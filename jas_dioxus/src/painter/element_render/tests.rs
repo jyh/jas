@@ -252,6 +252,23 @@ fn ref_groups() -> Vec<Element> {
 /// Render a reference document under one view transform (D2) and return its
 /// canonical JSON.
 fn render_doc(elems: &[Element]) -> String {
+    // ⭐ ROW CV -- THE PAINT CONTEXT IS PINNED, NOT INHERITED. Live geometry
+    // tessellates at the INSTALLED precision, so a golden rendered against
+    // whatever the ambient thread-local happened to hold would be a golden of
+    // the test runner's state. An empty index is deliberate: these reference
+    // documents are self-contained (`ref_live`'s compound shape owns its
+    // operands), and a golden that needed a resolver would be pinning the
+    // fixture's index as much as the lowering. The by-id paths -- Fork F3 and
+    // the dangling-target rule -- are pinned by the assertions below instead.
+    //
+    // 📌 INERT FOR THE FIVE PRE-CV GOLDENS: none contains a live element, and
+    // nothing else reads the context. Their committed bytes are unchanged by
+    // this install, which is what `reference_docs_match_goldens` says on the
+    // very first run after it.
+    let _paint_context = crate::document::id_index::install_paint_context(
+        crate::document::id_index::IdIndex::new(),
+        crate::geometry::live::DEFAULT_PRECISION,
+    );
     let mut rec = RecordingPainter::new();
     // The driver owns the view transform and pushes it as ONE matrix (D2).
     rec.push_state(Transform { a: 1.5, b: 0.0, c: 0.0, d: 1.5, e: 20.0, f: 10.0 });
@@ -277,7 +294,54 @@ fn reference_docs() -> Vec<(&'static str, Vec<Element>)> {
         ("ref_gradients", ref_gradients()),
         ("ref_stroke_styles", ref_stroke_styles()),
         ("ref_groups", ref_groups()),
+        ("ref_live", ref_live()),
     ]
+}
+
+/// ROW CV's display-list lock: live geometry as the walk actually emits it.
+///
+/// Three elements, each pinning something the assertions state separately —
+/// a filled+stroked UNION (one ring neither operand has), a SUBTRACT whose
+/// result is TWO rings emitted into ONE path (the legacy trace opens one path
+/// and closes each ring into it), and a live element under an OUTLINED group
+/// (hairline, no fill). Self-contained: every operand is owned, so nothing here
+/// depends on an installed index.
+///
+/// ⛔ THE SUBTRACT DOES NOT RENDER A HOLE, AND I ALMOST WROTE THAT IT DID.
+/// See `the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid`
+/// below: the fact is MEASURED off these committed bytes, not assumed from the
+/// operation's name.
+fn ref_live() -> Vec<Element> {
+    let union = live_union(
+        overlapping_operands(),
+        fill(Color::rgb(0.9, 0.2, 0.1)),
+        Some(stroke(Color::rgb(0.0, 0.0, 0.4), 2.5)),
+    );
+    let hole = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+        operation: CompoundOperation::SubtractFront,
+        operands: vec![
+            Rc::new(rect(200.0, 0.0, 120.0, 120.0, None, None)),
+            Rc::new(rect(230.0, 30.0, 60.0, 60.0, None, None)),
+        ],
+        fill: fill(Color::rgb(0.1, 0.5, 0.9)),
+        stroke: None,
+        common: common_alpha(0.6),
+    }));
+    let mut outlined = GroupElem {
+        children: vec![Rc::new(live_union(
+            vec![
+                rect(0.0, 200.0, 80.0, 80.0, None, None),
+                rect(40.0, 240.0, 80.0, 80.0, None, None),
+            ],
+            fill(Color::WHITE),
+            None,
+        ))],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    outlined.common.visibility = Visibility::Outline;
+    vec![union, hole, Element::Group(outlined)]
 }
 
 fn golden_path(name: &str) -> String {
@@ -1876,4 +1940,477 @@ fn outline_rides_the_inherited_alpha_but_drops_the_elements_own_paint_opacities(
     let strokes = outline_style_of(&rec.commands());
     assert_eq!(strokes.len(), 1);
     assert_eq!(strokes[0].2, 0.5, "the incoming alpha must survive outline mode");
+}
+
+// ---------------------------------------------------------------------------
+// ROW CV — LIVE ELEMENTS THROUGH THE ROUTER
+// ---------------------------------------------------------------------------
+//
+// ⭐ THE RULING (helm, 2026-09-01 17:24:10): a Live element off the web IS ITS
+// EVALUATED OUTPUT THROUGH THE CORE'S OWN CONTRACT — the four `evaluate_with`
+// arms `canvas::render` already takes per variant — drawn through the Painter
+// as geometry. NEVER a baked snapshot, NEVER a native-specific generator, and a
+// generator that cannot complete yields EMPTY (LIVE_ELEMENTS.md §2's uniform
+// failure rule).
+//
+// ⛔ THE ARM THAT ALREADY LOOKED RIGHT WAS RIGHT FOR THE WRONG REASON.
+// `emit_element_body`'s `Element::Live(_) => {}` painted nothing before this
+// row too — not because the element evaluated to nothing, but because Live was
+// unimplemented and the router kept it away. An empty result and an absent
+// implementation are indistinguishable from the outside, which is why the
+// dangling-reference test below is not redundant with the arm existing: it is
+// the only one that can tell them apart.
+
+use crate::document::id_index::{install_paint_context, IdIndex};
+use crate::geometry::live::{
+    CompoundOperation, CompoundShape, ElementRef, LiveVariant, ReferenceElem, DEFAULT_PRECISION,
+};
+
+/// A compound shape with its own paint, as an `Element`.
+fn live_union(operands: Vec<Element>, f: Option<Fill>, s: Option<Stroke>) -> Element {
+    Element::Live(LiveVariant::CompoundShape(CompoundShape {
+        operation: CompoundOperation::Union,
+        operands: operands.into_iter().map(Rc::new).collect(),
+        fill: f,
+        stroke: s,
+        common: common(),
+    }))
+}
+
+/// Two overlapping rects — a union with ONE ring and a shape neither operand
+/// has, so a lowering that painted an operand instead of the evaluated output
+/// would be visible in the vertex list rather than only in the paint.
+fn overlapping_operands() -> Vec<Element> {
+    vec![
+        rect(0.0, 0.0, 100.0, 100.0, fill(Color::rgb(1.0, 1.0, 0.0)), None),
+        rect(50.0, 50.0, 100.0, 100.0, fill(Color::rgb(0.0, 1.0, 1.0)), None),
+    ]
+}
+
+fn fill_paths(cmds: &[Command]) -> Vec<(&Vec<PathCommand>, &Brush, f64)> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::FillPath { path, brush, paint_alpha, .. } => Some((path, brush, *paint_alpha)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn stroke_paths(cmds: &[Command]) -> Vec<(&Vec<PathCommand>, &Brush, &StrokeStyle, f64)> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::StrokePath { path, brush, stroke, paint_alpha } => {
+                Some((path, brush, stroke, *paint_alpha))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The router must stop sending live geometry to legacy — otherwise the
+/// lowering below is unreachable and the Windows app, whose ONLY renderer is
+/// `emit_element`, keeps refusing every document that carries one.
+///
+/// ⚠️ AND TEXT MUST STAY. The clause being edited names three kinds in one
+/// `matches!`; deleting the whole clause would silently put `Text` and
+/// `TextPath` on a seam that has no shaping vocabulary for them (PH3, not this
+/// row). Both halves are asserted so the edit cannot be wider than the ruling.
+#[test]
+fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
+    let caps = Caps::NONE
+        .with(Capability::IsolatedLayers)
+        .with(Capability::MaskLayers);
+    let live = live_union(overlapping_operands(), fill(Color::rgb(1.0, 0.0, 0.0)), None);
+    assert!(
+        !element_needs_legacy(&live, caps),
+        "live geometry is lowered on the seam now; routing it to legacy would \
+         leave the lowering unreachable and the native walk blind"
+    );
+    let text = Element::Text(crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        common(),
+    ));
+    assert!(
+        element_needs_legacy(&text, caps),
+        "text is PH3 shaping work, NOT this row: the clause must narrow, not vanish"
+    );
+}
+
+/// ⭐ THE EVALUATED OUTPUT, NOT THE OPERANDS. The union of two overlapping
+/// rects is a single 8-vertex ring belonging to NEITHER operand, so this
+/// assertion cannot be satisfied by painting an operand and cannot be satisfied
+/// by painting a bounding box.
+#[test]
+fn a_live_compound_shape_paints_its_evaluated_geometry_through_the_painter() {
+    let elem = live_union(
+        overlapping_operands(),
+        fill(Color::rgb(1.0, 0.0, 0.0)),
+        Some(stroke(Color::rgb(0.0, 0.0, 1.0), 3.0)),
+    );
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let cmds = rec.commands();
+
+    let fills = fill_paths(cmds);
+    assert_eq!(fills.len(), 1, "one fill for the evaluated ring: {cmds:?}");
+    assert_eq!(*fills[0].1, Brush::Solid(Color::rgb(1.0, 0.0, 0.0)),
+               "the compound's OWN fill, not an operand's yellow or cyan");
+
+    // The union's outline: 8 corners, closed. A lowering that drew an operand
+    // would emit 4, and one that drew both would emit two rings.
+    let moves = fills[0].0.iter().filter(|c| matches!(c, PathCommand::MoveTo { .. })).count();
+    let lines = fills[0].0.iter().filter(|c| matches!(c, PathCommand::LineTo { .. })).count();
+    assert_eq!(moves, 1, "the union is ONE ring: {:?}", fills[0].0);
+    assert_eq!(lines, 7, "an L-shaped union has 8 vertices: {:?}", fills[0].0);
+    assert!(matches!(fills[0].0.last(), Some(PathCommand::ClosePath)),
+            "legacy closes every ring before filling: {:?}", fills[0].0);
+
+    let strokes = stroke_paths(cmds);
+    assert_eq!(strokes.len(), 1, "one stroke over the same ring: {cmds:?}");
+    assert_eq!(strokes[0].0, fills[0].0, "fill and stroke trace ONE path (legacy traces once)");
+    assert_eq!(strokes[0].2.width, 3.0);
+}
+
+/// A live element with NO paint at all paints nothing — `render.rs` fills only
+/// `if live_fill.is_some()` and strokes only `if live_stroke.is_some()`.
+/// Without this arm a lowering could emit a transparent fill and no test would
+/// see the extra op.
+///
+/// ⚠️ GREEN AT HEAD TOO, for the same reason as the dangling-reference arm
+/// below: "unimplemented" and "nothing to paint" are the same picture. Driven
+/// by mutation (emit an unconditional fill), not by red-first.
+#[test]
+fn a_live_element_with_no_paint_emits_no_ops() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &live_union(overlapping_operands(), None, None), 1.0);
+    assert!(rec.commands().is_empty(), "no paint, no ops: {:?}", rec.commands());
+}
+
+/// ⛔ THE UNIFORM FAILURE RULE (LIVE_ELEMENTS.md §2): a reference to an id
+/// nothing indexes evaluates to EMPTY, so nothing is painted — not a bounding
+/// box, not a placeholder, and NOT a panic.
+///
+/// ⚠️ THIS ARM IS GREEN AT HEAD AND I AM SAYING SO. Before the row, `Live` was
+/// routed to legacy and the body arm painted nothing; after it, the reference
+/// resolves to nothing and the body arm paints nothing. The two states AGREE
+/// here, so this test is red-first for nothing and proves nothing on its own —
+/// it is the tame example, kept and labelled rather than mistaken for evidence.
+/// What drives it is the MUTATION pass (an arm that paints a bbox for an
+/// unresolvable target, or one that panics), and what makes it meaningful is
+/// the tests above it, which force the lowering to exist in the first place.
+#[test]
+fn a_dangling_reference_paints_nothing() {
+    let elem = Element::Live(LiveVariant::Reference(ReferenceElem {
+        target: ElementRef("no-such-id".into()),
+        transform: None,
+        fill: fill(Color::rgb(1.0, 0.0, 0.0)),
+        stroke: Some(stroke(Color::rgb(0.0, 0.0, 1.0), 2.0)),
+        common: common(),
+    }));
+    let _guard = install_paint_context(IdIndex::new(), DEFAULT_PRECISION);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    assert!(rec.commands().is_empty(),
+            "a dangling target yields EMPTY, and empty geometry paints nothing: {:?}",
+            rec.commands());
+}
+
+/// A resolvable target, installed through the SAME core service `canvas::render`
+/// installs — this is the row's second half: the router USES the caller-owned
+/// paint context rather than carrying an index of its own.
+fn indexed(target: Element) -> IdIndex {
+    let mut idx = IdIndex::new();
+    let id = target.common().id.clone().expect("the fixture's target carries an id");
+    idx = idx.insert(id, Rc::new(target));
+    idx
+}
+
+/// ⭐ FORK F3 — A REFERENCE WITH NO PAINT OF ITS OWN INHERITS ITS TARGET'S.
+/// `render.rs` does this for the `Reference` variant and ONLY for it; the
+/// inheritance is the one place the four variants differ, so a lowering that
+/// treated them uniformly would draw an unpainted instance of a painted master.
+#[test]
+fn a_reference_inherits_the_targets_paint_when_its_own_is_unset() {
+    let mut target = rect(10.0, 10.0, 40.0, 40.0,
+                          fill(Color::rgb(0.0, 1.0, 0.0)),
+                          Some(stroke(Color::rgb(1.0, 0.0, 1.0), 5.0)));
+    target.common_mut().id = Some("m1".into());
+    let _guard = install_paint_context(indexed(target), DEFAULT_PRECISION);
+
+    let elem = Element::Live(LiveVariant::Reference(ReferenceElem {
+        target: ElementRef("m1".into()),
+        transform: None,
+        fill: None,
+        stroke: None,
+        common: common(),
+    }));
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let cmds = rec.commands();
+
+    let fills = fill_paths(cmds);
+    assert_eq!(fills.len(), 1, "the resolved geometry is filled: {cmds:?}");
+    assert_eq!(*fills[0].1, Brush::Solid(Color::rgb(0.0, 1.0, 0.0)),
+               "F3: the unset fill inherits the TARGET's green");
+    let strokes = stroke_paths(cmds);
+    assert_eq!(strokes.len(), 1);
+    assert_eq!(*strokes[0].1, Brush::Solid(Color::rgb(1.0, 0.0, 1.0)),
+               "F3: the unset stroke inherits the TARGET's magenta");
+    assert_eq!(strokes[0].2.width, 5.0, "the target's stroke rides whole, not just its colour");
+}
+
+/// …and an own paint OVERRIDES it. Without this arm a lowering that ALWAYS read
+/// the target's paint would pass the test above.
+#[test]
+fn a_reference_with_its_own_paint_does_not_inherit() {
+    let mut target = rect(10.0, 10.0, 40.0, 40.0, fill(Color::rgb(0.0, 1.0, 0.0)), None);
+    target.common_mut().id = Some("m1".into());
+    let _guard = install_paint_context(indexed(target), DEFAULT_PRECISION);
+
+    let elem = Element::Live(LiveVariant::Reference(ReferenceElem {
+        target: ElementRef("m1".into()),
+        transform: None,
+        fill: fill(Color::rgb(1.0, 0.0, 0.0)),
+        stroke: None,
+        common: common(),
+    }));
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    assert_eq!(*fill_paths(rec.commands())[0].1, Brush::Solid(Color::rgb(1.0, 0.0, 0.0)),
+               "an own fill wins over the target's");
+}
+
+/// ⭐ THE PRECISION IS READ FROM THE INSTALLED CONTEXT, NOT FROM A CONSTANT.
+/// `canvas::render` evaluates at the walk's own `precision` parameter;
+/// `emit_element` has no such parameter, so row CV made precision part of the
+/// install. A lowering that reached for `DEFAULT_PRECISION` instead would
+/// tessellate the same document differently from the web walk at any non-
+/// default Boolean-panel setting, and nothing else would be looking.
+#[test]
+fn the_live_arm_evaluates_at_the_installed_precision() {
+    let curved = || {
+        vec![Element::Ellipse(EllipseElem {
+            cx: 60.0, cy: 60.0, rx: 50.0, ry: 50.0,
+            fill: None, stroke: None, common: common(),
+            fill_gradient: None, stroke_gradient: None,
+        })]
+    };
+    let verts_at = |precision: f64| -> usize {
+        let _guard = install_paint_context(IdIndex::new(), precision);
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, &live_union(curved(), fill(Color::WHITE), None), 1.0);
+        fill_paths(rec.commands())[0].0.len()
+    };
+    let coarse = verts_at(2.0);
+    let fine = verts_at(0.001);
+    assert!(
+        fine > coarse,
+        "a finer installed precision must tessellate the arc into more vertices \
+         (coarse={coarse}, fine={fine}); equal counts mean the arm ignored the install"
+    );
+}
+
+/// ⛔ OUTLINE MODE REACHES LIVE GEOMETRY TOO. `render.rs`'s Live arm branches on
+/// `outline` exactly as every other arm does: `apply_outline_style`, then NO
+/// fill and a stroke over the evaluated rings. Before this row the outline arm
+/// listed `Live` among the kinds that "fall through silently" and justified it
+/// by saying the router sent them to legacy — a reason this row removes.
+#[test]
+fn a_live_element_in_outline_mode_is_one_black_hairline_and_no_fill() {
+    let mut elem = live_union(
+        overlapping_operands(),
+        fill(Color::rgb(1.0, 0.0, 0.0)),
+        Some(stroke(Color::rgb(0.0, 0.0, 1.0), 9.0)),
+    );
+    elem.common_mut().visibility = Visibility::Outline;
+
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let cmds = rec.commands();
+
+    assert_eq!(fills(cmds), 0, "outline REPLACES the fill: {cmds:?}");
+    let strokes = stroke_paths(cmds);
+    assert_eq!(strokes.len(), 1, "exactly one hairline: {cmds:?}");
+    assert_eq!(*strokes[0].1, Brush::Solid(Color::rgb(0.0, 0.0, 0.0)),
+               "outline is black, not the element's blue");
+    assert_eq!(strokes[0].2.width, 1.0, "outline is a 1px hairline, not the element's 9");
+    assert!(strokes[0].2.dash.is_empty(), "outline clears the dash");
+    let lines = strokes[0].0.iter().filter(|c| matches!(c, PathCommand::LineTo { .. })).count();
+    assert_eq!(lines, 7, "the hairline traces the EVALUATED union, not a bbox");
+}
+
+/// The inherited half: a live element inside an OUTLINED group outlines too.
+/// `emit_element_body` dispatches outline before the leaf arms, so this is the
+/// route production actually takes for a Live layer under an outlined group.
+#[test]
+fn a_live_element_under_an_outlined_group_outlines() {
+    let live = live_union(overlapping_operands(), fill(Color::rgb(1.0, 0.0, 0.0)), None);
+    let mut g = GroupElem {
+        children: vec![Rc::new(live)],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    g.common.visibility = Visibility::Outline;
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Group(g), 1.0);
+    assert_eq!(fills(rec.commands()), 0, "the group's outline reaches the live child");
+    assert_eq!(stroke_paths(rec.commands()).len(), 1, "and gives it a hairline");
+}
+
+/// The paint alpha compounds through live geometry exactly as it does through a
+/// rect: `render.rs` uses `base_alpha * fill_op` / `base_alpha * stroke_op`.
+#[test]
+fn live_geometry_rides_the_inherited_alpha_and_its_own_paint_opacities() {
+    let elem = live_union(
+        overlapping_operands(),
+        fill_op(Color::rgb(1.0, 0.0, 0.0), 0.5),
+        Some({
+            let mut s = stroke(Color::rgb(0.0, 0.0, 1.0), 3.0);
+            s.opacity = 0.25;
+            s
+        }),
+    );
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 0.4);
+    let cmds = rec.commands();
+    assert!((fill_paths(cmds)[0].2 - 0.4 * 0.5).abs() < 1e-12,
+            "fill alpha = incoming * fill opacity: {:?}", fill_paths(cmds)[0].2);
+    assert!((stroke_paths(cmds)[0].3 - 0.4 * 0.25).abs() < 1e-12,
+            "stroke alpha = incoming * stroke opacity: {:?}", stroke_paths(cmds)[0].3);
+}
+
+/// ⛔ AND THE SUBTREE ROUTER FOLLOWS. `subtree_needs_legacy` is the PRODUCTION
+/// router: a masked group holding a live child used to force the whole subtree
+/// to legacy, which is how the web app renders it today. After this row it
+/// converts — a named production route change, not a discovered one.
+#[test]
+fn a_subtree_holding_a_live_element_no_longer_forces_legacy() {
+    let caps = Caps::NONE
+        .with(Capability::IsolatedLayers)
+        .with(Capability::MaskLayers);
+    let g = GroupElem {
+        children: vec![
+            Rc::new(rect(0.0, 0.0, 10.0, 10.0, fill(Color::WHITE), None)),
+            Rc::new(live_union(overlapping_operands(), fill(Color::WHITE), None)),
+        ],
+        common: common(),
+        isolated_blending: false,
+        knockout_group: false,
+    };
+    assert!(!subtree_needs_legacy(&Element::Group(g), caps),
+            "a live descendant no longer drags its whole subtree to legacy");
+}
+
+/// ⛔ A MEASURED NEGATIVE, FOUND BY READING THE GOLDEN I HAD JUST GENERATED
+/// RATHER THAN THE COMMENT I HAD JUST WRITTEN. `ref_live`'s `SubtractFront`
+/// evaluates to an outer ring and an inner ring, and I described it as "a ring
+/// with a hole". IT IS NOT ONE. Both rings come out in the SAME rotational
+/// orientation, so under the non-zero rule the inner region has winding ±2 and
+/// FILLS. A hole would need the inner ring reversed (or the even-odd rule).
+///
+/// ⚖️ THIS SEAM IS NEVERTHELESS EXACTLY RIGHT, WHICH IS THE POINT. `render.rs`'s
+/// Live arm traces the identical rings and calls bare `ctx.fill()` — Canvas2D's
+/// default is `"nonzero"` — and `CompoundShape` carries no `fill_rule` field for
+/// either path to consult. So the two walks paint the same solid square, and R4
+/// equivalence holds. The defect, if it is one, is OLDER than this row and lives
+/// in what the boolean evaluator hands back; it is REPORTED, not repaired here,
+/// because repairing it is a rendering change to the shipped web app and needs
+/// its own word.
+///
+/// This test exists so the golden's meaning is stated rather than inferred: if
+/// the evaluator ever starts reversing hole rings, or the fill rule changes,
+/// this reds and says which.
+#[test]
+fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
+    /// Twice the signed area — positive and negative are opposite orientations.
+    fn signed_area2(ring: &[(f64, f64)]) -> f64 {
+        let mut a = 0.0;
+        for i in 0..ring.len() {
+            let (x0, y0) = ring[i];
+            let (x1, y1) = ring[(i + 1) % ring.len()];
+            a += x0 * y1 - x1 * y0;
+        }
+        a
+    }
+    let hole = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+        operation: CompoundOperation::SubtractFront,
+        operands: vec![
+            Rc::new(rect(200.0, 0.0, 120.0, 120.0, None, None)),
+            Rc::new(rect(230.0, 30.0, 60.0, 60.0, None, None)),
+        ],
+        fill: fill(Color::WHITE),
+        stroke: None,
+        common: common(),
+    }));
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &hole, 1.0);
+    let cmds = rec.commands();
+    let fills = fill_paths(cmds);
+    assert_eq!(fills.len(), 1, "two rings, ONE path, one fill: {cmds:?}");
+    let winding = cmds.iter().find_map(|c| match c {
+        Command::FillPath { winding, .. } => Some(*winding),
+        _ => None,
+    });
+    assert_eq!(
+        winding, Some(FillRule::NonZero),
+        "the seam must use the rule bare `ctx.fill()` uses, whatever the shape looks like"
+    );
+
+    // Rebuild the rings from the emitted path and compare their orientations.
+    let mut rings: Vec<Vec<(f64, f64)>> = Vec::new();
+    for c in fills[0].0 {
+        match c {
+            PathCommand::MoveTo { x, y } => rings.push(vec![(*x, *y)]),
+            PathCommand::LineTo { x, y } => rings.last_mut().unwrap().push((*x, *y)),
+            _ => {}
+        }
+    }
+    assert_eq!(rings.len(), 2, "an outer ring and an inner one: {rings:?}");
+    let (outer, inner) = (signed_area2(&rings[0]), signed_area2(&rings[1]));
+    assert!(
+        outer * inner > 0.0,
+        "MEASURED: the subtract's rings share an orientation (outer={outer}, \
+         inner={inner}), so the non-zero fill is SOLID and this shape has no \
+         hole on EITHER walk. If this ever flips, the golden below it changed \
+         meaning and both ports must be re-photographed."
+    );
+}
+
+/// ⛔ A ONE-POINT RING IS SKIPPED, AND THIS ARM EXISTS BECAUSE A MUTANT SURVIVED
+/// WITHOUT IT. `live_rings_path` skips any ring with fewer than two points —
+/// `render.rs` skips the same ones with the same test — and weakening that to
+/// `is_empty()` changed NO test in the first mutation pass. So the guard was a
+/// faithful port of legacy that nothing drove, which is the state a guard rots
+/// in.
+///
+/// 📌 IT IS REACHABLE, MEASURED RATHER THAN ASSUMED: a `Polygon` operand with a
+/// single point evaluates to `[[(5,5)]]` — the boolean evaluator hands the ring
+/// through rather than collapsing it — so the skip is live code on both walks.
+/// A degenerate `MoveTo`+`ClosePath` would otherwise reach the backend as a real
+/// fill op, and Direct2D and Canvas2D need not agree on what they do with one.
+///
+/// ⚠️ Green at HEAD as well (the arm painted nothing there either), so this is
+/// not red-first for anything — it is the mutation's fixture, and it is labelled
+/// as such rather than counted as a red.
+#[test]
+fn a_ring_with_one_point_is_skipped_and_emits_no_degenerate_path() {
+    use crate::geometry::element::PolygonElem;
+    let single_point = Element::Polygon(PolygonElem {
+        points: vec![(5.0, 5.0)],
+        fill: None,
+        stroke: None,
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    let elem = live_union(vec![single_point], fill(Color::WHITE), None);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    assert!(
+        rec.commands().is_empty(),
+        "a one-point ring has no edge to trace; emitting MoveTo+ClosePath would \
+         hand the backend a degenerate fill: {:?}",
+        rec.commands()
+    );
 }

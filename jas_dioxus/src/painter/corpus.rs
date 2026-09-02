@@ -27,6 +27,11 @@ pub const SCENES: &[(&str, &str)] = &[
     ("ref_gradients.json", include_str!("testdata/ref_gradients.json")),
     ("ref_groups.json", include_str!("testdata/ref_groups.json")),
     ("ref_line_convert.json", include_str!("testdata/ref_line_convert.json")),
+    // ROW CV -- live geometry as the walk emits it. This one earns its place in
+    // the BROWSER lane in particular: replaying it drives the evaluated rings
+    // through the real Canvas2D backend, which is the only place the native
+    // lowering and the shipped renderer meet on the same artifact.
+    ("ref_live.json", include_str!("testdata/ref_live.json")),
     ("ref_path_convert.json", include_str!("testdata/ref_path_convert.json")),
     ("ref_paths.json", include_str!("testdata/ref_paths.json")),
     ("ref_polygon_convert.json", include_str!("testdata/ref_polygon_convert.json")),

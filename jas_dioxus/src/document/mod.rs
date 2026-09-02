@@ -7,6 +7,11 @@ pub mod evaluated_bounds;
 pub mod id_index;
 pub mod model;
 pub mod op_apply;
+// The NATIVE document walk (row CV): install this document's paint context,
+// then emit every layer through the Painter seam. Declared here so both the
+// library and the app binary see it (`main.rs` re-declares only the TOP-LEVEL
+// module tree, and `document` is already in it).
+pub mod paint;
 pub mod op_log;
 pub mod print_preferences;
 

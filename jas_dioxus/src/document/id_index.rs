@@ -2,10 +2,14 @@
 //!
 //! This is CORE (non-web) code: the `Model` (also core) carries an `IdIndex`
 //! paired with its document snapshot, so it must not depend on the web-gated
-//! `canvas` module. The render-scoped *installation* of an index for a paint
-//! (the thread-local `CURRENT_REF_INDEX`, `install_ref_index`, the
-//! `RenderResolver`) stays in `canvas::render`, which is web-only; only the
-//! index DATA and its pure builders live here.
+//! `canvas` module.
+//!
+//! It holds the index DATA, its pure builders, AND — since row CV — the
+//! render-scoped INSTALLATION of a paint context (the thread-local, its guard,
+//! and the resolver reading it). That installation lived in `canvas::render`
+//! while paint and `canvas` were the same thing; `painter::element_render` is
+//! a paint too, and is the only one a Windows build has. See the paint-context
+//! section at the foot of this file.
 //!
 //! The map values are bit-identical to the old per-paint rebuild (same walk,
 //! same first-occurrence-wins discipline, same sorted-symbols order), so
@@ -214,4 +218,105 @@ pub fn incremental_update_index(mut idx: IdIndex, old_doc: &Document, new_doc: &
     }
 
     idx
+}
+
+// ---------------------------------------------------------------------------
+// THE RENDER-SCOPED PAINT CONTEXT (row CV)
+// ---------------------------------------------------------------------------
+//
+// ⭐ WHY THIS MOVED HERE, AND WHAT WAS FALSE ABOUT WHERE IT WAS. This module's
+// header used to say that the render-scoped INSTALLATION of an index — the
+// thread-local, its guard, and the resolver reading it — "stays in
+// `canvas::render`, which is web-only", on the ground that installation is
+// paint-only and paint is `canvas`. The premise was true when it was written
+// and is false now: `painter::element_render::emit_element` is a paint, it is
+// NOT web-gated, and on Windows it is the ONLY paint. A reason that has gone
+// away is not an inconvenience to work around.
+//
+// ⛔ ONE INSTALL, NOT TWO. The alternative — a second thread-local beside the
+// canvas one for the native walk — would let the two walks resolve the SAME id
+// to different elements, which is the one thing exact functional equivalence
+// across ports cannot survive. `canvas::render` now delegates to this; there is
+// a single place a paint's ambient state lives.
+//
+// ⚖️ PRECISION RIDES WITH THE INDEX because it is the same KIND of thing:
+// LIVE_ELEMENTS.md §2 names the ambient evaluation input not owned by the
+// element — "tessellation precision/tolerance today" — as the evaluation
+// `context`. The web walk evaluates a compound shape at the Boolean panel's
+// precision; a native walk that silently used a different one would tessellate
+// the same document into different geometry and no test would be looking.
+
+/// The ambient, render-scoped evaluation context: what a paint resolves
+/// by-id references against, and the tessellation precision it evaluates at.
+#[derive(Clone)]
+pub struct PaintContext {
+    pub index: IdIndex,
+    pub precision: f64,
+}
+
+impl Default for PaintContext {
+    /// An EMPTY index at the default precision. This is what a caller that
+    /// installed nothing gets, and it is deliberately the state in which every
+    /// by-id reference is DANGLING: under the uniform failure rule
+    /// (LIVE_ELEMENTS.md §2) a live element that cannot resolve evaluates to an
+    /// empty result, so a walk with no context painted draws nothing for it
+    /// rather than reaching for a stale index left by an earlier paint.
+    fn default() -> Self {
+        Self { index: IdIndex::new(), precision: crate::geometry::live::DEFAULT_PRECISION }
+    }
+}
+
+thread_local! {
+    static CURRENT_PAINT_CONTEXT: std::cell::RefCell<PaintContext> =
+        std::cell::RefCell::new(PaintContext::default());
+}
+
+/// Restores the prior context on drop, so nested paints nest safely.
+pub struct PaintContextGuard {
+    prior: PaintContext,
+}
+
+impl Drop for PaintContextGuard {
+    fn drop(&mut self) {
+        let prior = std::mem::take(&mut self.prior.index);
+        let precision = self.prior.precision;
+        CURRENT_PAINT_CONTEXT.with(|c| {
+            *c.borrow_mut() = PaintContext { index: prior, precision };
+        });
+    }
+}
+
+/// Install `index` + `precision` for this paint and return the restore guard.
+pub fn install_paint_context(index: IdIndex, precision: f64) -> PaintContextGuard {
+    let prior = CURRENT_PAINT_CONTEXT.with(|c| {
+        c.replace(PaintContext { index, precision })
+    });
+    PaintContextGuard { prior }
+}
+
+/// The precision the installed context evaluates at.
+pub fn installed_precision() -> f64 {
+    CURRENT_PAINT_CONTEXT.with(|c| c.borrow().precision)
+}
+
+/// The resolver over the INSTALLED context — the one both paints use.
+///
+/// A zero-sized type rather than a borrow, because the paint walk is a free
+/// function threading no context object; the install is what scopes it.
+pub struct InstalledResolver;
+
+impl crate::geometry::live::ElementResolver for InstalledResolver {
+    fn resolve(
+        &self,
+        id: &crate::geometry::live::ElementRef,
+    ) -> Option<std::rc::Rc<Element>> {
+        CURRENT_PAINT_CONTEXT.with(|c| c.borrow().index.get(&id.0).cloned())
+    }
+
+    fn resolve_concept(
+        &self,
+        concept_id: &str,
+    ) -> Option<crate::geometry::live::ConceptDef> {
+        crate::geometry::live::workspace_concept(concept_id)
+    }
 }

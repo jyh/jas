@@ -370,7 +370,36 @@ mod tests {
         // The four A6 goldens (design block §6) put masks, nested layers and a
         // non-Normal blend into the corpus. So the assertion inverts: the gap
         // must now be REPORTED, and it must be EXACTLY the declared one.
-        assert_eq!(n, 20, "14 pre-A6 + 4 A6 goldens + group_blend + a6_layer_no_mask");
+        // ⛔ THIS WAS A PIN AND IT COST A CI ROUND TRIP THE DAY A SCENE WAS
+        // ADDED (row CV, `ref_live.json`). It read `assert_eq!(n, 20, ...)`,
+        // which is not a property of anything -- it is the corpus's size at the
+        // moment the line was typed, restated as a law. Every OTHER count in
+        // this crate's corpus assertions is already derived or a floor
+        // (`ffi_paint`'s `jas_corpus_len() == SCENES.len()`, `replay_drive`'s
+        // `>= 20`); this was the last hard pin, and a pin's failure message
+        // accuses the change rather than naming the fact.
+        //
+        // ⭐ AND THE DERIVED FORM IS STRONGER THAN THE PIN, NOT WEAKER. `scenes()`
+        // reads the DIRECTORY; `corpus::SCENES` is the EMBEDDED list the wasm
+        // lane replays. Asserting they are the same length makes this the
+        // Direct2D-side counterpart of
+        // `painter::corpus::tests::embedded_corpus_matches_the_directory` -- a
+        // scene added to one and not the other reds HERE too, on the platform
+        // that reads the filesystem. The pin could never have said that.
+        assert_eq!(
+            n,
+            crate::painter::corpus::SCENES.len(),
+            "the directory holds {n} scene(s) and the embedded corpus holds {} -- \
+             a scene added to one and not the other changes what each lane replays",
+            crate::painter::corpus::SCENES.len()
+        );
+        // ...and the floor keeps the anti-vacuity the pin was also carrying: an
+        // empty testdata/ would satisfy the equality above on both sides.
+        assert!(
+            n >= 20,
+            "the corpus SHRANK to {n}; its floor when this arm was written was 20 \
+             (14 pre-A6 + 4 A6 goldens + group_blend + a6_layer_no_mask)"
+        );
         for want in ["a6_law_variants.json", "a6_alpha_law.json",
                      "a6_nested_layers.json", "a6_blend.json"] {
             assert!(scenes().iter().any(|(name, _)| name == want),
