@@ -83,6 +83,22 @@ PAINTER = REPO / "jas_dioxus" / "src" / "painter"
 # A backend must not reach into the legacy walk. Matched on code, not prose.
 BACKEND_REACH = re.compile(r"\bcrate::canvas\b")
 
+SRC = REPO / "jas_dioxus" / "src"
+# ⛔ THE THIRD ARM'S SUBJECT: a canvas-to-canvas blit. `WebSurface::composite_onto`
+# was created (2026-09-01, PR #71) to be THE ONE COPY of the
+# `save · reset transform · set alpha · set composite op · drawImage · restore`
+# sequence. Matched on code, not prose.
+BLIT = re.compile(r"\bdraw_image_with_html_canvas_element\s*\(")
+
+# The files allowed to spell a blit by hand, and why. ⛔ THIS TABLE MAY ONLY
+# SHRINK, and adding to it is a STOP AND FLAG: a second hand-rolled blit is not
+# a style question, it is a second implementation of a composite whose op, alpha
+# and transform handling must agree with the first or two surfaces composite
+# differently with nothing comparing them.
+BLIT_HOME: dict[str, str] = {
+    "surface/web.rs": "the service itself -- WebSurface::composite_onto's own body",
+}
+
 # Every Canvas2D method that has a `Painter` expression, and what it maps to.
 # The value is documentation, not machinery -- a reader deciding whether a port
 # is tractable should be able to answer that from this table alone.
@@ -192,6 +208,56 @@ def backend_reaches():
     return hits
 
 
+def blits_outside_the_service():
+    """Return [(file, line)] for every hand-rolled canvas-to-canvas blit that is
+    not in a declared `BLIT_HOME` file.
+
+    ⛔ WHY THIS ARM EXISTS, AND WHY NEITHER EXISTING ARM COULD HAVE FOUND ITS
+    SUBJECT. Measured 2026-09-02: `painter/canvas2d.rs` carried THREE hand-rolled
+    blits (`:456`, `:473`, `:518`) -- `composite_onto`'s body line for line --
+    while this gate printed `0 unmapped, 0 backend reaches` and every figure was
+    honest. `scan()` looks under `canvas/` only, so a site in `painter/` is
+    outside its universe; `backend_reaches()` matches `crate::canvas`, and these
+    sites reach for no module at all -- they call web-sys on a raw context.
+
+    ⇒ A GATE'S SILENCE IS BOUNDED BY ITS UNIVERSE, and the universe is the part
+    nobody re-reads. The pattern gets audited because it looks like a decision;
+    the directory glob looks like setup, and is read once, when it was right.
+    This arm's universe is the WHOLE crate source for exactly that reason.
+    """
+    files = sorted(SRC.rglob("*.rs"))
+    if not files:
+        raise SystemExit(
+            f"FAIL [canvas-portability]: no .rs files under {SRC} -- the blit "
+            f"arm found nothing because it looked nowhere. Refusing to report "
+            f"clean."
+        )
+    hits: list[tuple[str, int]] = []
+    homes_seen: set[str] = set()
+    for f in files:
+        rel = f.relative_to(SRC).as_posix()
+        text = COMMENT.sub("", f.read_text(encoding="utf-8"))
+        for m in BLIT.finditer(text):
+            n = text.count("\n", 0, m.start()) + 1
+            if rel in BLIT_HOME:
+                homes_seen.add(rel)
+                continue
+            hits.append((rel, n))
+    # ⛔ ANTI-VACUITY, AND IT IS THE ARM THAT MATTERS MOST HERE. If the service's
+    # own blit were renamed or moved, every site would look "outside the home"
+    # or -- worse, if the pattern died -- none would, and a clean zero would
+    # mean the instrument stopped rather than the tree got better.
+    missing = set(BLIT_HOME) - homes_seen
+    if missing:
+        raise SystemExit(
+            f"FAIL [canvas-portability]: declared blit home(s) {sorted(missing)} "
+            f"contain NO blit. Either the service moved -- in which case this "
+            f"table moves with it -- or the pattern is dead and this arm has "
+            f"been measuring nothing."
+        )
+    return hits
+
+
 def check() -> int:
     found = scan()
     known = set(MAPPED) | set(UNMAPPED)
@@ -234,10 +300,27 @@ def check() -> int:
         print("host-independent module (see `crate::surface`), not in the walk.")
         return 1
 
+    # THE BLIT ARM: the composite service must be the ONE copy of itself.
+    blits = blits_outside_the_service()
+    if blits:
+        print(f"FAIL [canvas-portability]: {len(blits)} hand-rolled "
+              f"canvas-to-canvas blit(s) outside the composite service:")
+        for f, n in blits:
+            print(f"  - {f}:{n}")
+        print("\nUse `WebSurface::composite_onto(dst, op, alpha)` -- it IS this")
+        print("sequence (save, identity transform, alpha, composite op, drawImage,")
+        print("restore), and `CompositeOp` carries DestinationIn / DestinationOut /")
+        print("Blend(mode). A second spelling is a second composite whose op, alpha")
+        print("and transform handling must agree with the first, with nothing")
+        print("comparing them. If a site genuinely cannot use the service, that is")
+        print("a STOP AND FLAG, not a BLIT_HOME entry made in passing.")
+        return 1
+
     print(f"check_canvas_portability: OK -- {total} ctx.* site(s), "
           f"{len(found)} distinct method(s); {len(found) - len(UNMAPPED)} mapped, "
           f"{len(UNMAPPED)} declared-unmapped over {unmapped_sites} site(s); "
-          f"painter/ reaches into canvas/: 0.")
+          f"painter/ reaches into canvas/: 0; hand-rolled blits outside the "
+          f"composite service: 0.")
     if UNMAPPED:
         print("\nThe unmapped set (RATIFIED-INTERFACE question, may only shrink):")
         for k in sorted(UNMAPPED):
@@ -307,6 +390,30 @@ def self_test() -> int:
         failures.append("ctx.begin_path is absent from the scan -- either the "
                         "tree changed shape or the pattern is dead")
 
+    # ARM 2e -- THE BLIT ARM'S PATTERN, driven on code and on prose. This is the
+    # arm added 2026-09-02 after three hand-rolled blits survived a row that was
+    # about them; its own self-test is what stops it going the same way.
+    if BLIT.search(COMMENT.sub("", "    // draw_image_with_html_canvas_element in prose")):
+        failures.append("blit arm matched prose")
+    if not BLIT.search("        let _ = p.draw_image_with_html_canvas_element(c, 0.0, 0.0);"):
+        failures.append("blit arm missed a real blit")
+    # ...and it must not match a NAME that merely contains it.
+    if BLIT.search("    let draw_image_with_html_canvas_elements = 1;"):
+        failures.append("blit arm matched an identifier that is not a call")
+
+    # ARM 2f -- THE POSITIVE CONTROL FOR THE BLIT ARM, and the one that keeps a
+    # clean zero honest. The service's own blit must be FOUND (so the pattern is
+    # alive) and must be EXCLUDED (so the home table is doing its job). A dead
+    # pattern would report zero outside the home and zero inside it, which reads
+    # exactly like a tidy tree.
+    home_file = SRC / "surface" / "web.rs"
+    if not BLIT.search(COMMENT.sub("", home_file.read_text(encoding="utf-8"))):
+        failures.append("the composite service's own blit is not matched -- the "
+                        "pattern is dead, or the service moved without its "
+                        "BLIT_HOME entry")
+    if any(f in BLIT_HOME for f, _ in blits_outside_the_service()):
+        failures.append("a declared BLIT_HOME file was reported as an outside site")
+
     # ARM 4 -- the two tables must not overlap: a method declared BOTH mapped
     # and unmapped would make the ratchet meaningless.
     both = set(MAPPED) & set(UNMAPPED)
@@ -321,8 +428,9 @@ def self_test() -> int:
     print("check_canvas_portability SELF-TEST: OK (live tree fully declared; a "
           "planted undeclared method is matched, in every receiver shape; prose "
           "is not counted; the backend arm sees code and not prose; the pattern "
-          "is positively controlled against a real site; the two tables are "
-          "disjoint)")
+          "is positively controlled against a real site; the blit arm sees a "
+          "call and not prose nor an identifier, and the service's own blit is "
+          "both matched and excluded; the two tables are disjoint)")
     return 0
 
 
