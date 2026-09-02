@@ -2376,3 +2376,41 @@ fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
          meaning and both ports must be re-photographed."
     );
 }
+
+/// ⛔ A ONE-POINT RING IS SKIPPED, AND THIS ARM EXISTS BECAUSE A MUTANT SURVIVED
+/// WITHOUT IT. `live_rings_path` skips any ring with fewer than two points —
+/// `render.rs` skips the same ones with the same test — and weakening that to
+/// `is_empty()` changed NO test in the first mutation pass. So the guard was a
+/// faithful port of legacy that nothing drove, which is the state a guard rots
+/// in.
+///
+/// 📌 IT IS REACHABLE, MEASURED RATHER THAN ASSUMED: a `Polygon` operand with a
+/// single point evaluates to `[[(5,5)]]` — the boolean evaluator hands the ring
+/// through rather than collapsing it — so the skip is live code on both walks.
+/// A degenerate `MoveTo`+`ClosePath` would otherwise reach the backend as a real
+/// fill op, and Direct2D and Canvas2D need not agree on what they do with one.
+///
+/// ⚠️ Green at HEAD as well (the arm painted nothing there either), so this is
+/// not red-first for anything — it is the mutation's fixture, and it is labelled
+/// as such rather than counted as a red.
+#[test]
+fn a_ring_with_one_point_is_skipped_and_emits_no_degenerate_path() {
+    use crate::geometry::element::PolygonElem;
+    let single_point = Element::Polygon(PolygonElem {
+        points: vec![(5.0, 5.0)],
+        fill: None,
+        stroke: None,
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    let elem = live_union(vec![single_point], fill(Color::WHITE), None);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    assert!(
+        rec.commands().is_empty(),
+        "a one-point ring has no edge to trace; emitting MoveTo+ClosePath would \
+         hand the backend a degenerate fill: {:?}",
+        rec.commands()
+    );
+}
