@@ -307,10 +307,15 @@ fn reference_docs() -> Vec<(&'static str, Vec<Element>)> {
 /// (hairline, no fill). Self-contained: every operand is owned, so nothing here
 /// depends on an installed index.
 ///
-/// ⛔ THE SUBTRACT DOES NOT RENDER A HOLE, AND I ALMOST WROTE THAT IT DID.
-/// See `the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid`
-/// below: the fact is MEASURED off these committed bytes, not assumed from the
-/// operation's name.
+/// ⛔ THE SUBTRACT DOES RENDER A HOLE, AND UNTIL ROW EH IT DID NOT. This
+/// comment read "THE SUBTRACT DOES NOT RENDER A HOLE" on 09/02, which was a
+/// true report of the tree and a false report of the contract: the rings are
+/// co-oriented, so the non-zero rule the walks were using filled the cutter's
+/// interior. The rule is the algorithm layer's to declare (BOOLEAN.md clause
+/// 4) and it declares EVEN-ODD. See
+/// `the_subtract_rings_are_co_oriented_and_are_read_under_the_declared_even_odd_rule`
+/// below: both halves are MEASURED off these committed bytes -- the shared
+/// orientation and the declared rule -- not assumed from the operation's name.
 fn ref_live() -> Vec<Element> {
     let union = live_union(
         overlapping_operands(),
@@ -2334,27 +2339,36 @@ fn a_subtree_holding_a_live_element_no_longer_forces_legacy() {
             "a live descendant no longer drags its whole subtree to legacy");
 }
 
-/// ⛔ A MEASURED NEGATIVE, FOUND BY READING THE GOLDEN I HAD JUST GENERATED
-/// RATHER THAN THE COMMENT I HAD JUST WRITTEN. `ref_live`'s `SubtractFront`
-/// evaluates to an outer ring and an inner ring, and I described it as "a ring
-/// with a hole". IT IS NOT ONE. Both rings come out in the SAME rotational
-/// orientation, so under the non-zero rule the inner region has winding ±2 and
-/// FILLS. A hole would need the inner ring reversed (or the even-odd rule).
+/// ⛔ ROW EH — THE RULE THE RINGS ARE READ UNDER, AND WHY IT IS NOT NON-ZERO.
 ///
-/// ⚖️ THIS SEAM IS NEVERTHELESS EXACTLY RIGHT, WHICH IS THE POINT. `render.rs`'s
-/// Live arm traces the identical rings and calls bare `ctx.fill()` — Canvas2D's
-/// default is `"nonzero"` — and `CompoundShape` carries no `fill_rule` field for
-/// either path to consult. So the two walks paint the same solid square, and R4
-/// equivalence holds. The defect, if it is one, is OLDER than this row and lives
-/// in what the boolean evaluator hands back; it is REPORTED, not repaired here,
-/// because repairing it is a rendering change to the shipped web app and needs
-/// its own word.
+/// This test was written on 09/02 as a measured NEGATIVE: `ref_live`'s
+/// `SubtractFront` evaluates to two CO-ORIENTED rings, so it asserted that the
+/// seam emits `NonZero` and the shape paints solid. That reading of the
+/// ORIENTATION was correct and is kept below — the rings really do share a
+/// winding direction, and that is exactly why the rule matters here. What was
+/// wrong was the conclusion: it treated "both walks agree" as the whole
+/// contract and left the shared answer unexamined.
 ///
-/// This test exists so the golden's meaning is stated rather than inferred: if
-/// the evaluator ever starts reversing hole rings, or the fill rule changes,
-/// this reds and says which.
+/// ⚖️ THE RULE IS NOT THE RENDERER'S TO PICK. BOOLEAN.md's carried-rule law
+/// (RULED 2026-07-26, clause 4) makes a generated boolean result declare
+/// EVEN-ODD, named by `boolean::RESULT_FILL_RULE`, precisely so a hole survives
+/// a sweep that emits inconsistent winding. Every ring set reaching a live
+/// element's paint comes out of that layer. So co-orientation is not evidence
+/// that the shape is solid — under the rule its producer declares, two nested
+/// co-oriented rings are a HOLE, and reading them under non-zero refills it.
+///
+/// ⛔ THE OLD COMMENT'S "`CompoundShape` carries no `fill_rule` field for either
+/// path to consult" WAS THE FINDING, READ AS AN EXCUSE. It is true, and it is
+/// the reason the 07/26 wave — which repaired the destructive boolean by
+/// stamping the constant onto the `Path` element it emits — could not reach
+/// this arm. A live compound emits no element to stamp. The rule therefore has
+/// to come from the constant directly, which is what the seam now does.
+///
+/// This test states the golden's meaning rather than leaving it inferred: if
+/// the evaluator ever starts reversing hole rings, or the declared rule moves,
+/// this reds and says which of the two changed.
 #[test]
-fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
+fn the_subtract_rings_are_co_oriented_and_are_read_under_the_declared_even_odd_rule() {
     /// Twice the signed area — positive and negative are opposite orientations.
     fn signed_area2(ring: &[(f64, f64)]) -> f64 {
         let mut a = 0.0;
@@ -2385,8 +2399,10 @@ fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
         _ => None,
     });
     assert_eq!(
-        winding, Some(FillRule::NonZero),
-        "the seam must use the rule bare `ctx.fill()` uses, whatever the shape looks like"
+        winding, Some(FillRule::from(crate::algorithms::boolean::RESULT_FILL_RULE)),
+        "the seam must declare the rule the ALGORITHM LAYER declares for its own \
+         output (BOOLEAN.md clause 4), not the one its language's bare fill \
+         happens to default to"
     );
 
     // Rebuild the rings from the emitted path and compare their orientations.
@@ -2403,9 +2419,11 @@ fn the_subtract_rings_share_an_orientation_so_the_non_zero_fill_is_solid() {
     assert!(
         outer * inner > 0.0,
         "MEASURED: the subtract's rings share an orientation (outer={outer}, \
-         inner={inner}), so the non-zero fill is SOLID and this shape has no \
-         hole on EITHER walk. If this ever flips, the golden below it changed \
-         meaning and both ports must be re-photographed."
+         inner={inner}). That is WHY the declared rule is load-bearing: under \
+         even-odd these two rings are a ring and a hole, and under non-zero the \
+         inner one has winding ±2 and fills. If this ever flips — the evaluator \
+         starting to reverse hole rings — the rule stops being the only thing \
+         holding the hole open, and the goldens must be re-photographed."
     );
 }
 

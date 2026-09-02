@@ -744,6 +744,25 @@ fn draw_element(
 /// As [draw_element], but carrying the accumulated element-transform scale
 /// from the ancestor chain (see [accumulate_element_scale]). The public
 /// [draw_element] seeds this at 1.0.
+/// Fill the current path under a DECLARED fill rule -- the one lowering of
+/// `FillRule` onto the canvas API in this file.
+///
+/// ⛔ IT IS A FUNCTION BECAUSE THE BARE CALL IS THE BUG. `ctx.fill()` means
+/// non-zero, silently and by specification, so every site that fills without
+/// naming a rule has SILENTLY CHOSEN one. Two arms in this file did:
+/// `PathFillRuleRenderTests`'s Swift siblings found three more on that port,
+/// and row EH found this file's `Element::Live` arm. Routing both arms through
+/// one function makes the choice impossible to make by omission -- the
+/// parameter has to be supplied, and a reader can see what it was.
+fn fill_under_rule(ctx: &CanvasRenderingContext2d, rule: crate::geometry::element::FillRule) {
+    match rule {
+        crate::geometry::element::FillRule::NonZero => ctx.fill(),
+        crate::geometry::element::FillRule::EvenOdd => {
+            ctx.fill_with_canvas_winding_rule(web_sys::CanvasWindingRule::Evenodd)
+        }
+    }
+}
+
 fn draw_element_scaled(
     ctx: &CanvasRenderingContext2d,
     target: TargetSize,
@@ -1891,12 +1910,7 @@ fn draw_element_body(
                 ctx.begin_path();
                 build_path(ctx, &e.d);
                 ctx.set_global_alpha(base_alpha * fill_op);
-                match e.fill_rule {
-                    crate::geometry::element::FillRule::NonZero => ctx.fill(),
-                    crate::geometry::element::FillRule::EvenOdd => ctx.fill_with_canvas_winding_rule(
-                        web_sys::CanvasWindingRule::Evenodd,
-                    ),
-                }
+                fill_under_rule(ctx, e.fill_rule);
             }
             // Brushed stroke — when stroke_brush resolves to a known
             // Calligraphic brush, draw its variable-width outline as a
@@ -2459,7 +2473,20 @@ fn draw_element_body(
                 }
                 if !outline && live_fill.is_some() {
                     ctx.set_global_alpha(base_alpha * fill_op);
-                    ctx.fill();
+                    // ⛔ ROW EH. NOT a bare `ctx.fill()`, which means non-zero:
+                    // these rings are the algorithm layer's own output and it
+                    // declares them EVEN-ODD (BOOLEAN.md clause 4). The bare
+                    // call stood here until 09/02 and refilled every hole a
+                    // `SubtractFront` cut. A live element carries no
+                    // `fill_rule` field to consult -- that is why the 07/26
+                    // fill-rule wave, which stamps the constant onto the Path
+                    // ELEMENT the destructive boolean emits, could not reach
+                    // this arm -- so the rule comes from the constant directly.
+                    fill_under_rule(
+                        ctx,
+                        crate::geometry::element::FillRule::from(
+                            crate::algorithms::boolean::RESULT_FILL_RULE),
+                    );
                 }
                 if outline || live_stroke.is_some() {
                     ctx.set_global_alpha(base_alpha * stroke_op);
@@ -5064,5 +5091,276 @@ mod ctx_transform_tests {
         assert_eq!(alpha(2.0), 0,
                    "…and nothing at the identity origin, which is where the \
                     identity-framed scratch used to put it");
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ROW EH — A LIVE BOOLEAN RESULT IS READ UNDER THE RULE IT WAS BUILT UNDER
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ⛔ THE DEFECT, AND IT IS OLDER AND WIDER THAN THE ROW THAT FOUND IT.
+// `algorithms::boolean`'s output contract (BOOLEAN.md "Fill rule: the polygon
+// set carries it", RULED 2026-07-26, clause 4) is that a generated result
+// DECLARES EVEN-ODD: `RESULT_FILL_RULE`. Every ring set that reaches a live
+// element's render arm comes out of that layer. All three shipped walks read
+// it under NON-ZERO — the Rust legacy arm and the Swift arm by calling a bare
+// `fill()` / `fillPath()`, the Rust painter walk by passing
+// `FillRule::NonZero` explicitly — so a `SubtractFront` whose cutter lands
+// INSIDE its survivor comes back as two co-oriented rings and paints SOLID.
+// The subtraction happened; the hole was refilled at the last step.
+//
+// ⚖️ WHY THE 07/26 WAVE MISSED IT, stated because it explains the whole shape:
+// that wave repaired the DESTRUCTIVE boolean, whose output is a `Path` ELEMENT
+// carrying a `fill_rule` field, and both ports' emitters stamp the constant
+// into it. A LIVE compound shape has no `fill_rule` field at all — it is not a
+// path, it is an element that evaluates to rings at paint time — so the
+// rule-honouring machinery the wave installed had nothing to read here and
+// every walk fell through to its language's default. The remedy the ruling
+// wrote down (declare the rule ON the path) was structurally unavailable on
+// this arm, which is exactly why the arm kept the bug while its sibling was
+// fixed and pinned.
+//
+// ⛔ THIS IS A PIXEL TEST BECAUSE A WINDING RULE HAS NO OTHER WITNESS on the
+// legacy walk. `canvas::render` calls raw `ctx.*`; there is no display list to
+// read and no return value to assert on. `JasSwift/Tests/Canvas/
+// PathFillRuleRenderTests.swift` says the same thing about the same rule on
+// the `.path` arm, and this module is that file's missing `.live` sibling.
+//
+// ⚖️ BOTH WALKS IN ONE TEST, ON PURPOSE. The two arms below render the SAME
+// element at the SAME size and probe the SAME two points; the only variable is
+// which walk paints. Two suites that each pin a law the other leaves open are
+// not evidence that the ports agree — that is this seat's own standing lesson
+// — so the parity claim is written as one assertion over two arms rather than
+// as two tests that happen to expect the same number.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod fill_rule_pixel_tests {
+    use super::*;
+    use crate::geometry::element::{
+        CommonProps, Fill, FillRule, PathElem, RectElem, Stroke, StrokeWidthPoint,
+    };
+    use crate::geometry::live::{CompoundOperation, CompoundShape, LiveVariant};
+    use std::rc::Rc;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    const SIZE: u32 = 100;
+    /// Dead centre of the cutter — inside the hole a subtraction must leave.
+    const HOLE: (f64, f64) = (50.0, 50.0);
+    /// Inside the survivor and well outside the cutter — the ring, which must
+    /// stay painted under EITHER rule. Its job is to prove the arm rendered at
+    /// all: without it a walk that drew NOTHING would read as a perfect hole.
+    const RING: (f64, f64) = (10.0, 50.0);
+
+    fn surface(w: u32, h: u32) -> (WebSurface, CanvasRenderingContext2d) {
+        let s = WebSurface::offscreen(w, h).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        (s, ctx)
+    }
+
+    fn alpha_at(s: &WebSurface, x: f64, y: f64) -> u8 {
+        s.read_rgba(x as u32, y as u32, 1, 1).expect("in bounds")[3]
+    }
+
+    fn bare_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    /// THE DONUT, and it is deliberately the SAME SHAPE as the Swift arm's
+    /// (`PathFillRuleRenderTests.donutCommands`): an outer 0…100 square with a
+    /// concentric 25…75 cutter. Same geometry on both ports means the two
+    /// fixtures are comparable by inspection rather than by argument.
+    ///
+    /// ⛔ THE OPERANDS CARRY NO PAINT. A live compound shape paints with its
+    /// OWN fill, never its operands' — passing `None` here keeps the fixture
+    /// honest about that, so a regression that started painting operands would
+    /// show up as a changed picture instead of hiding behind identical colours.
+    fn subtract_donut() -> Element {
+        Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::SubtractFront,
+            operands: vec![
+                Rc::new(bare_rect(0.0, 0.0, 100.0, 100.0)),
+                Rc::new(bare_rect(25.0, 25.0, 50.0, 50.0)),
+            ],
+            fill: Some(Fill { color: Color::BLACK, opacity: 1.0 }),
+            stroke: None,
+            common: CommonProps::default(),
+        }))
+    }
+
+    /// The LEGACY walk: `canvas::render`'s own `Element::Live` arm, raw `ctx`.
+    fn legacy(elem: &Element) -> (u8, u8) {
+        let (s, ctx) = surface(SIZE, SIZE);
+        draw_element_scaled(&ctx, TargetSize::of(&s), elem, Visibility::Preview, 1.0, 1.0);
+        (alpha_at(&s, HOLE.0, HOLE.1), alpha_at(&s, RING.0, RING.1))
+    }
+
+    /// The PAINTER walk: row CV's `emit_element` through `Canvas2dPainter`.
+    /// The paint context is INSTALLED, not inherited — live geometry
+    /// tessellates at the installed precision, and an ambient one would make
+    /// this a measurement of the test runner's state (row CV's law).
+    fn painter(elem: &Element) -> (u8, u8) {
+        let (s, ctx) = surface(SIZE, SIZE);
+        let _pc = crate::document::id_index::install_paint_context(
+            crate::document::id_index::IdIndex::new(),
+            crate::geometry::live::DEFAULT_PRECISION,
+        );
+        {
+            let mut p = crate::painter::canvas2d::Canvas2dPainter::new(&ctx);
+            crate::painter::element_render::emit_element(&mut p, elem, 1.0);
+        }
+        (alpha_at(&s, HOLE.0, HOLE.1), alpha_at(&s, RING.0, RING.1))
+    }
+
+    /// ⛔⛔ A SUBTRACTION'S HOLE SURVIVES THE PAINT, ON BOTH WALKS.
+    ///
+    /// Red at HEAD on both arms (hole = 255 where 0 is owed): the rings are
+    /// co-oriented, so the non-zero rule gives the cutter's interior winding
+    /// ±2 and fills it. Repaired by reading the set under the rule the
+    /// algorithm layer declares for its own output.
+    #[wasm_bindgen_test]
+    fn a_live_subtractions_hole_is_not_refilled_by_the_paint() {
+        let donut = subtract_donut();
+        let (legacy_hole, legacy_ring) = legacy(&donut);
+        let (painter_hole, painter_ring) = painter(&donut);
+
+        // The instrument first: a walk that painted nothing would report a
+        // flawless hole, so the ring is what makes the hole readings mean
+        // anything at all.
+        assert_eq!(legacy_ring, 255,
+                   "POSITIVE CONTROL: the legacy walk must paint the ring; \
+                    got {legacy_ring}, so the hole reading below is not evidence");
+        assert_eq!(painter_ring, 255,
+                   "POSITIVE CONTROL: the painter walk must paint the ring; \
+                    got {painter_ring}, so the hole reading below is not evidence");
+
+        assert_eq!(legacy_hole, 0,
+                   "the LEGACY walk refilled the hole SubtractFront cut \
+                    (alpha {legacy_hole}); a boolean result declares EVEN-ODD \
+                    (BOOLEAN.md clause 4) and a bare ctx.fill() reads non-zero");
+        assert_eq!(painter_hole, 0,
+                   "the PAINTER walk refilled the hole SubtractFront cut \
+                    (alpha {painter_hole}); element_render must pass \
+                    RESULT_FILL_RULE, not FillRule::NonZero");
+
+        // ⚖️ THE PARITY CLAIM, as one assertion rather than two coincidences.
+        assert_eq!((legacy_hole, legacy_ring), (painter_hole, painter_ring),
+                   "the two walks must paint the same picture for the same \
+                    element: legacy {legacy_hole}/{legacy_ring} vs painter \
+                    {painter_hole}/{painter_ring}");
+    }
+
+    /// ⛔⛔ AND THE SIBLING ARM, WHICH THIS ROW'S MUTATION PASS FOUND UNGUARDED.
+    ///
+    /// This test is NOT about live geometry. It is here because corrupting
+    /// `fill_under_rule(ctx, e.fill_rule)` — the LEGACY `Element::Path` fill,
+    /// the one the 2026-07-26 fill-rule wave installed — to pass a constant
+    /// `NonZero` left **every test in this repository green**: 60/60 in the
+    /// browser and 3033/0 native. An even-odd path could render as non-zero on
+    /// the shipped web app and nothing could say so.
+    ///
+    /// ⚖️ AND THE OTHER PORT PINS IT SIX TIMES. `PathFillRuleRenderTests.swift`
+    /// exists for exactly this lowering on exactly these branches, and its own
+    /// header explains why Rust needs it too: `path_painter_inputs` returns
+    /// `None` for a stroke brush, a variable-width profile and anchor-aligned
+    /// dashes, so in Rust all three land on this single fill. That sentence was
+    /// true and had no test under it. ⇒ **two ports can both be well tested and
+    /// share no tested property** — measured again, on the arm next door to the
+    /// one this row was sent to fix.
+    ///
+    /// 📌 REACHABLE, not hypothetical: `apply_destructive_boolean` stamps
+    /// `RESULT_FILL_RULE` (even-odd) onto every multi-ring result it emits, so
+    /// giving one of those a variable-width profile is an ordinary edit.
+    ///
+    /// ⚠️ NOT RED AT THE ROW'S HEAD — it is green before and after the repair.
+    /// It is red only against the mutant, and it is labelled that way rather
+    /// than counted as one of this row's reds.
+    #[wasm_bindgen_test]
+    fn the_legacy_path_arm_fills_under_the_rule_the_element_declares() {
+        // The donut: outer 0…100 square, concentric 25…75 cutter, co-oriented.
+        let donut = |rule: FillRule| -> (u8, u8) {
+            let mut d = vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 0.0 },
+                PathCommand::LineTo { x: 100.0, y: 100.0 },
+                PathCommand::LineTo { x: 0.0, y: 100.0 },
+                PathCommand::ClosePath,
+            ];
+            d.extend([
+                PathCommand::MoveTo { x: 25.0, y: 25.0 },
+                PathCommand::LineTo { x: 75.0, y: 25.0 },
+                PathCommand::LineTo { x: 75.0, y: 75.0 },
+                PathCommand::LineTo { x: 25.0, y: 75.0 },
+                PathCommand::ClosePath,
+            ]);
+            let e = Element::Path(PathElem {
+                d,
+                fill: Some(Fill { color: Color::BLACK, opacity: 1.0 }),
+                stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+                // ⛔ THE PROFILE IS THE INSTRUMENT, not decoration: it is what
+                // makes `path_painter_inputs` return None, which is what routes
+                // this element to the LEGACY fill instead of the painter seam.
+                // Without it the test would silently measure the other walk.
+                width_points: vec![
+                    StrokeWidthPoint { t: 0.0, width_left: 0.5, width_right: 0.5 },
+                    StrokeWidthPoint { t: 1.0, width_left: 0.5, width_right: 0.5 },
+                ],
+                common: CommonProps::default(),
+                fill_gradient: None,
+                stroke_gradient: None,
+                fill_rule: rule,
+                stroke_brush: None,
+                stroke_brush_overrides: None,
+            });
+            let (s, ctx) = surface(SIZE, SIZE);
+            draw_element_scaled(&ctx, TargetSize::of(&s), &e, Visibility::Preview, 1.0, 1.0);
+            (alpha_at(&s, HOLE.0, HOLE.1), alpha_at(&s, RING.0, RING.1))
+        };
+
+        let (eo_hole, eo_ring) = donut(FillRule::EvenOdd);
+        let (nz_hole, _) = donut(FillRule::NonZero);
+
+        assert_eq!(eo_ring, 255, "POSITIVE CONTROL: the ring must be painted");
+        assert_eq!(eo_hole, 0, "an even-odd path keeps its hole on the legacy arm");
+        // ⚖️ BOTH RULES, ONE INPUT. Asserting only the even-odd case would stay
+        // green under a lowering that answered "even-odd" to everything, which
+        // is the mirror of the bug. The pair is what pins the DISCRIMINATION.
+        assert_eq!(nz_hole, 255, "and a non-zero path is NOT rewritten to even-odd");
+    }
+
+    /// ⛔ THE UNCHANGED HALF, ASSERTED — because a fix that reads every live
+    /// element under even-odd would ALSO change what a UNION paints, and that
+    /// would be a silent second behaviour change riding this one.
+    ///
+    /// Two overlapping rects united: the boolean layer returns ONE ring (the
+    /// outline neither operand has), and one ring reads identically under both
+    /// rules. So this arm is GREEN AT HEAD and stays green after — it is the
+    /// control that bounds the repair's blast radius to the multi-ring case.
+    ///
+    /// ⚠️ Said plainly: this is NOT red-first for anything. It is the arm that
+    /// makes the red one attributable.
+    #[wasm_bindgen_test]
+    fn a_live_unions_single_ring_paints_the_same_under_either_rule() {
+        let union = Element::Live(LiveVariant::CompoundShape(CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![
+                Rc::new(bare_rect(0.0, 0.0, 60.0, 60.0)),
+                Rc::new(bare_rect(40.0, 40.0, 60.0, 60.0)),
+            ],
+            fill: Some(Fill { color: Color::BLACK, opacity: 1.0 }),
+            stroke: None,
+            common: CommonProps::default(),
+        }));
+        // (50,50) is inside BOTH operands — the overlap, which is where a rule
+        // change would show if the result were still two rings.
+        let (legacy_overlap, _) = legacy(&union);
+        let (painter_overlap, _) = painter(&union);
+        assert_eq!(legacy_overlap, 255, "a union's overlap is INSIDE the result");
+        assert_eq!(painter_overlap, 255, "a union's overlap is INSIDE the result");
     }
 }
