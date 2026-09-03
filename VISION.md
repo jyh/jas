@@ -102,6 +102,21 @@ Two corollaries:
   algorithm harness silently sat dead-but-green in CI for seven weeks; see the
   near-term backlog in §11.)
 
+**And a line drawn across that road, not a turn off it — ruled 2026-09-03.** *The framework
+stays open; once AI-supported features are added, the **product** becomes proprietary.* The
+operation API and canvas perception — the hooks a model calls — are framework and stay in
+this repository, together with the journal, the corpora, the interpreter and every app. The
+assistant that calls them, its practised moves, and the *contents* of the intent ledger are
+proprietary and live in a **private fork**, never a directory inside this tree. The intent
+ledger splits at the same seam: its **schema is open**, so a third party can write their own
+assistant against it, while the **reasoning it records is proprietary**.
+
+This changes nothing about the architecture above — that is the point of recording it here.
+One road still, and everything §4 says about equivalence and the AI vision being the same
+architecture seen twice holds on both sides of the line. What it changes is *where code
+lands*, and it is written into the vision because the vision is where a reader looks to find
+out what this project is.
+
 ---
 
 ## 5. The architecture, converged
@@ -192,12 +207,18 @@ across five apps); and the **concept-pack format + generator engine have shipped
 a `workspace/concepts/*.yaml` (`params` + a generator expression → geometry), pinned by its own
 cross-language conformance corpus (`CONCEPTS.md`; `regular_polygon`, `spiral`, `star`, and the
 flagship `gear` ride it — with `mod`/`floor` added to the language for the gear/star parity). A
-parametric concept is now data, **the gear included**. **Remaining, in dependency order:** the
-document `LiveVariant::Generated` instance arm; operations; the fitter (`promote`); and a
-**constraint representation**. **Benefit:** N domains
-cost ~one engine, propagated to the active apps for free (frozen ports hold the tag-era packs). **Downside:** the fitter and a deterministic
-(no-JS) constraint representation are still unbuilt; the generator engine is corpus-pinned, so
-each addition stays safe.
+parametric concept is now data, **the gear included**. **✅ COMPLETE — all four parts now ship as data** (repaired 2026-09-03; this line
+previously listed them as remaining): the document `LiveVariant::Generated` instance arm
+(`document/document.rs:322`, `:965`, `document/controller.rs:594`, `:612`; Swift
+`ActiveDocumentView.swift:205`, `ConceptsPanel.swift:104`), operations, the fitter
+(`promote`), and a **constraint representation** — `workspace/concepts/regular_polygon.yaml`
+carries all four keys, `gear.yaml` carries generator/operations/constraints, and each part
+is pinned by its own cross-language corpus (`workspace/tests/concept_operations.yaml`,
+`concept_fitters.yaml`, `concept_constraints.yaml`). `CONCEPTS.md:252`: *"All six
+increments are complete."* **Benefit:** N domains
+cost ~one engine, propagated to the active apps for free (frozen ports hold the tag-era packs). **Downside:** the generator engine is corpus-pinned, so
+each addition stays safe; what remains genuinely unbuilt is not the deterministic fitter
+but the *fuzzy* one — semantic fitting of messy hand-drawing stays frontier (§7).
 
 ### 6.4 Liveness as the bridge between brainstorm-speed and CAD-precision
 A gesture produces a *live operation with inferred parameters*; the panel later tunes the same
@@ -319,8 +340,13 @@ Three regimes; push everything as far *down* as possible (cheaper, cross-platfor
    deterministic fixture replayed across all apps. **Our 36 manual-test transcripts
    (`transcripts/*_TESTS.md`) are already scripted action sequences with coordinates and
    Do/Expect — adding session capture turns them into executable, cross-app regression
-   fixtures, so each manual session is paid for once.** (No capture/replay recorder exists yet;
-   this regime is unbuilt. Manual passes are currently Rust-only in practice.)
+   fixtures, so each manual session is paid for once.** (**Repaired 2026-09-03: the recorder now
+   exists** — `jas_dioxus/src/recorder/` (`core` · `hooks` · `replay` · `fidelity`),
+   `RECORDER.md`, `scripts/ingest_recording.py`, four capture seams. This line previously
+   read *"no capture/replay recorder exists yet; this regime is unbuilt"*, which is false.
+   **The true statement is narrower and still an open item: it is Rust/wasm only** — zero
+   recorder hits in `JasSwift/Sources` — so the regime exists in one port and the
+   cross-app half of its value is unclaimed.)
 3. **Perceptual / evaluative** — the irreducible frontier: "is the AI plan good?", "does it look
    right?", "does the gesture feel right?" Eval datasets, golden images (per-platform, sparingly),
    LLM-as-judge (calibrated), and a *bounded* human sample.
@@ -346,7 +372,8 @@ Everything stands on three things — build them first:
    byte-identical), the 33-verb `actions.yaml`↔`op_apply` unification, per-frame drag coalescing,
    id-primary addressing (3c-1), the runtime layout-op dispatcher (3d), and sibling-app
    production routing so *every* app's gestures journal — not just Rust's. **Still ahead:**
-   capture/replay sessions (§9 regime 2 — the highest-value follow-on), journal persistence, and
+   capture/replay sessions **in the ports that do not have them** (§9 regime 2 — the
+   highest-value follow-on; the recorder ships in Rust/wasm, see §9), journal persistence, and
    collaboration (op-inversion, `doc_id`, recorded-merge — 3c-2/3/4), all deliberately deferred
    but kept format-ready.
 3. **The expression-language conformance corpus** — ✅ **SHIPPED as a cross-language gate.**
@@ -355,16 +382,24 @@ Everything stands on three things — build them first:
    freshness check). The closure lexical-scoping divergence it was meant to pin is fixed in OCaml
    **and** Rust — the gate immediately caught a second leak a manual survey had missed.
    **Geometry generators now ship on top of it** — `sin`/`cos`/`tan` (degrees), `pow`, `range`,
-   `fold`, pinned by the corpus across all five interpreters — so the next critical-path item is
-   the **concept-pack format + constraint representation** (6.3).
+   `fold`, pinned by the corpus across all five interpreters. **Repaired 2026-09-03:** this
+   line previously named the **concept-pack format + constraint representation** (6.3) as
+   the next critical-path item. Both shipped, so this critical path is **fully discharged**
+   — all three items in §10 are ✅, and the next work is a milestone rather than a
+   foundation. `docs/ROADMAP.md` §3 carries the ruled sequence.
 
 The live dependency graph (6.2 — ✅ shipped) and the operation-log spine (§5 item 5 / §10 item 2
-— ✅ shipped) are both in. The open chain, in dependency order: the rest of the concept-pack system (6.3 —
-the format + generator engine ship and the gear/star flagship is data; remaining are the document
-`Generated` instance arm, operations, the fitter, and constraints) → capture/replay sessions
-(§9 regime 2, now unblocked by the journal) and the gesture/lens layer (6.4) → the AI operation
-API and perception (6.1/6.7) → versioning (6.9). Animation (6.8) and collaboration (6.9) stay
-deferred-but-ready throughout.
+— ✅ shipped) are both in. The concept-pack system (6.3) is **also shipped in full** — the second place this
+document listed its parts as remaining, repaired 2026-09-03 with §6.3. The open chain, in
+dependency order, is therefore: capture/replay sessions **beyond the first port**
+(§9 regime 2) and the gesture/lens layer (6.4); the AI operation API and perception
+(6.1/6.7); versioning (6.9). Animation (6.8) and collaboration (6.9) stay deferred-but-ready
+throughout.
+
+⚠️ **Dependency order is not build order, and the build order is ruled elsewhere.** The
+2026-09-03 roadmap sitting ruled the AI operation API **before** the gesture/lens layer,
+behind the Windows app; `docs/ROADMAP.md` §3 is the document of record for that sequence.
+This paragraph states what depends on what, not what is built next.
 
 ---
 
@@ -377,9 +412,11 @@ direct prerequisites for this vision. The most relevant:
   verified (done, then it **silently re-broke** when Phase-4b put `IdIndex` in the web-gated
   `canvas::render` and core `model.rs` imported it — `--no-default-features` stopped compiling;
   re-fixed 2026-06 by moving the index into core `document::id_index`; `algorithm_roundtrip`
-  418/0, commutativity 192/0). **Lesson, still open:** there is no fast unit-stage
-  `cargo build --no-default-features` guard, so a web-into-core leak surfaces only deep in the
-  cross-language CI job. Add that guard.
+  418/0, commutativity 192/0). **Lesson, and the guard now exists — repaired 2026-09-03:** this line previously read
+  *"there is no fast unit-stage `cargo build --no-default-features` guard … Add that
+  guard."* It is in CI twice: `.github/workflows/test.yml:824` and `:1182` both run
+  `cargo build --bins --no-default-features`, so a web-into-core leak no longer waits for
+  the cross-language job to surface it.
 - **Fix canonical-serialization fidelity** (CompoundShape and per-range tspans were silently
   dropped) — ✅ **done**: CompoundShape and per-range tspans now round-trip through JSON,
   binary, and SVG, pinned by the shared cross-language harness.
@@ -393,8 +430,25 @@ direct prerequisites for this vision. The most relevant:
   through the enforced `set_document` chokepoint (the `in_txn` assertion) in all four native
   apps — the prerequisite that made the op-log journal complete-by-construction (`OP_LOG.md`
   Increment 1). Artist primacy (6.10) is now architecturally enforced at this seam.
-- **Add the widget/effect parity guard and validator cross-reference layer** — ⬜ not done;
-  catches whole classes of five-app divergence cheaply.
+- **Add the widget/effect parity guard** — ✅ **done.** `scripts/check_widget_kind_dispatch.py`
+  (CI `.github/workflows/test.yml:108` and `:648-649`) covers per-app widget-kind dispatch;
+  `scripts/check_action_implementations.py` (CI `:121` and `:652-653`) covers the actions
+  behind a widget. Both are CI-wired and both run their own `--self-test` first.
+- **Add the validator cross-reference layer** — 🟡 **one of four sub-checks done.** ⛔ This
+  line was **split** from the one above on 2026-09-03 rather than ticked, because the two
+  halves are in different states and a single tick would have erased three open gates.
+  Measured against the layer's own four-check definition: *every `action:` reference
+  resolves* ✅ (`scripts/check_action_refs.py`, plus the reference interpreter's own test);
+  *every `$state` read has a declaration* ⬜ **absent**; *no duplicate ids* ⬜ **absent for
+  workspace ids** (the only id check is per-tool filename-stem matching, which is one tool
+  at a time, not uniqueness); *enum values match declared* 🟡 **partial** — `schema/` covers
+  app, tool, elements, features and preferences, while panels, dialogs, menubar, toolbar and
+  actions have no schema at all.
+  **The three real, named, unbuilt gates are therefore:** a `$state`-read declaration gate; a
+  workspace duplicate-id gate; and schemas for panels/dialogs/menubar/toolbar/actions, which
+  is what would make the enum check real rather than partial.
+  ⚠️ Related and unrepaired: `workspace_interpreter/validator.py`'s docstring names itself
+  the home of two validation layers it does not implement.
 
 ---
 
