@@ -49,9 +49,17 @@ WHAT IT DOES NOT COVER
   passes here -- the arm exists. Whether the widget WORKS is not a syntactic
   property, and the two artboard kinds above are exactly why that caveat
   matters: an arm is necessary and nowhere near sufficient.
-* It says nothing about the ACTIONS a widget's behaviour dispatches. That is a
-  real adjacent gap (`check_action_refs.py` validates references, not per-port
-  handlers) and it is what made the three arms misleading.
+* It says nothing about the ACTIONS a widget's behaviour dispatches. That is
+  still true of THIS gate, and it is what made the three arms misleading. It is
+  NO LONGER an open gap: `check_action_implementations.py` -- added 2026-07-30,
+  ONE DAY after this file -- parses per-port dispatch labels and classifies every
+  log-only action as native in both ports, declared-bypassed, or divergent.
+  `check_action_refs.py` validates references and not per-port handlers, which is
+  why it was named here as insufficient and still is.
+  (Corrected 2026-09-03: the sentence above read "that is a real adjacent gap"
+  for five weeks after the gap closed. A caveat is written when a gap is open and
+  is never re-read when it shuts, so it decays toward PESSIMISM -- and a phantom
+  gap in a gate's own header invites redundant work while looking like rigour.)
 * Frozen ports are out of scope by policy.
 """
 
