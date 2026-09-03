@@ -36,9 +36,11 @@ verdict() {
   echo "NO SIGNAL"; return 2
 }
 
-witnessed=0; blind=0; BLIND=()
+witnessed=0; blind=0; undecided=0; attempted=0
+BLIND=(); UNDECIDED=()
 for op in $OPS; do
   [ -n "$ONLY" ] && [ "$ONLY" != "$op" ] && continue
+  attempted=$((attempted+1))
   cp "$P" /tmp/witness_orig.rs
   # Gut the body: an early `return` as the first statement, inside the impl
   # block only. Arguments stay bound, so nothing goes unused-warning noisy.
@@ -59,15 +61,47 @@ io.open(p,'w',encoding='utf-8',newline='\n').write(
     s[:brace+1] + "\n        return; // WHOLE-OP WITNESS PROBE\n" + s[brace+1:])
 PY
   if cmp -s "$P" /tmp/witness_orig.rs; then
-    printf '  %-22s [NOT APPLIED] %s\n' "$op" "$(head -1 /tmp/witness_err | tail -c 50)"
+    why="[NOT APPLIED] $(head -1 /tmp/witness_err | tail -c 50)"
+    printf '  %-22s %s\n' "$op" "$why"
+    undecided=$((undecided+1)); UNDECIDED+=("$op -- $why")
     cp /tmp/witness_orig.rs "$P"; continue
   fi
   v=$(verdict); rc=$?
   printf '  %-22s %s\n' "$op" "$v"
-  case $rc in 0) witnessed=$((witnessed+1));; 1) blind=$((blind+1)); BLIND+=("$op");; esac
+  case $rc in
+    0) witnessed=$((witnessed+1));;
+    1) blind=$((blind+1)); BLIND+=("$op");;
+    *) undecided=$((undecided+1)); UNDECIDED+=("$op -- $v");;
+  esac
   cp /tmp/witness_orig.rs "$P"
 done
 
 echo
-echo "=== WITNESS RESULT: $witnessed witnessed, $blind with NO witness ==="
+# ⛔ THE TOTALS MUST CLOSE, AND THE HEADLINE MUST CARRY THE DENOMINATOR.
+#
+# A row this harness could not DECIDE -- [NOT APPLIED], BUILD-ERROR, NO SIGNAL --
+# used to be counted in NEITHER column. So a run that decided 15 of 16 printed
+#
+#     === WITNESS RESULT: 15 witnessed, 0 with NO witness ===
+#
+# and 15 + 0 is not 16. At the bottom of a long log that reads exactly like a
+# clean sweep, which is the one thing it must never do: the whole point of
+# refusing a verdict per row (properties 1 and 2 at the top of this file) is
+# thrown away if the SUMMARY then quietly rounds the refusal off.
+#
+# Measured 2026-09-03: a concurrent process holding jas_dioxus.dll made
+# `pop_mask_layer` report NO SIGNAL, and the headline still said "0 with NO
+# witness". Re-run alone it is WITNESSED -- but nothing in the output said a row
+# was missing. An undecided row is NOT a pass; the denominator is what says so.
+echo "=== WITNESS RESULT: $witnessed witnessed, $blind with NO witness," \
+     "$undecided undecided, of $attempted attempted ==="
 for b in "${BLIND[@]:-}"; do [ -n "$b" ] && echo "  NO WITNESS: $b"; done
+for u in "${UNDECIDED[@]:-}"; do [ -n "$u" ] && echo "  UNDECIDED : $u"; done
+
+if [ $((witnessed + blind + undecided)) -ne "$attempted" ]; then
+  echo "  |X| THE TOTALS DO NOT CLOSE. This harness lost a row and its own"
+  echo "      verdict is void -- do not read the line above as a result."
+  exit 3
+fi
+[ "$undecided" -gt 0 ] && exit 2
+exit 0
