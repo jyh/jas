@@ -37,6 +37,8 @@ local by git's design, so it is covered two other ways:
 | `commit-msg` | **100755** | entry point: strips the session trailer before it can enter history |
 | `commit_msg_scrub.py` | **100644** | the module `commit-msg` invokes. Deliberately **not** executable — see below |
 | `prove_commit_msg_scrub.sh` | **100755** | the 10-phase prover: red proven before green |
+| `pre-push` | **100755** | entry point: refuses a push whose delta carries a session trailer/URL or a path into the private record — the CI gates run *after* the objects are public |
+| `prove_pre_push.sh` | **100755** | the 8-arm prover for `pre-push`: three clean pushes, three leak shapes refused, a delete allowed, and a mutation control |
 
 ## TWO PLATFORM RULES THAT ARE NOT STYLE
 
