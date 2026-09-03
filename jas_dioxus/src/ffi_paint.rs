@@ -1424,6 +1424,10 @@ mod tests {
     /// had ever reached this surface type on any run.
     #[test]
     fn a_recorded_scene_reaches_the_surface_the_host_presents() {
+        // ⭐ ROW EK: the ONE crate-level counter lock -- this test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let (dev, ctx) = warp();
         let rt = tex(&dev, false);
         let scene = scene_named("ref_gradients.json");
@@ -1457,6 +1461,10 @@ mod tests {
     /// identical surfaces and require the results to DIFFER.
     #[test]
     fn the_scene_path_is_not_the_probe_pattern_wearing_a_new_name() {
+        // ⭐ ROW EK: the ONE crate-level counter lock -- this test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let (dev, ctx) = warp();
 
         let probe_tex = tex(&dev, false);
@@ -1513,6 +1521,10 @@ mod tests {
     /// specimen `replay`'s own suite uses.
     #[test]
     fn a_scene_the_painter_cannot_fully_draw_is_refused_not_reported_ok() {
+        // ⭐ ROW EK: the ONE crate-level counter lock -- this test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let (dev, _ctx) = warp();
         let rt = tex(&dev, false);
         let scene = serde_json::json!([{ "cmd": "teleport_the_artboard" }]);
@@ -1534,6 +1546,10 @@ mod tests {
 
     #[test]
     fn a_null_surface_is_a_status_not_a_crash_on_the_scene_path() {
+        // ⭐ ROW EK: the ONE crate-level counter lock -- this test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let bytes = b"[]";
         let rc = unsafe {
             jas_paint_scene(std::ptr::null_mut(), bytes.as_ptr(), bytes.len(), 8.0, 8.0)
@@ -1543,6 +1559,10 @@ mod tests {
 
     #[test]
     fn a_scene_that_is_not_json_is_refused_by_name() {
+        // ⭐ ROW EK: the ONE crate-level counter lock -- this test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let (dev, _ctx) = warp();
         let rt = tex(&dev, false);
         let junk = b"{ this is not a scene";
