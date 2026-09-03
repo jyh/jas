@@ -287,6 +287,10 @@ mod tests {
     /// the element. Nothing in the shell knew where the rect was.
     #[test]
     fn a_press_drag_release_through_the_c_abi_selects_the_element() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         seed(e);
         assert_eq!(selection_len(e), 0, "nothing selected before the gesture");
@@ -309,6 +313,10 @@ mod tests {
     /// applied to every other crossing.
     #[test]
     fn a_pointer_the_boundary_cannot_honour_refuses_by_name() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         unsafe {
             assert_eq!(jas_pointer_event(std::ptr::null_mut(), KIND_PRESS, 0.0, 0.0, 0),
                        JasStatus::NullHandle, "a null engine must not fault");
@@ -346,6 +354,10 @@ mod tests {
     /// control asserted enclosure and the tool selected anyway).
     #[test]
     fn the_same_document_point_is_reached_at_100_and_150_percent() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         fn gesture(scale: f64, x0: f64, y0: f64, x1: f64, y1: f64) -> usize {
             let e = jas_engine_new();
             seed(e);
@@ -393,6 +405,10 @@ mod tests {
     /// passing assertion would be worse than saying so.
     #[test]
     fn the_shift_bit_reaches_the_tool_and_changes_what_it_does() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         fn click_two(mods_on_second: u32) -> usize {
             let e = jas_engine_new();
             seed_two(e);
@@ -421,6 +437,10 @@ mod tests {
     /// test existed.
     #[test]
     fn the_alt_bit_reaches_the_tool_as_a_different_verb() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         fn drag_from_inside(mods: u32) -> usize {
             let e = jas_engine_new();
             seed(e);
@@ -450,6 +470,10 @@ mod tests {
     /// surface, which is why the law is testable at all.
     #[test]
     fn a_frame_draws_the_document_then_the_overlay_on_top() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         use crate::painter::recording::RecordingPainter;
 
         let e = jas_engine_new();
@@ -485,6 +509,10 @@ mod tests {
     /// ⛔ A COUNT CANNOT EXPRESS A REFUSAL, so a null engine does not return 0.
     #[test]
     fn the_selection_count_crosses_and_a_null_engine_is_not_zero() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         assert_eq!(unsafe { jas_selection_len(std::ptr::null_mut()) }, usize::MAX,
                    "0 there would read as 'nothing selected' about a session                     that does not exist");
         let e = jas_engine_new();

@@ -196,6 +196,82 @@ pub fn record(c: Crossing, bytes_in: usize, bytes_out: usize) {
     COUNTERS.bytes_out[i].fetch_add(bytes_out as u64, Ordering::Relaxed);
 }
 
+/// ⭐ ROW EK — **THE ONE TEST LOCK FOR THE SHARED COUNTERS**, and the guard that
+/// makes a test hermetic.
+///
+/// ⛔ WHY IT LIVES HERE AND IS `pub(crate)` RATHER THAN PRIVATE TO A TESTS
+/// MODULE. It used to be a `static SERIAL` inside `ffi_instr::tests`, which
+/// serialised that module against ITSELF and against nothing else — while
+/// `COUNTERS` is process-global and **every** `ffi_*` test writes it by calling
+/// an export. `ffi.rs` alone has seven tests that build an engine, and
+/// `ffi_pointer.rs` records on every `jas_pointer_event`. A lock private to one
+/// module guarding a resource shared by four is not a lock; it is a comment.
+///
+/// **There is exactly one, and the old private mutex is DELETED rather than
+/// left beside it** — two locks guarding one resource is the same defect
+/// wearing a hat.
+///
+/// ⛔ IT SNAPSHOTS AND RESTORES, so a test that panics mid-way cannot poison the
+/// next one with whatever it had counted so far. The restore runs in `Drop`,
+/// which runs while unwinding.
+///
+/// ⛔ AND IT DOES NOT PROPAGATE POISON. A panic in any test poisons the mutex,
+/// and `.unwrap()` on a poisoned lock panics in turn — so one genuine failure
+/// reports as five, and the four bystanders panic at the lock line, nowhere
+/// near the defect. The counters are plain atomics with no invariant a panic can
+/// break, so recovering the guard is sound: the poison flag carries no
+/// information here beyond "some other test failed", which the runner already
+/// says. (That reasoning is inherited verbatim from the mutex this replaces —
+/// it was right, it was just guarding too little.)
+#[cfg(test)]
+pub(crate) mod test_lock {
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static COUNTER_LOCK: Mutex<()> = Mutex::new(());
+
+    /// The snapshot a guard restores on drop.
+    type Saved = (Vec<(u64, u64, u64)>, (u64, u64, u64));
+
+    pub(crate) struct CountersGuard {
+        _lock: MutexGuard<'static, ()>,
+        saved: Saved,
+    }
+
+    impl Drop for CountersGuard {
+        fn drop(&mut self) {
+            for (i, (c, bi, bo)) in self.saved.0.iter().enumerate() {
+                COUNTERS.calls[i].store(*c, Ordering::Relaxed);
+                COUNTERS.bytes_in[i].store(*bi, Ordering::Relaxed);
+                COUNTERS.bytes_out[i].store(*bo, Ordering::Relaxed);
+            }
+            let (r, p, t) = self.saved.1;
+            ENGINE.rows_evaluated.store(r, Ordering::Relaxed);
+            ENGINE.panels_evaluated.store(p, Ordering::Relaxed);
+            ENGINE.ticks.store(t, Ordering::Relaxed);
+        }
+    }
+
+    /// Take the one lock and snapshot the counters. **Every test that touches
+    /// them — in any module — calls this and holds the guard for its body.**
+    pub(crate) fn lock() -> CountersGuard {
+        let lock = COUNTER_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let calls = (0..Crossing::COUNT)
+            .map(|i| (
+                COUNTERS.calls[i].load(Ordering::Relaxed),
+                COUNTERS.bytes_in[i].load(Ordering::Relaxed),
+                COUNTERS.bytes_out[i].load(Ordering::Relaxed),
+            ))
+            .collect();
+        let engine = (
+            ENGINE.rows_evaluated.load(Ordering::Relaxed),
+            ENGINE.panels_evaluated.load(Ordering::Relaxed),
+            ENGINE.ticks.load(Ordering::Relaxed),
+        );
+        CountersGuard { _lock: lock, saved: (calls, engine) }
+    }
+}
+
 /// Zero every counter. Called at the START of a named interaction so the dump
 /// that follows describes that interaction alone.
 pub fn reset() {
@@ -273,24 +349,108 @@ pub fn snapshot_json() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    /// ⚰️ THE PRIVATE `SERIAL` MUTEX THAT USED TO LIVE HERE IS GONE. It
+    /// serialised this module against itself while three others wrote the same
+    /// process-global counters unlocked — the row EK defect. Every caller now
+    /// takes the ONE crate-level lock, and gets snapshot/restore with it.
+    use super::test_lock::lock as serial;
 
-    /// The counters are PROCESS-GLOBAL, and cargo runs tests in parallel threads
-    /// inside one binary. Without this lock two tests would interleave their
-    /// `reset()` and `record()` calls and fail intermittently — a flake
-    /// manufactured by the instrument rather than found by it.
-    static SERIAL: Mutex<()> = Mutex::new(());
-
-    /// Take the lock WITHOUT propagating poison.
+    /// ⭐ ROW EK, THE ARM: **200 interleaved rounds against a concurrent
+    /// recorder, and both sides take THE SAME LOCK.**
     ///
-    /// A panic in any test poisons this mutex, and `.unwrap()` on a poisoned
-    /// lock panics in turn — so one genuine failure reports as five, and the
-    /// four bystanders panic at the lock line, which is nowhere near the defect.
-    /// The counters are plain atomics with no invariant a panic can break, so
-    /// recovering the guard is sound: the poison flag carries no information here
-    /// beyond "some other test failed", which the runner already says.
-    fn serial() -> std::sync::MutexGuard<'static, ()> {
-        SERIAL.lock().unwrap_or_else(|e| e.into_inner())
+    /// ⛔ THE RED IT WAS WRITTEN AGAINST, MEASURED BEFORE THE FIX: with the
+    /// background thread recording WITHOUT the lock -- which is exactly what
+    /// every `ffi.rs` and `ffi_pointer.rs` test used to do -- this loop failed
+    /// **3 runs out of 3** on the `leaked == 0` line. That is the row EK defect
+    /// reproduced on demand rather than waited for.
+    ///
+    /// ⚠️ AND WHY THE BACKGROUND THREAD NOW LOCKS RATHER THAN STAYING THE
+    /// VILLAIN: a test that permanently records unlocked does not just fail
+    /// itself, it POISONS EVERY OTHER TEST IN THE BINARY. Leaving it in broke
+    /// `snapshot_names_every_function_and_totals_agree` on `"crossings":2` --
+    /// which is the helm's own 14:02 fingerprint, reproduced by my own fix
+    /// attempt. The permanent arm proves the lock HOLDS under interleaving; the
+    /// measurement above is what proves it was needed.
+    ///
+    /// ⛔ THE LOOP CARRIES ITS OWN CONTROL. A stress loop whose other thread
+    /// never runs is a loop that always passes -- the same vacuous green as a
+    /// mutation filter matching nothing. `observed` asserts the recorder made
+    /// progress across the window, and the test FAILS if it never did.
+    #[test]
+    fn the_counters_survive_an_interleaved_recorder() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize};
+        use std::sync::Arc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let hits = Arc::new(AtomicUsize::new(0));
+        let (s2, h2) = (Arc::clone(&stop), Arc::clone(&hits));
+
+        let noise = std::thread::spawn(move || {
+            while !s2.load(Ordering::Relaxed) {
+                {
+                    // The SAME lock the reader takes. This is what every test
+                    // touching the counters now does.
+                    let _g = serial();
+                    record(Crossing::PointerEvent, 0, 0);
+                }
+                h2.fetch_add(1, Ordering::Relaxed);
+                std::thread::yield_now();
+            }
+        });
+
+        let start = hits.load(Ordering::Relaxed);
+        for _ in 0..200 {
+            let _g = serial();
+            reset();
+            assert_eq!(read(Crossing::PointerEvent).0, 0,
+                       "a counter read under the lock saw another thread's                         crossing -- the lock does not cover every writer");
+        }
+        let observed = hits.load(Ordering::Relaxed) - start;
+
+        stop.store(true, Ordering::Relaxed);
+        noise.join().expect("noise thread");
+        assert!(observed > 0,
+                "the recorder never ran during the window, so this loop proved                  nothing -- that is not a green, it is a no-op");
+    }
+
+    /// ⭐ ROW EK, THE OTHER HALF OF THE DESIGN WORD: **a panicking test cannot
+    /// poison the next one.**
+    ///
+    /// The guard snapshots on acquire and restores in `Drop`, and `Drop` runs
+    /// while unwinding — so a test that panics half-way through counting leaves
+    /// the counters exactly as it found them. Without that, the next test to
+    /// take the lock inherits a partial count and fails for a reason that has
+    /// nothing to do with it: one genuine failure reported as two, and the
+    /// second one misleading.
+    ///
+    /// ⛔ AND THE LOCK MUST STILL BE TAKEABLE AFTERWARDS. A panic poisons a
+    /// `Mutex`, and `.unwrap()` on a poisoned lock panics in turn — which would
+    /// turn one failure into every subsequent test panicking at the lock line,
+    /// nowhere near the defect. The second half of this arm is that the guard
+    /// can still be acquired after the panic.
+    #[test]
+    fn a_panicking_test_restores_the_counters_and_leaves_the_lock_usable() {
+        // The state the guard is supposed to hand back. Read under a guard,
+        // which itself restores, so this observation cannot disturb it.
+        let pre = { let _g = serial(); read(Crossing::EngineNew) };
+
+        let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = serial();
+            reset();
+            record(Crossing::EngineNew, 7, 11);
+            // ⛔ THE CONTROL: the write really happened, so the restore below is
+            // undoing something rather than finding nothing to undo.
+            assert_eq!(read(Crossing::EngineNew), (1, 7, 11));
+            panic!("a test failing mid-count");
+        }));
+        assert!(panicked.is_err(), "the closure must actually have panicked");
+
+        // ⛔ AND THE LOCK IS STILL TAKEABLE. A panic poisons a Mutex; taking it
+        // with `.unwrap()` would panic in turn, turning one failure into every
+        // later test dying at the lock line. This call is that half of the arm.
+        let _g = serial();
+        assert_eq!(read(Crossing::EngineNew), pre,
+                   "Drop ran while unwinding and put back what it snapshotted");
     }
 
     #[test]

@@ -722,6 +722,10 @@ mod tests {
 
     #[test]
     fn engine_roundtrips_and_frees() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         assert!(!e.is_null());
         let v = take(jas_version());
@@ -731,12 +735,20 @@ mod tests {
 
     #[test]
     fn free_is_safe_on_the_empty_span() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         unsafe { jas_free(JasBytes::empty()) };
         unsafe { jas_engine_free(std::ptr::null_mut()) };
     }
 
     #[test]
     fn null_handle_is_its_own_status_not_a_core_verdict() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let (p, n) = bytes("{}");
         let st = unsafe { jas_dispatch_event(std::ptr::null_mut(), p, n) };
         assert_eq!(st, JasStatus::NullHandle);
@@ -746,6 +758,10 @@ mod tests {
 
     #[test]
     fn bad_utf8_and_bad_json_are_transport_not_core() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let bad = [0xff_u8, 0xfe];
         let st = unsafe { jas_dispatch_event(e, bad.as_ptr(), bad.len()) };
