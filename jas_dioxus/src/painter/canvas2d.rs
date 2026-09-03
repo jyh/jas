@@ -1844,30 +1844,50 @@ mod stroke_alignment_laws {
     /// production sites — the direct `Rect` arm (`element_render.rs:1284`) and
     /// outline mode (`:1573`).
     ///
-    /// 📌 MARGINS. The rect is `(16,16)-(48,48)` with an 8px CENTRE pen, so the
-    /// painted band straddles each edge over ±4px: along y=32 it covers
-    /// x ∈ [12,20] and x ∈ [44,52]. The border probe sits at x=16 — 4px from
-    /// either edge of its band. The interior probe sits at the centre (32,32),
-    /// **12px** clear of the nearest band edge at x=20.
+    /// ⛔ AND THE PEN STRADDLES THE EDGE, which is a second law and needs its own
+    /// probes. An arm reading only "painted at the edge, clear at the centre"
+    /// cannot tell a straddling pen from one INSET wholly inside the rect —
+    /// both paint at x=16 and both leave the centre clear. Direct2D has carried
+    /// `stroke_rect_straddles_the_edge_it_is_given` all along; this is the
+    /// Canvas2D twin, written after intersecting the two ports' arm lists.
+    ///
+    /// 📌 MARGINS. The rect is `(16,16)-(48,48)` with a 16px CENTRE pen, so along
+    /// y=32 the painted band is x ∈ [8,24]. The four probes and what each
+    /// lowering would read:
+    ///
+    /// | probe | straddle (correct) | inset [16,32] | outset [0,16] |
+    /// |---|---|---|---|
+    /// | x=4  | clear | clear | paint |
+    /// | x=12 | paint | clear | paint |
+    /// | x=28 | clear | paint | clear |
+    /// | x=32 (centre) | clear | clear | clear |
+    ///
+    /// All three rows are distinct, so the arm separates the correct lowering
+    /// from BOTH one-sided alternatives rather than just one. Every probe is
+    /// **4px** clear of the nearest band edge, computed, not eyeballed.
     #[wasm_bindgen_test]
-    fn stroke_rect_paints_its_border_and_not_its_interior() {
+    fn stroke_rect_paints_its_border_straddling_the_edge_and_not_its_interior() {
         let (_c, ctx) = surface(64, 64);
         {
             let mut p = Canvas2dPainter::new(&ctx);
             p.stroke_rect(
                 Rect { x: 16.0, y: 16.0, w: 32.0, h: 32.0 },
-                &Brush::Solid(Color::WHITE), &pen(8.0), 1.0,
+                &Brush::Solid(Color::WHITE), &pen(16.0), 1.0,
             );
         }
-        let on_border = alpha_at(&ctx, 16.0, CY);
-        let interior = alpha_at(&ctx, CX, CY);
-        assert_eq!(on_border, 255,
-                   "the border must be painted; got {on_border}. A zero here is \
-                    the whole-op failure: `stroke_rect` drawing NOTHING, which \
-                    left this lane at 65/65 before this arm existed.");
-        assert_eq!(interior, 0,
-                   "a STROKED rect must leave its interior empty; got {interior}. \
-                    A 255 here means the op filled rather than stroked.");
+        let got = (
+            alpha_at(&ctx, 4.0, CY),
+            alpha_at(&ctx, 12.0, CY),
+            alpha_at(&ctx, 28.0, CY),
+            alpha_at(&ctx, CX, CY),
+        );
+        assert_eq!(got, (0, 255, 0, 0),
+                   "a stroked rect paints a band STRADDLING its edge and leaves \
+                    the interior empty; got {got:?}. All-zero is the whole-op \
+                    failure — `stroke_rect` drawing NOTHING, which left this lane \
+                    at 65/65 before this arm existed. (0,0,255,0) is an INSET \
+                    pen, (255,255,0,0) an OUTSET one, and a 255 in the last slot \
+                    means the op filled rather than stroked.");
     }
 
     /// ⛔ `clip` RESTRICTS WHAT A LATER PAINT CAN REACH.
@@ -1905,6 +1925,63 @@ mod stroke_alignment_laws {
                     is the whole-op failure — `clip` doing nothing, so every \
                     inside- and outside-aligned PATH stroke silently renders as \
                     a full-width CENTRE stroke.");
+    }
+
+    /// ⛔ `clip` HONOURS THE WINDING RULE IT IS HANDED.
+    ///
+    /// ⭐ FOUND BY THE SYMMETRIC-DIFFERENCE EXERCISE, IN CODE THIS VERY ROW HAD
+    /// JUST TOUCHED. Direct2D has carried `clip_honours_the_winding_rule_it_is_given`
+    /// all along; the arm above passes `NonZero` only, so after writing it the
+    /// mutant *`clip` ignores `w` and always clips NonZero* still **SURVIVED** at
+    /// 68/68. Measured, not suspected. ⇒ **Giving an op its first witness does
+    /// not witness the op's PARAMETERS** — the same shape as the census/whole-op
+    /// distinction one level down.
+    ///
+    /// Two rings wound the SAME way, nested. Under `NonZero` the inner ring adds
+    /// to the winding and the whole outer square clips; under `EvenOdd` the inner
+    /// ring is a hole. Both rules are driven on one surface each and the two
+    /// answers must differ — a backend dropping `w` gives them the same answer
+    /// whichever rule it defaulted to.
+    ///
+    /// 📌 MARGINS. Outer ring `(16,16)-(48,48)`, inner `(24,24)-(40,40)`. The
+    /// centre probe (32,32) is **8px** inside the inner ring; the annulus probe
+    /// (20,32) sits **4px** from the outer edge and **4px** from the inner.
+    #[wasm_bindgen_test]
+    fn a_clip_honours_the_winding_rule_it_is_given() {
+        let ring = |x0: f64, y0: f64, x1: f64, y1: f64| {
+            [
+                PathCommand::MoveTo { x: x0, y: y0 },
+                PathCommand::LineTo { x: x1, y: y0 },
+                PathCommand::LineTo { x: x1, y: y1 },
+                PathCommand::LineTo { x: x0, y: y1 },
+                PathCommand::ClosePath,
+            ]
+        };
+        let under = |rule: FillRule| -> (u8, u8) {
+            let (_c, ctx) = surface(64, 64);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                let mut path = Vec::new();
+                path.extend_from_slice(&ring(16.0, 16.0, 48.0, 48.0));
+                path.extend_from_slice(&ring(24.0, 24.0, 40.0, 40.0));
+                p.clip(&path, rule);
+                p.fill_rect(Rect { x: 0.0, y: 0.0, w: 64.0, h: 64.0 },
+                            &Brush::Solid(Color::WHITE), 1.0);
+            }
+            (alpha_at(&ctx, CX, CY), alpha_at(&ctx, 20.0, CY))
+        };
+        let nonzero = under(FillRule::NonZero);
+        let evenodd = under(FillRule::EvenOdd);
+        assert_eq!(nonzero, (255, 255),
+                   "co-oriented nested rings under NON-ZERO clip as one solid \
+                    square: both probes inside; got {nonzero:?}");
+        assert_eq!(evenodd, (0, 255),
+                   "the same rings under EVEN-ODD make the inner one a HOLE: the \
+                    centre is outside the clip and the annulus is inside; got \
+                    {evenodd:?}");
+        // ⚖️ The parameter, stated as one claim: a backend ignoring `w` returns
+        // the same pair for both rules, whichever way its default fell.
+        assert_ne!(nonzero, evenodd, "the winding rule must change the clip; it did not");
     }
 
     /// ⛔⛔ THE THREE ALIGNMENTS PAINT THREE DIFFERENT BANDS.
