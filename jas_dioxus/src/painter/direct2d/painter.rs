@@ -1432,6 +1432,177 @@ mod tests {
                 "sRGB interpolation puts the midpoint near 144; LINEAR puts it                  near 197 (got {mid})");
     }
 
+    // -- ROW EG(2b): THE CENSUS SURVIVORS, CLOSED ---------------------------
+    //
+    // Each arm below exists because a named mutant lived through the whole
+    // native suite. The census script (`scripts/d2d_mutation_census.sh`) is what
+    // found them and is what re-checks them.
+
+    /// ⛔ THE TRANSLUCENT-COLOUR FORM — jas's own category name, and the one
+    /// that is invisible while every fixture is opaque.
+    ///
+    /// `Color` carries its own alpha and the paint alpha MULTIPLIES it. Replace
+    /// that multiply with an assignment and nothing reds, because `1.0 * a ==
+    /// a` for every opaque colour any other arm draws. Two translucent halves
+    /// give a quarter, and only a quarter distinguishes the two rules.
+    #[test]
+    fn a_translucent_colour_multiplies_with_the_paint_alpha() {
+        let half_blue = Brush::Solid(Color::new(0.0, 0.0, 1.0, 0.5));
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 }, &half_blue, 0.5)
+        });
+        assert_eq!(px(&buf, 16, 8, 8)[3], 64,
+                   "0.5 colour x 0.5 paint = 0.25, not 0.5 and not 1.0");
+    }
+
+    /// ⛔ A CLOSED PATH'S CLOSING EDGE IS STROKED. A fill closes an open figure
+    /// implicitly, so only a STROKE can see this -- which is why the mutant that
+    /// ended every figure OPEN survived a suite full of fills.
+    #[test]
+    fn a_closed_path_strokes_its_closing_edge() {
+        let tri = vec![
+            PathCommand::MoveTo { x: 3.0, y: 3.0 },
+            PathCommand::LineTo { x: 13.0, y: 3.0 },
+            PathCommand::LineTo { x: 13.0, y: 13.0 },
+            PathCommand::ClosePath,
+        ];
+        let st = StrokeStyle {
+            width: 3.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        };
+        let buf = draw(16, 16, |p| p.stroke_path(&tri, &red(), &st, 1.0));
+        // The two drawn edges, as a control that the path reached the sink.
+        assert_eq!(px(&buf, 16, 8, 3), [0, 0, 255, 255], "the top edge");
+        assert_eq!(px(&buf, 16, 13, 8), [0, 0, 255, 255], "the right edge");
+        // ⛔ THE HYPOTENUSE IS THE CLOSING EDGE, drawn only because the figure
+        // is CLOSED. Leave it open and this pixel is empty.
+        assert_eq!(px(&buf, 16, 8, 8), [0, 0, 255, 255],
+                   "the closing edge back to the start");
+    }
+
+    /// ⛔ A QUADRATIC'S CONTROL POINT BENDS IT. Point the control at the
+    /// endpoint and the curve becomes a straight line -- a plausible shape, and
+    /// one no arm could see, because nothing compared a curved pixel.
+    #[test]
+    fn a_quadratic_bends_towards_its_control_point() {
+        let curve = vec![
+            PathCommand::MoveTo { x: 2.0, y: 14.0 },
+            PathCommand::QuadTo { x1: 8.0, y1: 0.0, x: 14.0, y: 14.0 },
+            PathCommand::ClosePath,
+        ];
+        let buf = draw(16, 16, |p| p.fill_path(&curve, FillRule::NonZero, &red(), 1.0));
+        // Under the arch, which the straight-line degenerate case never reaches.
+        assert_eq!(px(&buf, 16, 8, 9), [0, 0, 255, 255],
+                   "the control at y=0 lifts the curve well above the chord");
+    }
+
+    /// ⛔ EVERY BLEND MODE IS ITS OWN MAPPING. The suite covered Multiply and
+    /// ColorBurn, so Darken -> Lighten survived: an untested arm of a match is
+    /// a mapping nothing checks.
+    #[test]
+    fn a_darken_group_takes_the_darker_of_the_two() {
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 },
+                        &Brush::Solid(Color::rgb(0.2, 0.2, 0.2)), 1.0);
+            p.push_group(1.0, BlendMode::Darken);
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 },
+                        &Brush::Solid(Color::rgb(0.8, 0.8, 0.8)), 1.0);
+            p.pop_group();
+        });
+        let v = px(&buf, 16, 8, 8)[0];
+        assert!(v < 128,
+                "Darken keeps the DARKER backdrop (0.2); Lighten would take                  0.8 and land near 204 (got {v})");
+    }
+
+    /// ⛔ A ROUND JOIN IS NOT A MITER JOIN. Every stroke fixture in this file
+    /// used `LineJoin::Miter`, which maps to `MITER_OR_BEVEL` -- so forcing that
+    /// constant changed nothing anywhere and the mutant lived.
+    ///
+    /// A right-angle corner stroked thickly: a miter fills the outer square
+    /// corner, a round join cuts it away.
+    #[test]
+    fn a_round_join_rounds_the_corner_a_miter_would_fill() {
+        let elbow = vec![
+            PathCommand::MoveTo { x: 2.0, y: 8.0 },
+            PathCommand::LineTo { x: 8.0, y: 8.0 },
+            PathCommand::LineTo { x: 8.0, y: 14.0 },
+        ];
+        let mk = |join| StrokeStyle {
+            width: 6.0, cap: LineCap::Butt, join, miter: 10.0, dash: vec![],
+        };
+        let mitred = draw(16, 16, |p| p.stroke_path(&elbow, &red(), &mk(LineJoin::Miter), 1.0));
+        let round = draw(16, 16, |p| p.stroke_path(&elbow, &red(), &mk(LineJoin::Round), 1.0));
+
+        // The outer corner of the elbow is (11,5) for a 6-wide stroke.
+        assert_eq!(px(&mitred, 16, 10, 6), [0, 0, 255, 255], "a miter fills the corner");
+        assert_ne!(px(&round, 16, 10, 6), px(&mitred, 16, 10, 6),
+                   "and a ROUND join does not -- the join must reach the backend");
+    }
+
+    /// ⛔ THE MITER LIMIT IS A NUMBER THE CALLER CHOOSES. Every fixture used the
+    /// default 10, so hardcoding 10 changed nothing. A spike sharp enough to
+    /// exceed a limit of 1 gets bevelled instead, and that is visible.
+    #[test]
+    fn a_miter_limit_bevels_a_spike_too_sharp_to_keep() {
+        let spike = vec![
+            PathCommand::MoveTo { x: 2.0, y: 13.0 },
+            PathCommand::LineTo { x: 8.0, y: 3.0 },
+            PathCommand::LineTo { x: 14.0, y: 13.0 },
+        ];
+        let mk = |miter| StrokeStyle {
+            width: 3.0, cap: LineCap::Butt, join: LineJoin::Miter, miter, dash: vec![],
+        };
+        let kept = draw(16, 16, |p| p.stroke_path(&spike, &red(), &mk(10.0), 1.0));
+        let cut = draw(16, 16, |p| p.stroke_path(&spike, &red(), &mk(1.0), 1.0));
+        assert_ne!(px(&kept, 16, 8, 1), px(&cut, 16, 8, 1),
+                   "a limit of 1 bevels the spike a limit of 10 keeps");
+    }
+
+    /// ⛔ D2D DASH LENGTHS ARE MULTIPLES OF THE STROKE WIDTH, not absolute.
+    /// The contract's `dash` is absolute (canvas semantics), so it must be
+    /// divided by the emitted width -- and at width 1 that division is the
+    /// identity, which is why a mutant replacing the divisor with 1.0 survived
+    /// a suite whose only dashed fixture was one pixel wide.
+    #[test]
+    fn a_dash_pattern_is_scaled_by_a_width_other_than_one() {
+        let line = vec![
+            PathCommand::MoveTo { x: 0.0, y: 8.0 },
+            PathCommand::LineTo { x: 16.0, y: 8.0 },
+        ];
+        let st = StrokeStyle {
+            width: 4.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![4.0, 4.0],
+        };
+        let buf = draw(16, 16, |p| p.stroke_path(&line, &red(), &st, 1.0));
+        // 4-on/4-off at width 4 is ONE multiple on, one off: ink 0..4, gap 4..8.
+        assert_eq!(px(&buf, 16, 1, 8), [0, 0, 255, 255], "the first dash");
+        assert_eq!(px(&buf, 16, 6, 8), [0, 0, 0, 0], "and the first gap");
+        // Undivided, the pattern would be 4 DEVICE units at width 4 = 16 units
+        // on, which paints the whole line and never reaches a gap.
+    }
+
+    /// An out-of-range paint alpha paints an opaque colour rather than
+    /// something wild. The trait does not forbid a caller passing one.
+    ///
+    /// ⚠️ **THIS ARM DOES NOT KILL THE UNCLAMPED MUTANT, AND SAYING SO IS THE
+    /// POINT.** I wrote it expecting to, and measured otherwise: removing
+    /// `clamp(0.0, 1.0)` leaves this pixel identical, because D2D SATURATES a
+    /// `D2D1_COLOR_F` alpha above 1 itself. So the clamp is genuinely
+    /// unobservable at the pixel — a real equivalent mutant, established by
+    /// trying to kill it rather than by arguing it away.
+    ///
+    /// The clamp stays: relying on a backend's saturation to hold a contract
+    /// invariant is a promise D2D never made, and the next backend need not.
+    #[test]
+    fn an_out_of_range_paint_alpha_is_clamped_not_passed_through() {
+        let buf = draw(16, 16, |p| {
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 16.0, h: 16.0 },
+                        &Brush::Solid(Color::new(0.0, 0.0, 1.0, 1.0)), 4.0)
+        });
+        assert_eq!(px(&buf, 16, 8, 8), [255, 0, 0, 255],
+                   "alpha 4.0 clamps to 1.0 and paints an opaque blue");
+    }
+
     /// A full-sweep ellipse fills. This is 100% of the recorded traffic.
     #[test]
     fn fill_ellipse_arc_paints_a_full_circle() {
