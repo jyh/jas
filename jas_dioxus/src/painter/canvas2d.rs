@@ -1796,3 +1796,183 @@ mod partial_arc_laws {
                    "rotated a quarter turn, the 28 radius lies along y");
     }
 }
+
+/// ⛔⛔ THREE OPS THAT COULD BE DELETED WHOLESALE, MEASURED — NOT ASSUMED.
+///
+/// Row EJ (helm 2026-09-02 17:13) — the remainder of the WHOLE-OP WITNESS PASS
+/// that PR #90 opened. Method: replace one `Painter` method's entire body with
+/// a no-op, run this lane, restore, verify by `md5`. Measured at main
+/// `c56f9b76`, RE-MEASURED rather than inherited (my own table was already one
+/// commit stale after flask's #89 rewrote `stroke_ellipse_arc` under it):
+///
+/// | mutant | lane before this module |
+/// |---|---|
+/// | `stroke_rect` body → `{}` | **65/65 GREEN** |
+/// | `clip` body → `{}` | **65/65 GREEN** |
+/// | the inside/outside branch of `stroke_ellipse_arc` disabled | **65/65 GREEN** |
+///
+/// ⚖️ THE THIRD IS NOT A SEPARATE COINCIDENCE. `clip` IS the stroke-alignment
+/// lowering for PATHS (`element_render.rs:839`, `:847`, `:1646`, `:1658`) and
+/// that branch is the stroke-alignment lowering for ELLIPSES. With both
+/// unwitnessed, **stroke alignment had no pixel that could fail on either
+/// route** — every inside- and outside-aligned stroke in the application could
+/// silently render as a full-width CENTRE stroke, wrong by a factor of two in
+/// width and by half a pen in offset, at a fully green board.
+///
+/// 📌 EVERY MARGIN BELOW IS COMPUTED FROM THE BAND ARITHMETIC AND WRITTEN DOWN,
+/// never eyeballed — the miter arm's first cut in PR #79 went red at HEAD for
+/// sitting 1.5px inside an antialiasing edge.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod stroke_alignment_laws {
+    use super::browser_probe::{alpha_at, surface};
+    use super::*;
+    use crate::geometry::element::{Color, StrokeAlign};
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    const CX: f64 = 32.0;
+    const CY: f64 = 32.0;
+
+    fn pen(width: f64) -> StrokeStyle {
+        StrokeStyle { width, cap: LineCap::Butt, join: LineJoin::Miter, miter: 4.0, dash: Vec::new() }
+    }
+
+    /// ⛔ `stroke_rect` DRAWS A BORDER AND LEAVES THE INTERIOR ALONE.
+    ///
+    /// Kills the whole-op deletion of `stroke_rect`. Reachable from two
+    /// production sites — the direct `Rect` arm (`element_render.rs:1284`) and
+    /// outline mode (`:1573`).
+    ///
+    /// 📌 MARGINS. The rect is `(16,16)-(48,48)` with an 8px CENTRE pen, so the
+    /// painted band straddles each edge over ±4px: along y=32 it covers
+    /// x ∈ [12,20] and x ∈ [44,52]. The border probe sits at x=16 — 4px from
+    /// either edge of its band. The interior probe sits at the centre (32,32),
+    /// **12px** clear of the nearest band edge at x=20.
+    #[wasm_bindgen_test]
+    fn stroke_rect_paints_its_border_and_not_its_interior() {
+        let (_c, ctx) = surface(64, 64);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.stroke_rect(
+                Rect { x: 16.0, y: 16.0, w: 32.0, h: 32.0 },
+                &Brush::Solid(Color::WHITE), &pen(8.0), 1.0,
+            );
+        }
+        let on_border = alpha_at(&ctx, 16.0, CY);
+        let interior = alpha_at(&ctx, CX, CY);
+        assert_eq!(on_border, 255,
+                   "the border must be painted; got {on_border}. A zero here is \
+                    the whole-op failure: `stroke_rect` drawing NOTHING, which \
+                    left this lane at 65/65 before this arm existed.");
+        assert_eq!(interior, 0,
+                   "a STROKED rect must leave its interior empty; got {interior}. \
+                    A 255 here means the op filled rather than stroked.");
+    }
+
+    /// ⛔ `clip` RESTRICTS WHAT A LATER PAINT CAN REACH.
+    ///
+    /// Kills the whole-op deletion of `clip`. Two probes on ONE surface, so the
+    /// arm reads as a single claim: the same `fill_rect` covering the entire
+    /// canvas must land inside the clip and nowhere else.
+    ///
+    /// 📌 MARGINS. The clip is `(24,24)-(40,40)`; the inside probe is the centre
+    /// (32,32), **8px** from every clip edge, and the outside probe (8,8) is
+    /// **16px** beyond the nearest corner. No probe is within 8px of an edge.
+    #[wasm_bindgen_test]
+    fn a_clip_bounds_the_paint_that_follows_it() {
+        let (_c, ctx) = surface(64, 64);
+        {
+            let mut p = Canvas2dPainter::new(&ctx);
+            p.clip(
+                &[
+                    PathCommand::MoveTo { x: 24.0, y: 24.0 },
+                    PathCommand::LineTo { x: 40.0, y: 24.0 },
+                    PathCommand::LineTo { x: 40.0, y: 40.0 },
+                    PathCommand::LineTo { x: 24.0, y: 40.0 },
+                    PathCommand::ClosePath,
+                ],
+                FillRule::NonZero,
+            );
+            p.fill_rect(Rect { x: 0.0, y: 0.0, w: 64.0, h: 64.0 },
+                        &Brush::Solid(Color::WHITE), 1.0);
+        }
+        let inside = alpha_at(&ctx, CX, CY);
+        let outside = alpha_at(&ctx, 8.0, 8.0);
+        assert_eq!(inside, 255, "inside the clip the paint must land; got {inside}");
+        assert_eq!(outside, 0,
+                   "outside the clip NOTHING may land; got {outside}. A 255 here \
+                    is the whole-op failure — `clip` doing nothing, so every \
+                    inside- and outside-aligned PATH stroke silently renders as \
+                    a full-width CENTRE stroke.");
+    }
+
+    /// ⛔⛔ THE THREE ALIGNMENTS PAINT THREE DIFFERENT BANDS.
+    ///
+    /// Kills the disabling of `stroke_ellipse_arc`'s inside/outside branch
+    /// (flask's #89, RP3). Asserted as a TABLE rather than as one arm: a backend
+    /// that dropped `align` gives rows the same answer, and the comparison
+    /// catches it whichever alignment it happened to collapse to. That is the
+    /// [[two-arms-one-variable]] discipline — three arms differing in exactly
+    /// one variable, with the differences themselves asserted.
+    ///
+    /// ⛔ THE THIRD PROBE EXISTS BECAUSE THE FIRST TWO WERE NOT ENOUGH, AND THAT
+    /// WAS MEASURED, NOT NOTICED IN REVIEW. With probes at r=24 and r=8 only,
+    /// `Center` and `Outside` read IDENTICALLY — (255, 0) both — so a mutant
+    /// collapsing `Outside` into `Center` would have survived an arm whose whole
+    /// stated purpose is to separate the three. The outer probe at r=32 is the
+    /// one that distinguishes them, and the `assert_ne!` triple below now covers
+    /// all three pairs rather than two. ⇒ **A table's discriminating power is a
+    /// property of its PROBES, not of the number of rows it prints.**
+    ///
+    /// 📌 MARGINS, from the band arithmetic. A circle `r = 20` at (48,48) on a
+    /// 96×96 surface with a 16px pen puts the painted annulus at:
+    ///
+    /// | align | band (radius) | r=8 | r=24 | r=32 |
+    /// |---|---|---|---|---|
+    /// | `Center` | 12 → 28 | clear | paint | clear |
+    /// | `Inside` | 4 → 20 | paint | clear | clear |
+    /// | `Outside` | 20 → 36 | clear | paint | paint |
+    ///
+    /// All nine readings are **4px clear** of the nearest band edge — the
+    /// tightest margin in the arm, computed, not eyeballed. The surface is 96
+    /// wide rather than 64 precisely so the r=32 probe (x=80) fits.
+    #[wasm_bindgen_test]
+    fn the_three_stroke_alignments_paint_three_different_bands() {
+        const OX: f64 = 48.0;
+        const OY: f64 = 48.0;
+        let banded = |align: StrokeAlign| -> (u8, u8, u8) {
+            let (_c, ctx) = surface(96, 96);
+            {
+                let mut p = Canvas2dPainter::new(&ctx);
+                p.stroke_ellipse_arc(
+                    &EllipseArc {
+                        cx: OX, cy: OY, rx: 20.0, ry: 20.0, rotation: 0.0,
+                        start: 0.0, end: std::f64::consts::TAU, ccw: false,
+                    },
+                    &Brush::Solid(Color::WHITE), &pen(16.0), align, 1.0,
+                );
+            }
+            (
+                alpha_at(&ctx, OX + 8.0, OY),
+                alpha_at(&ctx, OX + 24.0, OY),
+                alpha_at(&ctx, OX + 32.0, OY),
+            )
+        };
+        let centre = banded(StrokeAlign::Center);
+        let inside = banded(StrokeAlign::Inside);
+        let outside = banded(StrokeAlign::Outside);
+        assert_eq!(centre, (0, 255, 0),
+                   "a CENTRE pen straddles r=20, covering r=24 alone; got {centre:?}");
+        assert_eq!(inside, (255, 0, 0),
+                   "an INSIDE pen lies within r=20, covering r=8 alone; got {inside:?}");
+        assert_eq!(outside, (0, 255, 255),
+                   "an OUTSIDE pen lies beyond r=20, covering r=24 and r=32; got {outside:?}");
+        // ⚖️ The branch, stated as one claim over ALL THREE PAIRS: a backend
+        // that ignored `align`, or collapsed any one alignment into another,
+        // would make two of these equal.
+        assert_ne!(centre, inside, "`align` must change the picture; Center == Inside");
+        assert_ne!(outside, inside, "`align` must change the picture; Outside == Inside");
+        assert_ne!(centre, outside, "`align` must change the picture; Center == Outside");
+    }
+}
