@@ -400,10 +400,28 @@ mod tests {
 
         let start = hits.load(Ordering::Relaxed);
         for _ in 0..200 {
-            let _g = serial();
-            reset();
-            assert_eq!(read(Crossing::PointerEvent).0, 0,
-                       "a counter read under the lock saw another thread's                         crossing -- the lock does not cover every writer");
+            {
+                let _g = serial();
+                reset();
+                assert_eq!(read(Crossing::PointerEvent).0, 0,
+                           "a counter read under the lock saw another thread's                             crossing -- the lock does not cover every writer");
+            }
+            // ⛔ THE GUARD IS DROPPED AND THE CPU YIELDED **INSIDE** THE LOOP.
+            // Without this the reader re-acquires immediately and the recorder
+            // may never be scheduled at all -- which is not interleaving, it is
+            // a 200-round solo. Measured: it interleaved freely on this
+            // 8-core seat and NEVER ONCE on a CI runner, where the control
+            // below failed the build rather than let it pass empty.
+            std::thread::yield_now();
+        }
+
+        // ⛔ AND THE WAIT IS BOUNDED, NOT ASSUMED. A yield is a hint, not a
+        // promise; on a busy single-core runner the recorder can still lag. Wait
+        // for real progress, with a ceiling so a genuinely stuck thread fails
+        // the test instead of hanging CI.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while hits.load(Ordering::Relaxed) == start && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
         }
         let observed = hits.load(Ordering::Relaxed) - start;
 
