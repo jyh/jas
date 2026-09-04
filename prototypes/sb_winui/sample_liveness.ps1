@@ -42,16 +42,35 @@
 param(
     # The app process, PID-scoped like everything else in this harness.
     [Parameter(Mandatory = $true)][int]$ProcessId,
-    # The sample times, in seconds from THIS script's start. The caller starts it
-    # on the shell's own `STALL ARMED` row, so t=0 is the top of the stall.
-    [int[]]$At = @(2, 5, 10),
+    # The sample times, in seconds from THIS script's start, as a COMMA-JOINED
+    # STRING. The caller starts it on the shell's own `STALL ARMED` row, so t=0
+    # is the top of the stall.
+    #
+    # ⛔ A STRING, NOT `[int[]]`, AND THAT IS THE REPAIR. This script is
+    # dispatched as `powershell.exe -File sample_liveness.ps1 ... -At 2,5,10`
+    # through a scheduled task, and `-File` hands every argument over as a
+    # literal string. An `[int[]]` parameter then coerced "2,5,10" using the
+    # console's number format, where the comma is the DIGIT GROUP SEPARATOR --
+    # so `$At` became the single integer 2510, this script slept toward t=2510s
+    # (41.8 minutes), wrote ZERO samples inside a 20-second stall, and outlived
+    # the run by 42 minutes. Measured on kenai 2026-09-04; the receipt printed
+    # `at=2510s` and said so all along. `ConvertTo-SbIntList` splits it here,
+    # where the separator is this harness's decision and not the console's.
+    [string]$At = '2,5,10',
     # Where the readings go. The caller reads this back from session 0.
     [Parameter(Mandatory = $true)][string]$Out
 )
 
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot 'harness_common.ps1')
+
+# Parsed BEFORE anything else and echoed as a COUNT beside the values: the defect
+# this replaced was invisible precisely because `at=2510s` looked like a list.
+$times = @(ConvertTo-SbIntList $At | Sort-Object)
+if ($times.Count -lt 1) { throw "sample_liveness: -At '$At' names no sample times" }
+
 $log = New-Object System.Collections.Generic.List[string]
-$log.Add("sample_liveness: pid=$ProcessId at=$($At -join ',')s out=$Out")
+$log.Add("sample_liveness: pid=$ProcessId at=$($times -join ',')s (n=$($times.Count), from -At '$At') out=$Out")
 $log.Add("session=$((Get-Process -Id $PID).SessionId)")
 $log.Add("started=$((Get-Date).ToString('o'))")
 
@@ -65,7 +84,7 @@ function Save-SbSamples {
 Save-SbSamples
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-foreach ($t in ($At | Sort-Object)) {
+foreach ($t in $times) {
     while ($sw.Elapsed.TotalSeconds -lt $t) { Start-Sleep -Milliseconds 100 }
     $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($null -eq $p) {
@@ -81,6 +100,6 @@ foreach ($t in ($At | Sort-Object)) {
     Save-SbSamples
 }
 
-$log.Add("done samples=$($At.Count)")
+$log.Add("done samples=$($times.Count)")
 Save-SbSamples
 exit 0
