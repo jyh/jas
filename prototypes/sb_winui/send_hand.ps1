@@ -51,9 +51,13 @@
 # ⚠️ AND `GetDpiForWindow` IS HONEST ABOUT A DISHONEST WINDOW. On a DPI-UNAWARE
 # process Windows bitmap-virtualises the window and returns 96 for it correctly,
 # so this script computes `scale = 1` correctly and the gesture lands at 2/3 of
-# the asked point on a 150% display. Nothing here can detect that; the two numbers
-# that CAN are `client=` below and the shell's own `surface=`, and the harness
-# asserts their ratio against the shell's reported `scale=` (O4.8).
+# the asked point on a 150% display -- measured on kenai before the shell wave
+# gave the app a manifest. Nothing here can detect that; the two numbers that CAN
+# are `client=` below and the shell's own `surface=`, and O4.8 compares them.
+# ⛔ WHAT THAT COMPARISON EXPECTS DEPENDS ON THE SHELL: with the surface sized in
+# DIPs the ratio WAS the scale, and with it derived in physical pixels the two are
+# one measurement and the ratio is 1.0. The assertion reads the shell's `STARTUP`
+# row to know which, and never guesses.
 
 [CmdletBinding()]
 param(
@@ -258,7 +262,7 @@ $sent = 0
 # extra arrival is the INJECTOR's, not the app's.
 #
 # The shell counts a move ONLY between the press and the release
-# (`MainWindow.xaml.cs:239-249` returns early unless `_gestureOpen`, and
+# (`MainWindow.xaml.cs`'s `OnPointerMoved` returns early unless `_gestureOpen`, and
 # `OnPointerPressed` zeroes `_moveCount`), so the pre-press positioning move
 # cannot be one of the eight. What CAN be is a button event carrying absolute
 # coordinates: `SendInput` applies a position given with `MOUSEEVENTF_ABSOLUTE`
