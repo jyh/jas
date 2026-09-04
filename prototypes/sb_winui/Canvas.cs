@@ -1705,7 +1705,7 @@ internal sealed unsafe class Canvas : IDisposable
                 SampleDesc = new DXGI_SAMPLE_DESC { Count = 1, Quality = 0 },
                 Usage = D3D11_USAGE.D3D11_USAGE_STAGING,
                 BindFlags = 0,
-                CPUAccessFlags = (uint)D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ,
+                CPUAccessFlags = D3D11_CPU_ACCESS_FLAG.D3D11_CPU_ACCESS_READ,
                 MiscFlags = 0,
             };
             _device!.CreateTexture2D(in desc, null, out var staging);
