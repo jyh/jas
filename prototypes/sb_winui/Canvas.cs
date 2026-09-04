@@ -163,6 +163,30 @@ internal sealed class DpiCmd : Cmd
     internal double Scale = 1.0;
 }
 
+/// <summary>
+/// The XAML thread finished the sleep `SB_UI_STALL_MS` asked for, and says so
+/// FROM THE SLEEP'S OWN CONTINUATION.
+///
+/// ⛔ WHY THE UI ARM NEEDS A COMMAND AT ALL. O3's `STALL` row is written by the
+/// drain that runs AFTER the stall, and that drain was reachable only from the
+/// render-thread arm: with `SB_UI_STALL_MS` set alone the row was never written
+/// and the harness timed out at 140 s with nothing to read. The sleeping thread
+/// cannot write the row either -- what the row must carry (what was requested
+/// during the stall, what was painted after it) is known only on the render
+/// thread. So the UI thread reports that it woke, and the render thread arms the
+/// same latch the render arm arms.
+///
+/// It also carries the TID OF THE THREAD THAT ACTUALLY SLEPT, because the row's
+/// `stall-tid` field is the whole point of the control and the old status text
+/// said "slept on the render thread" on an arm where the render thread never
+/// slept at all.
+/// </summary>
+internal sealed class UiStallDoneCmd : Cmd
+{
+    internal int Ms;
+    internal int Tid;
+}
+
 internal sealed class QuitCmd : Cmd
 {
 }
@@ -259,6 +283,14 @@ internal sealed unsafe class Canvas : IDisposable
     /// instead of a hang somebody has to diagnose.
     /// </summary>
     private const int PaintOnUiWaitMs = 5000;
+
+    /// <summary>
+    /// How long a scene waits for a REAL hand when `SB_POINTER_WAIT_MS` says
+    /// nothing. Named here rather than written at the two call sites, because a
+    /// default that appears twice is a default that will disagree with itself
+    /// once, and the README's knob table quotes exactly one number.
+    /// </summary>
+    private const int DefaultHandWaitMs = 30000;
 
     /// <summary>
     /// ⚖️ O3's SECOND CONTROL, AND IT IS DESIGNED TO GO RED (FREEZE §2 O3(a)).
@@ -423,6 +455,20 @@ internal sealed unsafe class Canvas : IDisposable
 
     /// <summary>A press arrived while waiting, so a timeout is a DIFFERENT refusal.</summary>
     private bool _handPressSeen;
+
+    /// <summary>
+    /// What moved the document between `A` and `A-MUT`: `SYNTHETIC` (the seam's
+    /// control replayed a drag), `REAL` (a hand closed through the WinUI
+    /// handlers) or `NONE` (no gesture was available and the clause is NOT RUN).
+    ///
+    /// ⛔ IT IS ON THE `A-MUT` ROW BECAUSE `A-MUT == A` IS THEN A CONSTRUCTION,
+    /// NOT A FINDING. With no gesture the two hashes are equal by definition;
+    /// without this field a reader would see O1.6 (`A != A-MUT`) red and read it
+    /// as "the mutation did not reach the document", which is a claim about the
+    /// pointer seam that this run cannot make. `mutation=NONE` is what turns
+    /// that red into a NOT RUN.
+    /// </summary>
+    private string _mutation = "NONE";
 
     /// <summary>The scene posted <see cref="SceneCompleted"/> itself -- EARLY (`stall`,
     /// so the harness can resize DURING the stall) or LATE (`pointer`/`retained`
@@ -812,6 +858,11 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case DpiCmd dp:
                     if (_engine != IntPtr.Zero) { JasCore.jas_set_dpi_scale(_engine, dp.Scale); }
+                    _scaleX = (float)dp.Scale;
+                    break;
+
+                case UiStallDoneCmd u:
+                    ApplyUiStallDone(u);
                     break;
             }
         }
@@ -887,11 +938,49 @@ internal sealed unsafe class Canvas : IDisposable
         _handScene = "";
         _handPressSeen = false;
 
-        LastStatus = pressed
-            ? $"NOT RUN: hand refused (pressed but never released within {waited}ms)"
-            : $"NOT RUN: hand refused (no press within {waited}ms)";
+        var why = pressed
+            ? $"pressed but never released within {waited}ms"
+            : $"no press within {waited}ms";
+        LastStatus = $"NOT RUN: hand refused ({why})";
         _report($"{LastStatus} scene={scene} surface={_width}x{_height} {Tids()}");
+
+        // ⭐ AND THE SCENE IS NOT OVER. `retained`'s round trip does not need a
+        // gesture -- retention is the claim, and a refused hand only costs it
+        // the mutation clause -- so the mutation is marked NOT RUN on its own
+        // row and everything downstream of it runs. `pointer` IS the gesture and
+        // has nothing to proceed to.
+        if (string.Equals(scene, "retained", StringComparison.Ordinal))
+        {
+            CompleteRetainedWithoutGesture(why);
+        }
         PostToUi(() => SceneCompleted?.Invoke());
+    }
+
+    /// <summary>
+    /// The UI thread woke up. Arm the SAME latch the render arm arms, so the
+    /// post-stall drain (or its bounded grace) writes O3's `STALL` row.
+    ///
+    /// ⛔ ARMED HERE AND NOT BEFORE THE SLEEP, AND THE ORDER IS THE MEASUREMENT.
+    /// The latch's grace is <see cref="StallDrainGraceMs"/>; armed before a 20 s
+    /// UI sleep it would expire while the XAML thread was still asleep and write
+    /// `resize-during-stall=none` -- and it would be TRUE, because the thread
+    /// that posts `SB_RESIZE`'s steps is the thread that is sleeping. The stall
+    /// is over when the sleeper says so.
+    ///
+    /// The status is set HERE for the same reason: the old text claimed a sleep
+    /// that had not happened yet, on an arm where the render thread never sleeps
+    /// at all.
+    /// </summary>
+    private void ApplyUiStallDone(UiStallDoneCmd u)
+    {
+        _stallSlept = 0;
+        _stallTid = u.Tid;
+        _stallArmed = true;
+        LastStatus = $"UI-STALL DONE ui-stall={u.Ms}ms stall-tid={u.Tid} slept on the XAML "
+                   + $"THREAD (not the render thread); the STALL row carries what the "
+                   + $"post-stall drain applied surface={_width}x{_height}";
+        _report($"UI-STALL DONE ui-stall={u.Ms}ms stall-tid={u.Tid} "
+              + $"surface={_width}x{_height} {Tids()}");
     }
 
     /// <summary>O3's one row, written once. A second call is a no-op.</summary>
@@ -1293,7 +1382,10 @@ internal sealed unsafe class Canvas : IDisposable
         if (string.Equals(scene, "retained", StringComparison.Ordinal))
         {
             // The mutation's own frame, hashed at the surface `A` was hashed at,
-            // BEFORE the resize walk starts. `A-MUT` is the round trip's H0.
+            // BEFORE the resize walk starts. `A-MUT` is the round trip's H0, and
+            // it says on its face which hand moved the document -- a REAL one
+            // here, because only the WinUI handlers reach this method.
+            _mutation = "REAL";
             PaintAndHash("A-MUT");
         }
         _report($"HAND CLOSED scene={scene} pointer=REAL doc={doc} loads(shell)={_loadsShell} "
@@ -1513,10 +1605,17 @@ internal sealed unsafe class Canvas : IDisposable
             // for the life of the window, so these rows must read
             // `engines-created=1 engines-freed=0` at every stop of the walk.
             var (created, freed) = EngineCounters();
+            // `mutation=` rides on the MUTATED row and on no other, because it
+            // describes what happened between `A` and this one. Putting it on
+            // every hash row would invite a reader to compare a field that is
+            // meaningless on three of the four.
+            var mutation = string.Equals(label, "A-MUT", StringComparison.Ordinal)
+                ? $"mutation={_mutation} "
+                : "";
             _report(
                 $"{label} surface={_width}x{_height} hash={hash ?? "n/a"} "
               + $"engines-created={created} engines-freed={freed} loads(shell)={_loadsShell} "
-              + $"{Tids()}");
+              + $"{mutation}{Tids()}");
             // ⛔ THE NEXT RESIZE STEP IS POSTED FROM HERE, NOT FROM THE SETTLE.
             // O1's list walks the surface AWAY and BACK, hashing at each stop.
             // If the next `AppWindow.Resize` were posted the moment the previous
@@ -2200,7 +2299,23 @@ internal sealed unsafe class Canvas : IDisposable
             // NO SYNTH: WAIT FOR THE REAL HAND, and hold the resize walk until
             // it lands. Starting the round trip now would carry an unmutated
             // document across it and the receipt would still say `retained`.
-            if (!ArmHandWait("retained")) { return false; }
+            //
+            // ⚠️ BUT THE WAIT ENDING IS NOT THE SCENE ENDING. A refused hand
+            // used to stop the scene dead, and the RETENTION claim -- which
+            // needs no gesture at all -- went unmeasured with it. Both exits now
+            // lead to `CompleteRetainedWithoutGesture`, which marks the mutation
+            // clause NOT RUN and lets the round trip run.
+            if (!TryHandWaitMs(out var waitMs)) { return false; }
+            if (waitMs == 0)
+            {
+                CompleteRetainedWithoutGesture("SB_POINTER_WAIT_MS=0 declined the wait");
+                LastStatus = $"RETAINED '{name}' ({bytes.Length} bytes) in the HELD engine; "
+                           + $"NO GESTURE (the wait was declined) so mutation=NONE and A-MUT "
+                           + $"equals A by construction; the SB_RESIZE walk hashes the rest "
+                           + $"loads(shell)={_loadsShell} {Tids()}";
+                return true;
+            }
+            ArmHandWait("retained", waitMs);
             LastStatus = $"RETAINED '{name}' ({bytes.Length} bytes) loaded into the HELD engine; "
                        + $"hashed as A; WAITING for a real gesture (up to {_handWaitMs}ms) before "
                        + $"the resize round trip. surface={_width}x{_height} {Tids()}";
@@ -2208,6 +2323,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
 
         if (!SyntheticDrag(synth, "retained")) { return false; }
+        _mutation = "SYNTHETIC";
         PaintAndHash("A-MUT");
         ApplyDump("sb-doc-after.json");
 
@@ -2287,8 +2403,27 @@ internal sealed unsafe class Canvas : IDisposable
 
         if (_uiStallMs > 0)
         {
+            // ⛔ THE CONTINUATION IS PART OF THE CONTROL. `Thread.Sleep` on the
+            // XAML thread is the whole arm; what was missing is that NOTHING
+            // followed it. The row O3 reads is written by the post-stall drain,
+            // and with only this knob set that drain was never armed -- the
+            // harness waited 140 s for a row the shell had no path to write. So
+            // the sleep's own continuation, on the thread that slept, tells the
+            // render thread the stall is over and hands it the tid that slept.
             var ms = _uiStallMs;
-            PostToUi(() => Thread.Sleep(ms));
+            var renderArmOwnsTheRow = renderMs > 0;
+            PostToUi(() =>
+            {
+                var tid = Environment.CurrentManagedThreadId;
+                Thread.Sleep(ms);
+                // WITH BOTH KNOBS SET THE RENDER ARM OWNS THE ROW, and it has
+                // already armed the latch from inside its own repaint. A second
+                // arming would write a second `STALL` row whose `stall-tid`
+                // named the OTHER thread -- two rows, one stall, disagreeing
+                // about which arm was the subject.
+                if (renderArmOwnsTheRow) { return; }
+                _queue.Add(new UiStallDoneCmd { Ms = ms, Tid = tid });
+            });
         }
 
         if (renderMs > 0)
@@ -2297,9 +2432,19 @@ internal sealed unsafe class Canvas : IDisposable
             RepaintOnce("stall", 0);
         }
 
-        LastStatus = $"STALL render-stall={renderMs}ms ui-stall={_uiStallMs}ms slept on the "
-                   + $"render thread; the STALL row carries what the post-stall drain applied "
-                   + $"{Tids()}";
+        // ⚠️ THE STATUS NAMES THE ARM THAT ACTUALLY SLEPT, AND NEVER CLAIMS A
+        // SLEEP THAT HAS NOT HAPPENED. This method returns while the UI arm's
+        // sleep is still ahead of it (the sleep is POSTED), so the UI-only arm's
+        // status says ARMED here and is replaced by `UI-STALL DONE` from the
+        // sleep's continuation. The render arm's sleep is over by this line,
+        // because `RepaintOnce` performed it inline on this thread.
+        LastStatus = renderMs > 0
+            ? $"STALL render-stall={renderMs}ms ui-stall={_uiStallMs}ms slept on the "
+            + $"RENDER thread; the STALL row carries what the post-stall drain applied "
+            + $"{Tids()}"
+            : $"STALL ARMED render-stall=0ms ui-stall={_uiStallMs}ms; the XAML thread is "
+            + $"sleeping NOW and the STALL row follows its continuation, not this line "
+            + $"{Tids()}";
         return true;
     }
 
@@ -2356,7 +2501,18 @@ internal sealed unsafe class Canvas : IDisposable
             return true;
         }
 
-        if (!ArmHandWait("pointer")) { return false; }
+        if (!TryHandWaitMs(out var waitMs)) { return false; }
+        if (waitMs == 0)
+        {
+            // The wait was DECLINED, which is a different fact from a wait that
+            // expired, and it is written as one. `pointer` has nothing to
+            // proceed to -- the gesture IS the scene -- so it completes here.
+            LastStatus = "NOT RUN: hand refused (SB_POINTER_WAIT_MS=0 declined the wait; no "
+                       + "gesture was ever waited for)";
+            _report($"{LastStatus} scene=pointer surface={_width}x{_height} {Tids()}");
+            return true;
+        }
+        ArmHandWait("pointer", waitMs);
         LastStatus = $"POINTER '{name}' ({bytes.Length} bytes) loaded; WAITING for a real "
                    + $"gesture (up to {_handWaitMs}ms). A timeout is NOT RUN, never a "
                    + $"synthetic receipt labelled REAL. surface={_width}x{_height} {Tids()}";
@@ -2412,23 +2568,75 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
-    /// Arm the wait for a real hand. Returns false only if the knob is malformed.
+    /// How long to wait for a real hand. Returns false only if the knob is
+    /// malformed; `0` is a LEGAL ANSWER and means DECLINE THE WAIT.
+    ///
+    /// ⛔ UNSET AND `0` ARE DIFFERENT ANSWERS, AND THEY USED TO BE THE SAME ONE.
+    /// <see cref="ParseMs"/> returns 0 for both, and the old call site turned
+    /// that 0 into the 30 s default -- so a harness that has no hand to offer
+    /// had no way to say so and paid 30 s of dead time per run before a refusal
+    /// it already knew was coming. The raw value is therefore read here rather
+    /// than the parsed one: null is "you did not say" and "0" is "do not wait".
     /// </summary>
-    private bool ArmHandWait(string scene)
+    private bool TryHandWaitMs(out int waitMs)
     {
-        var waitMs = ParseMs(Environment.GetEnvironmentVariable("SB_POINTER_WAIT_MS"));
-        if (waitMs == 0) { waitMs = 30000; }
+        var raw = Environment.GetEnvironmentVariable("SB_POINTER_WAIT_MS");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            waitMs = DefaultHandWaitMs;
+            return true;
+        }
+        waitMs = ParseMs(raw);
         if (waitMs < 0)
         {
-            LastStatus = "SB_POINTER_WAIT_MS must be a positive number of milliseconds";
+            LastStatus = $"SB_POINTER_WAIT_MS='{raw}' must be a number of milliseconds "
+                       + "(0 declines the wait)";
             return false;
         }
+        return true;
+    }
+
+    /// <summary>Arm the wait for a real hand at an already-decided deadline.</summary>
+    private void ArmHandWait(string scene, int waitMs)
+    {
         _handWaitMs = waitMs;
         _handScene = scene;
         _handPressSeen = false;
         _handDeadlineMs = Environment.TickCount64 + waitMs;
         _scenePostsItsOwnCompletion = true;   // posted when the gesture closes, or on the refusal
-        return true;
+    }
+
+    /// <summary>
+    /// ⭐ `retained` WITHOUT A HAND STILL COMPLETES ITS ROUND TRIP.
+    ///
+    /// ⛔ THE DEFECT THIS REPAIRS, MEASURED ON THE BOX: with no `SB_SYNTH_DRAG`
+    /// and no gesture, the scene wrote its refusal and stopped. `A-MUT` was
+    /// never written, so O1.4 (`A-MUT == A'`) and O1.5 (`H1 != A-MUT`) had no
+    /// left-hand side, and the harness read a scene that had produced one hash
+    /// row out of four as a scene that had failed. The RETENTION claim -- one
+    /// engine, one document, across a surface that goes away and comes back --
+    /// does not depend on a gesture at all, and it is the claim O1 exists for.
+    ///
+    /// So the mutation clause is NOT RUN, ON ITS OWN ROW, and everything that
+    /// does not need it proceeds: `A-MUT` is hashed (equal to `A` BY
+    /// CONSTRUCTION, which the row says in `mutation=NONE` rather than leaving a
+    /// reader to infer it), the after-dump is written so the pair the harness
+    /// diffs still exists, and the `SB_RESIZE` walk writes `H1` and `A'`.
+    ///
+    /// ⚠️ WHAT THIS IS NOT: a substitute for a gesture. `mutation=NONE` is the
+    /// field a harness reads to mark O1.2 and O1.6 NOT RUN. A run that reported
+    /// `A-MUT == A'` here has proven retention across the round trip and has
+    /// proven NOTHING about the pointer seam.
+    /// </summary>
+    private void CompleteRetainedWithoutGesture(string why)
+    {
+        _mutation = "NONE";
+        _report($"NOT RUN: no gesture ({why}) scene=retained mutation=NONE — the mutation "
+              + $"clause is NOT RUN and A-MUT is hashed anyway, EQUAL TO A by construction; "
+              + $"the SB_RESIZE round trip proceeds, so H1 and A' are still written "
+              + $"surface={_width}x{_height} {Tids()}");
+        PaintAndHash("A-MUT");
+        ApplyDump("sb-doc-after.json");
     }
 
     /// <summary>
