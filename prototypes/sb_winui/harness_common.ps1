@@ -261,11 +261,24 @@ function Start-SbAppTask {
 # "record the launched PID, kill only it, REFUSE if it is gone". A process that
 # vanished before teardown is a fact about the run -- most likely a crash -- and
 # reporting it as a successful cleanup would erase it.
-function Stop-SbAppByPid {
+# ⛔ VALIDATE, THEN ACT -- AND THE VALIDATION IS ITS OWN FUNCTION BECAUSE TWO
+# CALLERS NEED IT AT TWO DIFFERENT MOMENTS.
+#
+# Measured on kenai 2026-09-03 (PR #110): a refused `-Stop <pid>` -- a pid that
+# was not an SbWinUi, and a pid that was already gone -- still printed
+# `ok  : scheduled task 'jas-sb-app-stay' dropped`. A refusal aimed at a STRANGER
+# tore down the launcher of a LIVE stay it had just declined to touch. The
+# refusal was correct and the side effect was not, which is the shape a caller
+# cannot see: the verdict line says REFUSED and the machine state says otherwise.
+#
+# So the decision is separable from the act. `sitting.ps1` asks this FIRST and
+# touches nothing when it says no; `Stop-SbAppByPid` asks it again immediately
+# before killing, so there is exactly ONE spelling of each refusal and the two
+# callers cannot drift into disagreeing about what a stranger is.
+function Test-SbStopTarget {
     param(
         [int]$TargetPid,
-        [string]$ExpectName,
-        [int]$GraceSeconds = 5
+        [string]$ExpectName
     )
     if ($TargetPid -le 0) {
         return @{ Ok = $false; Verdict = "REFUSED: no pid recorded -- this harness kills by PID only, never by name" }
@@ -276,6 +289,19 @@ function Stop-SbAppByPid {
     }
     if ($p.ProcessName -ne $ExpectName) {
         return @{ Ok = $false; Verdict = "REFUSED: pid $TargetPid is '$($p.ProcessName)', not '$ExpectName' -- refusing to kill a stranger (a pid can be recycled; the name is the guard, never the target)" }
+    }
+    return @{ Ok = $true; Verdict = "ok  : pid $TargetPid is a live $ExpectName -- this call may act on it" }
+}
+
+function Stop-SbAppByPid {
+    param(
+        [int]$TargetPid,
+        [string]$ExpectName,
+        [int]$GraceSeconds = 5
+    )
+    $check = Test-SbStopTarget -TargetPid $TargetPid -ExpectName $ExpectName
+    if (-not $check.Ok) {
+        return @{ Ok = $false; Verdict = $check.Verdict }
     }
     Stop-Process -Id $TargetPid -Force -ErrorAction SilentlyContinue
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
@@ -304,4 +330,85 @@ function Get-SbPoint([string]$Row, [string]$Name) {
     $m = [regex]::Match($Row, [regex]::Escape($Name) + '=\(([-0-9.]+),([-0-9.]+)\)')
     if (-not $m.Success) { return $null }
     return @{ X = [double]$m.Groups[1].Value; Y = [double]$m.Groups[2].Value }
+}
+
+# `Stat()` (Canvas.cs) writes `<name> first=<a>ms steady-mean=<b>ms min=... max=...
+# n=...` and a BENCHMARK row carries THREE of them: `paint`, `paint+copy` and
+# `present`. The space before `first=` is load-bearing -- `paint first=` cannot
+# match inside `paint+copy first=` -- and it is why this is one function rather
+# than a regex written twice.
+function Get-SbSteadyMean([string]$Row, [string]$Stat) {
+    if ([string]::IsNullOrEmpty($Row)) { return $null }
+    $m = [regex]::Match($Row, [regex]::Escape($Stat) + ' first=[0-9.]+ms steady-mean=([0-9.]+)ms')
+    if (-not $m.Success) { return $null }
+    return [double]$m.Groups[1].Value
+}
+
+# ---------------------------------------------------------------------------
+# CROSS-RUN RECEIPTS, SCOPED TO ONE SITTING
+# ---------------------------------------------------------------------------
+#
+# ⛔ SOME ASSERTIONS NEED A FIGURE FROM A DIFFERENT RUN, AND `sb-runs.log` CANNOT
+# CARRY IT. The log is read as a WINDOW past this run's mark, on purpose: a row
+# from an earlier run must never satisfy this one. But O2's band is a multiple of
+# the SAME SITTING's benchmark frame, and O6.4 reads a squeeze run together with a
+# probe run -- two figures that are, by construction, outside the window.
+#
+# So they travel as FILES, and every file carries the sitting it belongs to.
+# `JAS_SB_SITTING` is set once per sitting by `sitting.ps1` (a GUID) and is NOT an
+# `SB_*` name, so `Get-SbForwardedEnv` never forwards it to the app: it labels the
+# HARNESS's runs and is invisible to the shell, which is what stops it becoming a
+# knob nobody documented.
+#
+# Two runs driven by hand carry no sitting, so they share the id 'no-sitting' --
+# and a 'no-sitting' receipt EXPIRES after an hour, because otherwise a figure
+# measured last week would silently price a run taken today. The expiry is
+# reported by name; it is never a silent miss.
+function Get-SbSittingId {
+    $s = $env:JAS_SB_SITTING
+    if ([string]::IsNullOrWhiteSpace($s)) { return 'no-sitting' }
+    return $s
+}
+
+function Write-SbReceipt {
+    param([string]$Path, [hashtable]$Data)
+    $Data['sitting'] = Get-SbSittingId
+    $Data['written'] = (Get-Date).ToString('o')
+    ($Data | ConvertTo-Json -Depth 6) | Set-Content -Path $Path -Encoding utf8
+}
+
+# Returns @{ Ok; Data; Reason }. `Ok=$false` ALWAYS carries a Reason written to be
+# printed as a `NOT RUN` detail -- a receipt that cannot be used has to say which
+# of the three reasons applies (absent, another sitting, expired), because those
+# are three different things for the reader to do next.
+function Read-SbReceipt {
+    param([string]$Path, [string]$Label)
+    if (-not (Test-Path $Path)) {
+        return @{ Ok = $false; Data = $null; Reason = "no $Label receipt at $([IO.Path]::GetFileName($Path)) -- that run has not happened in this sitting" }
+    }
+    $data = $null
+    try { $data = Get-Content $Path -Raw | ConvertFrom-Json } catch {
+        return @{ Ok = $false; Data = $null; Reason = "the $Label receipt $([IO.Path]::GetFileName($Path)) could not be read as JSON: $($_.Exception.Message)" }
+    }
+    $mine = Get-SbSittingId
+    if ([string]$data.sitting -ne $mine) {
+        return @{ Ok = $false; Data = $null; Reason = "the $Label receipt belongs to sitting '$($data.sitting)' and this run is sitting '$mine' -- a figure from another sitting is a figure from another box state" }
+    }
+    if ($mine -eq 'no-sitting') {
+        # ⛔ PARSED DEFENSIVELY, AND WITH THE INVARIANT CULTURE. The callers run
+        # under `$ErrorActionPreference = 'Stop'`, so a throw here would kill the
+        # whole run over a stale receipt -- an unreadable timestamp must refuse the
+        # FIGURE, never the RUN.
+        $age = 0.0
+        try {
+            $written = [datetime]::Parse([string]$data.written, [Globalization.CultureInfo]::InvariantCulture)
+            $age = ((Get-Date) - $written).TotalMinutes
+        } catch {
+            return @{ Ok = $false; Data = $null; Reason = "the $Label receipt carries no readable timestamp ('$($data.written)'), and with no sitting id there is nothing else to scope it by" }
+        }
+        if ($age -gt 60) {
+            return @{ Ok = $false; Data = $null; Reason = ("the $Label receipt is {0:N0} minutes old and carries no sitting id (both runs were driven by hand) -- refusing to price this run with it" -f $age) }
+        }
+    }
+    return @{ Ok = $true; Data = $data; Reason = '' }
 }

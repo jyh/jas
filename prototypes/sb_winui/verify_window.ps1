@@ -40,6 +40,28 @@
 #    that can be read before it is spent is cheaper than a run that measured the
 #    wrong thing.
 #
+# ============================================================================
+# WHAT THE FIRST RUN ON THE BOX CHANGED (PR #110's rows, 2026-09-03)
+# ============================================================================
+#
+# The harness was executed for the first time and six of its own mechanisms were
+# measured wrong. Every one below is a repair to THIS harness, not to the app:
+#
+# 5. THE LIVENESS ORACLE MOVED INTO SESSION 1 (`sample_liveness.ps1`). Reading
+#    `Responding` from session 0 was proved VACUOUS by a positive control -- the
+#    handle is always 0 across the boundary and `Responding` returns True when it
+#    is. Every sample now carries its own precondition.
+# 6. O2's BAND IS ONE FRAME, not `2 x present-mean` -- which asserted that paint
+#    costs no more than present and redded in all four runs while the subject
+#    improved 110-275x. It comes from the SAME SITTING's DIRECT benchmark run.
+# 7. O6.4 IS TWO RUNS. One run cannot hold both arms: the probe moves the surface
+#    permanently, so `A'` is never written and `surface(A) == surface(A')` cannot
+#    hold. The arms travel between runs as receipts scoped to one sitting.
+# 8. `-Scale` IS GONE. It reached nothing -- measured identical readings with and
+#    without it. The scale is READ from the shell's rows and its source named.
+# 9. O3.1 IS ASSERTED OVER ROWS THAT PAINTED, with the count printed. A `DUMP`
+#    row carries the tid tail with `paint-tid=0`.
+#
 # ⛔ WHAT THIS FILE CANNOT DO IS DECIDE WHETHER AN ASSERTION PASSED WITHOUT THE
 # BOX. Nothing below has been executed: it was written on a Mac with no
 # PowerShell and no Windows desktop. The CI gate on it parses it; only kenai
@@ -66,11 +88,17 @@ param(
     [string]$Scene = '',
     # Override the derived timeout, in seconds. 0 = derive it.
     [int]$TimeoutSeconds = 0,
-    # O2's "before". A number in ms, or a path to a file whose first number is
+    # O2.3's "before". A number in ms, or a path to a file whose first number is
     # the ms figure. UNSUPPLIED PRINTS "before: not supplied" -- the N0b figure
     # (363 ms at 984x526) is NOT hardcoded here, because a hardcoded before is a
     # number nobody re-measures and every comparison inherits it silently.
     [string]$Before = '',
+    # O2.2's BAND SOURCE: one benchmark frame, paint+present, in ms. A number, or
+    # a path to a file whose first number is it. Normally UNSUPPLIED -- the
+    # `benchmark` run of the SAME SITTING writes it to a receipt and this run
+    # reads it from there, so the band is a figure this box produced today rather
+    # than a constant. Supplying it by hand overrides the receipt and says so.
+    [string]$BenchmarkFrameMs = '',
     # Drive O4's session-1 hand after the scene's before-dump appears.
     [switch]$Hand,
     # k, VARIED. O4 asks for 2, then 7.
@@ -86,9 +114,6 @@ param(
     # the seam's positive control, with the SAME harness-chosen element and delta
     # the hand would have used.
     [switch]$SynthFromDump,
-    # Physical pixels per DIP. 0 = read the last `scale=` the log has ever
-    # carried; 1.0 if the log has none, and the plan says which it used.
-    [double]$Scale = 0,
     # O1's probe-colour arm needs a POSITIVE half: a DXGI capture of a frame that
     # DOES contain PROBE_FG. Without it the absence arm is vacuous and says so.
     [string]$ProbeCapture = '',
@@ -117,6 +142,16 @@ $launchTask = "jas-sb-app"
 $capTask = "jas-sb-capture"
 $handTask = "jas-sb-hand"
 $dupTask = "jas-sb-capture-dxgi"
+$liveTask = "jas-sb-liveness"
+
+# The cross-run receipts (see `harness_common.ps1`): figures that belong to a
+# DIFFERENT run of the SAME sitting, and are therefore outside this run's log
+# window by construction.
+$benchDirectReceipt = Join-Path $scratch 'sb-benchmark-frame-DIRECT.json'
+$benchOffscreenReceipt = Join-Path $scratch 'sb-benchmark-frame-OFFSCREEN.json'
+$o6SqueezeReceipt = Join-Path $scratch 'sb-o6-squeeze.json'
+$o6ProbeReceipt = Join-Path $scratch 'sb-o6-probe.json'
+$liveReceipt = Join-Path $scratch 'sb-liveness.txt'
 
 # ---------------------------------------------------------------------------
 # THE SCENES, AND THE ROW EACH ONE FINISHES WITH
@@ -359,22 +394,49 @@ if ($deltaParts.Count -eq 2) {
     exit 1
 }
 
-# THE SCALE. Physical = DIP * scale, and the shell reports `scale=` only on a row
-# it has already written. So: the caller's value, else the last one this log has
-# ever carried, else 1.0 -- and the plan SAYS which, because a silently assumed
-# scale puts the gesture somewhere else and the miss looks like a seam failure.
-$scaleSource = 'the -Scale parameter'
-if ($Scale -le 0) {
+# THE SCALE. Physical = DIP * scale.
+#
+# ⛔ `-Scale` IS GONE, AND ITS REMOVAL IS A DEFECT REPAIR. It was measured on
+# kenai 2026-09-03 (PR #110) to reach NOTHING: `send_hand.ps1` has no `-Scale`
+# parameter and derives the factor solely from `GetDpiForWindow`, so
+# `verify_window.ps1 -Scale 1.5` governed only the synthetic arm and the tolerance
+# text -- a run driven with it produced readings identical to a run without it,
+# down to the digit. A knob that appears in the plan, is echoed in the detail and
+# changes no behaviour is worse than no knob: it invites the reader to believe the
+# coordinate chain was corrected when it was not.
+#
+# The real chain is the SHELL's: an unpackaged WinUI 3 app with no application
+# manifest is DPI-unaware, Windows bitmap-virtualises it, `GetDpiForWindow`
+# honestly returns 96, and the gesture lands at 2/3 of the asked point on a 150%
+# display. That is the shell wave's manifest to fix; it is not something a
+# harness parameter can paper over.
+#
+# So the scale is READ, never supplied: the last `scale=` field THIS RUN has
+# written, else the last one this log has ever carried, else 1.0 -- and the plan
+# and every detail SAY which of the three, because a silently assumed scale puts
+# the gesture somewhere else and the miss looks like a seam failure.
+$scaleSource = ''
+function Resolve-SbScale {
+    param($RunRows)
+    $row = $null
+    if ($null -ne $RunRows -and @($RunRows).Count -gt 0) {
+        $row = Select-SbRow $RunRows 'scale=[0-9.]+'
+    }
+    if ($null -ne $row) {
+        return @{ Scale = [double](Get-SbField $row 'scale')
+                  Source = "the last scale= field THIS RUN wrote" }
+    }
     $histRow = Select-SbRow (Read-SbRows $log 0) 'scale=[0-9.]+'
     $histScale = Get-SbField $histRow 'scale'
     if ($null -ne $histScale) {
-        $Scale = [double]$histScale
-        $scaleSource = "the last scale= field in $([IO.Path]::GetFileName($log))"
-    } else {
-        $Scale = 1.0
-        $scaleSource = 'ASSUMED 1.0 -- this log has never carried a scale= field'
+        return @{ Scale = [double]$histScale
+                  Source = "the last scale= field in $([IO.Path]::GetFileName($log)) (an EARLIER run's; this run had written none when the point was chosen)" }
     }
+    return @{ Scale = 1.0; Source = 'ASSUMED 1.0 -- this log has never carried a scale= field' }
 }
+$resolved = Resolve-SbScale $null
+$Scale = $resolved.Scale
+$scaleSource = $resolved.Source
 
 $beforeDump = Join-Path $scratch 'sb-doc-before.json'
 $afterDump = Join-Path $scratch 'sb-doc-after.json'
@@ -454,10 +516,21 @@ if ($DryRun) {
     Write-Output "  log            : $log (mark: $(Get-SbLogMark $log) bytes)"
     Write-Output "  already up     : $(($(Get-SbAppPids $Exe) -join ', '))  <- left alive; the teardown is PID-scoped"
     Write-Output "  launch task    : $launchTask   capture: $capTask   dxgi: $dupTask   hand: $handTask"
-    Write-Output "  scale          : $Scale  (from $scaleSource)"
+    Write-Output "  scale          : $Scale  (from $scaleSource; -Scale no longer exists -- it reached nothing)"
+    Write-Output "  sitting        : $(Get-SbSittingId)"
     Write-Output "  forwarded env  : $(if ($fwd.Names.Count) { $fwd.Names -join ' ' } else { '(none)' })"
     Write-Output "  teardown       : $(if ($NoKill) { 'NONE (-NoKill): the launched process is LEFT RUNNING' } else { 'kill the launched pid ONLY; refuse if it is gone' })"
-    Write-Output "  O2 before      : $(if ($Before) { $Before } else { 'not supplied' })"
+    Write-Output "  O2.3 before    : $(if ($Before) { $Before } else { 'not supplied -- O2.3 will be NOT RUN' })"
+    $benchPlan = if ($BenchmarkFrameMs) { "$BenchmarkFrameMs (supplied, overrides the receipt)" } else { (Read-SbReceipt $benchDirectReceipt 'benchmark-frame DIRECT').Reason }
+    if (-not $BenchmarkFrameMs -and (Read-SbReceipt $benchDirectReceipt 'benchmark-frame DIRECT').Ok) {
+        $bd = (Read-SbReceipt $benchDirectReceipt 'benchmark-frame DIRECT').Data
+        $benchPlan = "$($bd.frame_ms) ms/frame at surface $($bd.surface) on route $($bd.route), from this sitting's benchmark run"
+    }
+    Write-Output "  O2.2 band src  : $benchPlan"
+    if ($Scene -eq 'stall') {
+        Write-Output "  liveness       : session-1 sampler '$liveTask' at t=2,5,10s, dispatched on the shell's own STALL ARMED row -> $([IO.Path]::GetFileName($liveReceipt))"
+        Write-Output "                   (the session-0 Responding reading is kept as a NOTE only: it is VACUOUS across the session boundary)"
+    }
     Write-Output "  probe capture  : $(if ($ProbeCapture) { $ProbeCapture } else { 'not supplied -- O1.7 will be NOT RUN' })"
     if ($SynthFromDump) { Write-Output "  synth drag     : $synthNote" }
     if ($Hand) {
@@ -482,7 +555,13 @@ Remove-SbTask $launchTask
 Remove-SbTask $capTask
 Remove-SbTask $handTask
 Remove-SbTask $dupTask
+Remove-SbTask $liveTask
 Remove-Item $png, "$png.json", "$png.error.txt" -ErrorAction SilentlyContinue
+# ⛔ THE LIVENESS RECEIPT IS DELETED BEFORE THE RUN, NOT READ PAST. It is a FILE,
+# not a log window, so a previous run's samples would be read as this run's --
+# the exact defect the log's byte mark exists to prevent, arriving through the
+# one reading that does not come from the log.
+Remove-Item $liveReceipt -ErrorAction SilentlyContinue
 
 # ⭐ O5's CONTROL, RECORDED BEFORE ANYTHING IS STARTED. Whatever is already
 # running is NOT this run's subject and is NOT killed by it. The old name-sweep
@@ -509,10 +588,15 @@ $verdicts += "ok  : launched pid $appPid after $($start.Waited)s (identified by 
 # THE WAITS -- each on a row, each bounded, each refusing BY NAME
 # ---------------------------------------------------------------------------
 
-# O3's LIVENESS SAMPLER rides the scene's own wait, at t=2, 5 and 10 s. It is
-# here and not in a sleep beside the run because `Responding` has to be read
-# WHILE the stall is happening -- the whole claim is that the UI thread pumps
-# while the render thread sleeps.
+# ⛔ THE SESSION-0 SAMPLER IS KEPT AND IS NO LONGER AN ORACLE. It rides the
+# scene's own wait at t=2, 5 and 10 s exactly as before, and its readings are
+# printed as a NOTE beside the session-1 ones -- because the two arms side by side
+# ARE the evidence. Measured on kenai 2026-09-03 (PR #110): from session 0 a
+# session-1 window's `MainWindowHandle` is always 0, and `Process.Responding`
+# returns True whenever the handle is 0. The positive control was the reading
+# shell itself, which has no window at all and also read True. So this arm returns
+# True for a live app, a hung app and a windowless process alike, and NO assertion
+# reads it any more.
 $respond = @{}
 $sampler = {
     param($elapsed)
@@ -580,6 +664,37 @@ if (Test-Path $dupExe) {
     Write-Host "      cargo build --no-default-features --features d2d,ffi --bin capture_desktop"
 }
 
+# ---- O3's LIVENESS ORACLE, IN SESSION 1, ON THE SHELL'S OWN `STALL ARMED` ---
+#
+# ⭐ THIS IS THE REPAIR PR #110's ROWS ASKED FOR. The oracle moves into session 1
+# through the SAME scheduled-task mechanism the launcher, the camera and the hand
+# already use -- `send_hand.ps1` resolved this app's `hwnd` from session 1 on the
+# same box on the same night, so the mechanism was never in question.
+#
+# ⛔ IT IS DISPATCHED ON A ROW, NOT ON A CLOCK. `STALL ARMED` is written by the
+# scene immediately before the sleeps begin, so t=0 in the sampler is the top of
+# the stall. Dispatching it at launch would sample the load, the paint and the
+# first present and call them the stall.
+$liveDispatched = $false
+$liveArmedWait = $null
+if ($Scene -eq 'stall') {
+    $liveArmedWait = Wait-SbRow -Log $log -Mark $logMark -Patterns @('STALL ARMED render-stall=') `
+                                -TimeoutSeconds ([math]::Min($timeout, 90)) -Tick $sampler
+    if ($null -eq $liveArmedWait.Row) {
+        $verdicts += "note: no STALL ARMED row within $($liveArmedWait.Waited)s -- the session-1 liveness sampler was NOT dispatched, and O3.3/O3.C1 will say so by name"
+    } else {
+        $liveArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'sample_liveness.ps1') + '"' +
+                    " -ProcessId $appPid -At 2,5,10 -Out `"$liveReceipt`"")
+        $livePrincipal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
+        $liveAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $liveArg
+        Register-ScheduledTask -TaskName $liveTask -Action $liveAction -Principal $livePrincipal -Force -ErrorAction Stop | Out-Null
+        Start-ScheduledTask -TaskName $liveTask
+        $liveDispatched = $true
+        $verdicts += "ok  : session-1 liveness sampler dispatched on the shell's own STALL ARMED row (after $($liveArmedWait.Waited)s) -- pid $appPid, t=2,5,10s [O3.3/O3.C1]"
+        $verdicts += "      row: $($liveArmedWait.Row)"
+    }
+}
+
 # ---- O4's hand: fire it when the shell has written the before-dump ---------
 # `$handTarget` / `$handAsked` are NOT reset here: the synthetic arm may already
 # have set them (see the declaration above), and this arm sets them itself.
@@ -591,6 +706,16 @@ if ($Hand) {
     if ($null -eq $dumpWait.Row) {
         Add-NotRun 'O4 hand' "timed out after $($dumpWait.Waited)s waiting for the DUMP sb-doc-before.json row -- the harness never had a document to choose a point from"
     } else {
+        # ⛔ THE SCALE IS RE-READ HERE, FROM THE ROWS THIS RUN HAS ALREADY
+        # WRITTEN. Before launch there were none, so the pre-launch resolution
+        # could only read history; by the time the before-dump exists the shell
+        # has written rows of its own, and an empty-canvas point derived from an
+        # EARLIER run's scale would be aimed with a number this run never
+        # produced. The source is reported either way.
+        $resolved = Resolve-SbScale $dumpWait.Rows
+        $Scale = $resolved.Scale
+        $scaleSource = $resolved.Source
+        $verdicts += "ok  : scale $Scale for the hand's aim, from $scaleSource (there is no -Scale: it reached nothing, PR #110)"
         $handTarget = Get-SbHitTarget $beforeDump
         if ($null -eq $handTarget) {
             Add-NotRun 'O4 hand' "sb-doc-before.json holds no element with readable coordinates -- the harness will not aim at a point it did not derive"
@@ -649,6 +774,36 @@ if ($sceneTimedOut) {
     $ok = $false
 } else {
     $verdicts += "ok  : scene '$Scene' completed after $($done.Waited)s -- $($spec.Label)"
+}
+
+# ---- the session-1 liveness samples, read back ----------------------------
+#
+# ⛔ READ AFTER THE SCENE'S WAIT, AND BOUNDED AGAIN. The sampler needs ~10 s and
+# the scene normally outlives it, but a scene that TIMED OUT (PR #110 measured a
+# UI-only stall writing no STALL row at all, so the run timed out at 140 s) must
+# still be able to hand back its samples: the sampler is dispatched on STALL
+# ARMED, so its evidence exists whether or not the completion row ever does.
+$live = @{}
+$liveText = 'not dispatched'
+if ($liveDispatched) {
+    $lw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($lw.Elapsed.TotalSeconds -lt 25) {
+        if ((Test-Path $liveReceipt) -and ((Get-Content $liveReceipt -Raw) -match 'done samples=')) { break }
+        Start-Sleep -Milliseconds 300
+    }
+    if (Test-Path $liveReceipt) {
+        foreach ($l in (Get-Content $liveReceipt)) {
+            $m = [regex]::Match($l, '^t=([0-9]+)s handle=(\S+) responding=(\S+)')
+            if ($m.Success) {
+                $live[[int]$m.Groups[1].Value] = @{ Handle = $m.Groups[2].Value; Responding = $m.Groups[3].Value }
+            }
+        }
+        $liveText = ((Get-Content $liveReceipt) -join ' | ')
+        $verdicts += "ok  : session-1 liveness receipt read -- $liveText"
+    } else {
+        $liveText = "the sampler was dispatched and wrote no receipt within $([math]::Round($lw.Elapsed.TotalSeconds,1))s"
+        $verdicts += "note: $liveText"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -792,12 +947,79 @@ if ($ExpectColor.Count -gt 0 -and (Test-Path $colorPng)) {
     }
 }
 
+# ---------------------------------------------------------------------------
+# O2.2's BAND SOURCE -- ONE BENCHMARK FRAME, WRITTEN BY THE RUN THAT MEASURED IT
+# ---------------------------------------------------------------------------
+#
+# ⭐ THE BAND IS RE-CUT, AND THE OLD ONE WAS MEASURING THE WRONG THING. The
+# canvas freeze v3.1's ruling: `2 x present-mean` asserted that PAINT COSTS NO
+# MORE THAN PRESENT, and on this hardware present is 0.29-1.20 ms against a paint
+# of 1.0-4.3 ms, so it redded in all four runs of PR #110 while its subject
+# improved 110-275x. A gate that reds while the thing it measures gets two orders
+# of magnitude better is not a gate, it is a mislabelled constant.
+#
+# The claim O2 actually makes is that A RESIZE DRAIN COSTS ONE FRAME. So the band
+# is ONE FRAME, measured by this box today: the `benchmark` scene's steady-state
+# paint + present, on the SAME ROUTE and at the SAME SURFACE as the row being
+# priced. `Repaint()` always paints the back buffer directly, so the comparable
+# benchmark run is the DIRECT one (`SB_MODE=direct`); an OFFSCREEN+copy benchmark
+# is written to its own file and NEVER silently substituted.
+if ($Scene -eq 'benchmark') {
+    $benchRow = Select-SbRow $rows 'BENCHMARK frames='
+    if ($null -ne $benchRow) {
+        $paintMean = Get-SbSteadyMean $benchRow 'paint'
+        $presentMean = Get-SbSteadyMean $benchRow 'present'
+        $route = if ($benchRow -match 'BENCHMARK frames=[0-9]+ (\S+) ') { $Matches[1] } else { 'UNKNOWN' }
+        $surfaceLabel = if ($benchRow -match '([0-9]+x[0-9]+)px') { $Matches[1] } else { '' }
+        if ($null -eq $paintMean -or $null -eq $presentMean -or $surfaceLabel -eq '') {
+            $verdicts += "note: the BENCHMARK row carried no readable paint/present steady-mean or no WxHpx surface, so NO band source was written for O2.2"
+        } else {
+            $target = if ($route -eq 'DIRECT') { $benchDirectReceipt } else { $benchOffscreenReceipt }
+            Write-SbReceipt -Path $target -Data @{
+                frame_ms = [math]::Round($paintMean + $presentMean, 4)
+                paint_mean_ms = $paintMean
+                present_mean_ms = $presentMean
+                route = $route
+                surface = $surfaceLabel
+                row = $benchRow
+            }
+            $verdicts += ("ok  : band source written -- one {0} frame = paint {1:N2} + present {2:N2} = {3:N2} ms at {4} -> {5} [O2.2]" -f
+                          $route, $paintMean, $presentMean, ($paintMean + $presentMean), $surfaceLabel, [IO.Path]::GetFileName($target))
+        }
+    }
+}
+
+# The band source THIS run will price against: the caller's figure if one was
+# supplied (and named as such), else this sitting's DIRECT benchmark receipt.
+$benchFrame = $null
+$benchFrameSource = ''
+$benchFrameReason = ''
+if (-not [string]::IsNullOrWhiteSpace($BenchmarkFrameMs)) {
+    $bfv = $BenchmarkFrameMs
+    if (Test-Path $BenchmarkFrameMs) {
+        $rawB = Get-Content $BenchmarkFrameMs -Raw
+        $mb = [regex]::Match($rawB, '([0-9]+(\.[0-9]+)?)')
+        if ($mb.Success) { $bfv = $mb.Groups[1].Value }
+    }
+    $benchFrame = @{ FrameMs = [double]$bfv; Route = 'UNSTATED'; Surface = 'UNSTATED' }
+    $benchFrameSource = "supplied via -BenchmarkFrameMs '$BenchmarkFrameMs' -- the route and the surface it was taken at are NOT carried by this parameter and must be checked by the reader"
+} else {
+    $br = Read-SbReceipt $benchDirectReceipt 'benchmark-frame DIRECT'
+    if ($br.Ok) {
+        $benchFrame = @{ FrameMs = [double]$br.Data.frame_ms; Route = [string]$br.Data.route; Surface = [string]$br.Data.surface }
+        $benchFrameSource = "this sitting's benchmark run: one $($br.Data.route) frame = paint $($br.Data.paint_mean_ms) + present $($br.Data.present_mean_ms) ms at $($br.Data.surface)"
+    } else {
+        $benchFrameReason = $br.Reason
+    }
+}
+
 . (Join-Path $PSScriptRoot 'verify_assertions.ps1')
 
 # ---------------------------------------------------------------------------
 # TEARDOWN -- BY PID, AND ONLY THIS RUN'S PID
 # ---------------------------------------------------------------------------
 Remove-SbTask $handTask
+Remove-SbTask $liveTask
 if ($NoKill) {
     $verdicts += "ok  : -NoKill -- pid $appPid is LEFT RUNNING on the desktop (stop it with sitting.ps1 -Stop $appPid)"
 } else {
