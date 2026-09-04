@@ -454,9 +454,11 @@ direct prerequisites for this vision. The most relevant:
   `#dialog.hex` colour bind, and a `${...}` inside a `data.list_sort` path the JS engine reads
   literally rather than evaluating).
   The gate itself resolves 1,722 reads — 334 `state.`, 369 `panel.`, 475 `tool.<id>.`,
-  544 `dialog.` — against 675 declarations, and reports the 37 ambient `panel.`/`dialog.`
-  reads it CANNOT cover (the namespace is whichever panel is active, and nothing in the
-  source names it) as a printed number rather than a sentence. The item's `$state` spelling
+  544 `dialog.` — against 675 declarations, and prints the size of what it CANNOT cover
+  rather than leaving it to be inferred: 37 ambient `panel.`/`dialog.` reads (the namespace
+  is whichever panel is active, and nothing in the source names it) and 1,175 of the 14,298
+  scalars mentioning a namespace that is not state at all (`param.`, `data.`,
+  `active_document.`, `event.`, …). The item's `$state` spelling
   is FLASK_PARITY-era: the literal `$state` occurs in zero workspace YAML files.
   *no duplicate ids* ✅ **done for
   workspace ids** — `scripts/check_workspace_ids.py`, wired on both platform families (the

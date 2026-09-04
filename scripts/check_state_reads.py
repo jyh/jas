@@ -79,7 +79,8 @@ WHAT IT DOES NOT COVER, and why
   ``_active_document_view``), ``event.`` (the live input event),
   ``preferences.``, ``theme.``, ``workspace.``, ``panels.``, ``panes.``,
   ``selection.``. None of them is state; each has its own producer, and a gate
-  over them is a different gate.
+  over them is a different gate. The census COUNTS the strings that mention one
+  (``other-namespace``) so the size of this surface prints on every run.
 * Bare identifiers. ``foreach`` item variables, ``fun`` parameters, ``let``
   names, and a dialog property's SIBLING keys (``state_store.py:340-356`` binds
   every dialog key as a bare name inside a ``get:``/``set:``) all resolve
