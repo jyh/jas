@@ -67,6 +67,21 @@ function Test-Case([string]$Name, [scriptblock]$Actual, $Expected) {
     }
 }
 
+# ⛔ AND A FIXTURE LINE MUST NOT ABORT THE FILE EITHER. `Test-Case` catches a
+# throw because "a throw is a result, not a crash" -- but the SCRIPT-LEVEL lines
+# that BUILD the fixtures did not, and this file's own red-first run proved it:
+# at the sha carrying these cases without their readers, the run died on
+# `$aPrimePattern = Get-SbRowPattern ...` with `The term 'Get-SbRowPattern' is
+# not recognized`, printed NOT ONE case, and produced a receipt with one bit in
+# it. The law was written for the assertions and not for their setup, which is
+# exactly where the next reader will be missing.
+#
+# A fixture that cannot be built becomes `$null`, every case that reads it fails
+# BY NAME, and the file still enumerates.
+function Get-SbFixture([scriptblock]$Block) {
+    try { return (& $Block) } catch { return $null }
+}
+
 # ---------------------------------------------------------------------------
 # The rows. VERBATIM, off kenai's sb-runs.log at main f2da1654 -- not invented.
 # ---------------------------------------------------------------------------
@@ -290,10 +305,17 @@ $aPrimeRow = "02:06:31`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAMES
 $aPrimeRowOld = $aPrimeRow.Replace("`tRUSTOK A' surface=", "`tA' surface=")
 $proseRow = "02:06:31`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAMES=(default:60)`t" +
     "RUSTOK NOTE the walk hashes A, A-MUT, H1 and A' surface=2858x1429 is the round trip's"
-$aPrimePattern = Get-SbRowPattern "A'" " surface="
-Test-Case 'the completion-row pattern matches the PREFIXED row' { if ($aPrimeRow -match $aPrimePattern) { 'MATCHED' } else { 'missed' } } 'MATCHED'
-Test-Case 'CONTROL: it still matches a BISECTED build''s unprefixed row' { if ($aPrimeRowOld -match $aPrimePattern) { 'MATCHED' } else { 'missed' } } 'MATCHED'
-Test-Case 'CONTROL: and the tab anchor still keeps A'' out of another row''s prose' { if ($proseRow -match $aPrimePattern) { 'MATCHED' } else { 'missed' } } 'missed'
+$aPrimePattern = Get-SbFixture { Get-SbRowPattern "A'" " surface=" }
+# ⛔ `-match $null` MATCHES EVERYTHING, so an unbuilt pattern is named rather
+# than silently turning the two MATCHED controls green for the wrong reason.
+function Test-SbPatternOn([string]$Row) {
+    if ($null -eq $aPrimePattern) { return 'no pattern' }
+    if ($Row -match $aPrimePattern) { return 'MATCHED' }
+    return 'missed'
+}
+Test-Case 'the completion-row pattern matches the PREFIXED row' { Test-SbPatternOn $aPrimeRow } 'MATCHED'
+Test-Case 'CONTROL: it still matches a BISECTED build''s unprefixed row' { Test-SbPatternOn $aPrimeRowOld } 'MATCHED'
+Test-Case 'CONTROL: and the tab anchor still keeps A'' out of another row''s prose' { Test-SbPatternOn $proseRow } 'missed'
 
 Test-Case 'CONTROL: a RUSTOK title satisfies the oracle' { (Select-SbTitleMatch $titlesOk $required).Count } '1'
 Test-Case 'the oracle still REFUSES a RUSTFAIL title' { (Select-SbTitleMatch $titlesFail $required).Count } '0'
@@ -329,7 +351,7 @@ $afterJsonOther = $afterJson.Replace('"path":[0,2]', '"path":[0,1]')
 $beforeDoc = $beforeJson | ConvertFrom-Json
 $afterDoc = $afterJson | ConvertFrom-Json
 $afterDocOther = $afterJsonOther | ConvertFrom-Json
-$target = Get-SbHitTargetFromDoc $beforeDoc
+$target = Get-SbFixture { Get-SbHitTargetFromDoc $beforeDoc }
 
 Test-Case 'F-B: the chooser AIMS at the largest filled shape' { $target.AimPath } '$.layers[0].children[0]'
 Test-Case 'F-B: the aim point is that shape''s centre' { "$($target.X),$($target.Y)" } '36,36'
@@ -342,17 +364,22 @@ Test-Case 'F-B: O1.2c REPORTS a mismatch instead of charging it to the app' { ((
 # selected path the delta is the asked one; read at the harness's OLD choice the
 # element is byte-identical -- which is what produced two reds on a run in which
 # everything worked.
-$selEl = Get-SbElementByPathFromDoc $afterDoc '$.layers[0].children[2]'
-$selElBefore = Get-SbElementByPathFromDoc $beforeDoc '$.layers[0].children[2]'
-$aimElBefore = Get-SbElementByPathFromDoc $beforeDoc '$.layers[0].children[0]'
-$aimElAfter = Get-SbElementByPathFromDoc $afterDoc '$.layers[0].children[0]'
+$selEl = Get-SbFixture { Get-SbElementByPathFromDoc $afterDoc '$.layers[0].children[2]' }
+$selElBefore = Get-SbFixture { Get-SbElementByPathFromDoc $beforeDoc '$.layers[0].children[2]' }
+$aimElBefore = Get-SbFixture { Get-SbElementByPathFromDoc $beforeDoc '$.layers[0].children[0]' }
+$aimElAfter = Get-SbFixture { Get-SbElementByPathFromDoc $afterDoc '$.layers[0].children[0]' }
 Test-Case 'F-B: the selected element is the group' { $selEl.type } 'group'
-Test-Case 'F-B: O1.2b reads the SELECTED element''s delta -- the asked one' {
-    $b = Get-SbElementOrigin $selElBefore; $a = Get-SbElementOrigin $selEl
-    ("{0:N2},{1:N2}" -f ($a.X - $b.X), ($a.Y - $b.Y)) } '36.67,22.67'
-Test-Case 'F-B: CONTROL -- at the OLD chosen path nothing moved (the two false reds)' {
-    $b = Get-SbElementOrigin $aimElBefore; $a = Get-SbElementOrigin $aimElAfter
-    ("{0:N2},{1:N2}" -f ($a.X - $b.X), ($a.Y - $b.Y)) } '0.00,0.00'
+# ⛔ AND A MISSING ELEMENT READS AS A (0,0) DELTA. Named, or the "nothing
+# moved" CONTROL below goes green for the wrong reason -- which is the exact
+# shape of the defect this whole clause exists to repair.
+function Get-SbDeltaText($Before, $After) {
+    $b = Get-SbElementOrigin $Before
+    $a = Get-SbElementOrigin $After
+    if ($null -eq $b -or $null -eq $a) { return 'no position' }
+    return ("{0:N2},{1:N2}" -f ($a.X - $b.X), ($a.Y - $b.Y))
+}
+Test-Case 'F-B: O1.2b reads the SELECTED element''s delta -- the asked one' { Get-SbDeltaText $selElBefore $selEl } '36.67,22.67'
+Test-Case 'F-B: CONTROL -- at the OLD chosen path nothing moved (the two false reds)' { Get-SbDeltaText $aimElBefore $aimElAfter } '0.00,0.00'
 Test-Case 'F-B: both dumps'' positions are read by the SAME rule' {
     ((Get-SbElementOrigin $selElBefore).How -eq (Get-SbElementOrigin $selEl).How) } 'True'
 Test-Case 'F-B: and the rule is NAMED, not implied' { (Get-SbElementOrigin $selElBefore).How } 'the origin of its bounding box (min over this element and its descendants)'
