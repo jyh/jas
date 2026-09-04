@@ -16,13 +16,27 @@ blob_brush_tool_options:
       merge only with existing Blob Brush elements in the
       selection; erasing-mode is unaffected.
     - Size / Angle / Roundness: default tip shape values used
-      when no Calligraphic brush is active. Each is a variation
-      widget (fixed / random / pressure / tilt / bearing /
-      rotation). Rotation mode is disabled for size and
-      roundness. When a Calligraphic brush IS active in the
-      Brushes panel, these rows are disabled with a "(set by
-      active brush)" hint — the brush's own values take
-      precedence. See §Runtime tip resolution.
+      when no Calligraphic brush is active. Each is a
+      variation_widget template invocation, identical in shape to
+      the Brush Options dialog's three: a base combo bound to
+      dialog.<name>, a mode select bound to
+      dialog.<name>_variation.mode offering fixed / random /
+      pressure / tilt / bearing / rotation, and a min/max pair
+      bound to dialog.<name>_variation.min/.max that appears only
+      in random mode. When a Calligraphic brush IS active in the
+      Brushes panel, each row is disabled (bind.disabled on the
+      row container) with a "(set by active brush)" hint above —
+      the brush's own values take precedence. See §Runtime tip
+      resolution.
+
+      NOT YET EXPRESSIBLE: suppressing the Rotation option for
+      size and roundness alone. variation_widget offers the same
+      six modes at every invocation and declares no per-option
+      disable parameter; adding one is a widget-vocabulary change,
+      not a spec change, so the option is listed here rather than
+      claimed in the widget. Choosing Rotation for size or
+      roundness resolves through the same path as the other live
+      input modes.
 
     Reset restores defaults without committing. Cancel discards
     edits. OK writes all six values to state.blob_brush_*. See
@@ -47,14 +61,33 @@ blob_brush_tool_options:
       type: number
       default: 10
       description: "Default tip diameter in pt"
+    size_variation:
+      type: object
+      default: { mode: fixed }
+      description: >
+        Variation mode (fixed / random / pressure / tilt / bearing /
+        rotation) plus the random min/max bounds for size, as percent
+        of the base value. Same shape as brush_options.size_variation.
     angle:
       type: number
       default: 0
       description: "Default tip rotation in degrees"
+    angle_variation:
+      type: object
+      default: { mode: fixed }
+      description: >
+        Variation mode plus random min/max bounds for angle. Same
+        shape as brush_options.angle_variation.
     roundness:
       type: number
       default: 100
       description: "Default tip aspect in percent"
+    roundness_variation:
+      type: object
+      default: { mode: fixed }
+      description: >
+        Variation mode plus random min/max bounds for roundness. Same
+        shape as brush_options.roundness_variation.
   init:
     fidelity: "state.blob_brush_fidelity"
     keep_selected: "state.blob_brush_keep_selected"
@@ -138,63 +171,73 @@ blob_brush_tool_options:
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Size:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
-                  - include: variation_widget
-                    id_prefix: bbo_size
-                    base_bind: "dialog.size"
-                    mode_bind: "dialog.size_mode"
-                    unit: "pt"
-                    min: 0.5
-                    max: 500
-                    step: 0.1
-                    disable_rotation: true
-                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
+                  - template: variation_widget
+                    bind:
+                      disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                    params:
+                      id_prefix: bbo_size
+                      label: "Size"
+                      base_path: "dialog.size"
+                      mode_path: "dialog.size_variation.mode"
+                      min_path: "dialog.size_variation.min"
+                      max_path: "dialog.size_variation.max"
+                      base_min: 0.5
+                      base_max: 500
+                      base_step: 0.1
+                      base_unit: "pt"
 
           # Angle (variation widget)
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Angle:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
-                  - include: variation_widget
-                    id_prefix: bbo_angle
-                    base_bind: "dialog.angle"
-                    mode_bind: "dialog.angle_mode"
-                    unit: "°"
-                    min: -180
-                    max: 180
-                    step: 1
-                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
+                  - template: variation_widget
+                    bind:
+                      disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                    params:
+                      id_prefix: bbo_angle
+                      label: "Angle"
+                      base_path: "dialog.angle"
+                      mode_path: "dialog.angle_variation.mode"
+                      min_path: "dialog.angle_variation.min"
+                      max_path: "dialog.angle_variation.max"
+                      base_min: -180
+                      base_max: 180
+                      base_step: 1
+                      base_unit: "°"
 
           # Roundness (variation widget)
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Roundness:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
-                  - include: variation_widget
-                    id_prefix: bbo_roundness
-                    base_bind: "dialog.roundness"
-                    mode_bind: "dialog.roundness_mode"
-                    unit: "%"
-                    min: 0
-                    max: 100
-                    step: 1
-                    disable_rotation: true
-                    disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
+                  - template: variation_widget
+                    bind:
+                      disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                    params:
+                      id_prefix: bbo_roundness
+                      label: "Roundness"
+                      base_path: "dialog.roundness"
+                      mode_path: "dialog.roundness_variation.mode"
+                      min_path: "dialog.roundness_variation.min"
+                      max_path: "dialog.roundness_variation.max"
+                      base_min: 0
+                      base_max: 100
+                      base_step: 1
+                      base_unit: "%"
 
       # ── Reset + Cancel + OK ──
       - type: container

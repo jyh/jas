@@ -45,14 +45,19 @@ WHERE THE OTHER LAYERS ACTUALLY LIVE
   package's own ``expr_parser`` and resolves each ``state.`` / ``panel.``
   / ``tool.<id>.`` / ``dialog.`` read against the one namespace its head
   segment selects. Until 2026-09-03 this line read "NOT BUILT, anywhere",
-  which was true when it was written. Read what is WIRED: CI runs only
-  its ``--self-test`` (``.github/workflows/test.yml:87`` and ``:732``);
-  the LIVE arm is commented out beside each, because it reds on 13 real
-  workspace findings listed in ``VISION.md`` §11. Built and self-tested is
-  not the same as watching the tree, and saying so is the point of this
-  line. Note the spelling too: ``$state`` is FLASK_PARITY-era and occurs
-  in no workspace YAML today — a read is a dotted path inside an
-  expression string.
+  which was true when it was written; it then read "built and
+  self-tested, live arm NOT wired", which was true for as long as main
+  carried the 13 findings the gate surfaced. Read what is WIRED NOW: CI
+  runs ``--self-test`` AND the live scan on both platform families
+  (``.github/workflows/test.yml:98`` and ``:742-743``). All 13 findings
+  were repaired in the YAML with forms the grammar already had — no port
+  gained an operator — except one that is NAMED rather than exempted:
+  ``sort_brushes_by_name`` wanted a data path computed from state, which
+  no port can express, so it is a log-only stub that says so. Details in
+  ``VISION.md`` §11; behaviour pinned in
+  ``workspace_interpreter/tests/test_state_read_findings.py``. Note the
+  spelling too: ``$state`` is FLASK_PARITY-era and occurs in no workspace
+  YAML today — a read is a dotted path inside an expression string.
 * *enum values match declared* — partial, and by schema rather than by
   code: ``schema/`` covers app, tool, elements, features and preferences,
   while panels, dialogs, menubar, toolbar and actions have no schema at

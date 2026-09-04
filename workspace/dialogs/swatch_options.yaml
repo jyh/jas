@@ -26,7 +26,8 @@ swatch_options:
       on each slider container. The dialog change handler updates
       dialogState.color_mode and calls updateBindings().
     - Color preview swatch: 40px square showing the current color via
-      bind color="#dialog.hex"
+      bind color="dialog.color" -- the canonical value every component
+      derives from, the same form the Color Picker's preview swatch uses
     - Sliders: one group per color mode, each containing rows of
       [label, slider, number_input]. Moving a slider updates
       dialogState via the dialog input handler, which recomputes the
@@ -212,7 +213,7 @@ swatch_options:
                 summary: "Preview"
                 style: { size: 40 }
                 bind:
-                  color: "#dialog.hex"
+                  color: "dialog.color"
           - type: col
             col: 9
             children:

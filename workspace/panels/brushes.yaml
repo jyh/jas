@@ -164,32 +164,32 @@ menu:
   - label: "Show Calligraphic Brushes"
     action: toggle_brush_category
     params: { type: calligraphic }
-    checked_when: 'panel.category_filter contains "calligraphic"'
+    checked_when: 'any(panel.category_filter, fun c -> c == "calligraphic")'
     description: "Toggle visibility of Calligraphic brushes in the panel body."
   - label: "Show Scatter Brushes"
     action: toggle_brush_category
     params: { type: scatter }
-    checked_when: 'panel.category_filter contains "scatter"'
+    checked_when: 'any(panel.category_filter, fun c -> c == "scatter")'
     description: "Toggle visibility of Scatter brushes."
   - label: "Show Art Brushes"
     action: toggle_brush_category
     params: { type: art }
-    checked_when: 'panel.category_filter contains "art"'
+    checked_when: 'any(panel.category_filter, fun c -> c == "art")'
     description: "Toggle visibility of Art brushes."
   - label: "Show Pattern Brushes"
     action: toggle_brush_category
     params: { type: pattern }
-    checked_when: 'panel.category_filter contains "pattern"'
+    checked_when: 'any(panel.category_filter, fun c -> c == "pattern")'
     description: "Toggle visibility of Pattern brushes."
   - label: "Show Bristle Brushes"
     action: toggle_brush_category
     params: { type: bristle }
-    checked_when: 'panel.category_filter contains "bristle"'
+    checked_when: 'any(panel.category_filter, fun c -> c == "bristle")'
     description: "Toggle visibility of Bristle brushes."
   - separator
   - label: "Make Persistent"
     action: toggle_brush_library_persistent
-    checked_when: 'preferences.brushes.persistent_libraries contains panel.selected_library'
+    checked_when: 'any(preferences.brushes.persistent_libraries, fun lib -> lib == panel.selected_library)'
     description: >
       Toggle the selected library's presence in the user's
       persistent_libraries preference. Persistent libraries

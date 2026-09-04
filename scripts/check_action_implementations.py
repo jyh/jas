@@ -134,7 +134,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 62
+MIN_LOG_ONLY = 63
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -452,8 +452,20 @@ def self_test() -> int:
     # effects (EMPTYARTBOARDS) -- it had been a log-only stub whose menu command
     # did nothing in either port. The floor is EXACT so a stub leaving the set
     # -- or a new one joining it -- has to be noticed and accounted for, which
-    # is the friction working rather than an obstacle to it. It worked: this
-    # gate is how the change announced itself.
+    # is the friction working rather than an obstacle to it. It worked twice:
+    # this gate is how each change announced itself.
+    #
+    # 63 again as of the state-read repair, and this is the FIRST time the count
+    # went UP. `sort_brushes_by_name` JOINED the log-only set. It is not a new
+    # stub -- it was always a no-op; it declared
+    # `data.list_sort` with a `${panel.selected_library}` in its path, and
+    # `${...}` is `loader.substitute_params`, which never runs on an effect
+    # payload. So it read as implemented to this gate (a non-log effect) while
+    # doing nothing at all, which is precisely the undifferentiated pile this
+    # gate's docstring was written about -- one rung worse, because a broken
+    # effect declaration hides in the classified bucket rather than the
+    # unclassified one. Declaring it log-only moves it into the bucket that
+    # says "no port does this", which is true. See VISION.md section 11.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")

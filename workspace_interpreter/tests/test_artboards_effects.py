@@ -1302,6 +1302,45 @@ class TestArtboardOptionsDialog:
         assert store.get_dialog("x_rp") == 0
         assert store.get_dialog("y_rp") == 0
 
+    # ── The reference-point setters (state-read findings 7-8) ──────
+    #
+    # `x_rp` / `y_rp` had `set: "fun new -> x_stored := ..."`. `:=` is not a
+    # token in ANY port's lexer -- the grammar's only assignment is `<-`
+    # (`TokenKind.LARROW`) -- so `expr.evaluate` caught the ParseError, logged
+    # at WARNING and returned `Value.null()`. `set_dialog` only applies a
+    # CLOSURE (`state_store.py`), so the write was DROPPED: typing in Artboard
+    # Options' reference-point X / Y did nothing. The getters above always
+    # worked, which is why the round trip below is the arm that can see it.
+
+    def test_reference_point_setter_writes_back_through_the_anchor(self):
+        """With anchor = center on a 612x792 artboard, typing X=406 must store
+        x = 406 - 306 = 100."""
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {"artboard_id": "aaa"})
+        store.set_dialog("x_rp", 406)
+        store.set_dialog("y_rp", 496)
+        assert store.get_dialog("x_stored") == 100
+        assert store.get_dialog("y_stored") == 100
+
+    def test_reference_point_setter_round_trips_with_its_getter(self):
+        store = self._prepared_store()
+        _run_dialog_action(store, "open_artboard_options", {"artboard_id": "aaa"})
+        for value in (0, 306, 512.5):
+            store.set_dialog("x_rp", value)
+            assert store.get_dialog("x_rp") == value
+            store.set_dialog("y_rp", value)
+            assert store.get_dialog("y_rp") == value
+
+    def test_reference_point_setter_is_anchor_relative(self):
+        """top_left stores the typed value unchanged; center subtracts the half
+        extent. A setter that ignored `panel.reference_point` would pass the
+        round-trip arm above and fail here."""
+        store = self._prepared_store()
+        store.set_panel("artboards", "reference_point", "top_left")
+        _run_dialog_action(store, "open_artboard_options", {"artboard_id": "aaa"})
+        store.set_dialog("x_rp", 406)
+        assert store.get_dialog("x_stored") == 406
+
 
 # ══════════════════════════════════════════════════════════════════
 # Phase-1 deferrals and blue-dot (rearrange_dirty) flag

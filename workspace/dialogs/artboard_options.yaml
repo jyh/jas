@@ -105,10 +105,10 @@ artboard_options:
     # panel's reference_point preference; written back on OK.
     x_rp:
       get: "x_stored + anchor_offset_x(panel.reference_point, width)"
-      set: "fun new -> x_stored := new - anchor_offset_x(panel.reference_point, width)"
+      set: "fun new -> x_stored <- new - anchor_offset_x(panel.reference_point, width)"
     y_rp:
       get: "y_stored + anchor_offset_y(panel.reference_point, height)"
-      set: "fun new -> y_stored := new - anchor_offset_y(panel.reference_point, height)"
+      set: "fun new -> y_stored <- new - anchor_offset_y(panel.reference_point, height)"
 
   init:
     name: "filter(active_document.artboards, fun a -> a.id == param.artboard_id)[0].name"

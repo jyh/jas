@@ -69,23 +69,33 @@ jobs:
       # ctx.get(segments[0]) and never falls back, so an undeclared read is a
       # silent null).
       #
-      # ONLY THE SELF-TEST IS WIRED, DELIBERATELY. The live arm REDS on main
-      # today, on 13 real findings it was written to surface, and they are
-      # workspace defects rather than gate defects -- so wiring it would either
-      # red the branch or invite someone to silence it. TODO(state-reads): fix
-      # these, then uncomment the live line below.
-      #   * 3 undeclared dialog reads -- dialog.size_mode / angle_mode /
-      #     roundness_mode in workspace/dialogs/blob_brush_tool_options.yaml,
-      #     on `include: variation_widget` nodes that also use the wrong param
-      #     names (base_bind/mode_bind vs the template's base_path/mode_path).
-      #   * 10 expression strings that do not parse, hence evaluate to null in
-      #     every port: 6 `contains` uses in workspace/panels/brushes.yaml
-      #     (no such operator in any port's lexer), 2 `:=` setters in
-      #     workspace/dialogs/artboard_options.yaml (the grammar's assignment
-      #     is `<-`), `#dialog.hex` in workspace/dialogs/swatch_options.yaml,
-      #     and a `${...}` in workspace/actions.yaml's data.list_sort path.
-      - run: python scripts/check_state_reads.py --self-test
-      # - run: python scripts/check_state_reads.py
+      # BOTH ARMS ARE WIRED. The live arm landed commented out because main
+      # carried the 13 findings this gate was written to surface; all 13 were
+      # repaired IN THE YAML, with no new operator in any port, so that every
+      # port's behaviour changed identically by construction:
+      #   * the 6 `contains` uses in workspace/panels/brushes.yaml became
+      #     `any(list, fun x -> x == v)` -- a higher-order builtin all three
+      #     active evaluators already carry and the cross-language corpus
+      #     already pins;
+      #   * the 2 `:=` setters in workspace/dialogs/artboard_options.yaml
+      #     became `<-`, the grammar's only assignment token;
+      #   * `#dialog.hex` in workspace/dialogs/swatch_options.yaml became
+      #     `dialog.color`, the form the Color Picker's preview swatch uses;
+      #   * the `${...}` in workspace/actions.yaml's data.list_sort path is
+      #     gone -- no port can address a computed data path, so the action is
+      #     a log-only stub that says so (named remaining work, not a hidden
+      #     no-op);
+      #   * the 3 undeclared dialog.*_mode reads in
+      #     workspace/dialogs/blob_brush_tool_options.yaml sat on
+      #     `include: variation_widget` nodes that `loader.resolve_includes`
+      #     never reaches (it runs on `data["layout"]` only). They are now
+      #     `template:` invocations -- `resolve_templates` DOES run on every
+      #     dialog's content -- with the template's own param names and three
+      #     declared `*_variation` keys.
+      # Behaviour for each is pinned in
+      # workspace_interpreter/tests/test_state_read_findings.py, which fails on
+      # the pre-repair YAML; the gate below is the guard against the NEXT one.
+      - run: python scripts/check_state_reads.py --self-test && python scripts/check_state_reads.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -726,11 +736,11 @@ jobs:
           # YAML with an explicit encoding and keys its sites on `as_posix()`
           # relpaths, so it belongs on the platform whose separators and
           # default codepage differ -- the same argument as the line above.
-          # Only the SELF-TEST runs: the live arm reds on main on 13 real
-          # workspace findings. TODO(state-reads): see the ubuntu lane's note
-          # for the list, then uncomment the live line here and there together.
+          # Both arms run. The 13 workspace findings that kept the live arm
+          # commented out are repaired -- see the ubuntu lane's note for what
+          # each became and why no port gained an operator.
           python scripts/check_state_reads.py --self-test
-          # python scripts/check_state_reads.py
+          python scripts/check_state_reads.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh
