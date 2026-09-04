@@ -48,3 +48,15 @@ DXGI_SAMPLE_DESC
 D3D11_MAP
 D3D11_MAPPED_SUBRESOURCE
 D3D11_CPU_ACCESS_FLAG
+
+// THE DPI RECEIPT. The manifest (app.manifest, ApplicationManifest in the
+// csproj) declares PerMonitorV2, and the harness must be able to ASSERT that it
+// took effect rather than infer it from a client-to-surface ratio. So the
+// startup row reads the awareness the OS actually gave this window, and the DPI
+// the OS actually reports for it: an unaware process is bitmap-virtualised and
+// answers 96 for a window on a 150% panel, which is exactly the state that made
+// every injected gesture land at 2/3 of its asked point.
+GetWindowDpiAwarenessContext
+GetAwarenessFromDpiAwarenessContext
+GetDpiForWindow
+DPI_AWARENESS

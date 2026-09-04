@@ -3,6 +3,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.Graphics;
+using Windows.Win32;
+using Windows.Win32.Foundation;
+using Windows.Win32.UI.HiDpi;
 
 namespace SbWinUi;
 
@@ -28,6 +31,15 @@ public sealed partial class MainWindow : Window
     /// would pass over a run in which nothing of ours appeared.
     /// </summary>
     public const string VerifyTitle = "JAS S-B MATERIALIZER CHECKPOINT 3";
+
+    /// <summary>
+    /// How long the squeeze waits for the window manager's `SizeChanged` before
+    /// writing `delivered NONE`. Bounded, because the row must be written
+    /// whether the event comes or not; generous, because a slow answer and no
+    /// answer are different findings and the deadline must not turn the first
+    /// into the second.
+    /// </summary>
+    private const int SqueezeDeadlineMs = 2000;
 
     /// <summary>
     /// ONE LOCK FOR THE RECEIPT FILE, and it is a correctness fix rather than a
@@ -65,6 +77,37 @@ public sealed partial class MainWindow : Window
 
     private List<string> _resizeSteps = new();
     private int _resizeStep;
+
+    // ---- the squeeze, and what it was answered with -----------------------
+
+    /// <summary>
+    /// A squeeze has been REQUESTED and the window manager's answer has not been
+    /// seen yet. The next `SizeChanged` writes the `SQUEEZE delivered` row
+    /// whatever it carries, and a bounded timer writes one if no `SizeChanged`
+    /// arrives at all.
+    ///
+    /// ⛔ WHY THE FLAG EXISTS AT ALL. `SB_SQUEEZE=1` produced NO row of any kind
+    /// on the box: O6.1 failed twice while the PROBE arm passed, and from the
+    /// log alone it was impossible to tell whether the window manager never
+    /// delivered a zero-height `SizeChanged` or delivered one the policy
+    /// accepted. Those are opposite findings and they looked identical, so the
+    /// shell now writes a row in EVERY outcome and names the height it was
+    /// actually given.
+    /// </summary>
+    private bool _squeezePending;
+
+    /// <summary>The client height the squeeze asked the window down to.</summary>
+    private int _squeezeRequestedHeight;
+
+    /// <summary>What the presenter reports for its own minimum after the request
+    /// (`PreferredMinimumHeight`), rendered as text because the interesting case
+    /// is the one where the window manager IGNORES it.</summary>
+    private string _squeezeMinHeight = "unset";
+
+    /// <summary>Held in a field so the one-shot deadline is not collected before
+    /// it fires. A timer nobody references is a receipt that may or may not be
+    /// written, which is the shape this whole repair exists to end.</summary>
+    private DispatcherQueueTimer? _squeezeTimer;
 
     /// <summary>
     /// True under `SB_SCENE=retained`: every settled surface in the `SB_RESIZE`
@@ -328,8 +371,84 @@ public sealed partial class MainWindow : Window
         return m;
     }
 
-    private void OnCompositionScaleChanged(SwapChainPanel sender, object args) =>
+    /// <summary>
+    /// The scale moved (a DPI change, or the window dragged to another panel),
+    /// so BOTH halves of the scale chain move with it: the core is told the new
+    /// scale, and the surface is re-derived in physical pixels from the SAME
+    /// DIP size the panel still has.
+    ///
+    /// ⚠️ THE SECOND HALF IS THE ONE THAT WAS MISSING. `SizeChanged` does not
+    /// fire when only the scale changes -- the panel's DIP size is unchanged --
+    /// so a shell that only forwarded the scale would keep a surface sized for
+    /// the old rasterisation and report it as current. It is routed through
+    /// <c>Canvas.Resize</c>, which decides again, so a zero cannot enter here by
+    /// a door `SizeChanged` does not open.
+    /// </summary>
+    private void OnCompositionScaleChanged(SwapChainPanel sender, object args)
+    {
         _canvas.SetDpiScale(sender.CompositionScaleX);
+        if (!_started || !_canvas.HasSurface) { return; }
+
+        var scaleX = sender.CompositionScaleX <= 0 ? 1f : sender.CompositionScaleX;
+        var scaleY = sender.CompositionScaleY <= 0 ? 1f : sender.CompositionScaleY;
+        var w = (uint)(sender.ActualWidth * scaleX);
+        var h = (uint)(sender.ActualHeight * scaleY);
+        if (w == _canvas.Width && h == _canvas.Height) { return; }
+
+        // SB_SIZE pins the surface; the same mutual exclusion the resize path
+        // states applies here, and for the same reason.
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_SIZE"))) { return; }
+
+        Report($"SCALE CHANGED composition-scale={scaleX:0.###}x{scaleY:0.###} "
+             + $"client-dips={sender.ActualWidth:F0}x{sender.ActualHeight:F0} "
+             + $"surface-request={w}x{h} {_canvas.Tids()}");
+        _canvas.Resize(w, h, "SCALE");
+    }
+
+    /// <summary>
+    /// ⭐ THE STARTUP RECEIPT, AND ITS POINT IS THAT THE HARNESS CAN ASSERT THE
+    /// MANIFEST RATHER THAN INFER IT.
+    ///
+    /// The first run on the box diagnosed DPI-unawareness from a RATIO --
+    /// `client-width / surface-width = 2856/1904 = 1.5` across two receipts
+    /// written by two different programs. That reading was right, and it is the
+    /// wrong kind of evidence to have to reconstruct: the app's own `scale=1`
+    /// was TRUE from inside its virtualised view, so nothing in its log could
+    /// contradict it. This row asks the OS what awareness it actually gave this
+    /// window and what DPI it actually reports for it, so a manifest that failed
+    /// to take effect says so in one field instead of being deduced from two
+    /// numbers a page apart.
+    ///
+    /// ⚠️ `GetAwarenessFromDpiAwarenessContext` CANNOT DISTINGUISH PerMonitorV2
+    /// FROM PerMonitor(v1): both answer `DPI_AWARENESS_PER_MONITOR_AWARE`. The
+    /// pair to assert is therefore that field TOGETHER WITH
+    /// `dpi-for-window`, which reads 96 for a virtualised window and the panel's
+    /// real DPI (144 at 150%) for an aware one.
+    /// </summary>
+    private void ReportStartup(uint surfaceW, uint surfaceH)
+    {
+        var awareness = "UNKNOWN";
+        var dpi = "n/a";
+        try
+        {
+            var hwnd = (HWND)Microsoft.UI.Win32Interop.GetWindowFromWindowId(AppWindow.Id);
+            awareness = PInvoke.GetAwarenessFromDpiAwarenessContext(
+                PInvoke.GetWindowDpiAwarenessContext(hwnd)).ToString();
+            dpi = PInvoke.GetDpiForWindow(hwnd).ToString();
+        }
+        catch (Exception ex)
+        {
+            // NAMED, never silent: a row that omitted the field would read
+            // exactly like a build whose manifest was never applied.
+            awareness = $"UNREADABLE({ex.GetType().Name})";
+        }
+
+        Report($"STARTUP dpi-awareness={awareness} dpi-for-window={dpi} "
+             + $"composition-scale={this.Canvas.CompositionScaleX:0.###}x"
+             + $"{this.Canvas.CompositionScaleY:0.###} "
+             + $"client-dips={this.Canvas.ActualWidth:F0}x{this.Canvas.ActualHeight:F0} "
+             + $"surface-request={surfaceW}x{surfaceH} {_canvas.Tids()}");
+    }
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
@@ -353,9 +472,30 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnCanvasSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var w = (uint)e.NewSize.Width;
-        var h = (uint)e.NewSize.Height;
+        // ⭐ DIPs IN, PHYSICAL PIXELS OUT, AND THE MULTIPLY IS THE OTHER HALF OF
+        // THE MANIFEST. `e.NewSize` is XAML's, so it is DIPs whatever the
+        // display does; `CompositionScaleX/Y` is what the compositor will
+        // rasterise those DIPs at. Sized in DIPs the swapchain would be 1904 px
+        // wide behind a panel occupying 2856 device pixels and the compositor
+        // would upscale it -- and the pointer path, which multiplies by the same
+        // scale (see `Physical`), would then address a surface 1.5x larger than
+        // the one that exists.
+        //
+        // Before the manifest this multiply was an identity (an unaware process
+        // is told its scale is 1) and the defect was invisible for that reason;
+        // it is the manifest that makes the scale real, so the two land in one
+        // change and not in two.
+        var scaleX = this.Canvas.CompositionScaleX <= 0 ? 1f : this.Canvas.CompositionScaleX;
+        var scaleY = this.Canvas.CompositionScaleY <= 0 ? 1f : this.Canvas.CompositionScaleY;
+        var w = (uint)(e.NewSize.Width * scaleX);
+        var h = (uint)(e.NewSize.Height * scaleY);
         var decision = SurfacePolicy.Decide(w, h, _canvas.HasSurface);
+
+        // The squeeze's answer, WHATEVER IT IS, before any early return below
+        // can swallow it. A refusal, a deferral and an accept are three
+        // different findings about the window manager and all three used to
+        // leave the same silence.
+        if (_squeezePending) { ReportSqueezeDelivered($"{w}x{h}", decision.ToString()); }
 
         if (decision == Decision.Refuse)
         {
@@ -455,6 +595,11 @@ public sealed partial class MainWindow : Window
             // which is why O1 compares at the OBSERVED surface and refuses a
             // mismatch instead of asserting the requested one.
             _originalSize = AppWindow.Size;
+
+            // The startup receipt, written BEFORE the surface exists because
+            // what it carries is a property of the process and the window, not
+            // of the swapchain.
+            ReportStartup(w, h);
 
             if (!_canvas.Attach(_ui, this.Canvas, w, h,
                                 this.Canvas.CompositionScaleX, this.Canvas.CompositionScaleY))
@@ -581,8 +726,18 @@ public sealed partial class MainWindow : Window
         op.PreferredMinimumHeight = 1;
         var target = (int)Math.Ceiling(
             StatusLine.ActualHeight + StatusLine.Margin.Top + StatusLine.Margin.Bottom);
+
+        // READ BACK, NOT ASSUMED. `PreferredMinimumHeight` is a PREFERENCE: the
+        // window manager enforces its own floor for a window with a caption, and
+        // whether it honours 1 is precisely the question O6.1 could not answer
+        // from the log. So the value the presenter reports after the write goes
+        // on the receipt beside the height that was actually delivered.
+        _squeezeMinHeight = $"{op.PreferredMinimumHeight}";
+        _squeezeRequestedHeight = target;
+        _squeezePending = true;
+
         Report($"SQUEEZE requesting window height {target} (status row) from {AppWindow.Size.Height} "
-             + $"{_canvas.Tids()}");
+             + $"min-height policy={_squeezeMinHeight} {_canvas.Tids()}");
         _ui.TryEnqueue(() =>
         {
             try
@@ -592,8 +747,61 @@ public sealed partial class MainWindow : Window
             catch (Exception ex)
             {
                 Report($"RUSTFAIL squeeze request {ex.GetType().Name}: {ex.Message}");
+                ReportSqueezeDelivered("THREW", "NONE");
+                return;
             }
+            ArmSqueezeDeadline();
         });
+    }
+
+    /// <summary>
+    /// ⛔ A ROW IN EVERY OUTCOME, INCLUDING SILENCE. If the window manager never
+    /// delivers a `SizeChanged` at all, the absence is the finding -- and an
+    /// absence cannot be read out of a log. So the request arms a bounded
+    /// deadline, and the row it writes is DISTINCT from every row a delivered
+    /// `SizeChanged` can write (`delivered NONE`).
+    ///
+    /// One shot, and it is held in a field so it cannot be collected before it
+    /// fires.
+    /// </summary>
+    private void ArmSqueezeDeadline()
+    {
+        var timer = _ui.CreateTimer();
+        _squeezeTimer = timer;
+        timer.Interval = TimeSpan.FromMilliseconds(SqueezeDeadlineMs);
+        timer.IsRepeating = false;
+        timer.Tick += (s, e) =>
+        {
+            timer.Stop();
+            if (!_squeezePending) { return; }
+            ReportSqueezeDelivered("NONE", "NONE");
+        };
+        timer.Start();
+    }
+
+    /// <summary>
+    /// The squeeze's answer, written ONCE. `delivered` is the client size the
+    /// panel was actually given in PHYSICAL pixels (or `NONE` when nothing
+    /// arrived); `policy` is what <see cref="SurfacePolicy.Decide"/> answered
+    /// about it.
+    ///
+    /// ⚠️ IT IS A RECEIPT, NOT A VERDICT. If a zero client height turns out to
+    /// be unreachable through an `OverlappedPresenter` -- the window manager's
+    /// own minimum for a captioned window standing above
+    /// `PreferredMinimumHeight` -- then O6.1's REFUSED row is unproducible by
+    /// this route and the delivered height is what says so. The policy is NOT
+    /// relaxed to make the assertion pass; a `Decide` that refused a height the
+    /// window manager never sent would be an oracle agreeing with itself.
+    /// </summary>
+    private void ReportSqueezeDelivered(string delivered, string policy)
+    {
+        if (!_squeezePending) { return; }
+        _squeezePending = false;
+        // The deadline has done its job either way; a timer left running would
+        // fire into a flag that is already false and read as a second answer.
+        _squeezeTimer?.Stop();
+        Report($"SQUEEZE delivered {delivered} (requested height {_squeezeRequestedHeight}; "
+             + $"min-height policy={_squeezeMinHeight}) policy={policy} {_canvas.Tids()}");
     }
 
     /// <summary>

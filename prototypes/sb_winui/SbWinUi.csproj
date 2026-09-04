@@ -35,6 +35,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!--
+      THE DPI DECLARATION, AND WITHOUT IT THIS APP IS DPI UNAWARE. Measured on
+      the box at 150%: no manifest was declared here, no app.manifest existed,
+      and dpiAware did not occur in the exe, so Windows bitmap virtualised the
+      window (a 1904x941 client stretched to 2856x1464), GetDpiForWindow
+      answered 96, and every injected gesture landed at two thirds of its asked
+      point. See app.manifest for the whole reading.
+    -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>
