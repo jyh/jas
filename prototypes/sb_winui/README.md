@@ -10,6 +10,44 @@ Scope boundary inherited from S-A, stated in `../ffi_spike/README.md`:
 > No swapchain, no rendering. That is S-B, and its seam should be designed
 > against a real `SwapChainPanel` rather than in advance.
 
+## Knobs
+
+Every environment variable this shell reads, and nothing else. F-1 was closed as
+"working as intended" because `SB_SCENE_FINAL` **is** refused by name when it
+names a golden the corpus does not hold — but a reader could not find that out,
+because the README documented none of `SB_FRAMES`, `SB_SCENE_HOLD` or
+`SB_SCENE_FINAL`. A close by documentation that nothing gates rots on the first
+knob added after it, so `scripts/check_shell_knobs.py` censuses every
+`GetEnvironmentVariable("...")` in `*.cs` and reds in BOTH directions: a knob
+read and not listed here, and a row here naming a knob nothing reads.
+
+`kind` is a closed vocabulary. `benchmark` inputs decide what is measured;
+`interaction` inputs decide how the canvas behaves under a resize or a pointer;
+`provenance` is the one input that decides WHICH BINARY RAN, which is a
+different question from either.
+
+*(N6 owns the full README pass. This table is written by N1+N2 because the gate
+that reads it goes LIVE in the same pull request, and a gate landed red is a
+gate its own executor is invited to weaken.)*
+
+| knob | meaning | default | scene | kind |
+|---|---|---|---|---|
+| `JAS_CORE_DLL` | absolute path to the `jas_dioxus` cdylib to load; otherwise the debug artifact is found by walking up to `jas_dioxus/Cargo.toml` | *(search upward from the exe)* | all | provenance |
+| `SB_FRAMES` | how many frames the benchmark loop runs; the first is excluded from every mean | `60` | `benchmark` | benchmark |
+| `SB_FULLSCREEN` | `1` puts the window on the full-screen presenter BEFORE first layout, so the surface is the display's and not WinUI's default | *(unset: windowed)* | all | benchmark |
+| `SB_HIT` | which element carries the pointer handlers: `panel` (the `SwapChainPanel` itself) or `sibling` (a transparent `Border` in the same grid cell). The receipt says `hit=PANEL` or `hit=SIBLING` | `panel` | all | interaction |
+| `SB_MODE` | `direct` lets the core paint the back buffer; anything else uses the offscreen target plus one full-surface copy | *(unset: offscreen)* | `benchmark` | benchmark |
+| `SB_RESIZE` | a comma-separated LIST of window sizes to drive after the scene, e.g. `1000x600,original`; `original` is the `AppWindow` size recorded at first layout. Each step is posted when the previous one has landed, never after a sleep | *(unset: no driven resize)* | all | interaction |
+| `SB_SCENE` | which workload runs: `benchmark`, `goldens`, `document`, `selection`. An empty value resolves to `benchmark`, so every historical invocation keeps its meaning; an unrecognised value is refused by name | `benchmark` | all | benchmark |
+| `SB_SCENE_FINAL` | which golden is painted LAST, so the photograph is of a chosen frame rather than of whatever the loop ended on; refused by name if the corpus does not hold it | `ref_shapes.json` | `goldens` | benchmark |
+| `SB_SCENE_HOLD` | how many presents each held frame stays on screen; at a sync interval of 1 the default is roughly 200 ms apiece | `12` | `goldens`, `document`, `selection` | benchmark |
+| `SB_SIZE` | pin the swapchain at an explicit `WxH` in PHYSICAL pixels, so a copy can be priced at a stated surface. Mutually exclusive with `SB_RESIZE`: a later resize is refused by name | *(unset: the laid-out DIP size)* | all | benchmark |
+| `SB_SQUEEZE` | `1` sets `PreferredMinimumHeight = 1` and squeezes the window to the status row, so the panel's `SizeChanged` fires with height 0 through the real window manager | *(unset: no squeeze)* | all | interaction |
+| `SB_SURFACE_PROBE` | a `WxH` fed straight to `SurfacePolicy.Decide` — including `0x0` — so the policy function can be exercised without a window manager. The receipt says `policy=PROBE` | *(unset: no probe)* | all | interaction |
+| `SB_SVG` | path to the `.svg` the document and selection scenes open; required by both and refused by name when absent | *(none: the scene refuses)* | `document`, `selection` | benchmark |
+| `SB_TOOL` | which tool index the pointer drives. Only `0` (selection) is answered this wave; any other value is refused by name, because captured-only forwarding is wrong for a tool that reads idle motion | `0` | all | interaction |
+| `SB_TOPMOST` | `1` keeps the window at the top of the z-order, so a console that appears later cannot cover the canvas in a capture | *(unset: normal z-order)* | all | benchmark |
+
 ## RESOLVED — and both defects had ONE cause
 
 **S-B checkpoint 3 works. Both routes run 300 frames on hardware with no

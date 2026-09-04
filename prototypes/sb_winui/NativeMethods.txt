@@ -38,3 +38,13 @@ D3D11_TEXTURE2D_DESC
 D3D11_BIND_FLAG
 D3D11_USAGE
 DXGI_SAMPLE_DESC
+
+# O1's hash: the back buffer is copied into a STAGING texture and mapped for
+# read, because a render-target texture cannot be read by the CPU. `Map` is
+# what makes `RowPitch` visible, and `RowPitch` is why the hash walks rows
+# instead of hashing the mapped extent -- the padding past `w * 4` is
+# uninitialised memory and would make an exact comparison wobble for a reason
+# that has nothing to do with what was drawn.
+D3D11_MAP
+D3D11_MAPPED_SUBRESOURCE
+D3D11_CPU_ACCESS_FLAG

@@ -64,7 +64,13 @@ function Run-Arm([string]$mode, [string]$size, [string]$label) {
     # DOTNET_ROOT is required at APP RUNTIME: the dotnet on PATH is runtime-only
     # and shadows the real SDK, and the app dies with "You must install or update
     # .NET" -- which survives a correct build and looks like a packaging fault.
+    # SB_SCENE IS SET EXPLICITLY, AND IT USED NOT TO BE. Every arm of this sweep
+    # ran the benchmark loop because an unset SB_SCENE resolved to it -- true
+    # then and true now, but true by DEFAULT rather than by statement, so the
+    # receipts said what they measured only to a reader who knew the default.
+    # An experiment names its own workload.
     $sets = "`$env:DOTNET_ROOT='" + "$env:LOCALAPPDATA\Microsoft\dotnet" + "';" +
+            "`$env:SB_SCENE='benchmark';" +
             "`$env:SB_MODE='$mode';" +
             "`$env:SB_FRAMES='$Frames';"
     if ($size) { $sets += "`$env:SB_SIZE='$size';" }

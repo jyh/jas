@@ -14,8 +14,34 @@
           The canvas the Rust core draws into. Everything inside it is painted by
           Direct2D through a back buffer this shell owns; XAML draws none of it.
           That is the materializer claim made visible.
+
+          THE STAR ROW IS ALSO O6's MECHANISM. Because this row takes whatever
+          height is left, squeezing the window down to the status line's own
+          height gives the panel ZERO, and `SizeChanged` fires with height 0
+          through the real window manager rather than through a test hook.
         -->
         <SwapChainPanel x:Name="Canvas" Grid.Row="0" />
+
+        <!--
+          ⚠️ THE HIT-TESTABILITY FALLBACK, AND IT IS COLLAPSED BY DEFAULT.
+
+          A SwapChainPanel with no Background may not be hit-testable, and
+          Background cannot be set on it (its own Remarks page). The docs do not
+          settle it and the Mac this was written on cannot compile the shell, so
+          the question is decided AT THE BOX: `SB_HIT=sibling` makes this Border
+          visible and moves the SAME pointer handlers onto it. `Transparent` is
+          load-bearing -- a null background is not hit-testable, which is the
+          whole reason the panel is in question.
+
+          SAME GRID CELL as the panel, so it covers exactly the surface whose
+          coordinates the handlers report (they always call
+          GetCurrentPoint(Canvas), whichever element raised the event).
+        -->
+        <Border
+            x:Name="HitShield"
+            Grid.Row="0"
+            Background="Transparent"
+            Visibility="Collapsed" />
 
         <!--
           Status is XAML, not painted content, so a blank canvas over a healthy
