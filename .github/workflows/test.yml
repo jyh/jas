@@ -57,6 +57,12 @@ jobs:
       - run: python scripts/check_menu_structure.py
       - run: python scripts/check_toolbar_structure.py
       - run: python scripts/check_action_refs.py
+      # The sibling sub-check of the same VISION.md §11 layer, and it reads the
+      # YAML SOURCES rather than the compiled bundle ON PURPOSE: `safe_load`
+      # keeps the LAST of two duplicate mapping keys and raises nothing, so by
+      # the time workspace.json exists the duplicate is gone and the gate above
+      # -- which reads that bundle -- is structurally unable to see it.
+      - run: python scripts/check_workspace_ids.py --self-test && python scripts/check_workspace_ids.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -685,6 +691,14 @@ jobs:
           python scripts/check_menu_structure.py
           python scripts/check_toolbar_structure.py
           python scripts/check_action_refs.py
+          # Reads every workspace YAML with an explicit encoding and keys its
+          # findings on `as_posix()` relpaths -- the exact shape that broke
+          # check_swift_copy_sites.py on Windows and nowhere else -- so it runs
+          # on the platform whose separators and default codepage differ,
+          # rather than being written into an EXEMPT row that would be a
+          # promise the platform cannot matter.
+          python scripts/check_workspace_ids.py --self-test
+          python scripts/check_workspace_ids.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh
