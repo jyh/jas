@@ -1,4 +1,4 @@
-# sitting.ps1 -- drive the Windows app's scenes in one command, correctly, and
+﻿# sitting.ps1 -- drive the Windows app's scenes in one command, correctly, and
 # hold one instance open when a person needs to look at it.
 #
 # WHY THIS EXISTS, AND IT IS NOT CONVENIENCE.

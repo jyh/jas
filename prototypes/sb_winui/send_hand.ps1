@@ -1,4 +1,4 @@
-# send_hand.ps1 -- O4's HAND. A real mouse gesture, injected in SESSION 1.
+﻿# send_hand.ps1 -- O4's HAND. A real mouse gesture, injected in SESSION 1.
 #
 # WHAT IT IS FOR
 # --------------

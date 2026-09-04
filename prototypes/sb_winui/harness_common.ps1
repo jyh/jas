@@ -1,4 +1,4 @@
-# harness_common.ps1 -- the pieces `verify_window.ps1` and `sitting.ps1` BOTH
+﻿# harness_common.ps1 -- the pieces `verify_window.ps1` and `sitting.ps1` BOTH
 # need, in one file, dot-sourced by both.
 #
 # WHY A SHARED FILE AND NOT A SECOND COPY.
