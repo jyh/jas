@@ -103,6 +103,21 @@ param(
     [switch]$Hand,
     # k, VARIED. O4 asks for 2, then 7.
     [int]$HandMoves = 2,
+    # The injector's pause between steps, in ms, FORWARDED to `send_hand.ps1`
+    # (whose own default is 40). 0 = leave the injector's default alone.
+    #
+    # ⛔ THIS IS THE KNOB `-Scale` WAS NOT. `-Scale` was removed in PR #115
+    # because it reached nothing; this one reaches `send_hand.ps1 -SettleMs` and
+    # its whole purpose is to SEPARATE TWO EXPLANATIONS of a defect that has now
+    # survived two repair waves. Measured on kenai 2026-09-04: the real hand's
+    # `move=` reads exactly k at k=2,3,4 and k+1 at k=5,6,7,8 -- and because the
+    # injector pauses 40 ms per step, the k<=4 / k>=5 boundary is also the
+    # 160 ms / 200 ms boundary in post-press DRAG DURATION. Step count and
+    # elapsed time are perfectly confounded while this pause is fixed, and
+    # varying it is the one arm that tells them apart: k=4 at 100 ms lasts
+    # 400 ms with four steps, so a reading of 5 convicts TIME and a reading of 4
+    # convicts the STEP COUNT.
+    [int]$HandSettleMs = 0,
     # Aim the hand at EMPTY canvas -- O4's negative control. The expected row is
     # `press=1 move>=1 release=1 selected=0` WITH `doc=HELD`; the zero proves the
     # MISS only because `doc=HELD` proves the subject was loaded.
@@ -415,18 +430,28 @@ if ($deltaParts.Count -eq 2) {
 # written, else the last one this log has ever carried, else 1.0 -- and the plan
 # and every detail SAY which of the three, because a silently assumed scale puts
 # the gesture somewhere else and the miss looks like a seam failure.
+#
+# ⛔ AND THE SELECTOR IS ANCHORED, WHICH IS NOT A STYLE POINT. Measured on kenai
+# 2026-09-04: the shell wave's `STARTUP ... composition-scale=1.5x1.5` row
+# satisfied the unanchored `scale=[0-9.]+` selector, the reader then pulled
+# `1.5x1.5` out of the middle of that field, and the `[double]` cast below threw
+# and killed the sitting at run 2 of 8 -- every run after the first, because the
+# first run is what WROTE the row. The selector and the reader now share one
+# definition of what a field is (`Get-SbFieldPattern`), so they cannot disagree
+# about which rows carry a scale.
 $scaleSource = ''
+$scaleRowPattern = Get-SbFieldPattern 'scale' '[0-9.]+'
 function Resolve-SbScale {
     param($RunRows)
     $row = $null
     if ($null -ne $RunRows -and @($RunRows).Count -gt 0) {
-        $row = Select-SbRow $RunRows 'scale=[0-9.]+'
+        $row = Select-SbRow $RunRows $scaleRowPattern
     }
     if ($null -ne $row) {
         return @{ Scale = [double](Get-SbField $row 'scale')
                   Source = "the last scale= field THIS RUN wrote" }
     }
-    $histRow = Select-SbRow (Read-SbRows $log 0) 'scale=[0-9.]+'
+    $histRow = Select-SbRow (Read-SbRows $log 0) $scaleRowPattern
     $histScale = Get-SbField $histRow 'scale'
     if ($null -ne $histScale) {
         return @{ Scale = [double]$histScale
@@ -535,7 +560,7 @@ if ($DryRun) {
     if ($SynthFromDump) { Write-Output "  synth drag     : $synthNote" }
     if ($Hand) {
         $t = Get-SbHitTarget $beforeDump
-        Write-Output "  hand           : k=$HandMoves delta=($handDx,$handDy) DIP  empty-canvas=$([bool]$HandEmpty)"
+        Write-Output "  hand           : k=$HandMoves delta=($handDx,$handDy) DIP  empty-canvas=$([bool]$HandEmpty)  settle=$(if ($HandSettleMs -gt 0) { "$HandSettleMs ms (forwarded)" } else { "the injector's own default" })"
         if ($null -ne $t) {
             Write-Output "                   element chosen from the EXISTING dump: $($t.Type) id='$($t.Id)' at doc ($($t.X),$($t.Y))"
             Write-Output "                   (the real run re-chooses from the dump THIS run writes)"
@@ -754,7 +779,8 @@ if ($Hand) {
                 $handAsked = @{ X = $aimX; Y = $aimY; Dx = $handDx; Dy = $handDy; K = $HandMoves }
                 $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
                             " -ProcessId $appPid -DocX $aimX -DocY $aimY -DocDx $handDx -DocDy $handDy" +
-                            " -Moves $HandMoves -Out `"$handReceipt`"")
+                            " -Moves $HandMoves -Out `"$handReceipt`"" +
+                            $(if ($HandSettleMs -gt 0) { " -SettleMs $HandSettleMs" } else { '' }))
                 $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
                 $handAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $handArg
                 Register-ScheduledTask -TaskName $handTask -Action $handAction -Principal $principal -Force -ErrorAction Stop | Out-Null

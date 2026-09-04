@@ -717,6 +717,25 @@ jobs:
           Write-Host "--- $($files.Count) harness script(s) parsed, $bad with errors ---"
           if ($bad -gt 0) { exit 1 }
 
+      # ⛔ THE STEP ABOVE PROVES SYNTAX AND NOTHING ELSE, AND THAT WAS MEASURED.
+      # On 2026-09-04 the sitting died at run 2 of 8 on kenai because a field
+      # reader matched `scale` inside the shell wave's new `composition-scale=`
+      # field and threw on the cast. Seven scripts parsed; the gate was green;
+      # six of the eight runs were lost. The readers are PURE FUNCTIONS OVER
+      # STRINGS -- no window, no scheduled task, no session 1 -- so they are the
+      # one part of this harness that a runner with no desktop can actually
+      # exercise, and the only reason they were never exercised is that nobody
+      # had written the arm.
+      - name: The S-B harness row readers read rows
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          pwsh -File prototypes/sb_winui/harness_selftest.ps1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::the S-B harness self-test failed -- a row reader no longer reads the row it is given"
+            exit 1
+          }
+
       - name: Structural gates
         if: ${{ !cancelled() }}
         run: |

@@ -317,17 +317,99 @@ function Stop-SbAppByPid {
 # ---------------------------------------------------------------------------
 # Row field readers -- ONE parser, so two assertions cannot disagree
 # ---------------------------------------------------------------------------
+#
+# ⛔ A FIELD NAME IS ONLY A FIELD NAME AT THE START OF A TOKEN.
+#
+# Measured on kenai 2026-09-04, the second harness run, on main f2da1654: the
+# sitting died at run 2 of 8 with
+#
+#     Cannot convert value "1.5x1.5" to type "System.Double"
+#
+# because the shell wave (PR #113) added
+#
+#     STARTUP ... composition-scale=1.5x1.5 ...
+#
+# and this reader, asked for `scale`, matched INSIDE `composition-scale=` and
+# returned `1.5x1.5`. The first run of the sitting WROTE that row; every run
+# after it read the row back out of the log and threw before it launched
+# anything. Six of eight runs were lost to it, and the two-arm control is in
+# `harness_selftest.ps1`: the same reader on a row carrying a bare `scale=1.5`
+# returns `1.5` correctly, so the reader is right and the ANCHOR was missing.
+#
+# The rows are whitespace-separated (`Report()` joins fields with a space and
+# the log prefixes tab-separated columns), so requiring start-of-string or
+# whitespace before the name is exactly the row format's own rule. This is the
+# same class PR #115 already met at `) policy=` and solved in one caller; here
+# it is solved once, in the reader, for every caller.
+#
+# ⚠️ IT DOES NOT DISAMBIGUATE TWO FIELDS OF THE SAME NAME on one row -- the
+# `SQUEEZE delivered` row carries `min-height policy=<m>` and `policy=<decision>`
+# and both are token-initial. That row needs its own anchored pattern and has
+# one; see `verify_assertions.ps1`. The self-test pins that limitation as a case
+# so the next reader does not reach for this function there.
+
+# The anchor, written once. A caller that needs a bare `<name>=` SELECTOR (rather
+# than a read) uses this so the selector and the reader cannot disagree about
+# what counts as a field -- which is the second half of the same defect: an
+# unanchored selector picks the STARTUP row, the anchored reader then finds
+# nothing on it, and the run silently falls back to an ASSUMED scale of 1.0
+# instead of throwing. A wrong number that reads as a measurement is worse than
+# a crash.
+$SbFieldAnchor = '(?:^|\s)'
+
+function Get-SbFieldPattern([string]$Name, [string]$ValuePattern = '[^\s]+') {
+    return ($SbFieldAnchor + [regex]::Escape($Name) + '=' + $ValuePattern)
+}
+
+# ---------------------------------------------------------------------------
+# A LIST OF INTEGERS THAT SURVIVES `powershell -File`
+# ---------------------------------------------------------------------------
+#
+# ⛔ `-File` PASSES EVERY ARGUMENT AS A LITERAL STRING. It does not parse
+# PowerShell array syntax, so a script parameter typed `[int[]]` receiving
+# `-At 2,5,10` gets handed the single string "2,5,10" and coerces it -- and in an
+# en-US console the comma is the DIGIT GROUP SEPARATOR, so `[int[]]"2,5,10"` is
+# the single integer 2510. Not an error. Not a warning. One number.
+#
+# Measured on kenai 2026-09-04: `sample_liveness.ps1` is dispatched exactly that
+# way through a scheduled task, so O3's liveness sampler slept toward t=2510 s
+# (41.8 minutes), wrote ZERO of its three samples inside a 20-second stall, and
+# left an orphan process behind on every stall run. Its own receipt printed the
+# evidence -- `at=2510s` -- and nothing read it. O3.3 and O3.C1 read NOT RUN.
+#
+# ⚠️ AND THE FAILURE IS CULTURE-DEPENDENT: under a culture whose group separator
+# is not a comma the same string THROWS rather than becoming 2510. A harness that
+# reads differently on two machines because of a number format is not an
+# instrument. So the list crosses the boundary as a STRING and is split here,
+# where the separator is this code's decision and not the console's.
+function ConvertTo-SbIntList([string]$Text) {
+    $out = New-Object System.Collections.Generic.List[int]
+    foreach ($part in ($Text -split ',')) {
+        $s = $part.Trim()
+        if ($s -eq '') { continue }
+        $n = 0
+        # ⛔ InvariantCulture AND NumberStyles.None: no group separators, no
+        # sign, no decimal point. "2,510" must not become 2510 here either --
+        # that is the same defect wearing this function's name.
+        if (-not [int]::TryParse($s, [System.Globalization.NumberStyles]::None,
+                                 [System.Globalization.CultureInfo]::InvariantCulture, [ref]$n)) {
+            throw "ConvertTo-SbIntList: '$s' (in '$Text') is not a plain integer -- refusing to guess"
+        }
+        $out.Add($n)
+    }
+    return $out.ToArray()
+}
 
 function Get-SbField([string]$Row, [string]$Name) {
     if ([string]::IsNullOrEmpty($Row)) { return $null }
-    $m = [regex]::Match($Row, [regex]::Escape($Name) + '=([^\s]+)')
+    $m = [regex]::Match($Row, $SbFieldAnchor + [regex]::Escape($Name) + '=([^\s]+)')
     if (-not $m.Success) { return $null }
     return $m.Groups[1].Value
 }
 
 function Get-SbPoint([string]$Row, [string]$Name) {
     if ([string]::IsNullOrEmpty($Row)) { return $null }
-    $m = [regex]::Match($Row, [regex]::Escape($Name) + '=\(([-0-9.]+),([-0-9.]+)\)')
+    $m = [regex]::Match($Row, $SbFieldAnchor + [regex]::Escape($Name) + '=\(([-0-9.]+),([-0-9.]+)\)')
     if (-not $m.Success) { return $null }
     return @{ X = [double]$m.Groups[1].Value; Y = [double]$m.Groups[2].Value }
 }
