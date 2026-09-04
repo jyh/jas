@@ -1,4 +1,4 @@
-# verify_window.ps1 -- drive ONE scene of the S-B shell in session 1, wait for
+﻿# verify_window.ps1 -- drive ONE scene of the S-B shell in session 1, wait for
 # the row that scene writes, and assert the canvas freeze's observables against
 # the rows it produced.
 #
@@ -184,6 +184,17 @@ if (-not $sceneSpec.ContainsKey($Scene)) {
     exit 1
 }
 $spec = $sceneSpec[$Scene]
+
+# ⛔ AND THE RESOLVED SCENE GOES BACK INTO THE ENVIRONMENT, or this harness waits
+# for one experiment while the app runs another. `-Scene` READ SB_SCENE above and
+# never wrote it, so a direct `verify_window.ps1 -Scene retained` launched the app
+# on its DEFAULT scene (benchmark) while every assertion here was written for
+# `retained`: measured on kenai 2026-09-03, it produced 13 NOT RUN and one FAIL
+# that read as findings about the app. `sitting.ps1` set it and so hid this.
+# This is the defect Get-SbForwardedEnv's own header names -- a run LABELLED as
+# one experiment while MEASURING another -- arriving through the one SB_* knob
+# that was not taken from the environment in the first place.
+$env:SB_SCENE = $Scene
 
 # The stall and the hand wait are knobs, so the bound must be derived from them.
 # A hardcoded 90 s would tear down a 120 s stall and read as an app failure.

@@ -1,4 +1,4 @@
-# run_4k_sweep.ps1 -- the 4K re-measurement, ALL ARMS IN ONE SESSION.
+﻿# run_4k_sweep.ps1 -- the 4K re-measurement, ALL ARMS IN ONE SESSION.
 #
 # ASCII ONLY: Windows PowerShell 5.1 reads a BOM-less UTF-8 .ps1 as cp1252 and
 # dies in the PARSER on one non-ASCII byte, pointing at correct lines.

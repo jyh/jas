@@ -1,4 +1,4 @@
-# verify_assertions.ps1 -- the canvas freeze's observables, asserted against the
+﻿# verify_assertions.ps1 -- the canvas freeze's observables, asserted against the
 # rows one run wrote. DOT-SOURCED by `verify_window.ps1`, which owns the run.
 #
 # ⛔ EVERY ASSERTION HERE HAS THREE POSSIBLE VERDICTS AND `NOT RUN` IS A FIRST-
