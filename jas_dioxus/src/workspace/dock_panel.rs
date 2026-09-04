@@ -987,6 +987,12 @@ pub(crate) fn build_dock_groups(
     mut panel_menu_open: Signal<Option<PanelMenuOpen>>,
     mut menu_bar_open: Signal<Option<String>>,
     live_panel_overrides: &serde_json::Map<String, serde_json::Value>,
+    // The GENERIC per-panel state table (`AppState::panel_state`), keyed by
+    // panel content id. Unlike `live_panel_overrides` — one flat map of live
+    // values whose keys have to be scoped by hand to stop one panel's
+    // `thumbnail_size` reaching another's — this is already per panel, which
+    // is the whole reason it exists.
+    panel_state_table: &std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>,
     live_state_map: &serde_json::Map<String, serde_json::Value>,
     selection_preds: &serde_json::Map<String, serde_json::Value>,
     active_doc_view: &serde_json::Value,
@@ -1344,6 +1350,19 @@ pub(crate) fn build_dock_groups(
                                     panel_map.insert(k.clone(), v.clone());
                                 }
                             }
+                            // The GENERIC per-panel table, last: it is keyed by
+                            // this panel's own content id and holds only keys a
+                            // `set_panel_state` naming this panel has written,
+                            // so it is the freshest answer for every key it
+                            // carries. Without this the Brushes menu's check
+                            // marks would follow the user while the panel BODY
+                            // they describe kept rendering the declared default
+                            // — the same divergence, one layer down.
+                            if let Some(stored) = panel_state_table.get(content_id) {
+                                for (k, v) in stored {
+                                    panel_map.insert(k.clone(), v.clone());
+                                }
+                            }
                             // Build a minimal state map containing only the keys this
                             // panel references. This prevents unrelated state changes
                             // (e.g. active_tool) from invalidating the panel memo cache.
@@ -1434,16 +1453,17 @@ pub(crate) fn DockGroupsView() -> Element {
 
     // Extract everything we need from AppState, then drop the borrow
     // so child components (e.g. FillStrokeWidgetView) can borrow it.
-    let (focused_panel, right_dock_snapshot, live_panel_overrides, live_state_map,
-         selection_preds, active_doc_view) = {
+    let (focused_panel, right_dock_snapshot, live_panel_overrides, panel_state_table,
+         live_state_map, selection_preds, active_doc_view) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
         let panel_ov = build_live_panel_overrides(&st);
+        let panel_table = st.panel_state.clone();
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
         let active_doc = crate::interpreter::renderer::build_active_document_view(&st);
-        (focused, dock, panel_ov, state_map, preds, active_doc)
+        (focused, dock, panel_ov, panel_table, state_map, preds, active_doc)
     };
 
     let nodes: Vec<Result<VNode, RenderError>> = match right_dock_snapshot.as_ref() {
@@ -1493,6 +1513,7 @@ pub(crate) fn DockGroupsView() -> Element {
                 pms.open,
                 mbs.open_menu,
                 &live_panel_overrides,
+                &panel_state_table,
                 &live_state_map,
                 &selection_preds,
                 &active_doc_view,
@@ -1526,17 +1547,18 @@ pub(crate) fn FloatingDocksView() -> Element {
     let _ = revision();
     let mut title_drag = ds.title_drag;
 
-    let (focused_panel, floating_snapshot, live_panel_overrides, live_state_map,
-         selection_preds, z_order, active_doc_view) = {
+    let (focused_panel, floating_snapshot, live_panel_overrides, panel_state_table,
+         live_state_map, selection_preds, z_order, active_doc_view) = {
         let st = app.borrow();
         let focused = st.workspace_layout.focused_panel();
         let floating = st.workspace_layout.floating.clone();
         let panel_ov = build_live_panel_overrides(&st);
+        let panel_table = st.panel_state.clone();
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
         let z = st.workspace_layout.z_order.clone();
         let active_doc = crate::interpreter::renderer::build_active_document_view(&st);
-        (focused, floating, panel_ov, state_map, preds, z, active_doc)
+        (focused, floating, panel_ov, panel_table, state_map, preds, z, active_doc)
     };
 
     let floating_nodes: Vec<Result<VNode, RenderError>> = floating_snapshot.iter().map(|fd| {
@@ -1558,6 +1580,7 @@ pub(crate) fn FloatingDocksView() -> Element {
             pms.open,
             mbs.open_menu,
             &live_panel_overrides,
+            &panel_state_table,
             &live_state_map,
             &selection_preds,
             &active_doc_view,

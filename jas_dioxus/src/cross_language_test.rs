@@ -6253,6 +6253,86 @@ mod tests {
         assert!(checked_rows >= 29, "only {checked_rows} checked rows evaluated");
     }
 
+    /// The panel-state WRITE arm of the same chrome seam.
+    ///
+    /// `panel_menu_state.json` seeds a panel scope directly and pins how the
+    /// check marks are DERIVED from it. It says nothing about how the scope
+    /// comes to hold the user's choices, and that is where the two active ports
+    /// diverged next: this port stored no Brushes panel state at all, so every
+    /// Brushes check mark evaluated the declared default forever while
+    /// JasSwift's shared panel store moved with the user.
+    ///
+    /// The subject is the round trip — declared defaults, the generic
+    /// `set_panel_state` effect, the scope read back, the panel's own menu
+    /// evaluated against it — driven through THIS port's storage
+    /// (`apply_set_panel_state_with_ctx` writing, `panel_menu_ctx` reading). A
+    /// port that stores nothing returns the defaults and reds on the first case.
+    #[cfg(feature = "web")]
+    #[test]
+    fn algorithm_panel_state_write_vectors() {
+        use crate::interpreter::menu_state::menu_state;
+        use crate::workspace::app_state::AppState;
+
+        let json_str = read_fixture("algorithms/panel_state_writes.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+
+        let cases = tests.as_array().unwrap();
+        assert!(cases.len() >= 8, "corpus shrank: {} cases", cases.len());
+        let mut checked_rows = 0usize;
+        let mut panels_seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "panel_state_writes", "Unknown function: {}", func);
+            let pid = tc["args"]["panel"].as_str().unwrap();
+            panels_seen.insert(pid);
+            let writes = tc["args"]["writes"].as_array().unwrap();
+            assert!(!writes.is_empty(), "case '{}' performs no write", name);
+
+            // This port's storage, driven exactly as an action's effect drives
+            // it: a fresh AppState seeded only by the bundle's declared
+            // defaults, then one generic set_panel_state per write.
+            let mut st = AppState::new();
+            for w in writes {
+                let mut sps = serde_json::Map::new();
+                sps.insert("panel".to_string(), serde_json::Value::String(pid.to_string()));
+                sps.insert("key".to_string(), w["key"].clone());
+                sps.insert("value".to_string(), w["value"].clone());
+                crate::interpreter::renderer::apply_set_panel_state_with_ctx(&sps, &mut st, None);
+            }
+            // The scope this port would evaluate the panel's menu against.
+            let scope = crate::panels::panel_menu::panel_menu_ctx(pid, &st)["panel"].clone();
+            assert_eq!(
+                &scope, &tc["expected"]["panel_state"],
+                "Panel scope after the writes of '{}' mismatch", name
+            );
+
+            let menu = bundle["panels"][pid]["menu"].clone();
+            assert!(menu.is_array(), "panel {} has no menu in the bundle", pid);
+            let menubar = serde_json::json!([{ "items": menu }]);
+            let ctx = serde_json::json!({
+                "panel": scope,
+                "preferences": tc["args"]["preferences"],
+            });
+            let actual = menu_state(&menubar, &ctx);
+            assert_eq!(&actual, &tc["expected"]["menu"], "Panel menu after '{}' mismatch", name);
+            checked_rows += tc["expected"]["menu"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["checked"].is_boolean())
+                .count();
+        }
+        // Anti-vacuity: rows with no predicate pass without evaluating anything,
+        // and a corpus naming one panel is satisfied by a Brushes-shaped hook.
+        assert!(checked_rows >= 70, "only {checked_rows} checked rows evaluated");
+        assert!(panels_seen.len() >= 2, "only one panel covered");
+    }
+
     /// The derivation `layout -> panels.<id>` that `menu_state` takes as
     /// GIVEN. menu_state.json feeds the panels map in as input, so nothing
     /// watched how that map is computed from a dock layout — the seam where

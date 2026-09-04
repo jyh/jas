@@ -153,6 +153,11 @@
       "reason": "THE GENERATIVE LANE of the same law -- fresh vectors on a fresh seed each run, asserting that at least `min_discriminating` of them are vectors the pre-DYADICSIDE spelling gets WRONG, measured live against the mutant. The third of the ruled three (predicate, witnesses, generative).",
       "blocked_by": "Identical to shift_constrain_witnesses above -- same check_shift_constrain predicate, same run_gesture_case blocker, same measurement. It comes home with the `tools` split, not before."
     },
+    "jas_dioxus/src/cross_language_test.rs::algorithm_panel_state_write_vectors": {
+      "kind": "debt",
+      "reason": "THE PANEL-STATE WRITE ARM of the chrome seam (test_fixtures/algorithms/panel_state_writes.json): declared defaults, the generic set_panel_state effect, the scope read back, the panel's own menu evaluated against it. It has to drive THIS port's storage rather than a copy of it -- a control beside the instrument validates nothing -- and this port's storage is AppState.",
+      "blocked_by": "crate::workspace::app_state, plus interpreter::renderer and the panels module tree, all three of which are `feature = \"web\"` at the crate root. MEASURED 2026-09-04 by deleting the gate and running `cargo test --no-default-features --lib --no-run`: exactly three errors, and every one is a missing module rather than a web symbol -- E0432 on `crate::workspace::app_state`, E0433 on `interpreter::renderer` and on `crate::panels`. The same app_state root blocker the eight rows above name; it comes home with the app shell, not before."
+    },
     "jas_dioxus/src/cross_language_test.rs::action_corpus": {
       "kind": "debt",
       "reason": "THE ACTION CONFORMANCE CORPUS.",

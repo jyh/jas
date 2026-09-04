@@ -1846,7 +1846,7 @@ pub(crate) fn apply_properties_panel_field(
     }
 }
 
-fn apply_set_panel_state_with_ctx(
+pub(crate) fn apply_set_panel_state_with_ctx(
     sps: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
     action_ctx: Option<&serde_json::Value>,
@@ -2066,6 +2066,59 @@ fn apply_set_panel_state_with_ctx(
         apply_artboards_panel_field(st, key, &resolved);
         return;
     }
+    // ── Panel-named writes ────────────────────────────────────────────────
+    // Everything above dispatches on the effect's `key` ALONE, which is why the
+    // `panel:` the effect declares had never been read: a `set_panel_state
+    // {panel: brushes, key: view_mode}` matched no arm and fell through to the
+    // STROKE panel below, so this app stored no Brushes panel state at all and
+    // every Brushes check mark evaluated the declared default forever. Two
+    // panels even declare the SAME key (`thumbnail_size`, in brushes.yaml and
+    // swatches.yaml), so a key-only dispatch cannot tell them apart in
+    // principle.
+    //
+    // A panel-named write goes to that panel: into the typed `AppState` slot
+    // when this app keeps one (`panel_menu::typed_panel_slot_keys`), otherwise
+    // into the generic per-panel table — the reference's `StateStore.set_panel`
+    // and JasSwift's shared panel store, in this app. `panel: stroke` is
+    // deliberately excluded: the stroke panel IS the fall-through below, which
+    // resolves against its own live values and re-applies the edited field to
+    // the selection.
+    if let Some(raw_panel) = sps.get("panel").and_then(|v| v.as_str()) {
+        let content_id = crate::panels::panel_menu::panel_content_id(raw_panel);
+        if content_id != "stroke_panel_content" {
+            // The value is an expression over the TARGET panel's own live
+            // scope: `solo_layers_type_filter` reads `panel.type_filter` to
+            // decide whether the click solos or unsolos. Resolving it against
+            // the caller's ctx (whose `panel` is whatever panel was active)
+            // would answer about the wrong panel.
+            let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
+            let resolved = if let Some(expr_str) = val.as_str() {
+                let mut ctx = match action_ctx {
+                    Some(serde_json::Value::Object(m)) => m.clone(),
+                    _ => serde_json::Map::new(),
+                };
+                let panel_ctx = crate::panels::panel_menu::panel_menu_ctx(&content_id, st);
+                if let Some(panel) = panel_ctx.get("panel") {
+                    ctx.insert("panel".to_string(), panel.clone());
+                }
+                let ctx = serde_json::Value::Object(ctx);
+                super::effects::value_to_json(&super::expr::eval(expr_str, &ctx))
+            } else {
+                val.clone()
+            };
+            if !apply_typed_panel_slot(st, &content_id, key, &resolved) {
+                st.panel_state
+                    .entry(content_id.clone())
+                    .or_insert_with(|| {
+                        crate::interpreter::workspace::Workspace::load()
+                            .map(|ws| ws.panel_state_defaults(&content_id).into_iter().collect())
+                            .unwrap_or_default()
+                    })
+                    .insert(key.to_string(), resolved);
+            }
+            return;
+        }
+    }
     let val = sps.get("value").unwrap_or(&serde_json::Value::Null);
     // Evaluate expression values
     let resolved = if let Some(expr_str) = val.as_str() {
@@ -2098,6 +2151,57 @@ fn apply_set_panel_state_with_ctx(
     // field-scoped (it writes only this key's group), and keys that own
     // no element attribute are a no-op inside it.
     st.apply_stroke_panel_to_selection(key);
+}
+
+/// Route a panel-named `set_panel_state` write into the typed `AppState` slot
+/// this app keeps for it, returning whether it was claimed.
+///
+/// The write-side twin of `panels::panel_menu::live_panel_state`: that function
+/// says where a declared panel key is READ from, this one says where it is
+/// WRITTEN to, and `typed_panel_slot_keys` is the two lists' shared census.
+/// Anything not claimed here lands in the generic `AppState::panel_state`
+/// table, which is the default and the reference's own semantics; these arms
+/// exist only because this app already keeps these five values somewhere its
+/// panel bodies render from.
+fn apply_typed_panel_slot(
+    st: &mut crate::workspace::app_state::AppState,
+    content_id: &str,
+    key: &str,
+    resolved: &serde_json::Value,
+) -> bool {
+    match (content_id, key) {
+        ("color_panel_content", "mode") => {
+            if let Some(mode) = resolved
+                .as_str()
+                .and_then(crate::workspace::color_panel_view::ColorMode::from_slug)
+            {
+                st.color_panel_mode = mode;
+            }
+            true
+        }
+        ("swatches_panel_content", "thumbnail_size") => {
+            if let Some(s) = resolved.as_str() {
+                st.swatches_panel.thumbnail_size = s.to_string();
+            }
+            true
+        }
+        ("symbols_panel_content", "selected_symbol") => {
+            st.symbols_selected = resolved.as_str().map(|s| s.to_string());
+            true
+        }
+        ("concepts_panel_content", "selected_concept") => {
+            st.concepts_selected = resolved.as_str().map(|s| s.to_string());
+            true
+        }
+        ("layers_panel_content", "type_filter") => {
+            if let Some(items) = resolved.as_array() {
+                st.layers_type_filter =
+                    items.iter().filter_map(|v| v.as_str().map(String::from)).collect();
+            }
+            true
+        }
+        _ => false,
+    }
 }
 
 /// Get a stroke panel field as a JSON value.

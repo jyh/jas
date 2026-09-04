@@ -1,0 +1,1563 @@
+[
+  {
+    "name": "brushes_view_mode_list_disables_the_sizes",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "view_mode",
+          "value": "\"list\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "list",
+        "thumbnail_size": "small",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "art",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_thumbnail_size_large",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "thumbnail_size",
+          "value": "\"large\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "thumbnail",
+        "thumbnail_size": "large",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "art",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_category_art_toggled_off",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "category_filter",
+          "value": "filter(panel.category_filter, fun c -> c != \"art\")"
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "thumbnail",
+        "thumbnail_size": "small",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_category_only_art",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "category_filter",
+          "value": "[\"art\"]"
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "thumbnail",
+        "thumbnail_size": "small",
+        "category_filter": [
+          "art"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_two_writes_accumulate",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "view_mode",
+          "value": "\"list\""
+        },
+        {
+          "key": "thumbnail_size",
+          "value": "\"medium\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "default_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "list",
+        "thumbnail_size": "medium",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "art",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": false,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_selected_library_leaves_the_persistent_list",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "selected_library",
+          "value": "\"web_brushes\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "web_brushes",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "thumbnail",
+        "thumbnail_size": "small",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "art",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "brushes_selected_library_joins_the_persistent_list",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "brushes_panel_content",
+      "writes": [
+        {
+          "key": "selected_library",
+          "value": "\"vector_pack\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes",
+            "vector_pack"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_library": "vector_pack",
+        "selected_brushes": [],
+        "open_libraries": [
+          {
+            "id": "default_brushes",
+            "collapsed": false
+          }
+        ],
+        "view_mode": "thumbnail",
+        "thumbnail_size": "small",
+        "category_filter": [
+          "calligraphic",
+          "scatter",
+          "art",
+          "pattern",
+          "bristle"
+        ]
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "duplicate_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_brush",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            3
+          ],
+          "action": "open_brush_options",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            5
+          ],
+          "action": "select_all_unused_brushes",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            7
+          ],
+          "action": "sort_brushes_by_name",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            9
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            10
+          ],
+          "action": "set_brush_view_mode",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            12
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            13
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            14
+          ],
+          "action": "set_brush_thumbnail_size",
+          "enabled": true,
+          "checked": false
+        },
+        {
+          "path": [
+            0,
+            16
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            17
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            18
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            19
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            20
+          ],
+          "action": "toggle_brush_category",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            22
+          ],
+          "action": "toggle_brush_library_persistent",
+          "enabled": true,
+          "checked": true
+        },
+        {
+          "path": [
+            0,
+            23
+          ],
+          "action": "",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            24
+          ],
+          "action": "save_brush_library",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  },
+  {
+    "name": "symbols_selected_symbol",
+    "function": "panel_state_writes",
+    "args": {
+      "panel": "symbols_panel_content",
+      "writes": [
+        {
+          "key": "selected_symbol",
+          "value": "\"star\""
+        }
+      ],
+      "preferences": {
+        "brushes": {
+          "persistent_libraries": [
+            "default_brushes"
+          ]
+        }
+      }
+    },
+    "expected": {
+      "panel_state": {
+        "selected_symbol": "star"
+      },
+      "menu": [
+        {
+          "path": [
+            0,
+            0
+          ],
+          "action": "new_symbol",
+          "enabled": false,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            1
+          ],
+          "action": "place_instance",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            2
+          ],
+          "action": "delete_symbol_action",
+          "enabled": true,
+          "checked": null
+        },
+        {
+          "path": [
+            0,
+            4
+          ],
+          "action": "close_panel",
+          "enabled": true,
+          "checked": null
+        }
+      ]
+    }
+  }
+]

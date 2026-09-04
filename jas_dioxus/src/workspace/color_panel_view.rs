@@ -66,6 +66,25 @@ impl ColorMode {
             _ => None,
         }
     }
+
+    /// The slug color.yaml's `state.mode` enum declares for this mode, and the
+    /// value its menu rows compare against (`panel.mode == "cmyk"`). The one
+    /// spelling of the bundle's own vocabulary: the menu context publishes it
+    /// and a `set_panel_state {panel: color, key: mode}` write parses it back.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::Grayscale => "grayscale",
+            Self::Hsb => "hsb",
+            Self::Rgb => "rgb",
+            Self::Cmyk => "cmyk",
+            Self::WebSafeRgb => "web_safe_rgb",
+        }
+    }
+
+    /// Inverse of [`ColorMode::slug`]; None for a value the enum does not name.
+    pub fn from_slug(slug: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|m| m.slug() == slug)
+    }
 }
 
 // ---------------------------------------------------------------------------

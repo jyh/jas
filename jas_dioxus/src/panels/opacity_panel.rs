@@ -128,6 +128,7 @@ mod tests {
             symbols_selected: None,
             properties_constrain: false,
             concepts_selected: None,
+            panel_state: std::collections::HashMap::new(),
         }
     }
 

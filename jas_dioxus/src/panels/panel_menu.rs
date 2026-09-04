@@ -168,26 +168,61 @@ fn command_with_params(obj: &serde_json::Map<String, serde_json::Value>) -> Stri
     cmd
 }
 
-// ---------------------------------------------------------------------------
-// Generic panel-menu CHECKED state
-// ---------------------------------------------------------------------------
+/// The panel CONTENT id a YAML `panel:` reference names.
+///
+/// Actions name panels by their short kind (`panel: brushes`) while every panel
+/// map in the bundle — and therefore `panel_state_defaults`, the panel-menu
+/// lookup and this app's generic panel-state table — is keyed by the content id
+/// (`brushes_panel_content`). Appending the suffix when the caller passes the
+/// short form is the same normalisation JasSwift's `set_panel_state` applies,
+/// so a write lands in the bucket the YAML's `panel.<key>` reads from in BOTH
+/// active ports. An id that already carries the suffix passes through, which is
+/// what lets a fixture address a panel by one unambiguous spelling.
+pub fn panel_content_id(raw: &str) -> String {
+    if raw.ends_with("_panel_content") {
+        raw.to_string()
+    } else {
+        format!("{raw}_panel_content")
+    }
+}
 
-/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry whose
-/// runtime command is `cmd`, or `None` when there is no such entry or it
-/// declares no predicate.
+/// Recover the `(action, params)` a panel-menu entry declares from the runtime
+/// command the menu view dispatches.
 ///
-/// The command is matched with the SAME fold `build_menu_items` applies
-/// (`command_with_params` for radio members, the bare action otherwise), so a
-/// caller holding a `PanelMenuItem`'s command can always find its own entry.
-///
-/// Both spellings are read because the panel-menu vocabulary uses both:
-/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
-/// `checked_when:`, while `{align,character,paragraph}.yaml` write `checked:`.
-/// `build_menu_items` above already reads both to decide Toggle vs Radio, so
-/// reading only one here would leave three panels' check marks dead — the
-/// exact defect this path exists to close. No expression feature is added:
-/// the two keys carry the same grammar and are evaluated the same way.
-pub fn checked_expr(content_id: &str, cmd: &str) -> Option<String> {
+/// `build_menu_items` FOLDS a radio member's params into its command
+/// (`set_brush_view_mode:list`) so several rows can share one YAML action and
+/// still dispatch distinctly. Something has to unfold it again, and doing it
+/// here — by finding the entry the fold came from and returning its declared
+/// `params` map verbatim — means a panel's dispatch does not have to restate
+/// the panel's own parameter names in native code. `brushes_panel::dispatch`
+/// used to hand the FOLDED string to `dispatch_action` with an empty params
+/// map: no action of that name existed, so every Brushes menu row was a silent
+/// no-op, and `param.view_mode` would have been null even if one had.
+pub fn action_and_params(
+    content_id: &str,
+    cmd: &str,
+) -> Option<(String, serde_json::Map<String, serde_json::Value>)> {
+    let entry = menu_entry(content_id, cmd)?;
+    let action = entry.get("action").and_then(|a| a.as_str())?.to_string();
+    let params = entry
+        .get("params")
+        .and_then(|p| p.as_object())
+        .cloned()
+        .unwrap_or_default();
+    Some((action, params))
+}
+
+/// The bundle menu entry whose runtime command is `cmd`, matched with the SAME
+/// fold `build_menu_items` applies (`command_with_params` for radio members,
+/// the bare action otherwise), so a caller holding a `PanelMenuItem`'s command
+/// can always find its own entry.
+fn menu_entry(
+    content_id: &str,
+    cmd: &str,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    if cmd.is_empty() {
+        return None;
+    }
     let ws = crate::interpreter::workspace::Workspace::load()?;
     let menu = ws.panel_menu(content_id);
     let mut action_counts: std::collections::HashMap<&str, usize> =
@@ -210,17 +245,40 @@ pub fn checked_expr(content_id: &str, cmd: &str) -> Option<String> {
         } else {
             action.unwrap_or("").to_string()
         };
-        if entry_cmd != cmd || cmd.is_empty() {
-            continue;
+        if entry_cmd == cmd {
+            return Some(obj.clone());
         }
-        return obj
-            .get("checked_when")
-            .or_else(|| obj.get("checked"))
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// Generic panel-menu CHECKED state
+// ---------------------------------------------------------------------------
+
+/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry whose
+/// runtime command is `cmd`, or `None` when there is no such entry or it
+/// declares no predicate.
+///
+/// The command is matched with the SAME fold `build_menu_items` applies
+/// (`command_with_params` for radio members, the bare action otherwise), so a
+/// caller holding a `PanelMenuItem`'s command can always find its own entry.
+///
+/// Both spellings are read because the panel-menu vocabulary uses both:
+/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
+/// `checked_when:`, while `{align,character,paragraph}.yaml` write `checked:`.
+/// `build_menu_items` above already reads both to decide Toggle vs Radio, so
+/// reading only one here would leave three panels' check marks dead — the
+/// exact defect this path exists to close. No expression feature is added:
+/// the two keys carry the same grammar and are evaluated the same way.
+pub fn checked_expr(content_id: &str, cmd: &str) -> Option<String> {
+    let entry = menu_entry(content_id, cmd)?;
+    entry
+        .get("checked_when")
+        .or_else(|| entry.get("checked"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
 }
 
 /// Whether the panel-menu entry for `cmd` is checked, evaluating its bundle
@@ -248,14 +306,19 @@ pub fn is_checked_from_yaml(content_id: &str, cmd: &str, ctx: &serde_json::Value
 /// `AppState` slots rather than a generic panel store, so something has to
 /// publish those slots into the `panel` namespace, and this is that one place.
 ///
-/// A panel absent from the list below contributes no live keys and evaluates
-/// against the bundle defaults alone. For the Brushes panel that is currently
-/// the WHOLE answer and it is a real gap, named rather than hidden: nothing in
-/// `AppState` stores `view_mode` / `thumbnail_size` / `category_filter`, and
-/// `renderer::apply_set_panel_state_with_ctx` has no arm for those keys, so
-/// `set_brush_view_mode` and friends do not persist here. The check marks now
-/// EVALUATE (they showed nothing at all before); what they evaluate is the
-/// declared default until brushes panel state exists.
+/// The scope is built in three layers, weakest first: the bundle's declared
+/// `state:` defaults, then whatever the GENERIC per-panel table
+/// (`AppState::panel_state`) holds for this panel, then the typed `AppState`
+/// slots `live_panel_state` publishes. The generic layer is the reference's
+/// `StateStore` panel scope and JasSwift's shared panel store, in this app; the
+/// typed layer wins over it because for the five keys that have both, the typed
+/// slot is what this app's panel BODY renders from and what a native panel
+/// dispatch writes — and `apply_typed_panel_slot` routes the declared write
+/// there rather than into the table, so the two never disagree.
+///
+/// A panel with neither contributes nothing and evaluates against the bundle
+/// defaults, which is now the correct answer for a panel nobody has touched
+/// rather than, as it was, the only answer a panel could ever give.
 pub fn panel_menu_ctx(
     content_id: &str,
     st: &crate::workspace::app_state::AppState,
@@ -264,6 +327,11 @@ pub fn panel_menu_ctx(
     let mut panel: serde_json::Map<String, J> = crate::interpreter::workspace::Workspace::load()
         .map(|ws| ws.panel_state_defaults(content_id).into_iter().collect())
         .unwrap_or_default();
+    if let Some(stored) = st.panel_state.get(content_id) {
+        for (k, v) in stored {
+            panel.insert(k.clone(), v.clone());
+        }
+    }
     for (k, v) in live_panel_state(content_id, st) {
         panel.insert(k, v);
     }
@@ -274,6 +342,25 @@ pub fn panel_menu_ctx(
         "panel": J::Object(panel),
         "preferences": preferences,
     })
+}
+
+/// The `(content_id, key)` pairs a panel-named `set_panel_state` write is
+/// routed into a TYPED `AppState` slot for, rather than into the generic
+/// per-panel table.
+///
+/// This is the write-side twin of `live_panel_state`: that function says where
+/// this app READS a declared panel key from, this one says where it WRITES one
+/// to, and a key claimed here and unpublished there is a write no reader can
+/// see. `panels::tests::every_typed_write_target_is_published_to_the_menu_context`
+/// holds the two together.
+pub fn typed_panel_slot_keys() -> Vec<(&'static str, &'static str)> {
+    vec![
+        ("color_panel_content", "mode"),
+        ("swatches_panel_content", "thumbnail_size"),
+        ("symbols_panel_content", "selected_symbol"),
+        ("concepts_panel_content", "selected_concept"),
+        ("layers_panel_content", "type_filter"),
+    ]
 }
 
 /// The live `panel.*` values this app holds for `content_id`, keyed exactly as
@@ -290,17 +377,7 @@ fn live_panel_state(
     let s = |v: &str| J::String(v.to_string());
     let b = J::Bool;
     let pairs: Vec<(&str, J)> = match content_id {
-        "color_panel_content" => {
-            use crate::workspace::color_panel_view::ColorMode;
-            let mode = match st.color_panel_mode {
-                ColorMode::Grayscale => "grayscale",
-                ColorMode::Hsb => "hsb",
-                ColorMode::Rgb => "rgb",
-                ColorMode::Cmyk => "cmyk",
-                ColorMode::WebSafeRgb => "web_safe_rgb",
-            };
-            vec![("mode", s(mode))]
-        }
+        "color_panel_content" => vec![("mode", s(st.color_panel_mode.slug()))],
         "stroke_panel_content" => vec![
             ("cap", s(&st.stroke_panel.cap)),
             ("join", s(&st.stroke_panel.join)),
@@ -331,6 +408,31 @@ fn live_panel_state(
         "properties_panel_content" => {
             vec![("prop_constrain", b(st.properties_constrain))]
         }
+        // The three below carry no `checked_when` today. They are here because
+        // they are WRITE targets (`typed_panel_slot_keys`), and a write whose
+        // value is an expression over the panel's own scope — as
+        // `solo_layers_type_filter`'s is — has to be able to read that scope
+        // back. Publishing them is what makes the read and the write agree.
+        "symbols_panel_content" => vec![(
+            "selected_symbol",
+            st.symbols_selected.clone().map(J::String).unwrap_or(J::Null),
+        )],
+        "concepts_panel_content" => vec![(
+            "selected_concept",
+            st.concepts_selected.clone().map(J::String).unwrap_or(J::Null),
+        )],
+        "layers_panel_content" => {
+            // A HashSet has no order and the bundle's only expression that
+            // indexes this list guards on `length == 1`
+            // (`solo_layers_type_filter`), so any order answers the same; sorted
+            // so the published scope is at least deterministic.
+            let mut types: Vec<String> = st.layers_type_filter.iter().cloned().collect();
+            types.sort();
+            vec![
+                ("type_filter", J::Array(types.into_iter().map(J::String).collect())),
+                ("search_query", s(&st.layers_search_query)),
+            ]
+        }
         _ => vec![],
     };
     pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
@@ -339,6 +441,49 @@ fn live_panel_state(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Actions name a panel by its short kind (`panel: brushes`); every panel
+    /// map in the bundle is keyed by the content id. The two spellings have to
+    /// address ONE bucket, and the rule is JasSwift's: append the suffix when
+    /// it is absent, pass an id that already carries it through.
+    #[test]
+    fn panel_content_id_normalises_both_spellings() {
+        assert_eq!(panel_content_id("brushes"), "brushes_panel_content");
+        assert_eq!(panel_content_id("brushes_panel_content"), "brushes_panel_content");
+        assert_eq!(panel_content_id("swatches"), "swatches_panel_content");
+    }
+
+    /// The unfold `brushes_panel::dispatch` needs: a folded radio command back
+    /// into the action the row declares AND the params it declares, so
+    /// `param.view_mode` resolves. A non-radio row keeps its bare action and
+    /// whatever params it declares (Brush Options carries `mode:`).
+    #[test]
+    fn action_and_params_unfolds_a_folded_radio_command() {
+        let (action, params) =
+            action_and_params("brushes_panel_content", "set_brush_view_mode:list")
+                .expect("List View is a menu row");
+        assert_eq!(action, "set_brush_view_mode");
+        assert_eq!(params.get("view_mode").and_then(|v| v.as_str()), Some("list"));
+
+        let (action, params) =
+            action_and_params("brushes_panel_content", "set_brush_thumbnail_size:large")
+                .expect("Large Thumbnail View is a menu row");
+        assert_eq!(action, "set_brush_thumbnail_size");
+        assert_eq!(params.get("size").and_then(|v| v.as_str()), Some("large"));
+
+        // A single-action row is NOT folded, so its command is the bare action
+        // and its params come along untouched.
+        let (action, params) =
+            action_and_params("brushes_panel_content", "toggle_brush_library_persistent")
+                .expect("Make Persistent is a menu row");
+        assert_eq!(action, "toggle_brush_library_persistent");
+        assert!(params.is_empty());
+
+        // A command that names no row (and the empty command a disabled
+        // placeholder carries) resolves to nothing rather than to a wrong row.
+        assert!(action_and_params("brushes_panel_content", "no_such_command").is_none());
+        assert!(action_and_params("brushes_panel_content", "").is_none());
+    }
 
     #[test]
     fn menu_items_from_yaml_reads_boolean_panel() {

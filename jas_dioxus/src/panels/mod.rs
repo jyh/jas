@@ -325,6 +325,127 @@ mod tests {
         assert!(!panel_is_checked(PanelKind::Align, "toggle_use_preview_bounds", &state));
     }
 
+    /// The PRODUCTION route for a Brushes menu click: the folded command the
+    /// menu view dispatches must reach the panel's declared action WITH its
+    /// params, the action's generic `set_panel_state` must land in the Brushes
+    /// panel's own state, and the check mark must follow.
+    ///
+    /// Before this landed the chain broke twice over. `brushes_panel::dispatch`
+    /// handed the FOLDED command (`set_brush_view_mode:list`) to
+    /// `dispatch_action` with an empty params map, so no action of that name
+    /// existed and nothing ran; and had it run,
+    /// `renderer::apply_set_panel_state_with_ctx` dispatched on the effect's
+    /// `key` alone, ignored the `panel: brushes` the effect names, and fell
+    /// through to the STROKE panel. jas_dioxus stored no Brushes panel state at
+    /// all, so every Brushes check mark evaluated the declared default forever
+    /// while JasSwift's shared panel store moved with the user.
+    #[test]
+    fn brushes_menu_click_moves_the_check_mark() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+
+        // The view-mode radio moves, and with it the enabled-ness of the three
+        // thumbnail-size rows (brushes.yaml gates those on view_mode).
+        brushes_panel::dispatch("set_brush_view_mode:list", addr, &mut state);
+        assert!(panel_is_checked(PanelKind::Brushes, "set_brush_view_mode:list", &state),
+            "List View should be checked after the menu click");
+        assert!(!panel_is_checked(PanelKind::Brushes, "set_brush_view_mode:thumbnail", &state),
+            "Thumbnail View should have lost its check mark");
+
+        // A second, independent key: the two radios do not share a slot.
+        brushes_panel::dispatch("set_brush_thumbnail_size:large", addr, &mut state);
+        assert!(panel_is_checked(PanelKind::Brushes, "set_brush_thumbnail_size:large", &state));
+        assert!(!panel_is_checked(PanelKind::Brushes, "set_brush_thumbnail_size:small", &state));
+        // ...and the first write survived the second.
+        assert!(panel_is_checked(PanelKind::Brushes, "set_brush_view_mode:list", &state));
+    }
+
+    /// Two panels declare a `thumbnail_size` and both write it through the SAME
+    /// generic `set_panel_state` effect. A handler that dispatches on the
+    /// effect's `key` alone — which is what this app did — cannot tell them
+    /// apart, so this is the sharpest statement of why the `panel:` the effect
+    /// names has to be read.
+    #[test]
+    fn brushes_and_swatches_keep_separate_thumbnail_sizes() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+        let addr = PanelAddr {
+            group: GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+
+        swatches_panel::dispatch("set_swatch_thumbnail_size:medium", addr, &mut state);
+        brushes_panel::dispatch("set_brush_thumbnail_size:large", addr, &mut state);
+
+        assert!(panel_is_checked(
+            PanelKind::Swatches, "set_swatch_thumbnail_size:medium", &state),
+            "the Swatches size must not follow the Brushes write");
+        assert!(panel_is_checked(
+            PanelKind::Brushes, "set_brush_thumbnail_size:large", &state),
+            "the Brushes size must not follow the Swatches write");
+    }
+
+    /// Where this app WRITES a declared panel key and where it READS one back
+    /// have to be the same place.
+    ///
+    /// `panel_menu::typed_panel_slot_keys` names the five (panel, key) pairs a
+    /// panel-named `set_panel_state` is routed into a typed `AppState` slot for
+    /// instead of into the generic per-panel table; `panel_menu_ctx` builds the
+    /// scope a panel menu evaluates against. This drives each pair END TO END —
+    /// the real write path, then the real read path — because a weaker test
+    /// (does the key APPEAR in the context?) is answered by the bundle's
+    /// declared defaults and cannot fail.
+    #[test]
+    fn every_typed_write_target_round_trips_through_the_menu_context() {
+        let claimed = panel_menu::typed_panel_slot_keys();
+        assert_eq!(claimed.len(), 5, "the typed-slot census changed; add a probe below");
+        for (content_id, key) in claimed {
+            // A value the key's own enum / type accepts and that is NOT the
+            // declared default, so a write that silently does nothing reds.
+            let (value_expr, expected) = match (content_id, key) {
+                ("color_panel_content", "mode") => ("\"cmyk\"", serde_json::json!("cmyk")),
+                ("swatches_panel_content", "thumbnail_size") =>
+                    ("\"large\"", serde_json::json!("large")),
+                ("symbols_panel_content", "selected_symbol") =>
+                    ("\"star\"", serde_json::json!("star")),
+                ("concepts_panel_content", "selected_concept") =>
+                    ("\"triangle\"", serde_json::json!("triangle")),
+                ("layers_panel_content", "type_filter") =>
+                    ("[\"path\"]", serde_json::json!(["path"])),
+                other => panic!("no probe for {other:?}"),
+            };
+            let layout = WorkspaceLayout::default_layout();
+            let mut state = test_app_state(layout);
+            let before = panel_menu::panel_menu_ctx(content_id, &state)["panel"][key].clone();
+            assert_ne!(
+                before, expected,
+                "{content_id}/{key}: the probe equals the default and cannot fail"
+            );
+
+            let mut sps = serde_json::Map::new();
+            sps.insert("panel".into(), serde_json::Value::String(content_id.to_string()));
+            sps.insert("key".into(), serde_json::Value::String(key.to_string()));
+            sps.insert("value".into(), serde_json::Value::String(value_expr.to_string()));
+            crate::interpreter::renderer::apply_set_panel_state_with_ctx(&sps, &mut state, None);
+
+            assert_eq!(
+                panel_menu::panel_menu_ctx(content_id, &state)["panel"][key],
+                expected,
+                "{content_id} writes `{key}` somewhere panel_menu_ctx cannot see"
+            );
+            // ...and the generic table did not ALSO take a copy: a key with two
+            // homes is the split-brain this routing exists to prevent.
+            assert!(
+                state.panel_state.get(content_id).map_or(true, |m| !m.contains_key(key)),
+                "{content_id}/{key} landed in BOTH the typed slot and the generic table"
+            );
+        }
+    }
+
     #[test]
     fn panel_is_checked_defaults_false() {
         let layout = WorkspaceLayout::default_layout();
@@ -376,6 +497,7 @@ mod tests {
             symbols_selected: None,
             properties_constrain: false,
             concepts_selected: None,
+            panel_state: std::collections::HashMap::new(),
         }
     }
 }
