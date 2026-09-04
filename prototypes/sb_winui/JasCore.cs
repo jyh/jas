@@ -18,7 +18,7 @@ internal static unsafe class JasCore
 
     /// <summary>Status codes from <c>ffi_paint.rs</c>. Mirrored, not guessed.</summary>
     internal const int PaintOk = 0;
-    internal const int PaintNullSurface = 1;
+    internal const int PaintNullSurface = 1
     internal const int PaintNotASurface = 2;
     /// <summary>
     /// The two surfaces disagree on size or format, so the copy would be DROPPED.
