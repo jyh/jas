@@ -434,21 +434,34 @@ direct prerequisites for this vision. The most relevant:
   (CI `.github/workflows/test.yml:108` and `:648-649`) covers per-app widget-kind dispatch;
   `scripts/check_action_implementations.py` (CI `:121` and `:652-653`) covers the actions
   behind a widget. Both are CI-wired and both run their own `--self-test` first.
-- **Add the validator cross-reference layer** — 🟡 **one of four sub-checks done.** ⛔ This
+- **Add the validator cross-reference layer** — 🟡 **two of four sub-checks done.** ⛔ This
   line was **split** from the one above on 2026-09-03 rather than ticked, because the two
   halves are in different states and a single tick would have erased three open gates.
   Measured against the layer's own four-check definition: *every `action:` reference
   resolves* ✅ (`scripts/check_action_refs.py`, plus the reference interpreter's own test);
-  *every `$state` read has a declaration* ⬜ **absent**; *no duplicate ids* ⬜ **absent for
-  workspace ids** (the only id check is per-tool filename-stem matching, which is one tool
-  at a time, not uniqueness); *enum values match declared* 🟡 **partial** — `schema/` covers
+  *every `$state` read has a declaration* ⬜ **absent**; *no duplicate ids* ✅ **done for
+  workspace ids** — `scripts/check_workspace_ids.py`, wired on both platform families (the
+  ubuntu *workspace.json up-to-date* job and the Windows *Structural gates* step;
+  `.github/workflows/test.yml:65` and `:700-701` when written). 16 collectors over the 90
+  YAML sources the loader actually reads, uniqueness **per namespace**, with the one
+  cross-namespace clause read out of the code rather than assumed (`actions:` and
+  `native_intercepts:` are one action-verb table in `check_action_refs._resolvable`). It
+  reads the SOURCES and composes them into nodes, not the compiled bundle: `safe_load` keeps
+  the LAST of two duplicate mapping keys and raises nothing, so a duplicate is already gone
+  from `workspace.json` before any bundle-reading gate sees it. The per-tool filename-stem
+  match named in the old wording as "the only id check" is still exactly that, and still
+  cannot see two tool files claiming one id — the merge drops one before the validator
+  runs. *enum values match declared* 🟡 **partial** — `schema/` covers
   app, tool, elements, features and preferences, while panels, dialogs, menubar, toolbar and
   actions have no schema at all.
-  **The three real, named, unbuilt gates are therefore:** a `$state`-read declaration gate; a
-  workspace duplicate-id gate; and schemas for panels/dialogs/menubar/toolbar/actions, which
-  is what would make the enum check real rather than partial.
-  ⚠️ Related and unrepaired: `workspace_interpreter/validator.py`'s docstring names itself
-  the home of two validation layers it does not implement.
+  **The two real, named, unbuilt gates are therefore:** a `$state`-read declaration gate; and
+  schemas for panels/dialogs/menubar/toolbar/actions, which is what would make the enum check
+  real rather than partial.
+  ✅ The related defect this line used to carry as unrepaired —
+  `workspace_interpreter/validator.py`'s docstring naming itself the home of two validation
+  layers it does not implement — was repaired in the same pull request as the gate above.
+  The docstring now lists what the module validates today and points at where each other
+  layer lives, including the one that lives nowhere.
 
 ---
 
