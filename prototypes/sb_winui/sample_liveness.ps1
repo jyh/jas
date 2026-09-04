@@ -65,7 +65,7 @@ function Save-SbSamples {
 Save-SbSamples
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
-foreach ($t in ($At | Sort-Object) {
+foreach ($t in ($At | Sort-Object)) {
     while ($sw.Elapsed.TotalSeconds -lt $t) { Start-Sleep -Milliseconds 100 }
     $p = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if ($null -eq $p) {

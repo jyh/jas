@@ -395,7 +395,17 @@ function Read-SbReceipt {
         return @{ Ok = $false; Data = $null; Reason = "the $Label receipt belongs to sitting '$($data.sitting)' and this run is sitting '$mine' -- a figure from another sitting is a figure from another box state" }
     }
     if ($mine -eq 'no-sitting') {
-        $age = ((Get-Date) - [datetime]::Parse([string]$data.written)).TotalMinutes
+        # ⛔ PARSED DEFENSIVELY, AND WITH THE INVARIANT CULTURE. The callers run
+        # under `$ErrorActionPreference = 'Stop'`, so a throw here would kill the
+        # whole run over a stale receipt -- an unreadable timestamp must refuse the
+        # FIGURE, never the RUN.
+        $age = 0.0
+        try {
+            $written = [datetime]::Parse([string]$data.written, [Globalization.CultureInfo]::InvariantCulture)
+            $age = ((Get-Date) - $written).TotalMinutes
+        } catch {
+            return @{ Ok = $false; Data = $null; Reason = "the $Label receipt carries no readable timestamp ('$($data.written)'), and with no sitting id there is nothing else to scope it by" }
+        }
         if ($age -gt 60) {
             return @{ Ok = $false; Data = $null; Reason = ("the $Label receipt is {0:N0} minutes old and carries no sitting id (both runs were driven by hand) -- refusing to price this run with it" -f $age) }
         }

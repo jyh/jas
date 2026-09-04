@@ -41,6 +41,19 @@
 # two-row grid whose second row is `Auto` (the status line), so the canvas starts
 # at the client origin. It is stated here because it is an assumption about
 # `MainWindow.xaml` that this file cannot check.
+#
+# ⛔ THERE IS NO `-Scale` PARAMETER HERE AND THERE NEVER WAS, WHICH IS WHY
+# `verify_window.ps1` NO LONGER HAS ONE EITHER. The factor comes from
+# `GetDpiForWindow` and from nothing else, so a caller's `-Scale 1.5` reached this
+# gesture in no way at all -- measured on kenai 2026-09-03 (PR #110), where a run
+# driven with it read identically to one without it, down to the digit.
+#
+# ⚠️ AND `GetDpiForWindow` IS HONEST ABOUT A DISHONEST WINDOW. On a DPI-UNAWARE
+# process Windows bitmap-virtualises the window and returns 96 for it correctly,
+# so this script computes `scale = 1` correctly and the gesture lands at 2/3 of
+# the asked point on a 150% display. Nothing here can detect that; the two numbers
+# that CAN are `client=` below and the shell's own `surface=`, and the harness
+# asserts their ratio against the shell's reported `scale=` (O4.8).
 
 [CmdletBinding()]
 param(

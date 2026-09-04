@@ -202,7 +202,13 @@ if (-not $NoRebuild -and -not $DryRun) {
 # The document
 # ===========================================================================
 $svgAbs = $null
-$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay')
+# ⛔ `o6` IS IN THIS LIST THOUGH NO SCENE IS CALLED THAT. It is a PSEUDO-SCENE
+# whose two runs both drive `retained`, and this list is keyed by what the CALLER
+# asked for, not by what the runs resolve to -- so leaving it out would have
+# resolved no document, set SB_SVG empty, and made both O6 runs refuse by name on
+# a knob the operator did set. The guard below catches the next one of these
+# instead of leaving it to be discovered on the box.
+$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'o6')
 $needsSvg = ($Stay -and ($svgScenes -contains $Scene)) -or
             (@($Scenes | Where-Object { $svgScenes -contains $_ }).Count -gt 0)
 if ($needsSvg) {
@@ -401,6 +407,20 @@ $runs = @()
 foreach ($s in $Scenes) {
     if ($runPlan.ContainsKey($s)) { $runs += $runPlan[$s] }
     else { $runs += @{ Name = $s; Scene = $s; Env = @{}; Args = @() } }
+}
+
+# ⛔ AND THE DOCUMENT IS CHECKED AGAINST THE RUNS, NOT AGAINST THE ASKED NAMES.
+# `$needsSvg` above reads `$Scenes`, which holds what the caller typed; a
+# pseudo-scene expands to runs whose scenes are different, and a document that was
+# never resolved reaches the app as an EMPTY SB_SVG -- the scene then refuses by
+# name and the refusal reads as a defect in the scene. Refused here instead, where
+# the cause is.
+$needSvgRuns = @($runs | Where-Object { $svgScenes -contains $_.Scene })
+if ($needSvgRuns.Count -gt 0 -and $null -eq $svgAbs) {
+    Write-Host "REFUSED: $($needSvgRuns.Count) of the $($runs.Count) planned run(s) drive a scene that opens a document" -ForegroundColor Red
+    Write-Host "         ($(($needSvgRuns | ForEach-Object { $_.Scene } | Sort-Object -Unique) -join ', ')), and no document was resolved."
+    Write-Host "         -Scenes named $($Scenes -join ', '); add the run's resolved scene to the harness's document-scene list."
+    exit 4
 }
 
 if ($DryRun) {
