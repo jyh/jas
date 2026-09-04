@@ -168,7 +168,19 @@ $resizeRepaints = @($repaints | Where-Object { $_ -match 'cause=resize' })
 # SizeChanged event at 984x526) belongs to a measurement with a date and a
 # surface, and a constant pasted here would be inherited by every comparison
 # forever without anyone re-reading it.
-$beforeText = 'before: not supplied'
+#
+# ⛔ AND THE COMPARISON NAMES ITS AXES. `SB_MODE` is honoured ONLY by
+# `Benchmark()` -- `OffscreenMode` is read at the offscreen-target creation and
+# inside the benchmark loop, and NOWHERE ELSE -- so `Repaint()` always paints the
+# back buffer directly. Every REPAINT row below is therefore a DIRECT-route row
+# whatever `SB_MODE` says, and the row's own `SB_MODE=` prefix is about the
+# process, not about this frame. The "before" figure was taken on the
+# OFFSCREEN+copy route. Two routes, and a reader who is not told compares them as
+# if they were one; the present cost was measured route-independent
+# (4.84-5.06 ms), which is what makes the comparison legitimate rather than what
+# makes it unnecessary to state.
+$routeText = 'this run''s REPAINT rows: route=DIRECT (Repaint always paints the back buffer; SB_MODE is honoured only by Benchmark, so the row prefix SB_MODE= describes the process, not this frame)'
+$beforeText = "before: not supplied. $routeText"
 if (-not [string]::IsNullOrWhiteSpace($Before)) {
     $beforeVal = $Before
     if (Test-Path $Before) {
@@ -176,7 +188,7 @@ if (-not [string]::IsNullOrWhiteSpace($Before)) {
         $m = [regex]::Match($raw, '([0-9]+(\.[0-9]+)?)')
         if ($m.Success) { $beforeVal = $m.Groups[1].Value }
     }
-    $beforeText = "before: $beforeVal ms (supplied via -Before '$Before')"
+    $beforeText = "before: $beforeVal ms on the OFFSCREEN+copy route (supplied via -Before '$Before'). $routeText"
 }
 
 if ($resizeRepaints.Count -eq 0) {
