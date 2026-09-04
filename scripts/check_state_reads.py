@@ -210,10 +210,17 @@ INTERP_RE = re.compile(r"\{\{(.+?)\}\}")
 # deleting this set must make it RED.
 PROSE_KEYS = ("description", "summary")
 
-# Namespace heads that exist but are not state tables. Listed so the census can
-# print what it stepped over instead of leaving it to be inferred from silence.
+# Namespace heads that exist but are not state tables. Each has its own
+# producer -- see WHAT IT DOES NOT COVER. The census COUNTS the strings that
+# mention one (`other-namespace` below), so the surface this gate steps over is
+# a printed number and not a sentence in this docstring. It counts MENTIONS,
+# not resolved reads: these strings are never parsed here, deliberately, because
+# parsing them would turn a namespace this gate does not judge into a source of
+# refusals.
 NON_STATE_HEADS = ("param", "data", "active_document", "event", "preferences",
                    "theme", "workspace", "panels", "panes", "selection")
+OTHER_HEAD_RE = re.compile(
+    r"(?<![\w.])(" + "|".join(NON_STATE_HEADS) + r")\.")
 
 
 class Refusal(Exception):
@@ -433,7 +440,8 @@ COLLECTORS = ("scalars", "expr-strings",
 # Printed on a passing run beside the collectors, but allowed to be zero: an
 # uncovered surface can legitimately be empty, and requiring it non-empty would
 # make emptying it a failure.
-CENSUS = ("ambient-panel", "ambient-dialog", "warn-init-tier", "warn-shadow")
+CENSUS = ("ambient-panel", "ambient-dialog", "other-namespace",
+          "warn-init-tier", "warn-shadow")
 
 # The `get:` / `set:` position inside a dialog's `state:` block. The bindings
 # there are NOT eval_context's: `get_dialog` / `set_dialog`
@@ -596,7 +604,11 @@ def _walk(node, relpath, keypath, owner, report, in_prop=False):
     elif isinstance(node, yaml.ScalarNode):
         report.bump("scalars")
         text = node.value
-        if not isinstance(text, str) or not HEAD_RE.search(text):
+        if not isinstance(text, str):
+            return
+        if OTHER_HEAD_RE.search(text):
+            report.bump("other-namespace")
+        if not HEAD_RE.search(text):
             return
         report.bump("expr-strings")
         site = _site(relpath, node)
@@ -799,6 +811,9 @@ def _fixture():
             "      - id: menu_new\n"
             "        action: new_document\n"
             "        enabled_when: \"state.g_count > 0\"\n"
+            "      - id: menu_paste\n"
+            "        action: paste\n"
+            "        enabled_when: \"active_document.has_selection\"\n"
         ),
         "workspace/actions.yaml": (
             "actions:\n"
@@ -1055,6 +1070,14 @@ def _self_test():
         if not reg.counts.get(collector):
             failures.append(f"collector {collector!r} found nothing in the "
                             f"clean fixture")
+    #    The uncovered-surface counter is not in COLLECTORS -- it is allowed to
+    #    be zero on a tree that has none -- but it must WORK, or the census
+    #    would print a reassuring 0 for a surface it cannot see at all.
+    if not reg.counts.get("other-namespace"):
+        failures.append("the `other-namespace` census counter found nothing in "
+                        "a fixture that mentions active_document -- a counter "
+                        "that cannot count prints 0 and reads like a clean "
+                        "tree")
 
     # 6. ONE PLANTED UNDECLARED READ PER SPELLING. Each mutates a copy of the
     #    fixture case 5 has just proven green, so the RED is attributable to
