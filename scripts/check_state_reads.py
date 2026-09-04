@@ -478,16 +478,26 @@ def _resolve(report, segs, site, keypath, owner, in_prop):
         return
 
     if head == "tool":
-        if len(segs) < 3:
-            report.bump("ambient-tool")
-            return
         report.bump("read-tool")
+        if len(segs) < 2:
+            report.finding("tool", ".".join(segs), site, keypath,
+                           "the tool namespace",
+                           "a bare `tool` names the whole {id: table} map, "
+                           "which no widget binds")
+            return
         tid = segs[1]
         if tid not in report.decls.tool:
             report.finding("tool", ".".join(segs), site, keypath,
                            "workspace/tools/*.yaml entity ids",
                            f"no tool is filed under {tid!r}, so ctx['tool']"
                            f"[{tid!r}] is absent and the read is null")
+        elif len(segs) < 3:
+            # `tool.<id>` with no key reads the tool's WHOLE table. That is a
+            # legal value (a dict), so the only thing to judge here is that the
+            # tool exists -- which the branch above just did. Counted, not
+            # skipped: a read this gate steps over silently is a read it lies
+            # about. Live count today: 0.
+            pass
         elif segs[2] not in report.decls.tool[tid]:
             report.finding(
                 "tool", ".".join(segs), site, keypath,
@@ -821,6 +831,21 @@ def _fixture():
             "        disabled: \"state.g_flag\"\n"
             "      content: \"now {{ panel.a_key }} of {{ state.g_count }}\"\n"
         ),
+        "workspace/panels/beta.yaml": (
+            "id: beta_panel\n"
+            "type: panel\n"
+            "state:\n"
+            "  b_key:\n"
+            "    type: string\n"
+            "    default: \"\"\n"
+            "content:\n"
+            "  type: container\n"
+            "  children:\n"
+            "    - id: beta_row\n"
+            "      type: row\n"
+            "      bind:\n"
+            "        value: \"panel.b_key\"\n"
+        ),
         "workspace/tools/pen.yaml": (
             "id: pen\n"
             "cursor: crosshair\n"
@@ -853,6 +878,21 @@ def _fixture():
             "        bind:\n"
             "          value: \"dialog.d_key\"\n"
             "          visible: \"dialog.d_derived > 0\"\n"
+        ),
+        "workspace/dialogs/second.yaml": (
+            "second_dialog:\n"
+            "  modal: true\n"
+            "  state:\n"
+            "    e_key:\n"
+            "      type: number\n"
+            "      default: 0\n"
+            "  content:\n"
+            "    type: container\n"
+            "    children:\n"
+            "      - id: second_row\n"
+            "        type: row\n"
+            "        bind:\n"
+            "          value: \"dialog.e_key\"\n"
         ),
         "workspace/templates/slider.yaml": (
             "slider_row:\n"
@@ -891,12 +931,33 @@ def _planted_cases(clean):
     variant("a read of an unknown tool", "workspace/actions.yaml",
             'if: "tool.pen.mode == \'drawing\'"',
             'if: "tool.nosuch.mode == \'drawing\'"', "tool")
+    # The two-segment form reads a tool's WHOLE table, so the only judgement
+    # available is that the tool exists. Without this arm the `len(segs) < 3`
+    # branch would be a silent skip that reads exactly like a clean tree.
+    # TWO segments exactly -- `tool.<id>` with no key. The first version of
+    # this arm used `tool.nosuch.length`, which is THREE segments and drove the
+    # ordinary path; the mutant that skips `len(segs) < 3` survived it. A probe
+    # must exercise the branch it is named after.
+    variant("a whole-table read of an unknown tool", "workspace/menubar.yaml",
+            'enabled_when: "state.g_count > 0"',
+            'enabled_when: "tool.nosuch"', "tool")
     # RIGHT NAME, WRONG SCOPE. `a_key` IS declared -- in the panel -- and the
     # global table has no such key. There is no fallback search
     # (expr_eval.py:106-110), so this is null and must red.
     variant("a key declared only in another scope", "workspace/menubar.yaml",
             'enabled_when: "state.g_count > 0"',
             'enabled_when: "state.a_key > 0"', "state")
+    # OWNER IDENTITY. `b_key` IS declared -- in the OTHER panel -- and
+    # `e_key` IS declared, in the OTHER dialog. A gate that pooled every panel
+    # (or every dialog) into one table passes every arm above and fails only
+    # here. Both were added after a mutant that resolved every dialog read
+    # against the alphabetically-first dialog SURVIVED a one-dialog fixture.
+    variant("a key declared only in ANOTHER panel", "workspace/panels/alpha.yaml",
+            'disabled: "state.g_flag"', 'disabled: "panel.b_key"', "panel")
+    variant("a key declared only in ANOTHER dialog",
+            "workspace/dialogs/first.yaml",
+            'visible: "dialog.d_derived > 0"', 'visible: "dialog.e_key > 0"',
+            "dialog")
     # A dialog property getter has NO `dialog` binding of its own.
     variant("a dialog.* read inside a dialog property getter",
             "workspace/dialogs/first.yaml",
@@ -924,6 +985,11 @@ def _green_cases(clean):
     variant("an ambient dialog read in menubar.yaml", "workspace/menubar.yaml",
             'enabled_when: "state.g_count > 0"',
             'enabled_when: "dialog.whatever > 0"')
+    # The same two-segment shape on a tool that EXISTS reads its whole table,
+    # which is a legal value. Without this arm a resolver that redded every
+    # two-segment read would pass the planted case above.
+    variant("a whole-table read of a tool that exists", "workspace/menubar.yaml",
+            'enabled_when: "state.g_count > 0"', 'enabled_when: "tool.pen"')
     # PROSE: a description naming a key that does not exist stays green.
     variant("a bogus read inside prose", "workspace/state.yaml",
             "and dialog.d_ghost freely; neither is ever evaluated.",
@@ -1113,7 +1179,8 @@ def _self_test():
     real_prose = g["PROSE_KEYS"]
     g["PROSE_KEYS"] = ()
     try:
-        prose_docs = _green_cases(clean)[2][1]
+        prose_docs = [d for lbl, d in _green_cases(clean)
+                      if lbl == "a bogus read inside prose"][0]
         got = evaluate(prose_docs)
         # Prose is not an expression: with the exclusion gone the description
         # reaches the parser, fails it, and lands in `unreadable` -- a REFUSAL,
