@@ -49,8 +49,9 @@ or green this gate:
     (An empty `SB_SCENE` resolves to `benchmark` per the freeze's §1.2, so it
     reaches the same guarded arm and needs no separate clause here.)
 
-(c) ZERO clamps, banned as WHOLE IDENTIFIERS in four spellings: `Math.Max`,
-    `Math.Clamp`, `System.Math.Max`, and the ternary `w < 1 ? 1 : w`. Whole
+(c) ZERO clamps, banned as WHOLE IDENTIFIERS in the four spellings the freeze
+    names -- `Math.Max`, `Math.Clamp`, `System.Math.Max`, the ternary
+    `w < 1 ? 1 : w` -- plus that ternary's mirror `w > 1 ? w : 1`. Whole
     identifiers because a substring ban would also hit `MathMaxima`, and a gate
     that reds on an unrelated name is a gate someone weakens. `Math.Abs` and
     `Math.Round` are NOT banned -- the ban is on the clamp, not on arithmetic.
@@ -115,7 +116,9 @@ BENCHMARK_METHOD = "Benchmark"
 # The scene literal that marks the dispatch's benchmark arm.
 BENCHMARK_SCENE = '"benchmark"'
 
-# The three entry kinds every surface dimension must pass through Decide.
+# The entry METHODS. The third entry kind -- the `SizeChanged` handler -- is
+# found by subscription, not by name, so it is not in this tuple; the floor
+# below counts all three.
 ENTRY_METHODS = ("Attach", "Resize")
 
 DECIDE = re.compile(r"(?<![A-Za-z0-9_])SurfacePolicy\s*\.\s*Decide\s*\(")
@@ -123,6 +126,10 @@ DECIDE = re.compile(r"(?<![A-Za-z0-9_])SurfacePolicy\s*\.\s*Decide\s*\(")
 # ---- the four clamp spellings, WHOLE IDENTIFIER --------------------------
 # `(?<![A-Za-z0-9_.])` on the left keeps `Foo.Math.Max` matched (it is the same
 # clamp) while `(?![A-Za-z0-9_])` on the right refuses `Math.Maxima`.
+# COUNTED, not len(CLAMPS): three regexes carry FIVE spellings between them, and
+# the count is printed on a passing run. A number derived from the wrong
+# collection reads as measured and is off by two.
+CLAMP_SPELLINGS = 5
 CLAMPS = {
     "Math.Max / Math.Clamp":
         re.compile(r"(?<![A-Za-z0-9_])(?:System\s*\.\s*)?Math\s*\.\s*(?:Max|Clamp)(?![A-Za-z0-9_])"),
@@ -748,7 +755,7 @@ def main() -> int:
         return 1
     print(f"check_shell_interaction_path: OK ({len(files)} shell file(s) scanned; "
           f"one SB_FRAMES read, in Benchmark; whitelist {sorted(SB_FRAMES_WHITELIST)}; "
-          f"no clamp in any of {len(CLAMPS)} banned spellings; every Attach/Resize/"
+          f"no clamp in any of {CLAMP_SPELLINGS} banned spellings; every Attach/Resize/"
           f"SizeChanged entry passes through SurfacePolicy.Decide)")
     return 0
 

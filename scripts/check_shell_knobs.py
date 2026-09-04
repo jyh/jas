@@ -45,10 +45,12 @@ Then, against the knob table in `prototypes/sb_winui/README.md`:
   2. Every table row names a variable read somewhere in the census.    RED
   3. PREFIX COLLISION: for each scene VALUE `v` listed in the `SB_SCENE` row,
      `SB_SCENE_<V>` (case-insensitively) must not be another knob's name.  RED
-  4. `SB_*` tokens in README PROSE outside the table are WARNs with
-     `file:line`, never a red. The "Historical" section deliberately keeps
+  4. `SB_*` tokens in README PROSE outside the knob-table SECTION are WARNs
+     with `file:line`, never a red. The "Historical" section deliberately keeps
      `SB_SKIP_PAINT` as narrative, and a gate that reds on kept history is a
-     gate someone deletes history to satisfy.
+     gate someone deletes history to satisfy. (SECTION, not table: prose under
+     the `Knobs` heading and beside its table is not warned about, because that
+     is where the table's own explanation belongs.)
 
 THE TABLE'S SHAPE, decided here because N6 writes the table against this gate:
 
