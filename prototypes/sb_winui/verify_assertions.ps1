@@ -32,7 +32,24 @@ $tidRows = @($rows | Where-Object { $_ -match 'ui-tid=[0-9]+' })
 # PRINTED. A count is the one thing this assertion cannot do without: a check that
 # examines nothing returns success and looks exactly like a measurement, so zero
 # painting rows is `NOT RUN`, never a pass.
-$paintingRows = @($tidRows | Where-Object {
+#
+# ⛔ AND THE SUBJECT OF BOTH O3 CLAUSES IS THE ROWS THE RENDER THREAD WROTE.
+# This is F-A, and it was 8 of the second sitting's 11 FAILs -- one row, repeated
+# once per run. `STARTUP` is written at first layout ON THE UI THREAD, before the
+# render thread exists, so it carried `render-tid=0 paint-tid=0 present-tid=0
+# render-has-dispatcher=true` and O3.2 convicted the render thread of a flag
+# describing the XAML one. PR #115 deliberately left O3.2 "over every row
+# carrying the tail" because that clause is about the THREAD and holds on a row
+# that painted nothing -- TRUE of every row the shell wrote AT THE TIME, and the
+# shell wave then added one that carries the tail from the UI thread. The same
+# wave-boundary failure mode one row further on.
+#
+# The shell now prints `n/a` on such a row; `Test-SbRenderThreadRow` requires a
+# NON-ZERO INTEGER, so `n/a` and the pre-repair `0` are both excluded and this
+# harness reads a bisected build correctly. THE COUNT IS PRINTED and zero is
+# `NOT RUN`, because a check that examines nothing returns success.
+$renderRows = @($tidRows | Where-Object { Test-SbRenderThreadRow $_ })
+$paintingRows = @($renderRows | Where-Object {
     $pt = Get-SbField $_ 'paint-tid'
     ($null -ne $pt) -and ($pt -ne '0')
 })
@@ -41,8 +58,11 @@ $uiStallMs = Get-KnobMs 'SB_UI_STALL_MS'
 $renderStallMs = Get-KnobMs 'SB_RENDER_STALL_MS'
 $synthAsked = -not [string]::IsNullOrWhiteSpace($env:SB_SYNTH_DRAG)
 
+# The hash rows carry the completion-row verdict prefix since this PR; the
+# pattern is built by `Get-SbRowPattern` (harness_common.ps1) so the waits and
+# the readers share one definition of what a completion row looks like.
 function Get-SbHashRow([string]$label) {
-    return Select-SbRow $rows ("`t" + [regex]::Escape($label) + " surface=")
+    return Select-SbRow $rows (Get-SbRowPattern $label ' surface=')
 }
 
 # ===========================================================================
@@ -50,25 +70,34 @@ function Get-SbHashRow([string]$label) {
 # Asserted on EVERY scene, because the claim is about every row.
 # ===========================================================================
 
+$renderScope = "$($renderRows.Count) of this run's $($tidRows.Count) tid row(s) were written by the render thread (render-tid is a non-zero integer) and are the subject; the other $($tidRows.Count - $renderRows.Count) read render-tid=n/a or render-tid=0 and were written before the render thread existed"
+
 if ($tidRows.Count -eq 0) {
     Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
         "this run wrote no row carrying the tid tail -- there is nothing to assert residency over"
-    Add-NotRun 'O3.2 render-has-dispatcher=false' `
+    Add-NotRun 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' `
         "this run wrote no row carrying the tid tail"
+} elseif ($renderRows.Count -eq 0) {
+    # ⛔ NOT A PASS. Zero examined rows is the shape that returns success and
+    # looks exactly like a measurement.
+    Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
+        "NOT RUN: no row of this run was written by the render thread. $renderScope"
+    Add-NotRun 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' `
+        "NOT RUN: no row of this run was written by the render thread, so there is no thread to make the claim about. $renderScope" -Row $tidRows[-1]
 } elseif ($paintingRows.Count -eq 0) {
     Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
-        "this run wrote $($tidRows.Count) row(s) with the tid tail and NONE of them painted (every one reads paint-tid=0, as a DUMP row does). Residency is a claim about a painted frame, and there is no painted frame here to make it about"
+        "the render thread wrote $($renderRows.Count) row(s) and NONE of them painted (every one reads paint-tid=0, as a DUMP row does). Residency is a claim about a painted frame, and there is no painted frame here to make it about. $renderScope"
     if ($paintOnUi) {
         Add-NotRun 'O3.C2 SB_PAINT_ON_UI=1 design-red control' `
-            "the control needs a row that PAINTED to break, and this run wrote none ($($tidRows.Count) tid row(s), all paint-tid=0)"
+            "the control needs a row that PAINTED to break, and this run wrote none ($($renderRows.Count) render-thread row(s), all paint-tid=0)"
     }
-    $dispBad = @($tidRows | Where-Object { (Get-SbField $_ 'render-has-dispatcher') -ne 'false' })
+    $dispBad = @($renderRows | Where-Object { (Get-SbField $_ 'render-has-dispatcher') -ne 'false' })
     if ($dispBad.Count -eq 0) {
-        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'PASS' `
-            -Detail "all $($tidRows.Count) rows carrying the tid tail (this clause is about the THREAD and holds on a row that painted nothing, which is why it is not restricted to painting rows)" -Row $tidRows[-1]
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' -Verdict 'PASS' `
+            -Detail "all $($renderRows.Count) rows the render thread wrote (this clause is about the THREAD and holds on a row that painted nothing, which is why it is not restricted to painting rows). $renderScope" -Row $renderRows[-1]
     } else {
-        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'FAIL' `
-            -Detail "$($dispBad.Count) of $($tidRows.Count) rows report a dispatcher on the render thread" -Row $dispBad[0]
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' -Verdict 'FAIL' `
+            -Detail "$($dispBad.Count) of $($renderRows.Count) rows the render thread wrote report a dispatcher on it. $renderScope" -Row $dispBad[0]
     }
 } else {
     $tidBad = @()
@@ -80,7 +109,7 @@ if ($tidRows.Count -eq 0) {
         if ($null -eq $ui -or $null -eq $rt -or $null -eq $pt -or $null -eq $st) { continue }
         if (-not ($pt -eq $st -and $st -eq $rt -and $rt -ne $ui)) { $tidBad += $r }
     }
-    $tidScope = "$($paintingRows.Count) of this run's $($tidRows.Count) tid row(s) painted (paint-tid != 0) and are the subject; the other $($tidRows.Count - $paintingRows.Count) carry paint-tid=0"
+    $tidScope = "$($paintingRows.Count) of the $($renderRows.Count) row(s) the render thread wrote painted (paint-tid != 0) and are the subject; the other $($renderRows.Count - $paintingRows.Count) carry paint-tid=0. $renderScope"
     if ($paintOnUi) {
         # ⛔ THE DESIGN-RED CONTROL. Under SB_PAINT_ON_UI=1 the paint and the
         # present are marshalled through the dispatcher, so `present-tid ==
@@ -108,13 +137,13 @@ if ($tidRows.Count -eq 0) {
         }
     }
 
-    $dispBad = @($tidRows | Where-Object { (Get-SbField $_ 'render-has-dispatcher') -ne 'false' })
+    $dispBad = @($renderRows | Where-Object { (Get-SbField $_ 'render-has-dispatcher') -ne 'false' })
     if ($dispBad.Count -eq 0) {
-        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'PASS' `
-            -Detail "all $($tidRows.Count) rows" -Row $tidRows[-1]
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' -Verdict 'PASS' `
+            -Detail "all $($renderRows.Count) rows the render thread wrote. $renderScope" -Row $renderRows[-1]
     } else {
-        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'FAIL' `
-            -Detail "$($dispBad.Count) of $($tidRows.Count) rows report a dispatcher on the render thread" -Row $dispBad[0]
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false (rows the RENDER THREAD wrote)' -Verdict 'FAIL' `
+            -Detail "$($dispBad.Count) of $($renderRows.Count) rows the render thread wrote report a dispatcher on it. $renderScope" -Row $dispBad[0]
     }
 }
 
@@ -216,7 +245,7 @@ if ($Scene -ne 'stall') {
 
 # ---- the post-stall backlog yields EXACTLY ONE row -------------------------
 if ($Scene -eq 'stall') {
-    $stallRow = Select-SbRow $rows "`tSTALL render-stall="
+    $stallRow = Select-SbRow $rows (Get-SbRowPattern 'STALL' ' render-stall=')
     $armedRow = Select-SbRow $rows 'STALL ARMED render-stall='
     if ($null -eq $stallRow -or $null -eq $armedRow) {
         Add-NotRun 'O3.4 exactly ONE cause=resize row after the stall, at the LATEST size' `
@@ -457,66 +486,124 @@ if ($Scene -ne 'retained') {
     # shell, and today's behaviour is kept exactly.
     $mutField = if ($null -ne $rowAM) { Get-SbField $rowAM 'mutation' } else { $null }
     if ($mutField -eq 'NONE') {
-        Add-NotRun 'O1.2a the chosen element CHANGED between the dumps' `
+        Add-NotRun 'O1.2a the SELECTED element CHANGED between the dumps' `
             "NOT RUN: no gesture -- the A-MUT row reads mutation=NONE, so the retained walk ran with no hand and there is no asked delta to check. O1.4 (A-MUT == A-prime) still asserts, and it is the clause that carries the retention claim" -Row $rowAM
-        Add-NotRun 'O1.2b the delta in the dump equals the asked delta' `
+        Add-NotRun 'O1.2b the SELECTED element moved by the asked delta' `
             'NOT RUN: no gesture (A-MUT reads mutation=NONE)' -Row $rowAM
+        Add-NotRun 'O1.2c the app''s selected path == the harness-chosen target path' `
+            'NOT RUN: no gesture (A-MUT reads mutation=NONE), so the app selected nothing to compare the chooser against' -Row $rowAM
     } elseif ($null -eq $handAsked) {
-        Add-NotRun 'O1.2 the harness-chosen element moved by the asked delta' `
+        Add-NotRun 'O1.2 the SELECTED element moved by the asked delta' `
             'no gesture was driven by this harness (-Hand not given and -SynthFromDump not used), so there is no asked delta to check the dump against'
+        Add-NotRun 'O1.2c the app''s selected path == the harness-chosen target path' `
+            'no gesture was driven by this harness, so there is no chosen target and no selection to compare'
     } elseif (-not (Test-Path $afterDump)) {
-        Add-NotRun 'O1.2 the harness-chosen element moved by the asked delta' `
+        Add-NotRun 'O1.2 the SELECTED element moved by the asked delta' `
             "sb-doc-after.json was not written -- the gesture never closed"
+        Add-NotRun 'O1.2c the app''s selected path == the harness-chosen target path' `
+            'sb-doc-after.json was not written, so the app''s own answer was never recorded'
     } else {
-        $beforeEl = Get-SbElementByPath $beforeDump $handTarget.Path
-        $afterEl = Get-SbElementByPath $afterDump $handTarget.Path
+        # ⭐ F-B: THE SUBJECT IS THE ELEMENT THE APP SELECTED, NOT THE ONE THE
+        # HARNESS AIMED AT. Measured on kenai 2026-09-04, on a run in which
+        # EVERYTHING WORKED: the chooser aimed at the centre of the largest
+        # filled shape (`$.layers[0].children[0]`, a 72x72 rect) and asserted
+        # against it, while the app's hit test returned the TOPMOST shape over
+        # that point (`$.layers[0].children[2]`) and moved it by exactly the
+        # asked delta -- `(36.666664, 22.666668)` against the asked `(37,23)` at
+        # scale 1.5. Two reds landed on a perfect gesture, and O1.2b's FAIL
+        # branch printed a sentence about the element that was false of it.
+        #
+        # ⛔ THE REPAIR WAS ALREADY IN THE RECEIPT. The after-dump carries
+        # `selection[0].path` -- the APP's own answer to "which element did the
+        # gesture take" -- so O1.2a/b read THAT, and the disagreement between it
+        # and the chooser becomes its own clause (O1.2c) instead of being
+        # silently charged to the app. The chooser is repaired too (it mirrors
+        # the reference interpreter's hit test now), so O1.2c is expected to
+        # PASS; it exists because a chooser that agrees by luck and a chooser
+        # that agrees by rule are indistinguishable without it.
+        $appSelPath = Get-SbSelectionPath $afterDump
+        $readPath = $appSelPath
+        $pathSource = "read at the after-dump's selection[0].path -- the APP's own answer to which element the gesture took"
+        if ($null -eq $appSelPath) {
+            $readPath = $handTarget.Path
+            $pathSource = "read at the HARNESS-CHOSEN path: this after-dump carries no selection[0].path (the older dump shape), so the app's own answer is not available. NAMED, because this is exactly the reading that was wrong when the two disagree"
+        }
+        $beforeEl = Get-SbElementByPath $beforeDump $readPath
+        $afterEl = Get-SbElementByPath $afterDump $readPath
         if ($null -eq $beforeEl -or $null -eq $afterEl) {
-            Add-NotRun 'O1.2 the harness-chosen element moved by the asked delta' `
-                "the chosen element ($($handTarget.Path)) is not at the same path in both dumps -- the harness will not match elements by guessing"
+            Add-NotRun 'O1.2 the SELECTED element moved by the asked delta' `
+                "the element at $readPath is not at the same path in both dumps ($pathSource) -- the harness will not match elements by guessing"
         } else {
             $bJson = ($beforeEl | ConvertTo-Json -Depth 20 -Compress)
             $aJson = ($afterEl | ConvertTo-Json -Depth 20 -Compress)
             if ($bJson -eq $aJson) {
-                Add-Assert -Name 'O1.2a the chosen element CHANGED between the dumps' -Verdict 'FAIL' `
-                    -Detail "$($handTarget.Type) id='$($handTarget.Id)' at $($handTarget.Path) is byte-identical before and after a gesture that asked it to move by ($($handAsked.Dx),$($handAsked.Dy))"
+                Add-Assert -Name 'O1.2a the SELECTED element CHANGED between the dumps' -Verdict 'FAIL' `
+                    -Detail "the element at $readPath is byte-identical before and after a gesture that asked it to move by ($($handAsked.Dx),$($handAsked.Dy)) -- $pathSource"
             } else {
-                Add-Assert -Name 'O1.2a the chosen element CHANGED between the dumps' -Verdict 'PASS' `
-                    -Detail "$($handTarget.Type) id='$($handTarget.Id)' at $($handTarget.Path) differs before -> after"
+                Add-Assert -Name 'O1.2a the SELECTED element CHANGED between the dumps' -Verdict 'PASS' `
+                    -Detail "the element at $readPath differs before -> after -- $pathSource"
             }
-            # THE DELTA ARM, AND IT IS SEPARATE. The tool may express a move as a
-            # coordinate change or as a transform; only the first is readable as a
-            # number here, and the second is a NAMED gap rather than a pass.
-            $bx = $null; $ax = $null; $by = $null; $ay = $null
-            foreach ($pair in @(@('x', 'y'), @('cx', 'cy'))) {
-                $px = $pair[0]; $py = $pair[1]
-                if (($beforeEl.PSObject.Properties.Name -contains $px) -and
-                    ($afterEl.PSObject.Properties.Name -contains $px)) {
-                    $bx = [double]$beforeEl.$px; $ax = [double]$afterEl.$px
-                    $by = [double]$beforeEl.$py; $ay = [double]$afterEl.$py
-                    break
-                }
-            }
-            if ($null -eq $bx) {
-                Add-NotRun 'O1.2b the delta in the dump equals the asked delta' `
-                    "the chosen element carries no x/y or cx/cy pair to read -- the delta arm cannot read this element's move"
-            } elseif ([math]::Abs(($ax - $bx) - $handAsked.Dx) -le 1.0 -and
-                      [math]::Abs(($ay - $by) - $handAsked.Dy) -le 1.0) {
-                Add-Assert -Name 'O1.2b the delta in the dump equals the asked delta' -Verdict 'PASS' `
-                    -Detail ("moved ({0},{1}) against the asked ({2},{3}), within 1 document unit" -f ($ax - $bx), ($ay - $by), $handAsked.Dx, $handAsked.Dy)
-            } elseif (($ax -eq $bx) -and ($ay -eq $by)) {
+            # THE DELTA ARM, AND IT IS SEPARATE. The element the app selects may
+            # be a CONTAINER whose child carries the coordinates (the kenai run's
+            # `[0,2]` is a group holding a line), so the origin is read by the
+            # SAME RULE on both dumps and the rule is printed: `x/y`, `cx/cy`, or
+            # the origin of the subtree's bounding box. Two readings taken by
+            # different rules are not a delta.
+            $bo = Get-SbElementOrigin $beforeEl
+            $ao = Get-SbElementOrigin $afterEl
+            # ⛔ THE TOLERANCE IS 1/scale DIP, THE SAME ONE O4.6 PASSES ON. The
+            # hand is aimed in physical pixels and the document is in DIPs, so
+            # one pixel of rounding is 1/scale of a document unit -- a fixed
+            # 1.0 was looser than the measurement at scale 1.5 and would be
+            # tighter than it at scale 0.5.
+            $s1 = [double]$Scale
+            if ($s1 -le 0) { $s1 = 1.0 }
+            $tolD = 1.0 / $s1
+            if ($null -eq $bo -or $null -eq $ao) {
+                Add-NotRun 'O1.2b the SELECTED element moved by the asked delta' `
+                    "the element at $readPath carries no readable position -- no x/y, no cx/cy, and nothing under it with coordinates -- so this arm cannot price its move"
+            } elseif ($bo.How -ne $ao.How) {
+                Add-NotRun 'O1.2b the SELECTED element moved by the asked delta' `
+                    "the two dumps' positions were read by DIFFERENT rules (before: $($bo.How); after: $($ao.How)). Two readings taken by different rules are not a delta"
+            } elseif ([math]::Abs(($ao.X - $bo.X) - $handAsked.Dx) -le $tolD -and
+                      [math]::Abs(($ao.Y - $bo.Y) - $handAsked.Dy) -le $tolD) {
+                Add-Assert -Name 'O1.2b the SELECTED element moved by the asked delta' -Verdict 'PASS' `
+                    -Detail ("moved ({0:N2},{1:N2}) against the asked ({2},{3}), tolerance +-{4:N3} DIP (1/scale, scale={5}), reading {6} at {7} -- {8}" -f
+                             ($ao.X - $bo.X), ($ao.Y - $bo.Y), $handAsked.Dx, $handAsked.Dy, $tolD, $s1, $bo.How, $readPath, $pathSource)
+            } elseif (($ao.X -eq $bo.X) -and ($ao.Y -eq $bo.Y)) {
                 $bt = if ($beforeEl.PSObject.Properties.Name -contains 'transform') { [string]$beforeEl.transform } else { '(absent)' }
                 $at = if ($afterEl.PSObject.Properties.Name -contains 'transform') { [string]$afterEl.transform } else { '(absent)' }
                 if ($bt -ne $at) {
-                    Add-NotRun 'O1.2b the delta in the dump equals the asked delta' `
-                        "the element's x/y did not change; its transform did ($bt -> $at). The move is real (O1.2a passed) but this arm reads COORDINATES and cannot price a transform -- a NAMED gap, not a pass"
+                    Add-NotRun 'O1.2b the SELECTED element moved by the asked delta' `
+                        "the element's position did not change; its transform did ($bt -> $at). The move is real (O1.2a passed) but this arm reads COORDINATES and cannot price a transform -- a NAMED gap, not a pass"
                 } else {
-                    Add-Assert -Name 'O1.2b the delta in the dump equals the asked delta' -Verdict 'FAIL' `
-                        -Detail "neither the coordinates nor the transform moved, yet the element's JSON differs -- the change is somewhere this arm does not read"
+                    Add-Assert -Name 'O1.2b the SELECTED element moved by the asked delta' -Verdict 'FAIL' `
+                        -Detail "neither the position ($($bo.How)) nor the transform moved, yet the element's JSON differs -- the change is somewhere this arm does not read"
                 }
             } else {
-                Add-Assert -Name 'O1.2b the delta in the dump equals the asked delta' -Verdict 'FAIL' `
-                    -Detail ("moved ({0},{1}) against the asked ({2},{3})" -f ($ax - $bx), ($ay - $by), $handAsked.Dx, $handAsked.Dy)
+                Add-Assert -Name 'O1.2b the SELECTED element moved by the asked delta' -Verdict 'FAIL' `
+                    -Detail ("moved ({0:N2},{1:N2}) against the asked ({2},{3}), tolerance +-{4:N3} DIP (1/scale, scale={5}), reading {6} at {7}" -f
+                             ($ao.X - $bo.X), ($ao.Y - $bo.Y), $handAsked.Dx, $handAsked.Dy, $tolD, $s1, $bo.How, $readPath)
             }
+        }
+
+        # ---- O1.2c: THE CHOOSER, AGAINST THE APP -----------------------------
+        # ⛔ A MISMATCH HERE IS A FINDING ABOUT THE HARNESS, NOT ABOUT THE APP,
+        # and it says so in the detail. It is the clause that would have named
+        # F-B in one line instead of producing two reds about an element the
+        # gesture never touched.
+        if ($null -eq $appSelPath) {
+            Add-NotRun 'O1.2c the app''s selected path == the harness-chosen target path' `
+                'the after-dump carries no selection[0].path, so the app made no statement for the chooser to be compared against (the older dump shape)'
+        } elseif ($null -eq $handTarget) {
+            Add-NotRun 'O1.2c the app''s selected path == the harness-chosen target path' `
+                "the app selected $appSelPath and this harness chose no target for this run"
+        } elseif ($appSelPath -eq $handTarget.Path) {
+            Add-Assert -Name 'O1.2c the app''s selected path == the harness-chosen target path' -Verdict 'PASS' `
+                -Detail "both $appSelPath. The chooser aimed at ($($handAsked.X),$($handAsked.Y)) DIP, the centre of $($handTarget.AimPath), and resolved the target by $($handTarget.Rule)"
+        } else {
+            Add-Assert -Name 'O1.2c the app''s selected path == the harness-chosen target path' -Verdict 'FAIL' `
+                -Detail "the app selected $appSelPath and this harness chose $($handTarget.Path). ⛔ THIS IS A FINDING ABOUT THE CHOOSER, NOT ABOUT THE APP: the app's hit test is the authority on which element a press takes, and O1.2a/b were read against ITS answer. The chooser aimed at ($($handAsked.X),$($handAsked.Y)) DIP, the centre of $($handTarget.AimPath), and resolved by $($handTarget.Rule)"
         }
     }
 
@@ -687,34 +774,98 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
         $synthParts = @($env:SB_SYNTH_DRAG -split ',')
         if ($synthParts.Count -ge 5) { $wantK = [int]$synthParts[4] } else { $wantK = 2 }
     }
-    # ⛔ THE INJECTOR IS NOW EXACT, SO A MISMATCH BELONGS TO THE WINDOW. PR #110
-    # measured `move=8` at k=7 (twice) and `move=2` at k=2, while the seam control
-    # -- the same element, the same delta, through the C ABI -- read `move=7`. The
-    # injector emits ONE positioning move BEFORE the press and EXACTLY k moves
-    # after it, and its button events no longer carry a position (a positioned
-    # LEFTDOWN/LEFTUP is a motion as well as a click). The receipt's
-    # `post-press-moves` and `normalized-collisions` are what separate the two
-    # remaining explanations, and the failure detail names them.
+    # ⭐ `move != k` IS THE DRAG'S DURATION, NOT ITS STEP COUNT -- F-C, and the
+    # ruling on it. PR #110 measured `move=8` at k=7 and blamed the injector; PR
+    # #115 removed the positioned button events and k=7 read 8 again. The second
+    # sitting varied `-HandSettleMs`, which is the arm that breaks the confound
+    # (at a fixed 40 ms pause the step count and the elapsed time are perfectly
+    # correlated), and 13 configurations settle it:
+    #
+    #   k=7 @ 10 ms (70 ms drag)  -> 7, 7      the exact config that always read 8
+    #   k=4 @ 40 ms (160 ms)      -> 4         and k=4 @ 100 ms (400 ms) -> 5
+    #   k=1 @ 300 ms (300 ms)     -> 2         one step, one extra: not about k
+    #   k=2 @ 400 ms (800 ms)     -> 4         TWO extras: periodic, not one-shot
+    #
+    # ⚠️ THE SOURCE IS CHARACTERISED, NOT IDENTIFIED. One arrival per few hundred
+    # ms while the button is held fits every reading on record; the mechanism is a
+    # NAMED OPEN FINDING in the README and is not claimed here.
+    #
+    # ⛔ SO O4.4 IS `move >= k` WITH THE EXTRAS PRICED, AND ITS BUDGET IS LOOSE
+    # ON PURPOSE -- which is why it is not the only arm. `O4.4x` drives the same
+    # oracle UNDER the boundary, where the answer must be exactly k, and that is
+    # the arm that can still convict the app of miscounting. `sitting.ps1` runs a
+    # THIRD `pointer` run at `-HandSettleMs 10` (the second one driving a real
+    # hand) so both arms land in one sitting.
     $handNote = ''
+    $postPressMs = 0
+    $postPressKnown = $true
+    $postPressSource = "no injector receipt for this run: the SYNTHETIC arm is replayed inside the shell and never crosses a real pointer stream, so the post-press drag is 0 ms, the extras budget is 0 and an EXACT reading is required"
     if ($Hand -and (Test-Path $handReceipt)) {
         $rcTxt = (Get-Content $handReceipt) -join ' | '
         $mPost = [regex]::Match($rcTxt, 'post-press-moves=([0-9]+)')
         $mColl = [regex]::Match($rcTxt, 'normalized-collisions=([0-9]+)')
+        $mMs = [regex]::Match($rcTxt, 'post-press-ms=([0-9]+)')
         if ($mPost.Success) {
             $handNote = " The injector sent post-press-moves=$($mPost.Groups[1].Value)" +
                         $(if ($mColl.Success) { " with normalized-collisions=$($mColl.Groups[1].Value)" } else { '' }) +
                         ", and its button events carry no position."
         }
-    }
-    if ($move -eq [string]$wantK) {
-        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'PASS' -Detail "k=$wantK asked, move=$move reported (press=$press release=$release).$handNote" -Row $gestureRow
-    } else {
-        $diag = if ($null -ne $move -and [int]$move -gt $wantK) {
-            "move > k: the window saw an arrival the injector did not send -- a motion synthesised on pointer capture, or a real mouse moved during the run"
+        if ($mMs.Success) {
+            $postPressMs = [int]$mMs.Groups[1].Value
+            # ⛔ FIRST-POST-PRESS-MOVE TO RELEASE, WHICH IS THE COLUMN THE
+            # BOUNDARY WAS CALIBRATED ON (k x settle). The receipt also carries
+            # `button-held-ms`, one settle longer; quoting that one here would
+            # move the budget by a step against a boundary measured on the other.
+            $postPressSource = "the injector's own receipt: post-press-ms=$postPressMs (its first post-press move to its release, measured by the hand that sent them)"
         } else {
-            "move < k: coalescence, a UIPI-discarded event, or two steps landing on one normalized grid point (the receipt's normalized-collisions says which)"
+            $postPressKnown = $false
+            $postPressSource = "the injector's receipt carries no post-press-ms= field (an older send_hand.ps1), and the extras can only be priced against the drag's DURATION"
         }
-        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'FAIL' -Detail "k=$wantK asked, move=$move reported. $diag.$handNote" -Row $gestureRow
+    } elseif ($Hand) {
+        $postPressKnown = $false
+        $postPressSource = "the hand was dispatched and wrote no receipt, so this run has no post-press duration to price the extras against"
+    }
+
+    if ($null -eq $move) {
+        Add-NotRun "$o4Prefix.4 move >= k, extras priced against the drag's duration" `
+            "the gesture row carries no readable move= field" -Row $gestureRow
+        Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
+            "the gesture row carries no readable move= field" -Row $gestureRow
+    } elseif (-not $postPressKnown) {
+        Add-NotRun "$o4Prefix.4 move >= k, extras priced against the drag's duration" `
+            "$postPressSource. Read anyway: k=$wantK asked, move=$move reported (press=$press release=$release).$handNote" -Row $gestureRow
+        Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
+            "$postPressSource, so this run cannot be shown to be under the boundary. Read anyway: k=$wantK asked, move=$move reported" -Row $gestureRow
+    } else {
+        $mc = Test-SbMoveCount -Move ([int]$move) -K $wantK -PostPressMs $postPressMs
+        if ($mc.Ok) {
+            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'PASS' `
+                -Detail "$($mc.Text) (press=$press release=$release). The budget is one arrival per 160 ms of post-press drag, rounded up -- the boundary measured on kenai 2026-09-04, where the source is a periodic system arrival while the button is held: CHARACTERISED, NOT IDENTIFIED. Duration source: $postPressSource.$handNote" -Row $gestureRow
+        } elseif ($mc.Extras -lt 0) {
+            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'FAIL' `
+                -Detail "$($mc.Text) -- move < k: coalescence, a UIPI-discarded event, or two steps landing on one normalized grid point (the receipt's normalized-collisions says which). Duration source: $postPressSource.$handNote" -Row $gestureRow
+        } else {
+            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'FAIL' `
+                -Detail "$($mc.Text) -- MORE extras than a $($postPressMs)ms drag can account for at one arrival per 160 ms. That is outside the characterisation, so it is a finding about this run rather than the known periodic arrival. Duration source: $postPressSource.$handNote" -Row $gestureRow
+        }
+
+        $ex = Test-SbMoveExact -Move ([int]$move) -K $wantK -PostPressMs $postPressMs
+        if (-not $ex.Applies -and $postPressMs -le 0) {
+            # NOT the boundary case, and saying so: with no real pointer stream
+            # there is no drag to be under the boundary. O4.4's budget is 0 here,
+            # so the exact count is already what it required.
+            Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
+                "$($ex.Text) -- this run drove no real pointer stream (post-press=0ms), so there is no held-button drag for a periodic arrival to occur during. O4.4's budget is 0 for exactly that reason and has already required the exact count. Duration source: $postPressSource" -Row $gestureRow
+        } elseif (-not $ex.Applies) {
+            Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
+                "$($ex.Text) -- this run's post-press drag is past the 160-180 ms boundary, where one extra arrival is EXPECTED and an exact assertion would red on a run behaving as characterised. The exact arm is driven by the sitting's -HandSettleMs 10 pointer run. Duration source: $postPressSource" -Row $gestureRow
+        } elseif ($ex.Ok) {
+            Add-Assert -Name "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" -Verdict 'PASS' `
+                -Detail "$($ex.Text) -- under the boundary the window sees exactly what the injector sent, so this is the arm that can convict the app of miscounting. Duration source: $postPressSource.$handNote" -Row $gestureRow
+        } else {
+            Add-Assert -Name "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" -Verdict 'FAIL' `
+                -Detail "$($ex.Text) -- the drag was short enough that no periodic arrival is expected, and the count still differs. Duration source: $postPressSource.$handNote" -Row $gestureRow
+        }
     }
 
     if ($HandEmpty) {
@@ -976,8 +1127,17 @@ if (-not $squeezeAsked) {
         Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
             -Detail "$($deliveredRows.Count) SQUEEZE delivered rows in one run; exactly one is written per squeeze, so this run's receipt cannot be read as one decision" -Row $deliveredRows[-1]
     } elseif ($delivered -eq 'NONE') {
+        # ⛔ THE READING IS "NOT REACHABLE ON THIS WINDOW MANAGER", AND IT IS A
+        # MEASUREMENT, NOT AN ABSENCE. Kenai 2026-09-04, Windows 11 26200:
+        # `PreferredMinimumHeight = 1` was ACCEPTED (the presenter is not the
+        # floor), the request was `AppWindow.Resize(w, 35)` -- a squeeze of the
+        # CLIENT area to zero through a 35-px WINDOW -- and the manager delivered
+        # NO SizeChanged at all within the 2 s deadline. The accept arm (O6.3, at
+        # 1000x600) proves the machinery works, so `SurfacePolicy`'s zero-height
+        # branch is unexercised because NOTHING ARRIVES, not because it declined.
+        # The reason text says which of those two it is, and quotes the row.
         Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
-            'the squeeze was delivered NONE -- it never reached the window manager at all. That is a third finding, distinguishable at last, and it is not a verdict on the policy' -Row $deliveredRow
+            "NOT RUN: not reachable on this window manager -- the receipt reads '$deliveredRow'. The squeeze was delivered NONE: no SizeChanged arrived within the deadline, so the zero-height condition was never produced and the policy was never asked. That is a third finding, distinguishable at last, and it is not a verdict on the policy; O6.3's PROBE arm is the control that proves the policy can accept" -Row $deliveredRow
     } elseif ($delivered -eq 'THREW') {
         Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
             'the squeeze request THREW, so the zero-height condition was never produced' -Row $deliveredRow

@@ -643,10 +643,34 @@ internal sealed unsafe class Canvas : IDisposable
     /// OWN SITE, and O3 asserts `paint-tid == present-tid == render-tid != ui-tid`
     /// on every row. `render-has-dispatcher=false` is the same claim from the
     /// other side: a thread WinUI knows nothing about has no dispatcher queue.
+    ///
+    /// ⛔ A ROW WRITTEN BEFORE THE RENDER THREAD EXISTS PRINTS `n/a`, NOT A
+    /// NUMBER, AND THAT IS A MEASURED DEFECT REPAIR. `STARTUP` is written at
+    /// first layout ON THE UI THREAD, before <see cref="RenderLoop"/> has run:
+    /// its whole tid tail was therefore zeros, and
+    /// `_renderHasDispatcher` -- initialised `true` so that an UNSET value can
+    /// never read as the reassuring one -- described the UI thread. Measured on
+    /// kenai 2026-09-04: that one row made O3.2 red in 8 of 8 runs, and the red
+    /// was true of the field and false of the claim. A row must not carry a
+    /// field it cannot mean, so `_renderTid == 0` (the render thread has not
+    /// reached its own first line) prints `n/a` for all four render-side fields
+    /// and keeps `ui-tid`, which the writing thread does know.
+    ///
+    /// ⚠️ `paint-tid=0` ON A ROW WHOSE `render-tid` IS A NUMBER STILL MEANS
+    /// ZERO, not n/a: a `DUMP` row painted nothing and says so. The two are
+    /// different readings and the harness reads them differently -- O3.1 counts
+    /// painting rows, O3.1/O3.2 count rows the render thread wrote.
     /// </summary>
-    internal string Tids() =>
-        $"ui-tid={_uiTid} render-tid={_renderTid} paint-tid={_paintTid} present-tid={_presentTid} "
-        + $"render-has-dispatcher={(_renderHasDispatcher ? "true" : "false")}";
+    internal string Tids()
+    {
+        if (_renderTid == 0)
+        {
+            return $"ui-tid={_uiTid} render-tid=n/a paint-tid=n/a present-tid=n/a "
+                 + "render-has-dispatcher=n/a";
+        }
+        return $"ui-tid={_uiTid} render-tid={_renderTid} paint-tid={_paintTid} present-tid={_presentTid} "
+             + $"render-has-dispatcher={(_renderHasDispatcher ? "true" : "false")}";
+    }
 
     public void Dispose()
     {
@@ -988,7 +1012,9 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (!_stallArmed) { return; }
         _stallArmed = false;
-        _report($"STALL render-stall={_stallSlept}ms stall-tid={_stallTid} "
+        // The verdict prefix: this row ENDS the `stall` scene, so it is the row
+        // the window title carries when the run finishes (see PaintAndHash).
+        _report($"RUSTOK STALL render-stall={_stallSlept}ms stall-tid={_stallTid} "
               + $"ui-stall={_uiStallMs}ms resize-during-stall={requested} "
               + $"resizes-in-drain={resizes} painted-after-stall={_width}x{_height} "
               + $"{Tids()}");
@@ -1388,7 +1414,9 @@ internal sealed unsafe class Canvas : IDisposable
             _mutation = "REAL";
             PaintAndHash("A-MUT");
         }
-        _report($"HAND CLOSED scene={scene} pointer=REAL doc={doc} loads(shell)={_loadsShell} "
+        // The verdict prefix: this row ENDS the `pointer` scene (see
+        // PaintAndHash for why every completion row carries one).
+        _report($"RUSTOK HAND CLOSED scene={scene} pointer=REAL doc={doc} loads(shell)={_loadsShell} "
               + $"{selField} the scene's completion is posted now "
               + $"surface={_width}x{_height} {Tids()}");
         PostToUi(() => SceneCompleted?.Invoke());
@@ -1612,8 +1640,17 @@ internal sealed unsafe class Canvas : IDisposable
             var mutation = string.Equals(label, "A-MUT", StringComparison.Ordinal)
                 ? $"mutation={_mutation} "
                 : "";
+            // ⛔ THE VERDICT PREFIX, AND IT IS THE TITLE ORACLE'S REPAIR.
+            // `Report` puts the LAST row in the window title, and the session-1
+            // oracle requires `| RUSTOK` in it -- this seat's own hard-won rule,
+            // since a bare title passes a window that says RUSTFAIL. The
+            // `retained` scene's last row is `A'`, which carried no verdict, so
+            // three successful runs on kenai 2026-09-04 (`retained`, `stall`,
+            // the o6 squeeze) were FAILED by the oracle. The rule is right; the
+            // completion rows were missing the field it reads.
+            var hashVerdict = (hash is null || failure is not null) ? "RUSTFAIL" : "RUSTOK";
             _report(
-                $"{label} surface={_width}x{_height} hash={hash ?? "n/a"} "
+                $"{hashVerdict} {label} surface={_width}x{_height} hash={hash ?? "n/a"} "
               + $"engines-created={created} engines-freed={freed} loads(shell)={_loadsShell} "
               + $"{mutation}{Tids()}");
             // ⛔ THE NEXT RESIZE STEP IS POSTED FROM HERE, NOT FROM THE SETTLE.
@@ -1741,7 +1778,11 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
 
-        LastStatus = $"BENCHMARK frames={frames} {route} {SurfaceLabel()} on {Adapter} :: "
+        // `surface=` IS A FIELD HERE AND PROSE EVERYWHERE ELSE, DELIBERATELY.
+        // O2.2's band source reads this row with the same anchored field reader
+        // every other row is read with; before this it scraped `([0-9]+x[0-9]+)px`
+        // out of the label and got the doubly-scaled half.
+        LastStatus = $"BENCHMARK frames={frames} {route} surface={SurfaceLabel()} on {Adapter} :: "
                    + $"{Stat("paint", paint)} | {Stat("paint+copy", copy)} | {Stat("present", present)} "
                    + $"{Tids()}";
         return true;
@@ -2863,22 +2904,39 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
-    /// The surface, stated so it cannot be misread.
+    /// The surface, stated so it cannot be misread -- ONCE, in PHYSICAL pixels.
     ///
-    /// Under no scaling this is one number. Under scaling it names BOTH sizes and
-    /// the factor between them, because the buffer is the DIP one and the screen
-    /// is the physical one -- and a reader quoting "the surface" from this line
-    /// would otherwise quote a resolution that was never rendered (jyh/jas#16).
+    /// ⛔ THIS LABEL APPLIED THE SCALE A SECOND TIME, AND THE READING WAS
+    /// IMPOSSIBLE. Until the shell wave <see cref="_width"/> held the DIP size,
+    /// so the label multiplied by the composition scale to name the screen. The
+    /// wave made the swapchain PHYSICAL and this line was not re-read: on kenai
+    /// 2026-09-04 the `BENCHMARK` row said
+    /// `2858x1429DIP buffer @scale 1.5x1.5 -&gt; 4287x2144px on screen` for a
+    /// 2858x1429 surface on a panel 3840 px wide. `4287x2144` is not a size this
+    /// machine can display, and the harness's band source keyed on exactly that
+    /// half. A number derived twice is worse than a number missing once: the
+    /// missing one refuses, and this one was quoted.
+    ///
+    /// So the size is stated once, in the units the buffer is actually allocated
+    /// in, and the DIP client is named BESIDE it as a derived convenience rather
+    /// than as a second surface. `physical` is in the text so a row cannot be
+    /// read under the old convention by accident.
+    ///
+    /// ⚠️ EVERY MEASUREMENT IN THIS DIRECTORY'S README TAKEN BEFORE
+    /// 2026-09-04 WAS LABELLED THE OLD WAY, and those tables are not rewritten:
+    /// a number keeps the label it was taken under. The README says so where the
+    /// tables are.
     /// </summary>
     private string SurfaceLabel()
     {
-        if (Math.Abs(_scaleX - 1f) < 0.001f && Math.Abs(_scaleY - 1f) < 0.001f)
+        if ((Math.Abs(_scaleX - 1f) < 0.001f && Math.Abs(_scaleY - 1f) < 0.001f)
+            || _scaleX <= 0.001f || _scaleY <= 0.001f)
         {
-            return $"{_width}x{_height}px";
+            return $"{_width}x{_height} physical";
         }
-        var pw = (uint)Math.Round(_width * _scaleX);
-        var ph = (uint)Math.Round(_height * _scaleY);
-        return $"{_width}x{_height}DIP buffer @scale {_scaleX:0.##}x{_scaleY:0.##} "
-             + $"-> {pw}x{ph}px on screen (COMPOSITOR UPSCALES; jyh/jas#16)";
+        var dw = (uint)Math.Round(_width / _scaleX);
+        var dh = (uint)Math.Round(_height / _scaleY);
+        return $"{_width}x{_height} physical @scale {_scaleX:0.##}x{_scaleY:0.##} "
+             + $"(client {dw}x{dh} DIP)";
     }
 }

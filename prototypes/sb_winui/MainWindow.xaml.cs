@@ -800,7 +800,12 @@ public sealed partial class MainWindow : Window
         // The deadline has done its job either way; a timer left running would
         // fire into a flag that is already false and read as a second answer.
         _squeezeTimer?.Stop();
-        Report($"SQUEEZE delivered {delivered} (requested height {_squeezeRequestedHeight}; "
+        // The verdict prefix: on an `o6` squeeze run this receipt is the LAST
+        // row of the run, so it is what the window title carries and what the
+        // session-1 oracle reads (see Canvas.PaintAndHash). RUSTOK is about the
+        // RECEIPT having been written, not about the squeeze having landed --
+        // `delivered NONE` is a legitimate outcome and O6.1 is what prices it.
+        Report($"RUSTOK SQUEEZE delivered {delivered} (requested height {_squeezeRequestedHeight}; "
              + $"min-height policy={_squeezeMinHeight}) policy={policy} {_canvas.Tids()}");
     }
 

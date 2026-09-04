@@ -285,8 +285,24 @@ $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
 Start-Sleep -Milliseconds $SettleMs
 
 # The press, AT THE CURSOR. No MOVE, no ABSOLUTE: dx/dy are ignored for motion.
+$heldSw = [System.Diagnostics.Stopwatch]::StartNew()
 $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
 Start-Sleep -Milliseconds $SettleMs
+
+# ⭐ THE DRAG'S DURATION IS A RECEIPT FIELD NOW, BECAUSE IT IS THE VARIABLE THE
+# `move != k` DEFECT TURNED OUT TO BE ABOUT. Measured on kenai 2026-09-04 across
+# 13 configurations with `-SettleMs` varied: the window sees one EXTRA arrival
+# per few hundred ms while the button is held, and none at all under ~160 ms --
+# k=7 at 10 ms reads 7, k=1 at 300 ms reads 2. Without this field the harness
+# would have to RECOMPUTE the duration from k and the settle, which is the same
+# number derived by a second party instead of measured by the one that sent the
+# events.
+#
+# ⛔ `post-press-ms` IS FIRST-MOVE-TO-RELEASE, and that is the column the
+# boundary was calibrated on (k x settle). `button-held-ms` is press-to-release
+# and is a NOTE: it is the physically meaningful window, it is one settle longer,
+# and quoting one where the other was calibrated would move the budget by a step.
+$dragSw = [System.Diagnostics.Stopwatch]::StartNew()
 
 # k MOVES ALONG THE SEGMENT, the k-th landing exactly on the release point, and
 # NONE of them at the press point (i runs from 1, so t is never 0).
@@ -317,12 +333,16 @@ for ($i = 1; $i -le $Moves; $i++) {
 
 # The release, AT THE CURSOR -- which the k-th move has already put on the
 # release point. A positioned LEFTUP would be a (k+1)-th motion.
+$dragSw.Stop()
 $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
+$heldSw.Stop()
 
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")
+$log.Add(("post-press-ms={0} button-held-ms={1} settle-ms={2}" -f
+          [int]$dragSw.Elapsed.TotalMilliseconds, [int]$heldSw.Elapsed.TotalMilliseconds, $SettleMs))
 $log.Add("events-inserted=$sent expected=$($Moves + 3)")
 $log.Add("NOTE: SendInput returning the expected count proves the events were INSERTED, not that they ARRIVED. UIPI discards are invisible here by design; the shell's counters are the only oracle for arrival.")
-$log.Add("NOTE: post-press-moves is what the shell's move= must equal. move=k+1 means the window saw an arrival this injector did not send (a motion synthesised on capture, or a stray real mouse); move<k with normalized-collisions=0 means the window coalesced despite MOVE_NOCOALESCE.")
+$log.Add("NOTE: post-press-moves is the FLOOR of the shell's move=, not its value. Measured on kenai 2026-09-04: the window sees one EXTRA arrival per few hundred ms while the button is held (k=7 over 70ms reads 7; the same k=7 over 280ms reads 8; k=1 over 300ms reads 2; k=2 over 800ms reads 4). The source is a periodic system arrival, CHARACTERISED and NOT IDENTIFIED. O4.4 prices the extras against post-press-ms and O4.4x asserts equality under the 160ms boundary. move<k with normalized-collisions=0 still means the window coalesced despite MOVE_NOCOALESCE.")
 $log | Set-Content -Path $Out -Encoding utf8
 if ($sent -ne ($Moves + 3)) { exit 5 }
 exit 0

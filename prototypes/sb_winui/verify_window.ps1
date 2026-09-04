@@ -181,8 +181,16 @@ $liveReceipt = Join-Path $scratch 'sb-liveness.txt'
 # this run's mark. The leading tab is `Report`'s own separator, and it is there so
 # `A'` cannot be matched inside some other row's prose.
 $sceneSpec = @{
+    # ⛔ THE VERDICT PREFIX IS OPTIONAL IN THE PATTERN, AND THAT IS NOT
+    # LOOSENESS. The shell wave in this PR puts `RUSTOK `/`RUSTFAIL ` in front of
+    # every scene-COMPLETION row, because `Report` writes the last row into the
+    # window title and the session-1 oracle requires `| RUSTOK` there -- three
+    # successful runs were FAILED by it on kenai 2026-09-04. A pattern that
+    # REQUIRED the prefix would stop matching a bisected build's rows, which is
+    # the mirror defect of the one being repaired: this harness must read both
+    # shells. The tab is still the anchor, so `A'` cannot match inside prose.
     'retained' = @{
-        Done    = @("`tA' surface=")
+        Done    = @((Get-SbRowPattern "A'" " surface="))
         Label   = "the A' hash row (the round trip's H2)"
         Timeout = 150
     }
@@ -207,7 +215,7 @@ $sceneSpec = @{
         Timeout = 120
     }
     'stall' = @{
-        Done    = @("`tSTALL render-stall=")
+        Done    = @((Get-SbRowPattern 'STALL' ' render-stall='))
         Label   = "the STALL row (written by the POST-stall drain, not at the end of the sleep)"
         Timeout = 120
     }
@@ -284,118 +292,21 @@ function Add-NotRun {
 }
 
 # ---------------------------------------------------------------------------
-# THE DOCUMENT, AS THE HARNESS READS IT
+# THE DOCUMENT, AS THE HARNESS READS IT -- MOVED INTO `harness_common.ps1`
 # ---------------------------------------------------------------------------
 #
-# ⭐ THE DISCRIMINATOR LIVES HERE. O4's claim is not that a pointer arrived; it
-# is that a pointer arrived AT A POINT THE SHELL COULD NOT HAVE COMPUTED. The
-# point comes from `sb-doc-before.json`, which the shell WROTE and never reads
-# back, so an element chosen from it is chosen outside the app entirely. A
-# hardwired synthetic gesture cannot follow it, and that is the whole difference
-# between this and the marquee it replaces.
-
-function Get-SbFlatElements($node, [string]$path, $acc) {
-    if ($null -eq $node) { return }
-    # ⛔ SCALARS FIRST, AND `-isnot [psobject]` IS NOT THE TEST. Everything in
-    # PowerShell is a PSObject, including a string and a double, so that spelling
-    # excludes nothing and the walk would recurse into every leaf.
-    if ($node -is [string] -or $node -is [bool] -or $node -is [valuetype]) { return }
-    if ($node -is [System.Collections.IList]) {
-        for ($i = 0; $i -lt $node.Count; $i++) {
-            Get-SbFlatElements $node[$i] "$path[$i]" $acc
-        }
-        return
-    }
-    $props = @($node.PSObject.Properties | ForEach-Object { $_.Name })
-    if ($props -contains 'type') {
-        $acc.Add([pscustomobject]@{ Path = $path; Node = $node }) | Out-Null
-    }
-    foreach ($key in @('layers', 'children')) {
-        if ($props -contains $key) {
-            Get-SbFlatElements $node.$key "$path.$key" $acc
-        }
-    }
-}
-
-function Get-SbHitTarget([string]$JsonPath) {
-    if (-not (Test-Path $JsonPath)) { return $null }
-    $doc = Get-Content $JsonPath -Raw | ConvertFrom-Json
-    $flat = New-Object System.Collections.Generic.List[object]
-    Get-SbFlatElements $doc '$' $flat
-    $cands = @()
-    foreach ($e in $flat) {
-        $n = $e.Node
-        $props = @($n.PSObject.Properties | ForEach-Object { $_.Name })
-        $t = [string]$n.type
-        $hit = $null
-        $area = 0.0
-        if ($t -eq 'rect' -and ($props -contains 'x') -and ($props -contains 'width')) {
-            $hit = @{ X = [double]$n.x + ([double]$n.width / 2.0); Y = [double]$n.y + ([double]$n.height / 2.0) }
-            $area = [double]$n.width * [double]$n.height
-        } elseif (($t -eq 'ellipse' -or $t -eq 'circle') -and ($props -contains 'cx')) {
-            $rx = if ($props -contains 'rx') { [double]$n.rx } elseif ($props -contains 'r') { [double]$n.r } else { 0.0 }
-            $ry = if ($props -contains 'ry') { [double]$n.ry } elseif ($props -contains 'r') { [double]$n.r } else { $rx }
-            $hit = @{ X = [double]$n.cx; Y = [double]$n.cy }
-            $area = 4.0 * $rx * $ry
-        }
-        if ($null -eq $hit) { continue }
-        # FILLED FIRST. A stroke-only shape is a hairline at its centre: aiming
-        # there would test the hit test rather than the pointer seam, and a miss
-        # would be indistinguishable from an input failure.
-        $filled = 0
-        if (($props -contains 'fill') -and ($null -ne $n.fill)) { $filled = 1 }
-        $id = if ($props -contains 'id') { [string]$n.id } else { '' }
-        $cands += [pscustomobject]@{
-            Path = $e.Path; Id = $id; Type = $t; Filled = $filled; Area = $area
-            X = $hit.X; Y = $hit.Y; Node = $n
-        }
-    }
-    if ($cands.Count -eq 0) { return $null }
-    return @($cands | Sort-Object -Property @{Expression = 'Filled'; Descending = $true},
-                                            @{Expression = 'Area'; Descending = $true},
-                                            @{Expression = 'Path'; Descending = $false})[0]
-}
-
-# The furthest coordinate any element in the document reaches, so a point can be
-# shown to be OUTSIDE the artwork rather than assumed to be. Returns $null when
-# the document holds nothing with readable coordinates.
-function Get-SbDocExtent([string]$JsonPath) {
-    if (-not (Test-Path $JsonPath)) { return $null }
-    $doc = Get-Content $JsonPath -Raw | ConvertFrom-Json
-    $flat = New-Object System.Collections.Generic.List[object]
-    Get-SbFlatElements $doc '$' $flat
-    $maxX = $null
-    $maxY = $null
-    foreach ($e in $flat) {
-        $n = $e.Node
-        $props = @($n.PSObject.Properties | ForEach-Object { $_.Name })
-        $xs = @()
-        $ys = @()
-        if (($props -contains 'x') -and ($props -contains 'width')) {
-            $xs += ([double]$n.x + [double]$n.width); $ys += ([double]$n.y + [double]$n.height)
-        }
-        if ($props -contains 'cx') {
-            $r = if ($props -contains 'r') { [double]$n.r } elseif ($props -contains 'rx') { [double]$n.rx } else { 0.0 }
-            $xs += ([double]$n.cx + $r); $ys += ([double]$n.cy + $r)
-        }
-        foreach ($pair in @(@('x1', 'y1'), @('x2', 'y2'))) {
-            if ($props -contains $pair[0]) { $xs += [double]$n.($pair[0]); $ys += [double]$n.($pair[1]) }
-        }
-        foreach ($v in $xs) { if ($null -eq $maxX -or $v -gt $maxX) { $maxX = $v } }
-        foreach ($v in $ys) { if ($null -eq $maxY -or $v -gt $maxY) { $maxY = $v } }
-    }
-    if ($null -eq $maxX) { return $null }
-    return @{ MaxX = $maxX; MaxY = $maxY }
-}
-
-function Get-SbElementByPath([string]$JsonPath, [string]$Path) {
-    if (-not (Test-Path $JsonPath)) { return $null }
-    $doc = Get-Content $JsonPath -Raw | ConvertFrom-Json
-    $flat = New-Object System.Collections.Generic.List[object]
-    Get-SbFlatElements $doc '$' $flat
-    foreach ($e in $flat) { if ($e.Path -eq $Path) { return $e.Node } }
-    return $null
-}
+# ⛔ `Get-SbFlatElements`, `Get-SbHitTarget`, `Get-SbDocExtent` and
+# `Get-SbElementByPath` now live in `harness_common.ps1`, WITH THE CHOOSER'S
+# REPAIR, because they are pure functions over a parsed document and this file
+# cannot be dot-sourced without a Windows desktop. The one mechanism of this
+# harness that the box measured WRONG on 2026-09-04 -- the chooser aiming at the
+# largest filled shape while the app selects the topmost one over that point --
+# had no arm that could see it, and it could not have had one while it lived
+# here. `harness_selftest.ps1` drives them now, in CI, with no app.
+#
+# The discriminator itself is unchanged and is still the point: the aim comes
+# from `sb-doc-before.json`, which the shell WROTE and never reads back, so an
+# element chosen from it is chosen outside the app entirely.
 
 $handDx = 0.0
 $handDy = 0.0
@@ -563,6 +474,8 @@ if ($DryRun) {
         Write-Output "  hand           : k=$HandMoves delta=($handDx,$handDy) DIP  empty-canvas=$([bool]$HandEmpty)  settle=$(if ($HandSettleMs -gt 0) { "$HandSettleMs ms (forwarded)" } else { "the injector's own default" })"
         if ($null -ne $t) {
             Write-Output "                   element chosen from the EXISTING dump: $($t.Type) id='$($t.Id)' at doc ($($t.X),$($t.Y))"
+            Write-Output "                   aim: the centre of $($t.AimPath); target: $($t.Path)"
+            Write-Output "                   rule: $($t.Rule)"
             Write-Output "                   (the real run re-chooses from the dump THIS run writes)"
         } else {
             Write-Output "                   no $([IO.Path]::GetFileName($beforeDump)) on disk yet; the element is chosen from the one this run writes"
@@ -878,7 +791,12 @@ if (-not (Test-Path "$png.json")) {
     } else {
         $verdicts += "ok  : capture ran in session 1, bounds $($meta.bounds)"
     }
-    $hit = @($meta.windowsAtCap | Where-Object { $_ -like "*$Title*" })
+    # ⛔ THE RULE IS `| RUSTOK` IN THE TITLE AND IT DOES NOT MOVE. It read
+    # FAIL on three successful runs (kenai 2026-09-04) because the scenes'
+    # LAST rows carried no verdict; the repair is in the shell, not here. The
+    # comparison is `Select-SbTitleMatch` so the self-test can drive the rule
+    # itself rather than a copy of it.
+    $hit = @(Select-SbTitleMatch $meta.windowsAtCap $Title)
     if ($hit.Count -gt 0) {
         $verdicts += "ok  : window present -- $($hit -join '; ')"
     } else {
@@ -996,9 +914,18 @@ if ($Scene -eq 'benchmark') {
         $paintMean = Get-SbSteadyMean $benchRow 'paint'
         $presentMean = Get-SbSteadyMean $benchRow 'present'
         $route = if ($benchRow -match 'BENCHMARK frames=[0-9]+ (\S+) ') { $Matches[1] } else { 'UNKNOWN' }
-        $surfaceLabel = if ($benchRow -match '([0-9]+x[0-9]+)px') { $Matches[1] } else { '' }
-        if ($null -eq $paintMean -or $null -eq $presentMean -or $surfaceLabel -eq '') {
-            $verdicts += "note: the BENCHMARK row carried no readable paint/present steady-mean or no WxHpx surface, so NO band source was written for O2.2"
+        # ⛔ THE SURFACE IS READ AS A FIELD AND THE OLD LABEL IS REFUSED BY
+        # NAME. `([0-9]+x[0-9]+)px` scraped the pre-repair label's doubly-scaled
+        # half and returned `4287x2144` for a 2858x1429 surface on a 3840-wide
+        # panel, so O2.2 refused on a mismatch that was a LABEL and not a
+        # geometry. `Get-SbBenchmarkSurface` refuses the old shape rather than
+        # reading its DIP half: a band priced off a row written by a different
+        # shell is the wave-boundary defect, not a fallback.
+        $bs = Get-SbBenchmarkSurface $benchRow
+        $surfaceLabel = $bs.Surface
+        if ($null -eq $paintMean -or $null -eq $presentMean -or -not $bs.Ok) {
+            $why = if (-not $bs.Ok) { $bs.Reason } else { 'the row carried no readable paint/present steady-mean' }
+            $verdicts += "note: NO band source was written for O2.2 -- $why"
         } else {
             $target = if ($route -eq 'DIRECT') { $benchDirectReceipt } else { $benchOffscreenReceipt }
             Write-SbReceipt -Path $target -Data @{
