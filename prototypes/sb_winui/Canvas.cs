@@ -1234,8 +1234,36 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private void ApplyPointerReport(PointerReportCmd r)
     {
-        var selected = _engine == IntPtr.Zero ? nuint.MaxValue : JasCore.jas_selection_len(_engine);
-        var sel = selected == nuint.MaxValue ? "n/a" : selected.ToString();
+        // ⛔ AN UNLOADED ENGINE IS `NOT RUN`, NEVER A `selected=0` -- a repair
+        // folded in from flask's rows on the merged shell (R7/R8). A real hand
+        // on the `document` scene reported `selected=0` while the synthesised
+        // gesture reported 1, and the cause was that the control paints through
+        // its OWN engine and never loads the HELD one, so the pointer drove an
+        // EMPTY document. The tell was `loads(shell)=0`, on a row that did not
+        // carry it.
+        //
+        // The scenes N3 adds (`pointer`, `retained`) load the held engine, so
+        // that cause is gone -- but THE HAZARD IS NOT, because an empty-held-
+        // engine `selected=0` is BYTE-IDENTICAL to O4's empty-canvas negative
+        // control, which is a row that must read `selected=0` and mean the
+        // opposite thing. Two states that produce the same row cannot both be
+        // measured by it. So every gesture row now carries `doc=HELD|NONE` and
+        // `loads(shell)=`, and a row about an engine that has never been loaded
+        // REFUSES to print a selection figure at all.
+        var loaded = _engine != IntPtr.Zero && _loadsShell > 0;
+        var doc = loaded ? "HELD" : "NONE";
+        string selField;
+        if (loaded)
+        {
+            var selected = JasCore.jas_selection_len(_engine);
+            selField = selected == nuint.MaxValue
+                ? "selected=n/a"
+                : $"selected={selected}";
+        }
+        else
+        {
+            selField = "NOT RUN: held engine has no document";
+        }
 
         // ⛔ THE PROVENANCE IS A FIELD, DERIVED FROM THE KIND AND FROM NOTHING
         // ELSE. `SYNTHETIC` is set only by the replay of `SB_SYNTH_DRAG`;
@@ -1248,8 +1276,9 @@ internal sealed unsafe class Canvas : IDisposable
         _report(
             $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} "
           + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 pointer={provenance} "
+          + $"doc={doc} loads(shell)={_loadsShell} "
           + $"press@=({r.PressX:F1},{r.PressY:F1}) release@=({r.ReleaseX:F1},{r.ReleaseY:F1}) "
-          + $"selected={sel} surface={_width}x{_height} scale={_scaleX:0.##} {Tids()}");
+          + $"{selField} surface={_width}x{_height} scale={_scaleX:0.##} {Tids()}");
 
         // A SCENE THAT WAS WAITING FOR THIS GESTURE IS NOW FINISHED, and only a
         // gesture that came through the handlers closes it: the synthetic replay
@@ -1267,7 +1296,8 @@ internal sealed unsafe class Canvas : IDisposable
             // BEFORE the resize walk starts. `A-MUT` is the round trip's H0.
             PaintAndHash("A-MUT");
         }
-        _report($"HAND CLOSED scene={scene} pointer=REAL the scene's completion is posted now "
+        _report($"HAND CLOSED scene={scene} pointer=REAL doc={doc} loads(shell)={_loadsShell} "
+              + $"{selField} the scene's completion is posted now "
               + $"surface={_width}x{_height} {Tids()}");
         PostToUi(() => SceneCompleted?.Invoke());
     }
