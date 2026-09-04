@@ -371,21 +371,40 @@ $afterDump = Join-Path $scratch 'sb-doc-after.json'
 # ---------------------------------------------------------------------------
 # THE ENVIRONMENT, RESOLVED ONCE
 # ---------------------------------------------------------------------------
+$synthNote = ''
 if ($SynthFromDump) {
     $t = Get-SbHitTarget $beforeDump
     if ($null -eq $t) {
-        Write-Output "  NOT RUN: -SynthFromDump needs a prior $([IO.Path]::GetFileName($beforeDump)) to choose an element from."
-        Write-Output "           Run the hand arm (or -Scene pointer) once first; the shell writes it."
-        Write-Output "VERIFY: FAIL"
-        exit 1
+        # ⛔ A DRY RUN REPORTS THIS; A REAL RUN REFUSES. Exiting 1 from a plan that
+        # was asked to launch nothing would print `VERIFY: FAIL` over an
+        # experiment nobody attempted -- the mislabelling this harness exists to
+        # avoid, arriving through the switch added to avoid it.
+        $synthNote = "-SynthFromDump has no $([IO.Path]::GetFileName($beforeDump)) to choose from yet; run the hand arm (or -Scene pointer) once first"
+        if (-not $DryRun) {
+            Write-Output "  NOT RUN: $synthNote"
+            Write-Output "VERIFY: FAIL"
+            exit 1
+        }
+    } else {
+        $env:SB_SYNTH_DRAG = ("{0},{1},{2},{3},{4}" -f
+            [math]::Round($t.X * $Scale, 2), [math]::Round($t.Y * $Scale, 2),
+            [math]::Round($handDx * $Scale, 2), [math]::Round($handDy * $Scale, 2), $HandMoves)
+        $synthNote = "element $($t.Type) id='$($t.Id)' at doc ($($t.X),$($t.Y)) -> SB_SYNTH_DRAG=$env:SB_SYNTH_DRAG"
+        Write-Host "synth-from-dump: $synthNote"
     }
-    $env:SB_SYNTH_DRAG = ("{0},{1},{2},{3},{4}" -f
-        [math]::Round($t.X * $Scale, 2), [math]::Round($t.Y * $Scale, 2),
-        [math]::Round($handDx * $Scale, 2), [math]::Round($handDy * $Scale, 2), $HandMoves)
-    Write-Host "synth-from-dump: element $($t.Type) id='$($t.Id)' at doc ($($t.X),$($t.Y)) -> SB_SYNTH_DRAG=$env:SB_SYNTH_DRAG"
 }
 
-$fwd = Get-SbForwardedEnv
+# A knob whose VALUE contains a single quote cannot be forwarded through the
+# generated command, and the refusal is named here rather than thrown: an
+# unhandled throw exits with a stack trace and no `VERIFY:` line, which is the
+# one output shape every caller of this script parses.
+try {
+    $fwd = Get-SbForwardedEnv
+} catch {
+    Write-Output "  REFUSED: $($_.Exception.Message)"
+    Write-Output "VERIFY: FAIL"
+    exit 2
+}
 if ($fwd.Names.Count -gt 0) { Write-Host "forwarding: $($fwd.Names -join ' ')" }
 else { Write-Host "forwarding: (no SB_* variables set)" }
 
@@ -413,6 +432,7 @@ if ($DryRun) {
     Write-Output "  teardown       : $(if ($NoKill) { 'NONE (-NoKill): the launched process is LEFT RUNNING' } else { 'kill the launched pid ONLY; refuse if it is gone' })"
     Write-Output "  O2 before      : $(if ($Before) { $Before } else { 'not supplied' })"
     Write-Output "  probe capture  : $(if ($ProbeCapture) { $ProbeCapture } else { 'not supplied -- O1.7 will be NOT RUN' })"
+    if ($SynthFromDump) { Write-Output "  synth drag     : $synthNote" }
     if ($Hand) {
         $t = Get-SbHitTarget $beforeDump
         Write-Output "  hand           : k=$HandMoves delta=($handDx,$handDy) DIP  empty-canvas=$([bool]$HandEmpty)"

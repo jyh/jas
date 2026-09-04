@@ -459,7 +459,12 @@ if ($Scene -ne 'retained') {
 $gestureRow = Select-SbRow $rows 'POINTER (REAL|SYNTHETIC) press='
 $refusedRow = Select-SbRow $rows 'NOT RUN: hand refused'
 $wantProvenance = if ($synthAsked -and -not $Hand) { 'SYNTHETIC' } else { 'REAL' }
-$o4Prefix = if ($HandEmpty) { 'O4.C1 empty-canvas control' } elseif ($wantProvenance -eq 'SYNTHETIC') { 'O4.C2 SB_SYNTH_DRAG seam control' } else { 'O4' }
+# ⛔ THE ARM IS A SHORT PREFIX AND A SUFFIX ON THE DETAIL, NOT A SENTENCE INSIDE
+# THE NAME. `O4.C1 empty-canvas control.1 pointer=REAL` reads as a typo; a name
+# a reader distrusts is a name they do not quote back, and quoting rows back is
+# the whole protocol here.
+$o4Prefix = if ($HandEmpty) { 'O4.C1' } elseif ($wantProvenance -eq 'SYNTHETIC') { 'O4.C2' } else { 'O4' }
+$o4Arm = if ($HandEmpty) { ' [empty-canvas control]' } elseif ($wantProvenance -eq 'SYNTHETIC') { ' [SB_SYNTH_DRAG seam control]' } else { '' }
 
 if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     Add-NotRun "$o4Prefix gesture" "this run is scene '$Scene'; only 'pointer' and 'retained' carry a gesture"
@@ -482,9 +487,9 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     $releaseAt = Get-SbPoint $gestureRow 'release@'
 
     if ($prov -eq $wantProvenance) {
-        Add-Assert -Name "$o4Prefix.1 pointer=$wantProvenance" -Verdict 'PASS' -Detail "the row's provenance field reads $prov" -Row $gestureRow
+        Add-Assert -Name "$o4Prefix.1 pointer=$wantProvenance" -Verdict 'PASS' -Detail "the row's provenance field reads $prov$o4Arm" -Row $gestureRow
     } else {
-        Add-Assert -Name "$o4Prefix.1 pointer=$wantProvenance" -Verdict 'FAIL' -Detail "the row reads pointer=$prov; a receipt never wears a provenance its counters did not come from" -Row $gestureRow
+        Add-Assert -Name "$o4Prefix.1 pointer=$wantProvenance" -Verdict 'FAIL' -Detail "the row reads pointer=$prov$o4Arm; a receipt never wears a provenance its counters did not come from" -Row $gestureRow
     }
 
     # ⛔ doc=HELD IS WHAT MAKES A ZERO READABLE. An empty-held-engine `selected=0`

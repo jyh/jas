@@ -199,7 +199,12 @@ if ($Stay) {
     if ($Scene -eq 'goldens' -or $null -eq $svgAbs) { Remove-Item env:SB_SVG -ErrorAction SilentlyContinue }
     else { $env:SB_SVG = $svgAbs }
 
-    $fwd = Get-SbForwardedEnv
+    try {
+        $fwd = Get-SbForwardedEnv
+    } catch {
+        Write-Host "REFUSED: $($_.Exception.Message)" -ForegroundColor Red
+        exit 2
+    }
     $known = Get-SbAppPids $exe
     $logMark = Get-SbLogMark $log
 
