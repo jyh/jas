@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  THE APPLICATION MANIFEST, AND IT EXISTS FOR ONE MEASURED DEFECT.
+
+  The harness's first run on the real box (a 3840x2160 panel at 150%) found the
+  injected hand landing at exactly two thirds of every asked point, at two
+  different points, in three independent arms. The cause was read rather than
+  inferred: this project declared NO application manifest, no app.manifest
+  existed, and the string dpiAware did not occur in SbWinUi.exe. An unpackaged
+  WinUI 3 app with no manifest is DPI UNAWARE, so Windows bitmap virtualises it:
+  a 1904x941 logical client is stretched to 2856x1464 physical (exactly 1.5),
+  GetDpiForWindow answers 96, and the injector, which computes its scale from
+  that answer, injects at 96/96 = 1 into a window whose pixels are 1.5x.
+
+  The app's own scale=1 is TRUE from inside its virtualised view, which is why
+  no oracle inside the log could catch it and why the receipt now carries a
+  dpi-awareness field read from the OS instead of a ratio inferred from two
+  numbers.
+
+  PerMonitorV2 rather than System: the box has one panel today, and a per
+  monitor app is the only kind whose scale is still right after the window is
+  dragged to a second one. dpiAware true/pm is the pre 1703 fallback and is
+  ignored where dpiAwareness is understood; both are declared because a
+  manifest that is silent on the older key falls back to UNAWARE, not to the
+  newer key.
+
+  (XML forbids a double hyphen inside a comment, so this file's prose uses
+  none.)
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+
+  <assemblyIdentity
+      version="1.0.0.0"
+      name="SbWinUi.app"
+      type="win32" />
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11. PerMonitorV2 is honoured from 1703 onward. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+</assembly>
