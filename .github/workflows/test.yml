@@ -946,6 +946,153 @@ jobs:
           python scripts/check_native_backend_lane.py \
             --profile windows-d2d-ffi --log native-lane.log
 
+  # O8 -- THE C# SHELL COMPILES. The prototype shell in `prototypes/sb_winui/`
+  # is C#/WinUI-3 and nothing in this repository compiled it until now. The
+  # people who write it work on a Mac, where it cannot be built at all: no .NET
+  # SDK targeting `net10.0-windows10.0.22621.0`, no Windows App SDK, no
+  # CsWin32 metadata. Every gate this workflow already runs over that directory
+  # is a TEXT gate. A pull request touching the shell could therefore be fully
+  # green while containing C# that does not parse -- text-green for code nobody
+  # compiled -- and the first reader to find out would be a person at a Windows
+  # box, by hand, after the merge.
+  #
+  # A SEPARATE, PARALLEL JOB -- the same argument as `windows-native` above, and
+  # for the same measured reason. On run 32671926038 the `windows` job took 500s
+  # and was the critical path; the next longest job was 327s. A `dotnet build`
+  # added as a step in `windows` would extend the whole workflow's wall clock by
+  # its full duration. As its own job it costs runner minutes and no wall clock.
+  #
+  # NO `needs:`, DELIBERATELY, for the reason `windows-native` states: a job with
+  # no dependency cannot be skipped into silence by one. This lane reports its
+  # own verdict or it reports nothing.
+  #
+  # NOT IN `check_step_cannot_hide.py`'s FULL_SURFACE, and that is a decision
+  # rather than an oversight. That gate's `judges()` recognises a step by its
+  # content -- anything under `scripts/`, or `pytest`/`cargo test`/`swift test`.
+  # Neither step below matches, so the lane would count ZERO judging steps and
+  # trip that file's own MIN_JUDGING_STEPS floor, which exists precisely to say
+  # "a lane with nothing to hide behind means the SCANNER broke". Declaring this
+  # lane full-surface would therefore make a meta-gate red about a lane it
+  # cannot read. The isolation the declaration would buy is bought directly
+  # instead: each step below carries an explicit `if:` naming its own premise.
+  #
+  # NOT `continue-on-error`, ANYWHERE. See the block above the `windows` job:
+  # that mechanism runs the step and throws the verdict away. Stop 7 of the
+  # freeze that commissioned this lane says the same thing in its own words --
+  # a runner with no .NET 10 SDK is recorded `NOT RUN: no .NET 10 SDK` BY NAME
+  # and the lane goes RED, never green.
+  windows-shell-compile:
+    name: The C# shell compiles (WinUI-3 prototype)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      # THE FIRST `setup-dotnet` IN THIS WORKFLOW. `SbWinUi.csproj` targets
+      # `net10.0-windows10.0.22621.0` with `Microsoft.WindowsAppSDK 1.8.*`, and
+      # the runner image's preinstalled SDKs are not guaranteed to include a
+      # 10.x line. Pinned to the FEATURE BAND `10.0.x` rather than an exact
+      # patch: the csproj pins nothing tighter (it floats the Windows App SDK
+      # for a reason written in its own comments), so pinning a patch here would
+      # be a number nobody re-reads going stale against an SDK nobody chose.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # STOP 7, BY NAME. `!cancelled()` on purpose: if the step above failed to
+      # install an SDK, this must still run, because the whole point is that the
+      # ABSENCE is recorded in this job's own output in words a reader can grep
+      # for, rather than inferred from an action's stack trace.
+      #
+      # THE CSPROJ'S OWN NOTE IS WHY THIS IS A NAMED CHECK AND NOT AN ASSUMPTION
+      # (`SbWinUi.csproj:13-17`): on the machine that authored the shell, the
+      # `dotnet` on PATH was a runtime-only install that printed "No .NET SDKs
+      # were found" -- the identical message a machine with no SDK at all would
+      # print. A runtime is not an SDK, and `dotnet --version` cannot tell them
+      # apart. `dotnet --list-sdks` can, so that is the oracle.
+      - name: Stop 7 preflight -- a .NET 10 SDK is installed, named if it is not
+        id: sdk
+        if: ${{ !cancelled() }}
+        run: |
+          echo "--- dotnet --list-sdks ---"
+          dotnet --list-sdks || true
+          if ! dotnet --list-sdks 2>/dev/null | grep -qE '^10\.'; then
+            echo "NOT RUN: no .NET 10 SDK" >&2
+            echo "" >&2
+            echo "prototypes/sb_winui/SbWinUi.csproj targets" >&2
+            echo "net10.0-windows10.0.22621.0 and cannot be built by any older" >&2
+            echo "SDK line. This lane RECORDS the absence and REDS; it does not" >&2
+            echo "go green over a build that did not happen." >&2
+            exit 1
+          fi
+          echo "SDK line 10 present:"
+          dotnet --list-sdks | grep -E '^10\.'
+
+      # ONE `dotnet build`, NOTHING ELSE, AND THAT IS A DECISION DRIVEN BY CI.
+      # The Windows App SDK build could plausibly have needed several extra
+      # incantations -- an explicit `-p:Platform=x64` (the csproj declares
+      # `<Platforms>x64</Platforms>` and no AnyCPU), a separate `dotnet restore`,
+      # an MSIX-tooling opt-out, a Windows SDK install. None were reasoned into
+      # this file: the plain invocation was pushed first and CI was allowed to
+      # say. What survives here is what CI accepted. The csproj already carries
+      # `RuntimeIdentifier=win-x64`, `WindowsPackageType=None` and
+      # `EnableMsixTooling=false`, so the packaging path that needs `Platform`
+      # is not entered and the RID pins the native asset selection.
+      #
+      # `tee` under `set -o pipefail` so the log is captured WITHOUT discarding
+      # the build's exit status -- verbatim the reasoning of the `windows-native`
+      # lane above. Without pipefail the pipeline reports tee's status and a
+      # failing build reads as green.
+      - name: The WinUI-3 shell builds
+        id: shellbuild
+        if: ${{ !cancelled() && steps.sdk.conclusion == 'success' }}
+        run: |
+          set -o pipefail
+          dotnet build prototypes/sb_winui/SbWinUi.csproj 2>&1 | tee shell-build.log
+
+      # THE ANTI-VACUITY HALF, and the reason this lane is not just a build.
+      # `dotnet build` exits 0 for a great many things that are not "the C# was
+      # compiled": a restore-only run, a project whose sources were all filtered
+      # out, an up-to-date check that skipped CoreCompile. Exit status alone
+      # cannot separate those from a real compilation. The linker's own line --
+      # `SbWinUi -> ...\SbWinUi.dll` -- can, because MSBuild emits it from
+      # CopyFilesToOutputDirectory, which runs only after CoreCompile produced
+      # an assembly.
+      #
+      # A COUNT HAS NO FAILURE MODE unless it is required to be non-zero, so the
+      # log's own existence and size are asserted before it is searched: a grep
+      # over a file that is empty (or that `tee` never wrote) returns "not
+      # found", which is indistinguishable here from a build that produced no
+      # assembly, and both must red rather than one masquerading as the other.
+      #
+      # COUPLED TO ITS OWN PREMISE (`steps.shellbuild.conclusion == 'success'`),
+      # per the lesson the `windows-native` lane records: `!cancelled()` alone
+      # would free this from the step that PRODUCES its evidence, and a compile
+      # failure would then surface as a second, confusing red about a missing
+      # assembly name instead of the compiler error that actually happened.
+      - name: The build compiled C#, and did not merely restore
+        if: ${{ !cancelled() && steps.shellbuild.conclusion == 'success' }}
+        run: |
+          if [ ! -s shell-build.log ]; then
+            echo "NOT RUN: the build log is missing or empty" >&2
+            echo "There is nothing to search, so the positive control below" >&2
+            echo "would report 'not found' for a reason that has nothing to do" >&2
+            echo "with the compiler. Refusing to judge." >&2
+            exit 1
+          fi
+          n=$(grep -c 'SbWinUi\.dll' shell-build.log || true)
+          if [ "${n:-0}" -lt 1 ]; then
+            echo "NOT COMPILED: the build exited 0 but its log never names" >&2
+            echo "SbWinUi.dll, so no assembly was produced and nothing proves" >&2
+            echo "the C# was compiled rather than merely restored." >&2
+            echo "--- last 40 lines of the build log ---" >&2
+            tail -40 shell-build.log >&2
+            exit 1
+          fi
+          echo "positive control: $n line(s) name SbWinUi.dll"
+          grep 'SbWinUi\.dll' shell-build.log
+
   # THE SECOND PLATFORM FAMILY, for the half that has no platform reason to be
   # Windows-only. `feature = "ffi"` carries no cfg at all -- unlike d2d it
   # compiles everywhere -- so watching it on Windows alone would be watching it
