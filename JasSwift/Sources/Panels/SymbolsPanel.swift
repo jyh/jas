@@ -42,10 +42,6 @@ public enum SymbolsPanel {
         }
     }
 
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
-
     // MARK: - Native action arms (value-in-op; modeled on makeInstance)
 
     /// The StateStore scope id for the Symbols panel. The shared

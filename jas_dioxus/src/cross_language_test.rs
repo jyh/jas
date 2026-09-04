@@ -6203,6 +6203,56 @@ mod tests {
         }
     }
 
+    /// The PANEL-menu arm of the same chrome seam.
+    ///
+    /// `menu_state.json` pins the MENUBAR; nothing pinned a panel hamburger
+    /// menu's dynamic state, and the gap was not academic. Until this landed
+    /// this port answered every panel-menu `checked_when` with a hard-coded
+    /// `false` (fourteen per-panel `is_checked` hooks, one of them a
+    /// `return false` whose comment claimed the generic evaluator resolved
+    /// them) while JasSwift answered five of the Brushes panel's with a
+    /// hand-coded native rule — the same predicate, two answers.
+    ///
+    /// The subject is the SAME `menu_state` walk, applied to a panel's `menu:`
+    /// array wrapped as one menu, so paths read `[0, i]`.
+    #[test]
+    fn algorithm_panel_menu_state_vectors() {
+        use crate::interpreter::menu_state::menu_state;
+
+        let json_str = read_fixture("algorithms/panel_menu_state.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+
+        let cases = tests.as_array().unwrap();
+        assert!(cases.len() >= 6, "corpus shrank: {} cases", cases.len());
+        let mut checked_rows = 0usize;
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            let func = tc["function"].as_str().unwrap();
+            assert_eq!(func, "panel_menu_state", "Unknown function: {}", func);
+            let pid = tc["args"]["panel"].as_str().unwrap();
+            let menu = bundle["panels"][pid]["menu"].clone();
+            assert!(menu.is_array(), "panel {} has no menu in the bundle", pid);
+            let menubar = serde_json::json!([{ "items": menu }]);
+            let ctx = &tc["args"]["ctx"];
+
+            let actual = menu_state(&menubar, ctx);
+            assert_eq!(&actual, &tc["expected"], "Panel menu state '{}' mismatch", name);
+            checked_rows += tc["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["checked"].is_boolean())
+                .count();
+        }
+        // Anti-vacuity: a runner over rows that carry no predicate passes
+        // without evaluating anything.
+        assert!(checked_rows >= 29, "only {checked_rows} checked rows evaluated");
+    }
+
     /// The derivation `layout -> panels.<id>` that `menu_state` takes as
     /// GIVEN. menu_state.json feeds the panels map in as input, so nothing
     /// watched how that map is computed from a dock layout — the seam where
@@ -6306,7 +6356,6 @@ mod tests {
     // ---------------------------------------------------------------
     // Toolbar and menu structure tests
     // ---------------------------------------------------------------
-
 
     // ---------------------------------------------------------------
     // STROKEWIDTH: the field-scoped Stroke-panel apply law
@@ -6765,7 +6814,6 @@ mod tests {
         }
     }
 
-
     // ---------------------------------------------------------------
     // CODEC FIELD SURVIVAL
     //
@@ -7059,7 +7107,6 @@ mod tests {
             }
         }
     }
-
 
     // ---------------------------------------------------------------
     // BINARY WIRE -- the byte-level gate

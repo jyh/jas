@@ -77,17 +77,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a toggle/radio command is checked.
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    match cmd {
-        "toggle_opacity_thumbnails" => state.opacity_panel.thumbnails_hidden,
-        "toggle_opacity_options"    => state.opacity_panel.options_shown,
-        "toggle_new_masks_clipping" => state.opacity_panel.new_masks_clipping,
-        "toggle_new_masks_inverted" => state.opacity_panel.new_masks_inverted,
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,18 +348,24 @@ mod tests {
     #[test]
     fn is_checked_reflects_panel_state() {
         let mut st = test_app_state();
-        assert!(!is_checked("toggle_opacity_thumbnails", &st));
-        assert!(is_checked("toggle_new_masks_clipping", &st));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "toggle_opacity_thumbnails", &st));
+        assert!(crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "toggle_new_masks_clipping", &st));
         st.opacity_panel.thumbnails_hidden = true;
         st.opacity_panel.new_masks_clipping = false;
-        assert!(is_checked("toggle_opacity_thumbnails", &st));
-        assert!(!is_checked("toggle_new_masks_clipping", &st));
+        assert!(crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "toggle_opacity_thumbnails", &st));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "toggle_new_masks_clipping", &st));
     }
 
     #[test]
     fn is_checked_returns_false_for_unknown_command() {
         let st = test_app_state();
-        assert!(!is_checked("nonexistent_command", &st));
-        assert!(!is_checked("make_opacity_mask", &st));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "nonexistent_command", &st));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Opacity, "make_opacity_mask", &st));
     }
 }

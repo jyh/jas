@@ -74,13 +74,6 @@ public enum ColorPanel {
         }
     }
 
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        if let mode = ColorPanelMode.fromCommand(cmd) {
-            return layout.colorPanelMode == mode
-        }
-        return false
-    }
-
     /// Query whether a menu command is enabled. Invert / Complement need an
     /// active color (fill or stroke per `fillOnTop`) to operate on; gray them
     /// out when the active attribute is none. Same reader as the two commands

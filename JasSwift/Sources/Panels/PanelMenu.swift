@@ -182,29 +182,134 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
 }
 
 /// Query whether a toggle/radio command is checked for a panel kind.
-/// `model` is optional so legacy call sites without one still work; panels
-/// whose checked state mirrors panel-state (e.g. Swatches' thumbnail_size
-/// radio) need it to read the StateStore.
+///
+/// ONE path for every panel: the panel's bundle menu entry is looked up by
+/// its runtime command, its `checked_when:` / `checked:` predicate is
+/// evaluated against the panel's context, and that is the answer. The
+/// fourteen per-panel native hooks this replaced are gone — with them went
+/// `BrushesPanel`'s hand-written `arr.contains { ($0 as? String) == v }`,
+/// which was the ONLY place five of the Brushes panel's check marks worked
+/// (jas_dioxus answered `false` for all of them): the same YAML predicate,
+/// two different answers, which is precisely what the prime directive
+/// forbids.
+///
+/// `model` stays optional so legacy call sites without one still work; a
+/// panel whose live state is in the shared store then falls back to the
+/// bundle's declared defaults.
+///
+/// Mirrors the Rust `panels::panel_is_checked`.
 public func panelIsChecked(_ kind: PanelKind, cmd: String,
                            layout: WorkspaceLayout, model: Model? = nil) -> Bool {
-    switch kind {
-    case .layers: return LayersPanel.isChecked(cmd, layout: layout)
-    case .color: return ColorPanel.isChecked(cmd, layout: layout)
-    case .swatches:
-        return SwatchesPanel.isCheckedWithModel(cmd, model: model)
-    case .stroke: return StrokePanel.isCheckedWithModel(cmd, model: model)
-    case .properties: return PropertiesPanel.isChecked(cmd, layout: layout)
-    case .character: return CharacterPanel.isCheckedWithModel(cmd, model: model)
-    case .paragraph: return ParagraphPanel.isCheckedWithModel(cmd, model: model)
-    case .artboards: return ArtboardsPanel.isChecked(cmd, layout: layout)
-    case .align: return AlignPanel.isCheckedWithModel(cmd, model: model)
-    case .boolean: return BooleanPanel.isChecked(cmd, layout: layout)
-    case .opacity: return OpacityPanel.isChecked(cmd, layout: layout)
-    case .magicWand: return MagicWandPanel.isChecked(cmd, layout: layout)
-    case .symbols: return SymbolsPanel.isChecked(cmd, layout: layout)
-    case .brushes: return BrushesPanel.isCheckedWithModel(cmd, model: model)
-    // No native panel-menu module (YAML-rendered): no stateful checkmarks.
-    case .gradient, .concepts: return false
+    let contentId = panelKindToContentId(kind)
+    let ctx = panelMenuContext(contentId, layout: layout, model: model)
+    return panelMenuIsChecked(contentId, cmd, ctx: ctx)
+}
+
+/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry
+/// whose runtime command is `cmd`, or nil when there is no such entry or it
+/// declares no predicate.
+///
+/// The command is matched with the SAME fold `menuItemsFromYaml` applies
+/// (`commandWithParams` for radio members, the bare action otherwise), so a
+/// caller holding a `PanelMenuItem`'s command can always find its own entry.
+///
+/// Both spellings are read because the panel-menu vocabulary uses both:
+/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
+/// `checked_when:`, while `{align,character,paragraph}.yaml` write
+/// `checked:`. `menuItemsFromYaml` already reads both to decide toggle vs
+/// radio, so reading only one here would leave three panels' check marks
+/// dead. No expression feature is added: the two keys carry the same grammar
+/// and are evaluated the same way.
+///
+/// Mirrors the Rust `panel_menu::checked_expr`.
+public func panelMenuCheckedExpr(_ contentId: String, _ cmd: String) -> String? {
+    guard !cmd.isEmpty, let ws = WorkspaceData.load() else { return nil }
+    let menu = ws.panelMenuRaw(contentId)
+    var actionCounts: [String: Int] = [:]
+    for entry in menu {
+        if let obj = entry as? [String: Any],
+           let action = obj["action"] as? String {
+            actionCounts[action, default: 0] += 1
+        }
+    }
+    for entry in menu {
+        guard let obj = entry as? [String: Any] else { continue }
+        let action = obj["action"] as? String
+        let isRadioMember = action.map { (actionCounts[$0] ?? 0) > 1 } ?? false
+        let entryCmd = isRadioMember ? commandWithParams(obj) : (action ?? "")
+        guard entryCmd == cmd else { continue }
+        let expr = (obj["checked_when"] as? String) ?? (obj["checked"] as? String)
+        guard let expr = expr, !expr.isEmpty else { return nil }
+        return expr
+    }
+    return nil
+}
+
+/// Whether the panel-menu entry for `cmd` is checked, evaluating its bundle
+/// predicate against `ctx` through the SHARED menu-state evaluator.
+///
+/// An entry with no predicate — and a command that names no entry — is not
+/// checked, matching `MenuState`'s `checked: NSNull()` for an item with no
+/// `checked_when`.
+public func panelMenuIsChecked(_ contentId: String, _ cmd: String,
+                               ctx: [String: Any]) -> Bool {
+    guard let expr = panelMenuCheckedExpr(contentId, cmd) else { return false }
+    return MenuState.evalBool(expr, ctx)
+}
+
+/// Build the expression context a panel's menu predicates are evaluated
+/// against: the panel's own state table as `panel`, plus the `preferences`
+/// tier the bundle ships.
+///
+/// `panel` starts from the bundle's declared state defaults, is overlaid with
+/// the shared panel store (where most of this app's panel state actually
+/// lives), and is finally overlaid with the handful of values this app keeps
+/// on `WorkspaceLayout` instead. That last overlay is the whole of what the
+/// deleted native hooks encoded — a statement about STORAGE, not about menus.
+///
+/// Mirrors the Rust `panel_menu::panel_menu_ctx`.
+public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
+                             model: Model?) -> [String: Any] {
+    let ws = WorkspaceData.load()
+    var panel: [String: Any] = ws?.panelStateDefaults(contentId) ?? [:]
+    if let store = model?.stateStore, store.hasPanel(contentId) {
+        for (k, v) in store.getPanelState(contentId) { panel[k] = v }
+    }
+    for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
+    var ctx: [String: Any] = ["panel": panel]
+    ctx["preferences"] = ws?.data["preferences"] ?? [:]
+    return ctx
+}
+
+/// The `panel.*` values this app keeps on ``WorkspaceLayout`` rather than in
+/// the shared panel store, keyed exactly as the panel's YAML state table
+/// declares them.
+///
+/// Two panels only. Everything else reads back out of the store the YAML
+/// actions write to, which is why the other twelve native hooks reduced to
+/// nothing at all.
+private func layoutHeldPanelState(_ contentId: String,
+                                  layout: WorkspaceLayout) -> [String: Any] {
+    switch contentId {
+    case "color_panel_content":
+        let mode: String
+        switch layout.colorPanelMode {
+        case .grayscale: mode = "grayscale"
+        case .hsb: mode = "hsb"
+        case .rgb: mode = "rgb"
+        case .cmyk: mode = "cmyk"
+        case .webSafeRgb: mode = "web_safe_rgb"
+        }
+        return ["mode": mode]
+    case "opacity_panel_content":
+        return [
+            "thumbnails_hidden": layout.opacityPanel.thumbnailsHidden,
+            "options_shown": layout.opacityPanel.optionsShown,
+            "new_masks_clipping": layout.opacityPanel.newMasksClipping,
+            "new_masks_inverted": layout.opacityPanel.newMasksInverted,
+        ]
+    default:
+        return [:]
     }
 }
 

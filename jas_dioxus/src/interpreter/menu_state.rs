@@ -31,12 +31,14 @@ use super::expr::eval;
 /// Evaluate `expr` against `ctx` and coerce to bool via the shared expression
 /// evaluator's truthiness (`eval` never raises — it returns `Value::Null` on
 /// error, which `to_bool` reports as `false`).
-//
-// The cross-app byte-gate (`cross_language_test::algorithm_menu_state_vectors`)
-// is the sole caller (this pass is not yet wired into a render path), so it
-// reads as dead without the test cfg.
-#[allow(dead_code)] // Reachable only through `menu_state` (test-only caller).
-fn eval_bool(expr: &str, ctx: &Value) -> bool {
+///
+/// LIVE, and deliberately shared rather than re-derived: the panel hamburger
+/// menu's check marks resolve through this exact function
+/// (`panels::panel_menu::is_checked_from_yaml`), so a panel-menu
+/// `checked_when` and a menubar `checked_when` cannot answer the same
+/// expression differently. A control beside the instrument validates nothing;
+/// this is the instrument.
+pub(crate) fn eval_bool(expr: &str, ctx: &Value) -> bool {
     eval(expr, ctx).to_bool()
 }
 

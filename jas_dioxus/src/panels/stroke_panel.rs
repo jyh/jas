@@ -37,16 +37,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-/// Query whether a radio command is checked. The cap/join radio
-/// commands carry their value as a `:suffix` (see `dispatch`); the
-/// checkmark follows the matching panel-state field.
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    if let Some(cap) = cmd.strip_prefix("set_stroke_cap:") {
-        return state.stroke_panel.cap == cap;
-    }
-    if let Some(join) = cmd.strip_prefix("set_stroke_join:") {
-        return state.stroke_panel.join == join;
-    }
-    false
-}

@@ -30,8 +30,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    // Magic Wand panel has no checkable menu items in MVP.
-    false
-}

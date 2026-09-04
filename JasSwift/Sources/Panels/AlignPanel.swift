@@ -23,22 +23,4 @@ public enum AlignPanel {
         model.stateStore.setActivePanel("align_panel_content")
         runYamlActionByName(cmd, params: [:], model: model)
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
-
-    /// Same as ``isChecked`` but with model in scope so the toggle's
-    /// checkmark can read the panel state. Used by the hamburger
-    /// menu's checked-state logic.
-    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
-        guard let model = model else { return false }
-        switch cmd {
-        case "toggle_use_preview_bounds":
-            return (model.stateStore.getPanel(
-                "align_panel_content", "use_preview_bounds") as? Bool) ?? false
-        default:
-            return false
-        }
-    }
 }

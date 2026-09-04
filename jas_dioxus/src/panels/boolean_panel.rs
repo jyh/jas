@@ -40,8 +40,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    // No toggle-style menu items in the Boolean panel menu.
-    false
-}

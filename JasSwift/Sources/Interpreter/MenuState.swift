@@ -41,7 +41,13 @@ public enum MenuState {
     /// Evaluate `expr` against `ctx` and coerce to bool via the shared
     /// expression evaluator's truthiness (`evaluate` never raises — it returns
     /// `.null` on error, which `toBool()` reports as `false`).
-    private static func evalBool(_ expr: String, _ ctx: [String: Any]) -> Bool {
+    ///
+    /// Deliberately shared rather than re-derived: the panel hamburger menu's
+    /// check marks resolve through this exact function
+    /// (`panelMenuIsChecked`), so a panel-menu `checked_when` and a menubar
+    /// `checked_when` cannot answer the same expression differently. A control
+    /// beside the instrument validates nothing; this is the instrument.
+    public static func evalBool(_ expr: String, _ ctx: [String: Any]) -> Bool {
         evaluate(expr, context: ctx).toBool()
     }
 

@@ -109,25 +109,21 @@ pub(crate) fn panel_dynamic_label(
 }
 
 /// Query whether a toggle/radio command is checked for a panel kind.
+///
+/// ONE path for every panel: the panel's bundle menu entry is looked up by its
+/// runtime command, its `checked_when:` / `checked:` predicate is evaluated
+/// against the panel's context, and that is the answer. The fourteen per-panel
+/// native `is_checked` hooks this replaced are gone — with them went a
+/// `return false` in `brushes_panel` whose comment claimed "the generic
+/// menu-state evaluator resolves" the predicates it was silently dropping, and
+/// six `match cmd` arms that re-stated in Rust a rule the YAML already stated.
+///
+/// The port-specific residue is `panel_menu::panel_menu_ctx`: where this app
+/// KEEPS each live value, not what the menu does with it.
 pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> bool {
-    match kind {
-        PanelKind::Layers => layers_panel::is_checked(cmd, state),
-        PanelKind::Color => color_panel::is_checked(cmd, state),
-        PanelKind::Swatches => swatches_panel::is_checked(cmd, state),
-        PanelKind::Brushes => brushes_panel::is_checked(cmd, state),
-        PanelKind::Stroke => stroke_panel::is_checked(cmd, state),
-        PanelKind::Properties => properties_panel::is_checked(cmd, state),
-        PanelKind::Character => character_panel::is_checked(cmd, state),
-        PanelKind::Paragraph => paragraph_panel::is_checked(cmd, state),
-        PanelKind::Artboards => artboards_panel::is_checked(cmd, state),
-        PanelKind::Align => align_panel::is_checked(cmd, state),
-        PanelKind::Boolean => boolean_panel::is_checked(cmd, state),
-        PanelKind::Opacity => opacity_panel::is_checked(cmd, state),
-        PanelKind::MagicWand => magic_wand_panel::is_checked(cmd, state),
-        PanelKind::Symbols => symbols_panel::is_checked(cmd, state),
-        // No native module (YAML-rendered): no stateful checkmarks.
-        PanelKind::Gradient | PanelKind::Concepts => false,
-    }
+    let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+    let ctx = panel_menu::panel_menu_ctx(content_id, state);
+    panel_menu::is_checked_from_yaml(content_id, cmd, &ctx)
 }
 
 /// Query whether a menu command is enabled for a panel kind. Defaults
@@ -228,6 +224,105 @@ mod tests {
         assert!(state.workspace_layout.is_panel_visible(PanelKind::Color));
         panel_dispatch(PanelKind::Color, "close_panel", addr, &mut state);
         assert!(!state.workspace_layout.is_panel_visible(PanelKind::Color));
+    }
+
+    /// The Brushes panel's eleven `checked_when:` predicates, through the
+    /// generic panel-menu evaluator.
+    ///
+    /// Until this landed `brushes_panel::is_checked` was `false` for every
+    /// command, with a comment claiming "the generic menu-state evaluator
+    /// resolves" the bundle's predicates — which it did not, because
+    /// `menu_state` is the MENUBAR walk and never ran on a panel's menu. All
+    /// eleven check marks were dead here while five of them worked in
+    /// JasSwift's hand-coded rule: a live prime-directive divergence.
+    #[test]
+    fn panel_is_checked_evaluates_brushes_checked_when() {
+        let layout = WorkspaceLayout::default_layout();
+        let state = test_app_state(layout);
+        // brushes.yaml declares `category_filter` default `[calligraphic,
+        // scatter, art, pattern, bristle]`, `view_mode: thumbnail` and
+        // `thumbnail_size: small`, so a panel with no live overrides shows
+        // exactly those check marks.
+        for cat in ["calligraphic", "scatter", "art", "pattern", "bristle"] {
+            assert!(
+                panel_is_checked(
+                    PanelKind::Brushes,
+                    &format!("toggle_brush_category:{cat}"),
+                    &state
+                ),
+                "Show {cat} Brushes should be checked at the declared default"
+            );
+        }
+        assert!(panel_is_checked(
+            PanelKind::Brushes, "set_brush_view_mode:thumbnail", &state));
+        assert!(!panel_is_checked(
+            PanelKind::Brushes, "set_brush_view_mode:list", &state));
+        assert!(panel_is_checked(
+            PanelKind::Brushes, "set_brush_thumbnail_size:small", &state));
+        assert!(!panel_is_checked(
+            PanelKind::Brushes, "set_brush_thumbnail_size:medium", &state));
+        assert!(!panel_is_checked(
+            PanelKind::Brushes, "set_brush_thumbnail_size:large", &state));
+        // "Make Persistent" reads a namespace no native hook ever consulted:
+        // `any(preferences.brushes.persistent_libraries, fun lib -> lib ==
+        // panel.selected_library)`. preferences.yaml lists `default_brushes`
+        // and brushes.yaml's `selected_library` defaults to it, so it is
+        // checked — and it was dead in BOTH active ports before this.
+        assert!(panel_is_checked(
+            PanelKind::Brushes, "toggle_brush_library_persistent", &state));
+        // A command that names no menu entry is not checked, and neither is
+        // an entry that declares no predicate.
+        assert!(!panel_is_checked(PanelKind::Brushes, "sort_brushes_by_name", &state));
+        assert!(!panel_is_checked(PanelKind::Brushes, "no_such_command", &state));
+    }
+
+    /// The panels whose check marks ALREADY worked natively must keep working
+    /// once the native hooks are gone — the generic evaluator has to read the
+    /// same live values the hooks read, not the bundle defaults.
+    #[test]
+    fn panel_is_checked_still_follows_live_state_for_the_native_panels() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut state = test_app_state(layout);
+
+        state.opacity_panel.thumbnails_hidden = true;
+        state.opacity_panel.new_masks_clipping = false;
+        assert!(panel_is_checked(PanelKind::Opacity, "toggle_opacity_thumbnails", &state));
+        assert!(!panel_is_checked(PanelKind::Opacity, "toggle_new_masks_clipping", &state));
+        state.opacity_panel.thumbnails_hidden = false;
+        state.opacity_panel.new_masks_clipping = true;
+        assert!(!panel_is_checked(PanelKind::Opacity, "toggle_opacity_thumbnails", &state));
+        assert!(panel_is_checked(PanelKind::Opacity, "toggle_new_masks_clipping", &state));
+
+        state.color_panel_mode = crate::workspace::color_panel_view::ColorMode::Cmyk;
+        assert!(panel_is_checked(PanelKind::Color, "set_color_panel_mode:cmyk", &state));
+        assert!(!panel_is_checked(PanelKind::Color, "set_color_panel_mode:rgb", &state));
+
+        state.stroke_panel.cap = "round".to_string();
+        state.stroke_panel.join = "bevel".to_string();
+        assert!(panel_is_checked(PanelKind::Stroke, "set_stroke_cap:round", &state));
+        assert!(!panel_is_checked(PanelKind::Stroke, "set_stroke_cap:butt", &state));
+        assert!(panel_is_checked(PanelKind::Stroke, "set_stroke_join:bevel", &state));
+        assert!(!panel_is_checked(PanelKind::Stroke, "set_stroke_join:miter", &state));
+
+        state.swatches_panel.thumbnail_size = "medium".to_string();
+        assert!(panel_is_checked(
+            PanelKind::Swatches, "set_swatch_thumbnail_size:medium", &state));
+        assert!(!panel_is_checked(
+            PanelKind::Swatches, "set_swatch_thumbnail_size:small", &state));
+
+        state.character_panel.all_caps = true;
+        state.character_panel.small_caps = false;
+        assert!(panel_is_checked(PanelKind::Character, "toggle_all_caps", &state));
+        assert!(!panel_is_checked(PanelKind::Character, "toggle_small_caps", &state));
+
+        state.paragraph_panel.hanging_punctuation = true;
+        assert!(panel_is_checked(
+            PanelKind::Paragraph, "toggle_hanging_punctuation", &state));
+
+        state.align_panel.use_preview_bounds = true;
+        assert!(panel_is_checked(PanelKind::Align, "toggle_use_preview_bounds", &state));
+        state.align_panel.use_preview_bounds = false;
+        assert!(!panel_is_checked(PanelKind::Align, "toggle_use_preview_bounds", &state));
     }
 
     #[test]

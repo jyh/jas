@@ -168,6 +168,174 @@ fn command_with_params(obj: &serde_json::Map<String, serde_json::Value>) -> Stri
     cmd
 }
 
+// ---------------------------------------------------------------------------
+// Generic panel-menu CHECKED state
+// ---------------------------------------------------------------------------
+
+/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry whose
+/// runtime command is `cmd`, or `None` when there is no such entry or it
+/// declares no predicate.
+///
+/// The command is matched with the SAME fold `build_menu_items` applies
+/// (`command_with_params` for radio members, the bare action otherwise), so a
+/// caller holding a `PanelMenuItem`'s command can always find its own entry.
+///
+/// Both spellings are read because the panel-menu vocabulary uses both:
+/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
+/// `checked_when:`, while `{align,character,paragraph}.yaml` write `checked:`.
+/// `build_menu_items` above already reads both to decide Toggle vs Radio, so
+/// reading only one here would leave three panels' check marks dead — the
+/// exact defect this path exists to close. No expression feature is added:
+/// the two keys carry the same grammar and are evaluated the same way.
+pub fn checked_expr(content_id: &str, cmd: &str) -> Option<String> {
+    let ws = crate::interpreter::workspace::Workspace::load()?;
+    let menu = ws.panel_menu(content_id);
+    let mut action_counts: std::collections::HashMap<&str, usize> =
+        std::collections::HashMap::new();
+    for e in &menu {
+        if let Some(action) = e.as_object().and_then(|o| o.get("action")).and_then(|a| a.as_str()) {
+            *action_counts.entry(action).or_insert(0) += 1;
+        }
+    }
+    for e in &menu {
+        let obj = match e.as_object() {
+            Some(o) => o,
+            None => continue,
+        };
+        let action = obj.get("action").and_then(|a| a.as_str());
+        let is_radio_member =
+            action.map(|a| action_counts.get(a).copied().unwrap_or(0) > 1).unwrap_or(false);
+        let entry_cmd: String = if is_radio_member {
+            command_with_params(obj)
+        } else {
+            action.unwrap_or("").to_string()
+        };
+        if entry_cmd != cmd || cmd.is_empty() {
+            continue;
+        }
+        return obj
+            .get("checked_when")
+            .or_else(|| obj.get("checked"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+    }
+    None
+}
+
+/// Whether the panel-menu entry for `cmd` is checked, evaluating its bundle
+/// predicate against `ctx` through the SHARED menu-state evaluator.
+///
+/// An entry with no predicate — and a command that names no entry — is not
+/// checked, matching `menu_state`'s `checked: null` for an item with no
+/// `checked_when`.
+pub fn is_checked_from_yaml(content_id: &str, cmd: &str, ctx: &serde_json::Value) -> bool {
+    match checked_expr(content_id, cmd) {
+        Some(expr) => crate::interpreter::menu_state::eval_bool(&expr, ctx),
+        None => false,
+    }
+}
+
+/// Build the expression context a panel's menu predicates are evaluated
+/// against: the panel's own state table as `panel`, plus the `preferences`
+/// tier the bundle ships.
+///
+/// `panel` starts from the bundle's declared state defaults for the panel and
+/// is then overlaid with whatever this app holds LIVE for that panel. That
+/// overlay is the whole of what the fourteen deleted per-panel `is_checked`
+/// hooks used to encode, written once and named per panel instead of fourteen
+/// times as native `match cmd` arms — jas_dioxus keeps its panel state in typed
+/// `AppState` slots rather than a generic panel store, so something has to
+/// publish those slots into the `panel` namespace, and this is that one place.
+///
+/// A panel absent from the list below contributes no live keys and evaluates
+/// against the bundle defaults alone. For the Brushes panel that is currently
+/// the WHOLE answer and it is a real gap, named rather than hidden: nothing in
+/// `AppState` stores `view_mode` / `thumbnail_size` / `category_filter`, and
+/// `renderer::apply_set_panel_state_with_ctx` has no arm for those keys, so
+/// `set_brush_view_mode` and friends do not persist here. The check marks now
+/// EVALUATE (they showed nothing at all before); what they evaluate is the
+/// declared default until brushes panel state exists.
+pub fn panel_menu_ctx(
+    content_id: &str,
+    st: &crate::workspace::app_state::AppState,
+) -> serde_json::Value {
+    use serde_json::Value as J;
+    let mut panel: serde_json::Map<String, J> = crate::interpreter::workspace::Workspace::load()
+        .map(|ws| ws.panel_state_defaults(content_id).into_iter().collect())
+        .unwrap_or_default();
+    for (k, v) in live_panel_state(content_id, st) {
+        panel.insert(k, v);
+    }
+    let preferences = crate::interpreter::workspace::Workspace::load()
+        .and_then(|ws| ws.data().get("preferences").cloned())
+        .unwrap_or(J::Null);
+    serde_json::json!({
+        "panel": J::Object(panel),
+        "preferences": preferences,
+    })
+}
+
+/// The live `panel.*` values this app holds for `content_id`, keyed exactly as
+/// the panel's YAML state table declares them.
+///
+/// Each arm replaces one deleted native `is_checked` hook, and is a statement
+/// about STORAGE (where this app keeps the value) rather than about menus — the
+/// predicate that reads it stays in the YAML.
+fn live_panel_state(
+    content_id: &str,
+    st: &crate::workspace::app_state::AppState,
+) -> Vec<(String, serde_json::Value)> {
+    use serde_json::Value as J;
+    let s = |v: &str| J::String(v.to_string());
+    let b = J::Bool;
+    let pairs: Vec<(&str, J)> = match content_id {
+        "color_panel_content" => {
+            use crate::workspace::color_panel_view::ColorMode;
+            let mode = match st.color_panel_mode {
+                ColorMode::Grayscale => "grayscale",
+                ColorMode::Hsb => "hsb",
+                ColorMode::Rgb => "rgb",
+                ColorMode::Cmyk => "cmyk",
+                ColorMode::WebSafeRgb => "web_safe_rgb",
+            };
+            vec![("mode", s(mode))]
+        }
+        "stroke_panel_content" => vec![
+            ("cap", s(&st.stroke_panel.cap)),
+            ("join", s(&st.stroke_panel.join)),
+        ],
+        "swatches_panel_content" => {
+            vec![("thumbnail_size", s(&st.swatches_panel.thumbnail_size))]
+        }
+        "opacity_panel_content" => vec![
+            ("thumbnails_hidden", b(st.opacity_panel.thumbnails_hidden)),
+            ("options_shown", b(st.opacity_panel.options_shown)),
+            ("new_masks_clipping", b(st.opacity_panel.new_masks_clipping)),
+            ("new_masks_inverted", b(st.opacity_panel.new_masks_inverted)),
+        ],
+        "character_panel_content" => vec![
+            ("snap_to_glyph_visible", b(st.character_panel.snap_to_glyph_visible)),
+            ("all_caps", b(st.character_panel.all_caps)),
+            ("small_caps", b(st.character_panel.small_caps)),
+            ("superscript", b(st.character_panel.superscript)),
+            ("subscript", b(st.character_panel.subscript)),
+        ],
+        "paragraph_panel_content" => {
+            vec![("hanging_punctuation", b(st.paragraph_panel.hanging_punctuation))]
+        }
+        "align_panel_content" => vec![
+            ("use_preview_bounds", b(st.align_panel.use_preview_bounds)),
+            ("align_to", s(st.align_panel.align_to.as_str())),
+        ],
+        "properties_panel_content" => {
+            vec![("prop_constrain", b(st.properties_constrain))]
+        }
+        _ => vec![],
+    };
+    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
