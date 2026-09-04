@@ -66,6 +66,26 @@ public sealed partial class MainWindow : Window
     private List<string> _resizeSteps = new();
     private int _resizeStep;
 
+    /// <summary>
+    /// True under `SB_SCENE=retained`: every settled surface in the `SB_RESIZE`
+    /// walk is HASHED before the next step is asked for. O1's whole subject is
+    /// the pixels at each stop, so a walk that stepped without hashing would
+    /// arrive back at `original` having proven that a window can be resized.
+    /// </summary>
+    private bool _hashEveryStep;
+
+    /// <summary>
+    /// A step's hash is outstanding, so the NEXT step is owed to
+    /// <c>HashTaken</c> and to nothing else.
+    ///
+    /// ⛔ THE GATE IS NOT DECORATION. `HashTaken` fires for EVERY hash row,
+    /// including the two the `retained` scene takes for itself before the walk
+    /// begins (`A` and `A-MUT`). Without this flag those would each advance the
+    /// walk, and the surface would go away before the mutation's own frame had
+    /// been hashed.
+    /// </summary>
+    private bool _awaitingStepHash;
+
     // ---- the open gesture, owned by the XAML thread -----------------------
     private bool _gestureOpen;
     private int _pressCount;
@@ -84,8 +104,9 @@ public sealed partial class MainWindow : Window
         Title = VerifyTitle;
         _ui = DispatcherQueue;
         _canvas = new global::SbWinUi.Canvas(Report);
-        _canvas.SurfaceSettled = DriveNextResize;
+        _canvas.SurfaceSettled = OnSurfaceSettled;
         _canvas.SceneCompleted = AfterScene;
+        _canvas.HashTaken = OnHashTaken;
 
         // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
         // needs a run at the display's full resolution and not at whatever size
@@ -450,6 +471,13 @@ public sealed partial class MainWindow : Window
             // name on the render thread.
             var scene = Environment.GetEnvironmentVariable("SB_SCENE");
             if (string.IsNullOrWhiteSpace(scene)) { scene = "benchmark"; }
+
+            // O1's walk hashes at every stop. Decided HERE, from the scene name,
+            // rather than inside the walk: the walk is generic and the hashing
+            // is one scene's requirement, and a walk that hashed for everybody
+            // would put a hash row into every benchmark receipt on record.
+            _hashEveryStep = string.Equals(scene, "retained", StringComparison.OrdinalIgnoreCase);
+
             _canvas.Scene(scene);
         }
         catch (Exception ex)
@@ -624,6 +652,45 @@ public sealed partial class MainWindow : Window
 
         _resizeSteps = steps;
         _resizeStep = 0;
+        DriveNextResize();
+    }
+
+    /// <summary>
+    /// A surface settled. Under `SB_SCENE=retained` that is not the end of a
+    /// step -- the hash is.
+    ///
+    /// ⛔ THE STEP IS NOT ADVANCED FROM HERE UNDER `retained`, AND THAT IS A
+    /// RACE THIS DESIGN HAD TO ANSWER. Posting the next `AppWindow.Resize` the
+    /// moment the previous one settles lets the hash command and the next
+    /// resize be drained in ONE batch -- and a batch paints once. The row would
+    /// then carry the OLD step's label over the NEW step's pixels: a hash that
+    /// looks perfectly well-formed and describes the wrong surface, which is the
+    /// one failure O1 could not detect from its own rows.
+    /// </summary>
+    private void OnSurfaceSettled()
+    {
+        if (!_hashEveryStep || _resizeStep == 0)
+        {
+            DriveNextResize();
+            return;
+        }
+
+        // The LABEL names the stop, not the ordinal, because the harness asserts
+        // by name: `A'` is the return to `original` (O1's H2) and `H<i>` is the
+        // i-th away size (H1). A list with more stops keeps numbering.
+        var token = _resizeSteps[_resizeStep - 1];
+        var label = string.Equals(token, "original", StringComparison.OrdinalIgnoreCase)
+            ? "A'"
+            : $"H{_resizeStep}";
+        _awaitingStepHash = true;
+        _canvas.Hash(label);
+    }
+
+    /// <summary>A hash row landed. Only a STEP's hash owes the next step.</summary>
+    private void OnHashTaken()
+    {
+        if (!_awaitingStepHash) { return; }
+        _awaitingStepHash = false;
         DriveNextResize();
     }
 
