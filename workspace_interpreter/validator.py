@@ -1,22 +1,56 @@
-"""Workspace schema validator.
+"""Workspace STRUCTURAL validator — layer 1 of ``FLASK_PARITY.md`` §12, and
+only layer 1.
 
 Runs at compile time (inside ``workspace_interpreter.compile``) to catch
 structural errors in workspace YAML before the compiled ``workspace.json``
 ships. Five interpreters (Flask Python, jas Python, Rust, Swift, OCaml)
 load the compiled JSON trusting it to be well-formed.
 
-Three validation layers (see ``FLASK_PARITY.md`` §12):
+WHAT THIS MODULE VALIDATES TODAY — the whole list:
 
-1. **Structural** (JSON Schema) — required fields, types, unknown keys.
-2. **Cross-reference** (this module) — every ``action:`` points to a
-   defined action; every state-key read has a declaration; no duplicate
-   ids.
-3. **Expression parsing** (this module) — every expression string runs
-   through the parser; parse failures reported with context.
+1. ``schema_version`` is one of ``SUPPORTED_SCHEMA_VERSIONS``. Absent is
+   accepted, for workspaces predating the field.
+2. The ``app`` top-level document, against ``schema/app.schema.json``.
+3. Every entry of ``tools:``, against ``schema/tool.schema.json``, plus
+   the one cross-check this module owns: a tool's declared ``id`` must
+   equal the key it is filed under. Read that check for what it COVERS:
+   the key is the filename stem only until two tool files claim one id,
+   at which point ``loader.load_workspace``'s ``merged[entity_id] = part``
+   has already dropped one of them and this check finds the survivor
+   agreeing with itself. Uniqueness is not what it asserts.
+4. The ``elements``, ``preferences`` and ``features`` sections, each
+   against its own schema.
 
-Current coverage: structural only for ``app`` and ``tools``. Other
-layers will be added as schemas are written (``panel``, ``widget``,
-``action``, etc.).
+Nothing else. In particular this module implements NEITHER layer 2
+(cross-reference) NOR layer 3 (expression parsing) of ``FLASK_PARITY.md``
+§12. Until 2026-09-03 this docstring claimed both, and named "no
+duplicate ids" and "every state-key read has a declaration" as things
+this module does — a claim that had never been true and that no reader of
+the code below could have reconciled. ``VISION.md`` §11 carried it as
+"related and unrepaired"; this is the repair.
+
+WHERE THE OTHER LAYERS ACTUALLY LIVE
+
+* *every* ``action:`` *reference resolves* — ``scripts/check_action_refs.py``
+  (CI), and ``TestValidateActionRefs`` in
+  ``workspace_interpreter/tests/test_loader.py``.
+* *no duplicate ids* — ``scripts/check_workspace_ids.py`` (CI), per
+  namespace over the workspace YAML sources. It reads the SOURCES rather
+  than this module's input on purpose: by the time a workspace dict
+  reaches :func:`validate_workspace`, PyYAML has kept the LAST of two
+  duplicate mapping keys and raised nothing, so the duplicate cannot be
+  seen from here at all.
+* *every* ``$state`` *read has a declaration* — NOT BUILT, anywhere.
+  Named here rather than left to be inferred from silence; it is an open
+  gate in ``VISION.md`` §11.
+* *enum values match declared* — partial, and by schema rather than by
+  code: ``schema/`` covers app, tool, elements, features and preferences,
+  while panels, dialogs, menubar, toolbar and actions have no schema at
+  all.
+* *expression parsing* — no compile-time pass over the workspace exists.
+  The expression language is pinned by the cross-language corpus
+  (``scripts/compile_expr_corpus.py`` and its CI freshness gate), which
+  parses the CORPUS, not every expression string in the YAML.
 
 The validator prefers json-schema-spec but gracefully degrades to a
 minimal hand-rolled checker when the ``jsonschema`` package is not
