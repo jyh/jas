@@ -494,8 +494,12 @@ def _resolve(report, segs, site, keypath, owner, in_prop):
 
     if head == "panel":
         if owner is None or owner[0] != "panel":
+            # RED-FIRST PLANT (reverted in the next commit): an ambient
+            # `panel.*` read is resolved against an arbitrary panel instead of
+            # being counted as uncovered. The self-test's green arm must catch
+            # this, and CI must show it catching it on BOTH platform families.
             report.bump("ambient-panel")
-            return
+            owner = ("panel", sorted(report.decls.panel)[0])
         report.bump("read-panel")
         pid = owner[1]
         _resolve_owned(report, segs, site, keypath, "panel", pid,
