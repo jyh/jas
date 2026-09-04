@@ -254,8 +254,9 @@ if ($Scene -ne 'retained') {
     # shell of something nobody measured.
     $surfacesAgree = $false
     if ($null -eq $rowA -or $null -eq $rowA2) {
+        $missingLabel = if ($null -eq $rowA) { 'A' } else { 'A-prime' }
         Add-NotRun 'O1.0 surface(A) == surface(A-prime)' `
-            "the $(if ($null -eq $rowA) { 'A' } else { "A'" }) row was not written -- the walk did not reach both stops"
+            "the $missingLabel row was not written -- the walk did not reach both stops"
     } else {
         $sA = Get-SbField $rowA 'surface'
         $sA2 = Get-SbField $rowA2 'surface'

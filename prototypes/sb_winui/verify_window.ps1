@@ -398,7 +398,12 @@ if ($DryRun) {
     Write-Output "  title required : $Title"
     Write-Output "  scene          : $Scene"
     Write-Output "  waits for      : $($spec.Label)"
-    Write-Output "  wait patterns  : $(($spec.Done | ForEach-Object { $_ -replace "`t", '<TAB>' }) -join '  |  ')"
+    # ⛔ COMPUTED BEFORE THE STRING, NOT INSIDE IT. A double-quoted string nested
+    # inside a `$()` inside another double-quoted string parses, and it parses
+    # differently in enough hosts that it is not worth finding out which one this
+    # box has.
+    $patternText = (@($spec.Done | ForEach-Object { $_.Replace("`t", '<TAB>') }) -join '  |  ')
+    Write-Output "  wait patterns  : $patternText"
     Write-Output "  timeout        : $($timeout)s  (base $($spec.Timeout)s + $($knobSeconds)s derived from SB_RENDER_STALL_MS/SB_UI_STALL_MS/SB_POINTER_WAIT_MS)"
     Write-Output "  log            : $log (mark: $(Get-SbLogMark $log) bytes)"
     Write-Output "  already up     : $(($(Get-SbAppPids $Exe) -join ', '))  <- left alive; the teardown is PID-scoped"
