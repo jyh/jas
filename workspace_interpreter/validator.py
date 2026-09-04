@@ -40,9 +40,19 @@ WHERE THE OTHER LAYERS ACTUALLY LIVE
   reaches :func:`validate_workspace`, PyYAML has kept the LAST of two
   duplicate mapping keys and raised nothing, so the duplicate cannot be
   seen from here at all.
-* *every* ``$state`` *read has a declaration* — NOT BUILT, anywhere.
-  Named here rather than left to be inferred from silence; it is an open
-  gate in ``VISION.md`` §11.
+* *every* ``$state`` *read has a declaration* — ``scripts/check_state_reads.py``,
+  which parses every expression string in the workspace YAML with THIS
+  package's own ``expr_parser`` and resolves each ``state.`` / ``panel.``
+  / ``tool.<id>.`` / ``dialog.`` read against the one namespace its head
+  segment selects. Until 2026-09-03 this line read "NOT BUILT, anywhere",
+  which was true when it was written. Read what is WIRED: CI runs only
+  its ``--self-test`` (``.github/workflows/test.yml:87`` and ``:732``);
+  the LIVE arm is commented out beside each, because it reds on 13 real
+  workspace findings listed in ``VISION.md`` §11. Built and self-tested is
+  not the same as watching the tree, and saying so is the point of this
+  line. Note the spelling too: ``$state`` is FLASK_PARITY-era and occurs
+  in no workspace YAML today — a read is a dotted path inside an
+  expression string.
 * *enum values match declared* — partial, and by schema rather than by
   code: ``schema/`` covers app, tool, elements, features and preferences,
   while panels, dialogs, menubar, toolbar and actions have no schema at

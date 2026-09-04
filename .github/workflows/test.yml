@@ -63,6 +63,29 @@ jobs:
       # the time workspace.json exists the duplicate is gone and the gate above
       # -- which reads that bundle -- is structurally unable to see it.
       - run: python scripts/check_workspace_ids.py --self-test && python scripts/check_workspace_ids.py
+      # The THIRD sub-check of the same VISION.md §11 layer: every state read
+      # resolves to a declaration in the one namespace its head segment selects
+      # (there is no scope search -- expr_eval._eval_path takes
+      # ctx.get(segments[0]) and never falls back, so an undeclared read is a
+      # silent null).
+      #
+      # ONLY THE SELF-TEST IS WIRED, DELIBERATELY. The live arm REDS on main
+      # today, on 13 real findings it was written to surface, and they are
+      # workspace defects rather than gate defects -- so wiring it would either
+      # red the branch or invite someone to silence it. TODO(state-reads): fix
+      # these, then uncomment the live line below.
+      #   * 3 undeclared dialog reads -- dialog.size_mode / angle_mode /
+      #     roundness_mode in workspace/dialogs/blob_brush_tool_options.yaml,
+      #     on `include: variation_widget` nodes that also use the wrong param
+      #     names (base_bind/mode_bind vs the template's base_path/mode_path).
+      #   * 10 expression strings that do not parse, hence evaluate to null in
+      #     every port: 6 `contains` uses in workspace/panels/brushes.yaml
+      #     (no such operator in any port's lexer), 2 `:=` setters in
+      #     workspace/dialogs/artboard_options.yaml (the grammar's assignment
+      #     is `<-`), `#dialog.hex` in workspace/dialogs/swatch_options.yaml,
+      #     and a `${...}` in workspace/actions.yaml's data.list_sort path.
+      - run: python scripts/check_state_reads.py --self-test
+      # - run: python scripts/check_state_reads.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -699,6 +722,15 @@ jobs:
           # promise the platform cannot matter.
           python scripts/check_workspace_ids.py --self-test
           python scripts/check_workspace_ids.py
+          # The third sub-check of the same layer. It reads every workspace
+          # YAML with an explicit encoding and keys its sites on `as_posix()`
+          # relpaths, so it belongs on the platform whose separators and
+          # default codepage differ -- the same argument as the line above.
+          # Only the SELF-TEST runs: the live arm reds on main on 13 real
+          # workspace findings. TODO(state-reads): see the ubuntu lane's note
+          # for the list, then uncomment the live line here and there together.
+          python scripts/check_state_reads.py --self-test
+          # python scripts/check_state_reads.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh

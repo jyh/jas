@@ -434,12 +434,31 @@ direct prerequisites for this vision. The most relevant:
   (CI `.github/workflows/test.yml:108` and `:648-649`) covers per-app widget-kind dispatch;
   `scripts/check_action_implementations.py` (CI `:121` and `:652-653`) covers the actions
   behind a widget. Both are CI-wired and both run their own `--self-test` first.
-- **Add the validator cross-reference layer** — 🟡 **two of four sub-checks done.** ⛔ This
+- **Add the validator cross-reference layer** — 🟡 **two of four sub-checks done, a
+  third BUILT BUT NOT WIRED.** ⛔ This
   line was **split** from the one above on 2026-09-03 rather than ticked, because the two
   halves are in different states and a single tick would have erased three open gates.
   Measured against the layer's own four-check definition: *every `action:` reference
   resolves* ✅ (`scripts/check_action_refs.py`, plus the reference interpreter's own test);
-  *every `$state` read has a declaration* ⬜ **absent**; *no duplicate ids* ✅ **done for
+  *every `$state` read has a declaration* 🟡 **built, self-tested in CI, live arm NOT
+  wired** — `scripts/check_state_reads.py`, `.github/workflows/test.yml:87` (ubuntu) and
+  `:732` (Windows) run its `--self-test` on both platform families; the live line sits
+  beside each, COMMENTED, under a `TODO(state-reads)`. That is a different state from ✅
+  and it is written here as one. The live arm reds on main on 13 findings the gate was
+  written to surface, all of them WORKSPACE defects rather than gate defects, so they are
+  not silenced: 3 undeclared dialog reads (`dialog.size_mode` / `angle_mode` /
+  `roundness_mode` in `workspace/dialogs/blob_brush_tool_options.yaml`, on `include:`
+  nodes that also carry the wrong template param names), and 10 expression strings that do
+  not parse and therefore evaluate to null in every port (6 uses of a `contains` operator
+  no port's lexer has, 2 `:=` setters where the grammar's assignment is `<-`, a
+  `#dialog.hex` colour bind, and a `${...}` inside a `data.list_sort` path the JS engine reads
+  literally rather than evaluating).
+  The gate itself resolves 1,722 reads — 334 `state.`, 369 `panel.`, 475 `tool.<id>.`,
+  544 `dialog.` — against 675 declarations, and reports the 37 ambient `panel.`/`dialog.`
+  reads it CANNOT cover (the namespace is whichever panel is active, and nothing in the
+  source names it) as a printed number rather than a sentence. The item's `$state` spelling
+  is FLASK_PARITY-era: the literal `$state` occurs in zero workspace YAML files.
+  *no duplicate ids* ✅ **done for
   workspace ids** — `scripts/check_workspace_ids.py`, wired on both platform families (the
   ubuntu *workspace.json up-to-date* job and the Windows *Structural gates* step;
   `.github/workflows/test.yml:65` and `:700-701` when written). 16 collectors over the 90
@@ -454,9 +473,10 @@ direct prerequisites for this vision. The most relevant:
   runs. *enum values match declared* 🟡 **partial** — `schema/` covers
   app, tool, elements, features and preferences, while panels, dialogs, menubar, toolbar and
   actions have no schema at all.
-  **The two real, named, unbuilt gates are therefore:** a `$state`-read declaration gate; and
-  schemas for panels/dialogs/menubar/toolbar/actions, which is what would make the enum check
-  real rather than partial.
+  **One real, named, unbuilt gate remains:** schemas for panels/dialogs/menubar/toolbar/
+  actions, which is what would make the enum check real rather than partial. (Until
+  2026-09-03 this line named TWO; the state-read gate is now built, and is carried above in
+  its own honest 🟡 rather than being ticked out of this count.)
   ✅ The related defect this line used to carry as unrepaired —
   `workspace_interpreter/validator.py`'s docstring naming itself the home of two validation
   layers it does not implement — was repaired in the same pull request as the gate above.
