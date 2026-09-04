@@ -172,7 +172,13 @@ WORKSPACE = ROOT / "workspace"
 # The gate parses expressions with the INTERPRETER'S OWN parser. A second
 # grammar here would drift from the one that ships, and the drift would be
 # invisible: this gate would judge a string the runtime never sees that way.
-sys.path.insert(0, str(ROOT))
+#
+# `as_posix()`, not `str()`: a sys.path entry must be a string (a Path is
+# ignored by the path finder), and `str(Path)` renders backslashes on Windows,
+# which is exactly the keying-on-a-rendered-path shape check_path_keying.py
+# exists to refuse. CPython's import machinery accepts forward slashes on every
+# platform. check_path_keying.py caught this line on its first CI run.
+sys.path.insert(0, ROOT.as_posix())
 from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
 from workspace_interpreter.expr_parser import (  # noqa: E402
     Assign, Lambda, Let, parse,
