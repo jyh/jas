@@ -306,6 +306,93 @@ internal static unsafe class JasCore
     internal static extern int jas_paint_probe_offscreen(
         IntPtr backSurface, IntPtr offscreenSurface, float width, float height);
 
+    // -- the JSON surface (BL4): Rust owns the bytes, we copy and free -------
+    //
+    // ⛔ NONE OF THIS EXISTED BEFORE N1. At 3c8fddce every `DllImport` in this
+    // file returned a SCALAR: there was no `JasBytes`, no `jas_free` and no
+    // `jas_document_json` (grep -> 0). So the harness had no way to ask the core
+    // what document it was holding, which is why O1's mutation clause and O4's
+    // before/after oracle both needed a binding before they needed a scene.
+
+    /// <summary>
+    /// <c>JasBytes</c> -- an owned UTF-8 span, Rust-side (`ffi.rs:42-46`).
+    ///
+    /// ⛔ THE LAYOUT IS THE CONTRACT: `#[repr(C)] { *const u8, usize }`. `usize`
+    /// is <c>nuint</c> here and NOT <c>int</c> -- on x64 a 4-byte field would
+    /// misalign the pointer's neighbour and read length from the wrong half of
+    /// the struct, which is the class of bug that shows up as a plausible-looking
+    /// wrong number rather than as a crash.
+    ///
+    /// ⛔ AND IT IS RETURNED BY VALUE. A 16-byte struct comes back through the
+    /// x64 hidden-return-pointer convention on both sides, which is why this is a
+    /// struct rather than an out-parameter: the ABI is what it is and describing
+    /// it differently on this side would corrupt every call.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct JasBytes
+    {
+        internal IntPtr Ptr;
+        internal nuint Len;
+    }
+
+    /// <summary>
+    /// Release a span this ABI returned (BL4). Safe on the empty <c>JasBytes</c>
+    /// (`ptr == NULL && len == 0` is the canonical empty result).
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern void jas_free(JasBytes b);
+
+    /// <summary>
+    /// The session's document as canonical test JSON -- the SAME bytes the
+    /// cross-language corpus compares.
+    ///
+    /// ⚠️ A SUMMARY, NOT GEOMETRY (`ffi.rs:330-331`, BL6), and BLIND TO THE TOOL
+    /// OVERLAY: `jas_paint_frame` draws the overlay and this does not describe
+    /// it. So this is the DOCUMENT oracle and the hash is the PIXEL oracle, and
+    /// neither is offered as the other.
+    ///
+    /// BL2: a call for this engine, so it happens on the engine's own thread --
+    /// which is why <c>Canvas.Dump</c> is a queue command and not a method the
+    /// window can call.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_document_json(IntPtr engine);
+
+    /// <summary>
+    /// The boundary counters as JSON: per-function rows plus totals.
+    ///
+    /// ⭐ THIS IS O1's IDENTITY ORACLE. `jas_engine_new` and `jas_engine_free`
+    /// record their own crossings (`ffi.rs:274`, `:284`), so "the engine was
+    /// created once and never freed" is a fact the CORE reports rather than a
+    /// claim the shell makes about itself.
+    ///
+    /// ⚠️ READ IT LAST. Releasing the span calls <c>jas_free</c>, which IS a
+    /// counted crossing (`ffi.rs:551-556`), so a dump taken mid-interaction
+    /// perturbs the next reading.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_instr_counters_json();
+
+    /// <summary>
+    /// Copy a Rust-owned span into a C# string and free it -- BL4 in one place,
+    /// so no caller has to remember the second half.
+    ///
+    /// The free is in a `finally`: a decoding failure must not also leak, and an
+    /// exception on the copy is exactly when the release is easiest to forget.
+    /// </summary>
+    internal static string TakeString(JasBytes b)
+    {
+        try
+        {
+            if (b.Ptr == IntPtr.Zero || b.Len == 0) { return string.Empty; }
+            return System.Text.Encoding.UTF8.GetString((byte*)b.Ptr, (int)b.Len);
+        }
+        finally
+        {
+            jas_free(b);
+        }
+    }
+
     /// <summary>
     /// Point the loader at the cdylib.
     ///

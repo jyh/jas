@@ -164,16 +164,24 @@ jobs:
       # end. Per-family on purpose: pooled counting is what hides it (opacity
       # takes 9 distinct values corpus-wide while actions/ sits at 334 of 334).
       - run: python scripts/check_default_variance.py --self-test && python scripts/check_default_variance.py
-      # The two WinUI-shell text gates (FREEZE O2b and O7). ⛔ SELF-TESTS ONLY,
-      # and that is N5a's whole scope: both gates' LIVE arms are RED on `main` by
-      # construction -- the shell at 3c8fddce carries three Math.Max clamps, reads
-      # SB_FRAMES on the resize path, has no SurfacePolicy and no knob table. An
-      # executor facing its own red gate weakens it, so the live arms are wired
-      # into CI by N5b, in the SAME pull request as the shell that satisfies them.
-      # What runs here is the proof that each gate can RED: every violation is
-      # planted in a fixture copy, one at a time, and asserted.
+      # The two WinUI-shell text gates (FREEZE O2b and O7), SELF-TEST THEN LIVE.
+      #
+      # ⭐ N5b: THE LIVE ARMS ARE WIRED HERE, IN THE SAME PULL REQUEST AS THE
+      # SHELL THAT SATISFIES THEM, and that ordering is the whole design. Both
+      # gates are RED on `main` BY CONSTRUCTION -- at 3c8fddce the shell carries
+      # three `Math.Max` clamps, reads `SB_FRAMES` on the resize path, has no
+      # `SurfacePolicy`, no `Benchmark` and no knob table. Landing them live
+      # first would have handed an executor a red gate over code they were about
+      # to write, and an executor facing their own red gate weakens it.
+      #
+      # THE SELF-TEST STILL RUNS FIRST AND IS NOT REDUNDANT. It plants each
+      # violation in a fixture copy and asserts the gate REDS -- a gate that
+      # cannot fail is a count with no failure mode, and a live arm that has
+      # gone green because its scanner broke looks exactly like a clean tree.
       - run: python scripts/check_shell_interaction_path.py --self-test
+      - run: python scripts/check_shell_interaction_path.py
       - run: python scripts/check_shell_knobs.py --self-test
+      - run: python scripts/check_shell_knobs.py
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -687,14 +695,18 @@ jobs:
           # that, not this comment.
           python scripts/check_naming_rule.py --self-test
           python scripts/check_naming_rule.py
-          # FREEZE O2b and O7, SELF-TESTS ONLY (see the ubuntu lane's note): the
-          # live arms are red on `main` by construction and land with the shell in
-          # N5b's PR. Here because check_lane_coverage.py requires both platform
-          # families, and because both gates read source with pathlib and key
-          # findings on `Path.relative_to(...).as_posix()` -- the shape that broke
-          # check_swift_copy_sites.py on Windows and nowhere else.
+          # FREEZE O2b and O7, SELF-TEST THEN LIVE (N5b; see the ubuntu lane's
+          # note for why the live arms land with the shell rather than before it).
+          # Here because check_lane_coverage.py requires both platform families,
+          # and because both gates read source with pathlib and key findings on
+          # `Path.relative_to(...).as_posix()` -- the shape that broke
+          # check_swift_copy_sites.py on Windows and nowhere else. The LIVE arms
+          # are the ones that exercise that shape over real files, so running
+          # them here is where the separator claim is actually tested.
           python scripts/check_shell_interaction_path.py --self-test
+          python scripts/check_shell_interaction_path.py
           python scripts/check_shell_knobs.py --self-test
+          python scripts/check_shell_knobs.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
