@@ -371,6 +371,16 @@ $afterDump = Join-Path $scratch 'sb-doc-after.json'
 # ---------------------------------------------------------------------------
 # THE ENVIRONMENT, RESOLVED ONCE
 # ---------------------------------------------------------------------------
+# ⛔ THE CHOSEN POINT AND DELTA ARE DECLARED HERE, ABOVE BOTH ARMS THAT SET THEM.
+# The synthetic arm chooses BEFORE launch (the knob must be set for the shell to
+# read it) and the hand arm chooses DURING the run (from the dump this run
+# writes). If these were initialised between the two, the synthetic arm's choice
+# would be erased and every coordinate assertion in the SEAM CONTROL would read
+# `NOT RUN: this harness did not choose the delta` -- a control that measures
+# nothing while reporting that it was run.
+$handTarget = $null
+$handAsked = $null
+
 $synthNote = ''
 if ($SynthFromDump) {
     $t = Get-SbHitTarget $beforeDump
@@ -389,6 +399,12 @@ if ($SynthFromDump) {
         $env:SB_SYNTH_DRAG = ("{0},{1},{2},{3},{4}" -f
             [math]::Round($t.X * $Scale, 2), [math]::Round($t.Y * $Scale, 2),
             [math]::Round($handDx * $Scale, 2), [math]::Round($handDy * $Scale, 2), $HandMoves)
+        # The SAME chosen element and the SAME delta the hand would have used --
+        # which is what makes this the same oracle read through the other
+        # provenance, rather than a second experiment wearing the name of a
+        # control.
+        $handTarget = $t
+        $handAsked = @{ X = $t.X; Y = $t.Y; Dx = $handDx; Dy = $handDy; K = $HandMoves }
         $synthNote = "element $($t.Type) id='$($t.Id)' at doc ($($t.X),$($t.Y)) -> SB_SYNTH_DRAG=$env:SB_SYNTH_DRAG"
         Write-Host "synth-from-dump: $synthNote"
     }
@@ -554,9 +570,9 @@ if (Test-Path $dupExe) {
 }
 
 # ---- O4's hand: fire it when the shell has written the before-dump ---------
-$handTarget = $null
+# `$handTarget` / `$handAsked` are NOT reset here: the synthetic arm may already
+# have set them (see the declaration above), and this arm sets them itself.
 $handReceipt = Join-Path $scratch 'sb-hand.txt'
-$handAsked = $null
 if ($Hand) {
     Remove-Item $handReceipt -ErrorAction SilentlyContinue
     $dumpWait = Wait-SbRow -Log $log -Mark $logMark -Patterns @("DUMP sb-doc-before\.json bytes=") `
