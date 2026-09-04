@@ -305,3 +305,70 @@ the C# side should own it (host passes a device or a back-buffer surface) is a
 it is the first thing checkpoint 2 must settle rather than discover. S-B has no
 ruled kill-gate; if a point is reached where one is needed to judge whether the
 variant is dying, that goes back to the Captain rather than being invented here.
+
+## The harness — what changed, and how to drive it
+
+*(Only the harness usage lines that changed. The rest of this README is the
+documentation node's; nothing above this heading is touched by it.)*
+
+Four PowerShell files, and one of them is new:
+
+| file | what it is |
+|---|---|
+| `sitting.ps1` | drives a whole sitting; also `-Stay` / `-Stop` |
+| `verify_window.ps1` | drives ONE scene, waits on its completion row, asserts the observables |
+| `verify_assertions.ps1` | the assertion bodies, dot-sourced by the one above |
+| `harness_common.ps1` | launch / wait / stop / row-reading, shared by both entry points |
+| `send_hand.ps1` | the session-1 `SendInput` gesture the real-input observable needs |
+
+**Run and stay (F-2), PID-scoped throughout:**
+
+```powershell
+powershell -File prototypes\sb_winui\sitting.ps1 -Stay          # prints STAY pid=<n>, does NOT kill
+powershell -File prototypes\sb_winui\sitting.ps1 -Stop <pid>    # kills BY PID ONLY, drops the task
+```
+
+`-Stay` waits — bounded, with a named refusal on timeout — for the app's own
+`RUSTOK STAY pid=<n>` row before printing anything, and refuses by name while a
+recorded stay pid is still alive (`-Force` for a deliberate second instance).
+`-Stop` refuses if that pid is not an `SbWinUi`, and refuses if it is already
+gone rather than reporting a clean teardown.
+
+**A sitting, and a dry run of one:**
+
+```powershell
+powershell -File prototypes\sb_winui\sitting.ps1 -DryRun        # resolve every knob, launch nothing
+powershell -File prototypes\sb_winui\sitting.ps1                # benchmark, document, retained, stall, pointer x2, goldens
+```
+
+`-DryRun` (alias `-WhatIf`) exists on both entry points: it prints the resolved
+plan — scene, completion row, derived timeout, forwarded environment, teardown,
+the gesture's chosen point — and launches nothing. The box is expensive; a plan
+that can be read before it is spent is cheaper than a run that measured the
+wrong thing.
+
+**What `verify_window.ps1` now does that it did not:**
+
+* **The teardown is PID-scoped.** It kills the process it launched and no other,
+  and refuses if that pid is already gone. The old name sweep killed every
+  instance on the desktop, including a `-Stay` somebody was looking at.
+* **Every wait is on a row, not a clock.** Each scene has a completion row and a
+  derived bound (the stall's bound is derived from its own knobs, so a 20 s
+  stall is never torn down mid-stall). A timeout prints
+  `NOT RUN: timed out waiting for <row>` by name.
+* **It asserts.** Every observable is checked against the rows the run wrote and
+  reported `PASS` / `FAIL` / `NOT RUN` **by name, with the row it read**. An
+  assertion that cannot be evaluated is `NOT RUN` — never a pass — and the run
+  exits 6 (`VERIFY: INCOMPLETE`) rather than 0.
+* **The gesture is real and aimed from outside.** `-Hand` dispatches
+  `send_hand.ps1` as a session-1 scheduled task after the shell writes its
+  before-dump; the element and the delta are chosen from that dump, which the
+  shell wrote and never reads back. `-HandMoves` varies k; `-HandEmpty` aims at
+  empty canvas as the negative control; `-SynthFromDump` drives the same chosen
+  point through the synthetic-drag knob as the seam's positive control.
+* **The camera is timed on a row.** The DXGI capture in the `retained` scene is
+  taken on the shell's own `FIRST-PRESENT` row. Everywhere else it is a
+  demonstration, and the harness says which it is.
+
+Exit codes: `0` pass · `1` fail · `2` window ok / pixels inconclusive · `3`
+totals did not close · `6` incomplete (assertions `NOT RUN`, none failed).
