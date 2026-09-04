@@ -1471,6 +1471,17 @@ internal sealed unsafe class Canvas : IDisposable
         {
             var label = _hashLabel;
             _hashLabel = null;
+
+            // ⛔ THE COUNTERS ARE THE LAST CORE CALL BEFORE THE ROW (FREEZE
+            // O1(i)), AND THE ORDER IS THE MEASUREMENT. `jas_instr_counters_json`
+            // counts its own `jas_free`, and `jas_engine_free` is a recorded
+            // crossing -- so a row composed before a free that is about to
+            // happen reports the state one call ago. That is exactly the defect
+            // flask measured on the `document` control (`2 / 0`), repaired at
+            // its site by freeing before counting. Here nothing is freed at all,
+            // which is the whole claim: the `retained` scene holds ONE engine
+            // for the life of the window, so these rows must read
+            // `engines-created=1 engines-freed=0` at every stop of the walk.
             var (created, freed) = EngineCounters();
             _report(
                 $"{label} surface={_width}x{_height} hash={hash ?? "n/a"} "
@@ -1833,6 +1844,17 @@ internal sealed unsafe class Canvas : IDisposable
     /// ⛔ SO ITS `engines-created` READS 2, NOT 1, and that is correct for THIS
     /// scene: the retained engine from Attach plus this one. O1's identity clause
     /// is asserted on the `retained` scene, not here.
+    ///
+    /// ⭐ AND `engines-freed` READS 1 BECAUSE THE FREE IS ORDERED BEFORE THE
+    /// COUNTERS READ -- a repair folded in from flask's measurement of the
+    /// merged shell on kenai, where the row read `2 / 0`. Nothing leaked: the
+    /// free lived in the `finally`, so it ran AFTER the row was composed, and
+    /// the row was a true statement about a moment that was one call too early.
+    /// The count is therefore read AFTER this control's own `jas_engine_free`,
+    /// and the `finally` stays as a GUARD that frees only a handle still held
+    /// (the refusal paths above never reach the explicit free). An ordering
+    /// fact reported as a count is exactly the shape a reader cannot tell from
+    /// a leak, which is why it is fixed rather than annotated.
     /// </summary>
     private bool RenderDocumentControl()
     {
@@ -1914,6 +1936,14 @@ internal sealed unsafe class Canvas : IDisposable
                 return false;
             }
 
+            // ⛔ FREE FIRST, THEN COUNT. `jas_engine_free` is a recorded
+            // crossing, so a row composed before it reports the state one call
+            // ago -- `engines-freed=0` about an engine this scene is about to
+            // free. The handle is nulled so the `finally` below frees nothing
+            // twice.
+            JasCore.jas_engine_free(engine);
+            engine = IntPtr.Zero;
+
             var (created, freed) = EngineCounters();
             LastStatus = $"DOCUMENT '{System.IO.Path.GetFileName(svgPath)}' "
                        + $"({bytes.Length} bytes) painted LIVE through {SurfaceLabel()} on {Adapter} "
@@ -1924,9 +1954,15 @@ internal sealed unsafe class Canvas : IDisposable
         }
         finally
         {
-            // Freed on EVERY path including the refusals above: a session leaked
-            // per frame is a leak nobody notices until a long run.
-            JasCore.jas_engine_free(engine);
+            // A GUARD, not the primary free. The success path frees above, in
+            // order, and nulls the handle; this catches every refusal and throw
+            // between the create and that point -- a session leaked per frame is
+            // a leak nobody notices until a long run.
+            if (engine != IntPtr.Zero)
+            {
+                JasCore.jas_engine_free(engine);
+                engine = IntPtr.Zero;
+            }
         }
     }
 
