@@ -1641,7 +1641,7 @@ internal sealed unsafe class Canvas : IDisposable
             if (rc != JasCore.PaintOk) { return rc; }
 
             _presentTid = Environment.CurrentManagedThreadId;
-            var hr = _swapChain.Present(1, default);
+            var hr = _swapChain!.Present(1, default);
             if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; return rc; }
             // Occlusion is NOT fatal here, and that is a deliberate difference
             // from Benchmark. That method reports per-frame TIMINGS, which are
