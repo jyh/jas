@@ -133,7 +133,13 @@ CLAMPS = {
 }
 
 ENV_READ = re.compile(r"(?<![A-Za-z0-9_])Environment\s*\.\s*GetEnvironmentVariable\s*\(\s*\"([A-Za-z_][A-Za-z0-9_]*)\"\s*\)")
-BENCH_CALL = re.compile(r"(?<![A-Za-z0-9_.])(?:[A-Za-z_]\w*\s*\.\s*)?Benchmark\s*\(")
+# NO `.` IN THE LOOKBEHIND, AND THAT IS THE FIX. The first cut matched an
+# optional single-receiver prefix (`_canvas.`) and excluded `.` on the left,
+# which made `host.canvas.Benchmark(` unmatchable from either start position
+# -- a two-level member call was invisible to the clause. Excluding word
+# characters only catches every receiver depth, and still refuses
+# `MyBenchmark(`. The declaration is excluded by _sig_regions, not by this.
+BENCH_CALL = re.compile(r"(?<![A-Za-z0-9_])Benchmark\s*\(")
 SIZECHANGED = re.compile(r"(?<![A-Za-z0-9_])SizeChanged\s*\+=")
 NAMED_HANDLER = re.compile(r"(?<![A-Za-z0-9_])SizeChanged\s*\+=\s*([A-Za-z_]\w*)\s*;")
 CASE_BENCH = re.compile(r"(?<![A-Za-z0-9_])case\s+\"benchmark\"\s*:", re.IGNORECASE)
@@ -592,6 +598,15 @@ def self_test() -> int:
         _mutate("MainWindow.xaml.cs",
                 "            if (d == Decision.Accept) { _canvas.Enqueue(new Resize(w, h)); }",
                 "            if (d == Decision.Accept) { _canvas.Benchmark(); }"),
+        "does not name the scene")
+
+    # (12b) A TWO-LEVEL member call. The first cut of BENCH_CALL allowed one
+    #       receiver and excluded `.` on the left, so `host.canvas.Benchmark(`
+    #       matched from neither start position and was invisible to the clause.
+    red("12b Benchmark called off the arm, two-level receiver",
+        _mutate("MainWindow.xaml.cs",
+                "            if (d == Decision.Accept) { _canvas.Enqueue(new Resize(w, h)); }",
+                "            if (d == Decision.Accept) { _host.canvas.Benchmark(); }"),
         "does not name the scene")
 
     # (13) NO call site at all: a benchmark nobody calls.
