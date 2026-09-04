@@ -218,7 +218,19 @@ class Registry:
 def _collect_mapping_keys(node, where, path, reg):
     """LAYER A, universal: a repeated key in ANY mapping. PyYAML keeps the last
     and raises nothing, so this is invisible to every reader downstream of the
-    load -- including the compiled bundle."""
+    load -- including the compiled bundle.
+
+    The namespace is the KEY PATH, not the node's identity, so two mappings at
+    the same path share one namespace. That is deliberate and it is also what
+    the load does -- if `icons/selection_arrow` appears twice, the surviving
+    dict is the LAST one whole -- but it means a duplicate key CASCADES: the
+    repeated parent is reported, and so is every key inside it. Measured on the
+    red-first plant: one duplicated icon entry produced three findings, the
+    parent and its two fields. That is noise attached to a real finding and
+    never a standalone one, because two mappings can only share a key path if
+    an ancestor key is itself duplicated -- which is already reported above
+    them. A sequence gives its items distinct paths (`foo[0]`, `foo[1]`), so
+    siblings in a list cannot collide this way."""
     if _is_map(node):
         for key, key_node, value_node in _pairs(node):
             reg.add(f"mapping-key {where}{path}", key, _site(where, key_node),
