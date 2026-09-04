@@ -164,6 +164,16 @@ jobs:
       # end. Per-family on purpose: pooled counting is what hides it (opacity
       # takes 9 distinct values corpus-wide while actions/ sits at 334 of 334).
       - run: python scripts/check_default_variance.py --self-test && python scripts/check_default_variance.py
+      # The two WinUI-shell text gates (FREEZE O2b and O7). ⛔ SELF-TESTS ONLY,
+      # and that is N5a's whole scope: both gates' LIVE arms are RED on `main` by
+      # construction -- the shell at 3c8fddce carries three Math.Max clamps, reads
+      # SB_FRAMES on the resize path, has no SurfacePolicy and no knob table. An
+      # executor facing its own red gate weakens it, so the live arms are wired
+      # into CI by N5b, in the SAME pull request as the shell that satisfies them.
+      # What runs here is the proof that each gate can RED: every violation is
+      # planted in a fixture copy, one at a time, and asserted.
+      - run: python scripts/check_shell_interaction_path.py --self-test
+      - run: python scripts/check_shell_knobs.py --self-test
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -677,6 +687,14 @@ jobs:
           # that, not this comment.
           python scripts/check_naming_rule.py --self-test
           python scripts/check_naming_rule.py
+          # FREEZE O2b and O7, SELF-TESTS ONLY (see the ubuntu lane's note): the
+          # live arms are red on `main` by construction and land with the shell in
+          # N5b's PR. Here because check_lane_coverage.py requires both platform
+          # families, and because both gates read source with pathlib and key
+          # findings on `Path.relative_to(...).as_posix()` -- the shape that broke
+          # check_swift_copy_sites.py on Windows and nowhere else.
+          python scripts/check_shell_interaction_path.py --self-test
+          python scripts/check_shell_knobs.py --self-test
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
