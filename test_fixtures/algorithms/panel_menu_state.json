@@ -1,0 +1,833 @@
+[
+  {
+    "name": "brushes_all_categories_thumbnail_small",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "brushes_panel_content",
+      "ctx": {
+        "panel": {
+          "view_mode": "thumbnail",
+          "thumbnail_size": "small",
+          "category_filter": [
+            "calligraphic",
+            "scatter",
+            "art",
+            "pattern",
+            "bristle"
+          ],
+          "selected_library": "default_brushes",
+          "selected_brushes": []
+        },
+        "preferences": {
+          "brushes": {
+            "persistent_libraries": [
+              "default_brushes"
+            ]
+          }
+        },
+        "canvas_selection_non_empty": false
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "open_brush_options",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_brush",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_brush",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "open_brush_options",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "select_all_unused_brushes",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "sort_brushes_by_name",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "set_brush_view_mode",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "set_brush_view_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          14
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          16
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          17
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          18
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          19
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          20
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          22
+        ],
+        "action": "toggle_brush_library_persistent",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          23
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          24
+        ],
+        "action": "save_brush_library",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "brushes_only_art_list_large",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "brushes_panel_content",
+      "ctx": {
+        "panel": {
+          "view_mode": "list",
+          "thumbnail_size": "large",
+          "category_filter": [
+            "art"
+          ],
+          "selected_library": "my_library",
+          "selected_brushes": [
+            "b1"
+          ]
+        },
+        "preferences": {
+          "brushes": {
+            "persistent_libraries": [
+              "default_brushes"
+            ]
+          }
+        },
+        "canvas_selection_non_empty": true
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "open_brush_options",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_brush",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_brush",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "open_brush_options",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "select_all_unused_brushes",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "sort_brushes_by_name",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "set_brush_view_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "set_brush_view_mode",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": false,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": false,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          14
+        ],
+        "action": "set_brush_thumbnail_size",
+        "enabled": false,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          16
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          17
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          18
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          19
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          20
+        ],
+        "action": "toggle_brush_category",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          22
+        ],
+        "action": "toggle_brush_library_persistent",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          23
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          24
+        ],
+        "action": "save_brush_library",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "color_mode_cmyk",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "color_panel_content",
+      "ctx": {
+        "panel": {
+          "mode": "cmyk"
+        },
+        "state": {
+          "fill_on_top": true,
+          "fill_color": "#112233",
+          "stroke_color": null
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "invert_active_color",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "complement_active_color",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "stroke_cap_round_join_bevel",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "stroke_panel_content",
+      "ctx": {
+        "panel": {
+          "cap": "round",
+          "join": "bevel"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "set_stroke_cap",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "set_stroke_cap",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "set_stroke_cap",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "set_stroke_join",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "set_stroke_join",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "set_stroke_join",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "swatches_thumbnail_medium",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "swatches_panel_content",
+      "ctx": {
+        "panel": {
+          "thumbnail_size": "medium",
+          "selected_swatches": []
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_swatch",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_swatch",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_swatch",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "select_all_unused_swatches",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "add_used_colors",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "sort_swatches_by_name",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "open_swatch_options",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          15
+        ],
+        "action": "open_swatch_library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          16
+        ],
+        "action": "save_swatch_library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          18
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "opacity_thumbnails_hidden_masks_inverted",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "opacity_panel_content",
+      "ctx": {
+        "panel": {
+          "thumbnails_hidden": true,
+          "options_shown": false,
+          "new_masks_clipping": false,
+          "new_masks_inverted": true
+        },
+        "selection_has_mask": false
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_opacity_thumbnails",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "toggle_opacity_options",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "make_opacity_mask",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "release_opacity_mask",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "disable_opacity_mask",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "unlink_opacity_mask",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "toggle_new_masks_clipping",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "toggle_new_masks_inverted",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "toggle_page_isolated_blending",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "action": "toggle_page_knockout_group",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          14
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  }
+]

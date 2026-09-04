@@ -21,8 +21,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-/// Query whether a toggle/radio command is checked.
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    false
-}

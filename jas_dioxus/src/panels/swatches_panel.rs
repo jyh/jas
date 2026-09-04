@@ -51,8 +51,9 @@ fn walk_element(el: &Element, colors: &mut HashSet<String>) {
 ///
 /// The three thumbnail-size rows share `action: set_swatch_thumbnail_size`,
 /// so the builder folds each `params.size` into the command
-/// (`set_swatch_thumbnail_size:small`, …) — `dispatch` / `is_checked`
-/// split that suffix back off. The "Open Swatch Library" dynamic submenu
+/// (`set_swatch_thumbnail_size:small`, …) — `dispatch` splits that suffix
+/// back off; the CHECK MARK is swatches.yaml's own `checked_when:`,
+/// evaluated generically by `panels::panel_is_checked`. The "Open Swatch Library" dynamic submenu
 /// carries an explicit `action: open_swatch_library` in the YAML, which
 /// the menu view (`panel_menu_view.rs`) special-cases by that command to
 /// render the per-library flyout.
@@ -225,16 +226,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         }
         _ => {}
     }
-}
-
-/// Query whether a radio command is checked. The thumbnail-size radio
-/// carries its value as a `:suffix` (see `dispatch`); the checkmark
-/// follows the matching panel-state field.
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    if let Some(size) = cmd.strip_prefix("set_swatch_thumbnail_size:") {
-        return state.swatches_panel.thumbnail_size == size;
-    }
-    false
 }
 
 /// Query whether a menu command is enabled. Mirrors the `enabled_when`

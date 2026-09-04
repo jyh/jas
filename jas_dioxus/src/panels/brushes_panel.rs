@@ -15,6 +15,12 @@
 //! dispatch here routes the command string through the shared
 //! `dispatch_action` pipeline (the same path the panel-body buttons use)
 //! and handles `close_panel` locally.
+//!
+//! The menu's CHECK MARKS are NOT here. They are brushes.yaml's own
+//! `checked_when:` predicates, evaluated by `panels::panel_is_checked`
+//! through the shared menu-state evaluator. This module used to carry an
+//! `is_checked` returning `false` whose comment said that was already true;
+//! it was not, and all eleven check marks were dead as a result.
 
 use crate::workspace::app_state::AppState;
 use crate::workspace::workspace::PanelAddr;
@@ -45,13 +51,4 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             crate::interpreter::renderer::dispatch_action(cmd, &params, state);
         }
     }
-}
-
-/// Query whether a toggle/radio command is checked. The Brushes panel's
-/// stateful menu items (view mode, thumbnail size, category filters,
-/// persistence) carry `checked_when:` predicates in the bundle, which the
-/// generic menu-state evaluator resolves; this native hook has no extra
-/// state to report, mirroring the sibling panels.
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    false
 }

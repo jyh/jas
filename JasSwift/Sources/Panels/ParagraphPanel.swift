@@ -63,23 +63,4 @@ public enum ParagraphPanel {
             break
         }
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
-
-    /// Variant that consults the model's StateStore so the
-    /// Hanging Punctuation toggle can render its menu checkmark
-    /// from `panel.hanging_punctuation`. Mirrors the Rust
-    /// `paragraph_panel::is_checked` path.
-    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
-        guard let model = model else { return false }
-        switch cmd {
-        case "toggle_hanging_punctuation":
-            let pid = "paragraph_panel_content"
-            return (model.stateStore.getPanel(pid, "hanging_punctuation") as? Bool) ?? false
-        default:
-            return false
-        }
-    }
 }

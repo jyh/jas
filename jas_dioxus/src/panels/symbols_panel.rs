@@ -43,12 +43,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a toggle/radio command is checked. The Symbols panel
-/// has no stateful toggles in the menu (this slice).
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,7 +77,8 @@ mod tests {
     fn is_checked_always_false() {
         let st = AppState::new();
         for cmd in &["new_symbol", "place_instance", "delete_symbol_action", "close_panel"] {
-            assert!(!is_checked(cmd, &st));
+            assert!(!crate::panels::panel_is_checked(
+                crate::workspace::workspace::PanelKind::Symbols, cmd, &st));
         }
     }
 }

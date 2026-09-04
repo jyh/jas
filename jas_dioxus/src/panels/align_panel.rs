@@ -30,10 +30,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    match cmd {
-        "toggle_use_preview_bounds" => state.align_panel.use_preview_bounds,
-        _ => false,
-    }
-}

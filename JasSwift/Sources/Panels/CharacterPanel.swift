@@ -21,7 +21,8 @@ public enum CharacterPanel {
     /// Source of truth is workspace/panels/character.yaml's `menu:`
     /// block (review #15); the generic reader builds the items from the
     /// bundle. Each `checked:` toggle maps to a panel-state bool the
-    /// dispatcher flips (and `isCheckedWithModel` reads back).
+    /// dispatcher flips (and the generic `panelIsChecked` reads back through
+    /// character.yaml's own `checked:` predicates).
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml("character_panel_content")
     }
@@ -57,30 +58,6 @@ public enum CharacterPanel {
                           applyToSelection: true)
         default: break
         }
-    }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        // Without model context, no way to read panel state.
-        // Real menu invocations route through `isCheckedWithModel`.
-        false
-    }
-
-    /// Read a toggle's checked state from the Character panel store.
-    /// Used by the hamburger menu so the menu's checkmark mirrors the
-    /// panel-state bool the toggle dispatchers flip.
-    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
-        guard let model = model else { return false }
-        let pid = "character_panel_content"
-        let key: String
-        switch cmd {
-        case "toggle_snap_to_glyph_visible": key = "snap_to_glyph_visible"
-        case "toggle_all_caps":               key = "all_caps"
-        case "toggle_small_caps":             key = "small_caps"
-        case "toggle_superscript":            key = "superscript"
-        case "toggle_subscript":              key = "subscript"
-        default: return false
-        }
-        return (model.stateStore.getPanel(pid, key) as? Bool) ?? false
     }
 
     /// Flip a panel-local Bool, optionally clear sibling bools (for

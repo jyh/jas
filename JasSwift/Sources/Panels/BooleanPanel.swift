@@ -23,8 +23,4 @@ public enum BooleanPanel {
         model.stateStore.setActivePanel("boolean_panel_content")
         runYamlActionByName(cmd, params: [:], model: model)
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
 }

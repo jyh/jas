@@ -22,8 +22,4 @@ public enum MagicWandPanel {
         default: break
         }
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
 }

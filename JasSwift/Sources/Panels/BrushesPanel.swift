@@ -7,9 +7,12 @@ import Foundation
 /// bundle. Several rows share one YAML action and so arrive param-folded
 /// from the generic menu builder (`set_brush_view_mode:thumbnail`,
 /// `set_brush_thumbnail_size:small`, `toggle_brush_category:calligraphic`,
-/// `open_brush_options:create`); `dispatch` / `isCheckedWithModel` split the
-/// value suffix back off and route through the shared YAML action pipeline,
-/// matching the sibling Stroke / Swatches panels.
+/// `open_brush_options:create`); `dispatch` splits the value suffix back
+/// off and routes through the shared YAML action pipeline, matching the
+/// sibling Stroke / Swatches panels.
+///
+/// The menu's CHECK MARKS are not here: they are the bundle's own
+/// `checked_when:` predicates, evaluated generically by `panelIsChecked`.
 public enum BrushesPanel {
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml("brushes_panel_content")
@@ -44,31 +47,6 @@ public enum BrushesPanel {
         // so its command is empty — nothing to dispatch.
         guard !cmd.isEmpty else { return }
         runYamlActionByName(cmd, params: [:], model: model)
-    }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
-
-    /// Variant with the model in scope so the view-mode / thumbnail-size /
-    /// category radios render their checkmark from the Brushes panel state,
-    /// matching the YAML `checked_when` expressions.
-    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
-        guard let model = model else { return false }
-        let pid = "brushes_panel_content"
-        if let v = strip(cmd, prefix: "set_brush_view_mode:") {
-            return (model.stateStore.getPanel(pid, "view_mode") as? String) == v
-        }
-        if let v = strip(cmd, prefix: "set_brush_thumbnail_size:") {
-            return (model.stateStore.getPanel(pid, "thumbnail_size") as? String) == v
-        }
-        if let v = strip(cmd, prefix: "toggle_brush_category:") {
-            if let arr = model.stateStore.getPanel(pid, "category_filter") as? [Any] {
-                return arr.contains { ($0 as? String) == v }
-            }
-            return false
-        }
-        return false
     }
 
     private static func strip(_ s: String, prefix: String) -> String? {

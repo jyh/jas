@@ -37,10 +37,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    match cmd {
-        "toggle_hanging_punctuation" => state.paragraph_panel.hanging_punctuation,
-        _ => false,
-    }
-}
