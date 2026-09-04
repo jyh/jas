@@ -295,6 +295,38 @@ function Get-SbHitTarget([string]$JsonPath) {
                                             @{Expression = 'Path'; Descending = $false})[0]
 }
 
+# The furthest coordinate any element in the document reaches, so a point can be
+# shown to be OUTSIDE the artwork rather than assumed to be. Returns $null when
+# the document holds nothing with readable coordinates.
+function Get-SbDocExtent([string]$JsonPath) {
+    if (-not (Test-Path $JsonPath)) { return $null }
+    $doc = Get-Content $JsonPath -Raw | ConvertFrom-Json
+    $flat = New-Object System.Collections.Generic.List[object]
+    Get-SbFlatElements $doc '$' $flat
+    $maxX = $null
+    $maxY = $null
+    foreach ($e in $flat) {
+        $n = $e.Node
+        $props = @($n.PSObject.Properties | ForEach-Object { $_.Name })
+        $xs = @()
+        $ys = @()
+        if (($props -contains 'x') -and ($props -contains 'width')) {
+            $xs += ([double]$n.x + [double]$n.width); $ys += ([double]$n.y + [double]$n.height)
+        }
+        if ($props -contains 'cx') {
+            $r = if ($props -contains 'r') { [double]$n.r } elseif ($props -contains 'rx') { [double]$n.rx } else { 0.0 }
+            $xs += ([double]$n.cx + $r); $ys += ([double]$n.cy + $r)
+        }
+        foreach ($pair in @(@('x1', 'y1'), @('x2', 'y2'))) {
+            if ($props -contains $pair[0]) { $xs += [double]$n.($pair[0]); $ys += [double]$n.($pair[1]) }
+        }
+        foreach ($v in $xs) { if ($null -eq $maxX -or $v -gt $maxX) { $maxX = $v } }
+        foreach ($v in $ys) { if ($null -eq $maxY -or $v -gt $maxY) { $maxY = $v } }
+    }
+    if ($null -eq $maxX) { return $null }
+    return @{ MaxX = $maxX; MaxY = $maxY }
+}
+
 function Get-SbElementByPath([string]$JsonPath, [string]$Path) {
     if (-not (Test-Path $JsonPath)) { return $null }
     $doc = Get-Content $JsonPath -Raw | ConvertFrom-Json
@@ -515,12 +547,15 @@ if ($Hand) {
             $aimY = $handTarget.Y
             if ($HandEmpty) {
                 # THE EMPTY-CANVAS CONTROL. The point is derived from the OBSERVED
-                # surface, not guessed: the document occupies the top-left of a
-                # much larger canvas, so the far corner is empty by construction --
-                # and it is CHECKED against the chosen element's own coordinates
-                # rather than assumed.
+                # surface, never guessed -- and then CHECKED against the document's
+                # own extent. "The far corner is empty" is true of this fixture at
+                # this surface and would silently stop being true of a document
+                # that filled the canvas; a control aimed at artwork reports
+                # `selected=1` and reads as a broken negative control rather than
+                # as a badly chosen point.
                 $surfRow = Select-SbRow (Read-SbRows $log $logMark) 'surface=[0-9]+x[0-9]+'
                 $surf = Get-SbField $surfRow 'surface'
+                $extent = Get-SbDocExtent $beforeDump
                 if ($null -eq $surf) {
                     Add-NotRun 'O4.C1 empty-canvas control' 'no row carrying a surface=WxH field yet -- the empty point is derived from the OBSERVED surface and is never guessed'
                     $handTarget = $null
@@ -529,6 +564,13 @@ if ($Hand) {
                     $sh2 = [double]($surf -split 'x')[1]
                     $aimX = ($sw2 / $Scale) - 40.0
                     $aimY = ($sh2 / $Scale) - 40.0
+                    if ($null -eq $extent) {
+                        Add-NotRun 'O4.C1 empty-canvas control' 'the document''s extent could not be read, so no point in it can be shown to be empty'
+                        $handTarget = $null
+                    } elseif ($aimX -le ($extent.MaxX + 10.0) -or $aimY -le ($extent.MaxY + 10.0)) {
+                        Add-NotRun 'O4.C1 empty-canvas control' ("the derived point ({0},{1}) is not clear of the artwork (extent {2},{3} + 10 DIP margin) at surface $surf, scale $Scale -- refusing to aim a MISS control at a place that may hold an element" -f $aimX, $aimY, $extent.MaxX, $extent.MaxY)
+                        $handTarget = $null
+                    }
                 }
             }
             if ($null -ne $handTarget) {
@@ -756,10 +798,3 @@ if ($nNotRun -gt 0) {
 }
 Write-Output "VERIFY: PASS"
 exit 0
-
-# ⚠️ RED-FIRST FIXTURE, AND IT IS DELIBERATE. The brace below is never closed, so
-# `[Language.Parser]::ParseFile` on this file must report an error and the CI step
-# that runs it must go RED. It is removed in the very next commit; both run URLs
-# are in the pull request body. A gate that has never been seen to fail is a
-# count with no failure mode, and this file is the one it is written to read.
-if ($true) { Write-Output 'the parse gate must red on this'
