@@ -261,6 +261,43 @@ class TestBlobBrushVariationWidgets:
         ("bbo_angle", "angle", "angle_variation"),
         ("bbo_roundness", "roundness", "roundness_variation"),
     ]
+    LABELS = {"bbo_size": "Size", "bbo_angle": "Angle", "bbo_roundness": "Roundness"}
+
+    def _template_rows(self, ws) -> list[dict]:
+        rows: list[dict] = []
+
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("_template") == "variation_widget":
+                    rows.append(node)
+                for key in ("content", "children"):
+                    walk(node.get(key))
+            elif isinstance(node, list):
+                for child in node:
+                    walk(child)
+
+        walk(ws["dialogs"]["blob_brush_tool_options"]["content"])
+        return rows
+
+    def test_three_rows_expanded_each_carrying_its_own_label(self, ws):
+        """The template's first child is its label slot (``style.width: 80``).
+        Leaving it at its ``""`` default while the row keeps a separate label
+        column renders an 80px empty gutter -- a real layout defect that every
+        other arm here would pass straight over."""
+        rows = self._template_rows(ws)
+        assert len(rows) == 3, f"expected 3 variation widgets, found {len(rows)}"
+        for row in rows:
+            first = row["children"][0]
+            prefix = row["children"][1]["id"].rsplit("_", 1)[0]
+            assert first["content"] == self.LABELS[prefix], (
+                f"{prefix}'s label slot holds {first['content']!r}")
+
+    def test_each_row_disables_under_an_active_calligraphic_brush(self, ws):
+        """The row-level ``bind.disabled`` the pre-repair ``include:`` node
+        carried as a sibling key. It never ran -- the node never expanded."""
+        for row in self._template_rows(ws):
+            dis = row["bind"]["disabled"]
+            assert evaluate(dis, {"state": {"stroke_brush": None}}).to_bool() is False
 
     def test_no_unexpanded_include_nodes_survive(self, ws):
         dialog = ws["dialogs"]["blob_brush_tool_options"]

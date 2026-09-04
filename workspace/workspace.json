@@ -27338,20 +27338,7 @@
                 "children": [
                   {
                     "type": "col",
-                    "col": 2,
-                    "children": [
-                      {
-                        "type": "text",
-                        "content": "Size:",
-                        "style": {
-                          "font_size": 11
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "type": "col",
-                    "col": 10,
+                    "col": 12,
                     "children": [
                       {
                         "type": "container",
@@ -27363,7 +27350,7 @@
                         "children": [
                           {
                             "type": "text",
-                            "content": "",
+                            "content": "Size",
                             "style": {
                               "width": 80,
                               "font_size": 10
@@ -27473,20 +27460,7 @@
                 "children": [
                   {
                     "type": "col",
-                    "col": 2,
-                    "children": [
-                      {
-                        "type": "text",
-                        "content": "Angle:",
-                        "style": {
-                          "font_size": 11
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "type": "col",
-                    "col": 10,
+                    "col": 12,
                     "children": [
                       {
                         "type": "container",
@@ -27498,7 +27472,7 @@
                         "children": [
                           {
                             "type": "text",
-                            "content": "",
+                            "content": "Angle",
                             "style": {
                               "width": 80,
                               "font_size": 10
@@ -27608,20 +27582,7 @@
                 "children": [
                   {
                     "type": "col",
-                    "col": 2,
-                    "children": [
-                      {
-                        "type": "text",
-                        "content": "Roundness:",
-                        "style": {
-                          "font_size": 11
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "type": "col",
-                    "col": 10,
+                    "col": 12,
                     "children": [
                       {
                         "type": "container",
@@ -27633,7 +27594,7 @@
                         "children": [
                           {
                             "type": "text",
-                            "content": "",
+                            "content": "Roundness",
                             "style": {
                               "width": 80,
                               "font_size": 10

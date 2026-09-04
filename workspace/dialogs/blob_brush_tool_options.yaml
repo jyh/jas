@@ -171,17 +171,17 @@ blob_brush_tool_options:
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Size:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
                   - template: variation_widget
                     bind:
                       disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
                     params:
                       id_prefix: bbo_size
+                      label: "Size"
                       base_path: "dialog.size"
                       mode_path: "dialog.size_variation.mode"
                       min_path: "dialog.size_variation.min"
@@ -195,17 +195,17 @@ blob_brush_tool_options:
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Angle:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
                   - template: variation_widget
                     bind:
                       disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
                     params:
                       id_prefix: bbo_angle
+                      label: "Angle"
                       base_path: "dialog.angle"
                       mode_path: "dialog.angle_variation.mode"
                       min_path: "dialog.angle_variation.min"
@@ -219,17 +219,17 @@ blob_brush_tool_options:
           - type: row
             children:
               - type: col
-                col: 2
+                col: 12
                 children:
-                  - { type: text, content: "Roundness:", style: { font_size: 11 } }
-              - type: col
-                col: 10
-                children:
+                  # The template carries its own label slot (width 80),
+                  # so the row needs no separate label column -- the same
+                  # shape brush_options.yaml's three invocations use.
                   - template: variation_widget
                     bind:
                       disabled: "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
                     params:
                       id_prefix: bbo_roundness
+                      label: "Roundness"
                       base_path: "dialog.roundness"
                       mode_path: "dialog.roundness_variation.mode"
                       min_path: "dialog.roundness_variation.min"
