@@ -624,6 +624,60 @@ jobs:
         if: ${{ !cancelled() }}
         run: python scripts/check_wasm_canvas_count.py --self-test
 
+      # ⭐ THE ONLY THING CI CAN SAY ABOUT THE WINDOWS HARNESS, AND IT IS WORTH
+      # SAYING. `prototypes/sb_winui/*.ps1` drives the WinUI-3 shell in session 1
+      # on a physical desktop: no runner has one, so every row those scripts
+      # assert is measured off-CI by hand. What CI CAN decide is whether they
+      # PARSE -- and a PowerShell syntax error is invisible until the moment the
+      # script is run, which here is the moment somebody is standing at the box
+      # with the app up. A parse error found then costs a whole sitting.
+      #
+      # ⛔ THIS IS NOT A TEST OF BEHAVIOUR AND MUST NOT BE READ AS ONE. It proves
+      # the parser accepted the file. It says nothing about whether any assertion
+      # in it is right, and the PR that added it says so in as many words.
+      #
+      # `shell: pwsh` overrides this job's `defaults.run.shell: bash`; the
+      # Language.Parser API is the same one PowerShell itself uses, so "it
+      # parses" here means "it parses when run".
+      #
+      # ⛔ AND IT ASSERTS IT DID WORK. A loop over a glob that matches nothing
+      # examines nothing and exits 0, which looks exactly like a measurement. The
+      # floor is DERIVED from the harness's own file list, not typed: every .ps1
+      # this directory carries must be one the parser saw.
+      - name: The S-B PowerShell harness parses
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $dir = Join-Path $PWD 'prototypes/sb_winui'
+          $files = @(Get-ChildItem -Path $dir -Filter '*.ps1' -File | Sort-Object Name)
+          if ($files.Count -lt 1) {
+            Write-Host "::error::no .ps1 files found under prototypes/sb_winui -- this gate examined nothing, which is not a pass"
+            exit 1
+          }
+          $bad = 0
+          $seen = 0
+          foreach ($f in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors)
+            $seen++
+            if ($null -ne $errors -and $errors.Count -gt 0) {
+              $bad++
+              foreach ($e in $errors) {
+                Write-Host "::error file=prototypes/sb_winui/$($f.Name),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+              Write-Host "FAIL: $($f.Name) -- $($errors.Count) parse error(s)"
+            } else {
+              Write-Host ("ok  : {0,-24} parses ({1} tokens)" -f $f.Name, $tokens.Count)
+            }
+          }
+          if ($seen -ne $files.Count) {
+            Write-Host "::error::the parser saw $seen of $($files.Count) files -- the totals do not close, so this verdict is void"
+            exit 1
+          }
+          Write-Host "--- $($files.Count) harness script(s) parsed, $bad with errors ---"
+          if ($bad -gt 0) { exit 1 }
+
       - name: Structural gates
         if: ${{ !cancelled() }}
         run: |
