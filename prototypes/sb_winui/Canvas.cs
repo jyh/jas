@@ -660,7 +660,9 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
 
                 case LoadCmd l:
-                    ApplyLoad(l);
+                    _report(ApplyLoad(l)
+                        ? $"RUSTOK {LastStatus} {Tids()}"
+                        : $"RUSTFAIL {LastStatus} {Tids()}");
                     dirty = true;
                     cause = "load";
                     break;
@@ -970,23 +972,33 @@ internal sealed unsafe class Canvas : IDisposable
           + $"selected={sel} surface={_width}x{_height} scale={_scaleX:0.##} {Tids()}");
     }
 
-    private void ApplyLoad(LoadCmd l)
+    /// <summary>
+    /// COAT 1's `Load`: <c>jas_load_svg</c> ON THE HELD ENGINE, replacing whatever
+    /// it held. It does not create an engine and it does not free one.
+    ///
+    /// Returns success and sets <see cref="LastStatus"/>; it does NOT report,
+    /// because it has two callers with different receipts -- the queue (which
+    /// writes a `LOADED`/`LOAD FAILED` row) and the `selection` scene (which
+    /// folds the failure into its own). A method that reported for itself would
+    /// give the scene two rows for one event.
+    /// </summary>
+    private bool ApplyLoad(LoadCmd l)
     {
         if (_engine == IntPtr.Zero)
         {
             LastStatus = "LOAD FAILED: no engine";
-            _report($"RUSTFAIL {LastStatus} {Tids()}");
-            return;
+            return false;
         }
         var rc = JasCore.jas_load_svg(_engine, l.Svg, (nuint)l.Svg.Length);
         _loadsShell++;
         if (rc != JasCore.PaintOk)
         {
             LastStatus = $"LOAD FAILED '{l.Label}': {JasCore.Explain(rc)}";
-            _report($"RUSTFAIL {LastStatus} {Tids()}");
-            return;
+            return false;
         }
-        LastStatus = $"LOADED '{l.Label}' ({l.Svg.Length} bytes) into the RETAINED engine";
+        LastStatus = $"LOADED '{l.Label}' ({l.Svg.Length} bytes) into the RETAINED engine "
+                   + $"loads(shell)={_loadsShell}";
+        return true;
     }
 
     /// <summary>
@@ -1534,12 +1546,12 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
 
-        var lrc = JasCore.jas_load_svg(_engine, bytes, (nuint)bytes.Length);
-        _loadsShell++;
-        if (lrc != JasCore.PaintOk)
+        // THROUGH COAT 1's OWN LOAD PATH, not a second copy of it. The scene and
+        // the queue command reach `jas_load_svg` by the same route, so
+        // `loads(shell)` counts every load once and there is no second place for
+        // the held engine's document to be replaced.
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
         {
-            LastStatus = $"SELECTION FAILED to open '{System.IO.Path.GetFileName(svgPath)}': "
-                       + JasCore.Explain(lrc);
             return false;
         }
         ApplyDump("sb-doc-before.json");

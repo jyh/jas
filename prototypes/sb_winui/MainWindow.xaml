@@ -30,8 +30,9 @@
           settle it and the Mac this was written on cannot compile the shell, so
           the question is decided AT THE BOX: `SB_HIT=sibling` makes this Border
           visible and moves the SAME pointer handlers onto it. `Transparent` is
-          load-bearing -- a null background is not hit-testable, which is the
-          whole reason the panel is in question.
+          load-bearing, because a null background is not hit-testable, which is
+          the whole reason the panel is in question. (XML forbids a double hyphen
+          inside a comment, so this file's prose uses none.)
 
           SAME GRID CELL as the panel, so it covers exactly the surface whose
           coordinates the handlers report (they always call
