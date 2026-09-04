@@ -285,6 +285,26 @@ pub(crate) struct AppState {
     /// Id of the panel-selected concept in the Concepts panel, or None.
     /// The target of Place Instance (CONCEPTS.md §6).
     pub(crate) concepts_selected: Option<String>,
+    /// GENERIC per-panel state, keyed by panel CONTENT id, holding the keys a
+    /// panel declares in its YAML `state:` block that this app keeps no typed
+    /// slot for.
+    ///
+    /// This is the reference interpreter's `StateStore` panel scope
+    /// (`init_panel` / `set_panel`) and JasSwift's shared panel store, in this
+    /// app: a scope is seeded lazily from `loader.panel_state_defaults` the
+    /// first time a `set_panel_state` names its panel, and thereafter holds
+    /// exactly the keys that have been written. Read back by
+    /// `panels::panel_menu::panel_menu_ctx` (so a panel menu's `checked_when`
+    /// evaluates the user's choice rather than the declared default) and by
+    /// the dock's panel-body render.
+    ///
+    /// The fourteen panels this app keeps in TYPED slots
+    /// (`stroke_panel`, `color_panel_mode`, `align_panel`, ...) are unaffected:
+    /// a write whose (panel, key) names one of those is routed there instead,
+    /// so every declared key has exactly one home. See
+    /// `panels::panel_menu::typed_panel_slot_keys`.
+    pub(crate) panel_state:
+        std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>,
 }
 
 /// Solo/unsolo state for the layers panel.
@@ -1480,6 +1500,7 @@ impl AppState {
             symbols_selected: None,
             properties_constrain: false,
             concepts_selected: None,
+            panel_state: std::collections::HashMap::new(),
         }
     }
 

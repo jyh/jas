@@ -2762,6 +2762,92 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     #expect(checkedRows >= 29, "only \(checkedRows) checked rows evaluated")
 }
 
+// MARK: - Panel-state WRITE round trip (chrome seam) algorithm vectors
+
+/// The panel-state WRITE arm of the same chrome seam.
+///
+/// `panel_menu_state.json` seeds a panel scope directly and pins how the check
+/// marks are DERIVED from it. It says nothing about how that scope comes to
+/// hold the user's choices, and that is where the two active ports diverged
+/// next: jas_dioxus stored no Brushes panel state at all — its
+/// `set_panel_state` handler dispatched on the effect's `key` alone, ignored
+/// the `panel:` the effect names and fell through to the STROKE panel — so
+/// every Brushes check mark evaluated the declared default forever while this
+/// port's shared panel store moved with the user.
+///
+/// The subject is the round trip: declared defaults, the generic
+/// `set_panel_state` effect, the scope read back, the panel's own menu
+/// evaluated against it. This port drives it through the SAME `StateStore` the
+/// app uses, so it is the oracle here rather than a re-statement.
+@Test func testAlgorithmPanelStateWrites() throws {
+    let json = readFixture("algorithms/panel_state_writes.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    guard let ws = WorkspaceData.load() else {
+        Issue.record("Failed to load the workspace bundle")
+        return
+    }
+    let panels = ws.data["panels"] as! [String: Any]
+
+    #expect(tests.count >= 8, "corpus shrank: \(tests.count) cases")
+    var checkedRows = 0
+    var panelsSeen = Set<String>()
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "panel_state_writes", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let pid = args["panel"] as! String
+        panelsSeen.insert(pid)
+        let writes = args["writes"] as! [[String: Any]]
+        #expect(!writes.isEmpty, "case '\(name)' performs no write")
+        let expected = tc["expected"] as! [String: Any]
+
+        // This port's storage, driven exactly as an action's effect drives it.
+        let store = StateStore()
+        store.initPanel(pid, defaults: ws.panelStateDefaults(pid))
+        store.setActivePanel(pid)
+        for w in writes {
+            runEffects(
+                [["set_panel_state": ["panel": pid, "key": w["key"]!, "value": w["value"]!]]],
+                ctx: [:], store: store)
+        }
+        let scope = store.getPanelState(pid)
+
+        let scopeBytes = try JSONSerialization.data(
+            withJSONObject: scope, options: [.sortedKeys])
+        let wantScopeBytes = try JSONSerialization.data(
+            withJSONObject: expected["panel_state"] as! [String: Any], options: [.sortedKeys])
+        let wantScopeStr = String(data: wantScopeBytes, encoding: .utf8)!
+        let scopeStr = String(data: scopeBytes, encoding: .utf8)!
+        #expect(scopeBytes == wantScopeBytes,
+            "Panel scope after the writes of '\(name)' mismatch:\nexpected: \(wantScopeStr)\nactual:   \(scopeStr)")
+
+        guard let panel = panels[pid] as? [String: Any],
+              let menu = panel["menu"] as? [Any] else {
+            Issue.record("panel \(pid) has no menu in the bundle")
+            continue
+        }
+        let ctx: [String: Any] = ["panel": scope, "preferences": args["preferences"] ?? [:]]
+        let actual = MenuState.menuState([["items": menu]], ctx)
+        let expectedMenu = expected["menu"] as! [[String: Any]]
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expectedMenu, options: [.sortedKeys])
+        let expMenuStr = String(data: expectedBytes, encoding: .utf8)!
+        let actMenuStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Panel menu after '\(name)' mismatch:\nexpected: \(expMenuStr)\nactual:   \(actMenuStr)")
+        checkedRows += expectedMenu.filter { $0["checked"] is Bool }.count
+    }
+    // Anti-vacuity: rows with no predicate pass without evaluating anything,
+    // and a corpus naming one panel is satisfied by a Brushes-shaped hook.
+    #expect(checkedRows >= 70, "only \(checkedRows) checked rows evaluated")
+    #expect(panelsSeen.count >= 2, "only one panel covered")
+}
+
 // MARK: - Hit test algorithm vectors
 
 @Test func algorithmHitTestVectors() throws {

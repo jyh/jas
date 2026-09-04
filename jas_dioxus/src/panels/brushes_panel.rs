@@ -40,6 +40,13 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// defined in actions.yaml and is routed through the shared
 /// `dispatch_action` pipeline so the hamburger menu fires the same effect
 /// chain as the panel-body wiring.
+///
+/// A radio row's command arrives FOLDED from the generic builder
+/// (`set_brush_view_mode:list`), because several rows share one YAML action.
+/// `panel_menu::action_and_params` unfolds it back into the action and the
+/// entry's declared `params`, so `param.view_mode` resolves. Passing the folded
+/// string through with an empty params map — which is what this did — named no
+/// action at all, so every Brushes menu row was a silent no-op.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     match cmd {
         "close_panel" => crate::workspace::layout_apply::layout_apply(
@@ -47,8 +54,10 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             &crate::workspace::layout_apply::op_close_panel(addr),
         ),
         _ => {
-            let params = serde_json::Map::new();
-            crate::interpreter::renderer::dispatch_action(cmd, &params, state);
+            let (action, params) =
+                super::panel_menu::action_and_params("brushes_panel_content", cmd)
+                    .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
+            crate::interpreter::renderer::dispatch_action(&action, &params, state);
         }
     }
 }
