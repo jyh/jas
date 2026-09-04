@@ -36,11 +36,22 @@
 
 [CmdletBinding()]
 param(
-    # The document for the `document` and `selection` scenes. Resolved to an
-    # absolute path; the scenes refuse BY NAME rather than defaulting to a
-    # built-in, which is the mislabelled-experiment shape they exist to avoid.
+    # The document for every scene that opens one. Resolved to an absolute
+    # path; the scenes refuse BY NAME rather than defaulting to a built-in,
+    # which is the mislabelled-experiment shape they exist to avoid.
+    #
+    # `complex_document.svg` is also the CALIBRATED fixture the `retained`
+    # scene pins by name: O1 compares hashes with no tolerance, and an
+    # uncalibrated document is refused as `NOT RUN`, never hashed anyway.
     [string]$Svg = "test_fixtures\svg\complex_document.svg",
-    [string[]]$Scenes = @('goldens', 'document', 'selection'),
+    # ⛔ `selection` IS GONE FROM THE DEFAULT LIST, AND THAT IS THE RENAME'S
+    # CONSEQUENCE, NOT A REDUCTION IN SCOPE. It is now `selection-marquee` and
+    # the shell REFUSES the old spelling by name, so leaving it here would have
+    # made every default sitting red on a scene that no longer exists. The
+    # marquee is a CONTROL -- a synthetic gesture that moves nothing and selects
+    # N -- and the freeze says it does not belong in the default list; run it
+    # deliberately with `-Scenes selection-marquee`.
+    [string[]]$Scenes = @('goldens', 'document'),
     [int]$Seconds = 12,
     # Skip the cdylib rebuild. Only for someone who has just built it and knows
     # nothing has touched target/ since -- it is the one guard worth keeping.
@@ -77,7 +88,8 @@ if (-not $NoRebuild) {
 }
 
 $svgAbs = $null
-if ($Scenes -contains 'document' -or $Scenes -contains 'selection') {
+$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay')
+if (@($Scenes | Where-Object { $svgScenes -contains $_ }).Count -gt 0) {
     if (-not [System.IO.Path]::IsPathRooted($Svg)) { $Svg = Join-Path $repo $Svg }
     if (-not (Test-Path $Svg)) {
         Write-Host "REFUSED: no such document -- $Svg" -ForegroundColor Red

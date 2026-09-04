@@ -233,6 +233,51 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>How many resize arrival stamps one run's rows carry. See the use site.</summary>
     private const int ArrivalWindow = 200;
 
+    /// <summary>
+    /// How long the drain waits for the post-stall backlog before writing the
+    /// STALL row with `resize-during-stall=none`.
+    ///
+    /// O3's resize is posted DURING the stall, so by the time the sleep ends the
+    /// `ResizeCmd` is already queued and this timeout never fires. It exists so
+    /// that a run where NOBODY resized still emits its STALL row instead of the
+    /// render thread blocking in `Take()` with the row un-written -- a missing
+    /// row and a `resize-during-stall=none` row look nothing alike, and only one
+    /// of them can be read.
+    /// </summary>
+    private const int StallDrainGraceMs = 2000;
+
+    /// <summary>
+    /// How long <c>SB_PAINT_ON_UI</c>'s marshalled paint step waits for the
+    /// UI thread before refusing BY NAME.
+    ///
+    /// ⚠️ THIS IS THE ONE PLACE THE RENDER THREAD WAITS ON THE DISPATCHER, and it
+    /// exists only under the DESIGN-RED control knob. It is bounded because
+    /// `SB_PAINT_ON_UI=1` and `SB_UI_STALL_MS=20000` together would otherwise
+    /// hang: the thread that must run the paint is the thread that is asleep.
+    /// The two controls answer different questions and are meant to be run
+    /// separately; the bound is what makes running them together a REFUSAL
+    /// instead of a hang somebody has to diagnose.
+    /// </summary>
+    private const int PaintOnUiWaitMs = 5000;
+
+    /// <summary>
+    /// ⚖️ O3's SECOND CONTROL, AND IT IS DESIGNED TO GO RED (FREEZE §2 O3(a)).
+    ///
+    /// `SB_PAINT_ON_UI=1` marshals the paint AND the present through the
+    /// `DispatcherQueue`, so `paint-tid == present-tid == ui-tid` on every row
+    /// and O3's residency assertion FAILS BY CONSTRUCTION. That is the whole
+    /// point: it is §5 stop 1's named fallback made visible, so a reader can see
+    /// what the tid assertion looks like when it is not satisfied, rather than
+    /// trusting that a green one was ever capable of red.
+    ///
+    /// ⛔ A SWITCH INSIDE THE PAINT STEP, NEVER A SECOND PAINT PATH. Two code
+    /// paths would drift, and the day they differed the control would be
+    /// measuring the drift rather than the thread. Read ONCE into a static so a
+    /// run cannot change its answer half way through.
+    /// </summary>
+    private static readonly bool PaintOnUi =
+        Environment.GetEnvironmentVariable("SB_PAINT_ON_UI") == "1";
+
     // ---- the pump ---------------------------------------------------------
 
     private readonly BlockingCollection<Cmd> _queue = new();
@@ -339,6 +384,52 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Set by a <see cref="HashCmd"/>; consumed by the next paint.</summary>
     private string? _hashLabel;
 
+    // ---- N3's scenes: the latches the drain has to know about --------------
+    //
+    // ⛔ EVERY ONE OF THESE IS TOUCHED ONLY ON THE RENDER THREAD. They are the
+    // state that makes `stall` and `pointer` observable WITHOUT blocking the
+    // pump: a scene that waited for a hand by sleeping inside `ApplyScene`
+    // would be waiting on a queue only it can drain, so the hand's own events
+    // would never arrive. Both waits are therefore LATCHES plus a bounded
+    // `TryTake` at the head of the loop.
+
+    /// <summary>True once a present has succeeded. O3's DXGI eye is timed against
+    /// the FIRST worker-thread present, so that present is named in the log.</summary>
+    private bool _firstPresentSeen;
+
+    /// <summary>ms the NEXT <see cref="RepaintOnce"/> sleeps for, then zeroed.</summary>
+    private int _stallMs;
+
+    /// <summary>The stall that actually happened, and the thread that slept.</summary>
+    private int _stallSlept;
+    private int _stallTid;
+    private int _uiStallMs;
+
+    /// <summary>Set when a render stall ENDS; cleared when the STALL row is written
+    /// by the drain that applied the post-stall resize (or by the grace timeout).</summary>
+    private bool _stallArmed;
+
+    /// <summary>The LATEST size requested by a Resize in the drain being applied.</summary>
+    private string _lastResizeRequested = "none";
+
+    /// <summary>`TickCount64` after which a waited-for hand is `NOT RUN`. -1 = not waiting.</summary>
+    private long _handDeadlineMs = -1;
+
+    /// <summary>Which scene is waiting for the hand (`retained` or `pointer`).</summary>
+    private string _handScene = "";
+
+    /// <summary>How long the wait was asked to be, for the refusal's own text.</summary>
+    private int _handWaitMs;
+
+    /// <summary>A press arrived while waiting, so a timeout is a DIFFERENT refusal.</summary>
+    private bool _handPressSeen;
+
+    /// <summary>The scene posted <see cref="SceneCompleted"/> itself -- EARLY (`stall`,
+    /// so the harness can resize DURING the stall) or LATE (`pointer`/`retained`
+    /// waiting for a hand). <see cref="ApplyScene"/>'s `finally` must then not post
+    /// a second one.</summary>
+    private bool _scenePostsItsOwnCompletion;
+
     public string LastStatus { get; private set; } = "not started";
 
     public string Adapter { get; private set; } = "unknown";
@@ -371,6 +462,14 @@ internal sealed unsafe class Canvas : IDisposable
     /// row about a surface that exists.
     /// </summary>
     internal Action? SceneCompleted { get; set; }
+
+    /// <summary>
+    /// Raised ON THE UI THREAD after a hash row has been written. O1's
+    /// `SB_RESIZE` walk steps on THIS and not on <see cref="SurfaceSettled"/>:
+    /// the previous stop is not finished when its surface settles, it is
+    /// finished when its hash has been taken.
+    /// </summary>
+    internal Action? HashTaken { get; set; }
 
     /// <summary>
     /// OFFSCREEN mode: Rust paints a texture WE own, and we copy it into the back
@@ -541,16 +640,41 @@ internal sealed unsafe class Canvas : IDisposable
         {
             while (true)
             {
-                Cmd first;
+                Cmd first = null!;
+                bool got;
+
+                // ⛔ THE HEAD OF THE LOOP IS BOUNDED ONLY WHEN A LATCH IS ARMED,
+                // and never otherwise. A poll would burn a core and, worse,
+                // would make "the pump is alive" unfalsifiable: an idle render
+                // thread MUST block, so that a run in which nothing arrives is
+                // visibly a run in which nothing arrived. The two armed waits --
+                // the post-stall backlog and a scene waiting for a real hand --
+                // are the only cases where the ABSENCE of a command is itself
+                // the measurement, and each writes its own row when it fires.
+                var timeout = PendingTimeoutMs();
                 try
                 {
-                    first = _queue.Take();
+                    if (timeout < 0)
+                    {
+                        first = _queue.Take();
+                        got = true;
+                    }
+                    else
+                    {
+                        got = _queue.TryTake(out first, timeout);
+                    }
                 }
                 catch (Exception)
                 {
                     // CompleteAdding + empty, or disposed. Either way there is
                     // nothing left to drain and the loop is done.
                     break;
+                }
+
+                if (!got)
+                {
+                    FlushArmedTimeouts();
+                    continue;
                 }
 
                 var batch = new List<Cmd> { first };
@@ -612,6 +736,12 @@ internal sealed unsafe class Canvas : IDisposable
                 case ResizeCmd r:
                     _eventsTotal++;
                     _distinctSizes.Add($"{r.Width}x{r.Height}");
+                    // The LATEST requested size in this drain, for O3's
+                    // `resize-during-stall` field. It is what was ASKED FOR;
+                    // `painted-after-stall` is what the surface became, and the
+                    // two are different questions (a window size is not a
+                    // surface size -- the whole reason `original` is a sentinel).
+                    _lastResizeRequested = $"{r.Width}x{r.Height}";
                     if (_firstArrivalMs < 0) { _firstArrivalMs = r.ArrivedMs; }
                     // BOUNDED, and the bound is named on the row. `arrivals` is
                     // an inter-arrival SERIES for O2 to read a drag's cadence
@@ -693,11 +823,148 @@ internal sealed unsafe class Canvas : IDisposable
             RepaintOnce(cause, resizes);
         }
 
+        // O3's row, written HERE and not at the end of the sleep, because the
+        // two facts it has to carry -- what was requested during the stall and
+        // what was actually painted after it -- are not both known until the
+        // post-stall drain has run. A row written earlier would have to say
+        // `pending` in the field the oracle reads.
+        if (_stallArmed && resizes > 0)
+        {
+            FlushStallRow(resizes, _lastResizeRequested);
+        }
+
         if (applied)
         {
             PostToUi(() => SurfaceSettled?.Invoke());
         }
         return true;
+    }
+
+    /// <summary>
+    /// How long the head of the loop may wait, or -1 to block forever.
+    ///
+    /// ⛔ NO CLAMP HELPER, DELIBERATELY (FREEZE §1.5 / O2b). A past deadline
+    /// yields 0 -- "take whatever is already there, then fire" -- written as an
+    /// `if`, because `Math.Max` is banned in this shell as a whole identifier
+    /// and the ban is on the SHAPE, not on the three sites F-6 found.
+    /// </summary>
+    private int PendingTimeoutMs()
+    {
+        if (_stallArmed) { return StallDrainGraceMs; }
+        if (_handDeadlineMs >= 0)
+        {
+            var left = _handDeadlineMs - Environment.TickCount64;
+            if (left < 0) { return 0; }
+            if (left > int.MaxValue) { return int.MaxValue; }
+            return (int)left;
+        }
+        return -1;
+    }
+
+    /// <summary>
+    /// A bounded wait expired with nothing in the queue. Each armed latch writes
+    /// its OWN row -- silence is never the answer.
+    /// </summary>
+    private void FlushArmedTimeouts()
+    {
+        if (_stallArmed)
+        {
+            FlushStallRow(0, "none");
+            return;
+        }
+        if (_handDeadlineMs < 0) { return; }
+
+        // ⛔ NEVER A SYNTHETIC RECEIPT WEARING `REAL` (FREEZE §5 stop 4). The
+        // hand did not arrive, so the scene is NOT RUN and says why. The two
+        // refusals are DIFFERENT facts and are not merged: "no press at all"
+        // means the injector never reached the window (UIPI is undetectable at
+        // the injector, per the SendInput page); "pressed and never released"
+        // means it did reach it and the gesture was left open.
+        var scene = _handScene;
+        var waited = _handWaitMs;
+        var pressed = _handPressSeen;
+        _handDeadlineMs = -1;
+        _handScene = "";
+        _handPressSeen = false;
+
+        LastStatus = pressed
+            ? $"NOT RUN: hand refused (pressed but never released within {waited}ms)"
+            : $"NOT RUN: hand refused (no press within {waited}ms)";
+        _report($"{LastStatus} scene={scene} surface={_width}x{_height} {Tids()}");
+        PostToUi(() => SceneCompleted?.Invoke());
+    }
+
+    /// <summary>O3's one row, written once. A second call is a no-op.</summary>
+    private void FlushStallRow(int resizes, string requested)
+    {
+        if (!_stallArmed) { return; }
+        _stallArmed = false;
+        _report($"STALL render-stall={_stallSlept}ms stall-tid={_stallTid} "
+              + $"ui-stall={_uiStallMs}ms resize-during-stall={requested} "
+              + $"resizes-in-drain={resizes} painted-after-stall={_width}x{_height} "
+              + $"{Tids()}");
+    }
+
+    /// <summary>
+    /// Name the FIRST present in the log, once (FREEZE §2 O3's DXGI-eye clause).
+    ///
+    /// The camera is a GATE for exactly one row -- the first worker-thread
+    /// present in the `retained` scene -- because the realistic failure there is
+    /// S-OK-SHAPED: every call succeeds and the panel shows a stale or blank
+    /// surface. A capture is only evidence if the harness knows WHICH present it
+    /// is a photograph of, so the present announces itself with the surface it
+    /// put up and the thread that put it there.
+    ///
+    /// ⚠️ EMITTED FROM <see cref="RepaintOnce"/> ONLY, which is the only present
+    /// path the `retained` scene takes. The one-shot scenes (`goldens`,
+    /// `document`, `selection-marquee`) present through their own loops and do
+    /// NOT emit this row -- said here so its absence from those runs is not read
+    /// as a present that did not happen.
+    /// </summary>
+    private void MarkFirstPresent()
+    {
+        if (_firstPresentSeen) { return; }
+        _firstPresentSeen = true;
+        _report($"FIRST-PRESENT surface={_width}x{_height} "
+              + $"paint-on-ui={(PaintOnUi ? "1" : "0")} {Tids()}");
+    }
+
+    /// <summary>
+    /// Run one paint step ON THE UI THREAD and wait for it. Returns null on
+    /// success, or the refusal text.
+    ///
+    /// ⚠️ THE ONE RENDER-SIDE WAIT IN THIS SHELL, AND IT IS THE CONTROL'S OWN
+    /// MECHANISM. Everywhere else the render thread posts fire-and-forget,
+    /// because a wait in the resize path is the freeze's stop 2 by a second
+    /// door. Here the wait IS the design being demonstrated -- the paint has to
+    /// have finished before the row that names its thread is written -- so it is
+    /// bounded, and a UI thread that does not run the step within
+    /// <see cref="PaintOnUiWaitMs"/> is a REFUSAL with a name rather than a hang.
+    ///
+    /// The event is deliberately NOT disposed: on the timeout path the UI thread
+    /// may still be about to `Set()` it, and disposing under that race turns a
+    /// clean refusal into an `ObjectDisposedException` on the wrong thread.
+    /// </summary>
+    private string? RunPaintStepOnUi(Action step)
+    {
+        var ui = _ui;
+        if (ui is null) { return "SB_PAINT_ON_UI: there is no dispatcher to marshal to"; }
+
+        var done = new ManualResetEventSlim(false);
+        string? threw = null;
+        var queued = ui.TryEnqueue(() =>
+        {
+            try { step(); }
+            catch (Exception ex) { threw = $"{ex.GetType().Name}: {ex.Message}"; }
+            finally { done.Set(); }
+        });
+        if (!queued) { return "SB_PAINT_ON_UI: the dispatcher refused the paint step"; }
+        if (!done.Wait(PaintOnUiWaitMs))
+        {
+            return $"SB_PAINT_ON_UI: the UI thread did not run the paint step within "
+                 + $"{PaintOnUiWaitMs}ms (is SB_UI_STALL_MS set on the same run?)";
+        }
+        return threw;
     }
 
     /// <summary>
@@ -949,6 +1216,10 @@ internal sealed unsafe class Canvas : IDisposable
     private void ApplyPointer(PointerCmd p)
     {
         if (_engine == IntPtr.Zero) { return; }
+        // A scene WAITING for a hand stops asking "did anyone press?" the moment
+        // one does, so its timeout can distinguish an injector that never
+        // reached the window from a gesture left open.
+        if (_handDeadlineMs >= 0 && p.Kind == JasCore.PointerPress) { _handPressSeen = true; }
         JasCore.jas_pointer_event(_engine, p.Kind, p.X, p.Y, p.Mods);
     }
 
@@ -963,13 +1234,72 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private void ApplyPointerReport(PointerReportCmd r)
     {
-        var selected = _engine == IntPtr.Zero ? nuint.MaxValue : JasCore.jas_selection_len(_engine);
-        var sel = selected == nuint.MaxValue ? "n/a" : selected.ToString();
+        // ⛔ AN UNLOADED ENGINE IS `NOT RUN`, NEVER A `selected=0` -- a repair
+        // folded in from flask's rows on the merged shell (R7/R8). A real hand
+        // on the `document` scene reported `selected=0` while the synthesised
+        // gesture reported 1, and the cause was that the control paints through
+        // its OWN engine and never loads the HELD one, so the pointer drove an
+        // EMPTY document. The tell was `loads(shell)=0`, on a row that did not
+        // carry it.
+        //
+        // The scenes N3 adds (`pointer`, `retained`) load the held engine, so
+        // that cause is gone -- but THE HAZARD IS NOT, because an empty-held-
+        // engine `selected=0` is BYTE-IDENTICAL to O4's empty-canvas negative
+        // control, which is a row that must read `selected=0` and mean the
+        // opposite thing. Two states that produce the same row cannot both be
+        // measured by it. So every gesture row now carries `doc=HELD|NONE` and
+        // `loads(shell)=`, and a row about an engine that has never been loaded
+        // REFUSES to print a selection figure at all.
+        var loaded = _engine != IntPtr.Zero && _loadsShell > 0;
+        var doc = loaded ? "HELD" : "NONE";
+        string selField;
+        if (loaded)
+        {
+            var selected = JasCore.jas_selection_len(_engine);
+            selField = selected == nuint.MaxValue
+                ? "selected=n/a"
+                : $"selected={selected}";
+        }
+        else
+        {
+            selField = "NOT RUN: held engine has no document";
+        }
+
+        // ⛔ THE PROVENANCE IS A FIELD, DERIVED FROM THE KIND AND FROM NOTHING
+        // ELSE. `SYNTHETIC` is set only by the replay of `SB_SYNTH_DRAG`;
+        // `REAL` is reachable only from the WinUI handlers, which are the only
+        // things that can increment the counters. A row can therefore never
+        // claim a provenance its counters did not come from.
+        var provenance = string.Equals(r.Kind, "SYNTHETIC", StringComparison.Ordinal)
+            ? "SYNTHETIC"
+            : "REAL";
         _report(
             $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} "
-          + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 "
+          + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 pointer={provenance} "
+          + $"doc={doc} loads(shell)={_loadsShell} "
           + $"press@=({r.PressX:F1},{r.PressY:F1}) release@=({r.ReleaseX:F1},{r.ReleaseY:F1}) "
-          + $"selected={sel} surface={_width}x{_height} scale={_scaleX:0.##} {Tids()}");
+          + $"{selField} surface={_width}x{_height} scale={_scaleX:0.##} {Tids()}");
+
+        // A SCENE THAT WAS WAITING FOR THIS GESTURE IS NOW FINISHED, and only a
+        // gesture that came through the handlers closes it: the synthetic replay
+        // is applied inline by the scene that asked for it and never arrives
+        // here as the thing being waited for.
+        if (_handDeadlineMs < 0 || provenance != "REAL") { return; }
+        var scene = _handScene;
+        _handDeadlineMs = -1;
+        _handScene = "";
+        _handPressSeen = false;
+        ApplyDump("sb-doc-after.json");
+        if (string.Equals(scene, "retained", StringComparison.Ordinal))
+        {
+            // The mutation's own frame, hashed at the surface `A` was hashed at,
+            // BEFORE the resize walk starts. `A-MUT` is the round trip's H0.
+            PaintAndHash("A-MUT");
+        }
+        _report($"HAND CLOSED scene={scene} pointer=REAL doc={doc} loads(shell)={_loadsShell} "
+              + $"{selField} the scene's completion is posted now "
+              + $"surface={_width}x{_height} {Tids()}");
+        PostToUi(() => SceneCompleted?.Invoke());
     }
 
     /// <summary>
@@ -1080,43 +1410,79 @@ internal sealed unsafe class Canvas : IDisposable
         var occluded = 0;
         string? hash = null;
 
-        _swapChain.GetBuffer<IDXGISurface>(0, out var back);
-        // GetComInterfaceForObject, NOT GetIUnknownForObject: for a COM object
-        // exposing several interfaces those are DIFFERENT pointers, and calling
-        // through the wrong vtable manifested as 0xC0000374 in ntdll rather than
-        // as a clean failure.
-        var backPtr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
-        try
+        // ⭐ O3's STALL, AND IT IS INSIDE ONE REPAINT ON THE RENDER THREAD
+        // (FREEZE §2 O3). Not inside the marshalled paint step below: under
+        // `SB_PAINT_ON_UI=1` that step runs on the XAML thread, and a stall that
+        // moved with it would silently turn the RENDER-stall arm into the
+        // UI-stall arm -- two controls answering different questions, collapsed
+        // into one by an implementation detail. The sleep is latched to ONE
+        // repaint: `_stallMs` is zeroed before it starts, so a stalled scene
+        // does not stall every later frame.
+        if (_stallMs > 0)
         {
-            _paintTid = Environment.CurrentManagedThreadId;
-            swPaint.Restart();
-            var rc = JasCore.jas_paint_frame(_engine, backPtr, _width, _height);
-            swPaint.Stop();
-            if (rc != JasCore.PaintOk) { failure = JasCore.Explain(rc); }
-        }
-        finally
-        {
-            Marshal.Release(backPtr);
-        }
-
-        if (failure is null && _hashLabel is not null)
-        {
-            // ⛔ BEFORE Present, NOT AFTER. Under the flip model Present rotates
-            // the buffers, so a read-back after presenting samples a DIFFERENT
-            // buffer than the one just painted -- a hash that looks stable and
-            // describes the wrong frame.
-            hash = BackBufferSha256(out var hashNote);
-            if (hash is null) { failure = hashNote; }
+            var ms = _stallMs;
+            _stallMs = 0;
+            _stallSlept = ms;
+            _stallTid = Environment.CurrentManagedThreadId;
+            Thread.Sleep(ms);
+            _stallArmed = true;
         }
 
-        if (failure is null)
+        // ⛔ ONE PAINT STEP, TWO THREADS TO RUN IT ON -- and it is deliberately
+        // ONE body. `SB_PAINT_ON_UI` is O3's design-red control (see the field's
+        // note); implementing it as a second paint path would let the two drift,
+        // and the control would then be measuring the drift.
+        void PaintStep()
         {
-            _presentTid = Environment.CurrentManagedThreadId;
-            swPresent.Restart();
-            var hr = _swapChain.Present(1, default);
-            swPresent.Stop();
-            if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; }
-            else if (hr.Value == StatusOccluded) { occluded++; }
+            _swapChain!.GetBuffer<IDXGISurface>(0, out var back);
+            // GetComInterfaceForObject, NOT GetIUnknownForObject: for a COM
+            // object exposing several interfaces those are DIFFERENT pointers,
+            // and calling through the wrong vtable manifested as 0xC0000374 in
+            // ntdll rather than as a clean failure.
+            var backPtr = Marshal.GetComInterfaceForObject(back, typeof(IDXGISurface));
+            try
+            {
+                _paintTid = Environment.CurrentManagedThreadId;
+                swPaint.Restart();
+                var rc = JasCore.jas_paint_frame(_engine, backPtr, _width, _height);
+                swPaint.Stop();
+                if (rc != JasCore.PaintOk) { failure = JasCore.Explain(rc); }
+            }
+            finally
+            {
+                Marshal.Release(backPtr);
+            }
+
+            if (failure is null && _hashLabel is not null)
+            {
+                // ⛔ BEFORE Present, NOT AFTER. Under the flip model Present
+                // rotates the buffers, so a read-back after presenting samples a
+                // DIFFERENT buffer than the one just painted -- a hash that
+                // looks stable and describes the wrong frame.
+                hash = BackBufferSha256(out var hashNote);
+                if (hash is null) { failure = hashNote; }
+            }
+
+            if (failure is null)
+            {
+                _presentTid = Environment.CurrentManagedThreadId;
+                swPresent.Restart();
+                var hr = _swapChain!.Present(1, default);
+                swPresent.Stop();
+                if (hr.Failed) { failure = $"Present 0x{hr.Value:X8}"; }
+                else if (hr.Value == StatusOccluded) { occluded++; }
+                if (failure is null) { MarkFirstPresent(); }
+            }
+        }
+
+        if (PaintOnUi)
+        {
+            var refused = RunPaintStepOnUi(PaintStep);
+            if (refused is not null && failure is null) { failure = refused; }
+        }
+        else
+        {
+            PaintStep();
         }
 
         var head = failure is null ? "REPAINT" : "REPAINT-FAILED";
@@ -1135,12 +1501,46 @@ internal sealed unsafe class Canvas : IDisposable
         {
             var label = _hashLabel;
             _hashLabel = null;
+
+            // ⛔ THE COUNTERS ARE THE LAST CORE CALL BEFORE THE ROW (FREEZE
+            // O1(i)), AND THE ORDER IS THE MEASUREMENT. `jas_instr_counters_json`
+            // counts its own `jas_free`, and `jas_engine_free` is a recorded
+            // crossing -- so a row composed before a free that is about to
+            // happen reports the state one call ago. That is exactly the defect
+            // flask measured on the `document` control (`2 / 0`), repaired at
+            // its site by freeing before counting. Here nothing is freed at all,
+            // which is the whole claim: the `retained` scene holds ONE engine
+            // for the life of the window, so these rows must read
+            // `engines-created=1 engines-freed=0` at every stop of the walk.
             var (created, freed) = EngineCounters();
             _report(
                 $"{label} surface={_width}x{_height} hash={hash ?? "n/a"} "
               + $"engines-created={created} engines-freed={freed} loads(shell)={_loadsShell} "
               + $"{Tids()}");
+            // ⛔ THE NEXT RESIZE STEP IS POSTED FROM HERE, NOT FROM THE SETTLE.
+            // O1's list walks the surface AWAY and BACK, hashing at each stop.
+            // If the next `AppWindow.Resize` were posted the moment the previous
+            // one settled, the hash command and the next resize could land in
+            // ONE drain -- one paint, at the NEW size, wearing the OLD step's
+            // label. The hash row is the only point at which the previous stop
+            // is finished, so it is the only safe place to ask for the next.
+            PostToUi(() => HashTaken?.Invoke());
         }
+    }
+
+    /// <summary>
+    /// Paint one frame and hash it, RIGHT HERE on the render thread.
+    ///
+    /// The scenes use this instead of <see cref="Hash"/> because they are ALREADY
+    /// on the render thread: enqueuing from here would put two hash commands in
+    /// one batch, and a batch paints once -- the second label would overwrite the
+    /// first and one of the two hashes would silently never be taken. Same code
+    /// path as the queued one, so the two cannot drift.
+    /// </summary>
+    private void PaintAndHash(string label)
+    {
+        _hashLabel = label;
+        RepaintOnce("hash", 0);
     }
 
     /// <summary>
@@ -1274,8 +1674,28 @@ internal sealed unsafe class Canvas : IDisposable
         // notification that only fires on success is a notification the window
         // waits for forever after a bad SB_SVG -- and the run would look hung
         // rather than refused.
+        //
+        // ⚠️ TWO SCENES POST IT THEMSELVES, in opposite directions, and both say
+        // so by setting `_scenePostsItsOwnCompletion`:
+        //   * `stall` posts it EARLY, BEFORE the render thread sleeps -- O3's
+        //     resize has to be posted DURING the stall, and the window cannot
+        //     post it until it has been told the scene is up.
+        //   * `pointer` and `retained` waiting for a real hand post it LATE,
+        //     when the gesture closes or the wait is refused by name -- the
+        //     resize round trip must not start before the mutation it is
+        //     supposed to carry across.
+        // Every one of those paths ends in exactly one post, and the hand's is
+        // bounded by SB_POINTER_WAIT_MS, so no path can leave the window
+        // waiting forever.
+        _scenePostsItsOwnCompletion = false;
         try { ApplySceneInner(scene); }
-        finally { PostToUi(() => SceneCompleted?.Invoke()); }
+        finally
+        {
+            if (!_scenePostsItsOwnCompletion)
+            {
+                PostToUi(() => SceneCompleted?.Invoke());
+            }
+        }
     }
 
     private void ApplySceneInner(string scene)
@@ -1300,9 +1720,42 @@ internal sealed unsafe class Canvas : IDisposable
             {
                 ok = RenderDocumentControl();
             }
-            else if (string.Equals(scene, "selection", StringComparison.OrdinalIgnoreCase))
+            else if (string.Equals(scene, "selection-marquee", StringComparison.OrdinalIgnoreCase))
             {
                 ok = RenderSelection();
+            }
+            else if (string.Equals(scene, "retained", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderRetained();
+            }
+            else if (string.Equals(scene, "stall", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderStall();
+            }
+            else if (string.Equals(scene, "pointer", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderPointer();
+            }
+            else if (string.Equals(scene, "stay", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderStay();
+            }
+            else if (string.Equals(scene, "selection", StringComparison.OrdinalIgnoreCase))
+            {
+                // ⛔ THE OLD NAME IS REFUSED, POINTING AT THE NEW ONE, AND THAT
+                // IS THE WHOLE VALUE OF THE RENAME. `selection` drives a MARQUEE
+                // that moves nothing and selects N (FREEZE §1.4 / A4); it is a
+                // control, not O4's positive arm. If the old spelling silently
+                // ran the new scene, every invocation written before the rename
+                // would keep working and nobody would ever find out which arm
+                // their receipt came from.
+                LastStatus = "SB_SCENE='selection' is RENAMED 'selection-marquee'. It is a "
+                           + "CONTROL: its gesture is synthetic (pointer=SYNTHETIC), it moves "
+                           + "nothing, and it proves nothing about the pointer seam. For a "
+                           + "real gesture use SB_SCENE=pointer; for the seam's positive "
+                           + "control use SB_SYNTH_DRAG on 'pointer' or 'retained'";
+                _report($"RUSTFAIL {LastStatus} {Tids()}");
+                return;
             }
             else
             {
@@ -1310,7 +1763,8 @@ internal sealed unsafe class Canvas : IDisposable
                 // back to the probe. A run asked for goldens that quietly drew a
                 // square would report RUSTOK over the wrong workload.
                 LastStatus = $"SB_SCENE='{scene}' is not recognised; use 'benchmark', "
-                           + "'goldens', 'document' or 'selection'";
+                           + "'goldens', 'document', 'retained', 'stall', 'pointer', "
+                           + "'stay' or 'selection-marquee'";
                 _report($"RUSTFAIL {LastStatus} {Tids()}");
                 return;
             }
@@ -1420,6 +1874,17 @@ internal sealed unsafe class Canvas : IDisposable
     /// ⛔ SO ITS `engines-created` READS 2, NOT 1, and that is correct for THIS
     /// scene: the retained engine from Attach plus this one. O1's identity clause
     /// is asserted on the `retained` scene, not here.
+    ///
+    /// ⭐ AND `engines-freed` READS 1 BECAUSE THE FREE IS ORDERED BEFORE THE
+    /// COUNTERS READ -- a repair folded in from flask's measurement of the
+    /// merged shell on kenai, where the row read `2 / 0`. Nothing leaked: the
+    /// free lived in the `finally`, so it ran AFTER the row was composed, and
+    /// the row was a true statement about a moment that was one call too early.
+    /// The count is therefore read AFTER this control's own `jas_engine_free`,
+    /// and the `finally` stays as a GUARD that frees only a handle still held
+    /// (the refusal paths above never reach the explicit free). An ordering
+    /// fact reported as a count is exactly the shape a reader cannot tell from
+    /// a leak, which is why it is fixed rather than annotated.
     /// </summary>
     private bool RenderDocumentControl()
     {
@@ -1501,6 +1966,14 @@ internal sealed unsafe class Canvas : IDisposable
                 return false;
             }
 
+            // ⛔ FREE FIRST, THEN COUNT. `jas_engine_free` is a recorded
+            // crossing, so a row composed before it reports the state one call
+            // ago -- `engines-freed=0` about an engine this scene is about to
+            // free. The handle is nulled so the `finally` below frees nothing
+            // twice.
+            JasCore.jas_engine_free(engine);
+            engine = IntPtr.Zero;
+
             var (created, freed) = EngineCounters();
             LastStatus = $"DOCUMENT '{System.IO.Path.GetFileName(svgPath)}' "
                        + $"({bytes.Length} bytes) painted LIVE through {SurfaceLabel()} on {Adapter} "
@@ -1511,9 +1984,15 @@ internal sealed unsafe class Canvas : IDisposable
         }
         finally
         {
-            // Freed on EVERY path including the refusals above: a session leaked
-            // per frame is a leak nobody notices until a long run.
-            JasCore.jas_engine_free(engine);
+            // A GUARD, not the primary free. The success path frees above, in
+            // order, and nulls the handle; this catches every refusal and throw
+            // between the create and that point -- a session leaked per frame is
+            // a leak nobody notices until a long run.
+            if (engine != IntPtr.Zero)
+            {
+                JasCore.jas_engine_free(engine);
+                engine = IntPtr.Zero;
+            }
         }
     }
 
@@ -1534,7 +2013,7 @@ internal sealed unsafe class Canvas : IDisposable
         var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
         if (string.IsNullOrWhiteSpace(svgPath))
         {
-            LastStatus = "SB_SCENE=selection requires SB_SVG=<path to an .svg>";
+            LastStatus = "SB_SCENE=selection-marquee requires SB_SVG=<path to an .svg>";
             return false;
         }
 
@@ -1616,6 +2095,440 @@ internal sealed unsafe class Canvas : IDisposable
                    + $"marquee overlay presented through {SurfaceLabel()} on {Adapter} "
                    + $"loads(shell)={_loadsShell} {Tids()}";
         return true;
+    }
+
+    // =======================================================================
+    // N3 — THE SCENES THE FREEZE'S OBSERVABLES ARE MEASURED THROUGH
+    //
+    // ⚠️ NOTHING IN THIS SECTION IS A MEASUREMENT. Every method here EMITS the
+    // rows an oracle reads; not one of them asserts, and not one of them has
+    // been run -- the shell does not compile on the machine this was written on.
+    // The assertions are the harness's (N4) and the numbers are flask's.
+    // =======================================================================
+
+    /// <summary>
+    /// The SVGs whose hashes are CALIBRATED, by name.
+    ///
+    /// ⛔ AN UNCALIBRATED SVG IS REFUSED, NOT TOLERATED (FREEZE O1's negative
+    /// control). O1 compares hashes with NO TOLERANCE, and it can do that only
+    /// because the frame is deterministic for the scene that runs: `Clear` runs
+    /// every frame, nothing in the paint path reads a clock or a random source,
+    /// MSAA is impossible under the flip model. "Deterministic" is a property of
+    /// a PARTICULAR document at a PARTICULAR surface, though, and nobody has
+    /// checked it for an arbitrary one -- so the scene refuses by name rather
+    /// than producing a hash whose stability is an assumption. The refusal reads
+    /// `NOT RUN`, because a run that did not happen is not a run that failed.
+    ///
+    /// One name, and it is the one the reference renderer has been using:
+    /// `complex_document.svg` (819 bytes; two layers, a rounded rect, a circle,
+    /// a line in a half-opaque group, and one text element).
+    /// </summary>
+    private static readonly string[] CalibratedSvgs = { "complex_document.svg" };
+
+    /// <summary>
+    /// ⭐ O1's SUBJECT: the RETAINED document, across a resize round trip.
+    ///
+    /// Load into the HELD engine (never a new one), hash it, MUTATE it with an
+    /// operation that is not on disk, hash it again, and then let
+    /// `SB_RESIZE=1000x600,original` walk the surface away and back with a hash
+    /// at each stop. What the harness asserts on those rows is O1's, not this
+    /// method's; what this method owes is that each row is of the frame its
+    /// label names.
+    ///
+    /// ⚖️ FOUR HASH ROWS, NOT THREE, AND THAT IS A DECISION TAKEN WITHOUT AN
+    /// OPERATOR. The freeze asks O1 for both `hash(A) == hash(D)` -- the same
+    /// SVG through the fresh-engine `document` control -- and `H0 == H2`, the
+    /// round trip. Those cannot be the same hash: the mutation lands between
+    /// them, so a hash that survives the round trip is a hash of a document the
+    /// control never painted. So the pre-mutation frame and the post-mutation
+    /// frame are BOTH hashed and BOTH labelled:
+    ///
+    ///   `A`      after Load, before the mutation  -> the arm `hash(A) == hash(D)` reads
+    ///   `A-MUT`  after the mutation, same surface -> the round trip's H0
+    ///   `H1`     at the away size                 -> H1 != H0
+    ///   `A'`     back at `original`               -> H2, and H2 == A-MUT is retention
+    ///
+    /// `A != A-MUT` is the mutation's own pixel witness, which the freeze's
+    /// three-hash spelling could not carry either.
+    /// </summary>
+    private bool RenderRetained()
+    {
+        if (_swapChain is null || _engine == IntPtr.Zero)
+        {
+            LastStatus = "no swapchain";
+            return false;
+        }
+
+        var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
+        if (string.IsNullOrWhiteSpace(svgPath))
+        {
+            LastStatus = "SB_SCENE=retained requires SB_SVG=<path to an .svg>";
+            return false;
+        }
+
+        var name = System.IO.Path.GetFileName(svgPath);
+        var calibrated = false;
+        foreach (var known in CalibratedSvgs)
+        {
+            if (string.Equals(name, known, StringComparison.OrdinalIgnoreCase)) { calibrated = true; }
+        }
+        if (!calibrated)
+        {
+            LastStatus = $"NOT RUN: uncalibrated SVG '{name}' -- O1 compares hashes with no "
+                       + $"tolerance and only these are calibrated: {string.Join(", ", CalibratedSvgs)}";
+            return false;
+        }
+
+        byte[] bytes;
+        try { bytes = System.IO.File.ReadAllBytes(svgPath); }
+        catch (Exception ex)
+        {
+            LastStatus = $"RETAINED FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+            return false;
+        }
+
+        // THROUGH COAT 1's OWN LOAD PATH. `jas_load_svg` on the engine `Attach`
+        // created; no engine is made here and none is freed, which is what
+        // `engines-created=1 engines-freed=0` on the rows below is a witness to.
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name })) { return false; }
+        ApplyDump("sb-doc-before.json");
+        PaintAndHash("A");
+
+        var synth = Environment.GetEnvironmentVariable("SB_SYNTH_DRAG");
+        if (string.IsNullOrWhiteSpace(synth))
+        {
+            // NO SYNTH: WAIT FOR THE REAL HAND, and hold the resize walk until
+            // it lands. Starting the round trip now would carry an unmutated
+            // document across it and the receipt would still say `retained`.
+            if (!ArmHandWait("retained")) { return false; }
+            LastStatus = $"RETAINED '{name}' ({bytes.Length} bytes) loaded into the HELD engine; "
+                       + $"hashed as A; WAITING for a real gesture (up to {_handWaitMs}ms) before "
+                       + $"the resize round trip. surface={_width}x{_height} {Tids()}";
+            return true;
+        }
+
+        if (!SyntheticDrag(synth, "retained")) { return false; }
+        PaintAndHash("A-MUT");
+        ApplyDump("sb-doc-after.json");
+
+        LastStatus = $"RETAINED '{name}' ({bytes.Length} bytes) in the HELD engine; "
+                   + $"pointer=SYNTHETIC mutated it; hashed A and A-MUT at "
+                   + $"surface={_width}x{_height}; the SB_RESIZE walk hashes the rest "
+                   + $"loads(shell)={_loadsShell} {Tids()}";
+        return true;
+    }
+
+    /// <summary>
+    /// ⭐ O3's SUBJECT: a deliberate sleep INSIDE one repaint on the render
+    /// thread, and the two controls beside it.
+    ///
+    /// `SB_RENDER_STALL_MS` is the arm: the render thread sleeps inside a
+    /// repaint, a resize posted DURING that sleep piles up in the queue, and the
+    /// drain after it applies the LATEST size in exactly one frame. `Responding`
+    /// stays True throughout, because the UI thread is not the one sleeping --
+    /// that is the coat-3 claim, and it is why `Responding` is a LIVENESS
+    /// control and never a residency proof.
+    ///
+    /// `SB_UI_STALL_MS` is the oracle-liveness control: it sleeps the XAML
+    /// thread instead, so `Responding` must read False. Without it a True is
+    /// unfalsifiable -- an oracle that cannot say False says nothing when it
+    /// says True.
+    ///
+    /// ⛔ THE COMPLETION IS POSTED BEFORE THE SLEEP. The window drives
+    /// `SB_RESIZE` off the scene's completion, so a completion posted after the
+    /// stall would put the resize AFTER the stall it is supposed to arrive
+    /// during, and the row would read `resize-during-stall=none` on a run that
+    /// did everything right.
+    /// </summary>
+    private bool RenderStall()
+    {
+        if (_swapChain is null || _engine == IntPtr.Zero)
+        {
+            LastStatus = "no swapchain";
+            return false;
+        }
+
+        var renderMs = ParseMs(Environment.GetEnvironmentVariable("SB_RENDER_STALL_MS"));
+        _uiStallMs = ParseMs(Environment.GetEnvironmentVariable("SB_UI_STALL_MS"));
+        if (renderMs <= 0 && _uiStallMs <= 0)
+        {
+            LastStatus = "SB_SCENE=stall needs SB_RENDER_STALL_MS or SB_UI_STALL_MS (a positive "
+                       + "number of milliseconds); a stall scene that stalls for zero is a "
+                       + "scene that measures nothing";
+            return false;
+        }
+
+        // A document if one was named, so the stalled frame is a picture and not
+        // an empty canvas. Optional: O3 is about threads, not about pixels.
+        var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
+        if (!string.IsNullOrWhiteSpace(svgPath))
+        {
+            try
+            {
+                var bytes = System.IO.File.ReadAllBytes(svgPath);
+                if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LastStatus = $"STALL FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+                return false;
+            }
+        }
+
+        _report($"STALL ARMED render-stall={renderMs}ms ui-stall={_uiStallMs}ms "
+              + $"surface={_width}x{_height} {Tids()}");
+
+        // The window may now drive its SB_RESIZE list: the sleep has not started.
+        _scenePostsItsOwnCompletion = true;
+        PostToUi(() => SceneCompleted?.Invoke());
+
+        if (_uiStallMs > 0)
+        {
+            var ms = _uiStallMs;
+            PostToUi(() => Thread.Sleep(ms));
+        }
+
+        if (renderMs > 0)
+        {
+            _stallMs = renderMs;
+            RepaintOnce("stall", 0);
+        }
+
+        LastStatus = $"STALL render-stall={renderMs}ms ui-stall={_uiStallMs}ms slept on the "
+                   + $"render thread; the STALL row carries what the post-stall drain applied "
+                   + $"{Tids()}";
+        return true;
+    }
+
+    /// <summary>
+    /// ⭐ O4's SUBJECT: load a document, dump it, and WAIT FOR A REAL HAND.
+    ///
+    /// ⛔ THE WAIT IS A LATCH, NOT A SLEEP, and that is not a style choice: the
+    /// hand's events arrive as queue commands, and this method runs on the
+    /// thread that drains that queue. A scene that slept here would be waiting
+    /// for events only it can deliver. So it arms a deadline, returns, and the
+    /// gesture's own `Release` -- through the WinUI handlers, counted nowhere
+    /// else -- writes the `POINTER REAL` row and the after-dump.
+    ///
+    /// ⛔ AND A TIMEOUT IS `NOT RUN`, NEVER A SYNTHETIC RECEIPT WEARING `REAL`
+    /// (FREEZE §5 stop 4). `SB_SYNTH_DRAG` on this scene is its CONTROL and says
+    /// `pointer=SYNTHETIC` on its own row; the two can never be confused,
+    /// because the REAL counters can only be incremented inside the handlers.
+    /// </summary>
+    private bool RenderPointer()
+    {
+        if (_swapChain is null || _engine == IntPtr.Zero)
+        {
+            LastStatus = "no swapchain";
+            return false;
+        }
+
+        var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
+        if (string.IsNullOrWhiteSpace(svgPath))
+        {
+            LastStatus = "SB_SCENE=pointer requires SB_SVG=<path to an .svg>";
+            return false;
+        }
+
+        byte[] bytes;
+        try { bytes = System.IO.File.ReadAllBytes(svgPath); }
+        catch (Exception ex)
+        {
+            LastStatus = $"POINTER FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+            return false;
+        }
+
+        var name = System.IO.Path.GetFileName(svgPath);
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name })) { return false; }
+        ApplyDump("sb-doc-before.json");
+        RepaintOnce("load", 0);
+
+        var synth = Environment.GetEnvironmentVariable("SB_SYNTH_DRAG");
+        if (!string.IsNullOrWhiteSpace(synth))
+        {
+            if (!SyntheticDrag(synth, "pointer")) { return false; }
+            ApplyDump("sb-doc-after.json");
+            LastStatus = $"POINTER '{name}' pointer=SYNTHETIC (the CONTROL arm; the hand was "
+                       + $"not asked for) surface={_width}x{_height} {Tids()}";
+            return true;
+        }
+
+        if (!ArmHandWait("pointer")) { return false; }
+        LastStatus = $"POINTER '{name}' ({bytes.Length} bytes) loaded; WAITING for a real "
+                   + $"gesture (up to {_handWaitMs}ms). A timeout is NOT RUN, never a "
+                   + $"synthetic receipt labelled REAL. surface={_width}x{_height} {Tids()}";
+        return true;
+    }
+
+    /// <summary>
+    /// ⭐ O5's SUBJECT (F-2): paint once, announce the PID, and STAY.
+    ///
+    /// The scene does not run to completion in the sense the others do and it
+    /// never exits: it paints one frame, writes a row carrying `pid=`, and
+    /// leaves the app pumping until something kills it BY PID. `sitting.ps1
+    /// -Stay/-Stop` is the harness's (N4); this is the row it reads, and the row
+    /// is also the window's title, because a title is a channel session 0 can
+    /// read when a log file is not yet flushed.
+    ///
+    /// ⚠️ The PID is the row's POINT: `verify_window.ps1`'s old teardown killed
+    /// by NAME, which would kill a live `-Stay` belonging to someone else. A
+    /// name is not an identity.
+    /// </summary>
+    private bool RenderStay()
+    {
+        if (_swapChain is null || _engine == IntPtr.Zero)
+        {
+            LastStatus = "no swapchain";
+            return false;
+        }
+
+        var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
+        if (!string.IsNullOrWhiteSpace(svgPath))
+        {
+            try
+            {
+                var bytes = System.IO.File.ReadAllBytes(svgPath);
+                if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
+                {
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                LastStatus = $"STAY FAILED: cannot read '{svgPath}': {ex.GetType().Name}";
+                return false;
+            }
+        }
+
+        RepaintOnce("stay", 0);
+
+        var pid = Environment.ProcessId;
+        LastStatus = $"STAY pid={pid} surface={_width}x{_height} — run-and-stay: this scene "
+                   + $"does NOT complete and does NOT exit; stop it by PID {Tids()}";
+        return true;
+    }
+
+    /// <summary>
+    /// Arm the wait for a real hand. Returns false only if the knob is malformed.
+    /// </summary>
+    private bool ArmHandWait(string scene)
+    {
+        var waitMs = ParseMs(Environment.GetEnvironmentVariable("SB_POINTER_WAIT_MS"));
+        if (waitMs == 0) { waitMs = 30000; }
+        if (waitMs < 0)
+        {
+            LastStatus = "SB_POINTER_WAIT_MS must be a positive number of milliseconds";
+            return false;
+        }
+        _handWaitMs = waitMs;
+        _handScene = scene;
+        _handPressSeen = false;
+        _handDeadlineMs = Environment.TickCount64 + waitMs;
+        _scenePostsItsOwnCompletion = true;   // posted when the gesture closes, or on the refusal
+        return true;
+    }
+
+    /// <summary>
+    /// ⭐ THE SEAM'S POSITIVE CONTROL: `SB_SYNTH_DRAG=x,y,dx,dy[,k]`, PHYSICAL
+    /// PIXELS, HARNESS-SUPPLIED.
+    ///
+    /// ⛔ THE SHELL STAYS BLIND TO WHAT IT HITS, AND THAT IS WHAT MAKES THIS A
+    /// CONTROL RATHER THAN A SECOND MARQUEE. The harness reads
+    /// `sb-doc-before.json`, picks an element and a delta from it, and passes
+    /// them in; this method replays them through `jas_pointer_event` and cannot
+    /// know which element it moved (BL1). The old synthesised gesture chose its
+    /// own coordinates as fractions of the surface, moved nothing, and reported
+    /// `press=1 move=2 release=1` for its whole life -- it could not have failed.
+    ///
+    /// `k` (the number of intermediate moves, default 2) is the fifth field
+    /// rather than a knob of its own: O4 asks for k VARIED, and a control that
+    /// cannot follow a varied k is weaker than the hand it stands in for. A
+    /// fifth field costs no row in the knob table and cannot be set without
+    /// setting the drag.
+    /// </summary>
+    private bool SyntheticDrag(string spec, string scene)
+    {
+        var parts = spec.Split(',');
+        if (parts.Length < 4 || parts.Length > 5)
+        {
+            LastStatus = $"SB_SYNTH_DRAG='{spec}' malformed: want x,y,dx,dy[,k] in PHYSICAL "
+                       + "pixels, the point and the delta chosen by the harness from "
+                       + "sb-doc-before.json";
+            return false;
+        }
+
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var style = System.Globalization.NumberStyles.Float;
+        if (!double.TryParse(parts[0], style, culture, out var x)
+            || !double.TryParse(parts[1], style, culture, out var y)
+            || !double.TryParse(parts[2], style, culture, out var dx)
+            || !double.TryParse(parts[3], style, culture, out var dy))
+        {
+            LastStatus = $"SB_SYNTH_DRAG='{spec}': one of x,y,dx,dy is not a number";
+            return false;
+        }
+
+        var k = 2;
+        if (parts.Length == 5 && !int.TryParse(parts[4], out k))
+        {
+            LastStatus = $"SB_SYNTH_DRAG='{spec}': k (the move count) is not a number";
+            return false;
+        }
+        if (k < 1)
+        {
+            LastStatus = $"SB_SYNTH_DRAG='{spec}': k must be at least 1 -- a drag with no move "
+                       + "is a click, and it is not what this control exists to replay";
+            return false;
+        }
+
+        JasCore.jas_pointer_event(_engine, JasCore.PointerPress, x, y, 0);
+        for (var i = 1; i <= k; i++)
+        {
+            var t = (double)i / k;
+            JasCore.jas_pointer_event(_engine, JasCore.PointerMove,
+                x + (dx * t), y + (dy * t), JasCore.ModDragging);
+        }
+        JasCore.jas_pointer_event(_engine, JasCore.PointerRelease, x + dx, y + dy, 0);
+
+        // THE SAME RECEIPT WRITER AS THE HAND'S, with a Kind that can never read
+        // REAL. One row shape, two provenances, and the provenance is a field.
+        ApplyPointerReport(new PointerReportCmd
+        {
+            Kind = "SYNTHETIC",
+            PointerId = 0,
+            Device = "Synthetic",
+            Hit = "NONE",
+            Press = 1,
+            Move = k,
+            Release = 1,
+            PressX = x,
+            PressY = y,
+            ReleaseX = x + dx,
+            ReleaseY = y + dy,
+        });
+        _report($"SYNTH-DRAG scene={scene} spec='{spec}' k={k} press@=({x:F1},{y:F1}) "
+              + $"release@=({x + dx:F1},{y + dy:F1}) surface={_width}x{_height} {Tids()}");
+        return true;
+    }
+
+    /// <summary>
+    /// A millisecond knob's VALUE. 0 when unset, -1 when it is set to something
+    /// that is not a number -- so "unset" and "nonsense" reach DIFFERENT branches
+    /// at the call site instead of both defaulting quietly.
+    ///
+    /// ⛔ IT TAKES THE VALUE, NOT THE KNOB'S NAME, and that is O7's requirement
+    /// rather than a preference: `GetEnvironmentVariable(name)` with a variable
+    /// is a read the knob census cannot attribute, and that census REFUSES to
+    /// guess rather than reporting a complete table over knobs it cannot see. So
+    /// every knob in this shell is read at its own call site, as a literal.
+    /// </summary>
+    private static int ParseMs(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) { return 0; }
+        return int.TryParse(raw, out var ms) ? ms : -1;
     }
 
     /// <summary>
