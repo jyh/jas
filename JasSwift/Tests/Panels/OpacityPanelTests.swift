@@ -189,16 +189,16 @@ private func setupOneRectSelectionModel() -> Model {
 
 @Test func opacityPanelIsCheckedReflectsPanelState() {
     var layout = WorkspaceLayout.defaultLayout()
-    #expect(OpacityPanel.isChecked("toggle_opacity_thumbnails", layout: layout) == false)
-    #expect(OpacityPanel.isChecked("toggle_new_masks_clipping", layout: layout) == true)
+    #expect(panelIsChecked(.opacity, cmd: "toggle_opacity_thumbnails", layout: layout) == false)
+    #expect(panelIsChecked(.opacity, cmd: "toggle_new_masks_clipping", layout: layout) == true)
     layout.opacityPanel.thumbnailsHidden = true
     layout.opacityPanel.newMasksClipping = false
-    #expect(OpacityPanel.isChecked("toggle_opacity_thumbnails", layout: layout) == true)
-    #expect(OpacityPanel.isChecked("toggle_new_masks_clipping", layout: layout) == false)
+    #expect(panelIsChecked(.opacity, cmd: "toggle_opacity_thumbnails", layout: layout) == true)
+    #expect(panelIsChecked(.opacity, cmd: "toggle_new_masks_clipping", layout: layout) == false)
 }
 
 @Test func opacityPanelIsCheckedReturnsFalseForUnknownCommand() {
     let layout = WorkspaceLayout.defaultLayout()
-    #expect(OpacityPanel.isChecked("nonexistent", layout: layout) == false)
-    #expect(OpacityPanel.isChecked("make_opacity_mask", layout: layout) == false)
+    #expect(panelIsChecked(.opacity, cmd: "nonexistent", layout: layout) == false)
+    #expect(panelIsChecked(.opacity, cmd: "make_opacity_mask", layout: layout) == false)
 }

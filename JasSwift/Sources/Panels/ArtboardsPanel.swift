@@ -38,8 +38,4 @@ public enum ArtboardsPanel {
             )
         }
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
 }

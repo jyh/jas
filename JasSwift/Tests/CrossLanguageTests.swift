@@ -2701,6 +2701,67 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Panel-menu enabled/checked state (chrome seam) algorithm vectors
+
+/// The PANEL-menu arm of the same chrome seam.
+///
+/// `menu_state.json` pins the MENUBAR; nothing pinned a panel hamburger
+/// menu's dynamic state, and the gap was not academic. Until this landed
+/// jas_dioxus answered every panel-menu `checked_when` with a hard-coded
+/// `false` while this port answered five of the Brushes panel's with a
+/// hand-coded `arr.contains { ($0 as? String) == v }` — the same predicate,
+/// two answers, which is precisely what the prime directive forbids.
+///
+/// The subject is the SAME `MenuState.menuState` walk, applied to a panel's
+/// `menu:` array wrapped as one menu, so paths read `[0, i]`.
+@Test func testAlgorithmPanelMenuState() throws {
+    let json = readFixture("algorithms/panel_menu_state.json")
+    let data = json.data(using: .utf8)!
+    let tests = try JSONSerialization.jsonObject(with: data) as! [[String: Any]]
+
+    let bundlePath = (fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json")
+    let standardized = (bundlePath as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: standardized) else {
+        Issue.record("Failed to read workspace bundle: \(standardized)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panels = bundle["panels"] as! [String: Any]
+
+    #expect(tests.count >= 6, "corpus shrank: \(tests.count) cases")
+    var checkedRows = 0
+    for tc in tests {
+        let name = tc["name"] as! String
+        let function = tc["function"] as! String
+        #expect(function == "panel_menu_state", "Unknown function: \(function)")
+        let args = tc["args"] as! [String: Any]
+        let pid = args["panel"] as! String
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let expected = tc["expected"] as! [[String: Any]]
+        guard let panel = panels[pid] as? [String: Any],
+              let menu = panel["menu"] as? [Any] else {
+            Issue.record("panel \(pid) has no menu in the bundle")
+            continue
+        }
+
+        let actual = MenuState.menuState([["items": menu]], ctx)
+
+        let actualBytes = try JSONSerialization.data(
+            withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(
+            withJSONObject: expected, options: [.sortedKeys])
+        let expStr = String(data: expectedBytes, encoding: .utf8)!
+        let actStr = String(data: actualBytes, encoding: .utf8)!
+        #expect(actualBytes == expectedBytes,
+            "Panel menu state '\(name)' mismatch:\nexpected: \(expStr)\nactual:   \(actStr)")
+        checkedRows += expected.filter { $0["checked"] is Bool }.count
+    }
+    // Anti-vacuity: a runner over rows that carry no predicate passes without
+    // evaluating anything.
+    #expect(checkedRows >= 29, "only \(checkedRows) checked rows evaluated")
+}
+
 // MARK: - Hit test algorithm vectors
 
 @Test func algorithmHitTestVectors() throws {

@@ -66,14 +66,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a radio command is checked (the active color mode).
-pub fn is_checked(cmd: &str, state: &AppState) -> bool {
-    if let Some(mode) = mode_from_command(cmd) {
-        return state.color_panel_mode == mode;
-    }
-    false
-}
-
 /// Query whether a menu command is enabled. Invert / Complement need
 /// an active color (fill or stroke per `fill_on_top`) to operate on.
 pub fn is_enabled(cmd: &str, state: &AppState) -> bool {
@@ -183,11 +175,15 @@ mod tests {
     #[test]
     fn is_checked_matches_mode() {
         let mut state = test_app_state();
-        assert!(is_checked("set_color_panel_mode:hsb", &state));
-        assert!(!is_checked("set_color_panel_mode:rgb", &state));
+        assert!(crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Color, "set_color_panel_mode:hsb", &state));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Color, "set_color_panel_mode:rgb", &state));
         state.color_panel_mode = ColorMode::Cmyk;
-        assert!(is_checked("set_color_panel_mode:cmyk", &state));
-        assert!(!is_checked("set_color_panel_mode:hsb", &state));
+        assert!(crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Color, "set_color_panel_mode:cmyk", &state));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Color, "set_color_panel_mode:hsb", &state));
     }
 
     #[test]

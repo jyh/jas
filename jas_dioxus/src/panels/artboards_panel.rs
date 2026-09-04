@@ -62,14 +62,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a toggle/radio command is checked.
-///
-/// The Artboards panel has no stateful toggles in the menu; every
-/// entry is either an action or a deferred placeholder.
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,7 +130,8 @@ mod tests {
             "reset_artboards_panel",
             "close_panel",
         ] {
-            assert!(!is_checked(cmd, &st));
+            assert!(!crate::panels::panel_is_checked(
+                crate::workspace::workspace::PanelKind::Artboards, cmd, &st));
         }
     }
 

@@ -97,14 +97,4 @@ public enum OpacityPanel {
             break
         }
     }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        switch cmd {
-        case "toggle_opacity_thumbnails": return layout.opacityPanel.thumbnailsHidden
-        case "toggle_opacity_options":    return layout.opacityPanel.optionsShown
-        case "toggle_new_masks_clipping": return layout.opacityPanel.newMasksClipping
-        case "toggle_new_masks_inverted": return layout.opacityPanel.newMasksInverted
-        default: return false
-        }
-    }
 }

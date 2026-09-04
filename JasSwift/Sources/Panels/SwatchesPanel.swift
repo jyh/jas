@@ -17,8 +17,7 @@ public enum SwatchesPanel {
     /// The three thumbnail-size rows share `action:
     /// set_swatch_thumbnail_size`, so the builder folds each `params.size`
     /// into the command (`set_swatch_thumbnail_size:small`, …) — `dispatch`
-    /// / `isCheckedWithModel` split that suffix back off. The "Open Swatch
-    /// Library" dynamic submenu carries an explicit `action:
+    /// splits that suffix back off. The "Open Swatch Library" dynamic submenu carries an explicit `action:
     /// open_swatch_library` in the YAML; the menu view renders it as a
     /// plain item whose dispatch is the placeholder below until the
     /// library-load plumbing lands.
@@ -58,24 +57,6 @@ public enum SwatchesPanel {
         default:
             runYamlActionByName(cmd, params: [:], model: model)
         }
-    }
-
-    public static func isChecked(_ cmd: String, layout: WorkspaceLayout) -> Bool {
-        false
-    }
-
-    /// Same as ``isChecked`` but with the model in scope so radio
-    /// buttons that mirror panel state (thumbnail_size) can read it.
-    /// Used by the hamburger menu's checkmark logic; the
-    /// model-less ``isChecked`` is kept for legacy call sites.
-    public static func isCheckedWithModel(_ cmd: String, model: Model?) -> Bool {
-        guard let model = model else { return false }
-        guard let size = strip(cmd, prefix: "set_swatch_thumbnail_size:") else {
-            return false
-        }
-        let store = model.stateStore
-        let current = (store.getPanel("swatches_panel_content", "thumbnail_size") as? String) ?? "small"
-        return current == size
     }
 
     private static func strip(_ s: String, prefix: String) -> String? {

@@ -52,11 +52,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a toggle/radio command is checked.
-pub fn is_checked(_cmd: &str, _state: &AppState) -> bool {
-    false
-}
-
 /// Override the static menu label for commands whose displayed text
 /// depends on document state. Returns None to use the static label.
 pub fn dynamic_label(cmd: &str, state: &AppState) -> Option<String> {
@@ -271,6 +266,7 @@ mod tests {
     #[test]
     fn is_checked_returns_false() {
         let state = test_app_state();
-        assert!(!is_checked("anything", &state));
+        assert!(!crate::panels::panel_is_checked(
+            crate::workspace::workspace::PanelKind::Layers, "anything", &state));
     }
 }
