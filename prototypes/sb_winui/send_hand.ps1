@@ -234,33 +234,78 @@ function ConvertTo-Normalized([double]$x, [double]$y) {
 $moveFlags = [SbHand]::MOVE -bor [SbHand]::ABSOLUTE -bor [SbHand]::VIRTUALDESK -bor [SbHand]::MOVE_NOCOALESCE
 $sent = 0
 
+# ---------------------------------------------------------------------------
+# THE GESTURE: position, press, EXACTLY k moves, release
+# ---------------------------------------------------------------------------
+#
+# ⛔ THE BUTTON EVENTS NO LONGER CARRY A POSITION, AND THAT IS THE REPAIR.
+# Measured on kenai 2026-09-03 (PR #110): at k=7 the shell counted `move=8`
+# TWICE, while at k=2 it counted exactly 2. The seam control drove the same
+# element and the same delta through the C ABI and reported `move=7`, so the
+# extra arrival is the INJECTOR's, not the app's.
+#
+# The shell counts a move ONLY between the press and the release
+# (`MainWindow.xaml.cs:239-249` returns early unless `_gestureOpen`, and
+# `OnPointerPressed` zeroes `_moveCount`), so the pre-press positioning move
+# cannot be one of the eight. What CAN be is a button event carrying absolute
+# coordinates: `SendInput` applies a position given with `MOUSEEVENTF_ABSOLUTE`
+# and the window sees the motion, so a `LEFTDOWN`/`LEFTUP` at a point is a move
+# AND a click. Both button events used to carry one. They no longer do: with no
+# `MOUSEEVENTF_MOVE` and no `MOUSEEVENTF_ABSOLUTE` the button occurs AT THE
+# CURSOR, which is exactly where the preceding move already put it.
+#
+# ⚠️ THIS IS A CANDIDATE MECHANISM, NOT A PROVEN ONE. Nothing here has been
+# executed on the box, and the k=2 run counted 2 under the SAME construction, so
+# the mechanism does not explain both readings on its own. What this change does
+# guarantee is that the injector emits exactly k events capable of being counted
+# as moves after the press -- so a `move != k` reading now belongs to the app or
+# to the window manager and cannot be blamed on the instrument. The receipt below
+# carries the counts needed to tell those apart.
+if ($Moves -lt 1) { $Moves = 1 }
+
 $n = ConvertTo-Normalized $px0 $py0
 $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
 Start-Sleep -Milliseconds $SettleMs
 
-$sent += [SbHand]::Send(([SbHand]::LEFTDOWN -bor [SbHand]::ABSOLUTE -bor [SbHand]::VIRTUALDESK), $n[0], $n[1])
+# The press, AT THE CURSOR. No MOVE, no ABSOLUTE: dx/dy are ignored for motion.
+$sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
 Start-Sleep -Milliseconds $SettleMs
 
-# k MOVES ALONG THE SEGMENT, the k-th landing exactly on the release point.
+# k MOVES ALONG THE SEGMENT, the k-th landing exactly on the release point, and
+# NONE of them at the press point (i runs from 1, so t is never 0).
+#
 # ⛔ EVERY STEP CARRIES MOVE_NOCOALESCE. Without it Windows is free to merge
 # adjacent moves and the shell's `move=<n>` would read below k for a reason that
 # has nothing to do with the app -- an instrument defect wearing an application
 # failure's clothes.
-if ($Moves -lt 1) { $Moves = 1 }
+#
+# ⛔ AND THE NORMALISED POINTS ARE CHECKED FOR COLLISION. `ConvertTo-Normalized`
+# rounds into a 0..65535 grid over the virtual desktop; on a 3840-wide desktop one
+# grid step is ~1/17 of a pixel, but a SMALL delta divided by a LARGE k can still
+# put two consecutive steps on the same grid point, and Windows emits no motion
+# for a move that does not move. That would read as coalescence -- `move < k` --
+# and be blamed on the app. It is counted and reported instead.
+$prev = $n
+$collisions = 0
 for ($i = 1; $i -le $Moves; $i++) {
     $t = $i / [double]$Moves
     $mx = $px0 + (($px1 - $px0) * $t)
     $my = $py0 + (($py1 - $py0) * $t)
     $nm = ConvertTo-Normalized $mx $my
+    if ($nm[0] -eq $prev[0] -and $nm[1] -eq $prev[1]) { $collisions++ }
+    $prev = $nm
     $sent += [SbHand]::Send($moveFlags, $nm[0], $nm[1])
     Start-Sleep -Milliseconds $SettleMs
 }
 
-$nEnd = ConvertTo-Normalized $px1 $py1
-$sent += [SbHand]::Send(([SbHand]::LEFTUP -bor [SbHand]::ABSOLUTE -bor [SbHand]::VIRTUALDESK), $nEnd[0], $nEnd[1])
+# The release, AT THE CURSOR -- which the k-th move has already put on the
+# release point. A positioned LEFTUP would be a (k+1)-th motion.
+$sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
 
+$log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")
 $log.Add("events-inserted=$sent expected=$($Moves + 3)")
 $log.Add("NOTE: SendInput returning the expected count proves the events were INSERTED, not that they ARRIVED. UIPI discards are invisible here by design; the shell's counters are the only oracle for arrival.")
+$log.Add("NOTE: post-press-moves is what the shell's move= must equal. move=k+1 means the window saw an arrival this injector did not send (a motion synthesised on capture, or a stray real mouse); move<k with normalized-collisions=0 means the window coalesced despite MOVE_NOCOALESCE.")
 $log | Set-Content -Path $Out -Encoding utf8
 if ($sent -ne ($Moves + 3)) { exit 5 }
 exit 0

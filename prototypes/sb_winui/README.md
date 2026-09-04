@@ -519,15 +519,16 @@ invented here.
 *(The section "How the harness runs a scene" above is the shape; this is what the
 harness gained in the node that added the assertions. Five files now, not two.)*
 
-Five PowerShell files, three of them new:
+Six PowerShell files:
 
 | file | what it is |
 |---|---|
 | `sitting.ps1` | drives a whole sitting; also `-Stay` / `-Stop` |
 | `verify_window.ps1` | drives ONE scene, waits on its completion row, asserts the observables |
 | `verify_assertions.ps1` | the assertion bodies, dot-sourced by the one above |
-| `harness_common.ps1` | launch / wait / stop / row-reading, shared by both entry points |
+| `harness_common.ps1` | launch / wait / stop / row-reading / cross-run receipts, shared by both entry points |
 | `send_hand.ps1` | the session-1 `SendInput` gesture the real-input observable needs |
+| `sample_liveness.ps1` | the session-1 `Responding` sampler O3 needs — see below, the session-0 reading was measured VACUOUS |
 
 **Run and stay (F-2), PID-scoped throughout:**
 
@@ -546,7 +547,8 @@ gone rather than reporting a clean teardown.
 
 ```powershell
 powershell -File prototypes\sb_winui\sitting.ps1 -DryRun        # resolve every knob, launch nothing
-powershell -File prototypes\sb_winui\sitting.ps1                # benchmark, document, retained, stall, pointer x2, goldens
+powershell -File prototypes\sb_winui\sitting.ps1                # benchmark x2, document, retained, stall, pointer x2, goldens
+powershell -File prototypes\sb_winui\sitting.ps1 -Scenes o6    # the two O6 runs: the squeeze, then the probe
 ```
 
 `-DryRun` (alias `-WhatIf`) exists on both entry points: it prints the resolved
@@ -580,3 +582,84 @@ wrong thing.
 
 Exit codes: `0` pass · `1` fail · `2` window ok / pixels inconclusive · `3`
 totals did not close · `6` incomplete (assertions `NOT RUN`, none failed).
+
+### The assertion table — every assertion, and its exact expected reading
+
+Each one prints `PASS` / `FAIL` / `NOT RUN` **by name, followed by the row it
+read**. `NOT RUN` is a third verdict, never folded into either other: an
+assertion that could not be evaluated has not held, and it has not failed.
+
+**⛔ THE TABLE BELOW IS THE ONE THE FIRST RUN ON THE BOX RE-CUT.** Nine of these
+rows changed because the harness was executed for the first time and the rows it
+produced said so — not because anyone re-read it. Where a row differs from the
+node that introduced it, the reason is the measurement, and it is named.
+
+#### O1 — the retained document (`-Scene retained`)
+
+| name | expected reading |
+|---|---|
+| `O1.0 surface(A) == surface(A')` | **PASS**, both at the same `surface=WxH`. A mismatch is `NOT RUN: surface mismatch` and every hash clause inherits it — a hash comparison across two surfaces is not a comparison |
+| `O1.1 engines-created == 1 && engines-freed == 0` | **PASS** on all four hash rows |
+| `O1.1b all four hash rows present` | **PASS**; fewer than four is `NOT RUN` |
+| `O1.2a the chosen element CHANGED` | **PASS**. **NEW:** when `A-MUT` reads `mutation=NONE` — the walk ran with no hand — it is `NOT RUN: no gesture`, never a FAIL. An absent `mutation=` field is the older row shape and keeps the older behaviour |
+| `O1.2b the delta equals the asked delta` | **PASS** within 1 document unit; `NOT RUN: no gesture` under `mutation=NONE`; `NOT RUN` naming the transform if the tool moved by transform |
+| `O1.3 hash(A) == hash(D)` | **PASS**, both the same 64-hex at the same surface |
+| `O1.4 A-MUT == A'` | **PASS** — RETENTION across the round trip. **This clause still asserts under `mutation=NONE`**, and it is the one that carries the claim |
+| `O1.5 H1 != A-MUT` · `O1.6 A != A-MUT` | **PASS** |
+| `O1.7 probe colours` | **PASS** only with `-ProbeCapture`; otherwise `NOT RUN` with the three counts printed anyway |
+
+#### O2 — the resize drain, priced against ONE FRAME
+
+| name | expected reading |
+|---|---|
+| `O2.1 one cause=resize row per drain, frames=1` | **PASS** — every `cause=resize` row reads `frames=1` |
+| `O2.2 event_total <= 2 x one benchmark frame` | **PASS**, printing `event_total(paint P + present Q) = R ms at surface S, against 2 x one benchmark frame (F ms) = B ms band`. **RE-CUT:** the old band was `2 x present-mean`, which asserted that paint costs no more than present and redded in all four runs of the first sitting while its subject improved 110–275×. The band is now ONE FRAME from the SAME sitting's `benchmark` run, and it is `NOT RUN` **by name** when that run is missing, when it was measured on another route (`Repaint` is always DIRECT), or when it was measured at another surface |
+| `O2.3 event_total < before / 10` | **PASS**, printing the measured factor. `before` comes from `-Before <ms\|path>` and from nowhere else; unsupplied it is `NOT RUN`. Both sides name their route — the "before" was taken on OFFSCREEN+copy and every `REPAINT` row is DIRECT |
+
+#### O3 — residency by tids, liveness in SESSION 1
+
+| name | expected reading |
+|---|---|
+| `O3.1 paint-tid == present-tid == render-tid != ui-tid` | **PASS** over the rows that PAINTED, with the count printed. **NARROWED:** `DUMP` rows carry the tid tail with `paint-tid=0`; a residency claim over a row that painted nothing prices a frame that does not exist. Zero painting rows is `NOT RUN` |
+| `O3.2 render-has-dispatcher=false` | **PASS** over every row carrying the tail — this clause is about the THREAD and holds on a row that painted nothing |
+| `O3.3 Responding at t=2,5,10 (session 1)` | **PASS** with `True x3` **and a non-zero `MainWindowHandle` at every sample**. **MOVED INTO SESSION 1:** the session-0 reading was measured VACUOUS — `MainWindowHandle` is 0 across the session boundary and `Responding` returns True whenever it is, proved by a positive control (a shell with no window at all also read True). A sample with a zero handle is `NOT RUN: no window handle in session 1`. The session-0 readings are still printed, as a NOTE, beside the session-1 ones |
+| `O3.4 exactly ONE cause=resize row after the stall` | **PASS**, at the LATEST size, matching `painted-after-stall=` |
+| `O3.C1 SB_UI_STALL_MS oracle-liveness control` | **PASS** iff `Responding` reads **False** at ≥ 1 session-1 sample. A control that never says False makes every True uninterpretable. **If it now reads `True x3` with non-zero handles, that is a finding about the run — the instrument has been repaired, so the reading convicts** |
+| `O3.C2 SB_PAINT_ON_UI=1 design-red control` | **PASS iff the tid assertion FAILS**, counted over the PAINTING rows |
+
+#### O4 — real input (`-Scene pointer`, and the gesture inside `retained`)
+
+| name | expected reading |
+|---|---|
+| `O4.1 pointer=REAL` · `O4.2 doc=HELD` · `O4.3 loads(shell) >= 1` · `O4.5 selected == 1` | **PASS** |
+| `O4.4 move == k` | **PASS** at k=2 and at k=7. **REPAIRED IN THE INJECTOR:** it emits one positioning move BEFORE the press and exactly k after it, and its button events no longer carry a position (a positioned `LEFTDOWN`/`LEFTUP` is a motion as well as a click). `move > k` now names an arrival the injector did not send; `move < k` names coalescence or a normalized-grid collision, and the injector's receipt counts both |
+| `O4.6 (release@ - press@)/scale == the asked delta` | **PASS** — but **only when the shell reports a per-monitor `dpi-awareness=` context**. Otherwise `NOT RUN` by name, with the observed numbers printed anyway: on a DPI-unaware window the shell's `scale=` is true of a virtualised view and false about the screen, and a verdict there would price the manifest instead of the seam |
+| `O4.7 the press point is within 2 px of the asked one` | as O4.6, same gate, offset printed either way |
+| `O4.8 client/surface == the shell's reported scale` | **PASS** when the injector's `client=WxH` divided by the row's `surface=WxH` equals `scale=` within 0.01. **NEW, and it is the arm that keeps teeth while O4.6/O4.7 are refused:** the first run's `client=2856x1464` against `surface=1904x941` is exactly 1.5 while the shell reported `scale=1`, and that disagreement was sitting in the harness's own receipt as a note nobody could fail |
+| `O4.C1` / `O4.C2` | the same oracles read through the empty-canvas and the `SB_SYNTH_DRAG` provenances |
+| any of the above with counters at 0 | `NOT RUN: hand refused` — UIPI failure is undetectable at the injector, so a zero is never a pass |
+
+**`-Scale` no longer exists.** It was measured to reach nothing: `send_hand.ps1`
+has no such parameter and derives the factor from `GetDpiForWindow`, so a run
+driven with `-Scale 1.5` produced readings identical to one without it, down to
+the digit. The scale is READ — this run's rows, else the log's history, else 1.0
+— and every detail says which of the three.
+
+#### O5 — run and stay
+
+| name | expected reading |
+|---|---|
+| `O5.1 the STAY pid row names this run's process` | **PASS** — two independent identifications agreeing |
+| `O5.5 pre-existing instances survive the teardown` | **PASS** — `N of N` |
+| `O5.6 a refusal touched nothing` | **NEW.** `-Stop` VALIDATES BEFORE IT ACTS, and a refused `-Stop` prints `ok  : [O5.6] the refusal touched nothing` naming the task that is still registered and the stay pid that is still alive. The first run measured the opposite: both refusals still dropped a live stay's scheduled task. With no task and no record to observe, it is `NOT RUN` rather than a free pass. A SUCCESSFUL `-Stop` on a pid the record does not name leaves the task and the record alone for the same reason |
+
+#### O6 — the three-valued surface policy, in TWO runs
+
+| name | expected reading |
+|---|---|
+| `O6.1 RESIZE REFUSED WxH (policy=EVENT)` | **PASS** on the refusal row. With no refusal row: a `SQUEEZE delivered <W>x0` row makes it a **FAIL** (the policy accepted a zero); a `SQUEEZE delivered` row with a non-zero height makes it `NOT RUN` (the knob never produced the condition); no delivery row at all is the older shape and stays a FAIL that says it cannot tell the two apart |
+| `O6.2 no ResizeBuffers and no cause=resize repaint for the refused size` | **PASS**, with the named weakness printed: the shell writes no `ResizeBuffers` row, so that half can only read zero |
+| `O6.3 SB_SURFACE_PROBE accepts and resizes` | **PASS** — accepted, and a resize-caused repaint followed |
+| `O6.4a the surface and hash are unchanged across the refused squeeze` | **PASS** — the two hash rows BRACKETING the refusal, equal in hash and in surface, with no driven resize and no gesture between them. `NOT RUN` by name otherwise |
+| `O6.4 the two arms read together` | **PASS** when this sitting's squeeze run read `O6.4a PASS` **and** its probe run accepted. **SPLIT:** the old clause required both knobs in ONE `retained` run, and the first run measured that impossible — the probe moves the surface permanently, so `A'` is never written and `surface(A) == surface(A')` can never hold. ⛔ **The two runs' surfaces are never compared with each other**: `SB_RESIZE=1000x600` through the EVENT route reports a 984×526 client, `SB_SURFACE_PROBE=1000x600` reports 1000×600 exactly |
+

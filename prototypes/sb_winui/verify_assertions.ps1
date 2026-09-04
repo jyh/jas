@@ -20,6 +20,22 @@
 # Shared readings
 # ---------------------------------------------------------------------------
 $tidRows = @($rows | Where-Object { $_ -match 'ui-tid=[0-9]+' })
+
+# ⛔ THE RESIDENCY CLAUSE IS ABOUT ROWS THAT PAINTED, AND NOT EVERY ROW CARRYING
+# THE TID TAIL PAINTED. Measured on kenai 2026-09-03 (PR #110): `DUMP` rows carry
+# the tail with `paint-tid=0` -- there was no paint, so there is no painting
+# thread to report -- and asserting `paint-tid == present-tid == render-tid` over
+# them prices a frame that does not exist. It happened to hold there; on a run
+# where it does not, the red would name a thread that never ran.
+#
+# So the subject of O3.1 is rows with a NON-ZERO `paint-tid`, and THE COUNT IS
+# PRINTED. A count is the one thing this assertion cannot do without: a check that
+# examines nothing returns success and looks exactly like a measurement, so zero
+# painting rows is `NOT RUN`, never a pass.
+$paintingRows = @($tidRows | Where-Object {
+    $pt = Get-SbField $_ 'paint-tid'
+    ($null -ne $pt) -and ($pt -ne '0')
+})
 $paintOnUi = ($env:SB_PAINT_ON_UI -eq '1')
 $uiStallMs = Get-KnobMs 'SB_UI_STALL_MS'
 $renderStallMs = Get-KnobMs 'SB_RENDER_STALL_MS'
@@ -35,13 +51,28 @@ function Get-SbHashRow([string]$label) {
 # ===========================================================================
 
 if ($tidRows.Count -eq 0) {
-    Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid' `
+    Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
         "this run wrote no row carrying the tid tail -- there is nothing to assert residency over"
     Add-NotRun 'O3.2 render-has-dispatcher=false' `
         "this run wrote no row carrying the tid tail"
+} elseif ($paintingRows.Count -eq 0) {
+    Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
+        "this run wrote $($tidRows.Count) row(s) with the tid tail and NONE of them painted (every one reads paint-tid=0, as a DUMP row does). Residency is a claim about a painted frame, and there is no painted frame here to make it about"
+    if ($paintOnUi) {
+        Add-NotRun 'O3.C2 SB_PAINT_ON_UI=1 design-red control' `
+            "the control needs a row that PAINTED to break, and this run wrote none ($($tidRows.Count) tid row(s), all paint-tid=0)"
+    }
+    $dispBad = @($tidRows | Where-Object { (Get-SbField $_ 'render-has-dispatcher') -ne 'false' })
+    if ($dispBad.Count -eq 0) {
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'PASS' `
+            -Detail "all $($tidRows.Count) rows carrying the tid tail (this clause is about the THREAD and holds on a row that painted nothing, which is why it is not restricted to painting rows)" -Row $tidRows[-1]
+    } else {
+        Add-Assert -Name 'O3.2 render-has-dispatcher=false' -Verdict 'FAIL' `
+            -Detail "$($dispBad.Count) of $($tidRows.Count) rows report a dispatcher on the render thread" -Row $dispBad[0]
+    }
 } else {
     $tidBad = @()
-    foreach ($r in $tidRows) {
+    foreach ($r in $paintingRows) {
         $ui = Get-SbField $r 'ui-tid'
         $rt = Get-SbField $r 'render-tid'
         $pt = Get-SbField $r 'paint-tid'
@@ -49,6 +80,7 @@ if ($tidRows.Count -eq 0) {
         if ($null -eq $ui -or $null -eq $rt -or $null -eq $pt -or $null -eq $st) { continue }
         if (-not ($pt -eq $st -and $st -eq $rt -and $rt -ne $ui)) { $tidBad += $r }
     }
+    $tidScope = "$($paintingRows.Count) of this run's $($tidRows.Count) tid row(s) painted (paint-tid != 0) and are the subject; the other $($tidRows.Count - $paintingRows.Count) carry paint-tid=0"
     if ($paintOnUi) {
         # ⛔ THE DESIGN-RED CONTROL. Under SB_PAINT_ON_UI=1 the paint and the
         # present are marshalled through the dispatcher, so `present-tid ==
@@ -57,22 +89,22 @@ if ($tidRows.Count -eq 0) {
         # this is the arm that makes every other green mean something.
         if ($tidBad.Count -gt 0) {
             Add-Assert -Name 'O3.C2 SB_PAINT_ON_UI=1 design-red control' -Verdict 'PASS' `
-                -Detail "the tid assertion FAILED on $($tidBad.Count) of $($tidRows.Count) rows, as it must under this knob" `
+                -Detail "the tid assertion FAILED on $($tidBad.Count) of $($paintingRows.Count) PAINTING rows, as it must under this knob. $tidScope" `
                 -Row $tidBad[0]
         } else {
             Add-Assert -Name 'O3.C2 SB_PAINT_ON_UI=1 design-red control' -Verdict 'FAIL' `
-                -Detail "the tid assertion PASSED on all $($tidRows.Count) rows under SB_PAINT_ON_UI=1. A passing residency assertion under the knob that exists to break it means the assertion cannot fail -- so every green it has ever produced is uninterpretable" `
-                -Row $tidRows[-1]
+                -Detail "the tid assertion PASSED on all $($paintingRows.Count) PAINTING rows under SB_PAINT_ON_UI=1. A passing residency assertion under the knob that exists to break it means the assertion cannot fail -- so every green it has ever produced is uninterpretable. $tidScope" `
+                -Row $paintingRows[-1]
         }
-        Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid' `
+        Add-NotRun 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' `
             'SB_PAINT_ON_UI=1 is set: this run is the design-red control, not a residency measurement'
     } else {
         if ($tidBad.Count -eq 0) {
-            Add-Assert -Name 'O3.1 paint-tid == present-tid == render-tid != ui-tid' -Verdict 'PASS' `
-                -Detail "all $($tidRows.Count) rows of this run" -Row $tidRows[-1]
+            Add-Assert -Name 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' -Verdict 'PASS' `
+                -Detail "all $($paintingRows.Count) painting rows of this run. $tidScope" -Row $paintingRows[-1]
         } else {
-            Add-Assert -Name 'O3.1 paint-tid == present-tid == render-tid != ui-tid' -Verdict 'FAIL' `
-                -Detail "$($tidBad.Count) of $($tidRows.Count) rows do not hold it" -Row $tidBad[0]
+            Add-Assert -Name 'O3.1 paint-tid == present-tid == render-tid != ui-tid (rows that PAINTED)' -Verdict 'FAIL' `
+                -Detail "$($tidBad.Count) of $($paintingRows.Count) painting rows do not hold it. $tidScope" -Row $tidBad[0]
         }
     }
 
@@ -86,37 +118,83 @@ if ($tidRows.Count -eq 0) {
     }
 }
 
-# ---- liveness, sampled DURING the scene's own wait -------------------------
+# ---- liveness, sampled IN SESSION 1, during the stall -----------------------
+#
+# ⛔ THE SESSION-0 READING IS A NOTE AND NOTHING ELSE. PR #110 measured it
+# VACUOUS: `MainWindowHandle` is 0 across the session boundary, and
+# `Process.Responding` returns True whenever the handle is 0 -- proved by a
+# positive control (the reading shell, which has no window at all, also read
+# True). It is still printed beside the session-1 samples because two arms side by
+# side are the evidence for retiring it; no assertion reads it.
+#
 # ⛔ `@(2, 5, 10 | ForEach-Object {...})` PIPES ONLY THE 10. The pipeline binds
 # tighter than the comma, so that spelling would have reported one sample and
 # called it three -- a summary that silently under-counts its own evidence.
 $samples = @(@(2, 5, 10) | ForEach-Object { "t=$($_)s:$(if ($respond.ContainsKey($_)) { $respond[$_] } else { 'not sampled' })" })
-$sampleText = $samples -join ' '
+$sampleText = 'session-0 (VACUOUS, note only): ' + ($samples -join ' ')
+
+$liveSamples = @(@(2, 5, 10) | ForEach-Object {
+    if ($live.ContainsKey($_)) { "t=$($_)s:handle=$($live[$_].Handle),responding=$($live[$_].Responding)" }
+    else { "t=$($_)s:not sampled" }
+})
+$liveText2 = 'session-1: ' + ($liveSamples -join ' ')
+$bothText = "$liveText2 || $sampleText"
+
+# ⛔ THE PRECONDITION IS ASSERTED, NOT ASSUMED. A `Responding` reading taken
+# against a ZERO window handle is the vacuous reading this repair exists to
+# retire, and it must not be able to come back merely because the sampler ran in
+# the right session. Every sample must carry a non-zero handle, or the clause is
+# NOT RUN by name.
+$liveHandlesOk = ($live.Count -eq 3) -and (@(@(2, 5, 10) | Where-Object {
+    $live.ContainsKey($_) -and $live[$_].Handle -ne '0' -and $live[$_].Handle -ne 'GONE'
+}).Count -eq 3)
+
 if ($Scene -ne 'stall') {
-    Add-NotRun 'O3.3 Responding at t=2,5,10' "this run is scene '$Scene'; the liveness claim is about the stall (samples taken anyway: $sampleText)"
-} elseif ($respond.Count -lt 3) {
-    Add-NotRun 'O3.3 Responding at t=2,5,10' "the scene finished before all three samples were taken ($sampleText)"
+    Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' "this run is scene '$Scene'; the liveness claim is about the stall (samples taken anyway: $bothText)"
+} elseif ($live.Count -lt 3) {
+    $why = if (-not $liveDispatched) { 'the session-1 sampler was never dispatched (no STALL ARMED row)' } else { "the session-1 sampler wrote $($live.Count) of 3 samples" }
+    if ($uiStallMs -gt 0) {
+        Add-NotRun 'O3.C1 SB_UI_STALL_MS oracle-liveness control' "$why. $bothText"
+        Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' 'SB_UI_STALL_MS is set: this run is the oracle-liveness control, not the liveness measurement'
+    } else {
+        Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' "$why. $bothText"
+    }
+} elseif (-not $liveHandlesOk) {
+    # `if` is a STATEMENT in argument position; assigned to a variable first, it
+    # is an expression. The other spelling parses on some hosts and not others,
+    # and this harness's only Mac-side gate is a parser.
+    $preName = if ($uiStallMs -gt 0) { 'O3.C1 SB_UI_STALL_MS oracle-liveness control' } else { 'O3.3 Responding at t=2,5,10 (session 1)' }
+    Add-NotRun $preName `
+        "NOT RUN: no window handle in session 1 -- at least one sample read MainWindowHandle=0 or GONE, and Responding against a zero handle is documented to return True whatever the app is doing. $bothText"
+    if ($uiStallMs -gt 0) {
+        Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' 'SB_UI_STALL_MS is set: this run is the oracle-liveness control, not the liveness measurement'
+    }
 } elseif ($uiStallMs -gt 0) {
-    # ⛔ THE ORACLE-LIVENESS CONTROL. `SB_UI_STALL_MS` sleeps the XAML thread, so
-    # `Responding` MUST read False. An oracle that cannot say False says nothing
-    # when it says True -- this arm is what makes the True x3 above evidence.
-    $falses = @(@(2, 5, 10) | Where-Object { $respond[$_] -eq 'False' })
+    # ⛔ THE ORACLE-LIVENESS CONTROL, AND IT CAN NOW READ FALSE. `SB_UI_STALL_MS`
+    # sleeps the XAML thread, so `Responding` -- a SendMessageTimeout against that
+    # very thread, read from a session that can see the window -- MUST read False.
+    # An oracle that cannot say False says nothing when it says True.
+    #
+    # ⚠️ If this still reads True x3 with the handles non-zero, that is a FINDING
+    # about the app or about the knob, NOT a pass: the instrument has been
+    # repaired, so the reading is now interpretable and it convicts.
+    $falses = @(@(2, 5, 10) | Where-Object { $live[$_].Responding -eq 'False' })
     if ($falses.Count -ge 1) {
         Add-Assert -Name 'O3.C1 SB_UI_STALL_MS oracle-liveness control' -Verdict 'PASS' `
-            -Detail "Responding read False at $($falses.Count) of 3 samples -- the oracle can say False: $sampleText"
+            -Detail "Responding read False at $($falses.Count) of 3 session-1 samples, every one against a real window handle -- the oracle can say False. $bothText"
     } else {
         Add-Assert -Name 'O3.C1 SB_UI_STALL_MS oracle-liveness control' -Verdict 'FAIL' `
-            -Detail "Responding never read False under a $($uiStallMs)ms UI-thread sleep: $sampleText. The oracle cannot convict, so its True readings are uninterpretable"
+            -Detail "Responding never read False under a $($uiStallMs)ms UI-thread sleep, sampled IN SESSION 1 with a non-zero window handle at every sample. The session-0 vacuity is repaired, so this reading is now a finding about the run and not about the instrument. $bothText"
     }
-    Add-NotRun 'O3.3 Responding at t=2,5,10' 'SB_UI_STALL_MS is set: this run is the oracle-liveness control, not the liveness measurement'
+    Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' 'SB_UI_STALL_MS is set: this run is the oracle-liveness control, not the liveness measurement'
 } else {
-    $trues = @(@(2, 5, 10) | Where-Object { $respond[$_] -eq 'True' })
+    $trues = @(@(2, 5, 10) | Where-Object { $live[$_].Responding -eq 'True' })
     if ($trues.Count -eq 3) {
-        Add-Assert -Name 'O3.3 Responding at t=2,5,10' -Verdict 'PASS' `
-            -Detail "True x3 while the render thread slept $($renderStallMs)ms: $sampleText"
+        Add-Assert -Name 'O3.3 Responding at t=2,5,10 (session 1)' -Verdict 'PASS' `
+            -Detail "True x3 in session 1, against a non-zero window handle at every sample, while the render thread slept $($renderStallMs)ms. $bothText"
     } else {
-        Add-Assert -Name 'O3.3 Responding at t=2,5,10' -Verdict 'FAIL' `
-            -Detail "expected True x3, read: $sampleText"
+        Add-Assert -Name 'O3.3 Responding at t=2,5,10 (session 1)' -Verdict 'FAIL' `
+            -Detail "expected True x3, read: $bothText"
     }
 }
 
@@ -194,7 +272,9 @@ if (-not [string]::IsNullOrWhiteSpace($Before)) {
 if ($resizeRepaints.Count -eq 0) {
     Add-NotRun 'O2.1 one REPAINT cause=resize row per drain, frames=1' `
         "this run wrote no REPAINT row with cause=resize (SB_RESIZE unset, or no resize arrived). $beforeText"
-    Add-NotRun 'O2.2 repaint(paint+present) <= 2 x present-mean of the same run' `
+    Add-NotRun 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' `
+        "no cause=resize REPAINT row to price. $beforeText"
+    Add-NotRun 'O2.3 event_total < before / 10' `
         "no cause=resize REPAINT row to price. $beforeText"
 } else {
     $badFrames = @($resizeRepaints | Where-Object { (Get-SbField $_ 'frames') -ne '1' })
@@ -208,30 +288,79 @@ if ($resizeRepaints.Count -eq 0) {
             -Row $badFrames[0]
     }
 
-    # THE BAND IS A MULTIPLE OF THE SAME RUN'S OWN PRESENT, never a millisecond
-    # constant: a constant would be a claim about this box, and the claim is that
-    # a drain costs ONE FRAME.
-    $presents = @()
-    foreach ($r in $repaints) {
-        $p = Get-SbField $r 'present'
-        if ($null -ne $p) { $presents += [double]($p -replace 'ms$', '') }
-    }
-    if ($presents.Count -eq 0) {
-        Add-NotRun 'O2.2 repaint(paint+present) <= 2 x present-mean of the same run' `
-            'no REPAINT row carried a readable present= figure'
+    # ⭐ THE BAND IS ONE FRAME, AND THE OLD BAND WAS THE DEFECT.
+    #
+    # `2 x present-mean` asserted that PAINT COSTS NO MORE THAN PRESENT. On this
+    # hardware present is 0.29-1.20 ms and paint is 1.0-4.3 ms, so the band redded
+    # in every one of PR #110's four runs while the subject it prices improved
+    # 110-275x. The claim O2 makes is not "paint is cheap"; it is "A RESIZE DRAIN
+    # COSTS ONE FRAME". So the band is one frame, measured by this box, in this
+    # sitting, on the same route, at the same surface -- and where any of those
+    # three does not hold it is `NOT RUN` by name, never a red and never a
+    # substitution.
+    $eventRow = $resizeRepaints[-1]
+    $eventPaint = [double]((Get-SbField $eventRow 'paint') -replace 'ms$', '')
+    $eventPresent = [double]((Get-SbField $eventRow 'present') -replace 'ms$', '')
+    $eventTotal = $eventPaint + $eventPresent
+    $eventSurface = Get-SbField $eventRow 'surface'
+
+    if ($null -eq $benchFrame) {
+        Add-NotRun 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' `
+            "$benchFrameReason. Drive the 'benchmark' scene with SB_MODE=direct in the same sitting (sitting.ps1 does), or pass -BenchmarkFrameMs. This run's event_total was $([math]::Round($eventTotal,2)) ms at surface $eventSurface. $routeText"
+    } elseif ($benchFrame.Route -ne 'DIRECT' -and $benchFrame.Route -ne 'UNSTATED') {
+        Add-NotRun 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' `
+            "the band source was measured on route $($benchFrame.Route) and every REPAINT row is DIRECT. Two routes, no comparison -- re-run the benchmark with SB_MODE=direct. This run's event_total was $([math]::Round($eventTotal,2)) ms at surface $eventSurface. $routeText"
     } else {
-        $presentMean = ($presents | Measure-Object -Average).Average
-        $row = $resizeRepaints[-1]
-        $paintMs = [double]((Get-SbField $row 'paint') -replace 'ms$', '')
-        $presentMs = [double]((Get-SbField $row 'present') -replace 'ms$', '')
-        $cost = $paintMs + $presentMs
-        $band = 2.0 * $presentMean
-        $detail = ("repaint(paint {0:N2} + present {1:N2}) = {2:N2} ms against 2 x present-mean {3:N2} = {4:N2} ms band, at surface {5}. {6}" -f
-                   $paintMs, $presentMs, $cost, $presentMean, $band, (Get-SbField $row 'surface'), $beforeText)
-        if ($cost -le $band) {
-            Add-Assert -Name 'O2.2 repaint(paint+present) <= 2 x present-mean of the same run' -Verdict 'PASS' -Detail $detail -Row $row
+        # ⛔ AND THE ROW IS CHOSEN TO MATCH THE BAND'S SURFACE, not taken as
+        # whichever came last. A paint cost is a function of the surface: pricing
+        # a 984x526 drain against a 1904x941 frame is the same class of error as
+        # comparing two hashes taken at two surfaces, which O1.0 already refuses.
+        $sameSurface = @($resizeRepaints | Where-Object { (Get-SbField $_ 'surface') -eq $benchFrame.Surface })
+        if ($benchFrame.Surface -eq 'UNSTATED') { $sameSurface = @($eventRow) }
+        if ($sameSurface.Count -eq 0) {
+            $seen = (@($resizeRepaints | ForEach-Object { Get-SbField $_ 'surface' }) | Sort-Object -Unique) -join ', '
+            Add-NotRun 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' `
+                "the band was measured at surface $($benchFrame.Surface) and this run's resize-caused rows are at $seen. A paint cost is a function of the surface, so this is refused rather than scaled. event_total at $eventSurface was $([math]::Round($eventTotal,2)) ms against a band of $([math]::Round(2.0 * $benchFrame.FrameMs,2)) ms. $routeText"
         } else {
-            Add-Assert -Name 'O2.2 repaint(paint+present) <= 2 x present-mean of the same run' -Verdict 'FAIL' -Detail $detail -Row $row
+            $row2 = $sameSurface[-1]
+            $p2 = [double]((Get-SbField $row2 'paint') -replace 'ms$', '')
+            $q2 = [double]((Get-SbField $row2 'present') -replace 'ms$', '')
+            $cost2 = $p2 + $q2
+            $band2 = 2.0 * $benchFrame.FrameMs
+            $detail2 = ("event_total(paint {0:N2} + present {1:N2}) = {2:N2} ms at surface {3}, against 2 x one benchmark frame ({4:N2} ms) = {5:N2} ms band. Band source: {6}. {7}" -f
+                        $p2, $q2, $cost2, (Get-SbField $row2 'surface'), $benchFrame.FrameMs, $band2, $benchFrameSource, $routeText)
+            if ($cost2 -le $band2) {
+                Add-Assert -Name 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' -Verdict 'PASS' -Detail $detail2 -Row $row2
+            } else {
+                Add-Assert -Name 'O2.2 event_total <= 2 x one benchmark frame (same sitting, same route, same surface)' -Verdict 'FAIL' -Detail $detail2 -Row $row2
+            }
+        }
+    }
+
+    # ⭐ O2.3 -- THE ORDER-OF-MAGNITUDE CLAUSE, AND ITS "BEFORE" IS A PARAMETER.
+    # The freeze's claim against the old shell is a factor, not a millisecond
+    # count, and the factor is where the evidence is: 363 ms per resize event on
+    # the OFFSCREEN+copy route against a few ms on DIRECT. It is `NOT RUN` with
+    # nothing supplied, because a hardcoded before is a number nobody re-measures.
+    if ([string]::IsNullOrWhiteSpace($Before)) {
+        Add-NotRun 'O2.3 event_total < before / 10' `
+            "before: not supplied. This run's event_total was $([math]::Round($eventTotal,2)) ms at surface $eventSurface. Supply the old shell's per-resize-event cost with -Before <ms|path>, and state the surface and route it was taken at when you quote the result. $routeText"
+    } else {
+        $beforeMs = 0.0
+        $bm = [regex]::Match($beforeText, 'before: ([0-9]+(\.[0-9]+)?) ms')
+        if ($bm.Success) { $beforeMs = [double]$bm.Groups[1].Value }
+        if ($beforeMs -le 0) {
+            Add-NotRun 'O2.3 event_total < before / 10' `
+                "-Before '$Before' carried no readable millisecond figure. $routeText"
+        } else {
+            $factor = if ($eventTotal -gt 0) { $beforeMs / $eventTotal } else { 0 }
+            $detail3 = ("event_total {0:N2} ms at surface {1} (route DIRECT) against before/10 = {2:N2} ms; the measured factor is {3:N0}x. {4}" -f
+                        $eventTotal, $eventSurface, ($beforeMs / 10.0), $factor, $beforeText)
+            if ($eventTotal -lt ($beforeMs / 10.0)) {
+                Add-Assert -Name 'O2.3 event_total < before / 10' -Verdict 'PASS' -Detail $detail3 -Row $eventRow
+            } else {
+                Add-Assert -Name 'O2.3 event_total < before / 10' -Verdict 'FAIL' -Detail $detail3 -Row $eventRow
+            }
         }
     }
 }
@@ -299,7 +428,24 @@ if ($Scene -ne 'retained') {
     }
 
     # ---- O1.2: THE MUTATION, in the shell's own dumps -----------------------
-    if ($null -eq $handAsked) {
+    #
+    # ⛔ A ROUND TRIP WITH NO GESTURE IS NOT A FAILED MUTATION. PR #110 measured
+    # that `retained` without a hand waits out its gesture deadline and never
+    # completes the round trip at all; once the shell wave lands, `A-MUT` carries
+    # `mutation=NONE` and the walk runs anyway. In that shape O1.2a and O1.2b have
+    # no asked delta to check -- there was no gesture -- and O1.4 (`A-MUT == A'`,
+    # the RETENTION clause) is the assertion that still has teeth. A `FAIL` here
+    # would convict the shell of not moving an element nobody asked it to move.
+    #
+    # ⚠️ WRITTEN FOR BOTH ROW SHAPES: an ABSENT `mutation=` field is today's
+    # shell, and today's behaviour is kept exactly.
+    $mutField = if ($null -ne $rowAM) { Get-SbField $rowAM 'mutation' } else { $null }
+    if ($mutField -eq 'NONE') {
+        Add-NotRun 'O1.2a the chosen element CHANGED between the dumps' `
+            "NOT RUN: no gesture -- the A-MUT row reads mutation=NONE, so the retained walk ran with no hand and there is no asked delta to check. O1.4 (A-MUT == A-prime) still asserts, and it is the clause that carries the retention claim" -Row $rowAM
+        Add-NotRun 'O1.2b the delta in the dump equals the asked delta' `
+            'NOT RUN: no gesture (A-MUT reads mutation=NONE)' -Row $rowAM
+    } elseif ($null -eq $handAsked) {
         Add-NotRun 'O1.2 the harness-chosen element moved by the asked delta' `
             'no gesture was driven by this harness (-Hand not given and -SynthFromDump not used), so there is no asked delta to check the dump against'
     } elseif (-not (Test-Path $afterDump)) {
@@ -515,10 +661,34 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
         $synthParts = @($env:SB_SYNTH_DRAG -split ',')
         if ($synthParts.Count -ge 5) { $wantK = [int]$synthParts[4] } else { $wantK = 2 }
     }
+    # ⛔ THE INJECTOR IS NOW EXACT, SO A MISMATCH BELONGS TO THE WINDOW. PR #110
+    # measured `move=8` at k=7 (twice) and `move=2` at k=2, while the seam control
+    # -- the same element, the same delta, through the C ABI -- read `move=7`. The
+    # injector emits ONE positioning move BEFORE the press and EXACTLY k moves
+    # after it, and its button events no longer carry a position (a positioned
+    # LEFTDOWN/LEFTUP is a motion as well as a click). The receipt's
+    # `post-press-moves` and `normalized-collisions` are what separate the two
+    # remaining explanations, and the failure detail names them.
+    $handNote = ''
+    if ($Hand -and (Test-Path $handReceipt)) {
+        $rcTxt = (Get-Content $handReceipt) -join ' | '
+        $mPost = [regex]::Match($rcTxt, 'post-press-moves=([0-9]+)')
+        $mColl = [regex]::Match($rcTxt, 'normalized-collisions=([0-9]+)')
+        if ($mPost.Success) {
+            $handNote = " The injector sent post-press-moves=$($mPost.Groups[1].Value)" +
+                        $(if ($mColl.Success) { " with normalized-collisions=$($mColl.Groups[1].Value)" } else { '' }) +
+                        ", and its button events carry no position."
+        }
+    }
     if ($move -eq [string]$wantK) {
-        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'PASS' -Detail "k=$wantK asked, move=$move reported (press=$press release=$release)" -Row $gestureRow
+        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'PASS' -Detail "k=$wantK asked, move=$move reported (press=$press release=$release).$handNote" -Row $gestureRow
     } else {
-        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'FAIL' -Detail "k=$wantK asked, move=$move reported. A hardwired gesture cannot follow a varied k; a coalesced one reports fewer" -Row $gestureRow
+        $diag = if ($null -ne $move -and [int]$move -gt $wantK) {
+            "move > k: the window saw an arrival the injector did not send -- a motion synthesised on pointer capture, or a real mouse moved during the run"
+        } else {
+            "move < k: coalescence, a UIPI-discarded event, or two steps landing on one normalized grid point (the receipt's normalized-collisions says which)"
+        }
+        Add-Assert -Name "$o4Prefix.4 move == k" -Verdict 'FAIL' -Detail "k=$wantK asked, move=$move reported. $diag.$handNote" -Row $gestureRow
     }
 
     if ($HandEmpty) {
@@ -539,12 +709,53 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     }
 
     # ---- the coordinate arm ------------------------------------------------
+    #
+    # ⛔ THE SCALE IS THE SHELL'S, AND THE AWARENESS CONTEXT DECIDES WHETHER IT
+    # MEANS ANYTHING. `-Scale` is gone: PR #110 measured that it reached nothing
+    # (the injector has no such parameter and derives the factor from
+    # `GetDpiForWindow`), so the only scale in play is the one the shell reports on
+    # its own row -- and on a DPI-UNAWARE process that number is TRUE FROM INSIDE
+    # A VIRTUALISED VIEW and false about the screen. Four independent numbers put
+    # kenai's panel at 3840x2160 at 150%, the client at 2856x1464 against a
+    # 1904x941 surface (exactly 1.5), and the gesture landed at 2/3 of the asked
+    # point -- three times, at three different points.
+    #
+    # So these two arms assert ONLY when the shell reports a per-monitor awareness
+    # context. Otherwise they are `NOT RUN` BY NAME -- and they PRINT THE NUMBERS
+    # ANYWAY, because the reading is evidence about the manifest even when it
+    # cannot be a verdict about the seam. Convicting the injector of the shell's
+    # missing manifest would be the wrong repair aimed at the wrong file.
+    #
+    # ⚠️ BOTH ROW SHAPES: an ABSENT `dpi-awareness=` field is the pre-shell-wave
+    # shell, whose awareness is UNKNOWN to this harness -- and unknown is not
+    # per-monitor.
+    $awareRow = Select-SbRow $rows 'dpi-awareness='
+    $aware = Get-SbField $awareRow 'dpi-awareness'
+    $awareOk = ($null -ne $aware) -and ($aware -match '(?i)per.?monitor')
+    $awareText = if ($null -eq $aware) {
+        'the shell wrote no dpi-awareness= field (pre-shell-wave row shape): this harness cannot tell whether the window is DPI-virtualised'
+    } else {
+        "the shell reports dpi-awareness=$aware"
+    }
+
     if ($null -eq $handAsked) {
         Add-NotRun "$o4Prefix.6 (release@ - press@)/scale == the asked delta" `
             'this harness did not choose the delta for this run, so there is nothing to compare the observed one to'
     } elseif ($null -eq $pressAt -or $null -eq $releaseAt -or $null -eq $rowScale) {
         Add-NotRun "$o4Prefix.6 (release@ - press@)/scale == the asked delta" `
             'the row did not carry a readable press@/release@/scale triple'
+    } elseif (-not $awareOk) {
+        $s0 = [double]$rowScale
+        if ($s0 -le 0) { $s0 = 1.0 }
+        $od = ("observed ({0:N2},{1:N2}) DIP against the asked ({2},{3}) at the shell's reported scale={4}" -f
+               (($releaseAt.X - $pressAt.X) / $s0), (($releaseAt.Y - $pressAt.Y) / $s0), $handAsked.Dx, $handAsked.Dy, $s0)
+        $op = ("press@ ({0:N1},{1:N1}) px against the asked ({2:N1},{3:N1}) px -- offset {4:N1} px" -f
+               $pressAt.X, $pressAt.Y, ($handAsked.X * $s0), ($handAsked.Y * $s0),
+               [math]::Sqrt([math]::Pow($pressAt.X - ($handAsked.X * $s0), 2) + [math]::Pow($pressAt.Y - ($handAsked.Y * $s0), 2)))
+        Add-NotRun "$o4Prefix.6 (release@ - press@)/scale == the asked delta" `
+            "$awareText, so its scale= describes a view that may be virtualised and a coordinate verdict would price the manifest, not the seam. Read anyway: $od" -Row $gestureRow
+        Add-NotRun "$o4Prefix.7 the observed press point is within 2 px of the asked one" `
+            "$awareText. Read anyway: $op" -Row $gestureRow
     } else {
         $s = [double]$rowScale
         if ($s -le 0) { $s = 1.0 }
@@ -572,6 +783,57 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
             Add-Assert -Name "$o4Prefix.7 the observed press point is within 2 px of the asked one" -Verdict 'PASS' -Detail $detail2 -Row $gestureRow
         } else {
             Add-Assert -Name "$o4Prefix.7 the observed press point is within 2 px of the asked one" -Verdict 'FAIL' -Detail $detail2 -Row $gestureRow
+        }
+    }
+
+    # ---- O4.8: the two numbers that catch a virtualised window --------------
+    #
+    # ⭐ THE HARNESS CAN MEASURE THE VIRTUALISATION ITSELF, TODAY, WITHOUT THE
+    # SHELL'S NEW FIELD. The injector reports the window's CLIENT size in physical
+    # pixels (`client=2856x1464` on kenai) and the row reports the SURFACE in DIPs
+    # (`surface=1904x941`); their ratio is the true physical-per-DIP factor
+    # (exactly 1.5), and the shell reported `scale=1`. That disagreement IS the
+    # defect, and it was sitting in the harness's own receipt the whole time --
+    # printed as a note nobody could fail.
+    #
+    # ⛔ THIS IS THE ARM THAT KEEPS TEETH WHILE O4.6/O4.7 ARE REFUSED. Without it,
+    # a shell with no manifest would produce a run in which every coordinate
+    # clause reads NOT RUN and nothing at all convicts.
+    #
+    # DECIDED WITHOUT AN OPERATOR: it is a full assertion rather than a note,
+    # because a note has no failure mode and this comparison does.
+    if (-not $Hand) {
+        Add-NotRun "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" `
+            'no session-1 hand ran, so there is no client= measurement to compare the row against'
+    } elseif (-not (Test-Path $handReceipt)) {
+        Add-NotRun "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" `
+            'the injector wrote no receipt, so there is no client= measurement to compare the row against'
+    } else {
+        $rcAll = (Get-Content $handReceipt) -join ' | '
+        $mCl = [regex]::Match($rcAll, 'client=([0-9]+)x([0-9]+)')
+        $surfField = Get-SbField $gestureRow 'surface'
+        if (-not $mCl.Success -or $null -eq $surfField -or $null -eq $rowScale) {
+            Add-NotRun "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" `
+                "the receipt carried no client=WxH, or the row carried no surface=/scale= (client match: $($mCl.Success), surface: $surfField, scale: $rowScale)"
+        } else {
+            $clientW = [double]$mCl.Groups[1].Value
+            $surfW = [double](($surfField -split 'x')[0])
+            if ($surfW -le 0) {
+                Add-NotRun "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" `
+                    "the row's surface width is $surfW"
+            } else {
+                $ratio = $clientW / $surfW
+                $rs = [double]$rowScale
+                $d8 = ("client {0} / surface {1} = {2:N3} physical px per DIP, against the shell's reported scale={3}" -f
+                       $mCl.Groups[0].Value.Substring(7), $surfField, $ratio, $rs)
+                if ([math]::Abs($ratio - $rs) -le 0.01) {
+                    Add-Assert -Name "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" -Verdict 'PASS' `
+                        -Detail "$d8 -- the window is not being bitmap-virtualised, so the shell's scale describes the screen" -Row $gestureRow
+                } else {
+                    Add-Assert -Name "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" -Verdict 'FAIL' `
+                        -Detail "$d8 -- they disagree, which is what a DPI-virtualised window looks like from outside: the shell's number is true of its own view and false of the screen, and every gesture lands at scale/ratio of the asked point. $awareText" -Row $gestureRow
+                }
+            }
         }
     }
 
@@ -618,8 +880,29 @@ if (-not $squeezeAsked) {
     Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
         'SB_SQUEEZE is not 1: the real-link arm was not driven this run'
 } elseif ($null -eq $refuseRow) {
-    Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
-        -Detail 'SB_SQUEEZE=1 was set and no `RESIZE REFUSED <W>x0 ... policy=EVENT` row was written -- either the squeeze did not reach the panel or the policy accepted a zero'
+    # ⛔ TWO CAUSES, AND THE SHELL'S DELIVERY ROW SEPARATES THEM. PR #110: with
+    # SB_SQUEEZE=1 no refusal row was written at all, twice, and the run could not
+    # say whether the zero never reached the panel or the policy accepted it.
+    # Once the shell wave lands, `SQUEEZE delivered <W>x<H> ... policy=<...>` is
+    # the row that answers it -- and a squeeze DELIVERED with a non-zero height is
+    # a knob that did not produce the condition, which is `NOT RUN`, not a red
+    # against the policy.
+    $deliveredRow = Select-SbRow $rows 'SQUEEZE delivered [0-9]+x[0-9]+'
+    if ($null -eq $deliveredRow) {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+            -Detail 'SB_SQUEEZE=1 was set and no RESIZE REFUSED <W>x0 ... policy=EVENT row was written. The shell wrote no SQUEEZE delivered row either (pre-shell-wave row shape), so this run cannot say whether the squeeze reached the panel or the policy accepted a zero'
+    } else {
+        $delivered = ''
+        $md = [regex]::Match($deliveredRow, 'SQUEEZE delivered ([0-9]+)x([0-9]+)')
+        if ($md.Success) { $delivered = "$($md.Groups[1].Value)x$($md.Groups[2].Value)" }
+        if ($md.Success -and [int]$md.Groups[2].Value -eq 0) {
+            Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+                -Detail "the window manager DELIVERED $delivered to the panel and no policy=EVENT refusal row followed -- the policy accepted a zero" -Row $deliveredRow
+        } else {
+            Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
+                "the squeeze was delivered as $delivered -- a non-zero height, so the condition this assertion is about never arrived at the panel. The knob did not produce the experiment; that is not a verdict on the policy" -Row $deliveredRow
+        }
+    }
 } else {
     Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'PASS' `
         -Detail 'a zero height arrived through the window manager and the policy refused it, keeping the last good surface' -Row $refuseRow
@@ -669,26 +952,120 @@ if ([string]::IsNullOrWhiteSpace($probeAsked)) {
     }
 }
 
-# ⛔ THE HASH EQUALITY IS READ **TOGETHER WITH** THE ACCEPT ARM, AND ALONE IT IS
-# VACUOUS: a surface nobody touched is trivially equal to itself. So this arm
-# refuses unless the same run showed the policy is capable of accepting.
-if ($squeezeAsked) {
+# ===========================================================================
+# O6.4 -- SPLIT INTO TWO RUNS, BECAUSE ONE RUN CANNOT HOLD BOTH ARMS
+# ===========================================================================
+#
+# ⛔ THE OLD CLAUSE WAS STRUCTURALLY UNRUNNABLE, AND PR #110 MEASURED IT. It
+# demanded `SB_SQUEEZE=1` AND `SB_SURFACE_PROBE=1000x600` in ONE `retained` run --
+# but the probe moves the surface PERMANENTLY to 1000x600, so the round trip never
+# returns to 1904x941, `A'` is never written, and `surface(A) == surface(A')` can
+# never hold. Measured both ways: 1 of 4 hash rows without the hand, 2 of 4 with
+# it. The clause and the scene were in contradiction, and no reading of either
+# could have shown it -- only running it could.
+#
+# So it is TWO RUNS and the arms travel by receipt:
+#
+#   * THE SQUEEZE RUN (`SB_SQUEEZE=1`, no probe) writes O6.4a -- the hash and the
+#     surface BRACKETING the refusal row -- and its receipt.
+#   * THE PROBE RUN (`SB_SURFACE_PROBE=1000x600`, no squeeze) writes O6.3, the
+#     accept arm, and its receipt.
+#   * O6.4 is read by whichever run can see BOTH receipts from the SAME sitting.
+#
+# ⛔ AND NOTHING IS COMPARED ACROSS THE TWO ROUTES. PR #110: `SB_RESIZE=1000x600`
+# through the EVENT route reports a 984x526 client while `SB_SURFACE_PROBE=1000x600`
+# reports 1000x600 exactly -- the same asked size, two different reported surfaces,
+# because one is a WINDOW size and the other a SURFACE size. The probe run
+# contributes ONE FACT ONLY -- that the policy is capable of accepting -- and never
+# a number the squeeze run's equality is measured against.
+if ($squeezeAsked -and [string]::IsNullOrWhiteSpace($probeAsked)) {
+    # ---- O6.4a: the bracket, inside the squeeze run ------------------------
+    # The two hash rows STRADDLING the refusal, not the first and last of the run:
+    # a `retained` walk deliberately resizes, so first-vs-last would be measuring
+    # the walk. And the bracket is refused when a gesture or a driven resize lies
+    # inside it, because then the inequality would be about that instead.
     $sqHashes = @($rows | Where-Object { $_ -match 'hash=[0-9a-f]{64}' })
-    if ($sqHashes.Count -lt 2) {
-        Add-NotRun 'O6.4 the surface (and its hash) is unchanged across a refused squeeze' `
-            "this run wrote $($sqHashes.Count) hash row(s); the equality needs one before the squeeze and one after"
-    } elseif ($null -eq $acceptRow) {
-        Add-NotRun 'O6.4 the surface (and its hash) is unchanged across a refused squeeze' `
-            'REFUSED: no accept arm ran in this run. A hash that did not change across a resize nobody performed is trivially equal, and reading it alone would be a pass with no failure mode. Re-run with SB_SURFACE_PROBE=1000x600 set alongside SB_SQUEEZE=1'
-    } else {
-        $h0 = Get-SbField $sqHashes[0] 'hash'
-        $h1 = Get-SbField $sqHashes[-1] 'hash'
-        if ($h0 -eq $h1) {
-            Add-Assert -Name 'O6.4 the surface (and its hash) is unchanged across a refused squeeze' -Verdict 'PASS' `
-                -Detail "first=$h0 last=$h1, read together with the accept arm that proves the policy can change a surface" -Row $sqHashes[-1]
-        } else {
-            Add-Assert -Name 'O6.4 the surface (and its hash) is unchanged across a refused squeeze' -Verdict 'FAIL' `
-                -Detail "first=$h0 last=$h1 -- something repainted differently across a refusal" -Row $sqHashes[-1]
+    $sqHashes = @($rows | Where-Object { $_ -match 'hash=[0-9a-f]{64}' })
+    $refIdx = if ($null -ne $refuseRow) { [array]::IndexOf($rows, $refuseRow) } else { -1 }
+    $before6 = $null; $after6 = $null
+    if ($refIdx -ge 0) {
+        foreach ($h in $sqHashes) {
+            $hi = [array]::IndexOf($rows, $h)
+            if ($hi -lt $refIdx) { $before6 = $h }
+            elseif ($hi -gt $refIdx -and $null -eq $after6) { $after6 = $h }
         }
+    }
+    if ($refIdx -lt 0) {
+        Add-NotRun 'O6.4a the surface and its hash are unchanged across the refused squeeze' `
+            'no policy=EVENT refusal row in this run, so there is nothing to bracket (O6.1 says why)'
+    } elseif ($null -eq $before6 -or $null -eq $after6) {
+        Add-NotRun 'O6.4a the surface and its hash are unchanged across the refused squeeze' `
+            "the refusal is not bracketed by two hash rows (before: $(if ($null -eq $before6) { 'none' } else { 'present' }), after: $(if ($null -eq $after6) { 'none' } else { 'present' }); $($sqHashes.Count) hash row(s) in the run). Drive the squeeze on a scene that hashes on both sides of it"
+    } else {
+        $bIdx = [array]::IndexOf($rows, $before6)
+        $aIdx = [array]::IndexOf($rows, $after6)
+        # `$a[(n+1)..(m-1)]` COUNTS DOWN when the two rows are ADJACENT, yielding
+        # two bogus rows instead of none -- the same trap O3.4 already carries a
+        # guard for. An adjacent pair is exactly the good case here (nothing
+        # between the bracket), so the unguarded spelling would refuse the very
+        # reading it exists to take.
+        $between = @()
+        if (($aIdx - 1) -ge ($bIdx + 1)) { $between = @($rows[($bIdx + 1)..($aIdx - 1)]) }
+        $inBetweenResize = @($between | Where-Object { $_ -match 'REPAINT events_total=' -and $_ -match 'cause=resize' })
+        $inBetweenGesture = @($between | Where-Object { $_ -match 'POINTER (REAL|SYNTHETIC) press=' })
+        $hb = Get-SbField $before6 'hash'
+        $ha = Get-SbField $after6 'hash'
+        $sb2 = Get-SbField $before6 'surface'
+        $sa2 = Get-SbField $after6 'surface'
+        $o6aDetail = "before=$hb at $sb2, after=$ha at $sa2, bracketing the refusal row"
+        if ($inBetweenResize.Count -gt 0 -or $inBetweenGesture.Count -gt 0) {
+            Add-NotRun 'O6.4a the surface and its hash are unchanged across the refused squeeze' `
+                "$($inBetweenResize.Count) driven resize(s) and $($inBetweenGesture.Count) gesture(s) lie between the two bracketing hash rows -- an inequality here would be about those and not about the squeeze. $o6aDetail" -Row $refuseRow
+            Write-SbReceipt -Path $o6SqueezeReceipt -Data @{ verdict = 'NOT RUN'; detail = $o6aDetail; hash_before = $hb; hash_after = $ha; surface_before = $sb2; surface_after = $sa2 }
+        } elseif ($hb -eq $ha -and $sb2 -eq $sa2) {
+            Add-Assert -Name 'O6.4a the surface and its hash are unchanged across the refused squeeze' -Verdict 'PASS' `
+                -Detail "$o6aDetail, with no driven resize and no gesture between them" -Row $refuseRow
+            Write-SbReceipt -Path $o6SqueezeReceipt -Data @{ verdict = 'PASS'; detail = $o6aDetail; hash_before = $hb; hash_after = $ha; surface_before = $sb2; surface_after = $sa2 }
+        } else {
+            Add-Assert -Name 'O6.4a the surface and its hash are unchanged across the refused squeeze' -Verdict 'FAIL' `
+                -Detail "$o6aDetail -- something changed across a refusal" -Row $refuseRow
+            Write-SbReceipt -Path $o6SqueezeReceipt -Data @{ verdict = 'FAIL'; detail = $o6aDetail; hash_before = $hb; hash_after = $ha; surface_before = $sb2; surface_after = $sa2 }
+        }
+    }
+}
+
+# ---- the probe run's receipt: ONE FACT, the policy can accept ---------------
+if ((-not $squeezeAsked) -and (-not [string]::IsNullOrWhiteSpace($probeAsked)) -and ($probeAsked -notmatch '^0x0$')) {
+    $accepted = ($null -ne $acceptRow)
+    Write-SbReceipt -Path $o6ProbeReceipt -Data @{
+        accepted = $accepted
+        asked = [string]$probeAsked
+        surface_after = $(if ($accepted) { Get-SbField $acceptRow 'surface' } else { '' })
+        row = [string]$acceptRow
+    }
+}
+
+# ---- O6.4: the two runs, read together --------------------------------------
+#
+# ⛔ THE EQUALITY ALONE IS STILL VACUOUS. A surface nobody touched is trivially
+# equal to itself, so the squeeze run's PASS means something only beside a run
+# that showed the policy CAN change a surface. That has not become less true; it
+# has stopped being something one run can satisfy.
+if ($squeezeAsked -or (-not [string]::IsNullOrWhiteSpace($probeAsked))) {
+    $sqR = Read-SbReceipt $o6SqueezeReceipt 'O6 squeeze-run'
+    $prR = Read-SbReceipt $o6ProbeReceipt 'O6 probe-run'
+    if (-not $sqR.Ok) {
+        Add-NotRun 'O6.4 the refused squeeze changed nothing, read together with a probe run that proves the policy can accept' $sqR.Reason
+    } elseif (-not $prR.Ok) {
+        Add-NotRun 'O6.4 the refused squeeze changed nothing, read together with a probe run that proves the policy can accept' $prR.Reason
+    } elseif (-not $prR.Data.accepted) {
+        Add-NotRun 'O6.4 the refused squeeze changed nothing, read together with a probe run that proves the policy can accept' `
+            "the probe run asked $($prR.Data.asked) and the policy did not accept it, so this sitting has not shown the policy capable of changing a surface. The equality is refused rather than read"
+    } elseif ([string]$sqR.Data.verdict -ne 'PASS') {
+        Add-NotRun 'O6.4 the refused squeeze changed nothing, read together with a probe run that proves the policy can accept' `
+            "the squeeze run's O6.4a read $($sqR.Data.verdict): $($sqR.Data.detail)"
+    } else {
+        Add-Assert -Name 'O6.4 the refused squeeze changed nothing, read together with a probe run that proves the policy can accept' -Verdict 'PASS' `
+            -Detail "squeeze run: $($sqR.Data.detail). Probe run: asked $($prR.Data.asked), ACCEPTED, surface after $($prR.Data.surface_after). The two surfaces are NOT compared with each other -- the EVENT route reports a window's client area and the PROBE route a surface, and the same asked size reads differently on each"
     }
 }
