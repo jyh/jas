@@ -337,14 +337,14 @@ if ($Stay) {
 # The sitting: one RUN per row, and a run is not the same thing as a scene
 # ===========================================================================
 #
-# ⛔ THE UNIT IS THE RUN. `pointer` appears twice -- once with the session-1 hand
-# and once with SB_SYNTH_DRAG -- because O4's control is the SAME oracle read
-# through the other provenance, and `benchmark` appears twice because O2.2's band
-# must be a DIRECT frame while the historical arm is OFFSCREEN+copy. A summary
-# that counted scenes would report "6 of 6" over EIGHT runs. k is VARIED between
-# the two hand runs (2, then 7)
-# because a control that cannot follow a varied k is weaker than the hand it
-# stands in for.
+# ⛔ THE UNIT IS THE RUN. `pointer` appears THREE times -- the session-1 hand,
+# the same hand under the 160 ms boundary (O4.4x's exact arm), and SB_SYNTH_DRAG
+# -- because O4's control is the SAME oracle read through the other provenance
+# and its exact arm is the same oracle read at a shorter drag; `benchmark`
+# appears twice because O2.2's band must be a DIRECT frame while the historical
+# arm is OFFSCREEN+copy. A summary that counted scenes would report "6 of 6" over
+# NINE runs. k is VARIED between the hand runs (2, then 7) because a control that
+# cannot follow a varied k is weaker than the hand it stands in for.
 $runPlan = @{
     'benchmark' = @(
         @{ Name = 'benchmark'; Scene = 'benchmark'; Env = @{}; Args = @() },
@@ -371,8 +371,24 @@ $runPlan = @{
            Env = @{ SB_RENDER_STALL_MS = '20000'; SB_RESIZE = '1000x600' };
            Args = @() }
     )
+    # ⭐ THE THIRD POINTER RUN IS O4.4x's EXACT ARM, AND IT IS A RUN RATHER
+    # THAN A SECOND GESTURE INSIDE ONE. `move != k` is the DRAG'S DURATION: one
+    # extra arrival per few hundred ms while the button is held, none under
+    # ~160 ms (kenai 2026-09-04, 13 configurations, `-HandSettleMs` varied).
+    # O4.4 therefore prices the extras and its budget is deliberately loose;
+    # O4.4x asserts EQUALITY, and it can only do that on a drag short enough to
+    # be under the boundary -- k=7 at 10 ms is 70 ms and reads exactly 7.
+    #
+    # ⛔ A SECOND GESTURE INSIDE ONE RUN WOULD HAVE BROKEN THE BYTE-MARK
+    # DISCIPLINE. One launch, one log mark, one window is what makes a row belong
+    # to a run; the `pointer` scene completes on its FIRST `HAND CLOSED` row, so
+    # a second gesture would have to be waited for by a clock. That is the defect
+    # the completion-row table replaced. Both arms land in one SITTING, which is
+    # what the ruling asks for, and the cost is one more launch.
     'pointer' = @(
         @{ Name = 'pointer (hand, k=7)'; Scene = 'pointer'; Env = @{}; Args = @('-Hand', '-HandMoves', '7') },
+        @{ Name = 'pointer (hand, k=7 at 10ms -- O4.4x''s EXACT arm)'; Scene = 'pointer'; Env = @{};
+           Args = @('-Hand', '-HandMoves', '7', '-HandSettleMs', '10') },
         @{ Name = 'pointer (SB_SYNTH_DRAG control, k=7)'; Scene = 'pointer'; Env = @{};
            Args = @('-SynthFromDump', '-HandMoves', '7') }
     )
