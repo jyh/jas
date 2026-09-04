@@ -3833,11 +3833,25 @@ actions:
       alphabetically (case-sensitive, lexicographic). Slugs
       unchanged; selection preserved. Persisted on next
       save_brush_library.
+
+      NOT YET IMPLEMENTED in any port, and declared as a log-only
+      stub rather than as an effect that cannot run. The library to
+      sort is panel.selected_library, which is known only at run
+      time, and no port can address a data path computed from state:
+      every data.* effect reads its `path:` as a LITERAL dotted path
+      (jas_flask _readDataPath), and the reference interpreter, Rust
+      and Swift implement no data.* effect at all. The prior
+      declaration interpolated panel.selected_library into the
+      data.list_sort path with a ${...} substitution, but ${...} is
+      loader.substitute_params, which runs on template expansion and
+      layout includes and never on an effect payload — so the path was read literally, matched
+      nothing, and Sort by Name was a silent no-op that looked
+      implemented. The shape of the real fix is a brush.sort_by_name
+      shortcut taking `library:` as an EXPRESSION, exactly as
+      brush.delete_selected and brush.duplicate_selected already do.
     category: brushes
     effects:
-      - "data.list_sort":
-          path: "data.brush_libraries.${panel.selected_library}.brushes"
-          key: "item.name"
+      - log: "sort_brushes_by_name"
 
   set_brush_view_mode:
     description: >

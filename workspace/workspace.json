@@ -5660,14 +5660,11 @@
       ]
     },
     "sort_brushes_by_name": {
-      "description": "Permanently reorder panel.selected_library's brushes alphabetically (case-sensitive, lexicographic). Slugs unchanged; selection preserved. Persisted on next save_brush_library.\n",
+      "description": "Permanently reorder panel.selected_library's brushes alphabetically (case-sensitive, lexicographic). Slugs unchanged; selection preserved. Persisted on next save_brush_library.\nNOT YET IMPLEMENTED in any port, and declared as a log-only stub rather than as an effect that cannot run. The library to sort is panel.selected_library, which is known only at run time, and no port can address a data path computed from state: every data.* effect reads its `path:` as a LITERAL dotted path (jas_flask _readDataPath), and the reference interpreter, Rust and Swift implement no data.* effect at all. The prior declaration interpolated panel.selected_library into the data.list_sort path with a ${...} substitution, but ${...} is loader.substitute_params, which runs on template expansion and layout includes and never on an effect payload \u2014 so the path was read literally, matched nothing, and Sort by Name was a silent no-op that looked implemented. The shape of the real fix is a brush.sort_by_name shortcut taking `library:` as an EXPRESSION, exactly as brush.delete_selected and brush.duplicate_selected already do.\n",
       "category": "brushes",
       "effects": [
         {
-          "data.list_sort": {
-            "path": "data.brush_libraries.${panel.selected_library}.brushes",
-            "key": "item.name"
-          }
+          "log": "sort_brushes_by_name"
         }
       ]
     },
@@ -11884,7 +11881,7 @@
           "params": {
             "type": "calligraphic"
           },
-          "checked_when": "panel.category_filter contains \"calligraphic\"",
+          "checked_when": "any(panel.category_filter, fun c -> c == \"calligraphic\")",
           "description": "Toggle visibility of Calligraphic brushes in the panel body."
         },
         {
@@ -11893,7 +11890,7 @@
           "params": {
             "type": "scatter"
           },
-          "checked_when": "panel.category_filter contains \"scatter\"",
+          "checked_when": "any(panel.category_filter, fun c -> c == \"scatter\")",
           "description": "Toggle visibility of Scatter brushes."
         },
         {
@@ -11902,7 +11899,7 @@
           "params": {
             "type": "art"
           },
-          "checked_when": "panel.category_filter contains \"art\"",
+          "checked_when": "any(panel.category_filter, fun c -> c == \"art\")",
           "description": "Toggle visibility of Art brushes."
         },
         {
@@ -11911,7 +11908,7 @@
           "params": {
             "type": "pattern"
           },
-          "checked_when": "panel.category_filter contains \"pattern\"",
+          "checked_when": "any(panel.category_filter, fun c -> c == \"pattern\")",
           "description": "Toggle visibility of Pattern brushes."
         },
         {
@@ -11920,14 +11917,14 @@
           "params": {
             "type": "bristle"
           },
-          "checked_when": "panel.category_filter contains \"bristle\"",
+          "checked_when": "any(panel.category_filter, fun c -> c == \"bristle\")",
           "description": "Toggle visibility of Bristle brushes."
         },
         "separator",
         {
           "label": "Make Persistent",
           "action": "toggle_brush_library_persistent",
-          "checked_when": "preferences.brushes.persistent_libraries contains panel.selected_library",
+          "checked_when": "any(preferences.brushes.persistent_libraries, fun lib -> lib == panel.selected_library)",
           "description": "Toggle the selected library's presence in the user's persistent_libraries preference. Persistent libraries auto-open on app launch.\n"
         },
         {
@@ -26505,11 +26502,11 @@
         },
         "x_rp": {
           "get": "x_stored + anchor_offset_x(panel.reference_point, width)",
-          "set": "fun new -> x_stored := new - anchor_offset_x(panel.reference_point, width)"
+          "set": "fun new -> x_stored <- new - anchor_offset_x(panel.reference_point, width)"
         },
         "y_rp": {
           "get": "y_stored + anchor_offset_y(panel.reference_point, height)",
-          "set": "fun new -> y_stored := new - anchor_offset_y(panel.reference_point, height)"
+          "set": "fun new -> y_stored <- new - anchor_offset_y(panel.reference_point, height)"
         }
       },
       "init": {
@@ -27136,7 +27133,7 @@
     },
     "blob_brush_tool_options": {
       "summary": "Blob Brush Tool Options",
-      "description": "Modal dialog opened by double-clicking the Blob Brush icon in the toolbar. Edits six per-document options that drive the Blob Brush tool's sweep and commit behaviour:\n- Fidelity: 5-stop slider (Accurate \u2194 Smooth) driving the\n  RDP simplification epsilon at commit. Tick 1 = 0.5,\n  tick 3 (default) = 5.0, tick 5 = 10.0. See\n  BLOB_BRUSH_TOOL.md \u00a7Fidelity \u2192 simplification tolerance\n  mapping.\n- Keep Selected: when on, the new / merged element becomes\n  the canvas selection after commit. Default false.\n- Merge Only with Selection: when on, painting-mode sweeps\n  merge only with existing Blob Brush elements in the\n  selection; erasing-mode is unaffected.\n- Size / Angle / Roundness: default tip shape values used\n  when no Calligraphic brush is active. Each is a variation\n  widget (fixed / random / pressure / tilt / bearing /\n  rotation). Rotation mode is disabled for size and\n  roundness. When a Calligraphic brush IS active in the\n  Brushes panel, these rows are disabled with a \"(set by\n  active brush)\" hint \u2014 the brush's own values take\n  precedence. See \u00a7Runtime tip resolution.\n\nReset restores defaults without committing. Cancel discards edits. OK writes all six values to state.blob_brush_*. See BLOB_BRUSH_TOOL.md.\n",
+      "description": "Modal dialog opened by double-clicking the Blob Brush icon in the toolbar. Edits six per-document options that drive the Blob Brush tool's sweep and commit behaviour:\n- Fidelity: 5-stop slider (Accurate \u2194 Smooth) driving the\n  RDP simplification epsilon at commit. Tick 1 = 0.5,\n  tick 3 (default) = 5.0, tick 5 = 10.0. See\n  BLOB_BRUSH_TOOL.md \u00a7Fidelity \u2192 simplification tolerance\n  mapping.\n- Keep Selected: when on, the new / merged element becomes\n  the canvas selection after commit. Default false.\n- Merge Only with Selection: when on, painting-mode sweeps\n  merge only with existing Blob Brush elements in the\n  selection; erasing-mode is unaffected.\n- Size / Angle / Roundness: default tip shape values used\n  when no Calligraphic brush is active. Each is a\n  variation_widget template invocation, identical in shape to\n  the Brush Options dialog's three: a base combo bound to\n  dialog.<name>, a mode select bound to\n  dialog.<name>_variation.mode offering fixed / random /\n  pressure / tilt / bearing / rotation, and a min/max pair\n  bound to dialog.<name>_variation.min/.max that appears only\n  in random mode. When a Calligraphic brush IS active in the\n  Brushes panel, each row is disabled (bind.disabled on the\n  row container) with a \"(set by active brush)\" hint above \u2014\n  the brush's own values take precedence. See \u00a7Runtime tip\n  resolution.\n\n  NOT YET EXPRESSIBLE: suppressing the Rotation option for\n  size and roundness alone. variation_widget offers the same\n  six modes at every invocation and declares no per-option\n  disable parameter; adding one is a widget-vocabulary change,\n  not a spec change, so the option is listed here rather than\n  claimed in the widget. Choosing Rotation for size or\n  roundness resolves through the same path as the other live\n  input modes.\n\nReset restores defaults without committing. Cancel discards edits. OK writes all six values to state.blob_brush_*. See BLOB_BRUSH_TOOL.md.\n",
       "modal": true,
       "width": 520,
       "params": {},
@@ -27161,15 +27158,36 @@
           "default": 10,
           "description": "Default tip diameter in pt"
         },
+        "size_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          },
+          "description": "Variation mode (fixed / random / pressure / tilt / bearing / rotation) plus the random min/max bounds for size, as percent of the base value. Same shape as brush_options.size_variation.\n"
+        },
         "angle": {
           "type": "number",
           "default": 0,
           "description": "Default tip rotation in degrees"
         },
+        "angle_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          },
+          "description": "Variation mode plus random min/max bounds for angle. Same shape as brush_options.angle_variation.\n"
+        },
         "roundness": {
           "type": "number",
           "default": 100,
           "description": "Default tip aspect in percent"
+        },
+        "roundness_variation": {
+          "type": "object",
+          "default": {
+            "mode": "fixed"
+          },
+          "description": "Variation mode plus random min/max bounds for roundness. Same shape as brush_options.roundness_variation.\n"
         }
       },
       "init": {
@@ -27336,16 +27354,115 @@
                     "col": 10,
                     "children": [
                       {
-                        "include": "variation_widget",
-                        "id_prefix": "bbo_size",
-                        "base_bind": "dialog.size",
-                        "mode_bind": "dialog.size_mode",
-                        "unit": "pt",
-                        "min": 0.5,
-                        "max": 500,
-                        "step": 0.1,
-                        "disable_rotation": true,
-                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        "type": "container",
+                        "layout": "row",
+                        "style": {
+                          "gap": 4,
+                          "alignment": "center"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "",
+                            "style": {
+                              "width": 80,
+                              "font_size": 10
+                            }
+                          },
+                          {
+                            "id": "bbo_size_base",
+                            "type": "combo_box",
+                            "summary": "Base value",
+                            "min": 0.5,
+                            "max": 500,
+                            "step": 0.1,
+                            "suffix": "pt",
+                            "style": {
+                              "width": 60
+                            },
+                            "bind": {
+                              "value": "dialog.size",
+                              "disabled": "dialog.size_variation.mode == \"pressure\"\nor dialog.size_variation.mode == \"tilt\"\nor dialog.size_variation.mode == \"bearing\"\nor dialog.size_variation.mode == \"rotation\"\n"
+                            }
+                          },
+                          {
+                            "id": "bbo_size_mode",
+                            "type": "select",
+                            "summary": "Variation mode",
+                            "options": [
+                              {
+                                "label": "Fixed",
+                                "value": "fixed"
+                              },
+                              {
+                                "label": "Random",
+                                "value": "random"
+                              },
+                              {
+                                "label": "Pressure",
+                                "value": "pressure",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Tilt",
+                                "value": "tilt",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Bearing",
+                                "value": "bearing",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Rotation",
+                                "value": "rotation",
+                                "status": "pending_stylus"
+                              }
+                            ],
+                            "style": {
+                              "width": 90
+                            },
+                            "bind": {
+                              "value": "dialog.size_variation.mode"
+                            }
+                          },
+                          {
+                            "id": "bbo_size_min",
+                            "type": "combo_box",
+                            "summary": "Random minimum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.size_variation.min",
+                              "visible": "dialog.size_variation.mode == \"random\""
+                            }
+                          },
+                          {
+                            "id": "bbo_size_max",
+                            "type": "combo_box",
+                            "summary": "Random maximum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.size_variation.max",
+                              "visible": "dialog.size_variation.mode == \"random\""
+                            }
+                          }
+                        ],
+                        "bind": {
+                          "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        },
+                        "_template": "variation_widget"
                       }
                     ]
                   }
@@ -27372,15 +27489,115 @@
                     "col": 10,
                     "children": [
                       {
-                        "include": "variation_widget",
-                        "id_prefix": "bbo_angle",
-                        "base_bind": "dialog.angle",
-                        "mode_bind": "dialog.angle_mode",
-                        "unit": "\u00b0",
-                        "min": -180,
-                        "max": 180,
-                        "step": 1,
-                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        "type": "container",
+                        "layout": "row",
+                        "style": {
+                          "gap": 4,
+                          "alignment": "center"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "",
+                            "style": {
+                              "width": 80,
+                              "font_size": 10
+                            }
+                          },
+                          {
+                            "id": "bbo_angle_base",
+                            "type": "combo_box",
+                            "summary": "Base value",
+                            "min": -180,
+                            "max": 180,
+                            "step": 1,
+                            "suffix": "\u00b0",
+                            "style": {
+                              "width": 60
+                            },
+                            "bind": {
+                              "value": "dialog.angle",
+                              "disabled": "dialog.angle_variation.mode == \"pressure\"\nor dialog.angle_variation.mode == \"tilt\"\nor dialog.angle_variation.mode == \"bearing\"\nor dialog.angle_variation.mode == \"rotation\"\n"
+                            }
+                          },
+                          {
+                            "id": "bbo_angle_mode",
+                            "type": "select",
+                            "summary": "Variation mode",
+                            "options": [
+                              {
+                                "label": "Fixed",
+                                "value": "fixed"
+                              },
+                              {
+                                "label": "Random",
+                                "value": "random"
+                              },
+                              {
+                                "label": "Pressure",
+                                "value": "pressure",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Tilt",
+                                "value": "tilt",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Bearing",
+                                "value": "bearing",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Rotation",
+                                "value": "rotation",
+                                "status": "pending_stylus"
+                              }
+                            ],
+                            "style": {
+                              "width": 90
+                            },
+                            "bind": {
+                              "value": "dialog.angle_variation.mode"
+                            }
+                          },
+                          {
+                            "id": "bbo_angle_min",
+                            "type": "combo_box",
+                            "summary": "Random minimum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.angle_variation.min",
+                              "visible": "dialog.angle_variation.mode == \"random\""
+                            }
+                          },
+                          {
+                            "id": "bbo_angle_max",
+                            "type": "combo_box",
+                            "summary": "Random maximum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.angle_variation.max",
+                              "visible": "dialog.angle_variation.mode == \"random\""
+                            }
+                          }
+                        ],
+                        "bind": {
+                          "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        },
+                        "_template": "variation_widget"
                       }
                     ]
                   }
@@ -27407,16 +27624,115 @@
                     "col": 10,
                     "children": [
                       {
-                        "include": "variation_widget",
-                        "id_prefix": "bbo_roundness",
-                        "base_bind": "dialog.roundness",
-                        "mode_bind": "dialog.roundness_mode",
-                        "unit": "%",
-                        "min": 0,
-                        "max": 100,
-                        "step": 1,
-                        "disable_rotation": true,
-                        "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        "type": "container",
+                        "layout": "row",
+                        "style": {
+                          "gap": 4,
+                          "alignment": "center"
+                        },
+                        "children": [
+                          {
+                            "type": "text",
+                            "content": "",
+                            "style": {
+                              "width": 80,
+                              "font_size": 10
+                            }
+                          },
+                          {
+                            "id": "bbo_roundness_base",
+                            "type": "combo_box",
+                            "summary": "Base value",
+                            "min": 0,
+                            "max": 100,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 60
+                            },
+                            "bind": {
+                              "value": "dialog.roundness",
+                              "disabled": "dialog.roundness_variation.mode == \"pressure\"\nor dialog.roundness_variation.mode == \"tilt\"\nor dialog.roundness_variation.mode == \"bearing\"\nor dialog.roundness_variation.mode == \"rotation\"\n"
+                            }
+                          },
+                          {
+                            "id": "bbo_roundness_mode",
+                            "type": "select",
+                            "summary": "Variation mode",
+                            "options": [
+                              {
+                                "label": "Fixed",
+                                "value": "fixed"
+                              },
+                              {
+                                "label": "Random",
+                                "value": "random"
+                              },
+                              {
+                                "label": "Pressure",
+                                "value": "pressure",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Tilt",
+                                "value": "tilt",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Bearing",
+                                "value": "bearing",
+                                "status": "pending_stylus"
+                              },
+                              {
+                                "label": "Rotation",
+                                "value": "rotation",
+                                "status": "pending_stylus"
+                              }
+                            ],
+                            "style": {
+                              "width": 90
+                            },
+                            "bind": {
+                              "value": "dialog.roundness_variation.mode"
+                            }
+                          },
+                          {
+                            "id": "bbo_roundness_min",
+                            "type": "combo_box",
+                            "summary": "Random minimum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.roundness_variation.min",
+                              "visible": "dialog.roundness_variation.mode == \"random\""
+                            }
+                          },
+                          {
+                            "id": "bbo_roundness_max",
+                            "type": "combo_box",
+                            "summary": "Random maximum",
+                            "min": 0,
+                            "max": 1000,
+                            "step": 1,
+                            "suffix": "%",
+                            "style": {
+                              "width": 50
+                            },
+                            "bind": {
+                              "value": "dialog.roundness_variation.max",
+                              "visible": "dialog.roundness_variation.mode == \"random\""
+                            }
+                          }
+                        ],
+                        "bind": {
+                          "disabled": "state.stroke_brush != null && brush_type_of(state.stroke_brush) == 'calligraphic'"
+                        },
+                        "_template": "variation_widget"
                       }
                     ]
                   }
@@ -35820,7 +36136,7 @@
     },
     "swatch_options": {
       "summary": "Swatch Options",
-      "description": "Modal dialog for editing or creating a named color swatch. Supports two modes, determined by the param.mode parameter:\nEdit mode (param.mode == \"edit\"): Opened by double-clicking a library swatch tile or choosing Swatch Options... from the panel menu. All fields are populated from the selected swatch's data (name, color, color_mode) passed as dialog parameters. The color component sliders and hex field are initialized from param.color using the color conversion functions. OK updates the swatch in its library at the specified index.\nCreate mode (param.mode == \"create\"): Opened by double-clicking a non-library swatch (recent color, fill/stroke widget), choosing New Swatch from the panel menu, or choosing Create New Swatch... from the Color Panel menu. Fields are initialized from the active fill/stroke color. OK appends a new swatch to the selected library.\nLayout (top to bottom): - Swatch Name: text input (col-3 label / col-9 input) - Color Type: dropdown, always \"Process Color\" (disabled, future use) - Global: checkbox (centered, disabled, deferred for future use) - Color Mode: dropdown (Grayscale/HSB/RGB/CMYK/Web Safe RGB). Changing\n  the mode switches which slider group is visible via data-bind-visible\n  on each slider container. The dialog change handler updates\n  dialogState.color_mode and calls updateBindings().\n- Color preview swatch: 40px square showing the current color via\n  bind color=\"#dialog.hex\"\n- Sliders: one group per color mode, each containing rows of\n  [label, slider, number_input]. Moving a slider updates\n  dialogState via the dialog input handler, which recomputes the\n  hex value from all components and calls updateBindings() to\n  refresh the preview swatch and hex field.\n- Hex field: 6-character hex string (RRGGBB, displayed with # prefix) - Bottom row: Preview checkbox (live document update, future),\n  Cancel (dismiss_dialog), OK (swatch_options_confirm)\n\nThe dialog state includes working copies of all color components (h, s, b, r, g, bl, c, m, y, k, hex) and a _init_color field used during initialization. On open, the JS dialog init code detects _init_color and computes all component values from it using the color conversion functions (hsb_h, rgb_r, cmyk_c, etc.).\n",
+      "description": "Modal dialog for editing or creating a named color swatch. Supports two modes, determined by the param.mode parameter:\nEdit mode (param.mode == \"edit\"): Opened by double-clicking a library swatch tile or choosing Swatch Options... from the panel menu. All fields are populated from the selected swatch's data (name, color, color_mode) passed as dialog parameters. The color component sliders and hex field are initialized from param.color using the color conversion functions. OK updates the swatch in its library at the specified index.\nCreate mode (param.mode == \"create\"): Opened by double-clicking a non-library swatch (recent color, fill/stroke widget), choosing New Swatch from the panel menu, or choosing Create New Swatch... from the Color Panel menu. Fields are initialized from the active fill/stroke color. OK appends a new swatch to the selected library.\nLayout (top to bottom): - Swatch Name: text input (col-3 label / col-9 input) - Color Type: dropdown, always \"Process Color\" (disabled, future use) - Global: checkbox (centered, disabled, deferred for future use) - Color Mode: dropdown (Grayscale/HSB/RGB/CMYK/Web Safe RGB). Changing\n  the mode switches which slider group is visible via data-bind-visible\n  on each slider container. The dialog change handler updates\n  dialogState.color_mode and calls updateBindings().\n- Color preview swatch: 40px square showing the current color via\n  bind color=\"dialog.color\" -- the canonical value every component\n  derives from, the same form the Color Picker's preview swatch uses\n- Sliders: one group per color mode, each containing rows of\n  [label, slider, number_input]. Moving a slider updates\n  dialogState via the dialog input handler, which recomputes the\n  hex value from all components and calls updateBindings() to\n  refresh the preview swatch and hex field.\n- Hex field: 6-character hex string (RRGGBB, displayed with # prefix) - Bottom row: Preview checkbox (live document update, future),\n  Cancel (dismiss_dialog), OK (swatch_options_confirm)\n\nThe dialog state includes working copies of all color components (h, s, b, r, g, bl, c, m, y, k, hex) and a _init_color field used during initialization. On open, the JS dialog init code detects _init_color and computes all component values from it using the color conversion functions (hsb_h, rgb_r, cmyk_c, etc.).\n",
       "modal": true,
       "width": 300,
       "params": {
@@ -36113,7 +36429,7 @@
                       "size": 40
                     },
                     "bind": {
-                      "color": "#dialog.hex"
+                      "color": "dialog.color"
                     }
                   }
                 ]

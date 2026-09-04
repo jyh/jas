@@ -434,29 +434,50 @@ direct prerequisites for this vision. The most relevant:
   (CI `.github/workflows/test.yml:108` and `:648-649`) covers per-app widget-kind dispatch;
   `scripts/check_action_implementations.py` (CI `:121` and `:652-653`) covers the actions
   behind a widget. Both are CI-wired and both run their own `--self-test` first.
-- **Add the validator cross-reference layer** — 🟡 **two of four sub-checks done, a
-  third BUILT BUT NOT WIRED.** ⛔ This
+- **Add the validator cross-reference layer** — 🟡 **three of four sub-checks done.** ⛔ This
   line was **split** from the one above on 2026-09-03 rather than ticked, because the two
   halves are in different states and a single tick would have erased three open gates.
   Measured against the layer's own four-check definition: *every `action:` reference
   resolves* ✅ (`scripts/check_action_refs.py`, plus the reference interpreter's own test);
-  *every `$state` read has a declaration* 🟡 **built, self-tested in CI, live arm NOT
-  wired** — `scripts/check_state_reads.py`, `.github/workflows/test.yml:87` (ubuntu) and
-  `:732` (Windows) run its `--self-test` on both platform families; the live line sits
-  beside each, COMMENTED, under a `TODO(state-reads)`. That is a different state from ✅
-  and it is written here as one. The live arm reds on main on 13 findings the gate was
-  written to surface, all of them WORKSPACE defects rather than gate defects, so they are
-  not silenced: 3 undeclared dialog reads (`dialog.size_mode` / `angle_mode` /
-  `roundness_mode` in `workspace/dialogs/blob_brush_tool_options.yaml`, on `include:`
-  nodes that also carry the wrong template param names), and 10 expression strings that do
-  not parse and therefore evaluate to null in every port (6 uses of a `contains` operator
-  no port's lexer has, 2 `:=` setters where the grammar's assignment is `<-`, a
-  `#dialog.hex` colour bind, and a `${...}` inside a `data.list_sort` path the JS engine reads
-  literally rather than evaluating).
-  The gate itself resolves 1,722 reads — 334 `state.`, 369 `panel.`, 475 `tool.<id>.`,
-  544 `dialog.` — against 675 declarations, and prints the size of what it CANNOT cover
-  rather than leaving it to be inferred: 37 ambient `panel.`/`dialog.` reads (the namespace
-  is whichever panel is active, and nothing in the source names it) and 1,175 of the 14,298
+  *every `$state` read has a declaration* ✅ **done — built, self-tested AND LIVE on both
+  platform families** — `scripts/check_state_reads.py`,
+  `.github/workflows/test.yml:98` (ubuntu, the *workspace.json up-to-date* job) and
+  `:742-743` (Windows, the *Structural gates* step) run `--self-test && ` the live scan.
+  The gate landed on 2026-09-03 with its live arm COMMENTED OUT, because main carried 13
+  findings it was written to surface; the tick above is dated from the day all 13 were
+  repaired and both live lines uncommented, not from the day the script existed.
+  **How the 13 were repaired matters more than that they were**: every one was rewritten
+  IN THE YAML using forms the expression grammar already had, so no port gained an
+  operator and every port's behaviour changed identically by construction. The 6 uses of a
+  `contains` operator no port's lexer has became `any(list, fun x -> x == v)`, the
+  higher-order builtin all three active evaluators already carry and the cross-language
+  corpus already pins; the 2 `:=` setters became `<-`, the grammar's only assignment
+  token, so typing in Artboard Options' reference-point X/Y writes again; the
+  `#dialog.hex` colour bind became `dialog.color`, the form the Color Picker's own preview
+  swatch uses, which retires the one YAML site that needed a hand-written `"#expr"`
+  special case in two ports' renderers; the 3 undeclared `dialog.*_mode` reads sat on
+  `include: variation_widget` nodes that `loader.resolve_includes` never reaches (it runs
+  on `data["layout"]` only) and are now `template:` invocations — `resolve_templates` DOES
+  run on every dialog's `content`, and the compiled `workspace.json` the active ports read
+  carries the expansion, so the repair needed no interpreter change and no port change.
+  **One finding could not be repaired and is named rather than excluded:** the `${...}`
+  inside `sort_brushes_by_name`'s `data.list_sort` path. `${...}` is
+  `loader.substitute_params`, which never runs on an effect payload, and NO port has any
+  mechanism for a data path computed from state — every `data.*` effect reads `path:` as a
+  literal dotted string, and three of the four ports implement no `data.*` effect at all.
+  Inventing one would be exactly the new grammar this repair refused, so the action is now
+  a log-only stub whose description says it is unimplemented and names the shape of the
+  fix (a `brush.sort_by_name` shortcut taking `library:` as an expression, as
+  `brush.delete_selected` already does). Sort by Name still does not sort; the difference
+  is that the spec no longer claims it does. The gate needed no exemption for it.
+  Each repair is pinned by a behavioural test that fails on the pre-repair YAML —
+  `workspace_interpreter/tests/test_state_read_findings.py` (and the two setter arms in
+  `test_artboards_effects.py`) — because a gate proves a string parses and only a test
+  proves a check mark appears.
+  The gate itself resolves 1,735 reads — 334 `state.`, 375 `panel.`, 475 `tool.<id>.`,
+  551 `dialog.` — against 678 declarations, and prints the size of what it CANNOT cover
+  rather than leaving it to be inferred: 39 ambient `panel.`/`dialog.` reads (the namespace
+  is whichever panel is active, and nothing in the source names it) and 1,174 of the 14,307
   scalars mentioning a namespace that is not state at all (`param.`, `data.`,
   `active_document.`, `event.`, …). The item's `$state` spelling
   is FLASK_PARITY-era: the literal `$state` occurs in zero workspace YAML files.
@@ -477,8 +498,9 @@ direct prerequisites for this vision. The most relevant:
   actions have no schema at all.
   **One real, named, unbuilt gate remains:** schemas for panels/dialogs/menubar/toolbar/
   actions, which is what would make the enum check real rather than partial. (Until
-  2026-09-03 this line named TWO; the state-read gate is now built, and is carried above in
-  its own honest 🟡 rather than being ticked out of this count.)
+  2026-09-03 this line named TWO; the state-read gate was built that day and carried above
+  in its own honest 🟡 while its live arm stayed commented, and it is ticked here only now
+  that the live arm watches the tree on both platform families.)
   ✅ The related defect this line used to carry as unrepaired —
   `workspace_interpreter/validator.py`'s docstring naming itself the home of two validation
   layers it does not implement — was repaired in the same pull request as the gate above.
