@@ -178,13 +178,29 @@ if ($Scene -ne 'stall') {
     # ⚠️ If this still reads True x3 with the handles non-zero, that is a FINDING
     # about the app or about the knob, NOT a pass: the instrument has been
     # repaired, so the reading is now interpretable and it convicts.
+    # ⛔ AND THE STIMULUS IS WITNESSED BEFORE A `True x3` CONVICTS ANYTHING. The
+    # shell wave (PR #113) writes `UI-STALL DONE ui-stall=<n>ms stall-tid=<tid>`
+    # from the sleep's own continuation, on the thread that slept -- the only row
+    # that says the XAML thread actually slept rather than that a knob was set.
+    # A False is evidence whatever wrote it; a True is a finding ONLY if the sleep
+    # happened, so the missing witness refuses the FAIL direction and not the
+    # PASS one. Asymmetric on purpose: the two directions rest on different facts.
+    $uiDoneRow = Select-SbRow $rows 'UI-STALL DONE ui-stall='
+    $stimText = if ($null -eq $uiDoneRow) {
+        'the shell wrote no UI-STALL DONE row, so the sleep itself is unwitnessed'
+    } else {
+        "witnessed by: $uiDoneRow"
+    }
     $falses = @(@(2, 5, 10) | Where-Object { $live[$_].Responding -eq 'False' })
     if ($falses.Count -ge 1) {
         Add-Assert -Name 'O3.C1 SB_UI_STALL_MS oracle-liveness control' -Verdict 'PASS' `
-            -Detail "Responding read False at $($falses.Count) of 3 session-1 samples, every one against a real window handle -- the oracle can say False. $bothText"
+            -Detail "Responding read False at $($falses.Count) of 3 session-1 samples, every one against a real window handle -- the oracle can say False. $bothText. $stimText"
+    } elseif ($null -eq $uiDoneRow) {
+        Add-NotRun 'O3.C1 SB_UI_STALL_MS oracle-liveness control' `
+            "Responding never read False, and $stimText -- so this run cannot tell an oracle that will not convict from a sleep that never happened. Both are possible and they are different findings. $bothText"
     } else {
         Add-Assert -Name 'O3.C1 SB_UI_STALL_MS oracle-liveness control' -Verdict 'FAIL' `
-            -Detail "Responding never read False under a $($uiStallMs)ms UI-thread sleep, sampled IN SESSION 1 with a non-zero window handle at every sample. The session-0 vacuity is repaired, so this reading is now a finding about the run and not about the instrument. $bothText"
+            -Detail "Responding never read False under a $($uiStallMs)ms UI-thread sleep that the shell's own row witnesses, sampled IN SESSION 1 with a non-zero window handle at every sample. The session-0 vacuity is repaired and the stimulus is proved, so this reading is now a finding about the run and not about the instrument. $bothText. $stimText"
     }
     Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' 'SB_UI_STALL_MS is set: this run is the oracle-liveness control, not the liveness measurement'
 } else {
@@ -266,7 +282,7 @@ if (-not [string]::IsNullOrWhiteSpace($Before)) {
         $m = [regex]::Match($raw, '([0-9]+(\.[0-9]+)?)')
         if ($m.Success) { $beforeVal = $m.Groups[1].Value }
     }
-    $beforeText = "before: $beforeVal ms on the OFFSCREEN+copy route (supplied via -Before '$Before'). $routeText"
+    $beforeText = "before: $beforeVal ms on the OFFSCREEN+copy route (supplied via -Before '$Before'). NOTE: THE SURFACE LABEL CHANGED CONVENTION: before the shell wave the reported surface was sized in DIPs (a default window read 1904x941, and the EVENT route's 1000x600 read 984x526); it is derived in PHYSICAL pixels now, so the same window reports a different number and a 'before' quoted with an old label is not comparable BY LABEL. $routeText"
 }
 
 if ($resizeRepaints.Count -eq 0) {
@@ -558,7 +574,17 @@ if ($Scene -ne 'retained') {
 
     Add-HashCompare 'O1.4 A-MUT == A-prime (RETENTION across the round trip)' $rowAM $rowA2 'A-MUT' "A'" $true
     Add-HashCompare 'O1.5 H1 != A-MUT (the hash reads the buffer)' $rowH1 $rowAM 'H1' 'A-MUT' $false
-    Add-HashCompare 'O1.6 A != A-MUT (the mutation has a pixel witness)' $rowA $rowAM 'A' 'A-MUT' $false
+    # ⛔ O1.6 IS REFUSED UNDER `mutation=NONE`, NOT FAILED, AND THE SHELL WAVE
+    # SAYS SO IN AS MANY WORDS (PR #113): with no gesture, `A-MUT == A` is a
+    # CONSTRUCTION and not a finding. Read as a FAIL it would convict the pointer
+    # seam of a run that never drove it. `mutation=REAL` or `mutation=SYNTHETIC`
+    # is what licenses asserting it.
+    if ($mutField -eq 'NONE') {
+        Add-NotRun 'O1.6 A != A-MUT (the mutation has a pixel witness)' `
+            'NOT RUN: no gesture -- A-MUT reads mutation=NONE, so A == A-MUT is a construction and not a finding. O1.4 (A-MUT == A-prime) and O1.5 (H1 != A-MUT) still assert' -Row $rowAM
+    } else {
+        Add-HashCompare 'O1.6 A != A-MUT (the mutation has a pixel witness)' $rowA $rowAM 'A' 'A-MUT' $false
+    }
 
     # ---- O1.7: THE PROBE-COLOUR ARM, one row, through the DXGI eye ----------
     # ⛔ ABSENCE ALONE IS VACUOUS. "PROBE_FG is not in the retained frame" is
@@ -729,13 +755,35 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     # ⚠️ BOTH ROW SHAPES: an ABSENT `dpi-awareness=` field is the pre-shell-wave
     # shell, whose awareness is UNKNOWN to this harness -- and unknown is not
     # per-monitor.
-    $awareRow = Select-SbRow $rows 'dpi-awareness='
-    $aware = Get-SbField $awareRow 'dpi-awareness'
-    $awareOk = ($null -ne $aware) -and ($aware -match '(?i)per.?monitor')
-    $awareText = if ($null -eq $aware) {
-        'the shell wrote no dpi-awareness= field (pre-shell-wave row shape): this harness cannot tell whether the window is DPI-virtualised'
+    # ⛔ THE AWARENESS AND THE DPI ARE ASSERTED TOGETHER, AND THAT IS THE SHELL
+    # WAVE'S OWN RULING (PR #113). `GetAwarenessFromDpiAwarenessContext` CANNOT
+    # distinguish PerMonitorV2 from PerMonitor(v1) -- both answer
+    # `DPI_AWARENESS_PER_MONITOR_AWARE` -- so the awareness alone is weaker than it
+    # looks. The pair (`PER_MONITOR_AWARE`, `dpi-for-window=144` on a 150% panel)
+    # is the evidence, and `composition-scale=` is the third number that has to
+    # agree with the second: an aware window whose DPI and whose composition scale
+    # disagree is not a window whose coordinates this harness can price.
+    $startupRow = Select-SbRow $rows 'STARTUP dpi-awareness='
+    $aware = Get-SbField $startupRow 'dpi-awareness'
+    $dpiFor = Get-SbField $startupRow 'dpi-for-window'
+    $compScale = Get-SbField $startupRow 'composition-scale'
+    $clientDips = Get-SbField $startupRow 'client-dips'
+    $surfReq = Get-SbField $startupRow 'surface-request'
+    $compX = $null
+    if ($null -ne $compScale -and $compScale -match '^([0-9.]+)x([0-9.]+)$') { $compX = [double]$Matches[1] }
+    $dpiScale = $null
+    if ($null -ne $dpiFor -and [double]$dpiFor -gt 0) { $dpiScale = [double]$dpiFor / 96.0 }
+    $awareOk = ($null -ne $aware) -and ($aware -match '(?i)PER_MONITOR_AWARE') -and
+               ($null -ne $dpiScale) -and ($null -ne $compX) -and
+               ([math]::Abs($dpiScale - $compX) -le 0.01)
+    $awareText = if ($null -eq $startupRow) {
+        'the shell wrote no STARTUP dpi-awareness= row (pre-shell-wave row shape): this harness cannot tell whether the window is DPI-virtualised'
+    } elseif ($null -eq $dpiFor -or $null -eq $compScale) {
+        "the STARTUP row reads dpi-awareness=$aware but carries no readable dpi-for-window=/composition-scale= pair, and the awareness alone cannot separate PerMonitorV2 from v1"
+    } elseif (-not $awareOk) {
+        "the STARTUP row reads dpi-awareness=$aware dpi-for-window=$dpiFor composition-scale=$compScale client-dips=$clientDips surface-request=$surfReq -- the awareness is not PER_MONITOR_AWARE, or dpi-for-window/96 and the composition scale disagree"
     } else {
-        "the shell reports dpi-awareness=$aware"
+        "the STARTUP row reads dpi-awareness=$aware dpi-for-window=$dpiFor composition-scale=$compScale client-dips=$clientDips surface-request=$surfReq, and dpi-for-window/96 agrees with the composition scale"
     }
 
     if ($null -eq $handAsked) {
@@ -822,16 +870,31 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
                 Add-NotRun "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" `
                     "the row's surface width is $surfW"
             } else {
+                # ⛔ THE EXPECTED RATIO CHANGED WITH THE SHELL WAVE, AND READING
+                # THE OLD ONE WOULD NOW RED ON A CORRECT SHELL. Before PR #113
+                # the surface was sized in DIPs while the injector's client rect
+                # is physical, so the ratio WAS the scale (1.5 measured, against a
+                # reported scale=1 -- the defect). Since #113 the surface is
+                # derived in physical pixels, so the two numbers are the same
+                # measurement and the ratio must be 1.0. The `STARTUP` row is what
+                # says which shell wrote these rows; it is not guessed.
                 $ratio = $clientW / $surfW
                 $rs = [double]$rowScale
-                $d8 = ("client {0} / surface {1} = {2:N3} physical px per DIP, against the shell's reported scale={3}" -f
-                       $mCl.Groups[0].Value.Substring(7), $surfField, $ratio, $rs)
-                if ([math]::Abs($ratio - $rs) -le 0.01) {
-                    Add-Assert -Name "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" -Verdict 'PASS' `
-                        -Detail "$d8 -- the window is not being bitmap-virtualised, so the shell's scale describes the screen" -Row $gestureRow
+                $newShell = ($null -ne $startupRow)
+                $want = if ($newShell) { 1.0 } else { $rs }
+                $wantText = if ($newShell) {
+                    "1.0 (since the shell wave the surface is derived in PHYSICAL pixels, so the injector's client rect and the surface are the same measurement; the shell reports scale=$rs separately)"
                 } else {
-                    Add-Assert -Name "$o4Prefix.8 the injector's client/surface ratio agrees with the shell's reported scale" -Verdict 'FAIL' `
-                        -Detail "$d8 -- they disagree, which is what a DPI-virtualised window looks like from outside: the shell's number is true of its own view and false of the screen, and every gesture lands at scale/ratio of the asked point. $awareText" -Row $gestureRow
+                    "the shell's reported scale=$rs (pre-shell-wave: the surface was sized in DIPs, so the ratio IS the scale)"
+                }
+                $d8 = ("client {0} / surface {1} = {2:N3}, against the expected {3}" -f
+                       $mCl.Groups[0].Value.Substring(7), $surfField, $ratio, $wantText)
+                if ([math]::Abs($ratio - $want) -le 0.01) {
+                    Add-Assert -Name "$o4Prefix.8 the injector's client rect and the shell's surface are the same measurement" -Verdict 'PASS' `
+                        -Detail "$d8 -- the window is not being bitmap-virtualised. $awareText" -Row $gestureRow
+                } else {
+                    Add-Assert -Name "$o4Prefix.8 the injector's client rect and the shell's surface are the same measurement" -Verdict 'FAIL' `
+                        -Detail "$d8 -- they disagree, which is what a DPI-virtualised window looks like from outside: the shell's number is true of its own view and false of the screen, and every gesture lands at ratio/scale of the asked point. $awareText" -Row $gestureRow
                 }
             }
         }
@@ -879,34 +942,64 @@ $probeRefuseRow = Select-SbRow $rows 'RESIZE REFUSED [0-9]+x[0-9]+ .* policy=PRO
 if (-not $squeezeAsked) {
     Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
         'SB_SQUEEZE is not 1: the real-link arm was not driven this run'
-} elseif ($null -eq $refuseRow) {
-    # ⛔ TWO CAUSES, AND THE SHELL'S DELIVERY ROW SEPARATES THEM. PR #110: with
-    # SB_SQUEEZE=1 no refusal row was written at all, twice, and the run could not
-    # say whether the zero never reached the panel or the policy accepted it.
-    # Once the shell wave lands, `SQUEEZE delivered <W>x<H> ... policy=<...>` is
-    # the row that answers it -- and a squeeze DELIVERED with a non-zero height is
-    # a knob that did not produce the condition, which is `NOT RUN`, not a red
-    # against the policy.
-    $deliveredRow = Select-SbRow $rows 'SQUEEZE delivered [0-9]+x[0-9]+'
-    if ($null -eq $deliveredRow) {
-        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
-            -Detail 'SB_SQUEEZE=1 was set and no RESIZE REFUSED <W>x0 ... policy=EVENT row was written. The shell wrote no SQUEEZE delivered row either (pre-shell-wave row shape), so this run cannot say whether the squeeze reached the panel or the policy accepted a zero'
-    } else {
-        $delivered = ''
-        $md = [regex]::Match($deliveredRow, 'SQUEEZE delivered ([0-9]+)x([0-9]+)')
-        if ($md.Success) { $delivered = "$($md.Groups[1].Value)x$($md.Groups[2].Value)" }
-        if ($md.Success -and [int]$md.Groups[2].Value -eq 0) {
-            Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
-                -Detail "the window manager DELIVERED $delivered to the panel and no policy=EVENT refusal row followed -- the policy accepted a zero" -Row $deliveredRow
-        } else {
-            Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
-                "the squeeze was delivered as $delivered -- a non-zero height, so the condition this assertion is about never arrived at the panel. The knob did not produce the experiment; that is not a verdict on the policy" -Row $deliveredRow
-        }
-    }
 } else {
-    Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'PASS' `
-        -Detail 'a zero height arrived through the window manager and the policy refused it, keeping the last good surface' -Row $refuseRow
+    # ⛔ THE DELIVERY ROW IS THE SUBJECT NOW, AND IT SEPARATES THREE OUTCOMES A
+    # SILENCE COULD NOT. PR #110: `SB_SQUEEZE=1` set, no refusal row written at
+    # all, twice -- and the log could not say whether the zero never reached the
+    # panel or the policy accepted it. The shell wave (PR #113) writes EXACTLY ONE
+    # `SQUEEZE delivered` row per squeeze, always, so its absence is now a shell
+    # defect rather than an ambiguity, and its own `policy=` field says which of
+    # the three happened.
+    #
+    # ⛔ `policy=` IS READ WITH AN ANCHORED PATTERN, NOT WITH THE FIELD READER.
+    # The row carries `min-height policy=<m>` BEFORE the verdict's own
+    # `policy=<Refuse|Defer|Accept>`, and a first-occurrence `policy=` reader would
+    # return the min-height number and call it the decision.
+    $deliveredRows = @($rows | Where-Object { $_ -match 'SQUEEZE delivered ' })
+    $deliveredRow = if ($deliveredRows.Count -gt 0) { $deliveredRows[-1] } else { $null }
+    $delivered = ''
+    $delH = -1
+    $delPolicy = ''
+    if ($null -ne $deliveredRow) {
+        $md = [regex]::Match($deliveredRow, 'SQUEEZE delivered (\S+)')
+        if ($md.Success) { $delivered = $md.Groups[1].Value }
+        $mh = [regex]::Match($delivered, '^([0-9]+)x([0-9]+)$')
+        if ($mh.Success) { $delH = [int]$mh.Groups[2].Value }
+        $mp = [regex]::Match($deliveredRow, '\)\s+policy=(\S+)')
+        if ($mp.Success) { $delPolicy = $mp.Groups[1].Value }
+    }
 
+    if ($deliveredRows.Count -eq 0) {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+            -Detail 'SB_SQUEEZE=1 was set and the shell wrote NO SQUEEZE delivered row. Since the shell wave exactly one is written per squeeze in every outcome, so its absence is a shell defect and not an ambiguity'
+    } elseif ($deliveredRows.Count -gt 1) {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+            -Detail "$($deliveredRows.Count) SQUEEZE delivered rows in one run; exactly one is written per squeeze, so this run's receipt cannot be read as one decision" -Row $deliveredRows[-1]
+    } elseif ($delivered -eq 'NONE') {
+        Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
+            'the squeeze was delivered NONE -- it never reached the window manager at all. That is a third finding, distinguishable at last, and it is not a verdict on the policy' -Row $deliveredRow
+    } elseif ($delivered -eq 'THREW') {
+        Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
+            'the squeeze request THREW, so the zero-height condition was never produced' -Row $deliveredRow
+    } elseif ($delH -gt 0) {
+        Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
+            "the window manager delivered $delivered -- a NON-ZERO height (policy=$delPolicy). The manager clamped at its minimum and the zero never arrived, so the condition this assertion is about was never produced. The delivered height is the evidence; a silence would have read as a bug in the panel" -Row $deliveredRow
+    } elseif ($delH -eq 0 -and $delPolicy -eq 'Accept') {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+            -Detail "the window manager delivered $delivered -- a ZERO height -- and the policy ACCEPTED it. That is a real defect in SurfacePolicy, not a harness reading" -Row $deliveredRow
+    } elseif ($delH -eq 0 -and $null -eq $refuseRow) {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'FAIL' `
+            -Detail "the delivered row says $delivered policy=$delPolicy and NO 'RESIZE REFUSED <W>x0 ... policy=EVENT' row accompanies it -- the receipt and the row disagree about the same decision" -Row $deliveredRow
+    } elseif ($null -eq $refuseRow) {
+        Add-NotRun 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' `
+            "the delivered row reads '$delivered' policy=$delPolicy, which this harness does not know how to price against the missing refusal row" -Row $deliveredRow
+    } else {
+        Add-Assert -Name 'O6.1 RESIZE REFUSED WxH through the REAL link (policy=EVENT)' -Verdict 'PASS' `
+            -Detail "a zero height arrived through the window manager (delivered $delivered, policy=$delPolicy) and the policy refused it, keeping the last good surface" -Row $refuseRow
+    }
+}
+
+if ($squeezeAsked -and $null -ne $refuseRow) {
     # ⛔ AND NOTHING MAY HAVE BEEN RESIZED FOR IT. A refusal that still resized
     # the swapchain would be a receipt about a decision the code did not take.
     $refuseIdx = [array]::IndexOf($rows, $refuseRow)

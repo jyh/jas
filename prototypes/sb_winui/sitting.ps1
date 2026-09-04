@@ -391,13 +391,15 @@ $runPlan = @{
     # ⛔ THE SQUEEZE RUN CARRIES NO HAND AND NO SB_RESIZE. O6.4a needs two hash
     # rows bracketing the refusal with NOTHING between them: a gesture would move
     # the document (so the two hashes must differ) and a driven resize would move
-    # the surface. Today that means the run is INCOMPLETE, because PR #110 also
-    # measured that `retained` without a hand never completes its round trip; it
-    # becomes readable when the shell's `mutation=NONE` lands, and the assertion
-    # says which of the two it is looking at rather than guessing.
+    # the surface. That run is only possible since the shell wave (PR #113) --
+    # before it, `retained` without a hand waited out its deadline and never
+    # completed the round trip; it now writes `mutation=NONE` on `A-MUT` and walks
+    # on. `SB_POINTER_WAIT_MS=0` is the same PR's DECLINE, distinct from unset: it
+    # says "there is no hand to offer" instead of paying 30 s of dead time for a
+    # refusal this plan already knows is coming.
     'o6' = @(
         @{ Name = 'o6 squeeze (0xH through the REAL link)'; Scene = 'retained';
-           Env = @{ SB_SQUEEZE = '1' }; Args = @() },
+           Env = @{ SB_SQUEEZE = '1'; SB_POINTER_WAIT_MS = '0' }; Args = @() },
         @{ Name = 'o6 probe (the accept arm)'; Scene = 'retained';
            Env = @{ SB_SURFACE_PROBE = '1000x600' }; Args = @('-Hand', '-HandMoves', '2') }
     )
