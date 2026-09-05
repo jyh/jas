@@ -20,6 +20,18 @@ WHAT THIS MODULE VALIDATES TODAY — the whole list:
    agreeing with itself. Uniqueness is not what it asserts.
 4. The ``elements``, ``preferences`` and ``features`` sections, each
    against its own schema.
+5. Every panel against ``schema/panel.schema.json`` (its error names the
+   panel's source file, ``panels/<kind>.yaml``), every dialog against
+   ``dialog.schema.json``, every action against ``action.schema.json``,
+   the ``menubar`` and the ``layout`` (the pane system holding the
+   toolbar) against theirs — the six that landed 2026-09-05, sharing the
+   widget tree through ``widget.schema.json`` by a cross-file ``$ref``
+   resolved from the repo's own files (:func:`_schema_registry`). They
+   close the key sets, the widget kinds, the effect vocabulary and the
+   action categories; they leave ``style:``, per-kind widget properties
+   and effect payloads open, on purpose. When first run on the real
+   tree they went red on 63 sites and every one was a form the census
+   had missed, none a defect — a clean negative, reported as one.
 
 Nothing else. In particular this module implements NEITHER layer 2
 (cross-reference) NOR layer 3 (expression parsing) of ``FLASK_PARITY.md``
@@ -58,9 +70,11 @@ WHERE THE OTHER LAYERS ACTUALLY LIVE
   ``workspace_interpreter/tests/test_state_read_findings.py``. Note the
   spelling too: ``$state`` is FLASK_PARITY-era and occurs in no workspace
   YAML today — a read is a dotted path inside an expression string.
-* *enum values match declared* — partial, and by schema rather than by
-  code: ``schema/`` covers app, tool, elements, features and preferences,
-  while panels, dialogs, menubar, toolbar and actions have no schema at
+* *enum values match declared* — by schema rather than by code, and since
+  2026-09-05 over every authored section: ``schema/`` covers app, tool,
+  elements, features, preferences, panels, dialogs, actions, menubar and
+  the layout (toolbar included). What remains open is named in
+  ``schema/README.md``, not
   all.
 * *expression parsing* — no compile-time pass over the workspace exists.
   The expression language is pinned by the cross-language corpus
@@ -113,6 +127,28 @@ def _try_import_jsonschema():
         return None
 
 
+_REGISTRY = None
+
+
+def _schema_registry():
+    """Every ``schema/*.schema.json`` registered under its ``$id``, so a
+    cross-file ``$ref`` (``widget.schema.json#/$defs/widget`` from
+    panel/dialog/layout) resolves against the repo's own files and never
+    the network. Built once per process."""
+    global _REGISTRY
+    if _REGISTRY is None:
+        from referencing import Registry, Resource
+        resources = []
+        for fname in sorted(os.listdir(SCHEMA_DIR)):
+            if not fname.endswith(".schema.json"):
+                continue
+            with open(os.path.join(SCHEMA_DIR, fname), encoding="utf-8") as f:
+                contents = json.load(f)
+            resources.append((contents["$id"], Resource.from_contents(contents)))
+        _REGISTRY = Registry().with_resources(resources)
+    return _REGISTRY
+
+
 def _validate_structural(schema_name: str, doc: dict, where: str) -> list[str]:
     """Validate ``doc`` against ``schema/<schema_name>.schema.json``.
 
@@ -124,7 +160,7 @@ def _validate_structural(schema_name: str, doc: dict, where: str) -> list[str]:
     jsonschema = _try_import_jsonschema()
     if jsonschema is not None:
         errors = []
-        validator = jsonschema.Draft202012Validator(schema)
+        validator = jsonschema.Draft202012Validator(schema, registry=_schema_registry())
         for err in validator.iter_errors(doc):
             loc = "/".join(str(p) for p in err.absolute_path) or "<root>"
             errors.append(f"{where}: {loc}: {err.message}")
@@ -223,12 +259,25 @@ def validate_workspace(ws: dict) -> list[str]:
         ("elements", "elements.yaml"),
         ("preferences", "preferences.yaml"),
         ("features", "features.yaml"),
+        ("menubar", "menubar.yaml"),
+        ("layout", "layout.yaml"),
     )
     for section_key, where in section_schemas:
         if section_key not in ws:
             continue
         section_doc = {section_key: ws[section_key]}
         errors.extend(_validate_structural(section_key, section_doc, where))
+
+    # Structural validation — the per-entry sections: every panel, dialog
+    # and action against its own schema, each error naming the SOURCE file
+    # the entry was authored in (a panel's file is its short kind).
+    for pid, spec in (ws.get("panels") or {}).items():
+        stem = pid[: -len("_panel_content")] if pid.endswith("_panel_content") else pid
+        errors.extend(_validate_structural("panel", spec, f"panels/{stem}.yaml"))
+    for did, spec in (ws.get("dialogs") or {}).items():
+        errors.extend(_validate_structural("dialog", spec, f"dialogs/{did}.yaml"))
+    for aid, spec in (ws.get("actions") or {}).items():
+        errors.extend(_validate_structural("action", spec, f"actions.yaml: {aid}"))
 
     return errors
 

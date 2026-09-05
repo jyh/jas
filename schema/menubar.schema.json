@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/menubar.schema.json",
+  "title": "Menubar",
+  "description": "workspace/menubar.yaml: the top-level menus, each a list of items, separators and submenus. Every predicate is an expression string; `menu_state` evaluates them.",
+  "type": "object",
+  "required": [
+    "menubar"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "menubar": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "label",
+          "items"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/menu_item"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "menu_item": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "separator"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "label"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string"
+            },
+            "params": {
+              "type": "object"
+            },
+            "enabled_when": {
+              "type": "string",
+              "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+            },
+            "checked_when": {
+              "type": "string",
+              "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+            },
+            "shortcut": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "submenu"
+              ]
+            },
+            "dynamic": {
+              "type": "boolean"
+            },
+            "description": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/menu_item"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

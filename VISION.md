@@ -493,14 +493,23 @@ direct prerequisites for this vision. The most relevant:
   from `workspace.json` before any bundle-reading gate sees it. The per-tool filename-stem
   match named in the old wording as "the only id check" is still exactly that, and still
   cannot see two tool files claiming one id — the merge drops one before the validator
-  runs. *enum values match declared* 🟡 **partial** — `schema/` covers
-  app, tool, elements, features and preferences, while panels, dialogs, menubar, toolbar and
-  actions have no schema at all.
-  **One real, named, unbuilt gate remains:** schemas for panels/dialogs/menubar/toolbar/
-  actions, which is what would make the enum check real rather than partial. (Until
-  2026-09-03 this line named TWO; the state-read gate was built that day and carried above
-  in its own honest 🟡 while its live arm stayed commented, and it is ticked here only now
-  that the live arm watches the tree on both platform families.)
+  runs. *enum values match declared* ✅ **done, by schema, over every authored section
+  — 2026-09-05.** `schema/` covered app, tool, elements, features and preferences; six
+  schemas landed that day for the rest: `panel`, `dialog`, `action`, `menubar`, `layout`
+  (the pane system holding the toolbar) and the shared `widget` tree they reach by a
+  cross-file `$ref`. They close the top-level key set of every panel, dialog, action and
+  menubar item, the widget key set and the widget `type` enum (the canonical kinds; the
+  pane-system kinds admitted in `layout.yaml` only), every `bind:` value as an expression
+  string, the effect vocabulary and the action categories as closed lists, and dialog
+  state as stored (`type` + `default`) or derived (`get` + `set`). Wired in
+  `workspace_interpreter/validator.py`, run by the compile every CI lane performs, with a
+  planted-defect arm per class in `test_validator.py`. Read the "done" for what it COVERS:
+  `style:`, per-kind widget properties beyond the type, effect payload shapes and
+  expression parsing (layer 3) stay open, named in `schema/README.md`. When first run on
+  the real tree the six went red on 63 sites and every one was a form the census had
+  missed — none a defect: a clean negative. (Until 2026-09-03 this line named TWO unbuilt
+  gates; the state-read gate was built that day and ticked above once its live arm watched
+  the tree; this one was the last, and this section now names NONE.)
   ✅ The related defect this line used to carry as unrepaired —
   `workspace_interpreter/validator.py`'s docstring naming itself the home of two validation
   layers it does not implement — was repaired in the same pull request as the gate above.
