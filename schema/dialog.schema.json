@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/dialog.schema.json",
+  "title": "Dialog",
+  "description": "A dialog specification (workspace/dialogs/*.yaml): modality, parameters, declared state, init expressions and its widget tree.",
+  "type": "object",
+  "required": [
+    "summary",
+    "description",
+    "modal",
+    "content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "modal": {
+      "type": "boolean"
+    },
+    "width": {
+      "type": "integer"
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "enum",
+              "bool",
+              "color",
+              "state_ref"
+            ]
+          },
+          "values": {
+            "type": "array"
+          },
+          "optional": {
+            "type": "boolean"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "default": {},
+          "ref": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "number",
+              "bool",
+              "enum",
+              "string",
+              "list",
+              "object",
+              "path",
+              "color",
+              "color_or_transparent"
+            ]
+          },
+          "default": {},
+          "description": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "per_document": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "max_length": {
+            "type": "integer"
+          },
+          "get": {
+            "type": "string",
+            "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+          },
+          "set": {
+            "type": "string",
+            "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        },
+        "description": "A dialog state entry is STORED (`type` + `default`) or DERIVED (`get` + `set`, an expression pair over the stored entries \u2014 the colour channels of the pickers, Artboard Options' reference-point X/Y); a derived entry may still declare its `type`.",
+        "anyOf": [
+          {
+            "required": [
+              "type",
+              "default"
+            ]
+          },
+          {
+            "required": [
+              "get",
+              "set"
+            ]
+          }
+        ]
+      }
+    },
+    "init": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+      }
+    },
+    "on_change": {
+      "type": "string",
+      "description": "The action dispatched when a bound value changes."
+    },
+    "doc_preview": {
+      "type": "boolean"
+    },
+    "preview_targets": {
+      "type": "object"
+    },
+    "content": {
+      "$ref": "widget.schema.json#/$defs/widget"
+    }
+  }
+}

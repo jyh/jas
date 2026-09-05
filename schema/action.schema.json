@@ -1,0 +1,233 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/action.schema.json",
+  "title": "Action",
+  "description": "One entry of workspace/actions.yaml: a described, categorised list of effects with optional typed params, an enabled_when predicate and a tier. The effect vocabulary and the category list are CLOSED enums: a misspelt effect key or category is a refusal at compile time rather than an action that silently does nothing (scripts/check_action_implementations.py asks the complementary question \u2014 which port implements each verb).",
+  "type": "object",
+  "required": [
+    "description",
+    "category",
+    "effects"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "align",
+        "appearance",
+        "artboards",
+        "boolean",
+        "brushes",
+        "concepts",
+        "dialog",
+        "document",
+        "edit",
+        "file",
+        "fill_stroke",
+        "layers",
+        "magic_wand",
+        "object",
+        "panel",
+        "paragraph",
+        "stroke",
+        "swatches",
+        "symbols",
+        "tab",
+        "tool",
+        "tools",
+        "transform",
+        "view",
+        "window",
+        "workspace"
+      ]
+    },
+    "tier": {
+      "type": "integer"
+    },
+    "enabled_when": {
+      "type": "string",
+      "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "string",
+              "number",
+              "enum",
+              "bool",
+              "color",
+              "state_ref"
+            ]
+          },
+          "values": {
+            "type": "array"
+          },
+          "optional": {
+            "type": "boolean"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "default": {},
+          "ref": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/effect"
+      }
+    }
+  },
+  "$defs": {
+    "effect": {
+      "description": "One effect: a bare verb (no payload) or an object whose keys are effect verbs. The lists are the verbs every port dispatches today; adding a verb means adding it here, deliberately.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "clear_dialog_snapshot",
+            "close_dialog",
+            "doc.copy_selection_to_clipboard",
+            "doc.delete_selection",
+            "snapshot"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "align_bottom": {},
+            "align_horizontal_center": {},
+            "align_left": {},
+            "align_right": {},
+            "align_top": {},
+            "align_vertical_center": {},
+            "as": {},
+            "boolean_crop": {},
+            "boolean_divide": {},
+            "boolean_exclude": {},
+            "boolean_exclude_compound": {},
+            "boolean_intersection": {},
+            "boolean_intersection_compound": {},
+            "boolean_merge": {},
+            "boolean_subtract_back": {},
+            "boolean_subtract_front": {},
+            "boolean_subtract_front_compound": {},
+            "boolean_trim": {},
+            "boolean_union": {},
+            "boolean_union_compound": {},
+            "brush.delete_selected": {},
+            "brush.duplicate_selected": {},
+            "brush.options_confirm": {},
+            "clear_dialog_snapshot": {},
+            "close_dialog": {},
+            "close_panel": {},
+            "create_child": {},
+            "decrement": {},
+            "delete_layout": {},
+            "dispatch": {},
+            "distribute_bottom": {},
+            "distribute_horizontal_center": {},
+            "distribute_horizontal_spacing": {},
+            "distribute_left": {},
+            "distribute_right": {},
+            "distribute_top": {},
+            "distribute_vertical_center": {},
+            "distribute_vertical_spacing": {},
+            "do": {},
+            "doc.clone_at": {},
+            "doc.create_artboard": {},
+            "doc.create_layer": {},
+            "doc.delete_artboard_by_id": {},
+            "doc.delete_at": {},
+            "doc.duplicate_artboard": {},
+            "doc.insert_after": {},
+            "doc.insert_at": {},
+            "doc.move_artboards_down": {},
+            "doc.move_artboards_up": {},
+            "doc.preview.clear": {},
+            "doc.preview.restore": {},
+            "doc.rotate.apply": {},
+            "doc.scale.apply": {},
+            "doc.set": {},
+            "doc.set_advanced_field": {},
+            "doc.set_artboard_field": {},
+            "doc.set_artboard_options_field": {},
+            "doc.set_attr_on_selection": {},
+            "doc.set_color_management_field": {},
+            "doc.set_document_setup_field": {},
+            "doc.set_graphics_field": {},
+            "doc.set_marks_and_bleed_field": {},
+            "doc.set_output_field": {},
+            "doc.set_output_ink_field": {},
+            "doc.set_print_preferences_field": {},
+            "doc.shear.apply": {},
+            "doc.snapshot": {},
+            "doc.unpack_group_at": {},
+            "doc.wrap_in_group": {},
+            "doc.wrap_in_layer": {},
+            "doc.zoom.apply": {},
+            "doc.zoom.fit_all_artboards": {},
+            "doc.zoom.fit_elements": {},
+            "doc.zoom.fit_rect": {},
+            "doc.zoom.set": {},
+            "expand_compound_shape": {},
+            "foreach": {},
+            "geometry.export_pdf": {},
+            "if": {},
+            "increment": {},
+            "let": {},
+            "list_push": {},
+            "list_toggle": {},
+            "load_layout": {},
+            "log": {},
+            "make_compound_shape": {},
+            "maximize": {},
+            "open_dialog": {},
+            "pop": {},
+            "release_compound_shape": {},
+            "remove_child": {},
+            "repeat_boolean_operation": {},
+            "reset_boolean_panel": {},
+            "reset_layout": {},
+            "reset_paragraph_panel": {},
+            "restore": {},
+            "revert_layout": {},
+            "save_appearance": {},
+            "save_layout": {},
+            "set": {},
+            "set_panel_state": {},
+            "show_panel": {},
+            "swap": {},
+            "swap_panel_state": {},
+            "switch_appearance": {},
+            "tile": {},
+            "toggle": {},
+            "toggle_paragraph_field": {}
+          }
+        }
+      ]
+    }
+  }
+}

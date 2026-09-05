@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/layout.schema.json",
+  "title": "Layout",
+  "description": "workspace/layout.yaml: the pane system \u2014 the toolbar pane, the canvas pane and the dock pane \u2014 as a widget tree that admits the pane-system kinds.",
+  "type": "object",
+  "required": [
+    "layout"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "layout": {
+      "$ref": "widget.schema.json#/$defs/layout_widget"
+    }
+  }
+}
