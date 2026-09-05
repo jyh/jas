@@ -31,7 +31,9 @@ WHAT THIS MODULE VALIDATES TODAY — the whole list:
    action categories; they leave ``style:``, per-kind widget properties
    and effect payloads open, on purpose. When first run on the real
    tree they went red on 63 sites and every one was a form the census
-   had missed, none a defect — a clean negative, reported as one.
+   had missed, none a defect — a clean negative, reported as one. The
+   fallback checker (:func:`_validate_minimal`) refuses what they refuse
+   too, driven with ``jsonschema`` forced absent.
 
 Nothing else. In particular this module implements NEITHER layer 2
 (cross-reference) NOR layer 3 (expression parsing) of ``FLASK_PARITY.md``
@@ -168,48 +170,99 @@ def _validate_structural(schema_name: str, doc: dict, where: str) -> list[str]:
     return _validate_minimal(schema, doc, where)
 
 
-def _validate_minimal(schema: dict, doc, where: str, path: str = "") -> list[str]:
-    """Hand-rolled JSON Schema subset. Handles ``type``, ``required``,
-    ``additionalProperties``, ``enum``, and ``pattern``. Good enough for
-    the schemas this project ships; graceful degradation when
-    ``jsonschema`` isn't installed."""
+def _resolve_ref(ref: str, root: dict) -> tuple[dict, dict]:
+    """Resolve a ``$ref`` to ``(schema, root)``: a local ``#/$defs/x`` against
+    ``root``; a cross-file ``<name>.schema.json#/$defs/x`` against that file,
+    which becomes the new root for refs inside it. The same two forms the
+    shipped schemas use and the ``referencing`` registry resolves for
+    ``jsonschema``; anything else is refused loudly rather than skipped."""
+    file_part, _, frag = ref.partition("#")
+    if file_part:
+        if not file_part.endswith(".schema.json"):
+            raise ValueError(f"unsupported $ref {ref!r}")
+        root = _load_schema(file_part[: -len(".schema.json")])
+    node: dict = root
+    for seg in frag.strip("/").split("/") if frag.strip("/") else []:
+        node = node[seg]
+    return node, root
+
+
+_JSON_TYPES = {
+    "object": lambda d: isinstance(d, dict),
+    "array": lambda d: isinstance(d, list),
+    "string": lambda d: isinstance(d, str),
+    "integer": lambda d: isinstance(d, int) and not isinstance(d, bool),
+    "number": lambda d: isinstance(d, (int, float)) and not isinstance(d, bool),
+    "boolean": lambda d: isinstance(d, bool),
+    "null": lambda d: d is None,
+}
+
+
+def _validate_minimal(schema: dict, doc, where: str, path: str = "",
+                      root: dict | None = None) -> list[str]:
+    """Hand-rolled JSON Schema subset — the checker used when ``jsonschema``
+    is not installed. It understands what the shipped schemas use and nothing
+    more: ``type`` (a name or a list of names, all seven JSON types),
+    ``required``, ``properties``, ``additionalProperties`` (bool or schema),
+    ``items``, ``enum`` (any type), ``minProperties``, ``allOf``, ``anyOf`` /
+    ``oneOf`` (satisfied by any one branch — the exclusivity half of ``oneOf``
+    is not checked), and ``$ref`` in the two forms ``_resolve_ref`` names.
+    ``pattern`` is still not enforced. Until 2026-09-05 it knew none of
+    ``$ref`` / ``anyOf`` / ``oneOf`` / ``allOf`` / list-typed ``type``, so under
+    it the widget tree, the effect vocabulary and every ``$defs`` entry went
+    unvalidated while the run reported green — a fallback that degrades
+    silently is a gate that reads as coverage. ``test_validator.py`` drives
+    this checker over the real workspace and over each planted defect with
+    ``jsonschema`` forced absent."""
+    root = schema if root is None else root
     errors: list[str] = []
     loc = path or "<root>"
 
+    if "$ref" in schema:
+        target, target_root = _resolve_ref(schema["$ref"], root)
+        errors.extend(_validate_minimal(target, doc, where, path, target_root))
+        rest = {k: v for k, v in schema.items() if k != "$ref"}
+        if rest:
+            errors.extend(_validate_minimal(rest, doc, where, path, root))
+        return errors
+
+    for branch in schema.get("allOf", []):
+        errors.extend(_validate_minimal(branch, doc, where, path, root))
+    alternatives = schema.get("anyOf") or schema.get("oneOf")
+    if alternatives:
+        if not any(not _validate_minimal(b, doc, where, path, root) for b in alternatives):
+            errors.append(f"{where}: {loc}: matches none of the {len(alternatives)} alternatives")
+
     t = schema.get("type")
-    if t == "object":
-        if not isinstance(doc, dict):
-            errors.append(f"{where}: {loc}: expected object, got {type(doc).__name__}")
+    if t is not None:
+        names = t if isinstance(t, list) else [t]
+        if not any(_JSON_TYPES[n](doc) for n in names if n in _JSON_TYPES):
+            errors.append(f"{where}: {loc}: expected {'/'.join(names)}, got {type(doc).__name__}")
             return errors
+    if "enum" in schema and doc not in schema["enum"]:
+        errors.append(f"{where}: {loc}: {doc!r} not in {schema['enum']}")
+
+    if isinstance(doc, dict):
         for req in schema.get("required", []):
             if req not in doc:
                 errors.append(f"{where}: {loc}: missing required field '{req}'")
+        if "minProperties" in schema and len(doc) < schema["minProperties"]:
+            errors.append(f"{where}: {loc}: fewer than {schema['minProperties']} properties")
         props = schema.get("properties", {})
         ap = schema.get("additionalProperties", True)
         for k, v in doc.items():
             sub_path = f"{path}.{k}" if path else k
             if k in props:
-                errors.extend(_validate_minimal(props[k], v, where, sub_path))
+                errors.extend(_validate_minimal(props[k], v, where, sub_path, root))
             elif ap is False:
                 errors.append(f"{where}: {sub_path}: unknown field")
             elif isinstance(ap, dict):
-                errors.extend(_validate_minimal(ap, v, where, sub_path))
-    elif t == "array":
-        if not isinstance(doc, list):
-            errors.append(f"{where}: {loc}: expected array, got {type(doc).__name__}")
-            return errors
+                errors.extend(_validate_minimal(ap, v, where, sub_path, root))
+    elif isinstance(doc, list):
         item_schema = schema.get("items")
         if isinstance(item_schema, dict):
             for i, item in enumerate(doc):
-                errors.extend(_validate_minimal(item_schema, item, where, f"{path}[{i}]"))
-    elif t == "string":
-        if not isinstance(doc, str):
-            errors.append(f"{where}: {loc}: expected string, got {type(doc).__name__}")
-        elif "enum" in schema and doc not in schema["enum"]:
-            errors.append(f"{where}: {loc}: {doc!r} not in {schema['enum']}")
-    elif t == "integer":
-        if not isinstance(doc, int) or isinstance(doc, bool):
-            errors.append(f"{where}: {loc}: expected integer, got {type(doc).__name__}")
+                errors.extend(_validate_minimal(item_schema, item, where, f"{path}[{i}]", root))
 
     return errors
 
