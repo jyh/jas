@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/panel.schema.json",
+  "title": "Panel",
+  "description": "A dockable panel specification (workspace/panels/*.yaml): its declared state, its hamburger menu, its widget tree, and its keyboard rows.",
+  "type": "object",
+  "required": [
+    "id",
+    "summary",
+    "description",
+    "state",
+    "menu",
+    "content"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*_panel_content$",
+      "description": "The content id every store keys the panel's scope by."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "panel"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "state": {
+      "type": "object",
+      "description": "The panel's declared state: `panel.<key>` in expressions. Every entry declares its type and default.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "default"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "number",
+              "bool",
+              "enum",
+              "string",
+              "list",
+              "object",
+              "path"
+            ]
+          },
+          "default": {},
+          "description": {
+            "type": "string"
+          },
+          "values": {
+            "type": "array"
+          },
+          "nullable": {
+            "type": "boolean"
+          },
+          "item_type": {
+            "type": "string"
+          },
+          "per_document": {
+            "type": "boolean"
+          },
+          "persist": {
+            "type": "boolean"
+          },
+          "max_length": {
+            "type": "integer"
+          },
+          "get": {
+            "type": "string",
+            "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+          },
+          "set": {
+            "type": "string",
+            "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+          },
+          "min": {
+            "type": "number"
+          },
+          "max": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "init": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string",
+        "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+      }
+    },
+    "menu": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "separator"
+            ]
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label"
+            ],
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "action": {
+                "type": "string"
+              },
+              "params": {
+                "type": "object"
+              },
+              "enabled_when": {
+                "type": "string",
+                "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+              },
+              "checked_when": {
+                "type": "string",
+                "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+              },
+              "checked": {
+                "type": "string",
+                "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+              },
+              "description": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "submenu"
+                ]
+              },
+              "dynamic": {
+                "type": "boolean"
+              },
+              "disabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "content": {
+      "$ref": "widget.schema.json#/$defs/widget"
+    },
+    "keyboard": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "action"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object"
+          },
+          "enabled_when": {
+            "type": "string",
+            "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,356 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jas/schema/widget.schema.json",
+  "title": "Widget",
+  "description": "The widget tree shared by panels, dialogs and the layout. Referenced from panel/dialog/layout.schema.json; not a top-level document of its own. `widget` admits the canonical kinds (`workspace_interpreter.widget_tree.CANONICAL_WIDGET_KINDS`, the set `scripts/check_widget_kind_dispatch.py` holds every active port to); `layout_widget` admits the pane-system kinds as well, which belong in layout.yaml and nowhere else.",
+  "$defs": {
+    "expr": {
+      "type": "string",
+      "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+    },
+    "behavior_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event"
+      ],
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "effects": {
+          "type": "array"
+        },
+        "params": {
+          "type": "object"
+        },
+        "condition": {
+          "type": "string",
+          "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "widget_props": {
+      "type": "object",
+      "description": "The keys a widget node may carry. CLOSED: an unknown key is a refusal, because a misspelt key (`behaviour`, `childs`) is otherwise a widget that silently does nothing.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "The widget kind. Each variant below fixes the enum."
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "style": {
+          "type": "object",
+          "description": "Presentation attributes. Left open: the style vocabulary is the renderers'."
+        },
+        "layout": {
+          "type": "string",
+          "enum": [
+            "row",
+            "column",
+            "wrap"
+          ]
+        },
+        "children": {
+          "type": "array",
+          "description": "Child widgets. Each variant below fixes the item schema."
+        },
+        "bind": {
+          "description": "Reactive bindings. The object form maps bind targets (`value`, `disabled`, `checked`, `visible`, \u2026) to EXPRESSION strings \u2014 never literals, since a literal here is a bind that can never change. The string form is the value-bind shorthand (`bind: dialog.name`).",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "description": "An expression string."
+              }
+            }
+          ]
+        },
+        "behavior": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/behavior_entry"
+          }
+        },
+        "col": {
+          "type": "integer"
+        },
+        "min": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "step": {
+          "type": "number"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array"
+        },
+        "_template": {
+          "type": "string",
+          "description": "Set by the compiler's template expansion: the template this node came from."
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "grid": {
+          "type": "object"
+        },
+        "content": {
+          "description": "A nested content spec (a widget object) or the id of one."
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "variant": {
+          "type": "string"
+        },
+        "foreach": {
+          "type": "object"
+        },
+        "do": {
+          "type": "object"
+        },
+        "disabled": {
+          "type": "string",
+          "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+        },
+        "alternates": {
+          "type": "object"
+        },
+        "nullable": {
+          "type": "boolean"
+        },
+        "on_check": {
+          "type": "array"
+        },
+        "hollow": {
+          "type": "boolean"
+        },
+        "enabled_when": {
+          "type": "string",
+          "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
+        },
+        "params": {
+          "type": "object"
+        },
+        "default_position": {},
+        "min_width": {
+          "type": "number"
+        },
+        "max_width": {
+          "type": "number"
+        },
+        "fixed_width": {
+          "type": [
+            "boolean",
+            "number"
+          ],
+          "description": "`true` pins the pane at its content width; a number pins it at that width."
+        },
+        "collapsed_width": {
+          "type": "number"
+        },
+        "title_bar": {},
+        "context_menu": {
+          "type": "array"
+        },
+        "size": {},
+        "orientation": {
+          "type": "string"
+        },
+        "class": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array"
+        },
+        "row_template": {},
+        "keyboard": {
+          "type": "array"
+        },
+        "tabs": {
+          "type": "array"
+        },
+        "cols": {
+          "type": "integer"
+        },
+        "gap": {
+          "type": "number"
+        },
+        "flex": {
+          "type": "boolean"
+        },
+        "layout_state": {},
+        "groups": {
+          "type": "array"
+        },
+        "name": {
+          "type": "string",
+          "description": "An icon's glyph name (`type: icon, name: char_size`)."
+        }
+      }
+    },
+    "widget": {
+      "description": "A widget in a panel or a dialog: a canonical kind, children likewise.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/widget_props"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "brush_preview",
+                "button",
+                "checkbox",
+                "col",
+                "color_bar",
+                "color_gradient",
+                "color_hue_bar",
+                "color_swatch",
+                "combo_box",
+                "container",
+                "disclosure",
+                "dropdown",
+                "element_preview",
+                "fill_stroke_widget",
+                "gradient_slider",
+                "gradient_tile",
+                "grid",
+                "icon",
+                "icon_button",
+                "icon_button_group",
+                "icon_select",
+                "length_input",
+                "number_input",
+                "panel",
+                "placeholder",
+                "radio",
+                "radio_group",
+                "reference_point_widget",
+                "row",
+                "select",
+                "separator",
+                "slider",
+                "spacer",
+                "tabs",
+                "text",
+                "text_input",
+                "toggle",
+                "tree_view"
+              ]
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/widget"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "layout_widget": {
+      "description": "A widget in layout.yaml: a canonical kind or a pane-system kind, children likewise.",
+      "allOf": [
+        {
+          "$ref": "#/$defs/widget_props"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "brush_preview",
+                "button",
+                "checkbox",
+                "col",
+                "color_bar",
+                "color_gradient",
+                "color_hue_bar",
+                "color_swatch",
+                "combo_box",
+                "container",
+                "disclosure",
+                "dropdown",
+                "element_preview",
+                "fill_stroke_widget",
+                "gradient_slider",
+                "gradient_tile",
+                "grid",
+                "icon",
+                "icon_button",
+                "icon_button_group",
+                "icon_select",
+                "length_input",
+                "number_input",
+                "panel",
+                "placeholder",
+                "radio",
+                "radio_group",
+                "reference_point_widget",
+                "row",
+                "select",
+                "separator",
+                "slider",
+                "spacer",
+                "tabs",
+                "text",
+                "text_input",
+                "toggle",
+                "tree_view",
+                "pane_system",
+                "pane",
+                "dock_view",
+                "brand_logo"
+              ]
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/layout_widget"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

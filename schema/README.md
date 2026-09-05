@@ -17,10 +17,29 @@ JSON Schema definitions for the workspace YAML format. Used by:
 |---|---|
 | `app.schema.json` | `workspace/app.yaml` |
 | `tool.schema.json` | `workspace/tools/*.yaml` |
+| `elements.schema.json` | `workspace/elements.yaml` |
+| `preferences.schema.json` | `workspace/preferences.yaml` |
+| `features.schema.json` | `workspace/features.yaml` |
+| `panel.schema.json` | `workspace/panels/*.yaml` — one panel each |
+| `dialog.schema.json` | `workspace/dialogs/*.yaml` — one dialog each |
+| `action.schema.json` | `workspace/actions.yaml` — one action each |
+| `menubar.schema.json` | `workspace/menubar.yaml` |
+| `layout.schema.json` | `workspace/layout.yaml` (the pane system: toolbar, canvas, dock) |
+| `widget.schema.json` | not a document: the widget tree the panel, dialog and layout schemas reach by a cross-file `$ref` |
 
-(Additional schemas will be added as the workspace grows: `panel.schema.json`,
-`widget.schema.json`, `action.schema.json`, `effect.schema.json`,
-`element.schema.json`, `expression.schema.json`.)
+The last six landed 2026-09-05 (VISION.md §11's last named gate). What they
+CLOSE: the top-level key set of every panel, dialog, action and menubar item
+(an unknown key is a refusal); the widget key set and the widget `type` enum
+(the canonical kinds `widget_tree.CANONICAL_WIDGET_KINDS`, plus the pane-system
+kinds in layout.yaml only); every `bind:` value an expression string; the
+effect vocabulary and the action categories as closed lists; dialog state as
+stored (`type` + `default`) or derived (`get` + `set`). What they LEAVE OPEN,
+on purpose: `style:` (the renderers' vocabulary), per-kind widget properties
+beyond their type, effect payload shapes, and expression parsing (layer 3).
+Cross-file `$ref`s resolve through a `referencing` registry built from this
+directory, never the network; the hand-rolled fallback used when `jsonschema`
+is absent skips `$ref`, `oneOf` and `anyOf`, so under it the widget tree is
+unvalidated — CI installs `jsonschema`.
 
 ## Editor integration
 
