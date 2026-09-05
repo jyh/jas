@@ -86,6 +86,30 @@ def ensure_artboards_invariant(document: dict, id_generator=None) -> bool:
     return repaired
 
 
+PANEL_CONTENT_SUFFIX = "_panel_content"
+
+
+def panel_content_id(raw: str) -> str:
+    """The panel CONTENT id a ``panel:`` reference names.
+
+    The workspace YAML names a panel's state scope by its SHORT kind at every
+    effect site (``set_panel_state: { panel: brushes, … }``) while every panel
+    map in the compiled bundle — and so ``panel_state_defaults`` and the
+    ``panel.<key>`` reads a panel's own widgets make — is keyed by the content
+    id (``brushes_panel_content``). Appending the suffix when it is absent, and
+    passing an id that already carries it through, is the one rule that makes
+    both spellings address ONE scope. It is applied at THIS store's boundary
+    (init, read, write, subscribe, the active panel) so that no caller can
+    spell its way into a second bucket — the defect JasSwift carried for its
+    artboards selection (native verbs on ``"artboards"``, the YAML's writes on
+    the content id) and this reference carried for every short-spelled YAML
+    write (a scope nothing had initialised, dropped silently). Mirrors
+    jas_dioxus ``panel_menu::panel_content_id`` and JasSwift
+    ``StateStore.panelContentId``.
+    """
+    return raw if raw.endswith(PANEL_CONTENT_SUFFIX) else raw + PANEL_CONTENT_SUFFIX
+
+
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
@@ -239,17 +263,21 @@ class StateStore:
 
     # ── Panel state ──────────────────────────────────────────
 
+    # Every panel id crossing this boundary is canonicalised by
+    # ``panel_content_id`` — see its docstring for why the rule lives HERE.
+
     def init_panel(self, panel_id: str, defaults: dict):
         """Initialize a panel's state scope with defaults."""
-        self._panels[panel_id] = dict(defaults)
+        self._panels[panel_content_id(panel_id)] = dict(defaults)
 
     def get_panel(self, panel_id: str, key: str):
-        scope = self._panels.get(panel_id)
+        scope = self._panels.get(panel_content_id(panel_id))
         if scope is None:
             return None
         return scope.get(key)
 
     def set_panel(self, panel_id: str, key: str, value):
+        panel_id = panel_content_id(panel_id)
         scope = self._panels.get(panel_id)
         if scope is None:
             return
@@ -260,10 +288,10 @@ class StateStore:
         self._notify_panel(panel_id, key, value)
 
     def get_panel_state(self, panel_id: str) -> dict:
-        return dict(self._panels.get(panel_id, {}))
+        return dict(self._panels.get(panel_content_id(panel_id), {}))
 
     def set_active_panel(self, panel_id: str | None):
-        self._active_panel = panel_id
+        self._active_panel = panel_content_id(panel_id) if panel_id is not None else None
 
     def get_active_panel_id(self) -> str | None:
         return self._active_panel
@@ -274,6 +302,7 @@ class StateStore:
         return dict(self._panels.get(self._active_panel, {}))
 
     def destroy_panel(self, panel_id: str):
+        panel_id = panel_content_id(panel_id)
         self._panels.pop(panel_id, None)
         self._panel_subscribers.pop(panel_id, None)
         if self._active_panel == panel_id:
@@ -489,6 +518,7 @@ class StateStore:
     def list_push(self, panel_id: str, key: str, value,
                   unique: bool = False, max_length: int | None = None):
         """Push a value to the front of a list in panel state."""
+        panel_id = panel_content_id(panel_id)
         scope = self._panels.get(panel_id)
         if scope is None:
             return
@@ -521,6 +551,7 @@ class StateStore:
         Appends rather than prepends: this is a set, and stable order keeps the
         panel-state goldens from churning on every click.
         """
+        panel_id = panel_content_id(panel_id)
         scope = self._panels.get(panel_id)
         if scope is None:
             return
@@ -548,7 +579,7 @@ class StateStore:
 
     def subscribe_panel(self, panel_id: str, callback: Callable):
         """Subscribe to panel state changes. callback receives (key, new_value)."""
-        self._panel_subscribers.setdefault(panel_id, []).append(callback)
+        self._panel_subscribers.setdefault(panel_content_id(panel_id), []).append(callback)
 
     def _notify(self, key: str, value):
         for key_set, callback in self._subscribers:
@@ -989,7 +1020,7 @@ class StateStore:
                 artboards_view.append(v)
         artboards_count = len(artboards_view)
         next_ab_name = next_artboard_name(raw_artboards)
-        ab_panel = self._panels.get("artboards", {})
+        ab_panel = self._panels.get(panel_content_id("artboards"), {})
         ab_sel = ab_panel.get("artboards_panel_selection", [])
         artboards_panel_selection_ids = (
             [s for s in ab_sel if isinstance(s, str)]
@@ -1025,8 +1056,8 @@ class StateStore:
         }
         if self._document is None:
             sel_count = 0
-            if self._active_panel == "layers":
-                panel = self._panels.get("layers", {})
+            if self._active_panel == panel_content_id("layers"):
+                panel = self._panels.get(panel_content_id("layers"), {})
                 sel = panel.get("layers_panel_selection", [])
                 if isinstance(sel, list):
                     sel_count = len(sel)
@@ -1066,8 +1097,8 @@ class StateStore:
         # Insertion index: min of selected top-level indices + 1, else end.
         # Selection lives on the layers panel; read if active.
         insert_idx = len(layers)
-        if self._active_panel == "layers":
-            panel = self._panels.get("layers", {})
+        if self._active_panel == panel_content_id("layers"):
+            panel = self._panels.get(panel_content_id("layers"), {})
             sel = panel.get("layers_panel_selection", [])
             if isinstance(sel, list):
                 top_level_indices = []
@@ -1090,8 +1121,8 @@ class StateStore:
         # logic in actions like enter_isolation_mode.
         sel_count = 0
         sel_paths: list[tuple[int, ...]] = []
-        if self._active_panel == "layers":
-            panel = self._panels.get("layers", {})
+        if self._active_panel == panel_content_id("layers"):
+            panel = self._panels.get(panel_content_id("layers"), {})
             sel = panel.get("layers_panel_selection", [])
             if isinstance(sel, list):
                 sel_count = len(sel)

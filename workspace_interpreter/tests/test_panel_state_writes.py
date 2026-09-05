@@ -112,6 +112,17 @@ def test_every_case_moves_the_panel_scope(ws, cases):
         )
 
 
+def test_every_case_writes_through_the_yaml_spelling(cases):
+    """The `write_as` field is the arm that pins the store-boundary rule; a
+    case that writes by the content id it reads back by exercises nothing
+    about spelling. Every case carries the SHORT kind."""
+    for case in cases:
+        pid = case["args"]["panel"]
+        assert case["args"].get("write_as") == pid[: -len("_panel_content")], (
+            f"case {case['name']} does not write through the YAML's spelling"
+        )
+
+
 def test_more_than_one_panel_is_covered(cases):
     """Generic storage means generic: a corpus naming a single panel would be
     satisfied by a Brushes-shaped special case."""
@@ -125,9 +136,14 @@ def _run(ws, case):
     store = StateStore()
     store.init_panel(pid, panel_state_defaults(spec))
     store.set_active_panel(pid)
+    # `write_as` is the spelling the WRITE uses — the YAML's short kind
+    # (`panel: brushes`) — while the scope is initialised and read back by
+    # the content id. A store that does not canonicalise at its boundary
+    # writes into a scope nothing initialised and reds here.
+    write_as = case["args"].get("write_as", pid)
     for write in case["args"]["writes"]:
         run_effects(
-            [{"set_panel_state": {"panel": pid, "key": write["key"], "value": write["value"]}}],
+            [{"set_panel_state": {"panel": write_as, "key": write["key"], "value": write["value"]}}],
             {},
             store,
         )

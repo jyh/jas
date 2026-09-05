@@ -6299,7 +6299,11 @@ mod tests {
             let mut st = AppState::new();
             for w in writes {
                 let mut sps = serde_json::Map::new();
-                sps.insert("panel".to_string(), serde_json::Value::String(pid.to_string()));
+                // `write_as` is the YAML's SHORT spelling of the panel; the
+                // scope is read back by the content id. The write must
+                // normalise (`panel_content_id`) or the case reds.
+                let write_as = tc["args"]["write_as"].as_str().unwrap_or(pid);
+                sps.insert("panel".to_string(), serde_json::Value::String(write_as.to_string()));
                 sps.insert("key".to_string(), w["key"].clone());
                 sps.insert("value".to_string(), w["value"].clone());
                 crate::interpreter::renderer::apply_set_panel_state_with_ctx(&sps, &mut st, None);

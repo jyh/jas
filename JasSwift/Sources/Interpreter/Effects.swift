@@ -624,13 +624,12 @@ private func runOne(
         let writtenPanel: String?
         if let rawPanelId = sps["panel"] as? String {
             // YAML actions name panels by their short kind ("swatches",
-            // "color", "stroke") but the StateStore keys panel state by
-            // the content id ("swatches_panel_content"). Append the
-            // suffix when callers pass the short form so writes land in
-            // the same bucket the YAML's `panel.<key>` reads from.
-            let panelId = rawPanelId.hasSuffix("_panel_content")
-                ? rawPanelId
-                : rawPanelId + "_panel_content"
+            // "color", "stroke"); the store canonicalises every spelling
+            // to the content id at its boundary (`StateStore.panelContentId`),
+            // so this write and a native verb's write on the short name
+            // land in ONE bucket. The rule used to live here alone, which
+            // is how the artboards selection came to have two.
+            let panelId = StateStore.panelContentId(rawPanelId)
             store.setPanel(panelId, key, valueToAny(value))
             writtenPanel = panelId
         } else if let activeId = store.getActivePanelId() {

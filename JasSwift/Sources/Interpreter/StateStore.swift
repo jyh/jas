@@ -133,28 +133,52 @@ public class StateStore {
 
     // MARK: - Panel state
 
+    /// The panel CONTENT id a `panel:` reference names.
+    ///
+    /// The workspace YAML names a panel's state scope by its SHORT kind at
+    /// every effect site (`set_panel_state: { panel: brushes, … }`) while
+    /// every panel map in the compiled bundle — and so `panelStateDefaults`
+    /// and the `panel.<key>` reads a panel's own widgets make — is keyed by
+    /// the content id (`brushes_panel_content`). Appending the suffix when it
+    /// is absent, and passing an id that already carries it through, is the
+    /// one rule that makes both spellings address ONE scope. It is applied
+    /// at THIS store's boundary (init, read, write, the active panel, the
+    /// list verbs) so no caller can spell its way into a second bucket.
+    ///
+    /// This port used to apply it inside the `set_panel_state` effect and
+    /// nowhere else: the YAML's `panel: artboards` writes landed in
+    /// `artboards_panel_content` while the native artboard verbs, the
+    /// artboards panel's dispatch and the dialog scope all read and wrote
+    /// `"artboards"` — two buckets for one selection, and which one a
+    /// reader saw depended on who had written last. Mirrors jas_dioxus
+    /// `panel_menu::panel_content_id` and the reference's
+    /// `state_store.panel_content_id`.
+    public static func panelContentId(_ raw: String) -> String {
+        raw.hasSuffix("_panel_content") ? raw : raw + "_panel_content"
+    }
+
     public func initPanel(_ panelId: String, defaults: [String: Any]) {
-        panels[panelId] = defaults
+        panels[Self.panelContentId(panelId)] = defaults
     }
 
     public func hasPanel(_ panelId: String) -> Bool {
-        panels[panelId] != nil
+        panels[Self.panelContentId(panelId)] != nil
     }
 
     public func getPanel(_ panelId: String, _ key: String) -> Any? {
-        panels[panelId]?[key]
+        panels[Self.panelContentId(panelId)]?[key]
     }
 
     public func setPanel(_ panelId: String, _ key: String, _ value: Any?) {
-        panels[panelId]?[key] = value
+        panels[Self.panelContentId(panelId)]?[key] = value
     }
 
     public func getPanelState(_ panelId: String) -> [String: Any] {
-        panels[panelId] ?? [:]
+        panels[Self.panelContentId(panelId)] ?? [:]
     }
 
     public func setActivePanel(_ panelId: String?) {
-        activePanel = panelId
+        activePanel = panelId.map(Self.panelContentId)
     }
 
     public func getActivePanelId() -> String? {
@@ -167,6 +191,7 @@ public class StateStore {
     }
 
     public func destroyPanel(_ panelId: String) {
+        let panelId = Self.panelContentId(panelId)
         panels.removeValue(forKey: panelId)
         if activePanel == panelId {
             activePanel = nil
@@ -350,6 +375,7 @@ public class StateStore {
 
     public func listPush(_ panelId: String, _ key: String, _ value: Any,
                          unique: Bool = false, maxLength: Int? = nil) {
+        let panelId = Self.panelContentId(panelId)
         guard panels[panelId] != nil else { return }
         var lst = (panels[panelId]?[key] as? [Any]) ?? []
         if unique {
