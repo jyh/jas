@@ -498,6 +498,22 @@ fn live_panel_state(
             vec![
                 ("type_filter", J::Array(types.into_iter().map(J::String).collect())),
                 ("search_query", s(&st.layers_search_query)),
+                // The TREE selection, as the `__path__` markers the Group B
+                // actions iterate (`panel.layers_panel_selection`) and the
+                // keyboard rows index (`[0]`). The ONE name for it since
+                // 2026-09-05; the declared default is `[]`, so without this
+                // arm the scope would carry an empty list for any selection.
+                (
+                    "layers_panel_selection",
+                    J::Array(
+                        st.layers_panel_selection
+                            .iter()
+                            .map(|p| serde_json::json!({
+                                "__path__": p.iter().map(|&i| i as u64).collect::<Vec<_>>()
+                            }))
+                            .collect(),
+                    ),
+                ),
                 // "Exit Isolation Mode" reads `panel.isolation_stack.length`;
                 // "Collect in New Layer" wants it EMPTY. Each entry is a path
                 // of child indices, published as the YAML's list-of-lists.
