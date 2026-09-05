@@ -283,7 +283,8 @@ private func panelNum(_ model: Model, _ key: String) -> Double? {
     workspace.addCanvas(second)
     #expect(second.defaultFill == nil, "the fresh canvas's own tier is empty")
 
-    #expect(ColorPanel.isEnabled("invert_active_color", model: second),
+    #expect(panelIsEnabled(.color, cmd: "invert_active_color",
+                           layout: WorkspaceLayout.defaultLayout(), model: second),
             "Invert operates on the colour the panel DISPLAYS")
     var layout = WorkspaceLayout.defaultLayout()
     // `invert_active_color` touches neither the layout nor the address; any
@@ -310,7 +311,8 @@ private func panelNum(_ model: Model, _ key: String) -> Double? {
     workspace.addCanvas(model)
     LayersPanel.dispatchYamlAction("set_fill_none", model: model)
     #expect(model.appDefaultFill == nil, "the None route clears both tiers")
-    #expect(!ColorPanel.isEnabled("invert_active_color", model: model),
+    #expect(!panelIsEnabled(.color, cmd: "invert_active_color",
+                            layout: WorkspaceLayout.defaultLayout(), model: model),
             "no tier resolves, so Invert / Complement stay greyed")
 }
 

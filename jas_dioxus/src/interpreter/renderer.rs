@@ -2770,6 +2770,10 @@ pub(crate) fn build_active_document_view(
         // recursion limit (the no-tab object is already at the ceiling).
         if let serde_json::Value::Object(m) = &mut empty {
             m.insert("symbols".to_string(), serde_json::json!([]));
+            // The two layers-panel rollups (see the tab branch): no document,
+            // so no item is a container and none is a group.
+            m.insert("layers_panel_selection_is_container".to_string(), serde_json::Value::Bool(false));
+            m.insert("layers_panel_selection_has_group".to_string(), serde_json::Value::Bool(false));
         }
         return empty;
     };
@@ -2814,6 +2818,21 @@ pub(crate) fn build_active_document_view(
         Some(&i) => i + 1,
         None => tab.model.document().layers.len(),
     };
+    // runtime_contexts.yaml's two layers-panel rollups — "the sole selected
+    // layer item is a container (group or layer)" and "at least one selected
+    // layer item is a group". Declared there, read by layers.yaml's Enter
+    // Isolation Mode / Flatten Artwork rows (and those actions' own
+    // `enabled_when`), and built by NO port until the panel-menu
+    // `enabled_when` went live and the read census found both unpublished:
+    // they had evaluated null wherever anything evaluated them at all.
+    let layers_panel_selection_is_container = st.layers_panel_selection.len() == 1
+        && matches!(
+            tab.model.document().get_element(&st.layers_panel_selection[0]),
+            Some(Element::Group(_)) | Some(Element::Layer(_))
+        );
+    let layers_panel_selection_has_group = st.layers_panel_selection.iter().any(|p| {
+        matches!(tab.model.document().get_element(p), Some(Element::Group(_)))
+    });
     // Canvas selection rollup (Phase 0a, Align panel): scalar/boolean
     // plus path markers for downstream predicates and list operations.
     let canvas_selection = &tab.model.document().selection;
@@ -2996,6 +3015,14 @@ pub(crate) fn build_active_document_view(
         "view_offset_x": tab.model.view_offset_x,
         "view_offset_y": tab.model.view_offset_y,
     });
+    // Inserted outside the json! literal to keep the macro under the
+    // recursion limit (the tab-branch object is at the ceiling too).
+    if let serde_json::Value::Object(m) = &mut view {
+        m.insert("layers_panel_selection_is_container".to_string(),
+                 serde_json::Value::Bool(layers_panel_selection_is_container));
+        m.insert("layers_panel_selection_has_group".to_string(),
+                 serde_json::Value::Bool(layers_panel_selection_has_group));
+    }
     // Inserted after the json! literal: the populated active-document
     // object is already at the macro recursion ceiling, so the symbols
     // list is attached here (SYMBOLS.md §8).

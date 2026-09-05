@@ -301,18 +301,14 @@ public struct PanelGroupView: View {
             let overrides = propertiesPanelLiveOverrides(model: m)
             for (k, v) in overrides { panelMap[k] = v }
         }
-        // Render-time layers-panel selection, if the layers panel is
-        // currently initialised in the shared store. buildPanelCtx runs
-        // for whichever panel is being rendered, so it may not be the
-        // layers panel; pass [] when absent — only the selection
-        // scalars (has_selection / selection_count / element_selection)
-        // are consulted by non-layers bind predicates.
-        let layersPanelSelection: [[Int]] = {
-            guard let sel = model?.stateStore.getPanel("layers", "layers_panel_selection") as? [[Int]] else {
-                return []
-            }
-            return sel
-        }()
+        // Render-time layers-panel selection, through the ONE reader the
+        // panel-menu context uses (`layersPanelSelection(model:)`): the store
+        // key layers.yaml declares, mirrored from the tree view's selection.
+        // This used to read `"layers" / "layers_panel_selection"`, a scope
+        // and key nothing in this app ever wrote, so
+        // `active_document.layers_panel_selection_count` was 0 in every body
+        // context regardless of what the artist had selected.
+        let layersPanelSelection: [[Int]] = JasLib.layersPanelSelection(model: model)
         // document namespace — exposes per-document fields the YAML
         // reads but the StateStore has no native source for. Currently
         // just recent_colors, used by panel init expressions (color,
@@ -489,7 +485,8 @@ public struct PanelGroupView: View {
                                layout: workspaceLayout, model: model)
             },
             isEnabled: { cmd in
-                panelIsEnabled(activeKind, cmd: cmd, model: model)
+                panelIsEnabled(activeKind, cmd: cmd,
+                               layout: workspaceLayout, model: model)
             },
             onSelect: dispatchWithDialogBridge
         )

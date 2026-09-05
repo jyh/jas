@@ -288,3 +288,240 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
     ColorPanel.pushRecentColor(sentinel, model: m)
     #expect(box.count >= 1)
 }
+
+// ── Generic panel-menu ENABLED state ──────────────────────────────
+//
+// The `enabled` half of what `test_fixtures/algorithms/panel_menu_state.json`
+// pins, driven through this app's LIVE context rather than a seeded one.
+// Until this landed `panelIsEnabled` answered `true` for every panel but
+// Color, whose native hook restated a rule color.yaml already states; the
+// other forty-odd `enabled_when` rows were never evaluated live in EITHER
+// active port. Mirrors the Rust `panel_is_enabled_*` tests.
+
+/// A model whose document holds a layer with a rect at `[0, 0]` — SELECTED on
+/// the canvas — and a group at `[0, 1]` for the layers-panel rollups.
+private func modelWithOneSelectedRectAndAGroup() -> Model {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 10, height: 10))
+    let inner = Element.rect(Rect(x: 20, y: 0, width: 10, height: 10))
+    let group = Element.group(Group(children: [inner]))
+    let layer = Layer(name: "L0", children: [rect, group])
+    let doc = Document(layers: [layer], selection: [ElementSelection.all([0, 0])])
+    return Model(document: doc)
+}
+
+/// Seed a panel's store scope from its declared defaults and write one key.
+private func writePanel(_ model: Model, _ contentId: String, _ key: String, _ value: Any) {
+    let store = model.stateStore
+    if !store.hasPanel(contentId) {
+        store.initPanel(contentId, defaults: WorkspaceData.load()?.panelStateDefaults(contentId) ?? [:])
+    }
+    store.setPanel(contentId, key, value)
+}
+
+@Test func panelIsEnabledEvaluatesTheYamlPredicates() {
+    let layout = WorkspaceLayout.defaultLayout()
+    let m = Model()
+
+    // brushes.yaml: "New Brush" reads `active_document.has_selection`.
+    #expect(!panelIsEnabled(.brushes, cmd: "open_brush_options:create", layout: layout, model: m),
+            "New Brush needs a canvas selection")
+    // `panel.selected_brushes.length > 0`, from the shared store.
+    #expect(!panelIsEnabled(.brushes, cmd: "duplicate_brush", layout: layout, model: m))
+    #expect(!panelIsEnabled(.brushes, cmd: "delete_brush", layout: layout, model: m))
+    writePanel(m, "brushes_panel_content", "selected_brushes", [0])
+    #expect(panelIsEnabled(.brushes, cmd: "duplicate_brush", layout: layout, model: m))
+    #expect(panelIsEnabled(.brushes, cmd: "delete_brush", layout: layout, model: m))
+
+    // symbols.yaml / concepts.yaml: `panel.selected_* != null`.
+    #expect(!panelIsEnabled(.symbols, cmd: "place_instance", layout: layout, model: m))
+    writePanel(m, "symbols_panel_content", "selected_symbol", "star")
+    #expect(panelIsEnabled(.symbols, cmd: "place_instance", layout: layout, model: m))
+    #expect(!panelIsEnabled(.concepts, cmd: "place_concept_instance", layout: layout, model: m))
+    writePanel(m, "concepts_panel_content", "selected_concept", "chair")
+    #expect(panelIsEnabled(.concepts, cmd: "place_concept_instance", layout: layout, model: m))
+
+    // layers.yaml: "Exit Isolation Mode" reads `panel.isolation_stack.length`,
+    // which this app keeps on the Model.
+    #expect(!panelIsEnabled(.layers, cmd: "exit_isolation_mode", layout: layout, model: m))
+    m.layersIsolationStack.append([0])
+    #expect(panelIsEnabled(.layers, cmd: "exit_isolation_mode", layout: layout, model: m))
+    m.layersIsolationStack.removeAll()
+
+    // artboards.yaml: `active_document.artboards_panel_selection_ids.length`,
+    // from the scope the artboard verbs write.
+    #expect(!panelIsEnabled(.artboards, cmd: "open_artboard_options", layout: layout, model: m))
+    writePanel(m, "artboards", "artboards_panel_selection", ["ab-1"])
+    #expect(panelIsEnabled(.artboards, cmd: "open_artboard_options", layout: layout, model: m))
+
+    // gradient.yaml: a literal `enabled_when: "false"` is a disabled row.
+    #expect(!panelIsEnabled(.gradient, cmd: "gradient_reverse", layout: layout, model: m))
+
+    // No predicate, and no entry at all: enabled — `MenuState`'s default.
+    #expect(panelIsEnabled(.brushes, cmd: "select_all_unused_brushes", layout: layout, model: m))
+    #expect(panelIsEnabled(.brushes, cmd: "no_such_command", layout: layout, model: m))
+    // …and with no model at all, the same defaults.
+    #expect(!panelIsEnabled(.brushes, cmd: "open_brush_options:create", layout: layout, model: nil))
+    #expect(panelIsEnabled(.brushes, cmd: "no_such_command", layout: layout, model: nil))
+
+    // With a real selection on the canvas: New Brush lights, a mask can be
+    // made but not released, and New Symbol's `selection_count == 1`.
+    var sel = modelWithOneSelectedRectAndAGroup()
+    #expect(panelIsEnabled(.brushes, cmd: "open_brush_options:create", layout: layout, model: sel))
+    #expect(panelIsEnabled(.opacity, cmd: "make_opacity_mask", layout: layout, model: sel))
+    #expect(!panelIsEnabled(.opacity, cmd: "release_opacity_mask", layout: layout, model: sel))
+    #expect(panelIsEnabled(.symbols, cmd: "new_symbol", layout: layout, model: sel))
+    // Put a mask on the selection: the four mask rows flip together.
+    var opLayout = layout
+    let addr = PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0)
+    OpacityPanel.dispatch("make_opacity_mask", addr: addr, layout: &opLayout, model: sel)
+    #expect(!panelIsEnabled(.opacity, cmd: "make_opacity_mask", layout: layout, model: sel))
+    #expect(panelIsEnabled(.opacity, cmd: "release_opacity_mask", layout: layout, model: sel))
+    #expect(panelIsEnabled(.opacity, cmd: "disable_opacity_mask", layout: layout, model: sel))
+    #expect(panelIsEnabled(.opacity, cmd: "unlink_opacity_mask", layout: layout, model: sel))
+
+    // layers.yaml's rollups over the LAYERS-PANEL selection on that document
+    // (runtime_contexts.yaml: is_container = the sole selected item is a group
+    // or layer; has_group = any selected item is a group). `[0]` is the layer,
+    // `[0, 0]` the rect, `[0, 1]` the group. The selection is read from the
+    // store key the tree view mirrors into.
+    sel = modelWithOneSelectedRectAndAGroup()
+    writePanel(sel, "layers_panel_content", "panel_selection", [[0]])
+    #expect(panelIsEnabled(.layers, cmd: "new_group", layout: layout, model: sel))
+    #expect(panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
+            "a layer is a container")
+    #expect(!panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel),
+            "a layer is not a group")
+    #expect(panelIsEnabled(.layers, cmd: "collect_in_new_layer", layout: layout, model: sel))
+    sel.layersIsolationStack.append([0])
+    #expect(!panelIsEnabled(.layers, cmd: "collect_in_new_layer", layout: layout, model: sel),
+            "not while isolated: the conjunction's second half")
+    sel.layersIsolationStack.removeAll()
+    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 0]])
+    #expect(!panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
+            "a rect is not a container")
+    #expect(!panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel))
+    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 1]])
+    #expect(panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
+            "a group is a container")
+    #expect(panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel),
+            "a group is a group")
+    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 0], [0, 1]])
+    #expect(!panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
+            "two items: not the SOLE selected item")
+    #expect(panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel),
+            "at least one of them is a group")
+    writePanel(sel, "layers_panel_content", "panel_selection", [] as [[Int]])
+    #expect(!panelIsEnabled(.layers, cmd: "new_group", layout: layout, model: sel))
+}
+
+/// The panels whose enabled state ALREADY worked natively must keep working
+/// once the hooks are gone — the generic evaluator has to read the same live
+/// values the hooks read (the colour tiers for Color, the store's swatch
+/// selection for Swatches), not the bundle defaults.
+@Test func panelIsEnabledStillFollowsLiveStateForTheNativePanels() {
+    let layout = WorkspaceLayout.defaultLayout()
+    let m = Model(document: Document.newEmptyDocument())
+    // color.yaml: `if state.fill_on_top then state.fill_color != null else
+    // state.stroke_color != null`. A fresh model's app tier holds a fill and a
+    // stroke, fill on top.
+    m.appDefaultFill = Fill(color: .white)
+    m.appDefaultStroke = Stroke(color: .black)
+    m.defaultFill = nil
+    m.fillOnTop = true
+    #expect(panelIsEnabled(.color, cmd: "invert_active_color", layout: layout, model: m))
+    #expect(panelIsEnabled(.color, cmd: "complement_active_color", layout: layout, model: m))
+    m.appDefaultFill = nil
+    #expect(!panelIsEnabled(.color, cmd: "invert_active_color", layout: layout, model: m),
+            "no fill in any tier, fill on top: nothing to invert")
+    m.fillOnTop = false
+    #expect(panelIsEnabled(.color, cmd: "invert_active_color", layout: layout, model: m),
+            "stroke on top, and the stroke tier holds black")
+    // swatches.yaml: `panel.selected_swatches.length > 0`.
+    #expect(!panelIsEnabled(.swatches, cmd: "delete_swatch", layout: layout, model: m))
+    #expect(!panelIsEnabled(.swatches, cmd: "duplicate_swatch", layout: layout, model: m))
+    writePanel(m, "swatches_panel_content", "selected_swatches", [2])
+    #expect(panelIsEnabled(.swatches, cmd: "delete_swatch", layout: layout, model: m))
+    #expect(panelIsEnabled(.swatches, cmd: "duplicate_swatch", layout: layout, model: m))
+}
+
+/// The namespace reads a panel-menu predicate string makes: every
+/// `<head>.<key>` whose head is one of the four namespaces the menu context
+/// publishes, plus the bare OPACITY.md selection predicates. The scanner is a
+/// receiver assumption, stated: it skips string literals, keeps two segments
+/// (`panel.selected_brushes`, not `.length`), and a bare identifier outside
+/// the listed five is invisible to it — the reference's own parser censuses
+/// bare names in `workspace_interpreter/tests/test_panel_menu_state.py`, so a
+/// new one reds there. Mirrors the Rust `predicate_reads`.
+private func predicateReads(_ expr: String) -> [String] {
+    let heads: Set<String> = ["state", "panel", "active_document", "preferences"]
+    let bare: Set<String> = ["selection_has_mask", "selection_mask_clip",
+                             "selection_mask_invert", "selection_mask_linked",
+                             "editing_target_is_mask"]
+    var out: [String] = []
+    var inQuote = false
+    var ident = ""
+    func flush() {
+        defer { ident = "" }
+        guard !ident.isEmpty else { return }
+        let segs = ident.split(separator: ".").map(String.init)
+        if segs.count >= 2, heads.contains(segs[0]) {
+            out.append("\(segs[0]).\(segs[1])")
+        } else if segs.count == 1, bare.contains(segs[0]) {
+            out.append(segs[0])
+        }
+    }
+    for c in expr {
+        if c == "\"" || c == "'" { flush(); inQuote.toggle(); continue }
+        if inQuote { continue }
+        if c.isLetter || c.isNumber || c == "_" || c == "." { ident.append(c) } else { flush() }
+    }
+    flush()
+    return out
+}
+
+private func ctxHasPath(_ ctx: [String: Any], _ path: String) -> Bool {
+    var cur: Any = ctx
+    for seg in path.split(separator: ".") {
+        guard let obj = cur as? [String: Any], let next = obj[String(seg)] else { return false }
+        cur = next
+    }
+    return true
+}
+
+/// Every read a panel-menu predicate makes resolves to a key the LIVE menu
+/// context publishes. A key may legitimately be NSNull
+/// (`panel.selected_symbol`), so presence is the assertion, not truthiness.
+/// The positive control is the read count: a scanner that matched nothing
+/// would pass an empty census. Mirrors the Rust
+/// `every_panel_menu_predicate_read_is_published_to_the_menu_context`.
+@Test func everyPanelMenuPredicateReadIsPublishedToTheMenuContext() {
+    guard let ws = WorkspaceData.load(),
+          let panels = ws.data["panels"] as? [String: Any] else {
+        Issue.record("Failed to load the workspace bundle")
+        return
+    }
+    let layout = WorkspaceLayout.defaultLayout()
+    let model = modelWithOneSelectedRectAndAGroup()
+    var reads = 0
+    var missing: [String] = []
+    for (contentId, spec) in panels {
+        guard let panel = spec as? [String: Any],
+              let menu = panel["menu"] as? [Any] else { continue }
+        let ctx = panelMenuContext(contentId, layout: layout, model: model)
+        for entry in menu {
+            guard let obj = entry as? [String: Any] else { continue }
+            for key in ["enabled_when", "checked_when", "checked"] {
+                guard let expr = obj[key] as? String else { continue }
+                for path in predicateReads(expr) {
+                    reads += 1
+                    if !ctxHasPath(ctx, path) {
+                        missing.append("\(contentId): \(key): \(expr) reads \(path)")
+                    }
+                }
+            }
+        }
+    }
+    #expect(reads >= 40, "positive control: only \(reads) predicate reads found")
+    #expect(missing.isEmpty,
+            "panel-menu predicate reads the menu context does not publish:\n\(missing.joined(separator: "\n"))")
+}

@@ -25,7 +25,9 @@
             ]
           }
         },
-        "canvas_selection_non_empty": false
+        "active_document": {
+          "has_selection": false
+        }
       }
     },
     "expected": [
@@ -226,7 +228,9 @@
             ]
           }
         },
-        "canvas_selection_non_empty": true
+        "active_document": {
+          "has_selection": true
+        }
       }
     },
     "expected": [
@@ -823,6 +827,1143 @@
         "path": [
           0,
           14
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "concepts_none_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "concepts_panel_content",
+      "ctx": {
+        "panel": {
+          "selected_concept": null
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "place_concept_instance",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "concepts_chair_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "concepts_panel_content",
+      "ctx": {
+        "panel": {
+          "selected_concept": "chair"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "place_concept_instance",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "symbols_nothing_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "symbols_panel_content",
+      "ctx": {
+        "panel": {
+          "selected_symbol": null
+        },
+        "active_document": {
+          "selection_count": 0
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_symbol",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "place_instance",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_symbol_action",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "symbols_one_element_and_one_master_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "symbols_panel_content",
+      "ctx": {
+        "panel": {
+          "selected_symbol": "star"
+        },
+        "active_document": {
+          "selection_count": 1
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_symbol",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "place_instance",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_symbol_action",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "artboards_one_of_two_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "artboards_panel_content",
+      "ctx": {
+        "panel": {},
+        "active_document": {
+          "artboards_panel_selection_ids": [
+            "ab-1"
+          ],
+          "artboards_count": 2
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_artboard",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "rename_artboard",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "delete_empty_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "convert_to_artboards",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "open_artboard_options",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "rearrange_artboards",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "reset_artboards_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "artboards_both_of_two_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "artboards_panel_content",
+      "ctx": {
+        "panel": {},
+        "active_document": {
+          "artboards_panel_selection_ids": [
+            "ab-1",
+            "ab-2"
+          ],
+          "artboards_count": 2
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_artboard",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_artboards",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "rename_artboard",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "delete_empty_artboards",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "convert_to_artboards",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "open_artboard_options",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "rearrange_artboards",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "reset_artboards_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "gradient_every_row_pending_renderer",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "gradient_panel_content",
+      "ctx": {
+        "panel": {}
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "gradient_reverse",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "gradient_distribute_stops",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "gradient_reset_midpoints",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "gradient_save_library",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "layers_group_selected_not_isolated",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "layers_panel_content",
+      "ctx": {
+        "panel": {
+          "isolation_stack": []
+        },
+        "active_document": {
+          "layers_panel_selection_count": 1,
+          "layers_panel_selection_is_container": true,
+          "layers_panel_selection_has_group": true,
+          "any_layer_visible": true,
+          "any_layer_preview": true,
+          "any_layer_unlocked": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_layer",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "new_group",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "toggle_all_layers_visibility",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "toggle_all_layers_outline",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "toggle_all_layers_lock",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "enter_isolation_mode",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "exit_isolation_mode",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "flatten_artwork",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "collect_in_new_layer",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "layers_two_shapes_selected_isolated",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "layers_panel_content",
+      "ctx": {
+        "panel": {
+          "isolation_stack": [
+            {
+              "__path__": [
+                0
+              ]
+            }
+          ]
+        },
+        "active_document": {
+          "layers_panel_selection_count": 2,
+          "layers_panel_selection_is_container": false,
+          "layers_panel_selection_has_group": false,
+          "any_layer_visible": true,
+          "any_layer_preview": true,
+          "any_layer_unlocked": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_layer",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "new_group",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "toggle_all_layers_visibility",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "toggle_all_layers_outline",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "toggle_all_layers_lock",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "enter_isolation_mode",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "exit_isolation_mode",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "flatten_artwork",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "collect_in_new_layer",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "opacity_selection_masked",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "opacity_panel_content",
+      "ctx": {
+        "panel": {
+          "thumbnails_hidden": false,
+          "options_shown": true,
+          "new_masks_clipping": true,
+          "new_masks_inverted": false
+        },
+        "selection_has_mask": true
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_opacity_thumbnails",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "toggle_opacity_options",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "make_opacity_mask",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "release_opacity_mask",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "disable_opacity_mask",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "unlink_opacity_mask",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          8
+        ],
+        "action": "toggle_new_masks_clipping",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "toggle_new_masks_inverted",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "toggle_page_isolated_blending",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          12
+        ],
+        "action": "toggle_page_knockout_group",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          14
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "color_fill_none_on_top",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "color_panel_content",
+      "ctx": {
+        "panel": {
+          "mode": "cmyk"
+        },
+        "state": {
+          "fill_on_top": true,
+          "fill_color": null,
+          "stroke_color": "#000000"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "invert_active_color",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "complement_active_color",
+        "enabled": false,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "color_stroke_on_top_fill_none",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "color_panel_content",
+      "ctx": {
+        "panel": {
+          "mode": "cmyk"
+        },
+        "state": {
+          "fill_on_top": false,
+          "fill_color": null,
+          "stroke_color": "#000000"
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "set_color_panel_mode",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          6
+        ],
+        "action": "invert_active_color",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "complement_active_color",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "swatches_two_selected",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "swatches_panel_content",
+      "ctx": {
+        "panel": {
+          "thumbnail_size": "large",
+          "selected_swatches": [
+            1,
+            4
+          ],
+          "selected_library": "default",
+          "open_libraries": []
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "new_swatch",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          1
+        ],
+        "action": "duplicate_swatch",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "delete_swatch",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "select_all_unused_swatches",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "add_used_colors",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "sort_swatches_by_name",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          9
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          10
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          11
+        ],
+        "action": "set_swatch_thumbnail_size",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          13
+        ],
+        "action": "open_swatch_options",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          15
+        ],
+        "action": "open_swatch_library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          16
+        ],
+        "action": "save_swatch_library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          18
         ],
         "action": "close_panel",
         "enabled": true,

@@ -294,9 +294,56 @@ pub fn is_checked_from_yaml(content_id: &str, cmd: &str, ctx: &serde_json::Value
     }
 }
 
+// ---------------------------------------------------------------------------
+// Generic panel-menu ENABLED state
+// ---------------------------------------------------------------------------
+
+/// The `enabled_when:` predicate of the panel-menu entry whose runtime command
+/// is `cmd`, or `None` when there is no such entry or it declares none.
+///
+/// Matched with the SAME fold `build_menu_items` applies, exactly as
+/// `checked_expr` is. One spelling only: the panel-menu vocabulary writes
+/// `enabled_when:` everywhere (the menubar's word too), and the only static
+/// `disabled: true` in a panel menu sits on a row with no `action:` and so no
+/// command to look up.
+pub fn enabled_expr(content_id: &str, cmd: &str) -> Option<String> {
+    let entry = menu_entry(content_id, cmd)?;
+    entry
+        .get("enabled_when")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Whether the panel-menu entry for `cmd` is enabled, evaluating its bundle
+/// predicate against `ctx` through the SHARED menu-state evaluator.
+///
+/// An entry with no predicate — and a command that names no entry — is
+/// enabled, matching `menu_state`'s `enabled: true` default for an item with
+/// no `enabled_when`. Before this the answer came from two native hooks
+/// (`color_panel::is_enabled`, `swatches_panel::is_enabled`) that restated in
+/// Rust two rules the YAML already states, and `true` for the other forty-odd
+/// rows, which were therefore never evaluated live in EITHER active port.
+pub fn is_enabled_from_yaml(content_id: &str, cmd: &str, ctx: &serde_json::Value) -> bool {
+    match enabled_expr(content_id, cmd) {
+        Some(expr) => crate::interpreter::menu_state::eval_bool(&expr, ctx),
+        None => true,
+    }
+}
+
 /// Build the expression context a panel's menu predicates are evaluated
-/// against: the panel's own state table as `panel`, plus the `preferences`
-/// tier the bundle ships.
+/// against: the panel's own state table as `panel`, the `preferences` tier the
+/// bundle ships, the live `state` scope, the `active_document` view and the
+/// OPACITY.md selection predicates at top level — the namespaces the bundle's
+/// panel-menu `enabled_when` / `checked_when` rows read, censused by
+/// `panels::tests::every_panel_menu_predicate_read_is_published_to_the_menu_context`.
+///
+/// The last three are the SAME builders the panel BODY renders against
+/// (`dock_panel`'s eval map), so a predicate reads one fact one way whether it
+/// sits in the hamburger menu or in a widget's `bind:`. Until they were added
+/// the menu context published `panel` and `preferences` alone, and every
+/// `enabled_when` naming `state.`, `active_document.` or `selection_has_mask`
+/// read null — invisible while `panel_is_enabled` never consulted the YAML.
 ///
 /// `panel` starts from the bundle's declared state defaults for the panel and
 /// is then overlaid with whatever this app holds LIVE for that panel. That
@@ -338,10 +385,20 @@ pub fn panel_menu_ctx(
     let preferences = crate::interpreter::workspace::Workspace::load()
         .and_then(|ws| ws.data().get("preferences").cloned())
         .unwrap_or(J::Null);
-    serde_json::json!({
-        "panel": J::Object(panel),
-        "preferences": preferences,
-    })
+    let state = crate::workspace::dock_panel::build_live_state_map(st);
+    let active_document = crate::interpreter::renderer::build_active_document_view(st);
+    let mut ctx = serde_json::Map::new();
+    ctx.insert("panel".into(), J::Object(panel));
+    ctx.insert("preferences".into(), preferences);
+    ctx.insert("state".into(), J::Object(state));
+    ctx.insert("active_document".into(), active_document);
+    // `selection_has_mask` and its siblings sit at TOP level, as the body's
+    // eval map places them, so `enabled_when: "!selection_has_mask"` reads the
+    // same key from both surfaces.
+    for (k, v) in crate::workspace::dock_panel::build_selection_predicates(st) {
+        ctx.insert(k, v);
+    }
+    J::Object(ctx)
 }
 
 /// The `(content_id, key)` pairs a panel-named `set_panel_state` write is
@@ -382,9 +439,16 @@ fn live_panel_state(
             ("cap", s(&st.stroke_panel.cap)),
             ("join", s(&st.stroke_panel.join)),
         ],
-        "swatches_panel_content" => {
-            vec![("thumbnail_size", s(&st.swatches_panel.thumbnail_size))]
-        }
+        "swatches_panel_content" => vec![
+            ("thumbnail_size", s(&st.swatches_panel.thumbnail_size)),
+            // `panel.selected_swatches.length > 0` gates Duplicate / Delete
+            // Swatch — the rule `swatches_panel::is_enabled` restated natively
+            // until the generic path read this slot.
+            (
+                "selected_swatches",
+                J::Array(st.swatches_panel.selected_swatches.iter().map(|&i| J::from(i)).collect()),
+            ),
+        ],
         "opacity_panel_content" => vec![
             ("thumbnails_hidden", b(st.opacity_panel.thumbnails_hidden)),
             ("options_shown", b(st.opacity_panel.options_shown)),
@@ -431,6 +495,18 @@ fn live_panel_state(
             vec![
                 ("type_filter", J::Array(types.into_iter().map(J::String).collect())),
                 ("search_query", s(&st.layers_search_query)),
+                // "Exit Isolation Mode" reads `panel.isolation_stack.length`;
+                // "Collect in New Layer" wants it EMPTY. Each entry is a path
+                // of child indices, published as the YAML's list-of-lists.
+                (
+                    "isolation_stack",
+                    J::Array(
+                        st.layers_isolation_stack
+                            .iter()
+                            .map(|p| J::Array(p.iter().map(|&i| J::from(i)).collect()))
+                            .collect(),
+                    ),
+                ),
             ]
         }
         _ => vec![],

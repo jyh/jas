@@ -86,7 +86,7 @@ menu:
   - label: "New Brush"
     action: open_brush_options
     params: { mode: create }
-    enabled_when: "canvas_selection_non_empty"
+    enabled_when: "active_document.has_selection"
     description: >
       Open the Brush Options dialog in create mode with the
       canvas selection's geometry pre-filled as the new brush's
@@ -349,7 +349,7 @@ content:
           icon: new_brush
           style: { size: 18 }
           bind:
-            disabled: "not canvas_selection_non_empty"
+            disabled: "not active_document.has_selection"
           behavior:
             - event: click
               action: open_brush_options
