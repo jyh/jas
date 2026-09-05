@@ -134,7 +134,10 @@ def test_panel_menu_state_vectors(ws, cases):
 
 def _panel_menu_predicates(ws):
     """Every (panel id, key, expression) a panel's ``menu:`` block declares,
-    over the three predicate keys the panel-menu vocabulary uses."""
+    over the three predicate keys the panel-menu vocabulary uses — and the
+    ``keyboard:`` rows' ``enabled_when`` and ``params`` values, which evaluate
+    against the same panel context (layers.yaml's rows read
+    ``panel.layers_panel_selection[0]``)."""
     out = []
     for pid, spec in ws["panels"].items():
         for item in spec.get("menu", []):
@@ -144,6 +147,15 @@ def _panel_menu_predicates(ws):
                 expr = item.get(key)
                 if isinstance(expr, str) and expr:
                     out.append((pid, key, expr))
+        for item in spec.get("keyboard", []):
+            if not isinstance(item, dict):
+                continue
+            expr = item.get("enabled_when")
+            if isinstance(expr, str) and expr:
+                out.append((pid, "keyboard enabled_when", expr))
+            for pname, pv in (item.get("params") or {}).items():
+                if isinstance(pv, str) and pv:
+                    out.append((pid, f"keyboard params.{pname}", pv))
     return out
 
 

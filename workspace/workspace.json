@@ -15820,11 +15820,11 @@
           "default": [],
           "description": "Active element type filter; empty list means all types shown"
         },
-        "panel_selection": {
+        "layers_panel_selection": {
           "type": "list",
-          "item_type": "string",
+          "item_type": "path",
           "default": [],
-          "description": "List of element IDs that are panel-selected"
+          "description": "The layers panel's TREE selection: the paths of the rows the artist has selected in the panel (path markers, not element ids), independent of the canvas selection. Read by the Group B actions (delete/duplicate_layer_selection, collect_in_new_layer) as panel.layers_panel_selection, rolled up into active_document.layers_panel_selection_count / _is_container / _has_group, and written back to [] by the actions that consume it. This is the ONE name for it: runtime_contexts.yaml declares it, the actions read and write it, and every interpreter's dispatch context publishes it \u2014 until 2026-09-05 this file alone spelled it `panel_selection`, so the panel's own bind and keyboard rows read a key nothing wrote. (The line this replaced called the entries \"element IDs\"; they are paths.)\n"
         },
         "isolation_stack": {
           "type": "list",
@@ -15863,7 +15863,7 @@
         }
       },
       "init": {
-        "panel_selection": "[]",
+        "layers_panel_selection": "[]",
         "isolation_stack": "[]"
       },
       "menu": [
@@ -16173,7 +16173,7 @@
             },
             "bind": {
               "source": "active_document.element_tree",
-              "panel_selection": "panel.panel_selection",
+              "panel_selection": "panel.layers_panel_selection",
               "element_selection": "active_document.element_selection",
               "search_query": "panel.search_query",
               "type_filter": "panel.type_filter",
@@ -16448,16 +16448,16 @@
                 "key": "F2",
                 "action": "rename_element",
                 "params": {
-                  "element_id": "panel.panel_selection[0]"
+                  "element_id": "panel.layers_panel_selection[0]"
                 }
               },
               {
                 "key": "Enter",
                 "action": "rename_element",
                 "params": {
-                  "element_id": "panel.panel_selection[0]"
+                  "element_id": "panel.layers_panel_selection[0]"
                 },
-                "enabled_when": "panel.panel_selection.length == 1"
+                "enabled_when": "panel.layers_panel_selection.length == 1"
               },
               {
                 "key": "Meta+A",

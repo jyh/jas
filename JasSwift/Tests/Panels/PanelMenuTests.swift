@@ -385,7 +385,7 @@ private func writePanel(_ model: Model, _ contentId: String, _ key: String, _ va
     // `[0, 0]` the rect, `[0, 1]` the group. The selection is read from the
     // store key the tree view mirrors into.
     sel = modelWithOneSelectedRectAndAGroup()
-    writePanel(sel, "layers_panel_content", "panel_selection", [[0]])
+    writePanel(sel, "layers_panel_content", "layers_panel_selection", [[0]])
     #expect(panelIsEnabled(.layers, cmd: "new_group", layout: layout, model: sel))
     #expect(panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
             "a layer is a container")
@@ -396,21 +396,21 @@ private func writePanel(_ model: Model, _ contentId: String, _ key: String, _ va
     #expect(!panelIsEnabled(.layers, cmd: "collect_in_new_layer", layout: layout, model: sel),
             "not while isolated: the conjunction's second half")
     sel.layersIsolationStack.removeAll()
-    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 0]])
+    writePanel(sel, "layers_panel_content", "layers_panel_selection", [[0, 0]])
     #expect(!panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
             "a rect is not a container")
     #expect(!panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel))
-    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 1]])
+    writePanel(sel, "layers_panel_content", "layers_panel_selection", [[0, 1]])
     #expect(panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
             "a group is a container")
     #expect(panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel),
             "a group is a group")
-    writePanel(sel, "layers_panel_content", "panel_selection", [[0, 0], [0, 1]])
+    writePanel(sel, "layers_panel_content", "layers_panel_selection", [[0, 0], [0, 1]])
     #expect(!panelIsEnabled(.layers, cmd: "enter_isolation_mode", layout: layout, model: sel),
             "two items: not the SOLE selected item")
     #expect(panelIsEnabled(.layers, cmd: "flatten_artwork", layout: layout, model: sel),
             "at least one of them is a group")
-    writePanel(sel, "layers_panel_content", "panel_selection", [] as [[Int]])
+    writePanel(sel, "layers_panel_content", "layers_panel_selection", [] as [[Int]])
     #expect(!panelIsEnabled(.layers, cmd: "new_group", layout: layout, model: sel))
 }
 
@@ -505,18 +505,29 @@ private func ctxHasPath(_ ctx: [String: Any], _ path: String) -> Bool {
     var reads = 0
     var missing: [String] = []
     for (contentId, spec) in panels {
-        guard let panel = spec as? [String: Any],
-              let menu = panel["menu"] as? [Any] else { continue }
+        guard let panel = spec as? [String: Any] else { continue }
         let ctx = panelMenuContext(contentId, layout: layout, model: model)
-        for entry in menu {
+        var exprs: [(String, String)] = []
+        for entry in (panel["menu"] as? [Any]) ?? [] {
             guard let obj = entry as? [String: Any] else { continue }
             for key in ["enabled_when", "checked_when", "checked"] {
-                guard let expr = obj[key] as? String else { continue }
-                for path in predicateReads(expr) {
-                    reads += 1
-                    if !ctxHasPath(ctx, path) {
-                        missing.append("\(contentId): \(key): \(expr) reads \(path)")
-                    }
+                if let expr = obj[key] as? String { exprs.append(("menu \(key)", expr)) }
+            }
+        }
+        // The keyboard rows evaluate against the same panel context; see the
+        // Rust twin for why they are here.
+        for entry in (panel["keyboard"] as? [Any]) ?? [] {
+            guard let obj = entry as? [String: Any] else { continue }
+            if let expr = obj["enabled_when"] as? String { exprs.append(("keyboard enabled_when", expr)) }
+            for (pname, pv) in (obj["params"] as? [String: Any]) ?? [:] {
+                if let expr = pv as? String { exprs.append(("keyboard params.\(pname)", expr)) }
+            }
+        }
+        for (key, expr) in exprs {
+            for path in predicateReads(expr) {
+                reads += 1
+                if !ctxHasPath(ctx, path) {
+                    missing.append("\(contentId): \(key): \(expr) reads \(path)")
                 }
             }
         }

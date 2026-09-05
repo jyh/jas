@@ -689,6 +689,28 @@ mod tests {
         assert!(panel_is_enabled(PanelKind::Swatches, "duplicate_swatch", &st));
     }
 
+    /// `panel.layers_panel_selection` — the ONE name for the layers tree
+    /// selection since 2026-09-05 (layers.yaml alone had spelled it
+    /// `panel_selection`) — is published from this port's typed slot as the
+    /// `__path__` markers the actions iterate, not left at the declared
+    /// default. The presence census below cannot see this: the declared
+    /// default puts the key in the scope; only its VALUE says whether the
+    /// artist's selection reached it.
+    #[test]
+    fn layers_panel_selection_is_published_from_the_typed_slot() {
+        let mut sel = app_state_with_one_selected_rect();
+        sel.layers_panel_selection = vec![vec![0, 1], vec![0]];
+        let ctx = panel_menu::panel_menu_ctx("layers_panel_content", &sel);
+        assert_eq!(
+            ctx["panel"]["layers_panel_selection"],
+            serde_json::json!([{"__path__": [0, 1]}, {"__path__": [0]}]),
+            "the scope carries the live selection as path markers"
+        );
+        sel.layers_panel_selection.clear();
+        let ctx = panel_menu::panel_menu_ctx("layers_panel_content", &sel);
+        assert_eq!(ctx["panel"]["layers_panel_selection"], serde_json::json!([]));
+    }
+
     /// The namespace reads a panel-menu predicate string makes: every
     /// `<head>.<key>` whose head is one of the four namespaces the menu
     /// context publishes, plus the bare OPACITY.md selection predicates. The
@@ -749,6 +771,12 @@ mod tests {
     /// A key may legitimately be null (`panel.selected_symbol`), so presence
     /// is the assertion, not truthiness. The positive control is the read
     /// count: a scanner that matched nothing would pass an empty census.
+    ///
+    /// The panel's `keyboard:` rows are censused too (their `enabled_when`
+    /// and every `params` value): they evaluate against the same panel
+    /// context, and layers.yaml's `panel.layers_panel_selection[0]` was a
+    /// read of a key this port never published until this arm went red on
+    /// it.
     #[test]
     fn every_panel_menu_predicate_read_is_published_to_the_menu_context() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
@@ -757,17 +785,32 @@ mod tests {
         let mut reads = 0usize;
         let mut missing: Vec<String> = Vec::new();
         for (content_id, panel) in panels {
-            let Some(menu) = panel.get("menu").and_then(|m| m.as_array()) else { continue };
             let ctx = panel_menu::panel_menu_ctx(content_id, &st);
-            for e in menu {
+            let mut exprs: Vec<(String, String)> = Vec::new();
+            for e in panel.get("menu").and_then(|m| m.as_array()).into_iter().flatten() {
                 let Some(obj) = e.as_object() else { continue };
                 for key in ["enabled_when", "checked_when", "checked"] {
-                    let Some(expr) = obj.get(key).and_then(|v| v.as_str()) else { continue };
-                    for path in predicate_reads(expr) {
-                        reads += 1;
-                        if !ctx_has_path(&ctx, &path) {
-                            missing.push(format!("{content_id}: {key}: {expr:?} reads {path}"));
-                        }
+                    if let Some(expr) = obj.get(key).and_then(|v| v.as_str()) {
+                        exprs.push((format!("menu {key}"), expr.to_string()));
+                    }
+                }
+            }
+            for e in panel.get("keyboard").and_then(|m| m.as_array()).into_iter().flatten() {
+                let Some(obj) = e.as_object() else { continue };
+                if let Some(expr) = obj.get("enabled_when").and_then(|v| v.as_str()) {
+                    exprs.push(("keyboard enabled_when".to_string(), expr.to_string()));
+                }
+                for (pname, pv) in obj.get("params").and_then(|p| p.as_object()).into_iter().flatten() {
+                    if let Some(expr) = pv.as_str() {
+                        exprs.push((format!("keyboard params.{pname}"), expr.to_string()));
+                    }
+                }
+            }
+            for (key, expr) in exprs {
+                for path in predicate_reads(&expr) {
+                    reads += 1;
+                    if !ctx_has_path(&ctx, &path) {
+                        missing.push(format!("{content_id}: {key}: {expr:?} reads {path}"));
                     }
                 }
             }

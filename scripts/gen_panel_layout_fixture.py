@@ -320,7 +320,8 @@ _BV_SWATCHES_NESTED = {
 # `element_selection` is a list of PATH values (the reference builds it as
 # `[Value.path(p) for p in canvas_selection]`; over a JSON scope the same values
 # arrive as the `{"__path__": [...]}` marker every port decodes), and
-# `panel_selection` / `type_filter` are lists of strings.  A path INSIDE a list
+# `layers_panel_selection` / `type_filter` are lists of strings (the seed uses
+# ids where the app stores path markers; the vector is about the LIST form).  A path INSIDE a list
 # is the one element arm no other vector reaches: `type` "path" occurs zero
 # times in the 225 rows of the four seeds above.
 #
@@ -332,7 +333,7 @@ _BV_SWATCHES_NESTED = {
 _BV_LAYERS_LISTS = {
     "state": {},
     "panel": {
-        "panel_selection": ["el_a", "el_b", "el_c"],
+        "layers_panel_selection": ["el_a", "el_b", "el_c"],
         "type_filter": ["path", "text"],
         "isolation_stack": [],
         "twirl_states": None,

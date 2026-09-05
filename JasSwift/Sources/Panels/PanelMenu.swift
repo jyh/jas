@@ -309,8 +309,9 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
 }
 
 /// The layers-panel TREE selection, as paths, read from the shared store
-/// under the key layers.yaml declares (`panel.panel_selection`, content
-/// `layers_panel_content`).
+/// under the key layers.yaml declares (`panel.layers_panel_selection`, content
+/// `layers_panel_content` — the ONE name for it since 2026-09-05; the panel's
+/// file alone had spelled it `panel_selection`).
 ///
 /// `TreeViewContent` keeps the selection in view-lived `@State` and mirrors
 /// it here on every change; before the mirror existed nothing outside that
@@ -319,7 +320,7 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
 /// key nothing had ever written. One reader for both surfaces now.
 func layersPanelSelection(model: Model?) -> [[Int]] {
     guard let store = model?.stateStore,
-          let raw = store.getPanel("layers_panel_content", "panel_selection") as? [Any]
+          let raw = store.getPanel("layers_panel_content", "layers_panel_selection") as? [Any]
     else { return [] }
     return raw.compactMap { entry -> [Int]? in
         if let ints = entry as? [Int] { return ints }

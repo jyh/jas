@@ -3379,7 +3379,7 @@
       "ctx": {
         "state": {},
         "panel": {
-          "panel_selection": [
+          "layers_panel_selection": [
             "el_a",
             "el_b",
             "el_c"
