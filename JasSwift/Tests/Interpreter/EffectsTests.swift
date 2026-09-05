@@ -358,8 +358,12 @@ import Testing
 
 @Test func setPanelXFiresNotifyHookForActivePanel() {
     let store = StateStore()
-    store.initPanel("stroke_panel", defaults: ["cap": "butt"])
-    store.setActivePanel("stroke_panel")
+    // Spelled as the app spells it: the store canonicalises every panel id
+    // to the content id at its boundary (`StateStore.panelContentId`), and
+    // the hook is told the id the scope is actually keyed by — the same
+    // answer the `panel: character` write above gets.
+    store.initPanel("stroke_panel_content", defaults: ["cap": "butt"])
+    store.setActivePanel("stroke_panel_content")
     var notified: [String] = []
     var fields: [String?] = []
     let hook: PlatformEffect = { payload, _, _ in
@@ -376,7 +380,7 @@ import Testing
         ctx: [:], store: store,
         platformEffects: ["notify_panel_state_changed": hook]
     )
-    #expect(notified == ["stroke_panel"])
+    #expect(notified == ["stroke_panel_content"])
     #expect(fields == ["cap"], "the notify names the field it wrote")
 }
 

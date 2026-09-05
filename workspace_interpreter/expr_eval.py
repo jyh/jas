@@ -850,16 +850,6 @@ def _numeric_cmp(left: Value, right: Value, op) -> Value:
     return Value.bool_(op(left.value, right.value))
 
 
-def _eval_in(left: Value, right: Value) -> Value:
-    if right.type != ValueType.LIST:
-        return Value.bool_(False)
-    for item in right.value:
-        item_val = Value.from_python(item)
-        if _strict_eq(left, item_val):
-            return Value.bool_(True)
-    return Value.bool_(False)
-
-
 # ── Unary operators ──────────────────────────────────────────
 
 

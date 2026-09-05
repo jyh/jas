@@ -49,7 +49,14 @@ class DotAccess:
 
 @dataclass(slots=True)
 class BinaryOp:
-    """Binary operation: ==, !=, <, >, <=, >=, in"""
+    """Binary operation: ==, !=, <, >, <=, >=, +, -, *, /
+
+    ``in`` is NOT one of them: the lexer knows the word only as the
+    terminator of ``let x = e1 in e2``, no port's grammar has a membership
+    operator, and the cross-language corpus pins none. ``expr_eval`` carried
+    a dead ``_eval_in`` for it until 2026-09-05; membership is spelled
+    ``any(list, fun x -> x == v)``, the higher-order builtin every port has.
+    """
     op: str
     left: Any
     right: Any

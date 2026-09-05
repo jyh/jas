@@ -174,10 +174,13 @@ fn command_with_params(obj: &serde_json::Map<String, serde_json::Value>) -> Stri
 /// map in the bundle — and therefore `panel_state_defaults`, the panel-menu
 /// lookup and this app's generic panel-state table — is keyed by the content id
 /// (`brushes_panel_content`). Appending the suffix when the caller passes the
-/// short form is the same normalisation JasSwift's `set_panel_state` applies,
-/// so a write lands in the bucket the YAML's `panel.<key>` reads from in BOTH
-/// active ports. An id that already carries the suffix passes through, which is
-/// what lets a fixture address a panel by one unambiguous spelling.
+/// short form is the same rule the reference's `StateStore` and JasSwift's
+/// `StateStore` apply at their boundary (`panel_content_id` /
+/// `panelContentId`), so a write lands in the bucket the YAML's `panel.<key>`
+/// reads from in every interpreter. An id that already carries the suffix
+/// passes through, which is what lets a fixture address a panel by one
+/// unambiguous spelling — and `panel_state_writes.json`'s `write_as` field
+/// is where the SHORT spelling is driven through all three.
 pub fn panel_content_id(raw: &str) -> String {
     if raw.ends_with("_panel_content") {
         raw.to_string()

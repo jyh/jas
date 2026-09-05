@@ -2808,9 +2808,13 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
         let store = StateStore()
         store.initPanel(pid, defaults: ws.panelStateDefaults(pid))
         store.setActivePanel(pid)
+        // `write_as` is the YAML's SHORT spelling of the panel; the scope is
+        // read back by the content id. The store canonicalises at its
+        // boundary (`StateStore.panelContentId`) or the case reds.
+        let writeAs = (args["write_as"] as? String) ?? pid
         for w in writes {
             runEffects(
-                [["set_panel_state": ["panel": pid, "key": w["key"]!, "value": w["value"]!]]],
+                [["set_panel_state": ["panel": writeAs, "key": w["key"]!, "value": w["value"]!]]],
                 ctx: [:], store: store)
         }
         let scope = store.getPanelState(pid)

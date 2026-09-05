@@ -232,3 +232,64 @@ import Testing
     let result = store.getPanel("color", "recent") as? [String]
     #expect(result == ["d", "a", "b"])
 }
+
+// ── One panel scope per panel, whatever the spelling ─────────────
+//
+// The YAML names a panel's state scope by its SHORT kind at every effect
+// site (`set_panel_state: { panel: brushes, … }`); the bundle keys every
+// panel map by the CONTENT id. This store used to canonicalise inside the
+// `set_panel_state` effect and nowhere else, so the native artboard verbs
+// (writing `"artboards"`) and the YAML's writes (landing in
+// `artboards_panel_content`) kept two buckets for one selection. The rule is
+// the store's now, at its boundary. Mirrors the reference's
+// `test_panel_scope_spelling.py`.
+
+@Test func panelContentIdNormalisesBothSpellings() {
+    #expect(StateStore.panelContentId("brushes") == "brushes_panel_content")
+    #expect(StateStore.panelContentId("brushes_panel_content") == "brushes_panel_content")
+    #expect(StateStore.panelContentId("magic_wand") == "magic_wand_panel_content")
+}
+
+@Test func shortAndFullSpellingsAddressOneScope() {
+    let store = StateStore()
+    store.initPanel("swatches_panel_content", defaults: ["thumbnail_size": "small"])
+    store.setPanel("swatches", "thumbnail_size", "large")
+    #expect(store.getPanel("swatches_panel_content", "thumbnail_size") as? String == "large")
+    #expect(store.getPanel("swatches", "thumbnail_size") as? String == "large")
+    #expect(store.hasPanel("swatches"))
+    // Initialised SHORT, read by the content id.
+    store.initPanel("color", defaults: ["mode": "hsb"])
+    #expect(store.getPanel("color_panel_content", "mode") as? String == "hsb")
+    // The active panel, spelled short, is the content scope.
+    store.setActivePanel("color")
+    #expect(store.getActivePanelId() == "color_panel_content")
+    #expect(store.getActivePanelState()["mode"] as? String == "hsb")
+    // The list verb too.
+    store.initPanel("layers_panel_content", defaults: ["isolation_stack": [] as [Any]])
+    store.listPush("layers", "isolation_stack", [0])
+    #expect((store.getPanel("layers_panel_content", "isolation_stack") as? [Any])?.count == 1)
+    store.destroyPanel("color")
+    #expect(!store.hasPanel("color_panel_content"))
+}
+
+/// THE MEASUREMENT this file was written for: the YAML's `set_panel_state
+/// { panel: artboards, key: rearrange_dirty }` (six sites in actions.yaml)
+/// and a native verb's `setPanel("artboards", …)` must land in the bucket the
+/// artboards panel's own dispatch reads (`getPanelState("artboards")`) AND
+/// the one the dock's body context reads (`artboards_panel_content`). Before
+/// the store canonicalised, the first assertion held and the second did not.
+@Test func yamlWriteAndNativeWriteOnTheArtboardsScopeShareOneBucket() {
+    let store = StateStore()
+    store.initPanel("artboards_panel_content",
+                    defaults: ["rearrange_dirty": false, "artboards_panel_selection": [String]()])
+    runEffects(
+        [["set_panel_state": ["panel": "artboards", "key": "rearrange_dirty", "value": "true"]]],
+        ctx: [:], store: store)
+    #expect(store.getPanel("artboards", "rearrange_dirty") as? Bool == true,
+            "the YAML's write, read by the native verbs' spelling")
+    #expect(store.getPanel("artboards_panel_content", "rearrange_dirty") as? Bool == true,
+            "the YAML's write, read by the body's spelling")
+    store.setPanel("artboards", "artboards_panel_selection", ["ab-1"])
+    #expect(store.getPanelState("artboards_panel_content")["artboards_panel_selection"] as? [String] == ["ab-1"],
+            "a native verb's write, read by the body's spelling")
+}

@@ -16,7 +16,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -230,7 +231,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -444,7 +446,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -657,7 +660,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -871,7 +875,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -1085,7 +1090,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -1300,7 +1306,8 @@
             "vector_pack"
           ]
         }
-      }
+      },
+      "write_as": "brushes"
     },
     "expected": {
       "panel_state": {
@@ -1514,7 +1521,8 @@
             "default_brushes"
           ]
         }
-      }
+      },
+      "write_as": "symbols"
     },
     "expected": {
       "panel_state": {
