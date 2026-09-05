@@ -126,14 +126,21 @@ pub(crate) fn panel_is_checked(kind: PanelKind, cmd: &str, state: &AppState) -> 
     panel_menu::is_checked_from_yaml(content_id, cmd, &ctx)
 }
 
-/// Query whether a menu command is enabled for a panel kind. Defaults
-/// to `true` for panels / commands without a state-conditional rule.
+/// Query whether a menu command is enabled for a panel kind.
+///
+/// ONE path for every panel, the twin of `panel_is_checked`: the panel's
+/// bundle menu entry is looked up by its runtime command, its `enabled_when:`
+/// predicate is evaluated against the panel's context, and that is the answer
+/// (`true` with no predicate, as `menu_state` defaults). The two native hooks
+/// this replaced — Color's `active_color().is_some()`, Swatches'
+/// `!selected_swatches.is_empty()` — restated rules color.yaml and
+/// swatches.yaml already state; every other panel answered `true` without
+/// reading the YAML at all, so "New Brush" never greyed out and the gradient
+/// rows declared `enabled_when: "false"` stayed live in both active ports.
 pub(crate) fn panel_is_enabled(kind: PanelKind, cmd: &str, state: &AppState) -> bool {
-    match kind {
-        PanelKind::Color => color_panel::is_enabled(cmd, state),
-        PanelKind::Swatches => swatches_panel::is_enabled(cmd, state),
-        _ => true,
-    }
+    let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+    let ctx = panel_menu::panel_menu_ctx(content_id, state);
+    panel_menu::is_enabled_from_yaml(content_id, cmd, &ctx)
 }
 
 #[cfg(test)]
@@ -499,5 +506,277 @@ mod tests {
             concepts_selected: None,
             panel_state: std::collections::HashMap::new(),
         }
+    }
+
+    /// Build a real AppState holding one tab whose document has a layer with
+    /// a rect at `[0, 0]` — SELECTED on the canvas, the state every "needs a
+    /// canvas selection" predicate is about — and a group at `[0, 1]` for the
+    /// layers-panel rollups (a group is a container AND a group; a layer is a
+    /// container only; a rect is neither). Same construction as
+    /// `opacity_panel::tests::app_state_with_one_selected_rect`, plus the group.
+    fn app_state_with_one_selected_rect() -> AppState {
+        use crate::geometry::element::{CommonProps, Element, GroupElem, LayerElem, RectElem};
+        use crate::document::document::{Document, ElementSelection};
+        use std::rc::Rc;
+        let mut st = AppState::new();
+        let rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(),
+            fill_gradient: None,
+            stroke_gradient: None,
+        });
+        let group = Element::Group(GroupElem {
+            children: vec![Rc::new(rect(20.0))],
+            common: CommonProps { name: Some("G".into()), ..Default::default() },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect(0.0)), Rc::new(group)],
+            common: CommonProps { name: Some("L0".into()), ..Default::default() },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        let model = crate::document::model::Model::new(doc, None);
+        st.add_tab(crate::workspace::app_state::TabState::with_model(model));
+        st
+    }
+
+    /// The panel menus' `enabled_when:` predicates, through the generic
+    /// panel-menu evaluator — the `enabled` half of what
+    /// `test_fixtures/algorithms/panel_menu_state.json` pins.
+    ///
+    /// Until this landed `panel_is_enabled` answered `true` for every panel but
+    /// Color and Swatches, whose native `is_enabled` hooks restated in Rust two
+    /// rules the YAML already states; the other forty-odd `enabled_when` rows
+    /// were never evaluated live in EITHER active port, so "New Brush" was
+    /// never greyed out and every gradient row declared `enabled_when:
+    /// "false"` read as enabled. The corpus arm could not see it: it seeds the
+    /// context directly and says nothing about whether an app BUILDS one.
+    #[test]
+    fn panel_is_enabled_evaluates_the_yaml_predicates() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut st = test_app_state(layout);
+
+        // brushes.yaml: "New Brush" reads `active_document.has_selection` —
+        // no document, no selection.
+        assert!(
+            !panel_is_enabled(PanelKind::Brushes, "open_brush_options:create", &st),
+            "New Brush needs a canvas selection"
+        );
+        // `panel.selected_brushes.length > 0`, read from the GENERIC table
+        // (#116): empty at the declared default, live after a write.
+        assert!(!panel_is_enabled(PanelKind::Brushes, "duplicate_brush", &st));
+        assert!(!panel_is_enabled(PanelKind::Brushes, "delete_brush", &st));
+        st.panel_state
+            .entry("brushes_panel_content".to_string())
+            .or_default()
+            .insert("selected_brushes".into(), serde_json::json!([0]));
+        assert!(panel_is_enabled(PanelKind::Brushes, "duplicate_brush", &st));
+        assert!(panel_is_enabled(PanelKind::Brushes, "delete_brush", &st));
+
+        // symbols.yaml / concepts.yaml: `panel.selected_* != null`, published
+        // from the typed slots.
+        assert!(!panel_is_enabled(PanelKind::Symbols, "place_instance", &st));
+        st.symbols_selected = Some("star".into());
+        assert!(panel_is_enabled(PanelKind::Symbols, "place_instance", &st));
+        assert!(!panel_is_enabled(PanelKind::Concepts, "place_concept_instance", &st));
+        st.concepts_selected = Some("chair".into());
+        assert!(panel_is_enabled(PanelKind::Concepts, "place_concept_instance", &st));
+
+        // layers.yaml: "Exit Isolation Mode" reads `panel.isolation_stack.length`.
+        assert!(!panel_is_enabled(PanelKind::Layers, "exit_isolation_mode", &st));
+        st.layers_isolation_stack.push(vec![0]);
+        assert!(panel_is_enabled(PanelKind::Layers, "exit_isolation_mode", &st));
+
+        // artboards.yaml: `active_document.artboards_panel_selection_ids.length`.
+        assert!(!panel_is_enabled(PanelKind::Artboards, "open_artboard_options", &st));
+        st.artboards_panel_selection.push("ab-1".into());
+        assert!(panel_is_enabled(PanelKind::Artboards, "open_artboard_options", &st));
+
+        // gradient.yaml: a literal `enabled_when: "false"` is a disabled row.
+        assert!(!panel_is_enabled(PanelKind::Gradient, "gradient_reverse", &st));
+
+        // No predicate, and no entry at all: enabled — `menu_state`'s default.
+        assert!(panel_is_enabled(PanelKind::Brushes, "select_all_unused_brushes", &st));
+        assert!(panel_is_enabled(PanelKind::Brushes, "no_such_command", &st));
+
+        // With a real selection on the canvas: New Brush lights, a mask can
+        // be made but not released, and New Symbol's `selection_count == 1`.
+        let mut sel = app_state_with_one_selected_rect();
+        assert!(panel_is_enabled(PanelKind::Brushes, "open_brush_options:create", &sel));
+        assert!(panel_is_enabled(PanelKind::Opacity, "make_opacity_mask", &sel));
+        assert!(!panel_is_enabled(PanelKind::Opacity, "release_opacity_mask", &sel));
+        assert!(panel_is_enabled(PanelKind::Symbols, "new_symbol", &sel));
+        // Put a mask on the selection: the four mask rows flip together.
+        crate::document::controller::Controller::make_mask_on_selection(
+            &mut sel.tabs[0].model, true, false);
+        assert!(!panel_is_enabled(PanelKind::Opacity, "make_opacity_mask", &sel));
+        assert!(panel_is_enabled(PanelKind::Opacity, "release_opacity_mask", &sel));
+        assert!(panel_is_enabled(PanelKind::Opacity, "disable_opacity_mask", &sel));
+        assert!(panel_is_enabled(PanelKind::Opacity, "unlink_opacity_mask", &sel));
+
+        // layers.yaml's rollups over the LAYERS-PANEL selection on that
+        // document (runtime_contexts.yaml: is_container = the sole selected
+        // item is a group or layer; has_group = any selected item is a group).
+        // `[0]` is the layer, `[0, 0]` the rect, `[0, 1]` the group.
+        sel.layers_panel_selection = vec![vec![0]];
+        assert!(panel_is_enabled(PanelKind::Layers, "new_group", &sel));
+        assert!(panel_is_enabled(PanelKind::Layers, "enter_isolation_mode", &sel),
+                "a layer is a container");
+        assert!(!panel_is_enabled(PanelKind::Layers, "flatten_artwork", &sel),
+                "a layer is not a group");
+        assert!(panel_is_enabled(PanelKind::Layers, "collect_in_new_layer", &sel));
+        sel.layers_isolation_stack.push(vec![0]);
+        assert!(!panel_is_enabled(PanelKind::Layers, "collect_in_new_layer", &sel),
+                "not while isolated: the conjunction's second half");
+        sel.layers_isolation_stack.clear();
+        sel.layers_panel_selection = vec![vec![0, 0]];
+        assert!(!panel_is_enabled(PanelKind::Layers, "enter_isolation_mode", &sel),
+                "a rect is not a container");
+        assert!(!panel_is_enabled(PanelKind::Layers, "flatten_artwork", &sel));
+        sel.layers_panel_selection = vec![vec![0, 1]];
+        assert!(panel_is_enabled(PanelKind::Layers, "enter_isolation_mode", &sel),
+                "a group is a container");
+        assert!(panel_is_enabled(PanelKind::Layers, "flatten_artwork", &sel),
+                "a group is a group");
+        sel.layers_panel_selection = vec![vec![0, 0], vec![0, 1]];
+        assert!(!panel_is_enabled(PanelKind::Layers, "enter_isolation_mode", &sel),
+                "two items: not the SOLE selected item");
+        assert!(panel_is_enabled(PanelKind::Layers, "flatten_artwork", &sel),
+                "at least one of them is a group");
+        sel.layers_panel_selection.clear();
+        assert!(!panel_is_enabled(PanelKind::Layers, "new_group", &sel));
+    }
+
+    /// The two panels whose enabled state ALREADY worked natively must keep
+    /// working once their hooks are gone — the generic evaluator has to read
+    /// the same live values the hooks read (`active_color()`'s tiers for
+    /// Color, the typed swatches selection for Swatches), not the bundle
+    /// defaults.
+    #[test]
+    fn panel_is_enabled_still_follows_live_state_for_the_native_panels() {
+        let layout = WorkspaceLayout::default_layout();
+        let mut st = test_app_state(layout);
+
+        // color.yaml: `if state.fill_on_top then state.fill_color != null else
+        // state.stroke_color != null`. test_app_state seeds a white app-tier
+        // fill and a black app-tier stroke, fill on top.
+        assert!(panel_is_enabled(PanelKind::Color, "invert_active_color", &st));
+        assert!(panel_is_enabled(PanelKind::Color, "complement_active_color", &st));
+        st.app_default_fill = None;
+        assert!(
+            !panel_is_enabled(PanelKind::Color, "invert_active_color", &st),
+            "no fill in any tier, fill on top: nothing to invert"
+        );
+        st.fill_on_top = false;
+        assert!(
+            panel_is_enabled(PanelKind::Color, "invert_active_color", &st),
+            "stroke on top, and the stroke tier holds black"
+        );
+        // …and the swatches selection lives in a typed slot.
+        assert!(!panel_is_enabled(PanelKind::Swatches, "delete_swatch", &st));
+        assert!(!panel_is_enabled(PanelKind::Swatches, "duplicate_swatch", &st));
+        st.swatches_panel.selected_swatches = vec![2];
+        assert!(panel_is_enabled(PanelKind::Swatches, "delete_swatch", &st));
+        assert!(panel_is_enabled(PanelKind::Swatches, "duplicate_swatch", &st));
+    }
+
+    /// The namespace reads a panel-menu predicate string makes: every
+    /// `<head>.<key>` whose head is one of the four namespaces the menu
+    /// context publishes, plus the bare OPACITY.md selection predicates. The
+    /// scanner is a receiver assumption, stated: it skips string literals,
+    /// keeps two segments (`panel.selected_brushes`, not `.length`), and a
+    /// bare identifier outside the listed five is invisible to it — the
+    /// reference's own parser censuses bare names in
+    /// `workspace_interpreter/tests/test_panel_menu_state.py`, so a new one
+    /// reds there.
+    fn predicate_reads(expr: &str) -> Vec<String> {
+        const HEADS: [&str; 4] = ["state", "panel", "active_document", "preferences"];
+        const BARE: [&str; 5] = [
+            "selection_has_mask", "selection_mask_clip", "selection_mask_invert",
+            "selection_mask_linked", "editing_target_is_mask",
+        ];
+        let mut out = Vec::new();
+        // Even-indexed pieces are outside quotes (both quote styles occur).
+        for (i, piece) in expr.split(|c| c == '"' || c == '\'').enumerate() {
+            if i % 2 == 1 { continue; }
+            let mut ident = String::new();
+            let flush = |ident: &mut String, out: &mut Vec<String>| {
+                if ident.is_empty() { return; }
+                let segs: Vec<&str> = ident.split('.').collect();
+                if segs.len() >= 2 && HEADS.contains(&segs[0]) {
+                    out.push(format!("{}.{}", segs[0], segs[1]));
+                } else if segs.len() == 1 && BARE.contains(&segs[0]) {
+                    out.push(segs[0].to_string());
+                }
+                ident.clear();
+            };
+            for c in piece.chars() {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
+                    ident.push(c);
+                } else {
+                    flush(&mut ident, &mut out);
+                }
+            }
+            flush(&mut ident, &mut out);
+        }
+        out
+    }
+
+    fn ctx_has_path(ctx: &serde_json::Value, path: &str) -> bool {
+        let mut cur = ctx;
+        for seg in path.split('.') {
+            match cur.get(seg) {
+                Some(v) => cur = v,
+                None => return false,
+            }
+        }
+        true
+    }
+
+    /// Every read a panel-menu predicate makes resolves to a key the LIVE
+    /// menu context publishes. "Which decisions have no witness" and "which
+    /// reads have no source" are two different passes; this is the second.
+    ///
+    /// A key may legitimately be null (`panel.selected_symbol`), so presence
+    /// is the assertion, not truthiness. The positive control is the read
+    /// count: a scanner that matched nothing would pass an empty census.
+    #[test]
+    fn every_panel_menu_predicate_read_is_published_to_the_menu_context() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let panels = ws.data().get("panels").and_then(|p| p.as_object()).expect("panels");
+        let st = app_state_with_one_selected_rect();
+        let mut reads = 0usize;
+        let mut missing: Vec<String> = Vec::new();
+        for (content_id, panel) in panels {
+            let Some(menu) = panel.get("menu").and_then(|m| m.as_array()) else { continue };
+            let ctx = panel_menu::panel_menu_ctx(content_id, &st);
+            for e in menu {
+                let Some(obj) = e.as_object() else { continue };
+                for key in ["enabled_when", "checked_when", "checked"] {
+                    let Some(expr) = obj.get(key).and_then(|v| v.as_str()) else { continue };
+                    for path in predicate_reads(expr) {
+                        reads += 1;
+                        if !ctx_has_path(&ctx, &path) {
+                            missing.push(format!("{content_id}: {key}: {expr:?} reads {path}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(reads >= 40, "positive control: only {reads} predicate reads found");
+        assert!(
+            missing.is_empty(),
+            "panel-menu predicate reads the menu context does not publish:\n{}",
+            missing.join("\n")
+        );
     }
 }

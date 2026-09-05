@@ -19,6 +19,8 @@ runtime_contexts:
       layers_panel_selection_count: 0
       layers_panel_selection_is_container: false
       layers_panel_selection_has_group: false
+      artboards_count: 0
+      artboards_panel_selection_ids: []
       element_tree: null
       element_selection: []
     properties:
@@ -78,6 +80,19 @@ runtime_contexts:
       layers_panel_selection_has_group:
         type: bool
         description: "True when at least one selected layer item is a group"
+      # Artboards-panel rollups (ARTBOARDS.md § Artboard data model). Built by
+      # every port's active-document view since the artboards work landed and
+      # read by artboards.yaml's menu, context menu and keyboard rows; declared
+      # here only when the panel-menu read census found them undeclared.
+      artboards_count:
+        type: number
+        description: "Number of artboards in the active document"
+      artboards_panel_selection_ids:
+        type: list
+        item_type: string
+        description: >
+          Ids of the artboards selected in the Artboards panel, in selection
+          order. Empty when nothing is selected there.
       element_tree:
         type: object
         nullable: true

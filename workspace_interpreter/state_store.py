@@ -1036,6 +1036,9 @@ class StateStore:
                 "next_layer_name": "Layer 1",
                 "new_layer_insert_index": 0,
                 "layers_panel_selection_count": sel_count,
+                # No document: no item is a container and none is a group.
+                "layers_panel_selection_is_container": False,
+                "layers_panel_selection_has_group": False,
                 "has_selection": has_selection,
                 "selection_count": selection_count,
                 "element_selection": element_selection,
@@ -1086,17 +1089,44 @@ class StateStore:
         # Panel-selection rollup for enabled_when predicates and fallback
         # logic in actions like enter_isolation_mode.
         sel_count = 0
+        sel_paths: list[tuple[int, ...]] = []
         if self._active_panel == "layers":
             panel = self._panels.get("layers", {})
             sel = panel.get("layers_panel_selection", [])
             if isinstance(sel, list):
                 sel_count = len(sel)
+                for p in sel:
+                    if isinstance(p, Value) and p.type.name == "PATH":
+                        sel_paths.append(tuple(p.value))
+                    elif isinstance(p, dict) and "__path__" in p:
+                        sel_paths.append(tuple(p["__path__"]))
+                    elif isinstance(p, (list, tuple)):
+                        sel_paths.append(tuple(p))
+        # runtime_contexts.yaml's two layers-panel rollups — "the sole
+        # selected layer item is a container (group or layer)" and "at least
+        # one selected layer item is a group". Declared there, read by
+        # layers.yaml's Enter Isolation Mode / Flatten Artwork rows (and those
+        # actions' own enabled_when), and built by NO port until the active
+        # ports' panel-menu enabled_when went live and their read census
+        # found both unpublished. Mirrors build_active_document_view in
+        # jas_dioxus and buildActiveDocumentView in JasSwift.
+        def _kind(path: tuple[int, ...]) -> str | None:
+            elem = self.get_element(path)
+            return elem.get("kind") if isinstance(elem, dict) else None
+        layers_panel_selection_is_container = (
+            len(sel_paths) == 1 and _kind(sel_paths[0]) in ("Group", "Layer")
+        )
+        layers_panel_selection_has_group = any(
+            _kind(p) == "Group" for p in sel_paths
+        )
         return {
             "top_level_layers": top_level_layers,
             "top_level_layer_paths": top_level_layer_paths,
             "next_layer_name": next_layer_name,
             "new_layer_insert_index": insert_idx,
             "layers_panel_selection_count": sel_count,
+            "layers_panel_selection_is_container": layers_panel_selection_is_container,
+            "layers_panel_selection_has_group": layers_panel_selection_has_group,
             "has_selection": has_selection,
             "selection_count": selection_count,
             "element_selection": element_selection,

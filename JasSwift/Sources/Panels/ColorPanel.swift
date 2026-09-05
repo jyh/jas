@@ -74,20 +74,6 @@ public enum ColorPanel {
         }
     }
 
-    /// Query whether a menu command is enabled. Invert / Complement need an
-    /// active color (fill or stroke per `fillOnTop`) to operate on; gray them
-    /// out when the active attribute is none. Same reader as the two commands
-    /// themselves and as Rust's `is_enabled` (`state.active_color().is_some()`),
-    /// so the enabled state cannot disagree with what the command would do.
-    public static func isEnabled(_ cmd: String, model: Model?) -> Bool {
-        switch cmd {
-        case "invert_active_color", "complement_active_color":
-            guard let m = model else { return true }
-            return activeDefaultPaintColor(model: m) != nil
-        default: return true
-        }
-    }
-
     /// Set the active color (fill or stroke per fillOnTop), push to recent colors.
     ///
     /// A colour pick changes the COLOUR and nothing else: each selected

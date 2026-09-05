@@ -37,6 +37,11 @@ pub fn PanelMenuOverlay() -> Element {
     let y = open.y;
     let kind = open.kind;
     let addr = open.addr;
+    // One expression context per menu render, shared by every row's
+    // `enabled_when` / `checked_when` — the same context `panel_is_enabled` /
+    // `panel_is_checked` build per call.
+    let content_id = crate::interpreter::workspace::panel_kind_to_content_id(kind);
+    let menu_ctx = super::panel_menu::panel_menu_ctx(content_id, &st);
 
     let item_nodes: Vec<Result<VNode, RenderError>> = items.into_iter().map(|item| {
         match item {
@@ -140,7 +145,7 @@ pub fn PanelMenuOverlay() -> Element {
                 let cmd = command;
                 let display_label = super::panel_dynamic_label(kind, cmd, &st)
                     .unwrap_or_else(|| label.to_string());
-                let enabled = super::panel_is_enabled(kind, cmd, &st);
+                let enabled = super::panel_menu::is_enabled_from_yaml(content_id, cmd, &menu_ctx);
                 let (color, cursor, opacity) = if enabled {
                     (THEME_TEXT, "pointer", "1")
                 } else {
@@ -222,7 +227,7 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Toggle { label, command } => {
                 let act = act.clone();
                 let cmd = command;
-                let checked = super::panel_is_checked(kind, cmd, &st);
+                let checked = super::panel_menu::is_checked_from_yaml(content_id, cmd, &menu_ctx);
                 let prefix = if checked { "\u{2713} " } else { "    " };
                 let display = format!("{prefix}{label}");
                 rsx! {
@@ -244,7 +249,7 @@ pub fn PanelMenuOverlay() -> Element {
             PanelMenuItem::Radio { label, command, .. } => {
                 let act = act.clone();
                 let cmd = command;
-                let checked = super::panel_is_checked(kind, cmd, &st);
+                let checked = super::panel_menu::is_checked_from_yaml(content_id, cmd, &menu_ctx);
                 let prefix = if checked { "\u{2713} " } else { "    " };
                 let display = format!("{prefix}{label}");
                 rsx! {

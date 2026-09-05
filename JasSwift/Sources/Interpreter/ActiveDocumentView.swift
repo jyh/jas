@@ -26,6 +26,8 @@ public func buildActiveDocumentView(
             "next_layer_name": "Layer 1",
             "new_layer_insert_index": 0,
             "layers_panel_selection_count": layersPanelSelection.count,
+            "layers_panel_selection_is_container": false,
+            "layers_panel_selection_has_group": false,
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
@@ -74,6 +76,26 @@ public func buildActiveDocumentView(
     var n = 1
     while layerNames.contains("Layer \(n)") { n += 1 }
     let nextLayerName = "Layer \(n)"
+    // runtime_contexts.yaml's two layers-panel rollups — "the sole selected
+    // layer item is a container (group or layer)" and "at least one selected
+    // layer item is a group". Declared there, read by layers.yaml's Enter
+    // Isolation Mode / Flatten Artwork rows (and those actions' own
+    // `enabled_when`), and built by NO port until the panel-menu
+    // `enabled_when` went live and the read census found both unpublished.
+    // `tryGetElement`, not `getElement`: a stale path must read false, not
+    // trap. Mirrors the Rust `build_active_document_view`.
+    let layersPanelSelectionIsContainer: Bool = {
+        guard layersPanelSelection.count == 1,
+              let e = m.document.tryGetElement(layersPanelSelection[0]) else { return false }
+        switch e {
+        case .group, .layer: return true
+        default: return false
+        }
+    }()
+    let layersPanelSelectionHasGroup: Bool = layersPanelSelection.contains { path in
+        if case .group = m.document.tryGetElement(path) { return true }
+        return false
+    }
     let topLevelSelected = layersPanelSelection
         .filter { $0.count == 1 }
         .map { $0[0] }
@@ -156,6 +178,8 @@ public func buildActiveDocumentView(
         "next_layer_name": nextLayerName,
         "new_layer_insert_index": newLayerInsertIndex,
         "layers_panel_selection_count": layersPanelSelection.count,
+        "layers_panel_selection_is_container": layersPanelSelectionIsContainer,
+        "layers_panel_selection_has_group": layersPanelSelectionHasGroup,
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         "element_selection": elementSelection,

@@ -4334,6 +4334,23 @@ struct TreeViewContent: View {
         }
         .focusable()
         .focused($treeFocused)
+        // Mirror the tree selection into the store under the key layers.yaml
+        // declares (`panel.panel_selection`), so readers outside this view —
+        // the hamburger menu's `enabled_when` rows through
+        // `layersPanelSelection(model:)`, the dock's body context — see the
+        // selection the artist made. Sorted so the published list is
+        // deterministic; a Set has no order and the YAML indexes `[0]`.
+        .onChange(of: panelSelection) { sel in
+            let store = model.stateStore
+            if !store.hasPanel("layers_panel_content") {
+                let defaults = WorkspaceData.load()?.panelStateDefaults("layers_panel_content") ?? [:]
+                store.initPanel("layers_panel_content", defaults: defaults)
+            }
+            let paths = sel.map { Array($0) }
+                .sorted(by: { $0.lexicographicallyPrecedes($1) })
+            store.setPanel("layers_panel_content", "panel_selection", paths)
+            model.panelStateVersion &+= 1
+        }
         .onAppear {
             // NSEvent local monitor to capture modifier keys during mouse events.
             // Also handles Delete/Cmd-A/Escape key shortcuts when the tree is focused.

@@ -8737,6 +8737,8 @@
         "layers_panel_selection_count": 0,
         "layers_panel_selection_is_container": false,
         "layers_panel_selection_has_group": false,
+        "artboards_count": 0,
+        "artboards_panel_selection_ids": [],
         "element_tree": null,
         "element_selection": []
       },
@@ -8796,6 +8798,15 @@
         "layers_panel_selection_has_group": {
           "type": "bool",
           "description": "True when at least one selected layer item is a group"
+        },
+        "artboards_count": {
+          "type": "number",
+          "description": "Number of artboards in the active document"
+        },
+        "artboards_panel_selection_ids": {
+          "type": "list",
+          "item_type": "string",
+          "description": "Ids of the artboards selected in the Artboards panel, in selection order. Empty when nothing is selected there.\n"
         },
         "element_tree": {
           "type": "object",
@@ -11787,7 +11798,7 @@
           "params": {
             "mode": "create"
           },
-          "enabled_when": "canvas_selection_non_empty",
+          "enabled_when": "active_document.has_selection",
           "description": "Open the Brush Options dialog in create mode with the canvas selection's geometry pre-filled as the new brush's artwork. OK appends a new brush to the selected library.\n"
         },
         {
@@ -12134,7 +12145,7 @@
                   "size": 18
                 },
                 "bind": {
-                  "disabled": "not canvas_selection_non_empty"
+                  "disabled": "not active_document.has_selection"
                 },
                 "behavior": [
                   {

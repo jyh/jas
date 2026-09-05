@@ -64,7 +64,7 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
 /// count as "no mask"; the mask's clip / invert are read from the
 /// first selected element's mask, driving the "first-wins" bindings
 /// on CLIP_CHECKBOX / INVERT_MASK_CHECKBOX.
-fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
+pub(crate) fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
     let mut m = serde_json::Map::new();
     let (has_mask, clip, invert, linked) = st.tab().map(|t| {
         let doc = t.model.document();

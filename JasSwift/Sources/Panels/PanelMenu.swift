@@ -258,14 +258,26 @@ public func panelMenuIsChecked(_ contentId: String, _ cmd: String,
 }
 
 /// Build the expression context a panel's menu predicates are evaluated
-/// against: the panel's own state table as `panel`, plus the `preferences`
-/// tier the bundle ships.
+/// against: the panel's own state table as `panel`, the `preferences` tier the
+/// bundle ships, the live `state` scope, the `active_document` view and the
+/// OPACITY.md selection predicates at top level — the namespaces the bundle's
+/// panel-menu `enabled_when` / `checked_when` rows read, censused by
+/// `everyPanelMenuPredicateReadIsPublishedToTheMenuContext`.
 ///
 /// `panel` starts from the bundle's declared state defaults, is overlaid with
 /// the shared panel store (where most of this app's panel state actually
-/// lives), and is finally overlaid with the handful of values this app keeps
-/// on `WorkspaceLayout` instead. That last overlay is the whole of what the
-/// deleted native hooks encoded — a statement about STORAGE, not about menus.
+/// lives), then with the handful of values this app keeps on
+/// `WorkspaceLayout` and on the `Model` instead. Those overlays are the whole
+/// of what the deleted native hooks encoded — a statement about STORAGE, not
+/// about menus.
+///
+/// The other three namespaces come from the SAME builders the panel BODY
+/// renders against (`DockPanelView.buildPanelCtx`), so a predicate reads one
+/// fact one way whether it sits in the hamburger menu or in a widget's
+/// `bind:`. Until they were added the menu context published `panel` and
+/// `preferences` alone, and every `enabled_when` naming `state.`,
+/// `active_document.` or `selection_has_mask` read null — invisible while
+/// `panelIsEnabled` never consulted the YAML.
 ///
 /// Mirrors the Rust `panel_menu::panel_menu_ctx`.
 public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
@@ -276,9 +288,66 @@ public func panelMenuContext(_ contentId: String, layout: WorkspaceLayout,
         for (k, v) in store.getPanelState(contentId) { panel[k] = v }
     }
     for (k, v) in layoutHeldPanelState(contentId, layout: layout) { panel[k] = v }
+    for (k, v) in modelHeldPanelState(contentId, model: model) { panel[k] = v }
     var ctx: [String: Any] = ["panel": panel]
     ctx["preferences"] = ws?.data["preferences"] ?? [:]
+    if let ws = ws {
+        ctx["state"] = buildLiveStateMap(ws: ws, model: model)
+    } else {
+        ctx["state"] = [:] as [String: Any]
+    }
+    ctx["active_document"] = buildActiveDocumentView(
+        model: model,
+        layersPanelSelection: layersPanelSelection(model: model),
+        artboardsPanelSelection: artboardsPanelSelection(model: model)
+    )
+    // `selection_has_mask` and its siblings sit at TOP level, as the body's
+    // context places them, so `enabled_when: "!selection_has_mask"` reads the
+    // same key from both surfaces.
+    for (k, v) in buildSelectionPredicates(model: model) { ctx[k] = v }
     return ctx
+}
+
+/// The layers-panel TREE selection, as paths, read from the shared store
+/// under the key layers.yaml declares (`panel.panel_selection`, content
+/// `layers_panel_content`).
+///
+/// `TreeViewContent` keeps the selection in view-lived `@State` and mirrors
+/// it here on every change; before the mirror existed nothing outside that
+/// view could read it, so `active_document.layers_panel_selection_count` was
+/// 0 in every context this app built — the dock's body context read a store
+/// key nothing had ever written. One reader for both surfaces now.
+func layersPanelSelection(model: Model?) -> [[Int]] {
+    guard let store = model?.stateStore,
+          let raw = store.getPanel("layers_panel_content", "panel_selection") as? [Any]
+    else { return [] }
+    return raw.compactMap { entry -> [Int]? in
+        if let ints = entry as? [Int] { return ints }
+        if let nums = entry as? [NSNumber] { return nums.map { $0.intValue } }
+        return nil
+    }
+}
+
+/// The artboards-panel selection ids, read from the store scope the
+/// artboards effects write (`"artboards"` / `artboards_panel_selection`, the
+/// reader `Effects.swift`'s artboard verbs already use).
+func artboardsPanelSelection(model: Model?) -> [String] {
+    (model?.stateStore.getPanel("artboards", "artboards_panel_selection") as? [String]) ?? []
+}
+
+/// The `panel.*` values this app keeps on the ``Model`` rather than in the
+/// shared panel store, keyed exactly as the panel's YAML state table
+/// declares them. One panel: the layers isolation stack, which the YAML
+/// `list_push` / `list_pop` effects route to `model.layersIsolationStack`.
+private func modelHeldPanelState(_ contentId: String,
+                                 model: Model?) -> [String: Any] {
+    switch contentId {
+    case "layers_panel_content":
+        guard let m = model else { return [:] }
+        return ["isolation_stack": m.layersIsolationStack]
+    default:
+        return [:]
+    }
 }
 
 /// The `panel.*` values this app keeps on ``WorkspaceLayout`` rather than in
@@ -313,13 +382,63 @@ private func layoutHeldPanelState(_ contentId: String,
     }
 }
 
-/// Query whether a menu command is enabled for a panel kind. Defaults
-/// to `true` for panels / commands without a state-conditional rule.
-/// Mirrors Rust's `panel_is_enabled`.
+/// Query whether a menu command is enabled for a panel kind.
+///
+/// ONE path for every panel, the twin of `panelIsChecked`: the panel's bundle
+/// menu entry is looked up by its runtime command, its `enabled_when:`
+/// predicate is evaluated against the panel's context, and that is the answer
+/// (`true` with no predicate, as `MenuState` defaults). The native hook this
+/// replaced — `ColorPanel.isEnabled`'s `activeDefaultPaintColor != nil` —
+/// restated a rule color.yaml already states; every other panel answered
+/// `true` without reading the YAML at all, so "New Brush" never greyed out
+/// and the gradient rows declared `enabled_when: "false"` stayed live in both
+/// active ports.
+///
+/// Mirrors the Rust `panels::panel_is_enabled`.
 public func panelIsEnabled(_ kind: PanelKind, cmd: String,
-                           model: Model? = nil) -> Bool {
-    switch kind {
-    case .color: return ColorPanel.isEnabled(cmd, model: model)
-    default: return true
+                           layout: WorkspaceLayout, model: Model? = nil) -> Bool {
+    let contentId = panelKindToContentId(kind)
+    let ctx = panelMenuContext(contentId, layout: layout, model: model)
+    return panelMenuIsEnabled(contentId, cmd, ctx: ctx)
+}
+
+/// The `enabled_when:` predicate of the panel-menu entry whose runtime
+/// command is `cmd`, or nil when there is no such entry or it declares none.
+/// Matched with the SAME fold `menuItemsFromYaml` applies, exactly as
+/// `panelMenuCheckedExpr` is. One spelling only: the panel-menu vocabulary
+/// writes `enabled_when:` everywhere (the menubar's word too).
+///
+/// Mirrors the Rust `panel_menu::enabled_expr`.
+public func panelMenuEnabledExpr(_ contentId: String, _ cmd: String) -> String? {
+    guard !cmd.isEmpty, let ws = WorkspaceData.load() else { return nil }
+    let menu = ws.panelMenuRaw(contentId)
+    var actionCounts: [String: Int] = [:]
+    for entry in menu {
+        if let obj = entry as? [String: Any],
+           let action = obj["action"] as? String {
+            actionCounts[action, default: 0] += 1
+        }
     }
+    for entry in menu {
+        guard let obj = entry as? [String: Any] else { continue }
+        let action = obj["action"] as? String
+        let isRadioMember = action.map { (actionCounts[$0] ?? 0) > 1 } ?? false
+        let entryCmd = isRadioMember ? commandWithParams(obj) : (action ?? "")
+        guard entryCmd == cmd else { continue }
+        guard let expr = obj["enabled_when"] as? String, !expr.isEmpty else { return nil }
+        return expr
+    }
+    return nil
+}
+
+/// Whether the panel-menu entry for `cmd` is enabled, evaluating its bundle
+/// predicate against `ctx` through the SHARED menu-state evaluator. An entry
+/// with no predicate — and a command that names no entry — is enabled,
+/// matching `MenuState`'s `enabled: true` default.
+///
+/// Mirrors the Rust `panel_menu::is_enabled_from_yaml`.
+public func panelMenuIsEnabled(_ contentId: String, _ cmd: String,
+                               ctx: [String: Any]) -> Bool {
+    guard let expr = panelMenuEnabledExpr(contentId, cmd) else { return true }
+    return MenuState.evalBool(expr, ctx)
 }

@@ -227,15 +227,3 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
         _ => {}
     }
 }
-
-/// Query whether a menu command is enabled. Mirrors the `enabled_when`
-/// expressions in `workspace/panels/swatches.yaml`.
-pub fn is_enabled(cmd: &str, state: &AppState) -> bool {
-    match cmd {
-        // Both gated on at least one swatch being selected.
-        "duplicate_swatch" | "delete_swatch" => {
-            !state.swatches_panel.selected_swatches.is_empty()
-        }
-        _ => true,
-    }
-}

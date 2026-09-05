@@ -66,15 +66,6 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
     }
 }
 
-/// Query whether a menu command is enabled. Invert / Complement need
-/// an active color (fill or stroke per `fill_on_top`) to operate on.
-pub fn is_enabled(cmd: &str, state: &AppState) -> bool {
-    match cmd {
-        "invert_active_color" | "complement_active_color" => state.active_color().is_some(),
-        _ => true,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
