@@ -505,7 +505,8 @@ direct prerequisites for this vision. The most relevant:
   `workspace_interpreter/validator.py`, run by the compile every CI lane performs, with a
   planted-defect arm per class in `test_validator.py`. Read the "done" for what it COVERS:
   `style:`, per-kind widget properties beyond the type, effect payload shapes and
-  expression parsing (layer 3) stay open, named in `schema/README.md`. When first run on
+  expression parsing (layer 3) stay open, named in `schema/README.md`; the checker used
+  without `jsonschema` refuses the same planted defects, driven with it forced absent. When first run on
   the real tree the six went red on 63 sites and every one was a form the census had
   missed — none a defect: a clean negative. (Until 2026-09-03 this line named TWO unbuilt
   gates; the state-read gate was built that day and ticked above once its live arm watched

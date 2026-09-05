@@ -5,6 +5,8 @@ Covers Layer-1 (structural) validation for app and tool YAML. Layer-2
 layers are implemented.
 """
 
+import pytest
+
 from workspace_interpreter.loader import load_workspace
 from workspace_interpreter.validator import (
     validate_workspace,
@@ -379,3 +381,60 @@ class TestTheFiveSectionsAreWired:
         errs = validate_workspace(ws)
         for where in ("dialogs/probe.yaml", "actions.yaml: probe", "menubar.yaml", "layout.yaml"):
             assert any(e.startswith(where) for e in errs), (where, errs)
+
+
+class TestMinimalFallbackKnowsTheSchemas:
+    """The checker used when ``jsonschema`` is absent must refuse what the
+    schemas refuse. Until 2026-09-05 it knew no ``$ref`` / ``anyOf`` /
+    ``oneOf`` / ``allOf``, so under it the widget tree and the effect
+    vocabulary went unvalidated while the run reported green. Every arm
+    here forces the fallback (``jsonschema`` "absent") and re-drives a planted
+    defect from the classes above; the real workspace passing is the control
+    that the refusals are about the defects."""
+
+    @pytest.fixture(autouse=True)
+    def _no_jsonschema(self, monkeypatch):
+        import workspace_interpreter.validator as v
+        monkeypatch.setattr(v, "_try_import_jsonschema", lambda: None)
+
+    def test_real_workspace_validates_under_the_fallback(self, workspace_path):
+        assert validate_workspace(load_workspace(workspace_path)) == []
+
+    def test_the_fallback_reaches_the_tree_through_the_cross_file_ref(self):
+        deep = _widget(children=[_widget(children=[_widget(type="text", childs=[])])])
+        errs = _validate_structural("panel", _panel(content=deep), "probe")
+        assert any("childs" in e for e in errs), errs
+
+    def test_the_fallback_refuses_each_planted_class(self):
+        assert _validate_structural("panel", _panel(content=_widget(type="buton")), "probe")
+        assert _validate_structural("panel", _panel(content=_widget(type="dock_view")), "probe")
+        assert _validate_structural(
+            "panel", _panel(content=_widget(type="button", bind={"disabled": True})), "probe")
+        assert _validate_structural("panel", _panel(menu=[{"action": "x"}]), "probe")
+        assert _validate_structural("panel", _panel(state={"k": {"default": 1}}), "probe")
+        action = {"description": "d", "category": "edit", "effects": ["snapshot"]}
+        assert _validate_structural("action", dict(action, effects=[{"set_panel_stat": {}}]), "probe")
+        assert _validate_structural("action", dict(action, effects=["snapshoot"]), "probe")
+        assert _validate_structural("action", dict(action, category="layer"), "probe")
+        dialog = {"summary": "s", "description": "d", "modal": True, "content": _widget()}
+        assert _validate_structural("dialog", dict(dialog, state={"v": {"type": "number"}}), "probe")
+        assert _validate_structural("dialog", dict(dialog, modal="yes"), "probe")
+        menubar = {"menubar": [{"id": "m", "label": "M", "items": [{"label": "no id"}]}]}
+        assert _validate_structural("menubar", menubar, "probe")
+
+    def test_the_fallback_accepts_the_forms_the_schemas_admit(self):
+        # The string bind shorthand, a list-typed `fixed_width`, derived state.
+        assert _validate_structural(
+            "panel", _panel(content=_widget(type="text_input", bind="panel.mode")), "probe") == []
+        for fw in (True, 120):
+            doc = {"layout": {"id": "root", "type": "pane_system",
+                              "children": [{"id": "p", "type": "pane", "fixed_width": fw}]}}
+            assert _validate_structural("layout", doc, "probe") == []
+        dialog = {"summary": "s", "description": "d", "modal": True, "content": _widget(),
+                  "state": {"vv": {"get": "v * 2", "set": "fun n -> v <- n / 2"}}}
+        assert _validate_structural("dialog", dialog, "probe") == []
+
+    def test_an_unsupported_ref_form_is_loud(self):
+        from workspace_interpreter.validator import _resolve_ref
+        with pytest.raises(ValueError):
+            _resolve_ref("https://elsewhere/x.json#/$defs/y", {})

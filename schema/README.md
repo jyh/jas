@@ -37,9 +37,12 @@ stored (`type` + `default`) or derived (`get` + `set`). What they LEAVE OPEN,
 on purpose: `style:` (the renderers' vocabulary), per-kind widget properties
 beyond their type, effect payload shapes, and expression parsing (layer 3).
 Cross-file `$ref`s resolve through a `referencing` registry built from this
-directory, never the network; the hand-rolled fallback used when `jsonschema`
-is absent skips `$ref`, `oneOf` and `anyOf`, so under it the widget tree is
-unvalidated — CI installs `jsonschema`.
+directory, never the network. The hand-rolled fallback used when `jsonschema`
+is absent understands the constructs these schemas use (`$ref` in both forms,
+`allOf`, `anyOf`/`oneOf` as "any branch", list-typed `type`, `enum` on any
+type, `minProperties`) and is driven over the real workspace and over every
+planted defect with `jsonschema` forced absent (`test_validator.py`); it does
+not enforce `pattern` or `oneOf`'s exclusivity. CI installs `jsonschema`.
 
 ## Editor integration
 
