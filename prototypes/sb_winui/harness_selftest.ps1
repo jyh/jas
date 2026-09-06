@@ -90,7 +90,7 @@ $startupRow = "02:02:14`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAME
     "composition-scale=1.5x1.5 client-dips=1905x953 surface-request=2858x1429 " +
     "ui-tid=0 render-tid=0 paint-tid=0 present-tid=0 render-has-dispatcher=true"
 
-$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 selected=1 doc=HELD loads(shell)=1 " +
+$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 selected=1 doc=HELD loads(shell)=1 " +
     "point=(37.00,23.00) surface=2856x1464 scale=1.5 " +
     "ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false"
 
@@ -457,6 +457,21 @@ Test-Case 'O1.2c: the PORT selected the group, measured (not transcribed)' { Get
 Test-Case 'O1.2c: the chooser AIMS elsewhere -- so this document discriminates' { $corpusTarget.AimPath } '$.layers[0].children[0]'
 Test-Case 'O1.2c: ⭐ THE CHOOSER AGREES WITH THE PORT''S LIVE HIT TEST' { ((Get-SbSelectionPathFromDoc $corpusDoc) -eq $corpusTarget.Path) } 'True'
 Test-Case 'O1.2c: CONTROL -- aim and answer really are different paths here' { ($corpusTarget.AimPath -eq $corpusTarget.Path) } 'False'
+
+# ---------------------------------------------------------------------------
+# `dup-frames=` MUST NOT BE READ AS `frames=`
+# ---------------------------------------------------------------------------
+#
+# The shell's POINTER row gained `dup-frames=<n>` when the `move != k` extras
+# were identified as RE-DELIVERED pointer frames. `verify_assertions.ps1` reads a
+# field called `frames` off REPAINT rows, and `frames` is a suffix of
+# `dup-frames` -- the exact shape that killed a whole sitting when `scale`
+# matched inside `composition-scale=`. The anchor already forbids it; these
+# cases are what keep it forbidden, with the positive control beside them.
+Test-Case 'frames= is not read out of the middle of dup-frames=' { Get-SbField $pointerRow 'frames' } $null
+Test-Case 'dup-frames= is read whole' { Get-SbField $pointerRow 'dup-frames' } '5'
+Test-Case 'CONTROL: the reader still reads frames= where it IS a field' { Get-SbField $repaintDispRow 'frames' } '1'
+Test-Case 'CONTROL: move= is unaffected by the new neighbour' { Get-SbField $pointerRow 'move' } '7'
 
 # ---------------------------------------------------------------------------
 Write-Host ""

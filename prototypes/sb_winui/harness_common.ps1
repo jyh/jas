@@ -529,7 +529,12 @@ function Get-SbBenchmarkSurface([string]$Row) {
 # nothing to do with k at all. k=2 over 800 ms reads 4 -- TWO extras -- so the
 # source is periodic. The boundary is between 160 ms and 180 ms.
 #
-# ⚠ THE SOURCE IS CHARACTERISED, NOT IDENTIFIED. A periodic system arrival
+# ⭐ IDENTIFIED 2026-09-06: not an arrival at all -- a RE-DELIVERED pointer
+# frame, suppressed at the shell since, and reported as `dup-frames=`. The
+# boundary below is kept because it is what the historical readings were
+# calibrated against and jas's F-C ruling is written in its terms.
+#
+# ⚠ AS CHARACTERISED BEFORE THAT: a periodic system arrival
 # while the button is held fits every reading on record; which mechanism emits
 # it is a NAMED OPEN FINDING in the README and is not claimed here.
 #
