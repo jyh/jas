@@ -251,6 +251,29 @@ def declaration(source_text: str) -> tuple[list[str], list[tuple[str, int, int]]
 
 
 def findings(source_text: str, log: str) -> list[str]:
+    # ⛔ A BOM ON THE LOG NAMED THE WRONG DEFECT. `Out-File -Encoding utf8` in
+    # Windows PowerShell 5.1 writes UTF-8 WITH a BOM, so a log captured that way
+    # -- the natural way on the box this suite exists for -- arrives with
+    # `﻿` glued to the front of line 1. The first line is a case result, the
+    # match is anchored, and the gate reported THE FIRST DECLARED CASE as not
+    # run: a named, specific, entirely convincing red over a suite that had just
+    # printed `33 passed, 0 failed, of 33`. Measured on kenai 2026-09-06 (jas
+    # PR #129 review); stripping the three bytes and touching nothing else took
+    # the same file from FAILED to OK.
+    #
+    # ⛔ AND THE STRIP IS HERE, NOT ONLY AT THE FILE READ, so the self-test can
+    # drive it on a string with no filesystem. `main()` also reads with
+    # `utf-8-sig`, which is what makes a BOM-ONLY log read as empty and refuse
+    # for the reason it actually has ("the log is empty") rather than reaching a
+    # downstream guard that blames a missing summary line.
+    #
+    # 📌 THE SOURCE SIDE NEEDS NOTHING, AND THAT WAS MEASURED RATHER THAN
+    # ASSUMED: `declaration()` scans for a pattern instead of anchoring at the
+    # start of the file, so a BOM'd `Program.cs` derives the same 3 anchors and
+    # the same family. An arm below pins that it stays true -- its siblings
+    # `Canvas.cs` and `MainWindow.xaml.cs` in this same prototype ARE BOM'd, so
+    # a BOM on the source is one editor away.
+    log = log.lstrip("﻿")
     exact, loops = declaration(source_text)
     required = len(exact) + sum(size for _p, size, _b in loops)
 
@@ -459,6 +482,49 @@ def self_test() -> int:
     except Refusal as exc:
         arm("setup-loop: ignored not refused", False, str(exc))
 
+    # 9. ⭐ THE BOM ARMS. A log captured with `Out-File -Encoding utf8` (Windows
+    #    PowerShell 5.1, the box this suite exists for) carries a BOM, and before
+    #    the strip in `findings()` that produced ONE finding naming THE FIRST
+    #    DECLARED CASE over a suite that had passed every case. The positive
+    #    control is the same log without it, so a parser that had gone blind
+    #    could not satisfy both.
+    good_log = _log(_GOOD_NAMES)
+    arm("bom-log: CONTROL -- the clean log yields no finding",
+        findings(_GOOD_SOURCE, good_log) == [], "")
+    arm("bom-log: a BOM'd log yields no finding either",
+        findings(_GOOD_SOURCE, "﻿" + good_log) == [],
+        "got %r" % (findings(_GOOD_SOURCE, "﻿" + good_log),))
+
+    # ⛔ AND THE STRIP MUST NOT HAVE BLINDED IT. A gate that swallowed a BOM by
+    #    swallowing the whole first line would pass the arm above and stop
+    #    seeing the first case forever. Drop the FIRST case from a BOM'd log and
+    #    it must still red, by that case's name.
+    lost_first = _log(_GOOD_NAMES[1:])
+    lost = findings(_GOOD_SOURCE, "﻿" + lost_first)
+    # ⚠️ TWO findings, not one, and the arm says so rather than being loosened
+    #    to hide it: the gate names the missing CASE *and* reports the count
+    #    mismatch. My first cut of this arm asserted `len(lost) == 1` and failed
+    #    on the gate being more informative than I had assumed -- the arm was
+    #    wrong, not the code.
+    arm("bom-log: ...and a BOM'd log that really lost its first case still reds",
+        len(lost) >= 1 and any(_GOOD_NAMES[0] in f for f in lost),
+        "got %r" % (lost,))
+    arm("bom-log: ...naming the case AND the count, both",
+        any(_GOOD_NAMES[0] in f for f in lost)
+        and any("declares" in f for f in lost), "got %r" % (lost,))
+
+    # 📌 THE SOURCE SIDE IS ALREADY TOLERANT -- MEASURED, NOT ASSUMED, AND PINNED
+    #    SO IT STAYS. `declaration()` scans rather than anchoring at the file
+    #    start. `Canvas.cs` and `MainWindow.xaml.cs` in this same prototype are
+    #    BOM'd, so a BOM on `Program.cs` is one editor away.
+    try:
+        bex, blp = declaration("﻿" + _GOOD_SOURCE)
+        cex, clp = declaration(_GOOD_SOURCE)
+        arm("bom-source: a BOM'd source derives the same declaration",
+            bex == cex and blp == clp, "got %r / %r" % (bex, blp))
+    except Refusal as exc:
+        arm("bom-source: a BOM'd source derives the same declaration", False, str(exc))
+
     # 8. ⭐ THE PLURAL IN THIS GATE'S OWN CLAIM. It says "each data-driven
     #    family" and every arm above has exactly ONE, so the plural was an
     #    untested assertion -- the shape this repo calls "a first witness does
@@ -602,7 +668,7 @@ def main() -> int:
         return 2
     log_path = pathlib.Path(args.log)
     if not log_path.is_file() or not log_path.read_text(
-            encoding="utf-8", errors="replace").strip():
+            encoding="utf-8-sig", errors="replace").strip():
         print("check_title_oracle_ran: REFUSED -- the log %s is missing or empty, "
               "so nothing proves a case executed" % log_path.as_posix(), file=sys.stderr)
         return 2
@@ -610,7 +676,7 @@ def main() -> int:
     try:
         found = findings(
             source_path.read_text(encoding="utf-8"),
-            log_path.read_text(encoding="utf-8", errors="replace"),
+            log_path.read_text(encoding="utf-8-sig", errors="replace"),
         )
     except Refusal as exc:
         print("check_title_oracle_ran: REFUSED -- %s" % exc, file=sys.stderr)
