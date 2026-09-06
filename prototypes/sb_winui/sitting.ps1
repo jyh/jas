@@ -338,9 +338,10 @@ if ($Stay) {
 # ===========================================================================
 #
 # ⛔ THE UNIT IS THE RUN. `pointer` appears THREE times -- the session-1 hand,
-# the same hand under the 160 ms boundary (O4.4x's exact arm), and SB_SYNTH_DRAG
-# -- because O4's control is the SAME oracle read through the other provenance
-# and its exact arm is the same oracle read at a shorter drag; `benchmark`
+# the same hand at a 10 ms settle, and SB_SYNTH_DRAG -- because O4's control is
+# the SAME oracle read through the other provenance, and the short drag is the
+# configuration where the shell's duplicate suppression has NOTHING to do;
+# `benchmark`
 # appears twice because O2.2's band must be a DIRECT frame while the historical
 # arm is OFFSCREEN+copy. A summary that counted scenes would report "6 of 6" over
 # NINE runs. k is VARIED between the hand runs (2, then 7) because a control that
@@ -371,23 +372,34 @@ $runPlan = @{
            Env = @{ SB_RENDER_STALL_MS = '20000'; SB_RESIZE = '1000x600' };
            Args = @() }
     )
-    # ⭐ THE THIRD POINTER RUN IS O4.4x's EXACT ARM, AND IT IS A RUN RATHER
-    # THAN A SECOND GESTURE INSIDE ONE. `move != k` is the DRAG'S DURATION: one
-    # extra arrival per few hundred ms while the button is held, none under
-    # ~160 ms (kenai 2026-09-04, 13 configurations, `-HandSettleMs` varied).
-    # O4.4 therefore prices the extras and its budget is deliberately loose;
-    # O4.4x asserts EQUALITY, and it can only do that on a drag short enough to
-    # be under the boundary -- k=7 at 10 ms is 70 ms and reads exactly 7.
+    # ⭐ THE THIRD POINTER RUN NOW BRACKETS THE DUPLICATE SUPPRESSION, AND IT
+    # IS A RUN RATHER THAN A SECOND GESTURE INSIDE ONE.
+    #
+    # ⛔ ITS ORIGINAL REASON IS SPENT AND THE RUN IS KEPT ON A NEW ONE, said
+    # plainly rather than left to read as unchanged. It existed because O4.4
+    # priced the extras against the drag's duration and O4.4x could assert
+    # EQUALITY only under the 160 ms boundary, so the sitting needed one drag
+    # short enough to be under it. The extras are now identified as re-delivered
+    # pointer frames and suppressed at the shell, so O4.4 asserts equality at
+    # EVERY duration and no run is needed to reach it.
+    #
+    # What the two hand runs now do is bracket the suppression itself, and this
+    # is measured rather than argued (kenai 2026-09-06): at `-HandSettleMs 10`
+    # the drag is 70 ms and dup-frames is 0 -- the suppression has nothing to do
+    # and `move == k` holds anyway; at the default 40 ms the drag is 280 ms and
+    # dup-frames is 1 -- the suppression is doing real work for the same verdict.
+    # Delete this run and every remaining configuration has duplicates to
+    # suppress, so nothing would show that the verdict does not DEPEND on them.
     #
     # ⛔ A SECOND GESTURE INSIDE ONE RUN WOULD HAVE BROKEN THE BYTE-MARK
     # DISCIPLINE. One launch, one log mark, one window is what makes a row belong
     # to a run; the `pointer` scene completes on its FIRST `HAND CLOSED` row, so
     # a second gesture would have to be waited for by a clock. That is the defect
-    # the completion-row table replaced. Both arms land in one SITTING, which is
-    # what the ruling asks for, and the cost is one more launch.
+    # the completion-row table replaced. Both brackets land in one SITTING, and
+    # the cost is one more launch.
     'pointer' = @(
         @{ Name = 'pointer (hand, k=7)'; Scene = 'pointer'; Env = @{}; Args = @('-Hand', '-HandMoves', '7') },
-        @{ Name = 'pointer (hand, k=7 at 10ms -- O4.4x''s EXACT arm)'; Scene = 'pointer'; Env = @{};
+        @{ Name = 'pointer (hand, k=7 at 10ms -- the zero-duplicate bracket)'; Scene = 'pointer'; Env = @{};
            Args = @('-Hand', '-HandMoves', '7', '-HandSettleMs', '10') },
         @{ Name = 'pointer (SB_SYNTH_DRAG control, k=7)'; Scene = 'pointer'; Env = @{};
            Args = @('-SynthFromDump', '-HandMoves', '7') }
