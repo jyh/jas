@@ -221,6 +221,13 @@ jobs:
       - run: python scripts/check_shell_interaction_path.py
       - run: python scripts/check_shell_knobs.py --self-test
       - run: python scripts/check_shell_knobs.py
+      # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
+      # arm adjudicates a log that only exists where the C# suite runs, which is
+      # `windows-shell-compile`. The self-test is not a token invocation -- its
+      # last arms derive the declaration from the real `Program.cs`, so a
+      # platform difference in reading or parsing that file reds here, which is
+      # the property check_lane_coverage.py exists to hold.
+      - run: python scripts/check_title_oracle_ran.py --self-test
 
   expr-corpus-fresh:
     name: expression corpus JSON up-to-date
@@ -1190,6 +1197,12 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      # For check_title_oracle_ran.py below. Pinned like every other job here
+      # rather than leaning on the image's preinstalled interpreter, which is
+      # not a version this repo chose.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       # THE FIRST `setup-dotnet` IN THIS WORKFLOW. `SbWinUi.csproj` targets
       # `net10.0-windows10.0.22621.0` with `Microsoft.WindowsAppSDK 1.8.*`, and
       # the runner image's preinstalled SDKs are not guaranteed to include a
@@ -1316,29 +1329,34 @@ jobs:
           dotnet run --project prototypes/sb_winui_tests/TitleVerdictTests.csproj \
             2>&1 | tee titleverdict.log
 
-      # THE ANTI-VACUITY HALF, verbatim the argument the build's control makes.
-      # A green step proves the process exited 0; it does not prove any case ran.
-      # The summary line carries the count, and a count of zero must red.
-      - name: ...and it actually ran cases
+      # THE ANTI-VACUITY HALF. A green step proves the process exited 0; it does
+      # not prove any case ran.
+      #
+      # ⛔ UNTIL 2026-09-06 THIS STEP ENDED IN `[ "$n" -lt 20 ]`, AND THE SLACK
+      # IN THAT FLOOR WAS NEVER COMPUTED BY ANYONE. Measured at the object on run
+      # 34034173431: the suite runs **33** cases. Thirteen of them -- 39%,
+      # including BOTH cases named `CONTROL:` and all three kenai regression rows
+      # this suite was written for -- could have stopped executing with this step
+      # green. It had been carried in the seat's own record as "not a hole, the
+      # weaker form, whose number ages"; that label is why nobody read the count.
+      #
+      # ⭐ AND THE FIX IS NOT 33. Raising the floor is the move this workflow has
+      # already rejected in writing, twenty lines up in the wasm-canvas step:
+      # "Raising 4 to 17 would rot the same way and teach the next reader to bump
+      # it." check_title_oracle_ran.py DERIVES the declaration from Program.cs on
+      # every run -- every unconditional case by its own NAME, plus the size of
+      # each data-driven family -- so it says WHICH case stopped, needs no
+      # maintenance as the suite grows, and carries no number to go stale.
+      #
+      # SELF-TEST FIRST: a check that can only pass is not a check, and this one
+      # is trusted for its red. Its 21 arms include the real Program.cs, because
+      # a parser tuned on a fixture and never pointed at production is a defect
+      # this repo has already paid for.
+      - name: ...and it ran every case the file declares, by name
         if: ${{ !cancelled() && steps.titleverdict.conclusion == 'success' }}
         run: |
-          if [ ! -s titleverdict.log ]; then
-            echo "NOT RUN: the test log is missing or empty" >&2
-            exit 1
-          fi
-          line=$(grep -E '^--- [0-9]+ passed, [0-9]+ failed, of [0-9]+ case\(s\) ---$' \
-            titleverdict.log || true)
-          if [ -z "$line" ]; then
-            echo "NOT RUN: no summary line, so nothing proves a case executed" >&2
-            tail -20 titleverdict.log >&2
-            exit 1
-          fi
-          n=$(echo "$line" | sed -E 's/^--- ([0-9]+) passed.*/\1/')
-          if [ "${n:-0}" -lt 20 ]; then
-            echo "NOT RUN: only $n case(s) passed; this suite has far more" >&2
-            exit 1
-          fi
-          echo "positive control: $line"
+          python scripts/check_title_oracle_ran.py --self-test
+          python scripts/check_title_oracle_ran.py --log titleverdict.log
 
   # THE SECOND PLATFORM FAMILY, for the half that has no platform reason to be
   # Windows-only. `feature = "ffi"` carries no cfg at all -- unlike d2d it
