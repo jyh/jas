@@ -53,6 +53,20 @@ public sealed partial class MainWindow : Window
     private static readonly object LogLock = new();
 
     /// <summary>
+    /// THE RUN'S VERDICT, FOLDED OVER EVERY ROW — the value the session-1 title
+    /// oracle actually reads. Guarded by <see cref="LogLock"/> for exactly the
+    /// reason the log append is: <see cref="Report"/> runs on the render thread
+    /// and on the UI thread, and an unsynchronised read-modify-write here would
+    /// lose a verdict the same way an unsynchronised append lost a row.
+    ///
+    /// ⛔ IT IS NOT A COPY OF THE LAST ROW. See <see cref="TitleVerdict"/> for
+    /// why the title's verdict is a property of the RUN: three successful runs
+    /// were failed by the last-row rule on kenai 2026-09-04, and the class of
+    /// rows that can do it has twenty-odd members, not the three #118 named.
+    /// </summary>
+    private static TitleVerdict _titleVerdict = TitleVerdict.Empty;
+
+    /// <summary>
     /// The retained canvas. `global::` qualified because `x:Name="Canvas"` also
     /// puts a `SwapChainPanel` field called `Canvas` on this class: the two names
     /// are legal together (one is a type, one is a member) and the qualification
@@ -144,7 +158,10 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Title = VerifyTitle;
+        // `RUSTPENDING`, not a bare name: a window that has reported nothing yet
+        // must SAY so. The bare title used to be indistinguishable from a run
+        // whose verdict had been blanked by a verdict-less last row.
+        Title = TitleVerdict.Compose(VerifyTitle, TitleVerdict.Empty);
         _ui = DispatcherQueue;
         _canvas = new global::SbWinUi.Canvas(Report);
         _canvas.SurfaceSettled = OnSurfaceSettled;
@@ -978,6 +995,14 @@ public sealed partial class MainWindow : Window
     /// blocking hand-over from the render thread would be stop 2's deadlock by a
     /// third door.
     ///
+    /// ⛔ AND THE TITLE CARRIES THE RUN'S VERDICT, NOT THIS ROW'S. It used to
+    /// carry the row, which meant any caller that wrote no `RUSTOK `/`RUSTFAIL `
+    /// blanked the oracle's verdict — three successful runs failed that way on
+    /// kenai 2026-09-04, and there are twenty-odd such callers, not the three
+    /// PR #118 prefixed by name. <see cref="TitleVerdict"/> holds the rule and
+    /// `../sb_winui_tests/` drives it with no desktop; the STATUS LINE still
+    /// shows this row alone, because a human at the window wants the row.
+    ///
     /// AND A CAUGHT EXCEPTION PUTS `RECEIPT-LOST` IN THE TITLE. The old bare
     /// `catch { }` said "diagnostics must never become the failure", which is
     /// right, but it made a lost receipt indistinguishable from a run that had
@@ -1010,10 +1035,29 @@ public sealed partial class MainWindow : Window
         }
 
         var text = lost is null ? status : $"{lost} | {status}";
-        _ui.TryEnqueue(() =>
+
+        // THE FOLD, NOT THE LAST ROW. `text` is what a human reads; the verdict
+        // that reaches the title is the RUN's, so a row with no verdict on it
+        // (`A'`, `UI-STALL DONE`, `SQUEEZE requesting …`, `DUMP`, `SCALE
+        // CHANGED`, …) updates the text and leaves the verdict standing. The
+        // fold is taken here, on the reporting thread and under the same lock as
+        // the append, so the title cannot be composed from a half-updated value.
+        //
+        // ⛔ THE FOLD AND THE ENQUEUE ARE ONE CRITICAL SECTION. Composing under
+        // the lock and enqueuing outside it would let two reporting threads
+        // interleave — B composes and posts its title, then A posts the older
+        // one it composed first — and the title the oracle reads would be a
+        // STALE verdict. `TryEnqueue` neither blocks nor runs the callback
+        // inline, so there is nothing here to deadlock against.
+        lock (LogLock)
         {
-            Title = $"{VerifyTitle} | {text}";
-            StatusLine.Text = text;
-        });
+            _titleVerdict = TitleVerdict.Fold(_titleVerdict, text);
+            var title = TitleVerdict.Compose(VerifyTitle, _titleVerdict);
+            _ui.TryEnqueue(() =>
+            {
+                Title = title;
+                StatusLine.Text = text;
+            });
+        }
     }
 }

@@ -1234,6 +1234,52 @@ jobs:
           echo "positive control: $n line(s) name SbWinUi.dll"
           grep 'SbWinUi\.dll' shell-build.log
 
+      # ⭐ AND THE SHELL'S FIRST BEHAVIOURAL ARM, not just a compile.
+      #
+      # Every other arm this prototype has needs a desktop, so until this step
+      # the app's own logic was never executed by a runner -- and that gap has a
+      # measured cost. On kenai 2026-09-04 the session-1 title oracle FAILED
+      # THREE RUNS THAT SUCCEEDED because `Report` put the LAST ROW's verdict in
+      # the window title and those scenes ended on rows carrying none. The rule
+      # is a pure function over strings. A desktop-less runner CAN exercise it;
+      # nobody had written the arm. This is the same argument, and the same
+      # class of defect, as `harness_selftest.ps1` in the `windows` job.
+      #
+      # `dotnet run` returns the test program's exit code, so the step's own
+      # status is the verdict -- but a program that printed nothing would also
+      # exit 0, so the case count is asserted below rather than trusted.
+      - name: The title oracle's rule is driven
+        id: titleverdict
+        if: ${{ !cancelled() && steps.sdk.conclusion == 'success' }}
+        run: |
+          set -o pipefail
+          dotnet run --project prototypes/sb_winui_tests/TitleVerdictTests.csproj \
+            2>&1 | tee titleverdict.log
+
+      # THE ANTI-VACUITY HALF, verbatim the argument the build's control makes.
+      # A green step proves the process exited 0; it does not prove any case ran.
+      # The summary line carries the count, and a count of zero must red.
+      - name: ...and it actually ran cases
+        if: ${{ !cancelled() && steps.titleverdict.conclusion == 'success' }}
+        run: |
+          if [ ! -s titleverdict.log ]; then
+            echo "NOT RUN: the test log is missing or empty" >&2
+            exit 1
+          fi
+          line=$(grep -E '^--- [0-9]+ passed, [0-9]+ failed, of [0-9]+ case\(s\) ---$' \
+            titleverdict.log || true)
+          if [ -z "$line" ]; then
+            echo "NOT RUN: no summary line, so nothing proves a case executed" >&2
+            tail -20 titleverdict.log >&2
+            exit 1
+          fi
+          n=$(echo "$line" | sed -E 's/^--- ([0-9]+) passed.*/\1/')
+          if [ "${n:-0}" -lt 20 ]; then
+            echo "NOT RUN: only $n case(s) passed; this suite has far more" >&2
+            exit 1
+          fi
+          echo "positive control: $line"
+
   # THE SECOND PLATFORM FAMILY, for the half that has no platform reason to be
   # Windows-only. `feature = "ffi"` carries no cfg at all -- unlike d2d it
   # compiles everywhere -- so watching it on Windows alone would be watching it

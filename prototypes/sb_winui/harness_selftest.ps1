@@ -322,6 +322,34 @@ Test-Case 'the oracle still REFUSES a RUSTFAIL title' { (Select-SbTitleMatch $ti
 Test-Case 'the PRE-REPAIR completion row''s title did not satisfy it either (the defect)' { (Select-SbTitleMatch $titlesPreRepair $required).Count } '0'
 
 # ---------------------------------------------------------------------------
+# THE FOLDED TITLE -- the shell now writes the RUN's verdict, not the row's
+# ---------------------------------------------------------------------------
+#
+# ⛔ `TitleVerdict.Compose` (C#) changed the title's SHAPE: `<name> | <verdict>
+# [fails=N] | <last row>`. `Select-SbTitleMatch` is unchanged and must stay so,
+# but a rule that is never driven against the shape the app actually writes is a
+# rule about a title nobody produces. These cases pin the two halves together
+# from THIS side; `../sb_winui_tests/` drives the C# side. The fixtures are the
+# literal output of that project's `Compose`, not a paraphrase of it.
+$titlesFolded = @("JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTOK | A' scene=retained surface=2858x1429")
+$titlesFoldedTally = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTOK fails=1 | RUSTOK STAY pid=4812')
+$titlesFoldedFail = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTFAIL | RUSTFAIL render thread died')
+$titlesPending = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTPENDING')
+# ⛔ THE NEAR MISS. The last-row half can itself contain `RUSTOK` (`Report`
+# composes `RECEIPT-LOST <ex> | <status>`), so a FAILED run's title can carry the
+# word. The oracle must key on the APP NAME plus the verdict, never on `RUSTOK`
+# loose in the string -- a shorter name hiding inside a longer one is how this
+# seat lost a sitting.
+$titlesFailCarryingTheWord = @(
+    'JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTFAIL | RECEIPT-LOST IOException | RUSTOK GOLDENS 21/21')
+
+Test-Case 'the FOLDED title satisfies the oracle when the last row has no verdict' { (Select-SbTitleMatch $titlesFolded $required).Count } '1'
+Test-Case 'a folded title with a fail TALLY still satisfies it (O5 must not go red)' { (Select-SbTitleMatch $titlesFoldedTally $required).Count } '1'
+Test-Case 'CONTROL: a folded RUSTFAIL title is still refused' { (Select-SbTitleMatch $titlesFoldedFail $required).Count } '0'
+Test-Case 'CONTROL: a run that reported nothing (RUSTPENDING) is refused' { (Select-SbTitleMatch $titlesPending $required).Count } '0'
+Test-Case 'CONTROL: RUSTOK loose in the LAST-ROW half does not pass a failed run' { (Select-SbTitleMatch $titlesFailCarryingTheWord $required).Count } '0'
+
+# ---------------------------------------------------------------------------
 # F-B -- THE CHOOSER AIMS AT THE LARGEST, THE APP TAKES THE TOPMOST
 # ---------------------------------------------------------------------------
 #

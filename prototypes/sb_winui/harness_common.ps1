@@ -580,9 +580,15 @@ function Test-SbMoveExact {
 # carries the verdict. On kenai 2026-09-04 it FAILED three runs that had
 # succeeded -- `retained`, `stall` and the o6 squeeze -- because each scene's
 # LAST row (`A'`, `STALL ...`, `SQUEEZE delivered ...`) carried no verdict and
-# `Report` puts the last row in the title. The repair is in the SHELL: every
-# scene-completion row now carries the prefix. This function is the rule,
-# unchanged, in one place a self-test can drive.
+# `Report` puts the last row in the title.
+#
+# ⛔ AND THE REPAIR MOVED. PR #118 prefixed those three rows BY NAME; that left
+# ~20 other verdict-less `Report` callers able to blank the title the moment one
+# of them lands last, which is #115's failure mode a third time. The shell now
+# folds: `TitleVerdict.Compose` writes `<name> | <verdict>[ fails=N] | <row>`,
+# the verdict being the RUN's. So the title's shape changed and THIS FUNCTION
+# DID NOT -- it is still the substring rule, in one place a self-test can drive,
+# and `harness_selftest.ps1` now drives it against BOTH shapes.
 function Select-SbTitleMatch($Titles, [string]$Required) {
     if ($null -eq $Titles) { return @() }
     return @($Titles | Where-Object { $_ -like "*$Required*" })
