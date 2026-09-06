@@ -321,15 +321,23 @@ Test-Case 'F-C RE-CUT: move < k is still refused, and by its own sign' {
 # from one where they had stopped happening, and the next wave would have to
 # rediscover the whole finding" -- this is the arm that holds it to that.
 Test-Case 'O4.4x: a POINTER row carrying dup-frames reports it' {
-    $r = Test-SbDupFramesReported $pointerRow; "$($r.Ok)/$($r.Count)/$($r.Text)" } 'True/5/dup-frames=5'
+    $r = Test-SbDupFramesReported $pointerRow; "$($r.Ok)/$($r.Dups)/$($r.Text)" } 'True/5/dup-frames=5'
 Test-Case 'O4.4x: zero is REPORTED, not read as absent' {
-    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5', 'dup-frames=0'); "$($r.Ok)/$($r.Count)" } 'True/0'
+    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5', 'dup-frames=0'); "$($r.Ok)/$($r.Dups)" } 'True/0'
 Test-Case 'O4.4x: ⭐ THE MUTANT -- a row with the field REMOVED is refused' {
-    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5 ', ''); "$($r.Ok)/$($r.Count)" } 'False/-1'
+    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5 ', ''); "$($r.Ok)/$($r.Dups)" } 'False/-1'
 Test-Case 'O4.4x: a non-numeric value is refused rather than coerced' {
     $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5', 'dup-frames=none'); $r.Ok } 'False'
 Test-Case 'O4.4x: CONTROL -- an empty row is refused, not crashed on' {
     $r = Test-SbDupFramesReported ''; $r.Ok } 'False'
+# ⛔ THE RESULT KEY IS `Dups` BECAUSE `Count` IS A HASHTABLE MEMBER. A key named
+# `Count` is shadowed by the table's OWN `Count` (its number of entries), so
+# `$r.Count` would read 4 here and look exactly like a measurement. The
+# invariant is that the table has no such key at all -- asserted that way rather
+# than by pinning the entry count, which would red on any future key.
+Test-Case 'O4.4x: the result carries no key that its own Count would shadow' {
+    $r = Test-SbDupFramesReported $pointerRow
+    "$($r.Dups)/$($r.ContainsKey('Count'))" } '5/False'
 
 # ---------------------------------------------------------------------------
 # THE TITLE ORACLE -- the rule is right and it stays

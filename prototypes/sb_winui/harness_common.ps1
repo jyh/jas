@@ -585,14 +585,21 @@ function Test-SbMoveCount {
 function Test-SbDupFramesReported([string]$Row) {
     $raw = Get-SbField $Row 'dup-frames'
     $ok = ($null -ne $raw) -and ($raw -match '^[0-9]+$')
-    return @{
-        Ok = $ok
-        Count = $(if ($ok) { [int]$raw } else { -1 })
-        Raw = $raw
-        Text = $(if ($ok) { "dup-frames=$raw" }
-                 elseif ($null -eq $raw) { 'dup-frames= is ABSENT from the row' }
-                 else { "dup-frames= is not a count (read '$raw')" })
+    # ⛔ `Dups`, NOT `Count`. A PowerShell hashtable already HAS a `Count` member
+    # (its number of entries) and the .NET member wins over a key of the same
+    # name, so `$r.Count` on this result would read 4 -- a small integer from a
+    # field called Count, which reads exactly like a measurement. Censused the
+    # harness for the class (Count/Keys/Values/Item/IsReadOnly/IsFixedSize/
+    # SyncRoot/IsSynchronized as keys): this was the only hit.
+    $dups = -1
+    $text = 'dup-frames= is ABSENT from the row'
+    if ($ok) {
+        $dups = [int]$raw
+        $text = "dup-frames=$raw"
+    } elseif ($null -ne $raw) {
+        $text = "dup-frames= is not a count (read '$raw')"
     }
+    return @{ Ok = $ok; Dups = $dups; Raw = $raw; Text = $text }
 }
 
 # ---------------------------------------------------------------------------
