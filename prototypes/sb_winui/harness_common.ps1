@@ -515,65 +515,91 @@ function Get-SbBenchmarkSurface([string]$Row) {
 }
 
 # ---------------------------------------------------------------------------
-# THE MOVE COUNT, PRICED AGAINST THE DRAG'S DURATION (O4.4 / O4.4x)
+# THE MOVE COUNT: `move == k`, UNCONDITIONALLY (O4.4), AND THE DUPLICATES
+# THAT ARE STILL ARRIVING (O4.4x)
 # ---------------------------------------------------------------------------
 #
-# ⭐ `move != k` IS THE DRAG'S DURATION, NOT ITS STEP COUNT. Measured on
-# kenai 2026-09-04 across 13 configurations with `-HandSettleMs` varying the
-# injector's per-step pause -- the arm that breaks the confound, because at a
-# fixed 40 ms pause the step count and the elapsed time are perfectly
-# correlated. Three readings reverse the defect in both directions: k=7 at 10 ms
-# (a 70 ms drag) reads exactly 7, the same k=7 that has read 8 in every sitting
-# since PR #110 at 40 ms (a 280 ms drag); k=4 at 100 ms (400 ms) reads 5 while
-# k=4 at 40 ms (160 ms) reads 4; and k=1 at 300 ms reads 2, so the extra has
-# nothing to do with k at all. k=2 over 800 ms reads 4 -- TWO extras -- so the
-# source is periodic. The boundary is between 160 ms and 180 ms.
+# ⭐ `move != k` IS IDENTIFIED (flask, 2026-09-06) AND FIXED AT THE SOURCE.
+# The extras were never new input: XAML RE-DELIVERS a pointer frame the shell
+# has already applied -- same FrameId AND Timestamp AND position -- while the
+# contact sits still, and the repeats multiply with the idle gap after each move
+# (settle 10 ms: none; 800 ms: five). `MainWindow.OnPointerMoved` suppresses a
+# repeated frame, counts it, and reports the count as `dup-frames=`.
 #
-# ⭐ IDENTIFIED 2026-09-06: not an arrival at all -- a RE-DELIVERED pointer
-# frame, suppressed at the shell since, and reported as `dup-frames=`. The
-# boundary below is kept because it is what the historical readings were
-# calibrated against and jas's F-C ruling is written in its terms.
+# Everything below the app was excluded FIRST, by measurement rather than by
+# argument: `probe_hold.ps1` drives a BARE WIN32 WINDOW with this harness's own
+# injector construction and reads arrivals == k EXACTLY at every configuration
+# on record, in BOTH input stacks, with the button held and with the window
+# repainting at 5 ms. So SendInput, the mouse stack, the pointer stack, the
+# message queue and the redraw are innocent.
 #
-# ⚠ AS CHARACTERISED BEFORE THAT: a periodic system arrival
-# while the button is held fits every reading on record; which mechanism emits
-# it is a NAMED OPEN FINDING in the README and is not claimed here.
+# ⛔ THE HISTORICAL RULING WAS `move >= k` WITH THE EXTRAS PRICED at one arrival
+# per 160 ms of post-press drag (the boundary measured on kenai 2026-09-04
+# between 160 ms and 180 ms), and O4.4x asserted equality only UNDER that
+# boundary. The budget existed for exactly one reason, stated in the ruling
+# itself: the source was an open finding and could not be charged to the app's
+# counting. RE-CUT 2026-09-06 BY jas, THE RULING'S AUTHOR, BECAUSE THAT PREMISE
+# IS REFUTED. A budget whose stated reason has been withdrawn is not a loose
+# assertion, it is an assertion about nothing: it would absorb a NEW duplicate
+# shape -- one the FrameId/Timestamp/position triple does not catch -- in
+# perfect silence, which is the exact failure the suppression exists to prevent.
 #
-# So O4.4 is `move >= k` with the extras PRICED: one arrival per 160 ms of
-# post-press drag, rounded up. ⛔ THE BUDGET IS AN UPPER BOUND AND IT IS
-# LOOSE ON PURPOSE -- at the measured boundary a 280 ms drag is allowed 2 extras
-# and produced 1 -- which is exactly why it cannot be the only arm. `O4.4x`
-# drives the SAME oracle under the boundary, where the answer must be EXACTLY k,
-# and that is the arm that can still convict the app of miscounting.
-$SbMoveExactBoundaryMs = 160
-
-function Get-SbMoveExtrasBudget([int]$PostPressMs) {
-    if ($PostPressMs -le 0) { return 0 }
-    return [int][math]::Ceiling($PostPressMs / [double]$SbMoveExactBoundaryMs)
-}
-
+# ⇒ O4.4 IS `move == k` AT EVERY DURATION. Any extra is a finding; `move < k` is
+# still a finding and still reports its own sign (coalescence, a UIPI discard,
+# or two steps colliding on one normalized grid point -- the injector's
+# `normalized-collisions=` says which). The measured post-repair readings are
+# k=1@300, k=2@800, k=4@100, k=7@10 and k=7@40, all exact, dup-frames 1,5,1,0,1.
+#
+# ⚠️ `-PostPressMs` IS REPORTED AND NO LONGER GATES ANYTHING. It is kept because
+# the drag's duration is the first thing a reader of a failing row wants, and it
+# is said here so nobody assumes a parameter in the signature decides the
+# verdict. The 160 ms boundary constant and its budget function are DELETED
+# rather than left unread: a knob nothing reads still looks live to the next
+# reader. The calibration survives as history, in this comment and the README.
 function Test-SbMoveCount {
     param([int]$Move, [int]$K, [int]$PostPressMs)
-    $budget = Get-SbMoveExtrasBudget $PostPressMs
     $extras = $Move - $K
     return @{
-        Ok = (($extras -ge 0) -and ($extras -le $budget))
+        Ok = ($extras -eq 0)
         Extras = $extras
-        Budget = $budget
-        Text = "move=$Move k=$K extras=$extras post-press=$($PostPressMs)ms budget=$budget"
+        Text = "move=$Move k=$K extras=$extras post-press=$($PostPressMs)ms"
     }
 }
 
-# The EXACT arm. It APPLIES only when the post-press drag is at or under the
-# measured boundary -- outside it the extra arrival is expected and an exact
-# assertion would red on a run that is behaving as characterised. `Applies` is
-# false rather than `Ok` being true: an arm that cannot run says so by name.
-function Test-SbMoveExact {
-    param([int]$Move, [int]$K, [int]$PostPressMs)
-    return @{
-        Applies = (($PostPressMs -gt 0) -and ($PostPressMs -le $SbMoveExactBoundaryMs))
-        Ok = ($Move -eq $K)
-        Text = "move=$Move k=$K post-press=$($PostPressMs)ms boundary=$($SbMoveExactBoundaryMs)ms"
+# ⭐ O4.4x -- THE DUPLICATES ARE STILL ARRIVING, AND THIS IS THE ONLY SURFACE
+# THAT SAYS SO. Before the repair, the evidence that the phenomenon existed WAS
+# the extras count. After it, the extras are zero by construction and the sole
+# remaining evidence is `dup-frames=` on the POINTER row. Nothing asserted that
+# field's VALUE -- only a lexical case proving `frames=` cannot match inside it.
+# `MainWindow.OnPointerMoved`'s own comment says a shell that quietly swallowed
+# the repeats "would be indistinguishable from one where they had stopped
+# happening, and the next wave would have to rediscover the whole finding";
+# this arm is what holds the shell to that.
+#
+# ⛔ WHAT THIS ARM DOES NOT COVER, SAID ON ITS OWN PASS LINE RATHER THAN HERE
+# ONLY: it asserts the count is REPORTED and well-formed, not that it is
+# correct. A shell that kept suppressing but stopped INCREMENTING would read
+# `dup-frames=0` with `move == k` and pass. That residual hole is diagnostic
+# only -- a shell that stopped SUPPRESSING is caught by O4.4, because the
+# repeats would reach the core and drive move past k.
+function Test-SbDupFramesReported([string]$Row) {
+    $raw = Get-SbField $Row 'dup-frames'
+    $ok = ($null -ne $raw) -and ($raw -match '^[0-9]+$')
+    # ⛔ `Dups`, NOT `Count`. A PowerShell hashtable already HAS a `Count` member
+    # (its number of entries) and the .NET member wins over a key of the same
+    # name, so `$r.Count` on this result would read 4 -- a small integer from a
+    # field called Count, which reads exactly like a measurement. Censused the
+    # harness for the class (Count/Keys/Values/Item/IsReadOnly/IsFixedSize/
+    # SyncRoot/IsSynchronized as keys): this was the only hit.
+    $dups = -1
+    $text = 'dup-frames= is ABSENT from the row'
+    if ($ok) {
+        $dups = [int]$raw
+        $text = "dup-frames=$raw"
+    } elseif ($null -ne $raw) {
+        $text = "dup-frames= is not a count (read '$raw')"
     }
+    return @{ Ok = $ok; Dups = $dups; Raw = $raw; Text = $text }
 }
 
 # ---------------------------------------------------------------------------

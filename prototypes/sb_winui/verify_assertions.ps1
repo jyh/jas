@@ -774,46 +774,47 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
         $synthParts = @($env:SB_SYNTH_DRAG -split ',')
         if ($synthParts.Count -ge 5) { $wantK = [int]$synthParts[4] } else { $wantK = 2 }
     }
-    # ⭐ `move != k` IS THE DRAG'S DURATION, NOT ITS STEP COUNT -- F-C, and the
-    # ruling on it. PR #110 measured `move=8` at k=7 and blamed the injector; PR
-    # #115 removed the positioned button events and k=7 read 8 again. The second
-    # sitting varied `-HandSettleMs`, which is the arm that breaks the confound
-    # (at a fixed 40 ms pause the step count and the elapsed time are perfectly
-    # correlated), and 13 configurations settle it:
+    # ⭐ `move != k` IS IDENTIFIED (flask, 2026-09-06) AND FIXED AT THE SOURCE.
+    # PR #110 measured `move=8` at k=7 and blamed the injector; #115 removed the
+    # positioned button events and k=7 read 8 again; #117 refuted that candidate
+    # and characterised the extras as periodic in the DRAG'S DURATION, not in k;
+    # #118 priced them. The third harness run identified them: XAML RE-DELIVERS a
+    # pointer frame the shell has ALREADY APPLIED -- same FrameId AND Timestamp
+    # AND position -- while the contact sits still, so every repeat had been
+    # driving the core with a point it had already been given. The repeats
+    # multiply with the idle gap after each move, which is #117's "one extra per
+    # few hundred ms while the button is held" seen from the other side.
     #
-    #   k=7 @ 10 ms (70 ms drag)  -> 7, 7      the exact config that always read 8
-    #   k=4 @ 40 ms (160 ms)      -> 4         and k=4 @ 100 ms (400 ms) -> 5
-    #   k=1 @ 300 ms (300 ms)     -> 2         one step, one extra: not about k
-    #   k=2 @ 400 ms (800 ms)     -> 4         TWO extras: periodic, not one-shot
+    # Everything below the app was excluded FIRST, by measurement: `probe_hold.ps1`
+    # drives a BARE WIN32 WINDOW with this harness's own injector construction and
+    # reads arrivals == k EXACTLY at every configuration on record, in BOTH input
+    # stacks, with the button held and with the window repainting at 5 ms.
     #
-    # ⭐ THE SOURCE IS NOW IDENTIFIED (flask, 2026-09-06) AND THE SHELL FIXES IT
-    # AT THE SOURCE: the extras were RE-DELIVERED pointer frames -- same FrameId,
-    # same Timestamp, same position, raised again by XAML while the contact sat
-    # still -- so they were duplicates of input the shell had already applied to
-    # the core, not arrivals. `MainWindow.OnPointerMoved` now suppresses a
-    # repeated frame and the POINTER row carries `dup-frames=<n>`. Measured after
-    # the repair: move == k at every configuration on record (k=1@300, k=2@800,
-    # k=4@100, k=7@10, k=7@40), with dup-frames 1,5,1,0,1.
+    # `MainWindow.OnPointerMoved` now suppresses a repeated frame and reports the
+    # count as `dup-frames=`. Post-repair readings: k=1@300, k=2@800, k=4@100,
+    # k=7@10, k=7@40 -- all exact, dup-frames 1,5,1,0,1.
     #
-    # ⛔ THE ASSERTION BELOW IS UNCHANGED, DELIBERATELY. `move >= k` with the
-    # extras priced is jas's ruling (freeze v3.2 §9.2, F-C), and the finding that
-    # inverts its premise is flask's to report, not flask's to act on. The budget
-    # simply stops binding: it is now expected to be unused, and jas may want to
-    # tighten this to equality. The historical reading follows.
+    # ⛔ THE RULING IS RE-CUT, BY ITS AUTHOR, BECAUSE ITS PREMISE IS REFUTED.
+    # O4.4 was `move >= k` with the extras priced against the duration, and the
+    # budget existed for exactly one stated reason: the source was an open
+    # finding and could not be charged to the app's counting. It can now. A
+    # budget whose reason has been withdrawn is not a loose assertion but an
+    # assertion about nothing -- it would absorb a NEW duplicate shape, one the
+    # FrameId/Timestamp/position triple does not catch, in perfect silence, which
+    # is the exact failure the suppression exists to prevent.
     #
-    # ⚠️ AS CHARACTERISED BEFORE THE REPAIR: one arrival per few hundred
-    # ms while the button is held fits every reading on record; the mechanism is a
-    # NAMED OPEN FINDING in the README and is not claimed here.
-    #
-    # ⛔ SO O4.4 IS `move >= k` WITH THE EXTRAS PRICED, AND ITS BUDGET IS LOOSE
-    # ON PURPOSE -- which is why it is not the only arm. `O4.4x` drives the same
-    # oracle UNDER the boundary, where the answer must be exactly k, and that is
-    # the arm that can still convict the app of miscounting. `sitting.ps1` runs a
-    # THIRD `pointer` run at `-HandSettleMs 10` (the second one driving a real
-    # hand) so both arms land in one sitting.
+    # ⇒ O4.4 IS NOW `move == k` AT EVERY DURATION, and the 160 ms boundary is
+    # history rather than code. Two consequences worth naming:
+    #   * the duration no longer decides a verdict, so a run whose receipt
+    #     carries no `post-press-ms=` is now ASSERTED instead of NOT RUN -- the
+    #     old arms could not price the extras without it and had to abstain;
+    #   * O4.4x is RE-CUT, not deleted. Its old job (convicting the app of
+    #     miscounting) passes to O4.4, which now does it at every duration
+    #     instead of only under the boundary. Its new job is the one no arm
+    #     held: the duplicates did not stop, and `dup-frames=` is the only
+    #     surface that still says so.
     $handNote = ''
     $postPressMs = 0
-    $postPressKnown = $true
     $postPressSource = "no injector receipt for this run: the SYNTHETIC arm is replayed inside the shell and never crosses a real pointer stream, so the post-press drag is 0 ms, the extras budget is 0 and an EXACT reading is required"
     if ($Hand -and (Test-Path $handReceipt)) {
         $rcTxt = (Get-Content $handReceipt) -join ' | '
@@ -828,58 +829,49 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
         if ($mMs.Success) {
             $postPressMs = [int]$mMs.Groups[1].Value
             # ⛔ FIRST-POST-PRESS-MOVE TO RELEASE, WHICH IS THE COLUMN THE
-            # BOUNDARY WAS CALIBRATED ON (k x settle). The receipt also carries
-            # `button-held-ms`, one settle longer; quoting that one here would
-            # move the budget by a step against a boundary measured on the other.
+            # HISTORICAL BOUNDARY WAS CALIBRATED ON (k x settle). The receipt
+            # also carries `button-held-ms`, one settle longer. The two no
+            # longer decide anything -- this value is printed, not consulted --
+            # but the column is kept honest so the historical readings in the
+            # README stay comparable with what a run prints today.
             $postPressSource = "the injector's own receipt: post-press-ms=$postPressMs (its first post-press move to its release, measured by the hand that sent them)"
         } else {
-            $postPressKnown = $false
-            $postPressSource = "the injector's receipt carries no post-press-ms= field (an older send_hand.ps1), and the extras can only be priced against the drag's DURATION"
+            $postPressSource = "the injector's receipt carries no post-press-ms= field (an older send_hand.ps1), so the drag's duration is unknown; under the re-cut ruling that costs a diagnostic line, not the verdict"
         }
     } elseif ($Hand) {
-        $postPressKnown = $false
-        $postPressSource = "the hand was dispatched and wrote no receipt, so this run has no post-press duration to price the extras against"
+        $postPressSource = "the hand was dispatched and wrote no receipt, so this run has no post-press duration to report; under the re-cut ruling the verdict does not depend on it"
     }
 
     if ($null -eq $move) {
-        Add-NotRun "$o4Prefix.4 move >= k, extras priced against the drag's duration" `
+        Add-NotRun "$o4Prefix.4 move == k (the extras are identified and suppressed)" `
             "the gesture row carries no readable move= field" -Row $gestureRow
-        Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
+        Add-NotRun "$o4Prefix.4x dup-frames= is reported by the shell" `
             "the gesture row carries no readable move= field" -Row $gestureRow
-    } elseif (-not $postPressKnown) {
-        Add-NotRun "$o4Prefix.4 move >= k, extras priced against the drag's duration" `
-            "$postPressSource. Read anyway: k=$wantK asked, move=$move reported (press=$press release=$release).$handNote" -Row $gestureRow
-        Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
-            "$postPressSource, so this run cannot be shown to be under the boundary. Read anyway: k=$wantK asked, move=$move reported" -Row $gestureRow
     } else {
+        # ⛔ NO `-not $postPressKnown` ABSTENTION ANY MORE. The duration is
+        # printed, never consulted: under the re-cut the answer is the same at
+        # every duration, so a missing `post-press-ms=` costs a diagnostic line
+        # and not the verdict.
         $mc = Test-SbMoveCount -Move ([int]$move) -K $wantK -PostPressMs $postPressMs
         if ($mc.Ok) {
-            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'PASS' `
-                -Detail "$($mc.Text) (press=$press release=$release). The budget is one arrival per 160 ms of post-press drag, rounded up -- the boundary measured on kenai 2026-09-04. IDENTIFIED 2026-09-06: the extras were RE-DELIVERED pointer frames (same FrameId and Timestamp), which the shell now suppresses and reports as dup-frames=, so this budget is expected to be UNUSED and a non-zero extras count is now itself a finding. Duration source: $postPressSource.$handNote" -Row $gestureRow
+            Add-Assert -Name "$o4Prefix.4 move == k (the extras are identified and suppressed)" -Verdict 'PASS' `
+                -Detail "$($mc.Text) (press=$press release=$release). The window applied exactly what the injector sent. Duration source: $postPressSource.$handNote" -Row $gestureRow
         } elseif ($mc.Extras -lt 0) {
-            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'FAIL' `
+            Add-Assert -Name "$o4Prefix.4 move == k (the extras are identified and suppressed)" -Verdict 'FAIL' `
                 -Detail "$($mc.Text) -- move < k: coalescence, a UIPI-discarded event, or two steps landing on one normalized grid point (the receipt's normalized-collisions says which). Duration source: $postPressSource.$handNote" -Row $gestureRow
         } else {
-            Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'FAIL' `
-                -Detail "$($mc.Text) -- MORE extras than a $($postPressMs)ms drag can account for at one arrival per 160 ms. That is outside the characterisation, so it is a finding about this run rather than the known periodic arrival. Duration source: $postPressSource.$handNote" -Row $gestureRow
+            Add-Assert -Name "$o4Prefix.4 move == k (the extras are identified and suppressed)" -Verdict 'FAIL' `
+                -Detail "$($mc.Text) -- MORE moves than the injector sent, which the FrameId/Timestamp/position suppression in MainWindow.OnPointerMoved is supposed to make impossible. Either a duplicate shape that triple does not catch, or the suppression regressed: read the run again under SB_TRACE_POINTER, which prints one row per pointer event and is what identified this defect the first time. Historically this was budgeted at one arrival per 160 ms of drag and passed; that budget is withdrawn because its premise (an unidentified source) is refuted. Duration source: $postPressSource.$handNote" -Row $gestureRow
         }
 
-        $ex = Test-SbMoveExact -Move ([int]$move) -K $wantK -PostPressMs $postPressMs
-        if (-not $ex.Applies -and $postPressMs -le 0) {
-            # NOT the boundary case, and saying so: with no real pointer stream
-            # there is no drag to be under the boundary. O4.4's budget is 0 here,
-            # so the exact count is already what it required.
-            Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
-                "$($ex.Text) -- this run drove no real pointer stream (post-press=0ms), so there is no held-button drag for a periodic arrival to occur during. O4.4's budget is 0 for exactly that reason and has already required the exact count. Duration source: $postPressSource" -Row $gestureRow
-        } elseif (-not $ex.Applies) {
-            Add-NotRun "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" `
-                "$($ex.Text) -- this run's post-press drag is past the 160-180 ms boundary, where one extra arrival is EXPECTED and an exact assertion would red on a run behaving as characterised. The exact arm is driven by the sitting's -HandSettleMs 10 pointer run. Duration source: $postPressSource" -Row $gestureRow
-        } elseif ($ex.Ok) {
-            Add-Assert -Name "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" -Verdict 'PASS' `
-                -Detail "$($ex.Text) -- under the boundary the window sees exactly what the injector sent, so this is the arm that can convict the app of miscounting. Duration source: $postPressSource.$handNote" -Row $gestureRow
+        # ⭐ O4.4x -- THE DUPLICATES ARE STILL ARRIVING AND THE SHELL MUST SAY SO.
+        $dup = Test-SbDupFramesReported $gestureRow
+        if ($dup.Ok) {
+            Add-Assert -Name "$o4Prefix.4x dup-frames= is reported by the shell" -Verdict 'PASS' `
+                -Detail "$($dup.Text) -- the count of pointer frames XAML re-delivered and the shell refused. ⚠️ THIS ASSERTS THE COUNT IS REPORTED AND WELL-FORMED, NOT THAT IT IS CORRECT: a shell that kept suppressing but stopped incrementing would read dup-frames=0 with move==k and pass here. That residual hole is diagnostic only -- a shell that stopped SUPPRESSING is caught by O4.4 above, because the repeats would reach the core and drive move past k. Before the repair this phenomenon was visible as O4.4's extras; this field is now the only surface carrying it." -Row $gestureRow
         } else {
-            Add-Assert -Name "$o4Prefix.4x move == k EXACTLY (under the 160ms boundary)" -Verdict 'FAIL' `
-                -Detail "$($ex.Text) -- the drag was short enough that no periodic arrival is expected, and the count still differs. Duration source: $postPressSource.$handNote" -Row $gestureRow
+            Add-Assert -Name "$o4Prefix.4x dup-frames= is reported by the shell" -Verdict 'FAIL' `
+                -Detail "$($dup.Text) -- the POINTER row must carry the count of re-delivered pointer frames the shell suppressed. Without it a shell that has stopped suppressing is indistinguishable from one where the re-deliveries stopped happening, and the next wave would have to rediscover the whole finding (MainWindow.OnPointerMoved says exactly this in its own comment). Canvas.cs writes the field on every POINTER row, SYNTHETIC included." -Row $gestureRow
         }
     }
 

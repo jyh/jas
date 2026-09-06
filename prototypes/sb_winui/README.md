@@ -638,16 +638,31 @@ harness was executed and the rows it produced said so — not because anyone
 re-read it. Where a row differs from the node that introduced it, the reason is
 the measurement, and it is named.
 
-⚠️ **A NAMED OPEN FINDING, carried here so it is not mistaken for a closed one:
-`move` exceeds `k` by one arrival per few hundred milliseconds while the button
-is held.** Characterised across 13 configurations on kenai 2026-09-04 by varying
-the injector's per-step pause — k=7 over 70 ms reads 7, the same k=7 over 280 ms
-reads 8, k=1 over 300 ms reads 2, k=2 over 800 ms reads 4 — so it is a function
-of the DRAG'S DURATION and not of k. **The source is a periodic system arrival
-while the button is held: characterised, not identified.** A timer-driven
-`WM_MOUSEMOVE` (drag detection, pointer capture, or a position poll) fits and a
-stray hand does not, but no reading here names the mechanism, and O4.4's budget
-is written against the behaviour rather than against a cause.
+✅ **CLOSED 2026-09-06, and this paragraph says so where it used to say the
+opposite: `move` exceeding `k` is IDENTIFIED and fixed at the source.** It was
+carried here as a named open finding for two waves — characterised across 13
+configurations on kenai 2026-09-04 by varying the injector's per-step pause
+(k=7 over 70 ms reads 7, the same k=7 over 280 ms reads 8, k=1 over 300 ms reads
+2, k=2 over 800 ms reads 4), so a function of the DRAG'S DURATION and not of k,
+with the source called "a periodic system arrival … characterised, not
+identified".
+
+**It was not an arrival at all.** `SB_TRACE_POINTER` showed XAML RE-DELIVERING a
+pointer frame the shell had already applied — same `FrameId`, same `Timestamp`,
+same position — while the contact sat still, so the repeats multiply with the
+idle gap after each move (settle 10 ms: none; 800 ms: five) and every one of
+them had been driving the core with a point it already had. Everything below the
+app was excluded FIRST by measurement: `probe_hold.ps1` drives a bare Win32
+window with this harness's own injector construction and reads arrivals == k
+exactly, in both input stacks, held and repainting. `MainWindow.OnPointerMoved`
+suppresses a repeated frame and reports the count as `dup-frames=`.
+
+⛔ **AND THE RULING THAT WAS WRITTEN AGAINST THE BEHAVIOUR IS RE-CUT.** O4.4's
+budget existed because the source was an open finding; that premise is refuted,
+so `move == k` is now asserted at EVERY duration and the 160 ms boundary is
+history rather than code. A budget whose stated reason has been withdrawn would
+absorb a new duplicate shape in silence — the exact failure the suppression
+exists to prevent.
 
 #### O1 — the retained document (`-Scene retained`)
 
@@ -689,8 +704,8 @@ is written against the behaviour rather than against a cause.
 | name | expected reading |
 |---|---|
 | `O4.1 pointer=REAL` · `O4.2 doc=HELD` · `O4.3 loads(shell) >= 1` · `O4.5 selected == 1` | **PASS** |
-| `O4.4 move >= k, extras priced against the drag's duration` | **PASS**, printing `move=<n> k=<k> extras=<e> post-press=<ms>ms budget=<b>`. **RE-CUT, AND IT IS A RULING ON A DIAGNOSED DEFECT.** `move == k` was not an assertion about the app's counting: at the injector's 40 ms default it redded for every k ≥ 5, and the second sitting proved why by varying the pause — the extra is a function of the DRAG'S DURATION, not of k (k=7 over 70 ms reads 7; k=1 over 300 ms reads 2; k=2 over 800 ms reads 4). PASS iff `0 ≤ extras ≤ ceil(post_press_ms / 160)`, the boundary measured between 160 ms and 180 ms. The duration is the injector's own `post-press-ms=` receipt field, never recomputed from k. `move < k` still FAILS by name — coalescence, a UIPI discard, or a normalized-grid collision, and the receipt counts them. ⚠️ **The budget is a deliberately LOOSE upper bound**, which is why it is not the only arm |
-| `O4.4x move == k EXACTLY (under the 160ms boundary)` | **NEW, and it is the arm that keeps teeth.** **PASS**, printing `move=<n> k=<k> post-press=<ms>ms boundary=160ms`, on a run whose post-press drag is at or under the boundary — where no periodic arrival is expected and the count must be exactly k. `sitting.ps1` drives it as a **third `pointer` run at `-HandSettleMs 10`** (k=7 over 70 ms, which read exactly 7 on the box), so both arms land in one sitting. Past the boundary it is `NOT RUN` **by name** rather than red: an exact assertion there would convict a run behaving as characterised. ⛔ A second gesture inside ONE run was refused — the `pointer` scene completes on its first `HAND CLOSED` row, so a second would have to be waited for by a clock, which is the defect the completion-row table replaced |
+| `O4.4 move == k (the extras are identified and suppressed)` | **PASS**, printing `move=<n> k=<k> extras=<e> post-press=<ms>ms`. **RE-CUT 2026-09-06 BY ITS OWN AUTHOR, BECAUSE ITS PREMISE WAS REFUTED.** It read `move >= k` with the extras priced at `0 ≤ extras ≤ ceil(post_press_ms / 160)`, and that budget existed for exactly one stated reason: the source was an open finding and could not be charged to the app's counting. It can now — the extras were re-delivered pointer frames and the shell suppresses them — so the budget is withdrawn rather than left loose. A budget whose reason has gone is not a lenient assertion but an assertion about nothing: it would absorb a NEW duplicate shape, one the `FrameId`/`Timestamp`/position triple does not catch, in perfect silence. `move < k` still FAILS by name — coalescence, a UIPI discard, or a normalized-grid collision, and the receipt counts them. ⭐ **A run whose receipt carries no `post-press-ms=` is now ASSERTED rather than `NOT RUN`**: the duration is printed and never consulted, so the old arms' abstention has no subject. Post-repair readings, all exact: k=1@300, k=2@800, k=4@100, k=7@10, k=7@40 |
+| `O4.4x dup-frames= is reported by the shell` | **RE-CUT, NOT DELETED, AND ONTO THE JOB NO ARM HELD.** It used to assert `move == k` under the 160 ms boundary and was "the arm that keeps teeth"; O4.4 now does that at every duration, so that job is not vacated but promoted. Its new job: **the duplicates did not stop, and `dup-frames=` is the only surface that still says so.** Before the repair, the proof the phenomenon existed WAS O4.4's extras count; after it the extras are zero by construction, and nothing asserted this field's value — only a lexical case proving `frames=` cannot match inside `dup-frames=`. **PASS**, printing `dup-frames=<n>`. ⚠️ **It asserts the count is REPORTED and well-formed, not that it is correct** — a shell that kept suppressing but stopped incrementing would read `dup-frames=0` with `move == k` and pass; that residual hole is diagnostic only, because a shell that stopped SUPPRESSING is caught by O4.4 when the repeats reach the core. `sitting.ps1`'s third `pointer` run at `-HandSettleMs 10` is kept on a new reason too: at 70 ms `dup-frames` is 0 and at the default 280 ms it is 1, so the two hand runs bracket the suppression and show the verdict does not DEPEND on it |
 | `O4.6 (release@ - press@)/scale == the asked delta` | **PASS** — but **only when the `STARTUP` row reads `dpi-awareness=DPI_AWARENESS_PER_MONITOR_AWARE` AND its `dpi-for-window`/96 agrees with its `composition-scale`**. The awareness alone is not enough: `GetAwarenessFromDpiAwarenessContext` cannot separate PerMonitorV2 from v1, so the pair (`PER_MONITOR_AWARE`, `dpi-for-window=144` on a 150 % panel) is the assertion. Otherwise `NOT RUN` by name with the observed numbers printed anyway — on a virtualised window a coordinate verdict prices the manifest instead of the seam |
 | `O4.7 the press point is within 2 px of the asked one` | as O4.6, same gate, offset printed either way |
 | `O4.8 the injector's client rect and the shell's surface are the same measurement` | **NEW, and it is the arm that keeps teeth while O4.6/O4.7 are refused.** The expected ratio depends on which shell wrote the rows, and the `STARTUP` row says which — it is never guessed. **With `STARTUP`** (the surface is derived in physical pixels): `client / surface` must be **1.0**. **Without it** (the surface was sized in DIPs): the ratio IS the scale. The first run's `client=2856x1464` against `surface=1904x941` was exactly 1.5 while the shell reported `scale=1`, and that disagreement was sitting in the harness's own receipt as a note nobody could fail |
