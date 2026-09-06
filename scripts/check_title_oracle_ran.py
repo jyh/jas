@@ -502,7 +502,8 @@ def self_test() -> int:
         except Refusal as exc:
             arm("real-source parses", False, str(exc))
     else:
-        arm("real-source: present", False, "%s is missing" % DEFAULT_SOURCE)
+        arm("real-source: present", False,
+            "%s is missing" % DEFAULT_SOURCE.as_posix())
 
     bad = [(n, d) for n, ok, d in arms if not ok]
     for name, ok, detail in arms:
@@ -522,7 +523,7 @@ def main() -> int:
     )
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--log", help="the suite's stdout to adjudicate")
-    parser.add_argument("--source", default=str(DEFAULT_SOURCE),
+    parser.add_argument("--source", default=DEFAULT_SOURCE.as_posix(),
                         help="the C# suite whose declaration is derived")
     args = parser.parse_args()
 
@@ -537,13 +538,13 @@ def main() -> int:
     source_path = pathlib.Path(args.source)
     if not source_path.is_file():
         print("check_title_oracle_ran: REFUSED -- the source %s does not exist, "
-              "so no declaration can be derived" % source_path, file=sys.stderr)
+              "so no declaration can be derived" % source_path.as_posix(), file=sys.stderr)
         return 2
     log_path = pathlib.Path(args.log)
     if not log_path.is_file() or not log_path.read_text(
             encoding="utf-8", errors="replace").strip():
         print("check_title_oracle_ran: REFUSED -- the log %s is missing or empty, "
-              "so nothing proves a case executed" % log_path, file=sys.stderr)
+              "so nothing proves a case executed" % log_path.as_posix(), file=sys.stderr)
         return 2
 
     try:
