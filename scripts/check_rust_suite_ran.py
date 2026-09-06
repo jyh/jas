@@ -291,8 +291,8 @@ def declaration_findings() -> list[str]:
     on_disk = source_areas()
     if not on_disk:
         findings.append(
-            f"no `#[cfg(test)]` module found under {SRC} -- this gate examined "
-            f"nothing, which is a refusal and not a pass"
+            f"no `#[cfg(test)]` module found under {SRC.as_posix()} -- this "
+            f"gate examined nothing, which is a refusal and not a pass"
         )
     for area in sorted(on_disk - set(AREAS)):
         findings.append(
