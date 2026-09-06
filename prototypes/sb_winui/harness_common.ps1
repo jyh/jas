@@ -602,6 +602,44 @@ function Test-SbDupFramesReported([string]$Row) {
     return @{ Ok = $ok; Dups = $dups; Raw = $raw; Text = $text }
 }
 
+# ⭐ O4.4z -- THE FIELD O4.4y READS MUST ITSELF BE REPORTED, AND ITS ABSENCE IS A
+# REFUSAL RATHER THAN A SHRUG.
+#
+# ⛔ THIS IS O4.4x's HOLE ONE LEVEL UP, IN THE ARM THAT CLOSED IT. `raised=` is
+# produced by `Canvas.cs` for exactly one consumer, `Test-SbMoveIdentity`, and
+# that function answers `Applies = $false` -- NOT RUN -- for a row that does not
+# carry the field, so that a build older than the identity is not failed for a
+# field it never had. Right for the identity; but `NOT RUN` is tallied apart
+# from FAIL and fails no run, so the same tolerance is a switch: delete
+# `raised=` from the POINTER row and the arm built to make `dup-frames=`
+# checkable stops running, green, in silence.
+#
+# `dup-frames=` is not exposed that way -- an absent field is a FAIL on O4.4x,
+# and the §18 P3 field-removal mutant measured it going red. This function is
+# that same guarantee for `raised=`, drawn on the same line O4.4/O4.4x drew: the
+# REPORT and the VALUE are two questions, so the report gets an arm that cannot
+# be silenced and the identity keeps its tolerance for the value.
+#
+# ⚠️ `n/a` IS A REPORT. The synthetic control declines the COUNT -- its replay
+# is applied inline on the render thread and enters `MainWindow.OnPointerMoved`,
+# where the three counters live, never -- and says so in the field. Declining a
+# count is not dropping a field, and only the dropped field is a defect here.
+function Test-SbRaisedReported([string]$Row) {
+    $raw = Get-SbField $Row 'raised'
+    $ok = ($null -ne $raw) -and (($raw -match '^[0-9]+$') -or ($raw -eq 'n/a'))
+    # `Raw`/`Ok`/`Text`, and deliberately no key named for a hashtable member --
+    # `Count`, `Keys`, `Values`, `Item`: the .NET member wins over a key of the
+    # same name and returns a small integer that reads like a measurement. That
+    # was a live defect in this file on 2026-09-06; the class is censused.
+    $text = 'raised= is ABSENT from the row'
+    if ($ok) {
+        $text = "raised=$raw"
+    } elseif ($null -ne $raw) {
+        $text = "raised= is neither a count nor the declined marker n/a (read '$raw')"
+    }
+    return @{ Ok = $ok; Raw = $raw; Text = $text }
+}
+
 # ⭐ O4.4y -- THE IDENTITY THAT MAKES `dup-frames=` CHECKABLE
 # ---------------------------------------------------------------------------
 #
