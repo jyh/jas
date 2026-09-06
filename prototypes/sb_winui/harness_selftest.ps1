@@ -260,33 +260,76 @@ Test-Case 'CONTROL: the old reader finds nothing on the repaired row' {
 Test-Case 'the repaired row reads through the ordinary anchored field reader too' { Get-SbField $benchRowPhysical 'surface' } '2858x1429'
 
 # ---------------------------------------------------------------------------
-# F-C -- `move != k` IS THE DRAG'S DURATION, PRICED
+# F-C RE-CUT -- `move == k`, UNCONDITIONALLY (jas, 2026-09-06)
 # ---------------------------------------------------------------------------
 #
-# O4.4 := move >= k with the extras priced at one arrival per 160 ms of
-# post-press drag, rounded up. O4.4x asserts EQUALITY under that boundary.
-Test-Case 'F-C: k=7 over a 280ms drag reading move=8 is within budget' { (Test-SbMoveCount -Move 8 -K 7 -PostPressMs 280).Ok } 'True'
-Test-Case 'F-C: and the row it prints' { (Test-SbMoveCount -Move 8 -K 7 -PostPressMs 280).Text } 'move=8 k=7 extras=1 post-press=280ms budget=2'
-Test-Case 'F-C: k=7 over a 70ms drag reading move=8 FAILS the exact arm' {
-    $r = Test-SbMoveExact -Move 8 -K 7 -PostPressMs 70; "$($r.Applies)/$($r.Ok)" } 'True/False'
-Test-Case 'F-C: CONTROL -- k=7 over 70ms reading 7 passes the exact arm' {
-    $r = Test-SbMoveExact -Move 7 -K 7 -PostPressMs 70; "$($r.Applies)/$($r.Ok)" } 'True/True'
-Test-Case 'F-C: the exact arm does NOT apply past the boundary' {
-    $r = Test-SbMoveExact -Move 8 -K 7 -PostPressMs 280; "$($r.Applies)/$($r.Text)" } 'False/move=8 k=7 post-press=280ms boundary=160ms'
-Test-Case 'F-C: k=2 over an 800ms drag reading move=8 EXCEEDS the budget' {
-    $r = Test-SbMoveCount -Move 8 -K 2 -PostPressMs 800; "$($r.Ok)/$($r.Text)" } 'False/move=8 k=2 extras=6 post-press=800ms budget=5'
-# ⚠️ THE RULING'S OWN THIRD CASE, PINNED AS IT ACTUALLY READS. The ruling gave
-# both a formula (`extras <= ceil(post_press_ms / 160)`) and an example
-# (k=2, 800 ms, move=6 "fails the budget"). They disagree: 800/160 = 5 and the
-# example's extras are 4, so under the ruled formula it PASSES. The FORMULA is
-# what runs on the box, so the formula is implemented and the example is
-# recorded here with its arithmetic visible rather than silently dropped -- and
-# the failing case above is the same configuration one arrival further out.
-Test-Case 'F-C: the ruling''s (k=2, 800ms, move=6) PASSES under the ruled formula' {
-    $r = Test-SbMoveCount -Move 6 -K 2 -PostPressMs 800; "$($r.Ok)/$($r.Text)" } 'True/move=6 k=2 extras=4 post-press=800ms budget=5'
-Test-Case 'F-C: move < k is refused whatever the duration' { (Test-SbMoveCount -Move 1 -K 2 -PostPressMs 800).Ok } 'False'
-Test-Case 'F-C: a 0ms drag budgets nothing, so the reading must be exact' {
-    $r = Test-SbMoveCount -Move 8 -K 7 -PostPressMs 0; "$($r.Ok)/$($r.Budget)" } 'False/0'
+# ⛔ THE OLD RULING WAS `move >= k` WITH THE EXTRAS PRICED against the drag's
+# duration (one arrival per 160 ms, rounded up), and the budget existed for
+# exactly ONE reason, stated in the ruling itself: the extras had no identified
+# source, so they could not be charged to the app's counting. flask's third
+# harness run IDENTIFIED them -- XAML RE-DELIVERING a pointer frame the shell
+# had already applied, same FrameId AND Timestamp AND position -- and excluded
+# everything below the app by measurement (`probe_hold.ps1`: a bare Win32 window
+# driven by this harness's own injector reads arrivals == k exactly, in BOTH
+# input stacks, with and without a 5 ms repaint). The shell now suppresses the
+# repeat and reports it as `dup-frames=`.
+#
+# ⇒ THE PREMISE IS REFUTED, SO THE RULING IS RE-CUT RATHER THAN LEFT SLACK.
+# A budget whose stated reason has been withdrawn is not a merely loose
+# assertion -- it is an assertion about nothing, and it would absorb a NEW
+# duplicate shape (one the FrameId/Timestamp/position triple does not catch) in
+# perfect silence. That is the exact failure the suppression was written to make
+# visible. O4.4 is now `move == k` at EVERY duration and any extra is a finding.
+#
+# ⭐ AND THE EVIDENCE MOVED, WHICH IS WHY O4.4x IS RE-CUT AND NOT DELETED.
+# Before the repair, the proof that duplicates existed WAS the extras count.
+# After it, the only remaining evidence is `dup-frames=` -- and no assertion read
+# that field's value, only a lexical case proving `frames=` cannot match inside
+# it. So O4.4x hands "convict the app of miscounting" to O4.4 (which now does it
+# at every duration, not just under a boundary) and takes the job no arm held.
+#
+# ⚠️ `-PostPressMs` SURVIVES AS A REPORTED FIELD AND NO LONGER GATES ANYTHING.
+# It is kept because the duration is the first thing a reader of a failing row
+# wants, and it is named here so the next reader does not assume a parameter
+# that appears in the signature is deciding the verdict.
+Test-Case 'F-C RE-CUT: k=7 reading move=8 is a FINDING however long the drag was' {
+    (Test-SbMoveCount -Move 8 -K 7 -PostPressMs 280).Ok } 'False'
+Test-Case 'F-C RE-CUT: and the row it prints carries no budget' {
+    (Test-SbMoveCount -Move 8 -K 7 -PostPressMs 280).Text } 'move=8 k=7 extras=1 post-press=280ms'
+# The configuration that produced the largest extras count on record (k=2 over
+# 800 ms read move=4, two extras) is now a finding at its OWN measured reading,
+# not only at some larger one -- under the old budget of 5 it passed.
+Test-Case 'F-C RE-CUT: k=2 over 800ms reading move=4 is now a finding' {
+    $r = Test-SbMoveCount -Move 4 -K 2 -PostPressMs 800; "$($r.Ok)/$($r.Text)" } 'False/move=4 k=2 extras=2 post-press=800ms'
+# ⚠️ THE OLD RULING'S OWN THIRD CASE, KEPT AS THE HINGE OF THE RE-CUT. The old
+# ruling gave both a formula and an example (k=2, 800 ms, move=6) that its own
+# formula PASSED -- the disagreement was pinned here rather than dropped. Under
+# the re-cut the disagreement is moot: both readings are findings.
+Test-Case 'F-C RE-CUT: the old ruling''s (k=2, 800ms, move=6) is a finding too' {
+    $r = Test-SbMoveCount -Move 6 -K 2 -PostPressMs 800; "$($r.Ok)/$($r.Text)" } 'False/move=6 k=2 extras=4 post-press=800ms'
+Test-Case 'F-C RE-CUT: CONTROL -- the post-repair reading passes at every duration' {
+    $a = (Test-SbMoveCount -Move 7 -K 7 -PostPressMs 70).Ok
+    $b = (Test-SbMoveCount -Move 2 -K 2 -PostPressMs 800).Ok
+    $c = (Test-SbMoveCount -Move 7 -K 7 -PostPressMs 280).Ok
+    "$a/$b/$c" } 'True/True/True'
+Test-Case 'F-C RE-CUT: move < k is still refused, and by its own sign' {
+    $r = Test-SbMoveCount -Move 1 -K 2 -PostPressMs 800; "$($r.Ok)/$($r.Extras)" } 'False/-1'
+
+# ⭐ O4.4x -- `dup-frames=` IS REPORTED. The duplicates did not stop; they are
+# suppressed, and this is the only surface that still says so. The shell's own
+# comment says a shell that quietly swallowed them "would be indistinguishable
+# from one where they had stopped happening, and the next wave would have to
+# rediscover the whole finding" -- this is the arm that holds it to that.
+Test-Case 'O4.4x: a POINTER row carrying dup-frames reports it' {
+    $r = Test-SbDupFramesReported $pointerRow; "$($r.Ok)/$($r.Count)/$($r.Text)" } 'True/5/dup-frames=5'
+Test-Case 'O4.4x: zero is REPORTED, not read as absent' {
+    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5', 'dup-frames=0'); "$($r.Ok)/$($r.Count)" } 'True/0'
+Test-Case 'O4.4x: ⭐ THE MUTANT -- a row with the field REMOVED is refused' {
+    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5 ', ''); "$($r.Ok)/$($r.Count)" } 'False/-1'
+Test-Case 'O4.4x: a non-numeric value is refused rather than coerced' {
+    $r = Test-SbDupFramesReported ($pointerRow -replace 'dup-frames=5', 'dup-frames=none'); $r.Ok } 'False'
+Test-Case 'O4.4x: CONTROL -- an empty row is refused, not crashed on' {
+    $r = Test-SbDupFramesReported ''; $r.Ok } 'False'
 
 # ---------------------------------------------------------------------------
 # THE TITLE ORACLE -- the rule is right and it stays
