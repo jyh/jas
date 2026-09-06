@@ -183,9 +183,9 @@
         "why_not_closed": "Rides on stroke_brush and is blocked behind the same BRUSHAPPLY stone."
       },
       "families_varying:stroke": {
-        "value": 14,
+        "value": 15,
         "improves": "up",
-        "why_not_closed": "14 families, three obligated. Still debt because the corpus's strokes are nearly all the same stroke: width, cap, join, alignment, miter limit and dash pattern are effectively constant inside the non-null slots. This gate counts the SLOT as non-default and cannot see that its interior is frozen -- a Stroke is one field to P1 and eight fields to a copy site."
+        "why_not_closed": "15 families, three obligated. Still debt because the corpus's strokes are nearly all the same stroke: width, cap, join, alignment, miter limit and dash pattern are effectively constant inside the non-null slots. This gate counts the SLOT as non-default and cannot see that its interior is frozen -- a Stroke is one field to P1 and eight fields to a copy site. RESTATED 14 -> 15 (flask, 2026-09-06): the O1.2c live-hit-test vector's document (gestures/select_click_topmost_over_largest_filled) carries a stroked line, so the count moved for a reason that has nothing to do with the debt's interior -- the new family's stroke is the same frozen stroke as the other fourteen. The gate asked for a promotion or a restatement; this is the restatement, and the reason it is not a promotion is written here rather than implied by the number."
       },
       "families_varying:fill": {
         "value": 64,
