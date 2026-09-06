@@ -90,7 +90,7 @@ $startupRow = "02:02:14`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAME
     "composition-scale=1.5x1.5 client-dips=1905x953 surface-request=2858x1429 " +
     "ui-tid=0 render-tid=0 paint-tid=0 present-tid=0 render-has-dispatcher=true"
 
-$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 selected=1 doc=HELD loads(shell)=1 " +
+$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 raised=12 selected=1 doc=HELD loads(shell)=1 " +
     "point=(37.00,23.00) surface=2856x1464 scale=1.5 " +
     "ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false"
 
@@ -523,6 +523,44 @@ Test-Case 'frames= is not read out of the middle of dup-frames=' { Get-SbField $
 Test-Case 'dup-frames= is read whole' { Get-SbField $pointerRow 'dup-frames' } '5'
 Test-Case 'CONTROL: the reader still reads frames= where it IS a field' { Get-SbField $repaintDispRow 'frames' } '1'
 Test-Case 'CONTROL: move= is unaffected by the new neighbour' { Get-SbField $pointerRow 'move' } '7'
+
+# ---------------------------------------------------------------------------
+# O4.4y -- THE IDENTITY, AND WHY THE ROUTE §18 P4 PROPOSED IS NOT IT
+# ---------------------------------------------------------------------------
+#
+# `raised == move + dup-frames`, over three counters incremented at three
+# different sites. The fixture row reads move=7 dup-frames=5 raised=12.
+#
+# ⛔ THE `Applies=$false` CASE IS THE ONE THAT MATTERS MOST. A row from a build
+# older than the field must be NOT RUN -- not a pass, and not a fail. An arm
+# that failed a bisected build's row would be making a claim about a field that
+# build never carried, which is the mirror of the defect it exists to catch.
+$identRow    = $pointerRow
+$identOldRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 selected=1 surface=2856x1464"
+$identBadRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=4 raised=12 selected=1"
+$identSynthRow = "02:03:01`tRUSTOK POINTER SYNTHETIC press=1 move=7 release=1 dup-frames=0 raised=n/a pointer=SYNTHETIC"
+$identZeroRow  = "02:03:01`tRUSTOK POINTER SYNTHETIC press=1 move=7 release=1 dup-frames=0 raised=0 pointer=SYNTHETIC"
+
+Test-Case 'O4.4y: the identity holds on a consistent row' { (Test-SbMoveIdentity $identRow).Ok } 'True'
+Test-Case 'O4.4y: ...and it APPLIES to that row' { (Test-SbMoveIdentity $identRow).Applies } 'True'
+Test-Case 'O4.4y: CONTROL -- a row whose counts disagree FAILS' { (Test-SbMoveIdentity $identBadRow).Ok } 'False'
+Test-Case 'O4.4y: ...and the failing row still APPLIES (a fail, not a skip)' { (Test-SbMoveIdentity $identBadRow).Applies } 'True'
+Test-Case 'O4.4y: a row with no raised= does NOT apply (bisected build)' { (Test-SbMoveIdentity $identOldRow).Applies } 'False'
+# ⛔ AND THE SYNTHETIC ARM'S `n/a` IS A THIRD ANSWER, not a zero and not an
+# absence. A shell that printed `raised=0` there made this arm FAIL on a row it
+# cannot judge -- measured on the box before the repair.
+Test-Case 'O4.4y: raised=n/a does NOT apply (the synthetic control)' { (Test-SbMoveIdentity $identSynthRow).Applies } 'False'
+Test-Case 'O4.4y: ...and its reason names the synthetic arm' { if ((Test-SbMoveIdentity $identSynthRow).Text -match 'synthetic control') { 'named' } else { 'not named' } } 'named'
+Test-Case 'O4.4y: CONTROL -- raised=0 with move=7 WOULD fail (the pre-repair shape)' { (Test-SbMoveIdentity $identZeroRow).Ok } 'False'
+Test-Case 'O4.4y: ...and that zero row DOES apply, which is why n/a was needed' { (Test-SbMoveIdentity $identZeroRow).Applies } 'True'
+Test-Case 'O4.4y: ...and it does not report itself as a pass either' { (Test-SbMoveIdentity $identOldRow).Ok } 'False'
+Test-Case 'O4.4y: the identity names all three counters in its text' { if ((Test-SbMoveIdentity $identRow).Text -match 'raised=12 move=7 dup-frames=5') { 'named' } else { 'not named' } } 'named'
+
+# ⛔ `raised=` MUST NOT BE READ OUT OF ANOTHER FIELD, and `dup-frames=` must
+# still read whole beside it -- the same anchor law that killed a sitting when
+# `scale` matched inside `composition-scale=`.
+Test-Case 'raised= is read whole beside its neighbours' { Get-SbField $pointerRow 'raised' } '12'
+Test-Case 'CONTROL: dup-frames= still reads beside raised=' { Get-SbField $pointerRow 'dup-frames' } '5'
 
 # ---------------------------------------------------------------------------
 Write-Host ""
