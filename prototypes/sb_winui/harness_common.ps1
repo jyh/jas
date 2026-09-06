@@ -602,6 +602,69 @@ function Test-SbDupFramesReported([string]$Row) {
     return @{ Ok = $ok; Dups = $dups; Raw = $raw; Text = $text }
 }
 
+# ⭐ O4.4y -- THE IDENTITY THAT MAKES `dup-frames=` CHECKABLE
+# ---------------------------------------------------------------------------
+#
+# ⛔ THE HOLE THIS CLOSES IS NAMED ON O4.4x's OWN PASS LINE. That arm asserts
+# `dup-frames=` is REPORTED and well-formed, NOT that it is correct: a shell
+# that kept suppressing but stopped INCREMENTING reads `dup-frames=0` with
+# `move == k` and passes O4.4 and O4.4x both.
+#
+# ⛔ AND THE ROUTE §18 P4 PROPOSED DOES NOT CLOSE IT -- read, not assumed.
+# Counting `SB_TRACE_POINTER`'s `MOVE-DUP` rows against `dup-frames=` is the
+# same number twice: in `MainWindow.OnPointerMoved`, `_dupFrames++` and
+# `TracePointer("MOVE-DUP", ...)` are ADJACENT STATEMENTS IN ONE BLOCK, so a
+# shell that stopped incrementing stops tracing in the same breath. P4's own
+# precondition -- "only if the two counts come from different code paths" -- is
+# not met, so that arm was NOT built.
+#
+# What IS built is an identity over THREE counters at THREE sites:
+#
+#     raised == move + dup-frames
+#
+# `raised` before the branch, `move` in the applied branch, `dup-frames` in the
+# suppressed branch. No single edit keeps the identity true while making a count
+# wrong, which is exactly what `MOVE-DUP` could not give.
+#
+# ⚠️ A ROW WITHOUT `raised=` IS `Applies = $false`, NOT A PASS AND NOT A FAIL.
+# The field is newer than the corpus of rows on record, and a bisected build's
+# row must not red an arm about a field it never carried -- the same rule the
+# completion-row pattern already follows.
+function Test-SbMoveIdentity {
+    param([string]$Row)
+    $raised = Get-SbField $Row 'raised'
+    $move   = Get-SbField $Row 'move'
+    $dups   = Get-SbField $Row 'dup-frames'
+    if ($null -eq $raised) {
+        return @{ Applies = $false; Ok = $false
+                  Text = 'raised= is absent from the row (a build older than the identity)' }
+    }
+    # ⛔ `n/a` IS A THIRD ANSWER AND IT IS THE SHELL SAYING SO DELIBERATELY. The
+    # three counters live in `MainWindow.OnPointerMoved`; the SB_SYNTH_DRAG
+    # control is applied inline on the render thread and enters that method
+    # never, so there is no raised count to compare -- not a zero. `Canvas.cs`
+    # prints `raised=n/a` on any row whose provenance is not REAL, and this arm
+    # declines to judge it rather than reading the absence as a violation.
+    # Measured 2026-09-06: printing `0` there made this arm FAIL on the
+    # synthetic run, which is the unmeasured-slot-wearing-a-measurement class
+    # this seat already repaired once as `STARTUP render-tid=0`.
+    if ($raised -notmatch '^[0-9]+$') {
+        return @{ Applies = $false; Ok = $false
+                  Text = "raised=$raised -- the shell declines the count on this arm (the synthetic control never enters the WinUI handler where the three counters live)" }
+    }
+    if ($null -eq $move -or $move -notmatch '^[0-9]+$' -or
+        $null -eq $dups -or $dups -notmatch '^[0-9]+$') {
+        return @{ Applies = $true; Ok = $false
+                  Text = "raised=$raised but move= or dup-frames= is missing or not a count" }
+    }
+    $r = [int]$raised; $m = [int]$move; $d = [int]$dups
+    return @{
+        Applies = $true
+        Ok = ($r -eq ($m + $d))
+        Text = "raised=$r move=$m dup-frames=$d -- $m + $d = $($m + $d)"
+    }
+}
+
 # ---------------------------------------------------------------------------
 # THE TITLE ORACLE
 # ---------------------------------------------------------------------------

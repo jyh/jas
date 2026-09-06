@@ -873,6 +873,25 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
             Add-Assert -Name "$o4Prefix.4x dup-frames= is reported by the shell" -Verdict 'FAIL' `
                 -Detail "$($dup.Text) -- the POINTER row must carry the count of re-delivered pointer frames the shell suppressed. Without it a shell that has stopped suppressing is indistinguishable from one where the re-deliveries stopped happening, and the next wave would have to rediscover the whole finding (MainWindow.OnPointerMoved says exactly this in its own comment). Canvas.cs writes the field on every POINTER row, SYNTHETIC included." -Row $gestureRow
         }
+
+        # ⭐ O4.4y -- THE IDENTITY THAT CLOSES O4.4x's NAMED HOLE (§18 P4).
+        # `raised == move + dup-frames`, over three counters incremented at
+        # three different sites in MainWindow.OnPointerMoved. §18 P4 proposed
+        # comparing SB_TRACE_POINTER's MOVE-DUP rows against dup-frames=; that
+        # was READ FIRST and REFUSED, because `_dupFrames++` and the MOVE-DUP
+        # trace are adjacent statements in one block -- the same number twice,
+        # which is P4's own disqualifying condition.
+        $ident = Test-SbMoveIdentity $gestureRow
+        if (-not $ident.Applies) {
+            Add-NotRun "$o4Prefix.4y raised == move + dup-frames (the counts are consistent)" `
+                "$($ident.Text) -- a build older than the identity. Not a pass and not a fail: this arm cannot judge a row that never carried the field."
+        } elseif ($ident.Ok) {
+            Add-Assert -Name "$o4Prefix.4y raised == move + dup-frames (the counts are consistent)" -Verdict 'PASS' `
+                -Detail "$($ident.Text) -- every PointerMoved raised for this gesture was either APPLIED or SUPPRESSED, and the three counters agree. This is what makes dup-frames= checkable rather than merely present: freeze or drop any ONE of the three and the identity breaks, so no single edit can keep it true while making a count wrong." -Row $gestureRow
+        } else {
+            Add-Assert -Name "$o4Prefix.4y raised == move + dup-frames (the counts are consistent)" -Verdict 'FAIL' `
+                -Detail "$($ident.Text) -- the counters disagree, so one of the three sites is wrong. raised > move+dups means events were raised and neither applied nor counted as suppressed; raised < move+dups means something is counted twice. Read the run again under SB_TRACE_POINTER, which prints one row per pointer event." -Row $gestureRow
+        }
     }
 
     if ($HandEmpty) {

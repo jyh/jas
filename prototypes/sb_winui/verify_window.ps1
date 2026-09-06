@@ -220,8 +220,24 @@ $sceneSpec = @{
         Timeout = 120
     }
     'pointer' = @{
-        Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused")
-        Label   = "the HAND CLOSED row, or its named refusal"
+        # ⛔ THE THIRD PATTERN IS THE SYNTHETIC ARM'S, AND WITHOUT IT THAT RUN
+        # COULD NEVER COMPLETE. Measured 2026-09-06: the `SB_SYNTH_DRAG` run in
+        # `sitting.ps1`'s pointer set burned its full 120 s and reported
+        # `FAIL: NOT RUN: timed out`, on every sitting since `bf99ad62`, while
+        # its ten assertions PASSED off a row that had been on disk for two
+        # minutes. `Canvas.ApplyPointerReport` says why in its own comment --
+        # `if (_handDeadlineMs < 0 || provenance != "REAL") { return; }`, so the
+        # synthetic replay NEVER writes `HAND CLOSED` by design. The wait was
+        # asking for a row the arm is constructed not to produce.
+        #
+        # ⛔ AND IT IS THE SYNTHETIC-SPECIFIC SPELLING, NOT A BARE `POINTER `.
+        # A real hand writes its `POINTER REAL` row BEFORE `HAND CLOSED`, so a
+        # generic pattern would complete a real run early and skip the
+        # after-dump that O1.2 reads. `POINTER SYNTHETIC ` cannot appear in a
+        # real run at all: `Canvas.cs` derives the provenance from the kind and
+        # a row can never claim one its counters did not come from.
+        Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused", "POINTER SYNTHETIC press=")
+        Label   = "the HAND CLOSED row, its named refusal, or the SYNTHETIC control's own POINTER row"
         Timeout = 120
     }
     'stay' = @{

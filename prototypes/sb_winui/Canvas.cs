@@ -134,6 +134,10 @@ internal sealed class PointerReportCmd : Cmd
     /// already applied. Reported, never silently dropped -- see
     /// `MainWindow.OnPointerMoved`.
     internal int DupFrames;
+    /// Every `PointerMoved` raised for this gesture, counted BEFORE the
+    /// suppression decision. `MovesRaised == Move + DupFrames` is the identity
+    /// that makes `DupFrames` checkable rather than merely present.
+    internal int MovesRaised;
     internal int Release;
     internal double PressX;
     internal double PressY;
@@ -1392,9 +1396,24 @@ internal sealed unsafe class Canvas : IDisposable
         var provenance = string.Equals(r.Kind, "SYNTHETIC", StringComparison.Ordinal)
             ? "SYNTHETIC"
             : "REAL";
+
+        // ⛔ `n/a`, NOT `0`, ON THE SYNTHETIC ARM -- AND THE DIFFERENCE IS THIS
+        // SEAT'S OWN F-A FINDING, ONE FIELD ON. `raised` counts every
+        // `PointerMoved` the WINDOW raised, in `MainWindow.OnPointerMoved`; the
+        // synthetic replay is applied inline on the render thread and enters
+        // that method never, so the counter is not zero-because-nothing-
+        // happened, it is zero-because-nobody-looked. Printing `0` there makes
+        // the identity `raised == move + dup-frames` read as VIOLATED on a row
+        // that cannot hold it -- measured 2026-09-06, one red -- which is
+        // exactly the shape of #117's `STARTUP render-tid=0`: an unmeasured
+        // slot wearing a measurement's spelling. The harness reads a
+        // non-numeric value as "this arm does not apply" and says so by name.
+        var raisedField = string.Equals(provenance, "REAL", StringComparison.Ordinal)
+            ? r.MovesRaised.ToString()
+            : "n/a";
         _report(
             $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} "
-          + $"dup-frames={r.DupFrames} "
+          + $"dup-frames={r.DupFrames} raised={raisedField} "
           + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 pointer={provenance} "
           + $"doc={doc} loads(shell)={_loadsShell} "
           + $"press@=({r.PressX:F1},{r.PressY:F1}) release@=({r.ReleaseX:F1},{r.ReleaseY:F1}) "

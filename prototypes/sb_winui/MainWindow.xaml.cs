@@ -165,6 +165,32 @@ public sealed partial class MainWindow : Window
     /// the press and carried onto the `POINTER` row.
     private int _dupFrames;
 
+    /// <summary>
+    /// ⭐ EVERY `PointerMoved` THIS GESTURE WAS RAISED, COUNTED BEFORE ANY
+    /// DECISION IS TAKEN ABOUT IT — and it exists to close a hole jas named on
+    /// O4.4x's own PASS line rather than hiding: that arm asserts `dup-frames=`
+    /// is REPORTED and well-formed, not that it is CORRECT. A shell that kept
+    /// suppressing but stopped INCREMENTING would read `dup-frames=0` with
+    /// `move == k` and pass both arms.
+    ///
+    /// ⛔ THE OBVIOUS CLOSURE DOES NOT WORK, and it was read before it was
+    /// built. Counting `SB_TRACE_POINTER`'s `MOVE-DUP` rows against
+    /// `dup-frames=` is THE SAME NUMBER TWICE: `_dupFrames++` and
+    /// `TracePointer("MOVE-DUP", …)` are adjacent statements in one block, so a
+    /// shell that stopped incrementing would stop tracing in the same breath.
+    ///
+    /// What closes it is an IDENTITY over three counters incremented at THREE
+    /// DIFFERENT SITES:
+    ///
+    ///     raised == move + dup-frames
+    ///
+    /// `_movesRaised` here (before the branch), `_moveCount` in the applied
+    /// branch, `_dupFrames` in the suppressed branch. Drop or freeze any ONE of
+    /// the three and the identity breaks; no single edit can keep it true while
+    /// making a count wrong. That is what `MOVE-DUP` could not give.
+    /// </summary>
+    private int _movesRaised;
+
     /// Read ONCE, at construction: a gesture must not change instrumentation
     /// halfway through. See <see cref="TracePointer"/>.
     private static readonly bool _tracePointer =
@@ -356,6 +382,7 @@ public sealed partial class MainWindow : Window
             _lastPosY = pressed.Position.Y;
         }
         _dupFrames = 0;
+        _movesRaised = 0;
         _pointerId = e.Pointer.PointerId;
         _device = e.Pointer.PointerDeviceType.ToString();
         _pressCount++;
@@ -415,6 +442,11 @@ public sealed partial class MainWindow : Window
         // so nothing real is dropped. Coalesced samples inside one frame are
         // offered through `GetIntermediatePoints`, which this shell does not
         // read -- so they were never separate events here to lose.
+        // BEFORE THE DECISION. This is the third site of the identity described
+        // on `_movesRaised`; counting it after the branch would make it a copy
+        // of one of the other two rather than a witness over both.
+        _movesRaised++;
+
         var pp = e.GetCurrentPoint(Canvas);
         if (_lastFrameId.HasValue
             && pp.FrameId == _lastFrameId.Value
@@ -488,6 +520,7 @@ public sealed partial class MainWindow : Window
             Press = _pressCount,
             Move = _moveCount,
             DupFrames = _dupFrames,
+            MovesRaised = _movesRaised,
             Release = _releaseCount,
             PressX = _pressX,
             PressY = _pressY,
