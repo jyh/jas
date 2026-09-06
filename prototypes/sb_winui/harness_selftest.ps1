@@ -90,7 +90,7 @@ $startupRow = "02:02:14`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAME
     "composition-scale=1.5x1.5 client-dips=1905x953 surface-request=2858x1429 " +
     "ui-tid=0 render-tid=0 paint-tid=0 present-tid=0 render-has-dispatcher=true"
 
-$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 selected=1 doc=HELD loads(shell)=1 " +
+$pointerRow = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 selected=1 doc=HELD loads(shell)=1 " +
     "point=(37.00,23.00) surface=2856x1464 scale=1.5 " +
     "ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false"
 
@@ -322,6 +322,34 @@ Test-Case 'the oracle still REFUSES a RUSTFAIL title' { (Select-SbTitleMatch $ti
 Test-Case 'the PRE-REPAIR completion row''s title did not satisfy it either (the defect)' { (Select-SbTitleMatch $titlesPreRepair $required).Count } '0'
 
 # ---------------------------------------------------------------------------
+# THE FOLDED TITLE -- the shell now writes the RUN's verdict, not the row's
+# ---------------------------------------------------------------------------
+#
+# ⛔ `TitleVerdict.Compose` (C#) changed the title's SHAPE: `<name> | <verdict>
+# [fails=N] | <last row>`. `Select-SbTitleMatch` is unchanged and must stay so,
+# but a rule that is never driven against the shape the app actually writes is a
+# rule about a title nobody produces. These cases pin the two halves together
+# from THIS side; `../sb_winui_tests/` drives the C# side. The fixtures are the
+# literal output of that project's `Compose`, not a paraphrase of it.
+$titlesFolded = @("JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTOK | A' scene=retained surface=2858x1429")
+$titlesFoldedTally = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTOK fails=1 | RUSTOK STAY pid=4812')
+$titlesFoldedFail = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTFAIL | RUSTFAIL render thread died')
+$titlesPending = @('JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTPENDING')
+# ⛔ THE NEAR MISS. The last-row half can itself contain `RUSTOK` (`Report`
+# composes `RECEIPT-LOST <ex> | <status>`), so a FAILED run's title can carry the
+# word. The oracle must key on the APP NAME plus the verdict, never on `RUSTOK`
+# loose in the string -- a shorter name hiding inside a longer one is how this
+# seat lost a sitting.
+$titlesFailCarryingTheWord = @(
+    'JAS S-B MATERIALIZER CHECKPOINT 3 | RUSTFAIL | RECEIPT-LOST IOException | RUSTOK GOLDENS 21/21')
+
+Test-Case 'the FOLDED title satisfies the oracle when the last row has no verdict' { (Select-SbTitleMatch $titlesFolded $required).Count } '1'
+Test-Case 'a folded title with a fail TALLY still satisfies it (O5 must not go red)' { (Select-SbTitleMatch $titlesFoldedTally $required).Count } '1'
+Test-Case 'CONTROL: a folded RUSTFAIL title is still refused' { (Select-SbTitleMatch $titlesFoldedFail $required).Count } '0'
+Test-Case 'CONTROL: a run that reported nothing (RUSTPENDING) is refused' { (Select-SbTitleMatch $titlesPending $required).Count } '0'
+Test-Case 'CONTROL: RUSTOK loose in the LAST-ROW half does not pass a failed run' { (Select-SbTitleMatch $titlesFailCarryingTheWord $required).Count } '0'
+
+# ---------------------------------------------------------------------------
 # F-B -- THE CHOOSER AIMS AT THE LARGEST, THE APP TAKES THE TOPMOST
 # ---------------------------------------------------------------------------
 #
@@ -386,6 +414,64 @@ Test-Case 'F-B: and the rule is NAMED, not implied' { (Get-SbElementOrigin $selE
 Test-Case 'a rect still answers with its x/y pair' { (Get-SbElementOrigin $aimElBefore).How } 'the x/y pair'
 Test-Case 'the index list renders in this harness''s path spelling' { ConvertTo-SbElementPath @(0, 2, 0) } '$.layers[0].children[2].children[0]'
 Test-Case 'a dump with no selection reads $null (the older dump shape)' { Get-SbSelectionPathFromDoc $beforeDoc } $null
+
+# ---------------------------------------------------------------------------
+# O1.2c -- THE CHOOSER AGAINST THE PORT'S *LIVE* HIT TEST
+# ---------------------------------------------------------------------------
+#
+# ⛔ EVERYTHING ABOVE IN F-B IS DRIVEN ON A HAND-WRITTEN `selection[0].path`.
+# The chooser mirrors the app's topmost-at-point rule, but that mirror was READ
+# OUT OF THE REFERENCE INTERPRETER'S SOURCE (`workspace_interpreter/
+# doc_primitives.py`) and the fixture's "app answer" was written from the same
+# reading. A hand-written oracle CANNOT disagree with the mirror it came from,
+# so those cases pin the chooser to itself. jas's #118 ruling says so in its own
+# words: "the chooser's mirror was read from the reference, never against the
+# shell's live hit test -- O1.2c is where that shows."
+#
+# ⭐ THIS BLOCK IS THAT GAP CLOSED. The document below is not a fixture in this
+# file: it is `test_fixtures/gestures/select_click_topmost_over_largest_filled_
+# expected.json`, the canonical output of a gesture the PORT'S OWN SELECTION
+# TOOL executed -- a press at doc (36,36) replayed through `YamlTool` and
+# `doc_primitives::hit_test`, which is the same path `jas_pointer_event` drives
+# from the shell. Its `selection[0].path` is a MEASUREMENT, not a transcription.
+# So the comparison below is chooser-vs-app, across two languages, on one file.
+#
+# 📌 THE VECTOR IS NOT VACUOUS, and that was measured too: with the children
+# `.rev()` removed from `doc_primitives::hit_test`, the full Rust suite is
+# 3066 passed / 0 failed WITHOUT this vector and fails on it alone WITH it.
+#
+# ⛔ AND A MISSING FILE IS `NOT RUN`, NEVER A PASS. This is the one case in this
+# file that reads something off disk; if the corpus moves, it must say so rather
+# than compare two nulls and go green.
+$corpusPath = Join-Path $PSScriptRoot '..\..\test_fixtures\gestures\select_click_topmost_over_largest_filled_expected.json'
+$corpusDoc = $null
+$corpusState = 'NOT RUN: the corpus file is not there'
+if (Test-Path $corpusPath) {
+    $corpusDoc = Get-Content -Raw -LiteralPath $corpusPath | ConvertFrom-Json
+    $corpusState = 'read'
+}
+$corpusTarget = Get-SbFixture { if ($null -eq $corpusDoc) { $null } else { Get-SbHitTargetFromDoc $corpusDoc } }
+
+Test-Case 'O1.2c: the live-hit-test corpus vector is on disk' { $corpusState } 'read'
+Test-Case 'O1.2c: the PORT selected the group, measured (not transcribed)' { Get-SbSelectionPathFromDoc $corpusDoc } '$.layers[0].children[2]'
+Test-Case 'O1.2c: the chooser AIMS elsewhere -- so this document discriminates' { $corpusTarget.AimPath } '$.layers[0].children[0]'
+Test-Case 'O1.2c: ⭐ THE CHOOSER AGREES WITH THE PORT''S LIVE HIT TEST' { ((Get-SbSelectionPathFromDoc $corpusDoc) -eq $corpusTarget.Path) } 'True'
+Test-Case 'O1.2c: CONTROL -- aim and answer really are different paths here' { ($corpusTarget.AimPath -eq $corpusTarget.Path) } 'False'
+
+# ---------------------------------------------------------------------------
+# `dup-frames=` MUST NOT BE READ AS `frames=`
+# ---------------------------------------------------------------------------
+#
+# The shell's POINTER row gained `dup-frames=<n>` when the `move != k` extras
+# were identified as RE-DELIVERED pointer frames. `verify_assertions.ps1` reads a
+# field called `frames` off REPAINT rows, and `frames` is a suffix of
+# `dup-frames` -- the exact shape that killed a whole sitting when `scale`
+# matched inside `composition-scale=`. The anchor already forbids it; these
+# cases are what keep it forbidden, with the positive control beside them.
+Test-Case 'frames= is not read out of the middle of dup-frames=' { Get-SbField $pointerRow 'frames' } $null
+Test-Case 'dup-frames= is read whole' { Get-SbField $pointerRow 'dup-frames' } '5'
+Test-Case 'CONTROL: the reader still reads frames= where it IS a field' { Get-SbField $repaintDispRow 'frames' } '1'
+Test-Case 'CONTROL: move= is unaffected by the new neighbour' { Get-SbField $pointerRow 'move' } '7'
 
 # ---------------------------------------------------------------------------
 Write-Host ""

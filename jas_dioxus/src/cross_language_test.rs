@@ -1231,6 +1231,18 @@ mod tests {
         // what hit-testing means, so the press at doc(36,36) — inside both the
         // Background rect and the Foreground circle — must resolve [1, 0].
         "select_click_multi_layer.json",
+        // F-B / O1.2c (flask's third harness run): the S-B harness's chooser
+        // AIMS at the centre of the largest filled shape and then asserts
+        // against the element the APP selected. That mirror was read out of the
+        // reference interpreter's source and never driven against a live hit
+        // test — the harness's own fixture hand-writes the app's answer, and a
+        // hand-written oracle cannot disagree with the mirror it came from.
+        // Here the largest filled element is FIRST in document order and a
+        // group spanning the same region is LAST, so the aim ([0,0]) and the
+        // answer ([0,2]) differ; every other selection vector presses where the
+        // two rules agree. `prototypes/sb_winui/harness_selftest.ps1` reads this
+        // vector's expected JSON, so the chooser reds here rather than on kenai.
+        "select_click_topmost_over_largest_filled.json",
         // Marquee-select (TESTING_STRATEGY.md §5 rec 4): the other half of
         // the selection tool. When on_mousedown hit-tests to NULL (press on
         // empty space, here doc(-10,-10), outside both rects) the tool enters

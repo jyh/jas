@@ -3549,6 +3549,17 @@ private let gestureFixtures = [
     // not. Press at doc(36,36) is inside both the Background rect and the
     // Foreground circle; topmost-first means [1, 0].
     "select_click_multi_layer.json",
+    // O1.2c (flask's third harness run): click-select where the largest FILLED
+    // element is FIRST in document order and a group spanning the same region
+    // is LAST, so a within-layer forward walk and a reversed one give different
+    // answers. `select_click` and `select_click_multi_layer` both press where
+    // only one child of a layer contains the point, so neither can see the
+    // CHILDREN loop's order; measured in Rust, dropping that loop's `.rev()`
+    // left the whole suite green without this vector. The S-B harness's chooser
+    // reads this vector's expected JSON as the app's own answer, so its mirror
+    // of the topmost-at-point rule is checked against a live hit test rather
+    // than against the reference's source.
+    "select_click_topmost_over_largest_filled.json",
     // Marquee-select (§5 rec 4): press on EMPTY space (hit_test==null) enters
     // marquee mode; mouseup commits doc.select_in_rect over the normalized
     // marquee bounds. Drag encloses both rects -> [0,0]+[0,1].

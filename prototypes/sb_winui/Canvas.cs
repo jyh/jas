@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Microsoft.UI.Dispatching;
@@ -130,6 +130,10 @@ internal sealed class PointerReportCmd : Cmd
     internal string Hit = "PANEL";
     internal int Press;
     internal int Move;
+    /// How many `PointerMoved` events named a pointer FRAME the shell had
+    /// already applied. Reported, never silently dropped -- see
+    /// `MainWindow.OnPointerMoved`.
+    internal int DupFrames;
     internal int Release;
     internal double PressX;
     internal double PressY;
@@ -1390,6 +1394,7 @@ internal sealed unsafe class Canvas : IDisposable
             : "REAL";
         _report(
             $"POINTER {r.Kind} press={r.Press} move={r.Move} release={r.Release} "
+          + $"dup-frames={r.DupFrames} "
           + $"id={r.PointerId} device={r.Device} hit={r.Hit} tool=0 pointer={provenance} "
           + $"doc={doc} loads(shell)={_loadsShell} "
           + $"press@=({r.PressX:F1},{r.PressY:F1}) release@=({r.ReleaseX:F1},{r.ReleaseY:F1}) "

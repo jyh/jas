@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THE FIRST C# TEST IN THIS PROTOTYPE, AND THE ARGUMENT FOR IT IS THE ONE THAT
+    BUILT `harness_selftest.ps1`.
+
+    `windows-shell-compile` proves the shell COMPILES and nothing else; every
+    other arm this prototype has needs a desktop, so the app's own logic has
+    never been exercised by a runner. `TitleVerdict` is a pure function over
+    strings with no WinUI, no device and no window: the one part of the app a
+    desktop-less runner CAN exercise, and until this project it was not.
+
+    IT LIVES BESIDE `sb_winui/`, NOT INSIDE IT, ON PURPOSE. `SbWinUi.csproj` is
+    SDK-style, so its Compile glob is `**/*.cs` under its own directory; a test
+    project nested there would put a second entry point into the app's build.
+    The one file under test is LINKED rather than copied — a copy is a second
+    source of truth and would pass while the app was wrong.
+
+    Plain `net10.0`: no `-windows`, no Windows App SDK, no RuntimeIdentifier.
+    The subject needs none of them, and every one of them is a way for this gate
+    to fail for a reason that is not the code.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>SbWinUi.Tests</RootNamespace>
+    <AssemblyName>TitleVerdictTests</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="../sb_winui/TitleVerdict.cs" Link="TitleVerdict.cs" />
+  </ItemGroup>
+
+</Project>

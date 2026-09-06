@@ -786,7 +786,22 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     #   k=1 @ 300 ms (300 ms)     -> 2         one step, one extra: not about k
     #   k=2 @ 400 ms (800 ms)     -> 4         TWO extras: periodic, not one-shot
     #
-    # ⚠️ THE SOURCE IS CHARACTERISED, NOT IDENTIFIED. One arrival per few hundred
+    # ⭐ THE SOURCE IS NOW IDENTIFIED (flask, 2026-09-06) AND THE SHELL FIXES IT
+    # AT THE SOURCE: the extras were RE-DELIVERED pointer frames -- same FrameId,
+    # same Timestamp, same position, raised again by XAML while the contact sat
+    # still -- so they were duplicates of input the shell had already applied to
+    # the core, not arrivals. `MainWindow.OnPointerMoved` now suppresses a
+    # repeated frame and the POINTER row carries `dup-frames=<n>`. Measured after
+    # the repair: move == k at every configuration on record (k=1@300, k=2@800,
+    # k=4@100, k=7@10, k=7@40), with dup-frames 1,5,1,0,1.
+    #
+    # ⛔ THE ASSERTION BELOW IS UNCHANGED, DELIBERATELY. `move >= k` with the
+    # extras priced is jas's ruling (freeze v3.2 §9.2, F-C), and the finding that
+    # inverts its premise is flask's to report, not flask's to act on. The budget
+    # simply stops binding: it is now expected to be unused, and jas may want to
+    # tighten this to equality. The historical reading follows.
+    #
+    # ⚠️ AS CHARACTERISED BEFORE THE REPAIR: one arrival per few hundred
     # ms while the button is held fits every reading on record; the mechanism is a
     # NAMED OPEN FINDING in the README and is not claimed here.
     #
@@ -840,7 +855,7 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
         $mc = Test-SbMoveCount -Move ([int]$move) -K $wantK -PostPressMs $postPressMs
         if ($mc.Ok) {
             Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'PASS' `
-                -Detail "$($mc.Text) (press=$press release=$release). The budget is one arrival per 160 ms of post-press drag, rounded up -- the boundary measured on kenai 2026-09-04, where the source is a periodic system arrival while the button is held: CHARACTERISED, NOT IDENTIFIED. Duration source: $postPressSource.$handNote" -Row $gestureRow
+                -Detail "$($mc.Text) (press=$press release=$release). The budget is one arrival per 160 ms of post-press drag, rounded up -- the boundary measured on kenai 2026-09-04. IDENTIFIED 2026-09-06: the extras were RE-DELIVERED pointer frames (same FrameId and Timestamp), which the shell now suppresses and reports as dup-frames=, so this budget is expected to be UNUSED and a non-zero extras count is now itself a finding. Duration source: $postPressSource.$handNote" -Row $gestureRow
         } elseif ($mc.Extras -lt 0) {
             Add-Assert -Name "$o4Prefix.4 move >= k, extras priced against the drag's duration" -Verdict 'FAIL' `
                 -Detail "$($mc.Text) -- move < k: coalescence, a UIPI-discarded event, or two steps landing on one normalized grid point (the receipt's normalized-collisions says which). Duration source: $postPressSource.$handNote" -Row $gestureRow

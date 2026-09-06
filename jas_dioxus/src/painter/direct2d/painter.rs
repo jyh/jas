@@ -2305,5 +2305,153 @@ mod tests {
                 "uncovered half must be untouched backdrop (~204), got {right}");
         assert_eq!(ra, 255);
     }
-}
+    // =======================================================================
+    // STROKE ALIGNMENT — the one branch of this backend nothing was driving
+    // =======================================================================
+    //
+    // ⛔ BEFORE THIS BLOCK, `StrokeAlign::Inside` AND `::Outside` APPEARED IN
+    // THIS FILE EXACTLY ONCE EACH — in `stroke_ellipse_arc`'s own body. No test
+    // passed either value to anything. The backend's half of the alignment
+    // lowering (a geometric-mask LAYER plus a DOUBLED width, and for Outside an
+    // even-odd complement against a 1e7 rect) was entirely unpinned, while
+    // `dash_multiples`'s sibling arm has said since B1 that getting the doubled
+    // width wrong is silent and exactly a factor of two.
+    //
+    // ⭐ THE SHAPE OF EVERY ARM HERE IS A RADIAL RAY WITH FOUR SAMPLES, because
+    // one sample cannot tell the three alignments apart. A circle of radius 20
+    // stroked 8 wide covers
+    //
+    //     Center   r 16..24        Inside   r 12..20        Outside  r 20..28
+    //
+    // so the samples at r = 14, 18, 22, 26 give each alignment a DIFFERENT
+    // signature — and each sample sits ~1.5 px clear of every band edge, so no
+    // assertion here rests on an antialiased pixel.
+    //
+    //     r:        14      18      22      26
+    //     Center    clear   ink     ink     clear
+    //     Inside    ink     ink     clear   clear
+    //     Outside   clear   clear   ink     ink
+    //
+    // Every alignment therefore asserts both what it paints AND what it leaves
+    // alone. A backend that ignored `align` would fail Inside at r=14 and
+    // Outside at r=26; one that doubled the width and forgot the clip would
+    // paint the whole 12..28 span and fail every "clear" line. Both mutants die
+    // on a picture, not on an argument.
 
+    /// The full circle these three arms stroke. r 20 at the centre of a 64x64
+    /// target, so the widest band (Outside, out to r 28) still has 4 px of
+    /// margin and nothing under test touches the edge of the surface.
+    fn ring() -> EllipseArc {
+        EllipseArc {
+            cx: 32.0, cy: 32.0, rx: 20.0, ry: 20.0, rotation: 0.0,
+            start: 0.0, end: std::f64::consts::TAU, ccw: false,
+        }
+    }
+
+    fn ring_stroke() -> StrokeStyle {
+        StrokeStyle {
+            width: 8.0, cap: LineCap::Butt, join: LineJoin::Miter,
+            miter: 10.0, dash: vec![],
+        }
+    }
+
+    /// Sample the ring's band along the +x ray at `r` from the centre.
+    fn on_ray(buf: &[u8], r: u32) -> [u8; 4] {
+        px(buf, 64, 32 + r, 32)
+    }
+
+    /// CONTROL, and the row every other alignment is read against: a centred
+    /// stroke straddles the path — half in, half out.
+    #[test]
+    fn a_centred_stroke_straddles_the_ring() {
+        let buf = draw(64, 64, |p| {
+            p.stroke_ellipse_arc(&ring(), &red(), &ring_stroke(), StrokeAlign::Center, 1.0)
+        });
+        assert_eq!(on_ray(&buf, 14), [0, 0, 0, 0], "r=14 is inside the band's inner edge");
+        assert_eq!(on_ray(&buf, 18), [0, 0, 255, 255], "r=18 is in the band");
+        assert_eq!(on_ray(&buf, 22), [0, 0, 255, 255], "r=22 is in the band");
+        assert_eq!(on_ray(&buf, 26), [0, 0, 0, 0], "r=26 is beyond the band");
+    }
+
+    /// ⭐ INSIDE: the whole width lies WITHIN the path, so nothing is painted
+    /// outside r=20. This is the arm that fails if `align` is ignored — a
+    /// centred stroke leaves r=14 clear and paints r=22, the exact opposite of
+    /// both assertions below.
+    #[test]
+    fn an_inside_stroke_paints_only_within_the_ring() {
+        let buf = draw(64, 64, |p| {
+            p.stroke_ellipse_arc(&ring(), &red(), &ring_stroke(), StrokeAlign::Inside, 1.0)
+        });
+        assert_eq!(on_ray(&buf, 14), [0, 0, 255, 255], "r=14 IS painted -- the band moved inward");
+        assert_eq!(on_ray(&buf, 18), [0, 0, 255, 255], "r=18 is in the band");
+        // ⛔ THE TWO THAT KILL THE FORGOTTEN-CLIP MUTANT. Draw at 2x width with
+        // no geometric mask and the band runs r 12..28, painting both of these.
+        assert_eq!(on_ray(&buf, 22), [0, 0, 0, 0], "nothing outside the ring");
+        assert_eq!(on_ray(&buf, 26), [0, 0, 0, 0], "and nothing further out");
+    }
+
+    /// ⭐ OUTSIDE: the mirror image, and it drives the OTHER mask — an even-odd
+    /// geometry group of a 1e7 rect with the ellipse, which is a different code
+    /// path from Inside's bare ellipse mask and would otherwise be untested.
+    #[test]
+    fn an_outside_stroke_paints_only_beyond_the_ring() {
+        let buf = draw(64, 64, |p| {
+            p.stroke_ellipse_arc(&ring(), &red(), &ring_stroke(), StrokeAlign::Outside, 1.0)
+        });
+        assert_eq!(on_ray(&buf, 26), [0, 0, 255, 255], "r=26 IS painted -- the band moved outward");
+        assert_eq!(on_ray(&buf, 22), [0, 0, 255, 255], "r=22 is in the band");
+        // The complement really is a complement: the interior stays untouched.
+        assert_eq!(on_ray(&buf, 18), [0, 0, 0, 0], "nothing inside the ring");
+        assert_eq!(on_ray(&buf, 14), [0, 0, 0, 0], "and nothing further in");
+    }
+
+    /// ⭐ AND THE SAME QUESTION ON THE PATH ROUTE, THROUGH PRODUCTION CODE.
+    ///
+    /// The arms above drive `stroke_ellipse_arc`, which carries alignment
+    /// itself. Every OTHER shape reaches alignment through
+    /// `element_render::emit_aligned_path_stroke`, which lowers Inside/Outside
+    /// to `clip` + a doubled `stroke_path`. That lowering is painter-generic and
+    /// pinned where it lives — what is NOT pinned is that THIS backend's `clip`
+    /// (a D2D geometric-mask LAYER, not an axis-aligned clip) actually restricts
+    /// a STROKE. `clip`'s own comment says its whole production traffic is
+    /// "four call sites, all stroke-alignment", and the two existing clip arms
+    /// both clip a FILL. So the one thing clip is used for was the one thing no
+    /// arm covered.
+    ///
+    /// Driven through the real entry points — `rect_painter_inputs` then
+    /// `emit_shape_paint` — so the lowering under test is production's, not a
+    /// copy of it written into a test.
+    ///
+    /// A 44x44 rect at (10,10) stroked 8 wide, sampled along y=32 (mid-height,
+    /// clear of both corners): Center covers x 6..14, Inside 10..18,
+    /// Outside 2..10.
+    #[test]
+    fn an_inside_aligned_rect_stroke_is_clipped_to_the_rect_on_this_backend() {
+        use crate::geometry::element::{Color as GColor, CommonProps, RectElem, Stroke};
+        use crate::painter::element_render::{emit_shape_paint, rect_painter_inputs};
+
+        let mut stroke = Stroke::new(GColor::rgb(1.0, 0.0, 0.0), 8.0);
+        stroke.align = StrokeAlign::Inside;
+        let e = RectElem {
+            x: 10.0, y: 10.0, width: 44.0, height: 44.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(stroke),
+            fill_gradient: None, stroke_gradient: None,
+            common: CommonProps::default(),
+        };
+        let sp = rect_painter_inputs(&e, (10.0, 10.0, 44.0, 44.0))
+            .expect("a plain stroked rect is convertible, not legacy");
+
+        let buf = draw(64, 64, |p| emit_shape_paint(p, &sp, 1.0));
+
+        assert_eq!(px(&buf, 64, 16, 32), [0, 0, 255, 255],
+                   "x=16 is inside the rect and in the inward band");
+        assert_eq!(px(&buf, 64, 12, 32), [0, 0, 255, 255],
+                   "x=12 is in the band under every alignment -- reached the sink");
+        // ⛔ THE CLIP ITSELF. Without it the doubled 16-wide stroke would run
+        // x 2..18 and paint both of these.
+        assert_eq!(px(&buf, 64, 8, 32), [0, 0, 0, 0],
+                   "x=8 is OUTSIDE the rect -- an inside stroke must not reach it");
+        assert_eq!(px(&buf, 64, 4, 32), [0, 0, 0, 0],
+                   "and x=4 is further out still");
+    }
+}

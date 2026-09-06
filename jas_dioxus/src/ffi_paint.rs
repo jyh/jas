@@ -2162,14 +2162,23 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 70, "the fixture corpus changed size");
+        assert_eq!(total, 71, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
-        // in the SVG corpus now presents through the Windows surface — 70 of 70.
+        // in the SVG corpus now presents through the Windows surface — 71 of 71.
         //
         // The road: 51/70 before row CV → 61/70 after CV (LIVE) → 65/70 after
         // row DA (flat text) → 67/70 after DR capability 1 (segmented) → 70/70
         // here (type on a path).
+        //
+        // ⛔ 70 → 71 (flask, 2026-09-06): O1.2c's live-hit-test vector added
+        // topmost_over_largest_filled.svg. ⚠️ AND THIS ARM IS WINDOWS-ONLY, so
+        // the cheap `--features web` lane a corpus author runs cannot see the
+        // count move -- the vector went in green on `web` and red here. If you
+        // add an SVG fixture, this number is the one that reds, and it reds on
+        // a lane a Mac cannot run. The new document PRESENTS: it is one layer
+        // of two rects and a group holding a line, and `refusing` stayed empty
+        // on its first run.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2181,6 +2190,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 70, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 71, "the whole corpus presents");
     }
 }

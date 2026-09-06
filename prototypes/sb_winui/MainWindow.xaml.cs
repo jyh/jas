@@ -1,4 +1,4 @@
-using Microsoft.UI.Dispatching;
+﻿using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -51,6 +51,20 @@ public sealed partial class MainWindow : Window
     /// so a lost row is a lost measurement wearing a green tick.
     /// </summary>
     private static readonly object LogLock = new();
+
+    /// <summary>
+    /// THE RUN'S VERDICT, FOLDED OVER EVERY ROW — the value the session-1 title
+    /// oracle actually reads. Guarded by <see cref="LogLock"/> for exactly the
+    /// reason the log append is: <see cref="Report"/> runs on the render thread
+    /// and on the UI thread, and an unsynchronised read-modify-write here would
+    /// lose a verdict the same way an unsynchronised append lost a row.
+    ///
+    /// ⛔ IT IS NOT A COPY OF THE LAST ROW. See <see cref="TitleVerdict"/> for
+    /// why the title's verdict is a property of the RUN: three successful runs
+    /// were failed by the last-row rule on kenai 2026-09-04, and the class of
+    /// rows that can do it has twenty-odd members, not the three #118 named.
+    /// </summary>
+    private static TitleVerdict _titleVerdict = TitleVerdict.Empty;
 
     /// <summary>
     /// The retained canvas. `global::` qualified because `x:Name="Canvas"` also
@@ -139,12 +153,31 @@ public sealed partial class MainWindow : Window
     private double _lastX;
     private double _lastY;
     private uint _pointerId;
+
+    /// The last pointer FRAME this shell applied — id, timestamp and position
+    /// together. See <see cref="OnPointerMoved"/> for what they are for and for
+    /// the measurement that made them necessary.
+    private uint? _lastFrameId;
+    private ulong _lastTimestamp;
+    private double _lastPosX;
+    private double _lastPosY;
+    /// How many re-delivered frames were suppressed in THIS gesture. Zeroed at
+    /// the press and carried onto the `POINTER` row.
+    private int _dupFrames;
+
+    /// Read ONCE, at construction: a gesture must not change instrumentation
+    /// halfway through. See <see cref="TracePointer"/>.
+    private static readonly bool _tracePointer =
+        !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SB_TRACE_POINTER"));
     private string _device = "Unknown";
 
     public MainWindow()
     {
         InitializeComponent();
-        Title = VerifyTitle;
+        // `RUSTPENDING`, not a bare name: a window that has reported nothing yet
+        // must SAY so. The bare title used to be indistinguishable from a run
+        // whose verdict had been blanked by a verdict-less last row.
+        Title = TitleVerdict.Compose(VerifyTitle, TitleVerdict.Empty);
         _ui = DispatcherQueue;
         _canvas = new global::SbWinUi.Canvas(Report);
         _canvas.SurfaceSettled = OnSurfaceSettled;
@@ -250,10 +283,79 @@ public sealed partial class MainWindow : Window
         target.PointerCanceled += OnPointerCanceled;
     }
 
+    /// <summary>
+    /// ⭐ ONE ROW PER POINTER EVENT, WITH THE FIELDS THAT SAY WHERE IT CAME
+    /// FROM. Off unless `SB_TRACE_POINTER` is set, because a drag writes one row
+    /// per event and the receipt is also the oracle for every other assertion.
+    ///
+    /// ⛔ WHY IT EXISTS. `move != k` -- the shell counting more `PointerMoved`
+    /// than the injector sent -- has now survived two waves. #115 named a
+    /// candidate mechanism and #117 refuted it by measurement; #117 characterised
+    /// the extras as periodic in the drag's DURATION and said, in its own words,
+    /// "characterised, not identified"; #118 priced them rather than explaining
+    /// them. `probe_hold.ps1` then excluded everything below this class: a bare
+    /// Win32 window driven by the SAME injector at the SAME configurations reads
+    /// arrivals == k exactly, in both the legacy mouse stack and the pointer
+    /// stack, repainting or not. So the extras are raised ABOVE the message
+    /// queue, and these are the fields that say which:
+    ///
+    ///   `frame` and `ts`  -- a duplicate of either means one input frame was
+    ///                        raised twice; distinct values on every row mean
+    ///                        genuinely new frames arrived at this app and not
+    ///                        at the probe.
+    ///   `pos`             -- an extra that repeats the previous position is a
+    ///                        re-delivery; one that moves is real motion.
+    ///   `intermediates`   -- WinUI coalesces into a frame and offers the parts
+    ///                        here; a count above 1 is the platform saying it
+    ///                        merged, which is the OPPOSITE of an extra.
+    ///   `update`          -- `PointerUpdateKind`; `Other` on a synthesized
+    ///                        update, a button kind on a real transition.
+    ///
+    /// The row carries no verdict prefix ON PURPOSE: it is a note, not an
+    /// outcome, and since the title carries the RUN's verdict rather than the
+    /// last row's (see <see cref="TitleVerdict"/>) a diagnostic row can no
+    /// longer blank the oracle -- which is what would have made this trace
+    /// unusable during a real sitting.
+    /// </summary>
+    private void TracePointer(string kind, PointerRoutedEventArgs e)
+    {
+        if (!_tracePointer) { return; }
+        try
+        {
+            var p = e.GetCurrentPoint(Canvas);
+            var inter = e.GetIntermediatePoints(Canvas);
+            Report($"POINTER-TRACE kind={kind} id={e.Pointer.PointerId} "
+                 + $"ts={p.Timestamp} frame={p.FrameId} "
+                 + $"pos=({p.Position.X:F2},{p.Position.Y:F2}) "
+                 + $"contact={p.IsInContact} update={p.Properties.PointerUpdateKind} "
+                 + $"intermediates={(inter is null ? -1 : inter.Count)} "
+                 + $"move-count={_moveCount} gesture-open={_gestureOpen}");
+        }
+        catch (Exception ex)
+        {
+            // A trace that throws must not take the gesture with it -- the run
+            // is still a measurement of everything else.
+            Report($"POINTER-TRACE unavailable: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (sender is UIElement el) { el.CapturePointer(e.Pointer); }
+        TracePointer("PRESS", e);
         _gestureOpen = true;
+        // ⛔ THE PRESS'S OWN FRAME IS SEEDED HERE, because XAML re-raises IT as
+        // a `PointerMoved` too: the k=2 trace carries a MOVE at the press's
+        // frame with `update=LeftButtonPressed` on it. Without this seed the
+        // press's frame would be counted as the drag's first move.
+        {
+            var pressed = e.GetCurrentPoint(Canvas);
+            _lastFrameId = pressed.FrameId;
+            _lastTimestamp = pressed.Timestamp;
+            _lastPosX = pressed.Position.X;
+            _lastPosY = pressed.Position.Y;
+        }
+        _dupFrames = 0;
         _pointerId = e.Pointer.PointerId;
         _device = e.Pointer.PointerDeviceType.ToString();
         _pressCount++;
@@ -281,7 +383,60 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_gestureOpen) { return; }
+        if (!_gestureOpen) { TracePointer("MOVE-IGNORED", e); return; }
+
+        // ⭐⭐ ONE INPUT FRAME IS ONE MOVE. THIS IS THE `move != k` DEFECT, AND
+        // IT IS A RE-DELIVERY, NOT AN ARRIVAL.
+        //
+        // MEASURED on kenai 2026-09-06 with `SB_TRACE_POINTER=1`. k=2 at settle
+        // 800 ms: `frame=4` was raised THREE times and `frame=5` TWICE, every
+        // repeat carrying the SAME `FrameId` AND the SAME `Timestamp` AND the
+        // same position. k=7 at settle 10 ms: seven moves, frames 4..10, each
+        // raised exactly ONCE. So the repeats are XAML re-raising a frame the
+        // shell has already applied, and they multiply with the IDLE GAP after
+        // a frame -- which is precisely #117's "one extra per few hundred ms
+        // while the button is held", seen from the other side.
+        //
+        // ⛔ AND IT IS NOT MERELY A COUNT. Every repeat also called
+        // `_canvas.Pointer(PointerMove, ...)`, so the CORE was driven with a
+        // point it had already been given, several times per stationary
+        // moment. The counter was the visible half of a real defect.
+        //
+        // ⛔ EXCLUDED FIRST, BY MEASUREMENT, NOT BY ARGUMENT: `probe_hold.ps1`
+        // drives a bare Win32 window with this harness's own injector at these
+        // same configurations and reads arrivals == k EXACTLY -- in the legacy
+        // mouse stack and in the pointer stack, repainting at 5 ms or not at
+        // all. The injector, `SendInput`, the mouse stack, the pointer stack
+        // and the message queue are therefore all innocent. #115's candidate
+        // (positioned button events) was already refuted by #117.
+        //
+        // THE TEST IS THE WHOLE TRIPLE, not the frame id alone: a genuinely new
+        // sample cannot share a predecessor's frame id, timestamp AND position,
+        // so nothing real is dropped. Coalesced samples inside one frame are
+        // offered through `GetIntermediatePoints`, which this shell does not
+        // read -- so they were never separate events here to lose.
+        var pp = e.GetCurrentPoint(Canvas);
+        if (_lastFrameId.HasValue
+            && pp.FrameId == _lastFrameId.Value
+            && pp.Timestamp == _lastTimestamp
+            && pp.Position.X == _lastPosX
+            && pp.Position.Y == _lastPosY)
+        {
+            // ⛔ COUNTED AND REPORTED, NEVER SILENTLY DROPPED. A shell that
+            // quietly swallowed these would be indistinguishable from one where
+            // they had stopped happening, and the next wave would have to
+            // rediscover the whole finding.
+            _dupFrames++;
+            TracePointer("MOVE-DUP", e);
+            e.Handled = true;
+            return;
+        }
+        _lastFrameId = pp.FrameId;
+        _lastTimestamp = pp.Timestamp;
+        _lastPosX = pp.Position.X;
+        _lastPosY = pp.Position.Y;
+
+        TracePointer("MOVE", e);
         var (x, y) = Physical(e);
         _lastX = x;
         _lastY = y;
@@ -332,6 +487,7 @@ public sealed partial class MainWindow : Window
             Hit = _hit,
             Press = _pressCount,
             Move = _moveCount,
+            DupFrames = _dupFrames,
             Release = _releaseCount,
             PressX = _pressX,
             PressY = _pressY,
@@ -978,6 +1134,14 @@ public sealed partial class MainWindow : Window
     /// blocking hand-over from the render thread would be stop 2's deadlock by a
     /// third door.
     ///
+    /// ⛔ AND THE TITLE CARRIES THE RUN'S VERDICT, NOT THIS ROW'S. It used to
+    /// carry the row, which meant any caller that wrote no `RUSTOK `/`RUSTFAIL `
+    /// blanked the oracle's verdict — three successful runs failed that way on
+    /// kenai 2026-09-04, and there are twenty-odd such callers, not the three
+    /// PR #118 prefixed by name. <see cref="TitleVerdict"/> holds the rule and
+    /// `../sb_winui_tests/` drives it with no desktop; the STATUS LINE still
+    /// shows this row alone, because a human at the window wants the row.
+    ///
     /// AND A CAUGHT EXCEPTION PUTS `RECEIPT-LOST` IN THE TITLE. The old bare
     /// `catch { }` said "diagnostics must never become the failure", which is
     /// right, but it made a lost receipt indistinguishable from a run that had
@@ -1010,10 +1174,29 @@ public sealed partial class MainWindow : Window
         }
 
         var text = lost is null ? status : $"{lost} | {status}";
-        _ui.TryEnqueue(() =>
+
+        // THE FOLD, NOT THE LAST ROW. `text` is what a human reads; the verdict
+        // that reaches the title is the RUN's, so a row with no verdict on it
+        // (`A'`, `UI-STALL DONE`, `SQUEEZE requesting …`, `DUMP`, `SCALE
+        // CHANGED`, …) updates the text and leaves the verdict standing. The
+        // fold is taken here, on the reporting thread and under the same lock as
+        // the append, so the title cannot be composed from a half-updated value.
+        //
+        // ⛔ THE FOLD AND THE ENQUEUE ARE ONE CRITICAL SECTION. Composing under
+        // the lock and enqueuing outside it would let two reporting threads
+        // interleave — B composes and posts its title, then A posts the older
+        // one it composed first — and the title the oracle reads would be a
+        // STALE verdict. `TryEnqueue` neither blocks nor runs the callback
+        // inline, so there is nothing here to deadlock against.
+        lock (LogLock)
         {
-            Title = $"{VerifyTitle} | {text}";
-            StatusLine.Text = text;
-        });
+            _titleVerdict = TitleVerdict.Fold(_titleVerdict, text);
+            var title = TitleVerdict.Compose(VerifyTitle, _titleVerdict);
+            _ui.TryEnqueue(() =>
+            {
+                Title = title;
+                StatusLine.Text = text;
+            });
+        }
     }
 }
