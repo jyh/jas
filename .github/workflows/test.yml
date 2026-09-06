@@ -727,14 +727,67 @@ jobs:
       # exercise, and the only reason they were never exercised is that nobody
       # had written the arm.
       - name: The S-B harness row readers read rows
+        id: sbselftest
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
-          pwsh -File prototypes/sb_winui/harness_selftest.ps1
-          if ($LASTEXITCODE -ne 0) {
+          pwsh -File prototypes/sb_winui/harness_selftest.ps1 2>&1 |
+            Tee-Object -FilePath sbselftest.log
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) {
             Write-Host "::error::the S-B harness self-test failed -- a row reader no longer reads the row it is given"
             exit 1
           }
+
+      # ⛔ AND IT ASSERTS IT DID WORK -- the same argument the parse gate above
+      # makes in its own words, for the gate standing between it and the
+      # structural gates. A green step proves the process exited 0; it does not
+      # prove a case ran, and 97 cases and 0 cases exit identically.
+      #
+      # ⭐ DERIVED, NOT PINNED, and here the derived form is strictly stronger
+      # than the floor its sibling control uses for the title oracle ("at least
+      # 20; this suite has far more"). A floor is a number that ages and that
+      # nobody re-reads. This compares the cases EXECUTED against the cases the
+      # file DECLARES, so it needs no maintenance as the suite grows, and it
+      # catches the case a floor cannot: some cases silently stopping while the
+      # rest still pass.
+      #
+      # ⚠️ THE COMPARISON IS `-lt` AGAINST A LOWER BOUND, AND THE DIRECTION IS
+      # THE POINT. Every `Test-Case` at column 0 is unconditional, so counting
+      # them bounds executions from below; a case added inside a loop or an `if`
+      # can only push the executed count above that. Growth never reds this
+      # gate. Only a case that stopped running does.
+      - name: ...and it ran every case the file declares
+        if: ${{ !cancelled() && steps.sbselftest.conclusion == 'success' }}
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'sbselftest.log')) {
+            Write-Host "::error::NOT RUN: the self-test log is missing, so nothing proves a case executed"
+            exit 1
+          }
+          $log = @(Get-Content -Path 'sbselftest.log')
+          $summary = @($log | Where-Object { $_ -match '^--- \d+ passed, \d+ failed, of \d+ case' })
+          if ($summary.Count -lt 1) {
+            Write-Host "::error::NOT RUN: no summary line in the self-test output, so nothing proves a case executed"
+            exit 1
+          }
+          $ran = 0
+          if ($summary[-1] -match 'of (\d+) case') { $ran = [int]$Matches[1] }
+          $declared = @(Get-Content -Path 'prototypes/sb_winui/harness_selftest.ps1' |
+            Where-Object { $_ -match '^Test-Case ' }).Count
+          if ($ran -lt 1) {
+            Write-Host "::error::the self-test summary reports $ran case(s) -- it examined nothing, which is not a pass"
+            exit 1
+          }
+          if ($declared -lt 1) {
+            Write-Host "::error::no unconditional 'Test-Case' call found in harness_selftest.ps1 -- this control cannot derive its subject, which is a refusal and not a pass"
+            exit 1
+          }
+          if ($ran -lt $declared) {
+            Write-Host "::error::only $ran case(s) executed but the file declares $declared unconditional Test-Case call(s) -- cases stopped running while the rest passed"
+            exit 1
+          }
+          Write-Host "positive control: $ran executed, $declared declared unconditionally -- $($summary[-1])"
 
       - name: Structural gates
         if: ${{ !cancelled() }}

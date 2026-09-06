@@ -563,6 +563,44 @@ Test-Case 'raised= is read whole beside its neighbours' { Get-SbField $pointerRo
 Test-Case 'CONTROL: dup-frames= still reads beside raised=' { Get-SbField $pointerRow 'dup-frames' } '5'
 
 # ---------------------------------------------------------------------------
+# O4.4z -- THE FIELD O4.4y READS MUST ITSELF BE REPORTED
+# ---------------------------------------------------------------------------
+#
+# ⛔ THE HOLE IS ONE LEVEL UP FROM THE ONE O4.4y CLOSED, AND IT IS THE SAME HOLE.
+# O4.4y tolerates a row with no `raised=` by design -- `Applies = $false`, NOT
+# RUN -- so that a build older than the identity is not failed for a field it
+# never carried. That tolerance is right for the IDENTITY question and it is
+# also, unmodified, a way to switch the arm off: delete `raised=` from
+# `Canvas.cs` and O4.4y stops running instead of going red, while `NOT RUN` is
+# tallied separately from FAIL and no run fails.
+#
+# That is exactly the asymmetry O4.4x already refuses for its own field:
+# `dup-frames=` ABSENT is a FAIL, measured by the §18 P3 mutant. `raised=`
+# ABSENT was a silence. The split is the same one O4.4/O4.4x drew -- the REPORT
+# and the VALUE are two questions -- so `raised=` gets the report arm its
+# sibling has, and O4.4y keeps its tolerance for the value.
+#
+# ⚠️ `n/a` IS REPORTED, NOT MISSING. The synthetic arm declines the COUNT (it
+# never enters `MainWindow.OnPointerMoved`, where the three counters live); it
+# does not drop the FIELD. A row that carries no `raised=` at all is a different
+# event from one that carries `raised=n/a`, and only the first is a defect.
+$raisedDecoyRow = "02:03:01`tRUSTOK POINTER press=1 move=7 moves-raised=99 raised=12 dup-frames=5"
+$raisedBadRow   = "02:03:01`tRUSTOK POINTER press=1 move=7 release=1 dup-frames=5 raised=xyz"
+
+Test-Case 'O4.4z: raised= is reported on a REAL row' { (Test-SbRaisedReported $pointerRow).Ok } 'True'
+Test-Case 'O4.4z: raised=n/a IS reported (the synthetic arm declines the count, not the field)' { (Test-SbRaisedReported $identSynthRow).Ok } 'True'
+# ⛔ THE FIELD-REMOVAL MUTANT. This is the case whose absence let the hole exist:
+# before this arm, a row with no `raised=` reached O4.4y alone and came back NOT
+# RUN. Here it must be a refusal.
+Test-Case 'O4.4z: CONTROL -- the field-removal mutant, an ABSENT raised= is refused' { (Test-SbRaisedReported $identOldRow).Ok } 'False'
+Test-Case 'O4.4z: ...and its text names the absence rather than a value' { if ((Test-SbRaisedReported $identOldRow).Text -match 'ABSENT') { 'named' } else { 'not named' } } 'named'
+Test-Case 'O4.4z: CONTROL -- a malformed raised= is refused too' { (Test-SbRaisedReported $raisedBadRow).Ok } 'False'
+# ⛔ AND THE ANCHOR, AGAINST THE SUFFIX DECOY -- the `frames=` inside
+# `dup-frames=` class, one field on. `moves-raised=` is the name a reader would
+# most plausibly reach for next, so it is the decoy worth pinning.
+Test-Case 'O4.4z: CONTROL -- raised= is not read out of moves-raised=' { Get-SbField $raisedDecoyRow 'raised' } '12'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

@@ -874,6 +874,25 @@ if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
                 -Detail "$($dup.Text) -- the POINTER row must carry the count of re-delivered pointer frames the shell suppressed. Without it a shell that has stopped suppressing is indistinguishable from one where the re-deliveries stopped happening, and the next wave would have to rediscover the whole finding (MainWindow.OnPointerMoved says exactly this in its own comment). Canvas.cs writes the field on every POINTER row, SYNTHETIC included." -Row $gestureRow
         }
 
+        # ⭐ O4.4z -- THE FIELD O4.4y READS MUST ITSELF BE REPORTED.
+        # Placed here, beside O4.4x, because the two are the same question about
+        # two fields: is the count REPORTED. O4.4y below is the third question,
+        # whether the reported counts AGREE, and it reads both fields.
+        #
+        # ⛔ Without this arm O4.4y can be switched off by deleting `raised=`
+        # from `Canvas.cs`: O4.4y answers NOT RUN for a row without the field
+        # (deliberately -- an older build must not be failed for a field it
+        # never carried), NOT RUN is tallied apart from FAIL, and no run fails.
+        # That is precisely the exposure O4.4x already refuses for `dup-frames=`.
+        $raisedRep = Test-SbRaisedReported $gestureRow
+        if ($raisedRep.Ok) {
+            Add-Assert -Name "$o4Prefix.4z raised= is reported by the shell" -Verdict 'PASS' `
+                -Detail "$($raisedRep.Text) -- the count of PointerMoved events raised for this gesture before the suppression decision, or the marker n/a where the shell declines it by name. This arm asserts only that the field is REPORTED and well-formed; whether the counts AGREE is O4.4y. It exists because O4.4y answers NOT RUN on a row that lacks the field, so without a report arm the identity could be silenced by deleting the field rather than by breaking it -- the same exposure O4.4x refuses for dup-frames=." -Row $gestureRow
+        } else {
+            Add-Assert -Name "$o4Prefix.4z raised= is reported by the shell" -Verdict 'FAIL' `
+                -Detail "$($raisedRep.Text) -- every POINTER row must carry raised=, a count on a REAL row and the literal n/a where the provenance is not REAL (Canvas.cs derives it from the kind). Without the field O4.4y cannot run at all, and a NOT RUN fails nothing: the identity that makes dup-frames= checkable would go quiet rather than red. If this row comes from a build older than the field, that is what it means -- and it means this harness is being run against a shell it does not match, which is itself worth failing." -Row $gestureRow
+        }
+
         # ⭐ O4.4y -- THE IDENTITY THAT CLOSES O4.4x's NAMED HOLE (§18 P4).
         # `raised == move + dup-frames`, over three counters incremented at
         # three different sites in MainWindow.OnPointerMoved. §18 P4 proposed
