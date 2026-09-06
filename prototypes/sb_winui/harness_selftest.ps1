@@ -416,6 +416,49 @@ Test-Case 'the index list renders in this harness''s path spelling' { ConvertTo-
 Test-Case 'a dump with no selection reads $null (the older dump shape)' { Get-SbSelectionPathFromDoc $beforeDoc } $null
 
 # ---------------------------------------------------------------------------
+# O1.2c -- THE CHOOSER AGAINST THE PORT'S *LIVE* HIT TEST
+# ---------------------------------------------------------------------------
+#
+# ⛔ EVERYTHING ABOVE IN F-B IS DRIVEN ON A HAND-WRITTEN `selection[0].path`.
+# The chooser mirrors the app's topmost-at-point rule, but that mirror was READ
+# OUT OF THE REFERENCE INTERPRETER'S SOURCE (`workspace_interpreter/
+# doc_primitives.py`) and the fixture's "app answer" was written from the same
+# reading. A hand-written oracle CANNOT disagree with the mirror it came from,
+# so those cases pin the chooser to itself. jas's #118 ruling says so in its own
+# words: "the chooser's mirror was read from the reference, never against the
+# shell's live hit test -- O1.2c is where that shows."
+#
+# ⭐ THIS BLOCK IS THAT GAP CLOSED. The document below is not a fixture in this
+# file: it is `test_fixtures/gestures/select_click_topmost_over_largest_filled_
+# expected.json`, the canonical output of a gesture the PORT'S OWN SELECTION
+# TOOL executed -- a press at doc (36,36) replayed through `YamlTool` and
+# `doc_primitives::hit_test`, which is the same path `jas_pointer_event` drives
+# from the shell. Its `selection[0].path` is a MEASUREMENT, not a transcription.
+# So the comparison below is chooser-vs-app, across two languages, on one file.
+#
+# 📌 THE VECTOR IS NOT VACUOUS, and that was measured too: with the children
+# `.rev()` removed from `doc_primitives::hit_test`, the full Rust suite is
+# 3066 passed / 0 failed WITHOUT this vector and fails on it alone WITH it.
+#
+# ⛔ AND A MISSING FILE IS `NOT RUN`, NEVER A PASS. This is the one case in this
+# file that reads something off disk; if the corpus moves, it must say so rather
+# than compare two nulls and go green.
+$corpusPath = Join-Path $PSScriptRoot '..\..\test_fixtures\gestures\select_click_topmost_over_largest_filled_expected.json'
+$corpusDoc = $null
+$corpusState = 'NOT RUN: the corpus file is not there'
+if (Test-Path $corpusPath) {
+    $corpusDoc = Get-Content -Raw -LiteralPath $corpusPath | ConvertFrom-Json
+    $corpusState = 'read'
+}
+$corpusTarget = Get-SbFixture { if ($null -eq $corpusDoc) { $null } else { Get-SbHitTargetFromDoc $corpusDoc } }
+
+Test-Case 'O1.2c: the live-hit-test corpus vector is on disk' { $corpusState } 'read'
+Test-Case 'O1.2c: the PORT selected the group, measured (not transcribed)' { Get-SbSelectionPathFromDoc $corpusDoc } '$.layers[0].children[2]'
+Test-Case 'O1.2c: the chooser AIMS elsewhere -- so this document discriminates' { $corpusTarget.AimPath } '$.layers[0].children[0]'
+Test-Case 'O1.2c: ⭐ THE CHOOSER AGREES WITH THE PORT''S LIVE HIT TEST' { ((Get-SbSelectionPathFromDoc $corpusDoc) -eq $corpusTarget.Path) } 'True'
+Test-Case 'O1.2c: CONTROL -- aim and answer really are different paths here' { ($corpusTarget.AimPath -eq $corpusTarget.Path) } 'False'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

@@ -1,0 +1,13 @@
+[
+  {
+    "_doc": "F-B / O1.2c (jas PR #118's ruling, flask's third harness run). The S-B harness's chooser picks the press point as the CENTRE OF THE LARGEST FILLED SHAPE and then, since #118, asserts against the element the APP selected -- mirroring the app's topmost-at-point rule. That mirror was READ OUT OF THE REFERENCE INTERPRETER'S SOURCE (workspace_interpreter/doc_primitives.py) and never driven against a live hit test; the harness's own F-B fixture HAND-WRITES `selection[0].path = [0,2]` as the app's answer. A hand-written oracle cannot disagree with the mirror it was written from. This vector is that assumption, MEASURED: the same shape, the same press point, the answer produced by the port's own selection tool. prototypes/sb_winui/harness_selftest.ps1 reads THIS FILE'S expected JSON and asserts its chooser returns the same path, so a divergence reds on the harness side too rather than being argued about. DISCRIMINATING SHAPE: the largest filled element (the 72x72 rect at doc origin, area 5184) is FIRST in document order, and a group whose line spans the same region is LAST. Aim and answer therefore differ -- the chooser aims at [0,0] and the app must select [0,2]. Every other selection vector in this corpus presses at a point where the aimed element IS the topmost one, so none of them can tell the two rules apart. The small green rect at doc (120,120) is the control on the AIM half: it is filled, so a chooser that ignored area could pick it, and it does not contain the press point.",
+    "name": "select_click_topmost_over_largest_filled",
+    "setup_svg": "topmost_over_largest_filled.svg",
+    "tool": "selection",
+    "events": [
+      {"kind": "press", "x": 36, "y": 36},
+      {"kind": "release", "x": 36, "y": 36}
+    ],
+    "expected_json": "select_click_topmost_over_largest_filled_expected.json"
+  }
+]
