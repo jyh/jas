@@ -104,44 +104,105 @@ import sys
 
 MARKER = "encoding-exempt"
 
-# ANTI-VACUITY FLOOR. Measured 2026-07-28: 96 tracked .py files in scope.
+# ANTI-VACUITY COVERAGE, DERIVED. Until 2026-09-06 this was `MIN_TRACKED_FILES`,
+# a hand-typed floor.
 #
-# Without this, `git ls-files` failing, a checkout with no git available, or a
-# run from outside the repo all produce an empty file set, and the gate prints
-# "0 tracked Python files scanned, 0 violations" and EXITS 0 — a green that is
-# indistinguishable from no gate at all. That is precisely the class the
-# 2026-07-28 council packet found in all four preservation gates (F1): a single
-# `[]` in the corpus turned every one of them green simultaneously, because none
-# asserted a minimum. This gate was written the same day and shipped with the
-# same hole; the floor is the fix, and it was added after reading that finding.
+# Without SOME such guard, `git ls-files` failing, a checkout with no git
+# available, or a run from outside the repo all produce an empty file set, and
+# the gate prints "0 tracked Python files scanned, 0 violations" and EXITS 0 -- a
+# green indistinguishable from no gate at all. That is the class the 2026-07-28
+# council packet found in all four preservation gates (F1).
 #
-# 50 rather than 96: high enough that an empty or badly truncated scan cannot
-# pass, low enough that deleting genuinely dead scripts does not red the build
-# and tempt someone to lower it. Raise it if the tree grows a lot.
-MIN_TRACKED_FILES = 102
-#
-# EXACT, NOT SLACK. This was a hand-set floor with room to spare until
-# 2026-07-29, when the jas/windows seat proved the hole by mutation: it set a
-# test-count floor 1.6% below reality, gated six tests off, and the gate went
-# GREEN. Its sentence is the rule now --
+# ⛔ THE FLOOR WAS NOT DOING THAT JOB, AND ITS OWN COMMENT SAID SO WITHOUT ANYONE
+# READING IT. The block here declared "EXACT, NOT SLACK" and quoted the rule --
 #
 #     "A floor with slack is a floor with a hole exactly the size of the slack,
 #      and the hole admits precisely the move the assertion exists to forbid."
 #
-# The floor is the ONLY guard: violations inside files the scan never
-# opened are simply not reported.
+# -- while the constant read 102 against a live tree of 147. FORTY-FIVE files of
+# slack, in the paragraph asserting there was none. It also stated three
+# different numbers: "Measured 2026-07-28: 96", then "50 rather than 96", then
+# 102. A number nobody has to restate is a number nobody rechecks, and this one
+# had drifted in prose AND in value.
 #
-# Adding to the set means raising this number in the same commit. That friction
-# is the feature: the number is a claim about coverage, and a claim nobody has
-# to restate is a claim nobody rechecks. (The model is
-# check_preservation_corpus.py, whose floor is DERIVED from per-vector `n_min`
-# declarations and therefore cannot drift at all -- prefer that shape where the
-# data can declare itself.)
+# ⭐ SO IT IS DERIVED NOW, AND FROM A DIFFERENT ORACLE THAN THE ONE IT GUARDS --
+# that distinction is the whole design. The subject is enumerated from the INDEX
+# (`git ls-files`); the expectation is enumerated from the COMMIT TREE
+# (`git ls-tree -r HEAD`). Deriving it from `git ls-files` would agree with any
+# breakage, which is worse than a stale number because it looks maintained.
+# (`check_lane_coverage.py` derives ITS floor from `git ls-files` for exactly the
+# mirrored reason: its subject discovery is a filesystem glob. Same principle,
+# opposite direction.)
+#
+# ⛔ A FILESYSTEM WALK IS NOT THE INDEPENDENT ORACLE, AND THAT WAS MEASURED
+# RATHER THAN ASSUMED: `rglob("*.py")` in this repo returns 10,334 paths against
+# 324 tracked, 3,172 of them under `.venv/`. Filtering it back down means reading
+# `.gitignore` -- git again, so the circularity returns through the filter.
+#
+# WHAT IT ASSERTS: every `.py` the COMMIT TREE holds (minus the frozen ports) was
+# actually opened and scanned. Not a count -- the SET, so it names what went
+# unscanned. This is strictly what the old comment said the floor was for:
+# "violations inside files the scan never opened are simply not reported."
+#
+# ⚠️ AND IT MUST NOT RED ON A DIRTY TREE, because a false red is the fastest way
+# to get a gate weakened until it stops speaking. Index and tree legitimately
+# differ while work is in progress, so an absence git itself explains -- a staged
+# or unstaged DELETION -- is accepted. ⛔ NOT via a tolerance: a tolerance is an
+# off switch, and would be satisfied by the very subset this guard exists to
+# catch. Each absence is explained BY NAME or it is a finding.
 
 
-def below_floor(n_files):
-    """True when the scan is too small to be believed. See MIN_TRACKED_FILES."""
-    return n_files < MIN_TRACKED_FILES
+def tree_python(repo_root):
+    """The same subject set, enumerated from the COMMIT TREE, not the index.
+
+    The independent oracle. A pathspec typo, a wrong working directory or a
+    submodule boundary hits one enumeration and not the other; both fail
+    together only when git itself is unavailable, which the empty-set guard in
+    main() catches on its own.
+
+    Returns None when git cannot answer, which is a REFUSAL upstream and never
+    an empty expectation -- a guard that expects nothing is satisfied by
+    anything.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", repo_root, "ls-tree", "-r", "--name-only", "HEAD"],
+            capture_output=True, check=True,
+        ).stdout.decode("utf-8")
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    return {rel.strip() for rel in out.splitlines()
+            if rel.strip().endswith(".py")
+            and not rel.strip().startswith(FROZEN_PREFIXES)}
+
+
+def explained_absences(repo_root):
+    """Paths git itself reports as deleted, staged or not.
+
+    A working clone mid-edit legitimately has index != tree. Asking git which
+    absences it already knows about keeps this guard exact on a clean checkout
+    (CI, where both sets are empty) without redding on every developer who has
+    staged a deletion.
+    """
+    out = set()
+    for cmd in (["ls-files", "--deleted"],
+                ["diff", "--cached", "--diff-filter=D", "--name-only"]):
+        try:
+            r = subprocess.run(["git", "-C", repo_root] + cmd,
+                               capture_output=True, check=True)
+            out |= {l.strip() for l in r.stdout.decode("utf-8").splitlines()
+                    if l.strip()}
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+    return out
+
+
+def coverage_findings(expected, scanned, explained):
+    """Files the commit tree holds that the scan never opened, minus the
+    absences git explains. Pure over three sets so the self-test can drive it."""
+    missing = set(expected) - set(scanned)
+    return sorted(missing - set(explained))
+
 
 # Ports FROZEN at tag five-port-parity (POLICY.md). Not swept: honoring the tag
 # outranks platform hygiene in code that is not built here.
@@ -530,26 +591,59 @@ def self_test():
         if got.get(path):
             failures.append(f"  {path}: expected NO violation, got {got[path]}")
 
-    # THE ANTI-VACUITY FLOOR is itself a class this gate has to get right: a run
-    # that scanned nothing must not read as a run that found nothing.
-    for n, want_rejected in [
-        (0, True),                        # git failed / not a checkout
-        (1, True),                        # a badly truncated scan
-        (MIN_TRACKED_FILES - 1, True),    # just under the line
-        (MIN_TRACKED_FILES, False),       # exactly at it
-        (102, False),                     # the real tree, measured 2026-07-29
-    ]:
-        if below_floor(n) != want_rejected:
-            verb = "reject" if want_rejected else "accept"
-            failures.append(f"  floor: a {n}-file scan should {verb}")
+    # THE COVERAGE GUARD is itself a class this gate has to get right: a run
+    # that scanned nothing must not read as a run that found nothing. Driven
+    # through `coverage_findings` itself -- an arm that recomputed the answer
+    # beside it would agree with a broken implementation.
+    #
+    # ⭐ POSITIVE CONTROL FIRST, and it asserts the guard can SAY YES: a check
+    # that only ever reds is as useless as one that only ever passes.
+    cov = [
+        # (label, expected, scanned, explained, want)
+        ("everything scanned",      {"a.py", "b.py"}, {"a.py", "b.py"}, set(), []),
+        ("nothing scanned at all",  {"a.py", "b.py"}, set(),            set(), ["a.py", "b.py"]),
+        ("one file went unopened",  {"a.py", "b.py"}, {"a.py"},         set(), ["b.py"]),
+        # A DIRTY TREE MUST NOT RED. git already knows about the deletion.
+        ("a staged deletion is explained",
+                                    {"a.py", "b.py"}, {"a.py"},   {"b.py"}, []),
+        # ...but an explanation for one absence must not cover a DIFFERENT one.
+        ("an unrelated deletion explains nothing",
+                                    {"a.py", "b.py"}, {"a.py"},   {"c.py"}, ["b.py"]),
+        # The scan seeing MORE than the tree (a staged addition) is not a gap.
+        ("a staged addition is not a gap",
+                                    {"a.py"}, {"a.py", "new.py"},  set(), []),
+    ]
+    for label, exp, scanned, expl, want in cov:
+        got_cov = coverage_findings(exp, scanned, expl)
+        if got_cov != want:
+            failures.append(f"  coverage/{label}: expected {want}, got {got_cov}")
+
+    # ⛔ AND THE ORACLE MUST BE REAL, not merely callable. This is the arm the
+    # old hand-typed floor could never have: it proves the INDEPENDENT
+    # enumeration actually resolves against this repo and agrees with the one it
+    # guards. A `tree_python` that quietly returned an empty set would satisfy
+    # every arm above -- an expectation of nothing is satisfied by anything.
+    _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    _tree = tree_python(_root)
+    if _tree is None:
+        failures.append("  coverage/oracle: tree_python() could not reach git")
+    elif not _tree:
+        failures.append("  coverage/oracle: tree_python() returned an EMPTY set, "
+                        "which would make this guard vacuous")
+    else:
+        _scanned = set(tracked_python(_root))
+        _gap = coverage_findings(_tree, _scanned, explained_absences(_root))
+        if _gap:
+            failures.append(f"  coverage/oracle: the live tree disagrees: {_gap[:3]}")
 
     if failures:
         print("SELF-TEST FAILED -- the gate does not detect what it claims:")
         print("\n".join(failures))
         return 1
     print(f"self-test: {len(expected)} fail-classes detected, "
-          f"{len(silent)} silent-classes clean, anti-vacuity floor holds "
-          f"at {MIN_TRACKED_FILES} -- gate proven RED where it must be.")
+          f"{len(silent)} silent-classes clean, {len(cov)} coverage arms plus a "
+          f"live-oracle arm over {len(_tree or ())} tree-enumerated file(s) "
+          f"-- gate proven RED where it must be.")
     return 0
 
 
@@ -561,17 +655,38 @@ def main():
     sources = tracked_python(repo_root)
 
     # Assert the scan happened at all, BEFORE trusting its silence.
-    if below_floor(len(sources)):
-        print(f"ERROR: scanned only {len(sources)} tracked Python files, below the "
-              f"anti-vacuity floor of {MIN_TRACKED_FILES}.", file=sys.stderr)
+    #
+    # The empty case first, because it is the one where the independent oracle
+    # is unavailable too: if git is gone, BOTH enumerations are empty and they
+    # would agree with each other about nothing.
+    expected = tree_python(repo_root)
+    if expected is None or not expected:
+        print("ERROR: could not enumerate the commit tree, so there is nothing to "
+              "check the scan against.", file=sys.stderr)
         print(file=sys.stderr)
-        print("This is not a pass. A gate that finds no files reports no violations,", file=sys.stderr)
-        print("which is indistinguishable from a gate that is working. Likely causes:", file=sys.stderr)
+        print("This is a REFUSAL, not a pass. A coverage guard that expects "
+              "nothing is satisfied by anything. Likely causes:", file=sys.stderr)
         print("  * git is unavailable, or this is not a git checkout", file=sys.stderr)
         print("  * run from outside the repository", file=sys.stderr)
-        print("  * a shallow or partial checkout", file=sys.stderr)
-        print(f"If the tree legitimately shrank below {MIN_TRACKED_FILES} files, lower", file=sys.stderr)
-        print("MIN_TRACKED_FILES deliberately and say why.", file=sys.stderr)
+        print("  * a shallow or partial checkout with no HEAD", file=sys.stderr)
+        return 1
+
+    gaps = coverage_findings(expected, set(sources), explained_absences(repo_root))
+    if gaps:
+        print(f"ERROR: {len(gaps)} file(s) tracked in the commit tree were never "
+              f"opened by this scan, of {len(expected)} expected.", file=sys.stderr)
+        print(file=sys.stderr)
+        for rel in gaps[:20]:
+            print(f"  {rel}", file=sys.stderr)
+        if len(gaps) > 20:
+            print(f"  ... and {len(gaps) - 20} more", file=sys.stderr)
+        print(file=sys.stderr)
+        print("This is not a pass. Violations inside files the scan never opened", file=sys.stderr)
+        print("are simply not reported, so an unscanned file is a silent hole.", file=sys.stderr)
+        print("Causes, in the order worth checking:", file=sys.stderr)
+        print("  * the file is not valid UTF-8, so tracked_python() skipped it", file=sys.stderr)
+        print("  * `git ls-files` returned a subset (pathspec, cwd, submodule)", file=sys.stderr)
+        print("  * the file was deleted without git being told", file=sys.stderr)
         return 1
 
     violations = scan(sources)
