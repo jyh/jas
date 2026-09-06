@@ -183,20 +183,44 @@ FROZEN_PORTS = frozenset({"jas", "jas_ocaml"})
 # constants stays green and losing them reds. Raise a number in the same
 # commit that legitimately shrinks the tree, and be suspicious while you do it.
 #
-# EXPECTED_FILES guards the file walk: a `git ls-files` that returns a subset
-# (wrong cwd, a pathspec typo, a submodule) reports a clean tree.
 # EXPECTED_PATH_FILES and EXPECTED_PATH_NAMES guard the part that actually
 # decides -- the path-type inference. If it stops recognising `Path(...)` (a
 # renamed import, a new spelling, a bug in this file), every finding
 # disappears and nothing else in this gate would notice. These two numbers are
 # the only witness that the analysis is still awake.
 #
+# ⛔ THESE TWO STAY HAND-TYPED ON PURPOSE, AND THAT IS NOT AN OVERSIGHT LEFT
+# BEHIND BY THE DERIVATION BELOW. They guard a PARSE, and there is no
+# independent oracle for how many path-typed names an inference SHOULD find --
+# any derivation would have to run the same inference, so it would agree with a
+# broken one. Their slack is not a defect; deriving them would be the
+# circularity `check_lane_coverage.py`'s header warns about. A sweep over
+# "hand-typed floors" would have "fixed" them and quietly deleted the only
+# witness this gate has.
+#
 # The counts INCLUDE this file (see tracked_python), so they do not move when
-# it is staged. Verified by mutation on 2026-07-30: each of the three, lowered
-# by one, reds -- self-test case (ab).
-EXPECTED_FILES = 105
+# it is staged. Verified by mutation on 2026-07-30: each, lowered by one, reds
+# -- self-test case (ab).
 EXPECTED_PATH_FILES = 18
 EXPECTED_PATH_NAMES = 60
+
+# ⭐ THE FILE WALK'S GUARD IS DERIVED, NOT PINNED (2026-09-06). It was
+# `EXPECTED_FILES = 105` against a live tree of 147 -- FORTY-TWO files of slack,
+# so a `git ls-files` returning any subset above 105 reported a clean tree, which
+# is precisely what this floor existed to refuse.
+#
+# ⚠️ AND ITS SELF-TEST COULD NOT SEE THAT. Case (ab) drives `floor_problems` with
+# the CONSTANTS themselves -- exact-is-green, one-fewer-reds. That proves the
+# COMPARISON and never the VALUE, so the floor could drift arbitrarily far from
+# the tree with every arm still green. **A floor's arm usually tests its
+# arithmetic; the number itself has no test at all.**
+#
+# The expectation now comes from the COMMIT TREE (`git ls-tree -r HEAD`) while
+# the subject comes from the INDEX (`git ls-files`) -- deliberately a DIFFERENT
+# oracle, since deriving it from the enumeration it guards would agree with any
+# breakage. `git ls-tree` also emits POSIX separators on every platform, so this
+# gate still keys on its own output without becoming an instance of what it
+# forbids. Set-valued, so it NAMES what went unscanned instead of counting.
 
 # --------------------------------------------------------------------------
 # Path-type inference
@@ -627,6 +651,70 @@ def tracked_python(repo=REPO):
     return sorted(files)
 
 
+def tree_python(repo=REPO):
+    """The same subject set, enumerated from the COMMIT TREE, not the index.
+
+    The independent oracle for `tracked_python`. A pathspec typo, a wrong
+    working directory or a submodule boundary hits one enumeration and not the
+    other. Returns None when git cannot answer, which is a refusal upstream --
+    an expectation of nothing is satisfied by anything.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "ls-tree", "-r", "--name-only", "HEAD"], cwd=repo,
+            capture_output=True, text=True, encoding="utf-8",
+            check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return sorted(rel for rel in out.splitlines()
+                  if rel.endswith(".py")
+                  and rel.split("/")[0] not in FROZEN_PORTS)
+
+
+def explained_absences(repo=REPO):
+    """Paths git itself reports as deleted, staged or not.
+
+    A working clone mid-edit legitimately has index != tree, and a guard that
+    red on that would be a false-red generator on every developer's machine --
+    the fastest route to a gate being weakened until it stops speaking. Asking
+    git which absences it already knows about keeps this exact on a clean
+    checkout without punishing a dirty one.
+    """
+    out = set()
+    for cmd in (["ls-files", "--deleted"],
+                ["diff", "--cached", "--diff-filter=D", "--name-only"]):
+        try:
+            r = subprocess.run(["git"] + cmd, cwd=repo, capture_output=True,
+                               text=True, encoding="utf-8", check=True)
+            out |= {l for l in r.stdout.splitlines() if l}
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    return out
+
+
+def coverage_problems(scanned, expected, explained):
+    """Files the commit tree holds that the walk never returned.
+
+    Pure over three collections so the self-test can drive it on values rather
+    than on this repo alone. ⛔ `expected` being empty or None is a REFUSAL, not
+    a vacuous pass.
+    """
+    if expected is None:
+        return ["cannot enumerate the commit tree, so there is nothing to "
+                "check the file walk against -- this is a refusal, not a pass"]
+    if not expected:
+        return ["the commit tree enumerated ZERO Python files, which would "
+                "make this guard vacuous -- a refusal, not a pass"]
+    missing = sorted(set(expected) - set(scanned) - set(explained))
+    if not missing:
+        return []
+    shown = ", ".join(missing[:5]) + (" ..." if len(missing) > 5 else "")
+    return [f"the file walk returned {len(scanned)} of the {len(expected)} "
+            f"Python files the commit tree holds; {len(missing)} were neither "
+            f"scanned nor explained by a deletion git knows about: {shown}. "
+            f"A short file list reports a clean tree"]
+
+
 # --------------------------------------------------------------------------
 # Exemptions and verdict
 # --------------------------------------------------------------------------
@@ -675,13 +763,8 @@ def exemption_problems(rows, findings):
     return out
 
 
-def floor_problems(n_files, n_path_files, n_path_names):
+def floor_problems(n_path_files, n_path_names):
     out = []
-    if n_files < EXPECTED_FILES:
-        out.append(
-            f"scanned {n_files} files, expected at least {EXPECTED_FILES}. "
-            f"A short file list reports a clean tree. If Python files were "
-            f"legitimately deleted, lower EXPECTED_FILES in the same commit")
     if n_path_files < EXPECTED_PATH_FILES or n_path_names < EXPECTED_PATH_NAMES:
         out.append(
             f"the path-type inference recognised {n_path_names} names in "
@@ -869,16 +952,54 @@ def go(flag):
         if n != want:
             bad.append(f"  {name}: expected {want} problem(s), got {n}")
 
-    # ---- the anti-vacuity floors -----------------------------------------
-    if floor_problems(EXPECTED_FILES, EXPECTED_PATH_FILES, EXPECTED_PATH_NAMES):
+    # ---- the two PARSE floors, which stay hand-typed ----------------------
+    #
+    # ⚠️ These arms drive the constants against themselves: exact-is-green,
+    # one-fewer-reds. That proves the COMPARISON and never the VALUE -- which is
+    # exactly how the deleted EXPECTED_FILES drifted 42 files from the tree with
+    # every arm still green. Kept for these two because a parse floor has no
+    # independent oracle to check its value against; noted so the limitation is
+    # stated rather than rediscovered.
+    if floor_problems(EXPECTED_PATH_FILES, EXPECTED_PATH_NAMES):
         bad.append("  aa/floor: exact reality must be GREEN")
     for label, args in (
-            ("files", (EXPECTED_FILES - 1, EXPECTED_PATH_FILES, EXPECTED_PATH_NAMES)),
-            ("path files", (EXPECTED_FILES, EXPECTED_PATH_FILES - 1, EXPECTED_PATH_NAMES)),
-            ("path names", (EXPECTED_FILES, EXPECTED_PATH_FILES, EXPECTED_PATH_NAMES - 1))):
+            ("path files", (EXPECTED_PATH_FILES - 1, EXPECTED_PATH_NAMES)),
+            ("path names", (EXPECTED_PATH_FILES, EXPECTED_PATH_NAMES - 1))):
         if not floor_problems(*args):
             bad.append(f"  ab/floor: one fewer {label} must RED -- a floor "
                        f"with slack is a floor with a hole")
+
+    # ---- the DERIVED file-walk guard, driven on values --------------------
+    #
+    # Positive control first, and each arm goes through `coverage_problems`
+    # itself: an arm recomputing the answer beside it would agree with a broken
+    # implementation.
+    for label, scanned, expected, explained, want_red in (
+            ("complete walk",        ["a.py", "b.py"], ["a.py", "b.py"], set(), False),
+            ("walk returned a subset", ["a.py"],       ["a.py", "b.py"], set(), True),
+            ("walk returned nothing", [],              ["a.py", "b.py"], set(), True),
+            # A dirty tree must NOT red: git already knows about the deletion.
+            ("a deletion git explains", ["a.py"], ["a.py", "b.py"], {"b.py"}, False),
+            # ...but one explanation must not cover a DIFFERENT absence.
+            ("an unrelated deletion", ["a.py"], ["a.py", "b.py"], {"c.py"}, True),
+            # A staged addition is not a gap.
+            ("a staged addition", ["a.py", "new.py"], ["a.py"], set(), False),
+            # ⛔ REFUSALS, not vacuous passes.
+            ("git cannot answer", ["a.py"], None, set(), True),
+            ("tree enumerated zero", ["a.py"], [], set(), True)):
+        if bool(coverage_problems(scanned, expected, explained)) != want_red:
+            verb = "RED" if want_red else "GREEN"
+            bad.append(f"  ac/coverage: {label} must be {verb}")
+
+    # ⭐ AND THE ORACLE MUST BE REAL, NOT MERELY CALLABLE -- the arm the deleted
+    # floor could never have had. A `tree_python` that quietly returned an empty
+    # list would satisfy every arm above.
+    _tree = tree_python()
+    if not _tree:
+        bad.append("  ad/oracle: tree_python() returned nothing against this "
+                   "repo, which would make the coverage guard vacuous")
+    elif coverage_problems(tracked_python(), _tree, explained_absences()):
+        bad.append("  ad/oracle: the live index and commit tree disagree")
 
     # ---- REFUSAL rather than a clean report ------------------------------
     try:
@@ -898,8 +1019,11 @@ def go(flag):
           "and annotated params, the legitimate spellings (as_posix, "
           "PurePosixPath, a Path used as a path, a human message), the "
           "element-path false positive that would have killed this gate, the "
-          "exemption mechanism with blank and stale rows, all three exact "
-          "floors mutated down by one, and refusal on an unparseable file.")
+          "exemption mechanism with blank and stale rows, the two PARSE floors "
+          "mutated down by one, the DERIVED file-walk guard driven on eight "
+          "value cases (subset, empty, a deletion git explains, an unrelated "
+          "one, a staged addition, and two refusals) plus a live-oracle arm "
+          "over the real tree, and refusal on an unparseable file.")
     return 0
 
 
@@ -936,7 +1060,8 @@ def main():
               "they ever ran under.", file=sys.stderr)
         return 1
 
-    problems = (floor_problems(len(files), n_path_files, n_path_names)
+    problems = (coverage_problems(files, tree_python(), explained_absences())
+                + floor_problems(n_path_files, n_path_names)
                 + exemption_problems(rows, findings)
                 + finding_problems(findings, rows))
 
