@@ -975,9 +975,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: python -m pytest spec/geometry/tests -q
 
-      - name: Rust tests
+      # The same gate on the second platform family. Wired in BOTH jobs
+      # deliberately: gating one of two identical invocations is how a defence
+      # comes to sit next door to the site that needs it.
+      - name: Rust tests, and every area proved to have run
         if: ${{ !cancelled() }}
-        run: cd jas_dioxus && cargo test
+        run: |
+          set -o pipefail
+          python scripts/check_rust_suite_ran.py --self-test
+          (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
+          python scripts/check_rust_suite_ran.py --log rust-test.log
 
       # The native half of the same claim. Windows is the platform that would
       # ship a frontend-less core, so this lane is where the assertion earns its
@@ -1378,7 +1385,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cd jas_dioxus && cargo test
+      # ⛔ A SUITE THAT QUIETLY STOPPED RUNNING STILL EXITS 0 -- measured, not
+      # argued: `cargo test` on a crate with zero tests exits 0. The wasm lane
+      # and the d2d/ffi lanes each carry an execution gate; this, the largest
+      # suite in the repo, carried none. `check_unregistered_tests.py` answers
+      # the neighbouring question (was a test REGISTERED), not this one (did the
+      # registered suite still RUN).
+      - name: Rust tests, and every area proved to have run
+        run: |
+          set -o pipefail
+          python3 scripts/check_rust_suite_ran.py --self-test
+          (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
+          python3 scripts/check_rust_suite_ran.py --log rust-test.log
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
       # check_cbindgen_freshness.py REFUSES on any other version: a version bump
