@@ -459,7 +459,36 @@ def self_test() -> int:
     except Refusal as exc:
         arm("setup-loop: ignored not refused", False, str(exc))
 
-    # 8. Refusals -- each one a shape that must not read as success.
+    # 8. ⭐ THE PLURAL IN THIS GATE'S OWN CLAIM. It says "each data-driven
+    #    family" and every arm above has exactly ONE, so the plural was an
+    #    untested assertion -- the shape this repo calls "a first witness does
+    #    not witness parameters". Two families, and the SECOND one shrinking must
+    #    red on its own, or a second family could be added later and silently
+    #    require nothing.
+    two = _GOOD_SOURCE.replace(
+        '        Check("CONTROL: gamma does not", false == false, "");',
+        '''        foreach (var w in new[] {
+            "P one",
+            "Q two",
+        })
+        {
+            Eq($"second family: \'{w.Split(\' \')[0]}\'", "y", "y");
+        }
+
+        Check("CONTROL: gamma does not", false == false, "");''')
+    try:
+        _ex, lps = declaration(two)
+        arm("two-families: both are derived", len(lps) == 2, "got %r" % (lps,))
+        both = _GOOD_NAMES + ["second family: 'P'", "second family: 'Q'"]
+        arm("two-families: a complete log passes",
+            findings(two, _log(both)) == [], "got %r" % (findings(two, _log(both)),))
+        f2 = findings(two, _log(both[:-1]))
+        arm("two-families: the SECOND family shrinking reds by name",
+            any("second family" in s for s in f2), "got %r" % (f2,))
+    except Refusal as exc:
+        arm("two-families", False, str(exc))
+
+    # 9. Refusals -- each one a shape that must not read as success.
     for label, src, lg, needle in [
         ("no-summary", _GOOD_SOURCE, _log(_GOOD_NAMES, summary=False), "summary"),
         ("empty-log", _GOOD_SOURCE, "", "summary"),
@@ -506,19 +535,19 @@ def self_test() -> int:
         except Refusal as exc:
             arm("refusal/%s" % label, needle in str(exc), "said %r" % str(exc)[:80])
 
-    # 9. A zero-case summary is a refusal, not a pass.
+    # 10. A zero-case summary is a refusal, not a pass.
     try:
         findings(_GOOD_SOURCE, "--- 0 passed, 0 failed, of 0 case(s) ---\n")
         arm("refusal/zero-cases", False, "returned instead of refusing")
     except Refusal as exc:
         arm("refusal/zero-cases", "examined nothing" in str(exc), str(exc)[:80])
 
-    # 10. A failing case is a finding that names it.
+    # 11. A failing case is a finding that names it.
     f = findings(_GOOD_SOURCE, _log(_GOOD_NAMES, failed=["beta holds"]))
     arm("failed-case: a FAIL row is named",
         any("case FAILED: beta holds" in s for s in f), "got %r" % (f,))
 
-    # 11. THE REAL ARTIFACT. Run the derivation on the file this gate actually
+    # 12. THE REAL ARTIFACT. Run the derivation on the file this gate actually
     #    guards -- a parser tuned on a fixture and never pointed at production is
     #    the census-filter error this repo has already paid for once.
     if DEFAULT_SOURCE.exists():
