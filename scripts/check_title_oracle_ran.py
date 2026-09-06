@@ -177,11 +177,23 @@ def _loop_blocks(lines: list[str]) -> list[tuple[str, int, int]]:
                 prefix = m.group(1)
             i += 1
         if prefix is None:
-            raise Refusal(
-                "the loop opened at line %d declares no case whose name this gate "
-                "can read, so its %d iteration(s) cannot be required"
-                % (header + 1, size)
-            )
+            # ⭐ A LOOP THAT DECLARES NO CASE IS NOT A CASE FAMILY, and refusing on
+            # one would red this gate on an ordinary setup loop -- a false red,
+            # which is its own defect and the fastest route to a gate being
+            # weakened to shut it up. But "declares nothing" must be MEASURED, not
+            # assumed from a parse that came back empty: a body that calls
+            # `Check`/`Eq` in a form this parser cannot read declares an unknown
+            # number of cases, and THAT is the shape that must never be ignored.
+            body = "\n".join(lines[body_start:i])
+            if re.search(r"\b(?:Check|Eq)\(", body):
+                raise Refusal(
+                    "the loop opened at line %d declares case(s) whose name this "
+                    "gate cannot read, so its %d iteration(s) cannot be required "
+                    "-- an unreadable declaration is not an absent one"
+                    % (header + 1, size)
+                )
+            i += 1
+            continue
         if not prefix.strip():
             raise Refusal(
                 "the loop opened at line %d names its cases with an empty literal "
@@ -428,7 +440,26 @@ def self_test() -> int:
     arm("loop-shrank: a floor would have passed that same log",
         len(short2) >= 5, "the floor arm must use a log above the floor")
 
-    # 7. Refusals -- each one a shape that must not read as success.
+    # 7. THE TWO HALVES OF THE "LOOP THAT DECLARES NOTHING" RULE. A setup loop
+    #    must be ignored (refusing on one is a false red, and a false red gets a
+    #    gate weakened); a loop whose case declarations this parser cannot read
+    #    must refuse. The difference is measured from the body, not assumed.
+    setup = _GOOD_SOURCE.replace(
+        "        foreach (var row in new[] {",
+        "        foreach (var warm in new[] {\n            \"A\",\n        })\n"
+        "        {\n            Sink(warm);\n        }\n\n"
+        "        foreach (var row in new[] {",
+    )
+    try:
+        ex, lp = declaration(setup)
+        arm("setup-loop: a loop declaring no case is ignored, not refused",
+            len(lp) == 1 and lp[0][1] == 3, "got %r" % (lp,))
+        arm("setup-loop: ...and the good log still passes",
+            findings(setup, _log(_GOOD_NAMES)) == [], "")
+    except Refusal as exc:
+        arm("setup-loop: ignored not refused", False, str(exc))
+
+    # 8. Refusals -- each one a shape that must not read as success.
     for label, src, lg, needle in [
         ("no-summary", _GOOD_SOURCE, _log(_GOOD_NAMES, summary=False), "summary"),
         ("empty-log", _GOOD_SOURCE, "", "summary"),
@@ -451,13 +482,13 @@ def self_test() -> int:
             "EMPTY data set",
         ),
         (
-            "nameless-family",
+            "unreadable-family",
             _GOOD_SOURCE.replace(
                 "            Eq($\"row carries: '{row.Split(' ')[0]}'\", \"x\", \"x\");",
-                "            Sink(row);",
+                "            Eq(NameFor(row), \"x\", \"x\");",
             ),
             _log(_GOOD_NAMES),
-            "declares no case whose name",
+            "cannot read",
         ),
         (
             "duplicate-name",
@@ -475,19 +506,19 @@ def self_test() -> int:
         except Refusal as exc:
             arm("refusal/%s" % label, needle in str(exc), "said %r" % str(exc)[:80])
 
-    # 8. A zero-case summary is a refusal, not a pass.
+    # 9. A zero-case summary is a refusal, not a pass.
     try:
         findings(_GOOD_SOURCE, "--- 0 passed, 0 failed, of 0 case(s) ---\n")
         arm("refusal/zero-cases", False, "returned instead of refusing")
     except Refusal as exc:
         arm("refusal/zero-cases", "examined nothing" in str(exc), str(exc)[:80])
 
-    # 9. A failing case is a finding that names it.
+    # 10. A failing case is a finding that names it.
     f = findings(_GOOD_SOURCE, _log(_GOOD_NAMES, failed=["beta holds"]))
     arm("failed-case: a FAIL row is named",
         any("case FAILED: beta holds" in s for s in f), "got %r" % (f,))
 
-    # 10. THE REAL ARTIFACT. Run the derivation on the file this gate actually
+    # 11. THE REAL ARTIFACT. Run the derivation on the file this gate actually
     #    guards -- a parser tuned on a fixture and never pointed at production is
     #    the census-filter error this repo has already paid for once.
     if DEFAULT_SOURCE.exists():
