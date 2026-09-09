@@ -49,8 +49,15 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// One countable boundary function. The discriminant is an index into the
-/// counter arrays, so adding a variant means adding a name to [`Crossing::NAMES`]
-/// and nothing else.
+/// counter arrays, so adding a variant means adding a name to [`Crossing::NAMES`],
+/// an entry to [`Crossing::ALL`], and bumping [`Crossing::COUNT`].
+///
+/// ⛔ THIS LINE READ "and nothing else" UNTIL W1b, AND IT WAS FALSE. `COUNT` and
+/// `ALL` both move with the enum. The claim cost nothing — the compiler refuses
+/// a `[&str; 13]` holding 14 entries, so the sentence was corrected by a build
+/// rather than by a reader — but a doc comment that is wrong about its own
+/// maintenance procedure is exactly the kind that is believed, and the next one
+/// might describe something the compiler cannot see.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(usize)]
 pub enum Crossing {
@@ -79,6 +86,13 @@ pub enum Crossing {
     /// per-frame menu rebuild is the design's named regression (freeze §3.1),
     /// and a counter is how it becomes visible rather than merely slow.
     MenuState = 12,
+    /// W1b: the menubar's STATIC shape — labels, shortcuts, separators, submenu
+    /// titles. Counted separately from `MenuState` because the two have opposite
+    /// cadences by design: the structure is read ONCE (it cannot change without
+    /// a rebuild) and the state on every menu open. A structure count that grew
+    /// with opens is a shell re-reading the half that never moves, and this row
+    /// is the only place that would show.
+    MenuStructure = 13,
 }
 
 impl Crossing {
@@ -98,6 +112,7 @@ impl Crossing {
         "jas_pointer_event",
         "jas_document_svg",
         "jas_menu_state",
+        "jas_menu_structure",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -107,7 +122,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 13;
+    pub(crate) const COUNT: usize = 14;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -128,6 +143,7 @@ impl Crossing {
         Crossing::PointerEvent,
         Crossing::DocumentSvg,
         Crossing::MenuState,
+        Crossing::MenuStructure,
     ];
 
     pub fn name(self) -> &'static str {

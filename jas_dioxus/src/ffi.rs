@@ -371,6 +371,43 @@ pub unsafe extern "C" fn jas_document_svg(e: *mut JasEngine) -> JasBytes {
     out
 }
 
+/// The menubar's STATIC shape — labels, shortcuts, separators, submenu titles.
+///
+/// ⭐ THE OTHER HALF OF [`jas_menu_state`], AND THE REASON A SHELL NEEDS BOTH.
+/// That pass answers *"which entries are enabled right now"* and deliberately
+/// emits neither labels nor separators nor submenu nodes. Every port that draws
+/// a menubar today gets the static half by projecting the compiled bundle
+/// in-process, because every one of them is an interpreter. **The WinUI shell is
+/// the first consumer that is not**, and §1's materializer law forbids it
+/// authoring the menubar itself — so without this export it could build 55
+/// correctly-enabled items with no text on them.
+///
+/// A consumer reads this ONCE and joins it to [`jas_menu_state`] on `path` at
+/// each menu open. The join law — every state row's path is an `item` here — is
+/// pinned by a test rather than by this comment.
+///
+/// ⛔ TAKES NO ENGINE, DELIBERATELY. The menubar is a property of the compiled
+/// bundle, not of a document session, and this pass evaluates nothing. A `*mut
+/// JasEngine` it ignored would be a dead arm wearing a driven arm's signature —
+/// every caller would pass a handle believing it mattered.
+///
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+#[unsafe(no_mangle)]
+pub extern "C" fn jas_menu_structure() -> JasBytes {
+    ffi_instr::record(Crossing::MenuStructure, 0, 0);
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let menubar = ws.data()["menubar"].clone();
+    if !menubar.is_array() {
+        return JasBytes::empty();
+    }
+    let rows = crate::interpreter::menu_state::menu_structure(&menubar);
+    let out = JasBytes::from_string(serde_json::to_string(&rows).unwrap_or_default());
+    ffi_instr::record_out(Crossing::MenuStructure, out.len);
+    out
+}
+
 /// The five `active_document.*` facts the ENGINE owns, as a JSON object.
 ///
 /// ⛔ THE LIST IS EXHAUSTIVE ON PURPOSE AND IT IS SHORTER THAN THE NAMESPACE.
@@ -1122,6 +1159,156 @@ mod tests {
         );
 
         unsafe { jas_engine_free(e) };
+    }
+
+    /// W1b arm (a) — THE JOIN LAW, and it is the whole reason this is a second
+    /// function rather than a second copy of the walk.
+    ///
+    /// `jas_menu_state` supplies the DYNAMIC half and `jas_menu_structure` the
+    /// STATIC half; the shell joins them on `path`. So **every state row's path
+    /// must exist in the structure as an `item`** — if that ever stops holding,
+    /// a shell would render an enabled/disabled verdict onto a menu entry that
+    /// does not exist, or silently drop one that does.
+    #[test]
+    fn menu_structure_and_menu_state_join_on_path() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+
+        let state: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_menu_state(e, std::ptr::null(), 0) }))
+                .expect("menu_state JSON");
+        let structure: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_menu_structure() }))
+                .expect("menu_structure JSON");
+
+        let items: std::collections::HashSet<String> = structure
+            .as_array()
+            .expect("array")
+            .iter()
+            .filter(|r| r["kind"] == "item")
+            .map(|r| r["path"].to_string())
+            .collect();
+
+        let rows = state.as_array().expect("array");
+        // ⛔ ANTI-VACUITY FIRST. Both sides empty would satisfy the subset law
+        // perfectly, and this test would pass against two functions that return
+        // `[]`. The count is checked BEFORE the law it is supposed to support.
+        assert!(
+            rows.len() >= 50,
+            "menu_state returned {} rows; the join law is vacuous below a real menubar",
+            rows.len()
+        );
+        assert_eq!(
+            items.len(),
+            rows.len(),
+            "structure has {} items, state has {} rows — the two halves disagree \
+             about how many menu entries exist",
+            items.len(),
+            rows.len()
+        );
+        for r in rows {
+            assert!(
+                items.contains(&r["path"].to_string()),
+                "state row at path {} has no `item` in the structure — a shell \
+                 joining on path would render a verdict onto nothing",
+                r["path"]
+            );
+        }
+
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// W1b arm (b) — ⭐ THE STATIC HALF IS ACTUALLY THERE, which is the entire
+    /// point of the node: `jas_menu_state` supplies `enabled` and an action id,
+    /// and the shell also needs a LABEL to draw. A structure whose labels were
+    /// all empty would satisfy arm (a) completely.
+    #[test]
+    fn menu_structure_carries_the_labels_and_shortcuts_the_state_pass_does_not() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let rows: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_menu_structure() })).expect("JSON");
+        let rows = rows.as_array().expect("array");
+
+        // Every top-level menu and every item carries a non-empty label.
+        let labelled = rows
+            .iter()
+            .filter(|r| r["kind"] == "menu" || r["kind"] == "item")
+            .count();
+        assert!(labelled >= 55, "only {labelled} labelled nodes");
+        for r in rows {
+            if r["kind"] == "menu" || r["kind"] == "item" {
+                assert!(
+                    r["label"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+                    "a {} node at {} has no label — the shell cannot draw it",
+                    r["kind"],
+                    r["path"]
+                );
+            }
+        }
+
+        // The `&` mnemonics survive verbatim: the shell renders them, and a pass
+        // that stripped them would look correct until someone used the keyboard.
+        assert!(
+            rows.iter().any(|r| r["label"].as_str() == Some("&File")),
+            "the File menu\'s mnemonic did not survive"
+        );
+        // At least one real accelerator string reaches the shell.
+        assert!(
+            rows.iter().any(|r| r["shortcut"].as_str() == Some("Ctrl+S")),
+            "no shortcut string in the structure"
+        );
+    }
+
+    /// W1b arm (c) — ⭐ SEPARATORS AND SUBMENUS ARE EMITTED HERE **because
+    /// `menu_state` deliberately does not emit them** (`menu_state.rs:47-53`).
+    /// That asymmetry is the reason a shell cannot build a menubar from the
+    /// state pass alone, and this arm is what proves the gap is closed.
+    #[test]
+    fn menu_structure_emits_what_menu_state_deliberately_omits() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let rows: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_menu_structure() })).expect("JSON");
+        let rows = rows.as_array().expect("array");
+
+        let count = |k: &str| rows.iter().filter(|r| r["kind"] == k).count();
+        // Measured at `workspace/menubar.yaml`: 5 top-level menus, 11 bare
+        // `separator` strings, 2 submenu nodes, 55 action items. Floors rather
+        // than equalities everywhere except the menus, because the menubar is
+        // edited by people and this test must not have to be edited with it —
+        // but a floor of ZERO would make each clause vacuous, which is the
+        // whole failure this arm exists to prevent.
+        assert_eq!(count("menu"), 5, "top-level menu count");
+        assert!(count("separator") >= 10, "separators: {}", count("separator"));
+        assert!(count("submenu") >= 2, "submenus: {}", count("submenu"));
+        assert!(count("item") >= 55, "items: {}", count("item"));
+
+        // A separator has no label and no action, and says so with nulls rather
+        // than with empty strings — `absent` and `""` are different answers.
+        let sep = rows.iter().find(|r| r["kind"] == "separator").expect("a separator");
+        assert!(sep["label"].is_null() && sep["action"].is_null(), "separator: {sep}");
+    }
+
+    /// W1b arm (d) — the structure pass takes NO engine and must not need one.
+    /// The menubar is a property of the compiled bundle, not of a document
+    /// session, and a parameter it ignored would be a dead arm wearing a driven
+    /// arm\'s signature.
+    #[test]
+    fn menu_structure_is_the_same_without_any_session() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let before = take(unsafe { jas_menu_structure() });
+        let e = jas_engine_new();
+        let op = r#"{"op":"create_artboard","id":"ab_w1b"}"#;
+        assert_eq!(
+            unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) },
+            JasStatus::Ok
+        );
+        let after_edit = take(unsafe { jas_menu_structure() });
+        unsafe { jas_engine_free(e) };
+        let after_free = take(unsafe { jas_menu_structure() });
+
+        assert!(!before.is_empty(), "the structure must be non-empty to compare");
+        assert_eq!(before, after_edit, "an edit changed the STATIC half");
+        assert_eq!(before, after_free, "freeing the engine changed the STATIC half");
     }
 
     #[test]
