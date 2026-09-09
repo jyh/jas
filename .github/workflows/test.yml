@@ -230,6 +230,16 @@ jobs:
       # Rust and says of itself that it stops there.
       - run: python scripts/check_shell_abi_bindings.py --self-test
       - run: python scripts/check_shell_abi_bindings.py
+      # The materializer gate (wave 1 / W0). SELF-TEST ONLY, and that is the
+      # whole design: its clause (b) asserts the shell HAS a menubar, which is
+      # red on `main` by construction until W4 lands one. A red gate facing the
+      # author of the code it judges is a gate that gets weakened.
+      #
+      # ⛔ A NEUTERED INVOCATION IS EXACTLY WHAT check_lane_coverage.py SAYS IT
+      # CANNOT SEE, so the gate's own self-test carries a machine-checked
+      # expiry: the moment MainWindow.xaml grows a `MenuBar`, this step REDS
+      # and names the missing live arm. W6 is a failing build, not a memo.
+      - run: python scripts/check_shell_no_interpreter.py --self-test
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -907,6 +917,7 @@ jobs:
           python scripts/check_shell_knobs.py
           python scripts/check_shell_abi_bindings.py --self-test
           python scripts/check_shell_abi_bindings.py
+          python scripts/check_shell_no_interpreter.py --self-test
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
