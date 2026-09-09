@@ -247,6 +247,14 @@ jobs:
       # MainWindow.xaml, the self-test REDDED and named this missing step. It
       # fired on its first real occasion, in the PR that caused it.
       - run: python scripts/check_shell_no_interpreter.py
+      # ⭐ THE SCENE JOIN (wave 1 / W5). LIVE FROM THE FIRST COMMIT, unlike W0's
+      # gate: its clauses are about two lists AGREEING, and both lists exist on
+      # `main`. It was RED on `main` when written -- `abi` and `app` were
+      # dispatched by the shell and absent from the harness's completion-row
+      # table -- which is the whole receipt for it being a real gate rather than
+      # a shape that happened to be satisfied.
+      - run: python scripts/check_scene_tables.py --self-test
+      - run: python scripts/check_scene_tables.py
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -926,6 +934,11 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          # The scene join reads a `.ps1` with `utf-8-sig` and a `.cs` with
+          # `utf-8`; the harness scripts carry a BOM and `Canvas.cs` does not.
+          # This lane is where that claim is actually tested.
+          python scripts/check_scene_tables.py --self-test
+          python scripts/check_scene_tables.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because

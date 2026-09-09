@@ -2339,6 +2339,17 @@ internal sealed unsafe class Canvas : IDisposable
         // the held engine's document to be replaced.
         if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
         {
+            // ⛔ THE SCENE'S NAME GOES ON THE FAILURE ROW, PREFIXED ONTO
+            // `ApplyLoad`'s cause rather than over it. `ApplySceneInner`
+            // writes `RUSTFAIL {LastStatus}` and the harness waits PER
+            // SCENE, so a bare `LOAD FAILED '<f>': <reason>` is a row no
+            // wait can match: the scene refused in milliseconds and was
+            // waited out for its full timeout, then reported as a hang.
+            // Censused 2026-09-09: FIVE scene methods had this branch and
+            // every one of them already labelled its UNREADABLE-FILE
+            // catch two lines above -- the half that was right is what
+            // stopped anyone looking at the half that was not.
+            LastStatus = $"SELECTION FAILED: {LastStatus}";
             return false;
         }
         ApplyDump("sb-doc-before.json");
@@ -2498,7 +2509,15 @@ internal sealed unsafe class Canvas : IDisposable
         // THROUGH COAT 1's OWN LOAD PATH. `jas_load_svg` on the engine `Attach`
         // created; no engine is made here and none is freed, which is what
         // `engines-created=1 engines-freed=0` on the rows below is a witness to.
-        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name })) { return false; }
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name }))
+        {
+            // See RenderSelection: the scene's name is what makes this row
+            // reachable by a wait. `retained` waits on the A' hash row, so this
+            // label does not by itself end that wait early -- it makes the
+            // timeout's log say which scene died and why.
+            LastStatus = $"RETAINED FAILED: {LastStatus}";
+            return false;
+        }
         ApplyDump("sb-doc-before.json");
         PaintAndHash("A");
 
@@ -2593,6 +2612,8 @@ internal sealed unsafe class Canvas : IDisposable
                 var bytes = System.IO.File.ReadAllBytes(svgPath);
                 if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
                 {
+                    // See RenderSelection.
+                    LastStatus = $"STALL FAILED: {LastStatus}";
                     return false;
                 }
             }
@@ -2696,7 +2717,12 @@ internal sealed unsafe class Canvas : IDisposable
         }
 
         var name = System.IO.Path.GetFileName(svgPath);
-        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name })) { return false; }
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = name }))
+        {
+            // See RenderSelection.
+            LastStatus = $"POINTER FAILED: {LastStatus}";
+            return false;
+        }
         ApplyDump("sb-doc-before.json");
         RepaintOnce("load", 0);
 
@@ -2746,7 +2772,11 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_swapChain is null || _engine == IntPtr.Zero)
         {
-            LastStatus = "no swapchain";
+            // ⛔ LABELLED, AND `stay`'s TABLE ENTRY NOW CARRIES `RUSTFAIL STAY `
+            // TO READ IT. A bare "no swapchain" produced a row no wait could
+            // match, so the fastest possible refusal was reported as a 120 s
+            // timeout -- which reads as a hung app instead of a refused one.
+            LastStatus = "STAY FAILED: no swapchain";
             return false;
         }
 
@@ -2758,6 +2788,8 @@ internal sealed unsafe class Canvas : IDisposable
                 var bytes = System.IO.File.ReadAllBytes(svgPath);
                 if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(svgPath) }))
                 {
+                    // See RenderSelection.
+                    LastStatus = $"STAY FAILED: {LastStatus}";
                     return false;
                 }
             }
@@ -2812,6 +2844,14 @@ internal sealed unsafe class Canvas : IDisposable
                    ?? Environment.GetEnvironmentVariable("SB_SVG");
         if (!string.IsNullOrWhiteSpace(preload) && !ApplyOpen(preload))
         {
+            // ⛔ SET EXPLICITLY, NOT PREFIXED, AND THE DIFFERENCE IS MEASURED.
+            // `ApplyOpen` reports its own `RUSTFAIL OPEN ...` row, and its
+            // unreadable-file path sets no `LastStatus` AT ALL -- so without
+            // this line the app's failure row carried whatever unrelated status
+            // happened to be last, and the table's `RUSTFAIL APP ` pattern
+            // could not match it. The cause is on the OPEN row directly above;
+            // this row's job is to say which SCENE stopped, so the wait ends.
+            LastStatus = $"APP FAILED: could not open '{preload}' — see the OPEN row above";
             return false;
         }
 
