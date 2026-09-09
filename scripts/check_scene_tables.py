@@ -381,8 +381,8 @@ def _fixture_findings(cs_text: str, ps_text: str, tmp: Path) -> list[str]:
         CANVAS = tmp / "Canvas.cs"
         SHELL = tmp
         MIN_DISPATCH = MIN_TABLE = MIN_HELP = 1
-        CANVAS.write_text(cs_text, encoding="utf-8")
-        (tmp / "harness.ps1").write_text(ps_text, encoding="utf-8")
+        CANVAS.write_text(cs_text, encoding="utf-8", newline="")
+        (tmp / "harness.ps1").write_text(ps_text, encoding="utf-8", newline="")
         return check()
     finally:
         CANVAS, SHELL, MIN_DISPATCH, MIN_TABLE, MIN_HELP = keep
@@ -458,8 +458,8 @@ def self_test() -> int:
         try:
             two = tmp / "two"
             two.mkdir(exist_ok=True)
-            (two / "a.ps1").write_text(_FIXTURE_PS1, encoding="utf-8")
-            (two / "b.ps1").write_text(_FIXTURE_PS1, encoding="utf-8")
+            (two / "a.ps1").write_text(_FIXTURE_PS1, encoding="utf-8", newline="")
+            (two / "b.ps1").write_text(_FIXTURE_PS1, encoding="utf-8", newline="")
             keep_shell = SHELL
             globals()["SHELL"] = two
             try:
