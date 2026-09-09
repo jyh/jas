@@ -457,6 +457,31 @@ struct JasBytes jas_document_json(struct JasEngine *e);
 struct JasBytes jas_document_svg(struct JasEngine *e);
 
 /**
+ * The menubar's STATIC shape — labels, shortcuts, separators, submenu titles.
+ *
+ * ⭐ THE OTHER HALF OF [`jas_menu_state`], AND THE REASON A SHELL NEEDS BOTH.
+ * That pass answers *"which entries are enabled right now"* and deliberately
+ * emits neither labels nor separators nor submenu nodes. Every port that draws
+ * a menubar today gets the static half by projecting the compiled bundle
+ * in-process, because every one of them is an interpreter. **The WinUI shell is
+ * the first consumer that is not**, and §1's materializer law forbids it
+ * authoring the menubar itself — so without this export it could build 55
+ * correctly-enabled items with no text on them.
+ *
+ * A consumer reads this ONCE and joins it to [`jas_menu_state`] on `path` at
+ * each menu open. The join law — every state row's path is an `item` here — is
+ * pinned by a test rather than by this comment.
+ *
+ * ⛔ TAKES NO ENGINE, DELIBERATELY. The menubar is a property of the compiled
+ * bundle, not of a document session, and this pass evaluates nothing. A `*mut
+ * JasEngine` it ignored would be a dead arm wearing a driven arm's signature —
+ * every caller would pass a handle believing it mattered.
+ *
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ */
+struct JasBytes jas_menu_structure(void);
+
+/**
  * The menubar's evaluated `enabled` / `checked` state — the tenth materializer
  * function, and the one that keeps a shell from authoring a second menubar.
  *
