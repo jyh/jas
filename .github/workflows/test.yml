@@ -221,6 +221,15 @@ jobs:
       - run: python scripts/check_shell_interaction_path.py
       - run: python scripts/check_shell_knobs.py --self-test
       - run: python scripts/check_shell_knobs.py
+      # The ABI-binding referee (wave 1 / W3). P/Invoke is UNCHECKED: a
+      # `nuint` spelled `int` compiles, links, runs, and reads the wrong half
+      # of a register, and `dotnet build` in `windows-shell-compile` cannot
+      # see it either -- the compiler never meets the callee. This is the only
+      # arm in the repository that reads the generated header BACK against a
+      # caller; check_cbindgen_freshness.py keeps that header current with the
+      # Rust and says of itself that it stops there.
+      - run: python scripts/check_shell_abi_bindings.py --self-test
+      - run: python scripts/check_shell_abi_bindings.py
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -896,6 +905,8 @@ jobs:
           python scripts/check_shell_interaction_path.py
           python scripts/check_shell_knobs.py --self-test
           python scripts/check_shell_knobs.py
+          python scripts/check_shell_abi_bindings.py --self-test
+          python scripts/check_shell_abi_bindings.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because

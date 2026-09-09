@@ -1904,6 +1904,10 @@ internal sealed unsafe class Canvas : IDisposable
             {
                 ok = RenderStay();
             }
+            else if (string.Equals(scene, "abi", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderAbiProbe();
+            }
             else if (string.Equals(scene, "selection", StringComparison.OrdinalIgnoreCase))
             {
                 // ⛔ THE OLD NAME IS REFUSED, POINTING AT THE NEW ONE, AND THAT
@@ -1928,7 +1932,7 @@ internal sealed unsafe class Canvas : IDisposable
                 // square would report RUSTOK over the wrong workload.
                 LastStatus = $"SB_SCENE='{scene}' is not recognised; use 'benchmark', "
                            + "'goldens', 'document', 'retained', 'stall', 'pointer', "
-                           + "'stay' or 'selection-marquee'";
+                           + "'stay', 'abi' or 'selection-marquee'";
                 _report($"RUSTFAIL {LastStatus} {Tids()}");
                 return;
             }
@@ -2630,6 +2634,192 @@ internal sealed unsafe class Canvas : IDisposable
         LastStatus = $"STAY pid={pid} surface={_width}x{_height} — run-and-stay: this scene "
                    + $"does NOT complete and does NOT exit; stop it by PID {Tids()}";
         return true;
+    }
+
+    /// <summary>
+    /// ⭐ THE CONSUMER FOR WAVE 1's FOUR NEW BINDINGS (W3). One scene, one row,
+    /// all four functions driven against the engine this shell is holding.
+    ///
+    /// ⛔ WHY THIS EXISTS AT ALL, AND IT IS THIS SEAT'S OWN CARD: A PRODUCER
+    /// NEEDS A CONSUMER THAT CAN RED. Four `DllImport`s nobody calls compile,
+    /// link and prove nothing -- a use proves an instrument RUNS, and only a
+    /// reading that could have come out differently proves anyone would notice
+    /// if it stopped.
+    ///
+    /// ⛔ IT IS NAMED `abi`, NOT `app`, AND THAT IS A DECISION AGAINST THE
+    /// COMMISSION'S OWN WORDING. The design block asks for "the `app` scene's
+    /// first slice", and the same block's §3.3 rules that `SB_SCENE=app` is THE
+    /// APP ENTRY -- what a person double-clicks. A probe that creates an
+    /// artboard at startup must not wear that name: W4 would have to gut it, and
+    /// until then every `app` receipt on record would be a synthetic one wearing
+    /// the product's name. That is the shape §7 stop 2 bans for the picker
+    /// ("never a synthetic receipt wearing PICKER"), and the ban is on the
+    /// shape. So `app` stays unclaimed for W4 and this says what it is.
+    ///
+    /// ⭐ THE EDIT IS REAL, AND THAT IS WHAT MAKES THE ROW CAPABLE OF REDDING.
+    /// On an untouched engine `can_undo` is false before and after an undo, so a
+    /// probe that only undid would read `false/false` -- identical to a
+    /// `jas_menu_state` that had stopped answering, to a `jas_dispatch_event`
+    /// that had stopped dispatching, and to a menubar whose `enabled_when` was
+    /// never evaluated. Driving ONE real op first makes the middle reading
+    /// `true`, so the row's own three-value shape is the assertion.
+    ///
+    /// ⛔ THE VERB IS FROM `op_apply`'s OWN MATCH, NOT FROM MEMORY. W1's Rust arm
+    /// paid for this once: its first draft used `add_rect`, which does not exist,
+    /// and failed with `UnknownVerb` -- a red that looked like a menu-state
+    /// defect and was a fixture defect.
+    ///
+    /// BL2 throughout: every one of these is a call for this engine, and this
+    /// method runs on the `jas-render` thread because the scene dispatch does.
+    /// </summary>
+    private bool RenderAbiProbe()
+    {
+        if (_engine == IntPtr.Zero) { LastStatus = "ABI FAILED: no engine"; return false; }
+
+        // The SHELL's half of the merge (§4.1). Session chrome only: tabs,
+        // filenames and saved layout are facts the engine has never held. It
+        // deliberately asserts NOTHING under `active_document` that the engine
+        // owns -- the engine wins on those and a shell that tried would be
+        // holding document state, which is BL1.
+        //
+        // ⚠️ THIS IS DATA, NOT AN EVALUATION, and the distinction is what P4's
+        // gate is for. Supplying `tab_count` is not evaluating `enabled_when`;
+        // the core does that. The gate's banned forms are the property
+        // ACCESSES (`state.`, `active_document.`) and this literal contains
+        // neither -- nor could it matter if it did, since a text gate over this
+        // shell reads `csharp_source.lex(...).code`, where literal contents are
+        // blanked.
+        var ctx = System.Text.Encoding.UTF8.GetBytes(
+            "{\"state\":{\"tab_count\":1},"
+          + "\"active_document\":{\"has_filename\":false},"
+          + "\"workspace\":{\"has_saved_layout\":false}}");
+
+        var (items0, enabled0, undo0) = MenuReading(ctx);
+        if (items0 < 0)
+        {
+            // A REFUSAL, NAMED BY ITS OWN REASON -- never "a menubar with no
+            // items". `REFUSED` is the core's empty span (a ctx it would not
+            // parse, or a workspace that would not load); `NOT-AN-ARRAY` is this
+            // side's shape check. The two are different faults in different
+            // files and the row must not collapse them into one zero.
+            LastStatus = $"ABI FAILED: jas_menu_state gave {undo0} -- this is a REFUSAL, "
+                       + "not a measurement of zero menu items";
+            return false;
+        }
+
+        var svg0 = JasCore.TakeString(JasCore.jas_document_svg(_engine)).Length;
+
+        // ONE real, undoable op. `create_artboard` is in `op_apply`'s vocabulary
+        // and is what W1's own Rust arm drives, so a red here is this seam's and
+        // not a fixture's.
+        var edit = Dispatch("{\"op\":\"create_artboard\",\"id\":\"abi_probe_artboard\"}");
+        var (_, _, undo1) = MenuReading(ctx);
+        var svg1 = JasCore.TakeString(JasCore.jas_document_svg(_engine)).Length;
+
+        var undo = Dispatch("{\"op\":\"undo\"}");
+        var (items2, enabled2, undo2) = MenuReading(ctx);
+
+        // Read LAST, and it is a reading in BOTH directions: `jas_dispatch_event`
+        // CLEARS the slot on entry, so a non-empty detail after two Ok statuses
+        // is itself a finding, and an empty one after a refusal would be too.
+        var detail = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+
+        // ⛔ THE COUNTS ARE ASSERTED TO BE STABLE ACROSS THE EDIT, and that is
+        // the anti-collapse arm. `menu-items` is structural -- the menubar has
+        // the same rows before and after an artboard exists -- so a differing
+        // pair means the shell is being handed a different menubar per call,
+        // which no oracle downstream would notice.
+        var structural = items0 == items2 ? $"{items0}" : $"{items0}!={items2}";
+
+        LastStatus =
+            $"ABI menu-items={structural} menu-enabled={enabled0}/{enabled2} "
+          + $"can-undo={undo0}/{undo1}/{undo2} edit={edit} undo={undo} "
+          + $"detail={(detail.Length == 0 ? "none" : detail)} svg-bytes={svg0}/{svg1}";
+
+        // Every field must be capable of disagreeing with the shape wave 1
+        // expects, and the ones that are NOT are named rather than assumed:
+        //   * `menu-items` proves the menubar is materialized, not authored;
+        //   * `menu-enabled` and `can-undo` prove `enabled_when` is EVALUATED by
+        //     the core against the merged ctx -- the middle `true` is the whole
+        //     point and it cannot appear without a real op having landed;
+        //   * `edit`/`undo` prove `jas_dispatch_event` reaches `op_apply`;
+        //   * `detail` proves `jas_last_error_json` is wired, in its empty
+        //     direction -- ⛔ AND THAT IS THE WEAK FIELD ON THIS ROW. A binding
+        //     that always returned the empty span would read `none` here and
+        //     pass. Its loaded direction needs a REFUSED op, which is W5's
+        //     negative arm and is stated here as a negative rather than implied;
+        //   * `svg-bytes` proves `jas_document_svg` sees the document, and its
+        //     two readings differ because the artboard is in the second.
+        return true;
+    }
+
+    /// <summary>
+    /// One `jas_menu_state` reading: (item count, enabled count, `can_undo`).
+    ///
+    /// Returns `(-1, -1, "REFUSED")` for the empty span, which the core returns
+    /// BY NAME for a ctx it would not parse. ⛔ Never `(0, 0, ...)`: a zero that
+    /// means "refused" is indistinguishable from a zero that means "measured",
+    /// and this seat has paid for that shape before.
+    /// </summary>
+    private (int Items, int Enabled, string CanUndo) MenuReading(byte[] ctx)
+    {
+        var json = JasCore.TakeString(
+            JasCore.jas_menu_state(_engine, ctx, (nuint)ctx.Length));
+        if (json.Length == 0) { return (-1, -1, "REFUSED"); }
+
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        // ⛔ THE SHAPE IS CHECKED, NOT ASSUMED. `EnumerateArray` on an object
+        // THROWS, and a throw here surfaces as `RUSTFAIL scene 'abi' threw
+        // InvalidOperationException` -- a probe defect wearing the seam's
+        // clothes, which is the one red most likely to be "fixed" in the code
+        // under test. A refusal names itself instead.
+        if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            return (-1, -1, "NOT-AN-ARRAY");
+        }
+
+        var items = 0;
+        var enabled = 0;
+        var canUndo = "absent";
+        foreach (var row in doc.RootElement.EnumerateArray())
+        {
+            items++;
+            if (row.TryGetProperty("enabled", out var en) &&
+                en.ValueKind == System.Text.Json.JsonValueKind.True)
+            {
+                enabled++;
+            }
+            // `GetString()` throws on a non-string kind, so the kind is tested
+            // first -- a separator row carrying a null `action` must read as
+            // "not the undo row", never as an exception.
+            if (row.TryGetProperty("action", out var act)
+                && act.ValueKind == System.Text.Json.JsonValueKind.String
+                && act.GetString() == "undo")
+            {
+                // `absent` and `false` are DIFFERENT answers. A menubar that
+                // stopped carrying an `undo` item would otherwise read exactly
+                // like one whose Undo is correctly disabled.
+                canUndo = row.TryGetProperty("enabled", out var ue)
+                    ? (ue.ValueKind == System.Text.Json.JsonValueKind.True ? "true" : "false")
+                    : "absent";
+            }
+        }
+        return (items, enabled, canUndo);
+    }
+
+    /// <summary>
+    /// One op envelope through <c>jas_dispatch_event</c>, rendered for the row.
+    ///
+    /// ⚠️ `Ok` IS NOT "SOMETHING HAPPENED" -- `undo`, `redo` and `snapshot`
+    /// return it unconditionally. Anything asserting an edit LANDED reads a
+    /// document fact around the call, which is why the row carries `can-undo`
+    /// three times and not just two statuses.
+    /// </summary>
+    private string Dispatch(string opJson)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes(opJson);
+        var st = JasCore.jas_dispatch_event(_engine, bytes, (nuint)bytes.Length);
+        return st == JasCore.StatusOk ? "Ok" : $"{st}({JasCore.ExplainStatus(st)})";
     }
 
     /// <summary>

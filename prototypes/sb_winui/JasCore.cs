@@ -359,6 +359,118 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_document_json(IntPtr engine);
 
     /// <summary>
+    /// The session's document as SVG -- the artefact a person SAVES.
+    ///
+    /// ⛔ NOT <see cref="jas_document_json"/>, AND THE DIFFERENCE IS THE WHOLE
+    /// POINT. That one is canonical test JSON, "a summary, not geometry" (BL6):
+    /// it is the corpus's comparison surface and it is lossy about the drawing.
+    /// This is `geometry::svg::document_to_svg`, the same writer every port
+    /// saves through, so a document saved on Windows and one saved on the web
+    /// are the same bytes.
+    ///
+    /// BL4: the span is Rust-owned -- <see cref="TakeString"/> copies and frees.
+    /// BL2: a call for this engine, so it happens on the `jas-render` thread.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_document_svg(IntPtr engine);
+
+    /// <summary>
+    /// The menubar's evaluated `enabled` / `checked` state: the canonical
+    /// `menu_state` array, a flat pre-order `{path, action, enabled, checked}`
+    /// per action item.
+    ///
+    /// ⭐ THIS IS WHAT KEEPS A SECOND MENUBAR FROM BEING AUTHORED HERE. The
+    /// shell does not evaluate `active_document.can_undo`; it reads the boolean
+    /// the core computed, from the SAME pass the cross-app byte-gate pins.
+    ///
+    /// ⚠️ THE CTX IS A MERGE, AND IT IS NOT `jas_widget_tree`'S NULL-CTX
+    /// CONVENTION. A panel's scope is wholly the engine's; a menubar's is not.
+    /// The engine supplies `active_document.{has_selection, selection_count,
+    /// can_undo, can_redo, is_modified}` and WINS on them -- a shell that could
+    /// assert `can_undo` would be holding document state, which is BL1. The
+    /// shell supplies everything else (`state.tab_count`,
+    /// `active_document.has_filename`, `workspace.*`, `panels.*`, `panes.*`),
+    /// because tabs, filenames and chrome visibility are session facts and have
+    /// never been the engine's.
+    ///
+    /// ⛔ A NULL `ctx` IS "THE SHELL SUPPLIES NOTHING", NOT "EMPTY SCOPE", and a
+    /// ctx that does not PARSE comes back as the empty span rather than being
+    /// treated as `{}` -- so a marshalling slip on this side cannot present a
+    /// plausible menu built from no session state at all. An empty result is
+    /// therefore a REFUSAL to be reported, never a menubar with no items.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_menu_state(IntPtr engine, byte[]? ctxJson, nuint ctxLen);
+
+    // -- events (BL1: the shell sends events, never state) -------------------
+
+    /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>
+    internal const int StatusOk = 0;
+    internal const int StatusMalformedEnvelope = 1;
+    internal const int StatusUnknownVerb = 2;
+    internal const int StatusMissingParam = 3;
+    internal const int StatusBadParamType = 4;
+    internal const int StatusMissingTarget = 5;
+    internal const int StatusBadUtf8 = 100;
+    internal const int StatusBadJson = 101;
+    internal const int StatusNullHandle = 102;
+
+    /// <summary>
+    /// Render a `JasStatus` for a human.
+    ///
+    /// ⛔ A SECOND EXPLAINER, DELIBERATELY, AND IT MUST NEVER BE MERGED WITH
+    /// <see cref="Explain"/>. The two vocabularies are DISJOINT BY DESIGN and
+    /// the header says so in its own voice -- the paint codes are "deliberately
+    /// NOT `JasStatus`". They overlap numerically (`2` is `not an IDXGISurface`
+    /// in one and `UnknownVerb` in the other), so one function serving both
+    /// would render a plausible sentence about the wrong seam, which is the
+    /// exact failure the `PaintSizeMismatch` comment above already paid for.
+    /// The 100-block is transport (the bytes never reached `op_apply`); 1-5 are
+    /// the five FROZEN `OpError` classes, spelled as the negative fixtures
+    /// spell them.
+    /// </summary>
+    internal static string ExplainStatus(int st) => st switch
+    {
+        StatusOk => "ok",
+        StatusMalformedEnvelope => "MalformedEnvelope -- the envelope carries no `op` verb",
+        StatusUnknownVerb => "UnknownVerb -- the verb is not in op_apply's vocabulary",
+        StatusMissingParam => "MissingParam -- the verb needs a parameter the envelope omits",
+        StatusBadParamType => "BadParamType -- a parameter is present with the wrong type",
+        StatusMissingTarget => "MissingTarget -- the op names an element the document does not hold",
+        StatusBadUtf8 => "BAD UTF-8 -- the bytes never reached op_apply; a marshalling fault, not a rejection",
+        StatusBadJson => "BAD JSON -- the bytes are not parseable; a marshalling fault, not a rejection",
+        StatusNullHandle => "NULL ENGINE -- there is no session to dispatch into",
+        _ => $"UNKNOWN JasStatus {st}",
+    };
+
+    /// <summary>
+    /// Apply one op envelope (BL1: the shell sends events, never state).
+    ///
+    /// Returns <see cref="StatusOk"/> or the frozen class of the rejection;
+    /// detail via <see cref="jas_last_error_json"/>.
+    ///
+    /// ⚠️ `Ok` IS NOT "SOMETHING HAPPENED". The history verbs -- `undo`, `redo`,
+    /// `snapshot` -- return `Ok` unconditionally (`op_apply.rs:1866-1885`), so an
+    /// undo on an empty journal is a successful no-op. Anything asserting that an
+    /// edit LANDED must read a document fact before and after, never this code.
+    ///
+    /// BL2: a call for this engine, so it happens on the `jas-render` thread.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_dispatch_event(IntPtr engine, byte[] opJson, nuint len);
+
+    /// <summary>
+    /// Detail for the last rejection: `{"class":"...", "name"|"id":"..."}` with
+    /// the class spelled as the negative fixtures spell it.
+    ///
+    /// ⛔ EMPTY MEANS "THE LAST CALL SUCCEEDED", and that is a reading, not an
+    /// absence: <see cref="jas_dispatch_event"/> CLEARS it on entry, so an empty
+    /// span after a non-Ok status would itself be a finding.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_last_error_json(IntPtr engine);
+
+    /// <summary>
     /// The boundary counters as JSON: per-function rows plus totals.
     ///
     /// ⭐ THIS IS O1's IDENTITY ORACLE. `jas_engine_new` and `jas_engine_free`
