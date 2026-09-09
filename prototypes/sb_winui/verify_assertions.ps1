@@ -1405,6 +1405,34 @@ if ($menuRows.Count -eq 0) {
             -Detail "$($badMissed.Count) of $scope report a lost publication. The failure mode is a STALE MENUBAR WITH NO OTHER DIAGNOSTIC -- an item enabled that should not be" -Row $badMissed[0]
     }
 
+    # ⭐ P4.3 -- THE REFUSAL THAT HAD NO READER. Two menubar shortcut specs
+    # (`Ctrl+=` and `Ctrl+-`, zoom in and out) cannot be turned into a Windows
+    # accelerator, so the shell attaches none -- correct, because a wrong
+    # accelerator steals a keystroke silently -- and said so ONLY in a log line
+    # nothing reads and no oracle looks at.
+    #
+    # ⛔ IT IS NOT ASSERTED TO BE ZERO. Two are expected today and pinning that
+    # would red the day a menubar gains an item. What IS asserted is that the
+    # count does not MOVE between rebuilds of one run: the menu structure is
+    # static (it is a projection of the compiled bundle), so a differing count
+    # across two rebuilds of the same structure is a real defect -- and it is
+    # the only reading here that can fail.
+    $applying = @($menuRows | ForEach-Object { Get-SbMenuRowReading $_ } |
+                  Where-Object { $_.Ok -and $_.ShortcutsApply })
+    if ($applying.Count -eq 0) {
+        Add-NotRun 'P4.3 unattached accelerators are reported, and stable across rebuilds' `
+            "no MENU row in this run carries a 'shortcuts-unparsed=' field. ABSENT is not zero: this is a build predating the field, not a build in which every accelerator attached" -Row $menuRows[-1]
+    } else {
+        $distinct = @($applying | ForEach-Object { $_.ShortcutsUnparsed } | Sort-Object -Unique)
+        if ($distinct.Count -eq 1) {
+            Add-Assert -Name 'P4.3 unattached accelerators are reported, and stable across rebuilds' -Verdict 'PASS' `
+                -Detail "shortcuts-unparsed=$($distinct[0]) on all $($applying.Count) reporting MENU row(s). REPORTED, not asserted to be zero -- the menubar has specs Windows has no accelerator for, and refusing to attach a wrong one is the right behaviour. What would fail here is the count MOVING between rebuilds of a static structure" -Row $menuRows[-1]
+        } else {
+            Add-Assert -Name 'P4.3 unattached accelerators are reported, and stable across rebuilds' -Verdict 'FAIL' `
+                -Detail "shortcuts-unparsed took $($distinct.Count) different values across this run's rebuilds ($($distinct -join ', ')). The menu structure is a projection of the compiled bundle and cannot change between rebuilds, so the accelerator parser is reading a different structure -- or a different answer from the same one" -Row $menuRows[-1]
+        }
+    }
+
     # ⭐ P4.4 -- §7 stop 4, and the expected count is DERIVED FROM THIS RUN'S OWN
     # KNOBS rather than pinned. The shell rebuilds when the CORE's answer
     # changes: once at startup, and once more if a document was preloaded.

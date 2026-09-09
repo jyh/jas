@@ -690,6 +690,19 @@ Test-Case 'P4: missed is read' { (Get-SbMenuRowReading $menuRow).Missed } '0'
 # ⛔ THE ARITHMETIC MUTANT. Without this the sum clause is satisfied by a reader
 # that returned the same number three times.
 Test-Case 'P4: CONTROL -- a row whose counts do not close is still READ, and its arithmetic fails' { $r = Get-SbMenuRowReading ($menuRow -replace 'disabled=12', 'disabled=11'); "$($r.Ok):$($r.Items - ($r.Enabled + $r.Disabled))" } 'True:1'
+# ⭐ `shortcuts-unparsed=` -- flask's fourth finding, given a reader. The
+# fixture above is kenai's VERBATIM row and PREDATES the field, so it is the
+# bisected-build arm for free; `$menuRowSc` is the shape the shell writes now.
+$menuRowSc = "$menuRow shortcuts-unparsed=2"
+Test-Case 'P4.3: the count is read when the row carries it' { (Get-SbMenuRowReading $menuRowSc).ShortcutsUnparsed } '2'
+Test-Case 'P4.3: ...and the row still reads as a whole' { (Get-SbMenuRowReading $menuRowSc).Ok } 'True'
+# ⛔ ABSENT IS NOT ZERO. A reader returning 0 for a row that never carried the
+# field would report "every accelerator attached" about a build that cannot
+# say. `ShortcutsApply` is the same $false-means-declines rule `raised=` uses.
+Test-Case 'P4.3: CONTROL -- kenai''s real row PREDATES the field and declines it' { (Get-SbMenuRowReading $menuRow).ShortcutsApply } 'False'
+Test-Case 'P4.3: ...declining, NOT reporting zero' { (Get-SbMenuRowReading $menuRow).ShortcutsUnparsed } '-1'
+Test-Case 'P4.3: a row reporting genuinely zero APPLIES' { (Get-SbMenuRowReading "$menuRow shortcuts-unparsed=0").ShortcutsApply } 'True'
+Test-Case 'P4.3: CONTROL -- a malformed count declines rather than reading' { (Get-SbMenuRowReading "$menuRow shortcuts-unparsed=xyz").ShortcutsApply } 'False'
 Test-Case 'P4: CONTROL -- a MENU row missing a field REFUSES rather than reading -1' { (Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Ok } 'False'
 Test-Case 'P4: ...and names the field it could not read' { if ((Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Reason -match 'missed') { 'named' } else { 'not named' } } 'named'
 

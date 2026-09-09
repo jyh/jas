@@ -479,7 +479,8 @@ function Get-SbStableCount([string]$Row, [string]$Name) {
 # row, so `harness_selftest.ps1` drives BOTH names against a real MENU row.
 function Get-SbMenuRowReading([string]$Row) {
     $out = @{ Ok = $false; Items = -1; Enabled = -1; Disabled = -1; Seq = -1
-              Missed = -1; StateAge = -1; Reason = '' }
+              Missed = -1; StateAge = -1; ShortcutsUnparsed = -1
+              ShortcutsApply = $false; Reason = '' }
     foreach ($name in @('items', 'enabled', 'disabled', 'seq', 'missed')) {
         $v = Get-SbField $Row $name
         if ($null -eq $v -or -not ($v -match '^[0-9]+$')) {
@@ -498,6 +499,19 @@ function Get-SbMenuRowReading([string]$Row) {
     $out.Seq = [int](Get-SbField $Row 'seq')
     $out.Missed = [int](Get-SbField $Row 'missed')
     $out.StateAge = [int]$age
+    # ⚠️ `shortcuts-unparsed` IS OPTIONAL AND `Applies` SAYS SO -- the same rule
+    # `raised=` follows. The field is newer than the corpus of MENU rows on
+    # record, and a bisected build's row must not be refused for lacking a field
+    # it never carried. ABSENT is not zero: "no accelerator failed" and "this
+    # build does not report accelerator failures" are different readings.
+    $su = Get-SbField $Row 'shortcuts-unparsed'
+    if ($null -ne $su -and ($su -match '^[0-9]+$')) {
+        $out.ShortcutsUnparsed = [int]$su
+        $out.ShortcutsApply = $true
+    } else {
+        $out.ShortcutsUnparsed = -1
+        $out.ShortcutsApply = $false
+    }
     $out.Ok = $true
     return $out
 }

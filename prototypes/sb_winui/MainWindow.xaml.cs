@@ -1262,6 +1262,22 @@ public sealed partial class MainWindow : Window
     private long _menuDrawnSeq = 0;
 
     /// <summary>
+    /// Shortcut specs this rebuild could not turn into an accelerator.
+    ///
+    /// ⛔ IT EXISTS BECAUSE THE REFUSAL HAD NO READER. Measured on kenai
+    /// 2026-09-09: `MENU SHORTCUT UNPARSED 'Ctrl+='` and `'Ctrl+-'` are written
+    /// TWICE PER REBUILD -- zoom-in and zoom-out have no keyboard accelerator
+    /// on Windows. The refusal is the RIGHT behaviour (a wrong accelerator
+    /// steals a keystroke silently) and it was announced only in a log line
+    /// that nothing reads and no oracle looks at. ⇒ A producer needs a consumer
+    /// that can red: the count goes on the MENU row, where P4 reads it, so the
+    /// number CHANGING is visible instead of merely being printed.
+    /// ⚠️ It is REPORTED, not asserted to be zero. Two are expected today and
+    /// pinning that number would red the day a menubar gains an item.
+    /// </summary>
+    private int _shortcutsUnparsed = 0;
+
+    /// <summary>
     /// A new menu reading arrived. Rebuild, on the UI thread, from the snapshot.
     ///
     /// ⛔ PUSHED, NOT POLLED, AND NEVER PER FRAME. This fires when the CORE's
@@ -1294,7 +1310,8 @@ public sealed partial class MainWindow : Window
             var missed = snap.Seq - _menuDrawnSeq - 1;
             Report($"MENU rebuilds={snap.Seq} items={items} enabled={enabled} "
                  + $"disabled={items - enabled} seq={snap.Seq} state-age=0 "
-                 + $"missed={(missed > 0 ? missed : 0)}");
+                 + $"missed={(missed > 0 ? missed : 0)} "
+                 + $"shortcuts-unparsed={_shortcutsUnparsed}");
             _menuDrawnSeq = snap.Seq;
         }
         catch (Exception ex)
@@ -1316,6 +1333,9 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private (int Items, int Enabled) BuildMenu(MenuSnapshot snap)
     {
+        // PER REBUILD, not cumulative: the row reports what THIS menubar could
+        // not attach, so two runs are comparable.
+        _shortcutsUnparsed = 0;
         using var structure = System.Text.Json.JsonDocument.Parse(snap.StructureJson);
         // ⛔ NOT `state` — see the note in `Canvas.ApplyMenuRefresh`: that token
         // is the workspace context's own spelling and the materializer gate bans
@@ -1459,6 +1479,7 @@ public sealed partial class MainWindow : Window
         }
         if (key is null)
         {
+            _shortcutsUnparsed++;
             Report($"MENU SHORTCUT UNPARSED '{spec}' — no accelerator was attached, "
                  + "which is deliberate: a wrong one steals a keystroke silently");
             return null;
