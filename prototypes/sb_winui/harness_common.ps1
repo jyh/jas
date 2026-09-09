@@ -625,8 +625,16 @@ $sceneSpec = @{
         Timeout = 120
     }
     'stall' = @{
-        Done    = @((Get-SbRowPattern 'STALL' ' render-stall='))
-        Label   = "the STALL row (written by the POST-stall drain, not at the end of the sleep)"
+        # ⛔ THE FAILURE PATTERN IS MEASURED, NOT ASSUMED. Driven on kenai
+        # 2026-09-09 with a non-SVG document: `RenderStall` refuses in under a
+        # second and labels its row (`RUSTFAIL STALL FAILED: LOAD FAILED
+        # '<p>': BAD SVG`), and with only the success pattern here that named
+        # refusal was waited out for the full 140 s (120 + the derived stall
+        # budget) and reported `FAIL: NOT RUN: timed out waiting for the STALL
+        # row` -- 237 s of wall-clock for a fault the shell had already named.
+        # A labelled row nothing waits on is a label with no reader.
+        Done    = @((Get-SbRowPattern 'STALL' ' render-stall='), "RUSTFAIL STALL ")
+        Label   = "the STALL row, or the scene's own named refusal"
         Timeout = 120
     }
     'pointer' = @{
@@ -646,8 +654,17 @@ $sceneSpec = @{
         # after-dump that O1.2 reads. `POINTER SYNTHETIC ` cannot appear in a
         # real run at all: `Canvas.cs` derives the provenance from the kind and
         # a row can never claim one its counters did not come from.
-        Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused", "POINTER SYNTHETIC press=")
-        Label   = "the HAND CLOSED row, its named refusal, or the SYNTHETIC control's own POINTER row"
+        #
+        # ⛔ AND THE FOURTH IS THE SCENE'S OWN REFUSAL, MEASURED ON kenai
+        # 2026-09-09. With a non-SVG document `RenderPointer` refuses at once
+        # and labels the row (`RUSTFAIL POINTER FAILED: LOAD FAILED '<p>': BAD
+        # SVG`) -- and the run still burned its full 120 s and reported
+        # `FAIL: NOT RUN: timed out`, with that labelled row sitting in the log
+        # and in the window title the whole time. Three pointer runs are
+        # planned per sitting, so the class cost 560 s in one measurement.
+        Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused", "POINTER SYNTHETIC press=",
+                    "RUSTFAIL POINTER ")
+        Label   = "the HAND CLOSED row, its named refusal, the SYNTHETIC control's own POINTER row, or the scene's own named refusal"
         Timeout = 120
     }
     # ⛔ THE FAILURE PATTERN IS NOT DECORATION HERE. `RenderStay` refuses BY
