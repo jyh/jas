@@ -407,6 +407,101 @@ function Get-SbField([string]$Row, [string]$Name) {
     return $m.Groups[1].Value
 }
 
+# ---------------------------------------------------------------------------
+# WAVE 1's RECEIPT ROWS, AS READINGS (P1-P4)
+# ---------------------------------------------------------------------------
+#
+# ⛔ THEY LIVE HERE, NOT IN `verify_assertions.ps1`, FOR THE REASON THAT FILE
+# ALREADY STATES ABOUT THE CHOOSER: it cannot be dot-sourced without a Windows
+# desktop, so anything inside it has no arm. These are PURE FUNCTIONS OVER
+# STRINGS -- `harness_selftest.ps1` drives them in CI, on the row text the box
+# actually printed, with no app and no session. P1-P4 are then thin: read, then
+# compare.
+#
+# ⛔⛔ AND EVERY ONE OF THEM REFUSES BY NAME RATHER THAN RETURNING $null. A
+# reader that answers `$null` for BOTH "the field is absent" and "the field is
+# malformed" hands an assertion a value that reads as FALSE, and a malformed row
+# then convicts the app of the defect the READER has. The refusal carries the
+# reason so the verdict can be NOT RUN -- which is a first-class verdict here
+# and is never a pass.
+
+# `name=a/b` or `name=a/b/c`: the paired readings wave 1 puts on one field.
+# `menu-enabled=43/44` (before/after a mutation), `can-undo=false/true/false`
+# (before/after the edit/after the undo), `svg-bytes=505/616`.
+function Get-SbSlashField([string]$Row, [string]$Name, [int]$Parts) {
+    $raw = Get-SbField $Row $Name
+    if ($null -eq $raw) {
+        return @{ Ok = $false; Parts = @(); Raw = ''
+                  Reason = "the row carries no '$Name=' field" }
+    }
+    $bits = @($raw -split '/')
+    if ($bits.Count -ne $Parts) {
+        # ⛔ REFUSING TO GUESS WHICH PART IS WHICH. A two-reading field that
+        # arrived with three parts is a shell change, and silently taking the
+        # first two would compare readings that are not the ones named.
+        return @{ Ok = $false; Parts = @(); Raw = $raw
+                  Reason = "'$Name=$raw' has $($bits.Count) slash-separated part(s), not $Parts" }
+    }
+    return @{ Ok = $true; Parts = $bits; Raw = $raw; Reason = '' }
+}
+
+# A count the shell asserts is STABLE across a pair of readings. The shell
+# writes `55` when the two agreed and `55!=57` when they did not, so the
+# disagreement is IN the field rather than inferable from its absence -- and a
+# reader that accepted only digits would treat the anti-collapse signal as a
+# malformed row.
+function Get-SbStableCount([string]$Row, [string]$Name) {
+    $raw = Get-SbField $Row $Name
+    if ($null -eq $raw) {
+        return @{ Ok = $false; Stable = $false; Value = -1; Raw = ''
+                  Reason = "the row carries no '$Name=' field" }
+    }
+    $m = [regex]::Match($raw, '^([0-9]+)$')
+    if ($m.Success) {
+        return @{ Ok = $true; Stable = $true; Value = [int]$m.Groups[1].Value; Raw = $raw; Reason = '' }
+    }
+    $d = [regex]::Match($raw, '^([0-9]+)!=([0-9]+)$')
+    if ($d.Success) {
+        return @{ Ok = $true; Stable = $false; Value = [int]$d.Groups[1].Value
+                  Other = [int]$d.Groups[2].Value; Raw = $raw; Reason = '' }
+    }
+    return @{ Ok = $false; Stable = $false; Value = -1; Raw = $raw
+              Reason = "'$Name=$raw' is neither a count nor the shell's disagreement form 'n!=m'" }
+}
+
+# The MENU row's arithmetic. `items`, `enabled` and `disabled` are three
+# independent readings of one menubar and the first must be the sum of the
+# other two; a shell drawing a different menubar than it counted breaks it.
+#
+# ⚠️ `enabled` AND `disabled` COLLIDE BY SUFFIX, and the harness's field anchor
+# `(?:^|\s)` is the only thing that keeps `Get-SbField <row> 'enabled'` off
+# `disabled=12`. That is the `composition-scale` defect's exact shape, on a new
+# row, so `harness_selftest.ps1` drives BOTH names against a real MENU row.
+function Get-SbMenuRowReading([string]$Row) {
+    $out = @{ Ok = $false; Items = -1; Enabled = -1; Disabled = -1; Seq = -1
+              Missed = -1; StateAge = -1; Reason = '' }
+    foreach ($name in @('items', 'enabled', 'disabled', 'seq', 'missed')) {
+        $v = Get-SbField $Row $name
+        if ($null -eq $v -or -not ($v -match '^[0-9]+$')) {
+            $out.Reason = "the MENU row carries no readable '$name=' field"
+            return $out
+        }
+    }
+    $age = Get-SbField $Row 'state-age'
+    if ($null -eq $age -or -not ($age -match '^[0-9]+$')) {
+        $out.Reason = "the MENU row carries no readable 'state-age=' field"
+        return $out
+    }
+    $out.Items = [int](Get-SbField $Row 'items')
+    $out.Enabled = [int](Get-SbField $Row 'enabled')
+    $out.Disabled = [int](Get-SbField $Row 'disabled')
+    $out.Seq = [int](Get-SbField $Row 'seq')
+    $out.Missed = [int](Get-SbField $Row 'missed')
+    $out.StateAge = [int]$age
+    $out.Ok = $true
+    return $out
+}
+
 function Get-SbPoint([string]$Row, [string]$Name) {
     if ([string]::IsNullOrEmpty($Row)) { return $null }
     $m = [regex]::Match($Row, $SbFieldAnchor + [regex]::Escape($Name) + '=\(([-0-9.]+),([-0-9.]+)\)')

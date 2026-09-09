@@ -600,6 +600,99 @@ Test-Case 'O4.4z: CONTROL -- a malformed raised= is refused too' { (Test-SbRaise
 # most plausibly reach for next, so it is the decoy worth pinning.
 Test-Case 'O4.4z: CONTROL -- raised= is not read out of moves-raised=' { Get-SbField $raisedDecoyRow 'raised' } '12'
 
+# ===========================================================================
+# WAVE 1's ROWS (P1-P4) -- VERBATIM OFF KENAI, 2026-09-09, jas main 2d24d782
+# ===========================================================================
+#
+# ⭐ THESE ARE READINGS, NOT SHAPES, AND THAT DISTINCTION IS WHY W5 WAITED.
+# The design block held P1-P4 back on the ground that an oracle written against
+# a row that has never been emitted is a fixture defect waiting for the seat
+# least able to tell whose defect it is. The rows below are what the box
+# printed. Two of the four assertions were re-cut because of what is in them.
+$abiRow = "09:02:31`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAMES=(default:60)`t" +
+    "RUSTOK ABI menu-items=55 menu-enabled=43/44 can-undo=false/true/false edit=Ok undo=Ok " +
+    "detail=none svg-bytes=505/616 struct-nodes=73 struct-labelled=62 " +
+    "struct-kinds=item|menu|separator|submenu"
+
+# ⛔ NO `RUSTOK ` ON THIS ONE, AND THAT IS THE POINT. `OnMenuChanged` calls
+# `Report(...)`; only the SCENE row carries a verdict prefix. My first draft of
+# this fixture had one -- copied from the ABI row beside it -- and it would have
+# made a P4 pattern of `'RUSTOK MENU rebuilds='` look correct while matching
+# nothing in a real log. A fixture written from an assumption agrees with it.
+$menuRow = "09:02:31`tMENU rebuilds=1 items=55 enabled=43 disabled=12 seq=1 state-age=0 missed=0"
+
+$appRow = "09:02:31`tRUSTOK APP pid=5920 surface=2858x1369 menu-rebuilds=1 menu-items=55 " +
+    "menu-enabled=43 doc=(empty) — run-and-stay: this scene does NOT complete and does NOT exit"
+
+# ---------------------------------------------------------------------------
+# ⛔ THE SUFFIX COLLISION ON THE NEW ROWS -- the `composition-scale` class again
+# ---------------------------------------------------------------------------
+#
+# `enabled` is a suffix of `disabled`, and BOTH are fields on the same MENU row.
+# `items` is a suffix of `menu-items` and BOTH are on the ABI and APP rows.
+# `undo` is a suffix of `can-undo`; `rebuilds` of `menu-rebuilds`. Four live
+# collisions on rows nothing had ever read. The anchor is what makes them safe,
+# and reasoning that it does is not the same as driving it.
+Test-Case 'P4: enabled= is not read out of disabled=' { Get-SbField $menuRow 'enabled' } '43'
+Test-Case 'P4: disabled= is read whole' { Get-SbField $menuRow 'disabled' } '12'
+Test-Case 'P4: items= is not read out of menu-items=' { Get-SbField $menuRow 'items' } '55'
+Test-Case 'P4: menu-items= on a row that has ONLY the prefixed form' { Get-SbField $abiRow 'menu-items' } '55'
+Test-Case 'P4: CONTROL -- bare items= is ABSENT from the ABI row, not 55' { Get-SbField $abiRow 'items' } $null
+Test-Case 'P2: undo= is not read out of can-undo=' { Get-SbField $abiRow 'undo' } 'Ok'
+Test-Case 'P2: can-undo= is read whole' { Get-SbField $abiRow 'can-undo' } 'false/true/false'
+Test-Case 'P4: rebuilds= is not read out of menu-rebuilds=' { Get-SbField $appRow 'menu-rebuilds' } '1'
+Test-Case 'P4: CONTROL -- bare rebuilds= is ABSENT from the APP row' { Get-SbField $appRow 'rebuilds' } $null
+
+# ---------------------------------------------------------------------------
+# Get-SbSlashField -- the paired readings, and its REFUSALS
+# ---------------------------------------------------------------------------
+Test-Case 'P4: menu-enabled=43/44 reads as two parts' { (Get-SbSlashField $abiRow 'menu-enabled' 2).Parts -join ',' } '43,44'
+Test-Case 'P2: can-undo reads as three parts' { (Get-SbSlashField $abiRow 'can-undo' 3).Parts -join ',' } 'false,true,false'
+Test-Case 'P3: svg-bytes reads as two parts' { (Get-SbSlashField $abiRow 'svg-bytes' 2).Parts -join ',' } '505,616'
+# ⛔ THE ARITY REFUSAL. Asking for the wrong number of parts must REFUSE, not
+# truncate -- a three-reading field read as two compares readings that are not
+# the ones named, and the verdict would be about the wrong pair.
+Test-Case 'CONTROL: can-undo asked for 2 parts REFUSES' { (Get-SbSlashField $abiRow 'can-undo' 2).Ok } 'False'
+Test-Case '...and the refusal names the arity it actually found' { if ((Get-SbSlashField $abiRow 'can-undo' 2).Reason -match '3 slash-separated') { 'named' } else { 'not named' } } 'named'
+# ⛔ AND AN ABSENT FIELD IS A DIFFERENT REFUSAL FROM A MALFORMED ONE. A reader
+# that answered $null for both would hand an assertion a value reading as FALSE.
+Test-Case 'CONTROL: an ABSENT field refuses and says so' { (Get-SbSlashField $menuRow 'svg-bytes' 2).Ok } 'False'
+Test-Case '...naming the absence, not an arity' { if ((Get-SbSlashField $menuRow 'svg-bytes' 2).Reason -match 'no .svg-bytes=. field') { 'named' } else { 'not named' } } 'named'
+
+# ---------------------------------------------------------------------------
+# Get-SbStableCount -- the anti-collapse form must PARSE, not look malformed
+# ---------------------------------------------------------------------------
+Test-Case 'P4: menu-items=55 is a stable count' { (Get-SbStableCount $abiRow 'menu-items').Stable } 'True'
+Test-Case 'P4: ...with the value on it' { (Get-SbStableCount $abiRow 'menu-items').Value } '55'
+# ⛔ THE DISAGREEMENT FORM IS A READING, NOT A PARSE FAILURE. The shell writes
+# `55!=57` when the menubar it counted twice differed; a reader accepting only
+# digits would call the anti-collapse signal a malformed row and the assertion
+# would go NOT RUN -- silencing the one field written to catch that defect.
+$abiSplitRow = $abiRow -replace 'menu-items=55', 'menu-items=55!=57'
+Test-Case 'P4: the disagreement form PARSES' { (Get-SbStableCount $abiSplitRow 'menu-items').Ok } 'True'
+Test-Case 'P4: ...and reports itself NOT stable' { (Get-SbStableCount $abiSplitRow 'menu-items').Stable } 'False'
+Test-Case 'P4: ...carrying both readings' { $r = Get-SbStableCount $abiSplitRow 'menu-items'; "$($r.Value)/$($r.Other)" } '55/57'
+Test-Case 'CONTROL: a non-numeric count refuses' { (Get-SbStableCount ($abiRow -replace 'menu-items=55', 'menu-items=xyz') 'menu-items').Ok } 'False'
+
+# ---------------------------------------------------------------------------
+# Get-SbMenuRowReading -- P4's arithmetic
+# ---------------------------------------------------------------------------
+# ⛔ THE PREFIX ARM. The completion-row pattern must match a MENU row that has
+# NO verdict prefix (the real shape) and one that does (a bisected build), or a
+# P4 clause silently reads NOT RUN over a run that measured the menubar.
+Test-Case 'P4: the completion-row pattern matches a PREFIXLESS MENU row (the real shape)' { if ($menuRow -match (Get-SbRowPattern 'MENU' ' rebuilds=')) { 'matched' } else { 'MISSED' } } 'matched'
+Test-Case 'P4: ...and still matches one carrying RUSTOK (a bisected build)' { if (($menuRow -replace "`tMENU", "`tRUSTOK MENU") -match (Get-SbRowPattern 'MENU' ' rebuilds=')) { 'matched' } else { 'MISSED' } } 'matched'
+Test-Case 'P4: CONTROL -- it does not match the MENU REFUSED row' { if ("09:02:31`tRUSTFAIL MENU REFUSED structure-bytes=0 state-bytes=0 cause=open" -match (Get-SbRowPattern 'MENU' ' rebuilds=')) { 'matched' } else { 'MISSED' } } 'MISSED'
+Test-Case 'P4: the MENU row reads' { (Get-SbMenuRowReading $menuRow).Ok } 'True'
+Test-Case 'P4: items == enabled + disabled on the real row' { $r = Get-SbMenuRowReading $menuRow; $r.Items - ($r.Enabled + $r.Disabled) } '0'
+Test-Case 'P4: state-age is read (it is a constant the row keeps deliberately)' { (Get-SbMenuRowReading $menuRow).StateAge } '0'
+Test-Case 'P4: missed is read' { (Get-SbMenuRowReading $menuRow).Missed } '0'
+# ⛔ THE ARITHMETIC MUTANT. Without this the sum clause is satisfied by a reader
+# that returned the same number three times.
+Test-Case 'P4: CONTROL -- a row whose counts do not close is still READ, and its arithmetic fails' { $r = Get-SbMenuRowReading ($menuRow -replace 'disabled=12', 'disabled=11'); "$($r.Ok):$($r.Items - ($r.Enabled + $r.Disabled))" } 'True:1'
+Test-Case 'P4: CONTROL -- a MENU row missing a field REFUSES rather than reading -1' { (Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Ok } 'False'
+Test-Case 'P4: ...and names the field it could not read' { if ((Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Reason -match 'missed') { 'named' } else { 'not named' } } 'named'
+
 # ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }

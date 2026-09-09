@@ -1126,6 +1126,323 @@ if ($Scene -eq 'stay') {
 }
 
 # ===========================================================================
+# P1-P4 -- WAVE 1's DOCUMENT LOOP (open / undo / save / the materialized menubar)
+# ===========================================================================
+#
+# ⛔⛔ TWO OF THESE FOUR ARE NOT WHAT THE DESIGN BLOCK SPECIFIED, AND THE
+# DIFFERENCE IS THE WHOLE REASON W5 WAITED FOR A REAL RUN. The block held P1-P4
+# back on the ground that an oracle written against a row that has never been
+# emitted is a fixture defect waiting for the seat least able to tell whose
+# defect it is. The box ran wave 1 on 2026-09-09 and the rows refuted two of the
+# four specified oracles:
+#
+#   P4 was specified as "`enabled` MUST CHANGE when you open a document".
+#      MEASURED: enabled=43 with no document, enabled=43 after a real open,
+#      across a real rebuild (seq=1 -> seq=2) in one process. NOT A DEFECT --
+#      the shell supplies `tab_count` as a constant, so the 16 items gated on it
+#      cannot move on an open, and the one menubar predicate mentioning
+#      `has_filename` also requires `is_modified`, which the open clears.
+#      ⇒ IN THIS WORKSPACE AN OPEN CANNOT MOVE `enabled`, and P4 as specified
+#      would have RED FOREVER ON CORRECT BEHAVIOUR.
+#      ⭐ The transition it wanted is real and is on the ABI row --
+#      `menu-enabled=43/44`, moved by a MUTATION (`can_redo` after the undo).
+#      P4.5 below asserts it there.
+#
+#   P1 was specified over `elements=<n>` from the OPEN row.
+#      MEASURED: `elements=-1` on a HEALTHY open, every time. `ElementCount()`
+#      read a top-level `elements` array and the core's document JSON has never
+#      had one. Repaired in this wave; P1 is written against the repaired field
+#      AND against a second, independent walk of the same document.
+#
+# ⚠️ AND WHAT IS **NOT** HERE IS NAMED RATHER THAN IMPLIED. Two of the design's
+# arms have no machine-drivable receipt at all: nothing in a headless run calls
+# `ApplyOp` or `ApplySave` -- both are reached from the UI (Ctrl+Z, the menu) --
+# so no `UNDO` or `SAVE` row is emitted by any scene. Those arms are NOT RUN
+# below, BY NAME, with what would be needed to run them. A NOT RUN is a
+# first-class verdict here; a check that examines nothing returns success.
+
+# ---- P1: the open half of the document loop -------------------------------
+$openRow = Select-SbRow $rows 'RUSTOK OPEN path='
+if ($null -eq $openRow) {
+    Add-NotRun 'P1.1 the open reports a readable element count' `
+        "this run is scene '$Scene' and wrote no RUSTOK OPEN row; only a scene that opens a document can"
+    Add-NotRun 'P1.2 the shell''s element count agrees with the harness''s own walk' `
+        "no RUSTOK OPEN row in this run"
+    Add-NotRun 'P1.3 the open read the file the harness named' "no RUSTOK OPEN row in this run"
+} else {
+    $elemRaw = Get-SbField $openRow 'elements'
+    $openPath = Get-SbField $openRow 'path'
+    $openBytes = Get-SbField $openRow 'bytes'
+
+    if ($null -eq $elemRaw -or -not ($elemRaw -match '^-?[0-9]+$')) {
+        Add-NotRun 'P1.1 the open reports a readable element count' `
+            "the OPEN row carries no readable 'elements=' field" -Row $openRow
+    } elseif ([int]$elemRaw -lt 0) {
+        # ⛔ THIS IS THE DEFECT THE BOX FOUND, AND IT MUST NOT READ AS "empty".
+        Add-Assert -Name 'P1.1 the open reports a readable element count' -Verdict 'FAIL' `
+            -Detail "elements=$elemRaw -- the receipt's own 'I could not read it' value on a successful open. Before this wave that was the ONLY value the field could take: ElementCount() looked for a top-level 'elements' array and the core writes 'layers'/'selected_layer'/'selection'" -Row $openRow
+    } else {
+        Add-Assert -Name 'P1.1 the open reports a readable element count' -Verdict 'PASS' `
+            -Detail "elements=$elemRaw -- a reading, not the -1 refusal. 0 is REACHABLE and means an empty document, which is why the two must stay distinguishable" -Row $openRow
+    }
+
+    # ⭐ P1.2 IS THE ARM THAT MAKES P1.1 MEAN SOMETHING. `elements > 0` is
+    # satisfied by a walk returning a constant, by a walk counting the wrong
+    # nodes, and by a document nobody replaced. Here the HARNESS walks the same
+    # dump with `Get-SbFlatElements` -- the rule the shell's counter was written
+    # to match -- and the two must agree.
+    # ⚠️ NOT A WITNESS TO THE CORE: both readers read the same bytes, so a core
+    # that serialised the wrong document satisfies both. Stated, not implied.
+    $openDoc = if (Test-Path $openDump) { Read-SbDoc $openDump } else { $null }
+    if ($null -eq $openDoc) {
+        Add-NotRun 'P1.2 the shell''s element count agrees with the harness''s own walk' `
+            "the shell wrote no readable $([IO.Path]::GetFileName($openDump)) beside the exe, so there is no second reading to compare against" -Row $openRow
+    } elseif ($null -eq $elemRaw -or -not ($elemRaw -match '^-?[0-9]+$')) {
+        Add-NotRun 'P1.2 the shell''s element count agrees with the harness''s own walk' `
+            "the OPEN row carries no readable 'elements=' field to compare" -Row $openRow
+    } else {
+        $flat = New-Object System.Collections.Generic.List[object]
+        Get-SbFlatElements $openDoc '$' $flat
+        if ($flat.Count -eq [int]$elemRaw) {
+            Add-Assert -Name 'P1.2 the shell''s element count agrees with the harness''s own walk' -Verdict 'PASS' `
+                -Detail "the shell counted $elemRaw and this harness independently walked $($flat.Count) typed node(s) through layers/children of the same dump" -Row $openRow
+        } else {
+            Add-Assert -Name 'P1.2 the shell''s element count agrees with the harness''s own walk' -Verdict 'FAIL' `
+                -Detail "the shell counted $elemRaw and this harness walked $($flat.Count) typed node(s) of the same dump. Two implementations of one rule (a node carrying 'type', reached through 'layers' and 'children') disagree; one of them is wrong and the row does not say which" -Row $openRow
+        }
+    }
+
+    # P1.3: the shell read THE file, not some other. `bytes` is the file's size
+    # on disk, so this is checkable without trusting anything the shell parsed.
+    if ($null -eq $openPath -or $null -eq $openBytes -or -not ($openBytes -match '^[0-9]+$')) {
+        Add-NotRun 'P1.3 the open read the file the harness named' `
+            "the OPEN row carries no readable 'path=' and 'bytes=' pair" -Row $openRow
+    } elseif (-not (Test-Path $openPath)) {
+        Add-NotRun 'P1.3 the open read the file the harness named' `
+            "the OPEN row names '$openPath', which this harness cannot see from here" -Row $openRow
+    } else {
+        $onDisk = (Get-Item $openPath).Length
+        if ($onDisk -eq [int]$openBytes) {
+            Add-Assert -Name 'P1.3 the open read the file the harness named' -Verdict 'PASS' `
+                -Detail "bytes=$openBytes matches the $onDisk-byte file at that path" -Row $openRow
+        } else {
+            Add-Assert -Name 'P1.3 the open read the file the harness named' -Verdict 'FAIL' `
+                -Detail "the row says bytes=$openBytes and the file at that path is $onDisk bytes" -Row $openRow
+        }
+    }
+}
+
+# ⛔ P1's NEGATIVE CONTROL IS NOT RUN AND IS NAMED. An open of a file that is
+# not valid SVG must write `RUSTFAIL OPEN REFUSED` carrying the CORE's rejection
+# class and leave the document unchanged. It is drivable -- `SB_OPEN_PATH` can
+# be pointed at any file -- but it needs a SECOND run of the app scene, and this
+# harness asserts over one run's rows. Until a run plan drives both, the loaded
+# direction of `jas_last_error_json` is untested and `detail=none` on the ABI
+# row is consistent with a binding that always returns the empty span.
+Add-NotRun 'P1.C an invalid document is REFUSED by class, document unchanged' `
+    'needs a second app run with SB_OPEN_PATH pointed at a non-SVG; this harness asserts over one run. The loaded direction of jas_last_error_json has no arm anywhere'
+
+# ---- P2 / P3: the ABI probe's readings ------------------------------------
+$abiRow = Select-SbRow $rows 'RUSTOK ABI menu-items='
+if ($null -eq $abiRow) {
+    foreach ($n in @('P2.1 can-undo moves false -> true -> false across a real op and its undo',
+                     'P2.2 the edit and the undo both crossed as Ok',
+                     'P3.1 the serializer reflects the mutation',
+                     'P4.5 enabled moves across a MUTATION',
+                     'P4.6 the menubar is the same size before and after the edit',
+                     'P4.7 the static structure decomposes')) {
+        Add-NotRun $n "this run is scene '$Scene' and wrote no RUSTOK ABI row; only the 'abi' probe does"
+    }
+} else {
+    # P2.1 -- the three-value shape IS the assertion. On an untouched engine
+    # can_undo is false before and after an undo, so false/false would be
+    # identical to a jas_menu_state that had stopped answering, to a
+    # jas_dispatch_event that had stopped dispatching, and to a menubar whose
+    # enabled_when was never evaluated. The middle `true` cannot appear unless a
+    # real op landed through the ABI and the core evaluated the merged ctx.
+    $cu = Get-SbSlashField $abiRow 'can-undo' 3
+    if (-not $cu.Ok) {
+        Add-NotRun 'P2.1 can-undo moves false -> true -> false across a real op and its undo' $cu.Reason -Row $abiRow
+    } elseif (($cu.Parts -join '/') -eq 'false/true/false') {
+        Add-Assert -Name 'P2.1 can-undo moves false -> true -> false across a real op and its undo' -Verdict 'PASS' `
+            -Detail "can-undo=$($cu.Raw): empty journal, then create_artboard landed through jas_dispatch_event and the core said so, then the undo took it back. The middle reading is the one that cannot be faked by a binding that stopped answering" -Row $abiRow
+    } else {
+        Add-Assert -Name 'P2.1 can-undo moves false -> true -> false across a real op and its undo' -Verdict 'FAIL' `
+            -Detail "can-undo=$($cu.Raw), want false/true/false. A first reading of true means the engine was not fresh; a middle false means the op did not land or the core is not evaluating; a last true means the undo did not apply" -Row $abiRow
+    }
+
+    $edit = Get-SbField $abiRow 'edit'
+    $undo = Get-SbField $abiRow 'undo'
+    if ($null -eq $edit -or $null -eq $undo) {
+        Add-NotRun 'P2.2 the edit and the undo both crossed as Ok' `
+            'the ABI row carries no edit=/undo= pair' -Row $abiRow
+    } elseif ($edit -eq 'Ok' -and $undo -eq 'Ok') {
+        Add-Assert -Name 'P2.2 the edit and the undo both crossed as Ok' -Verdict 'PASS' `
+            -Detail "edit=$edit undo=$undo -- both reached op_apply. ⚠️ Ok is NOT 'something happened': undo returns it unconditionally on an empty journal, which is why P2.1 reads the CORE's can-undo either side rather than these two statuses" -Row $abiRow
+    } else {
+        Add-Assert -Name 'P2.2 the edit and the undo both crossed as Ok' -Verdict 'FAIL' `
+            -Detail "edit=$edit undo=$undo -- jas_dispatch_event refused one of them" -Row $abiRow
+    }
+
+    # P3.1 -- the save half, in the only form a headless run emits. Two
+    # readings of jas_document_svg either side of one real op; the second must
+    # be larger because the artboard is in it. A serializer that wrote a
+    # constant gives p == q and fails here, which is the same defect the
+    # design's sha arm was written to catch.
+    $svg = Get-SbSlashField $abiRow 'svg-bytes' 2
+    if (-not $svg.Ok) {
+        Add-NotRun 'P3.1 the serializer reflects the mutation' $svg.Reason -Row $abiRow
+    } elseif (-not ($svg.Parts[0] -match '^[0-9]+$') -or -not ($svg.Parts[1] -match '^[0-9]+$')) {
+        Add-NotRun 'P3.1 the serializer reflects the mutation' `
+            "svg-bytes=$($svg.Raw) is not a pair of counts" -Row $abiRow
+    } else {
+        $p0 = [int]$svg.Parts[0]; $p1 = [int]$svg.Parts[1]
+        if ($p0 -gt 0 -and $p1 -gt $p0) {
+            Add-Assert -Name 'P3.1 the serializer reflects the mutation' -Verdict 'PASS' `
+                -Detail "svg-bytes=$p0/$p1 -- jas_document_svg produced a document before the edit and a LARGER one after it. A serializer writing a constant gives p == q" -Row $abiRow
+        } else {
+            Add-Assert -Name 'P3.1 the serializer reflects the mutation' -Verdict 'FAIL' `
+                -Detail "svg-bytes=$p0/$p1 -- want 0 < p < q. Equal readings mean the SVG writer did not see the op that jas_menu_state says landed" -Row $abiRow
+        }
+    }
+
+    # ⭐ P4.5 -- THE RE-CUT TRANSITION. Specified against an OPEN; measured, an
+    # open cannot move `enabled` in this workspace. A MUTATION does.
+    $me = Get-SbSlashField $abiRow 'menu-enabled' 2
+    if (-not $me.Ok) {
+        Add-NotRun 'P4.5 enabled moves across a MUTATION' $me.Reason -Row $abiRow
+    } elseif (-not ($me.Parts[0] -match '^[0-9]+$') -or -not ($me.Parts[1] -match '^[0-9]+$')) {
+        Add-NotRun 'P4.5 enabled moves across a MUTATION' "menu-enabled=$($me.Raw) is not a pair of counts" -Row $abiRow
+    } elseif ([int]$me.Parts[0] -ne [int]$me.Parts[1]) {
+        Add-Assert -Name 'P4.5 enabled moves across a MUTATION' -Verdict 'PASS' `
+            -Detail "menu-enabled=$($me.Raw) -- the core re-evaluated enabled_when against the merged ctx and a different number of items came back. This is the clause the text gate explicitly cannot see: a shell hard-coding its answers gives a constant here" -Row $abiRow
+    } else {
+        Add-Assert -Name 'P4.5 enabled moves across a MUTATION' -Verdict 'FAIL' `
+            -Detail "menu-enabled=$($me.Raw) -- the count did not move across a real op and its undo, so nothing here distinguishes a core evaluating enabled_when from a shell returning a fixed answer. ⛔ Do NOT repair this by asserting it across an OPEN instead: measured on the box, an open moves has_filename and no menubar item is gated on has_filename alone" -Row $abiRow
+    }
+
+    $mi = Get-SbStableCount $abiRow 'menu-items'
+    if (-not $mi.Ok) {
+        Add-NotRun 'P4.6 the menubar is the same size before and after the edit' $mi.Reason -Row $abiRow
+    } elseif ($mi.Stable) {
+        Add-Assert -Name 'P4.6 the menubar is the same size before and after the edit' -Verdict 'PASS' `
+            -Detail "menu-items=$($mi.Value), read twice and agreeing. The menubar is STRUCTURAL: the same rows exist before and after an artboard does, and a differing pair would mean the shell is handed a different menubar per call" -Row $abiRow
+    } else {
+        Add-Assert -Name 'P4.6 the menubar is the same size before and after the edit' -Verdict 'FAIL' `
+            -Detail "menu-items=$($mi.Raw) -- two readings of one menubar disagree ($($mi.Value) then $($mi.Other)). No oracle downstream would notice this; the field exists because of it" -Row $abiRow
+    }
+
+    # P4.7 -- flask's fifth finding, turned into an arm. `struct-labelled` must
+    # be strictly less than `struct-nodes` (separators carry no label) and all
+    # four kinds must appear: a walk that collapsed separators into items shows
+    # three, and a structure that crossed as the right SHAPE with empty strings
+    # in every label reads identically to a good one on `struct-nodes` alone.
+    $sn = Get-SbField $abiRow 'struct-nodes'
+    $sl = Get-SbField $abiRow 'struct-labelled'
+    $sk = Get-SbField $abiRow 'struct-kinds'
+    if ($null -eq $sn -or $null -eq $sl -or $null -eq $sk -or
+        -not ($sn -match '^[0-9]+$') -or -not ($sl -match '^[0-9]+$')) {
+        Add-NotRun 'P4.7 the static structure decomposes' `
+            'the ABI row carries no readable struct-nodes/struct-labelled/struct-kinds triple' -Row $abiRow
+    } else {
+        $kinds = @($sk -split '\|') | Sort-Object
+        $wantKinds = @('item', 'menu', 'separator', 'submenu')
+        $missing = @($wantKinds | Where-Object { $kinds -notcontains $_ })
+        if ([int]$sl -gt 0 -and [int]$sl -lt [int]$sn -and $missing.Count -eq 0) {
+            Add-Assert -Name 'P4.7 the static structure decomposes' -Verdict 'PASS' `
+                -Detail "struct-nodes=$sn struct-labelled=$sl struct-kinds=$sk -- every kind crossed, and labelled < nodes because separators carry no label. A menubar of blank items reads labelled=0 with the same node count" -Row $abiRow
+        } else {
+            Add-Assert -Name 'P4.7 the static structure decomposes' -Verdict 'FAIL' `
+                -Detail "struct-nodes=$sn struct-labelled=$sl struct-kinds=$sk$(if ($missing.Count) { "; kinds missing: $($missing -join ', ')" }). Want 0 < labelled < nodes and all of $($wantKinds -join '|'). A collapsed walk loses a kind; an empty-label structure loses the labelled count" -Row $abiRow
+        }
+    }
+}
+
+# ---- P4: the materialized menubar, on the rows the app writes -------------
+# ⛔ THE VERDICT PREFIX IS **NOT** ON THIS ROW, AND ASSUMING IT WAS IS THE
+# DEFECT THIS WHOLE NODE WAS DEFERRED TO AVOID. `MainWindow.OnMenuChanged`
+# calls `Report(...)` directly; only the SCENE row goes through
+# `_report(ok ? "RUSTOK ..." : "RUSTFAIL ...")`. A pattern of
+# `'RUSTOK MENU rebuilds='` matches NOTHING, every P4 clause below reads
+# NOT RUN, and a sitting reports "the menubar was not measured" on a run where
+# it was. Caught by reading the box's pasted rows back rather than my own
+# format strings -- which is the entire argument for having waited for them.
+# `Get-SbRowPattern` makes the prefix optional and keeps the tab as the anchor.
+$menuRows = @(Select-SbRows $rows (Get-SbRowPattern 'MENU' ' rebuilds='))
+if ($menuRows.Count -eq 0) {
+    Add-NotRun 'P4.1 every MENU row closes (items == enabled + disabled)' `
+        "this run is scene '$Scene' and wrote no MENU row; only a scene that materializes the menubar does"
+    Add-NotRun 'P4.2 no menu publication was lost (missed=0 on every row)' "no MENU row in this run"
+    Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' "no MENU row in this run"
+} else {
+    $badClose = @(); $badMissed = @(); $badAge = @(); $unreadable = @()
+    foreach ($r in $menuRows) {
+        $m = Get-SbMenuRowReading $r
+        if (-not $m.Ok) { $unreadable += $r; continue }
+        if ($m.Items -ne ($m.Enabled + $m.Disabled)) { $badClose += $r }
+        if ($m.Missed -ne 0) { $badMissed += $r }
+        if ($m.StateAge -ne 0) { $badAge += $r }
+    }
+    $scope = "$($menuRows.Count) MENU row(s) in this run, $($unreadable.Count) unreadable"
+    if ($unreadable.Count -eq $menuRows.Count) {
+        Add-NotRun 'P4.1 every MENU row closes (items == enabled + disabled)' `
+            "every one of this run's $($menuRows.Count) MENU row(s) is unreadable by Get-SbMenuRowReading" -Row $menuRows[-1]
+    } elseif ($badClose.Count -eq 0) {
+        Add-Assert -Name 'P4.1 every MENU row closes (items == enabled + disabled)' -Verdict 'PASS' `
+            -Detail "$scope. Three independent readings of one menubar, and the first is the sum of the other two -- a shell drawing a menubar different from the one it counted breaks it" -Row $menuRows[-1]
+    } else {
+        Add-Assert -Name 'P4.1 every MENU row closes (items == enabled + disabled)' -Verdict 'FAIL' `
+            -Detail "$($badClose.Count) of $scope do not close" -Row $badClose[0]
+    }
+
+    if ($unreadable.Count -eq $menuRows.Count) {
+        Add-NotRun 'P4.2 no menu publication was lost (missed=0 on every row)' "every MENU row is unreadable" -Row $menuRows[-1]
+    } elseif ($badMissed.Count -eq 0) {
+        Add-Assert -Name 'P4.2 no menu publication was lost (missed=0 on every row)' -Verdict 'PASS' `
+            -Detail "$scope, all missed=0 and state-age=0 ($($badAge.Count) row(s) with a non-zero age). PostToUi drops TryEnqueue's bool and returns silently on a null queue, so a menu announcement CAN vanish; a jump in seq is the only evidence that would ever exist" -Row $menuRows[-1]
+    } else {
+        Add-Assert -Name 'P4.2 no menu publication was lost (missed=0 on every row)' -Verdict 'FAIL' `
+            -Detail "$($badMissed.Count) of $scope report a lost publication. The failure mode is a STALE MENUBAR WITH NO OTHER DIAGNOSTIC -- an item enabled that should not be" -Row $badMissed[0]
+    }
+
+    # ⭐ P4.4 -- §7 stop 4, and the expected count is DERIVED FROM THIS RUN'S OWN
+    # KNOBS rather than pinned. The shell rebuilds when the CORE's answer
+    # changes: once at startup, and once more if a document was preloaded.
+    # A rebuild attached to the wrong event -- a repaint, an Opening -- makes
+    # this climb, which is the regression the field exists to make visible.
+    $preloaded = -not ([string]::IsNullOrWhiteSpace($env:SB_OPEN_PATH) -and [string]::IsNullOrWhiteSpace($env:SB_SVG))
+    $wantRebuilds = if ($preloaded) { 2 } else { 1 }
+    $lastSeq = -1
+    foreach ($r in $menuRows) {
+        $m = Get-SbMenuRowReading $r
+        if ($m.Ok -and $m.Seq -gt $lastSeq) { $lastSeq = $m.Seq }
+    }
+    if ($lastSeq -lt 0) {
+        Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
+            'no MENU row carried a readable seq=' -Row $menuRows[-1]
+    } elseif ($lastSeq -eq $wantRebuilds) {
+        Add-Assert -Name 'P4.4 the menubar rebuilt once per CORE answer, not per frame' -Verdict 'PASS' `
+            -Detail "seq reached $lastSeq, and $wantRebuilds is what this run's own knobs predict: 1 at startup$(if ($preloaded) { ' + 1 for the preloaded document' } else { ' and no document was preloaded' }). Derived from the run, not pinned" -Row $menuRows[-1]
+    } else {
+        Add-Assert -Name 'P4.4 the menubar rebuilt once per CORE answer, not per frame' -Verdict 'FAIL' `
+            -Detail "seq reached $lastSeq and this run's knobs predict $wantRebuilds ($(if ($preloaded) { 'a document WAS preloaded' } else { 'no document was preloaded' })). A count climbing with paint count means the rebuild is attached to the wrong event; ⛔ stop at the row, do not throttle it" -Row $menuRows[-1]
+    }
+}
+
+# ⛔ P2 AND P3's REMAINING ARMS HAVE NO PRODUCER, AND THAT IS A STATEMENT ABOUT
+# THE SHELL, NOT ABOUT THIS FILE. `ApplyOp` and `ApplySave` are reached from the
+# UI thread only -- Ctrl+Z, Ctrl+Y and the menu -- so no headless run emits an
+# `UNDO` or a `SAVE` row at all. Writing the assertions anyway would put two
+# permanently-NOT-RUN clauses in every sitting; writing them HERE, once, names
+# what is missing and what would produce it.
+Add-NotRun 'P2.3 undo on an EMPTY journal reports applied=0' `
+    'no scene drives ApplyOp: undo/redo are UI-thread commands and no headless run emits a RUSTOK UNDO row. ⭐ The shell already answers the design''s worry STRUCTURALLY -- ApplyOp derives `applied` from the CORE''s can-undo either side of the call, not from the status code, so an Ok on an empty journal reports applied=0 by construction. That is READ, not MEASURED, and this arm is what would measure it'
+Add-NotRun 'P3.2 two saves either side of an edit have DIFFERENT sha' `
+    'no scene drives ApplySave: save is a UI-thread command and no headless run emits a RUSTOK SAVE row, so the sha field and the file write are both unexercised. P3.1 covers the same property in byte-count form through jas_document_svg, which is what the abi probe does drive'
+Add-NotRun 'P3.3 a saved document reloads into an equal document (round trip)' `
+    'needs a SAVE row and a second engine; neither exists in a headless run. This is the arm that would catch a serializer whose output the reader cannot take back'
+
+# ===========================================================================
 # O6 -- 0xH REFUSED THROUGH THE REAL LINK, AND THE ACCEPT ARM BESIDE IT
 # ===========================================================================
 
