@@ -180,6 +180,13 @@ $liveHandlesOk = ($live.Count -eq 3) -and (@(@(2, 5, 10) | Where-Object {
 
 if ($Scene -ne 'stall') {
     Add-NotRun 'O3.3 Responding at t=2,5,10 (session 1)' "this run is scene '$Scene'; the liveness claim is about the stall (samples taken anyway: $bothText)"
+    # ⛔ THE CONTROL DECLARES TOO, AND IT DID NOT BEFORE. This branch named
+    # O3.3 correctly and that accuracy is what stopped anyone noticing that
+    # O3.C1 -- emitted by three of this chain's other four branches -- was
+    # emitted by NONE of them on a non-stall scene. An accurate statement about
+    # half a thing is what hides the other half.
+    Add-NotRun 'O3.C1 SB_UI_STALL_MS oracle-liveness control' `
+        "this run is scene '$Scene'; the oracle-liveness control is a claim about the stall's sampler, and there is no stall here to sample"
 } elseif ($live.Count -lt 3) {
     $why = if (-not $liveDispatched) { 'the session-1 sampler was never dispatched (no STALL ARMED row)' } else { "the session-1 sampler wrote $($live.Count) of 3 samples" }
     if ($uiStallMs -gt 0) {
@@ -278,6 +285,15 @@ if ($Scene -eq 'stall') {
                 -Row $stallRow
         }
     }
+} else {
+    # ⛔ AND THIS ONE NOBODY WAS LOOKING FOR. O5.1's twin was found by a person
+    # reading an assertion block against a list of clauses; that instrument can
+    # only find what the list already names, and O3.4 was not on it. A
+    # STRUCTURAL census of every top-level scene guard found this one --
+    # `scripts/check_assertion_declarations.py`, which was RED on `main` naming
+    # all three before it was green.
+    Add-NotRun 'O3.4 exactly ONE cause=resize row after the stall, at the LATEST size' `
+        "this run is scene '$Scene'; only the 'stall' scene has an interval after a stall to count resize repaints within"
 }
 
 # ===========================================================================
@@ -1123,6 +1139,17 @@ if ($Scene -eq 'stay') {
                 -Detail "the app reported pid=$rowPid but this harness launched pid $appPid" -Row $stayRow
         }
     }
+} else {
+    # ⛔ THIS `else` IS THE CLAUSE, NOT HOUSEKEEPING. Without it O5.1 was
+    # emitted NOWHERE on any non-stay scene -- not PASS, not FAIL, not NOT RUN
+    # -- while every other scene-scoped clause in this file declares. Measured
+    # on kenai 2026-09-09: an `abi` run reported 26 assertions and an `app` run
+    # 27, and the routing section that predicted "O5 (stay) reports NOT RUN"
+    # was read against the block and found to be false.
+    # `N of M` with a moving M cannot distinguish a clause that VANISHED from
+    # one that never existed, which is the entire reason NOT RUN exists here.
+    Add-NotRun 'O5.1 the STAY pid row names this run''s process' `
+        "this run is scene '$Scene'; only the 'stay' scene writes a STAY pid row"
 }
 
 # ===========================================================================
@@ -1373,6 +1400,16 @@ if ($menuRows.Count -eq 0) {
     Add-NotRun 'P4.1 every MENU row closes (items == enabled + disabled)' `
         "this run is scene '$Scene' and wrote no MENU row; only a scene that materializes the menubar does"
     Add-NotRun 'P4.2 no menu publication was lost (missed=0 on every row)' "no MENU row in this run"
+    # ⛔ P4.3 WAS THE ONE THAT VANISHED, AND ITS THREE SIBLINGS ARE WHY NOBODY
+    # SAW IT. This branch declared P4.1, P4.2 and P4.4; P4.3's own absent-guard
+    # sits inside the `else` below, reachable only when MENU rows EXIST. So on
+    # a scene with no menubar three of the four P4-MENU clauses said so and the
+    # fourth disappeared -- measured on kenai 2026-09-09, `abi` 26 assertions
+    # against `app` 27.
+    # ⇒ P4.3's own rule is "ABSENT IS NOT ZERO". This is that rule one level up:
+    # the clause enforcing it was itself the absent one.
+    Add-NotRun 'P4.3 unattached accelerators are reported, and stable across rebuilds' `
+        "this run is scene '$Scene' and wrote no MENU row; a count of unattached accelerators needs a rebuild to have happened"
     Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' "no MENU row in this run"
 } else {
     $badClose = @(); $badMissed = @(); $badAge = @(); $unreadable = @()
