@@ -6,9 +6,26 @@
 
     <Grid Background="#FF101418">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+
+        <!--
+          THE MENUBAR, AND IT IS EMPTY IN THIS FILE ON PURPOSE.
+
+          Every item is materialized at runtime from the core's own compiled
+          bundle: jas_menu_structure supplies the labels, shortcuts, dividers and
+          submenu titles, jas_menu_state supplies enabled and checked, and the
+          shell joins them on path. Authoring items here would re-author
+          menubar.yaml a second time in a language with no conformance corpus,
+          which is the exact defect the materializer law forbids and
+          check_shell_no_interpreter.py gates.
+
+          So this element is a MOUNT POINT. If it ever gains a child in this
+          file, that gate should be the thing that says so.
+        -->
+        <MenuBar x:Name="Menu" Grid.Row="0" />
 
         <!--
           The canvas the Rust core draws into. Everything inside it is painted by
@@ -20,7 +37,7 @@
           height gives the panel ZERO, and `SizeChanged` fires with height 0
           through the real window manager rather than through a test hook.
         -->
-        <SwapChainPanel x:Name="Canvas" Grid.Row="0" />
+        <SwapChainPanel x:Name="Canvas" Grid.Row="1" />
 
         <!--
           ⚠️ THE HIT-TESTABILITY FALLBACK, AND IT IS COLLAPSED BY DEFAULT.
@@ -40,7 +57,7 @@
         -->
         <Border
             x:Name="HitShield"
-            Grid.Row="0"
+            Grid.Row="1"
             Background="Transparent"
             Visibility="Collapsed" />
 
@@ -50,7 +67,7 @@
         -->
         <TextBlock
             x:Name="StatusLine"
-            Grid.Row="1"
+            Grid.Row="2"
             Margin="12,8"
             FontSize="14"
             Foreground="#CCFFFFFF"

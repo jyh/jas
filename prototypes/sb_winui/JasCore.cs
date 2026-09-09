@@ -402,6 +402,29 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_menu_state(IntPtr engine, byte[]? ctxJson, nuint ctxLen);
 
+    /// <summary>
+    /// The menubar's STATIC shape — labels, shortcuts, separators, submenu
+    /// titles. The other half of <see cref="jas_menu_state"/>.
+    ///
+    /// ⛔ WITHOUT THIS THE SHELL CAN DRAW 55 CORRECTLY-ENABLED MENU ITEMS WITH
+    /// NO TEXT ON THEM. `jas_menu_state` answers "which entries are enabled
+    /// right now" and emits neither labels nor separators nor submenu nodes, by
+    /// design — it is the cross-app byte-gate for the DYNAMIC half. Every other
+    /// port gets the static half by projecting the compiled bundle in-process,
+    /// because every other port is an interpreter; this shell is not, and §1
+    /// forbids it reading the bundle itself.
+    ///
+    /// Read ONCE — the structure cannot change without a rebuild — and joined to
+    /// <see cref="jas_menu_state"/> on `path` at each menu open.
+    ///
+    /// ⛔ TAKES NO ENGINE, AND THAT IS THE CORE'S DECISION, NOT AN OVERSIGHT.
+    /// The menubar is a property of the compiled bundle, not of a document
+    /// session. A handle passed here would be a dead arm wearing a driven arm's
+    /// signature.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_menu_structure();
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>

@@ -44,26 +44,29 @@ raw-text version of this gate would red on a fully compliant shell, and it would
 red hardest on its own documentation. (Positive control on the same reading:
 `JasCore.` occurs 81 times in code, so the lexer is not blanking everything.)
 
-⛔⛔ THE LIVE ARM IS **NOT WIRED INTO CI**, DELIBERATELY, AND THIS IS THE PART A
-READER MUST NOT SKIM
+✅ THE LIVE ARM IS WIRED (W6), AND IT WAS TURNED ON BY A RED RATHER THAN BY A
+MEMORY — WHICH IS THE PART WORTH READING
 ---------------------------------------------------------------------------
-CI runs `--self-test` ONLY. **Clause (b) is RED on `main` today, by construction:
-`MainWindow.xaml` is 59 lines and has no `MenuBar`.** Wiring the live arm now
-would land a red gate over code nobody has written yet, and a red gate facing the
-author of the code it judges is a gate that gets weakened.
+*(This block read "THE LIVE ARM IS NOT WIRED INTO CI, DELIBERATELY" from W0 until
+W4. Rewritten rather than deleted, because the mechanism it describes is the
+reason this gate is watching anything at all.)*
 
-⚠️ **SO THIS GATE IS CURRENTLY IN THE ONE STATE `check_lane_coverage.py` WARNS
-ABOUT IN ITS OWN VOICE:** *"It checks that a script is INVOKED, not that it is
-invoked correctly. A step that runs the gate with arguments that neuter it
-passes here."* A self-test-only wiring is exactly such a step. The lane-coverage
-green says this file is watched; it does not say the tree is.
+W0 landed this gate **self-test only**: clause (b) asserts the shell HAS a
+menubar, which was red on `main` by construction, and wiring a red gate over code
+nobody had written yet is how a gate gets weakened by the author of the code it
+judges.
 
-⇒ **THAT IS WHY THE DEFERRAL IS MACHINE-CHECKED AND NOT WRITTEN DOWN AS AN
-INTENTION.** `transcripts/CHECKER_RESIDUAL.md` carries an `expires-when` claim
-that `MainWindow.xaml` LACKS `MenuBar`. The moment the shell grows one, that
-precondition LAPSES, `check_deferral_expiry.py` REDS, and the live arm has to be
-wired to make it green again. **The thing that turns this gate on is a failing
-build, not somebody's memory of a row in a node list.**
+⚠️ **BUT THAT LEFT IT IN THE ONE STATE `check_lane_coverage.py` WARNS ABOUT IN ITS
+OWN VOICE:** *"It checks that a script is INVOKED, not that it is invoked
+correctly. A step that runs the gate with arguments that neuter it passes here."*
+A self-test-only wiring is exactly such a step. **Lane coverage's green said this
+file was watched; it did not say the tree was.**
+
+⇒ **SO THE DEFERRAL WAS MACHINE-CHECKED, NOT WRITTEN DOWN AS AN INTENTION** — see
+`deferral_lapsed` below. ⭐ **AND IT FIRED ON ITS FIRST REAL OCCASION, INSIDE THE
+PR THAT CAUSED IT.** W4 added a `MenuBar`, the self-test went red naming this
+missing step, and the live arm went in to discharge it. **W6 was never a row
+somebody remembered; it was a failing build.**
 
 WHAT IT DOES NOT COVER
 ----------------------
@@ -79,6 +82,16 @@ WHAT IT DOES NOT COVER
 * INTERPOLATED-STRING HOLES are opaque payload to `csharp_source.py`. An
   `enabled_when` evaluated inside `$"{...}"` would be missed. That is the safe
   direction for a ban and it is named rather than hidden.
+* ⚠️ A LOCAL VARIABLE NAMED `state` READS AS THE NAMESPACE, AND THAT IS A
+  FALSE POSITIVE THIS GATE KEEPS ON PURPOSE. W4 hit it twice within an hour of
+  the gate landing: `var state = JsonDocument.Parse(...)` then
+  `state.RootElement` is not evaluating anything, and the `\b` anchor cannot
+  help — the token really is `state.`.
+  ⛔ **THE CORRECT RESPONSE IS TO RENAME THE LOCAL, NOT TO NARROW THE GATE.**
+  Any narrowing that exempts "a local" also exempts the real thing, because the
+  shell could hold the workspace context in a local of any name. The cost is one
+  identifier; the alternative is a ban with a hole shaped exactly like the
+  defect. Both W4 sites now read `menuState`, which is clearer regardless.
 * THE OTHER PORTS. This is the C# shell alone. `workspace/menu_bar.rs` evaluates
   the same predicates in Dioxus and is SUPPOSED to -- it is an interpreter.
 """
@@ -414,8 +427,8 @@ def self_test() -> int:
         "DRIVEN; and the DEFERRAL is fixtured in all three states -- holds with no "
         "MenuBar, discharged when the live arm is wired, and FIRES on MenuBar + "
         "fixtures-only -- with the wired/unwired reader driven both ways, then "
-        "applied to the real tree. NO live-tree arm for the SHELL: the live mode "
-        "is red on main by construction (clause (b)) and is wired by W6)")
+        "applied to the real tree, where it FIRED on its first real occasion and "
+        "is now discharged: the live arm is wired (W6) and clause (b) passes)")
     return 0
 
 

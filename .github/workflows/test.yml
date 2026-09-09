@@ -240,6 +240,13 @@ jobs:
       # expiry: the moment MainWindow.xaml grows a `MenuBar`, this step REDS
       # and names the missing live arm. W6 is a failing build, not a memo.
       - run: python scripts/check_shell_no_interpreter.py --self-test
+      # ⭐ W6 — THE LIVE ARM, AND IT WAS TURNED ON BY A RED, NOT BY A MEMORY.
+      # W0 landed this gate self-test-only because its clause (b) asserts the
+      # shell HAS a menubar, which was red on `main` by construction. That
+      # deferral was machine-checked: the moment W4 added a `MenuBar` to
+      # MainWindow.xaml, the self-test REDDED and named this missing step. It
+      # fired on its first real occasion, in the PR that caused it.
+      - run: python scripts/check_shell_no_interpreter.py
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -918,6 +925,7 @@ jobs:
           python scripts/check_shell_abi_bindings.py --self-test
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
+          python scripts/check_shell_no_interpreter.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because

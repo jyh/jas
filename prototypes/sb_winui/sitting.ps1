@@ -208,7 +208,7 @@ $svgAbs = $null
 # resolved no document, set SB_SVG empty, and made both O6 runs refuse by name on
 # a knob the operator did set. The guard below catches the next one of these
 # instead of leaving it to be discovered on the box.
-$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'o6')
+$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'app', 'o6')
 $needsSvg = ($Stay -and ($svgScenes -contains $Scene)) -or
             (@($Scenes | Where-Object { $svgScenes -contains $_ }).Count -gt 0)
 if ($needsSvg) {
@@ -218,6 +218,22 @@ if ($needsSvg) {
         exit 4
     }
     $svgAbs = (Resolve-Path $Svg).Path
+}
+
+# ⛔ `app` IS AN APPLICATION, NOT A MEASUREMENT, SO IT REFUSES WITHOUT `-Stay`.
+# Every other scene completes and this script waits for that; `app` never
+# completes by design (it is the entry a person double-clicks). Launched without
+# `-Stay` it would sit until the wait expired and then be torn down -- a window
+# that opened, worked, and was killed, which reads on the far side as "the app
+# is broken" rather than "the harness was asked the wrong question". Refused BY
+# NAME, pointing at the flag, exactly as the `selection` rename is.
+if ($Scene -eq 'app' -and -not $Stay) {
+    Write-Host "REFUSED: -Scene app is the APP ENTRY and does not complete." -ForegroundColor Red
+    Write-Host "         It must be launched to HOLD:  sitting.ps1 -Stay -Scene app"
+    Write-Host "         Without -Stay this script waits for a completion that never"
+    Write-Host "         comes and then tears the window down, which looks like a"
+    Write-Host "         broken app instead of a misused harness."
+    exit 7
 }
 
 $env:SB_TOPMOST = '1'   # Windows Terminal ignores -WindowStyle Hidden; without

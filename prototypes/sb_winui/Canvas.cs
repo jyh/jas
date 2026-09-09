@@ -195,9 +195,51 @@ internal sealed class UiStallDoneCmd : Cmd
     internal int Tid;
 }
 
+/// <summary>Re-read the menu from the core and publish it for the UI thread.</summary>
+internal sealed class MenuRefreshCmd : Cmd
+{
+    internal string Cause = "opening";
+}
+
+/// <summary>Write the document as SVG. The path is chosen on the UI thread (a
+/// picker lives there); the SERIALIZATION is a call for the engine and so
+/// happens here (BL2).</summary>
+internal sealed class SaveCmd : Cmd
+{
+    internal string Path = "";
+}
+
+/// <summary>Load an SVG the UI thread chose. Same split as <see cref="SaveCmd"/>.</summary>
+internal sealed class OpenCmd : Cmd
+{
+    internal string Path = "";
+}
+
+/// <summary>One op envelope from the shell's small, explicit action table.</summary>
+internal sealed class OpCmd : Cmd
+{
+    internal string OpJson = "";
+    internal string Label = "";
+}
+
 internal sealed class QuitCmd : Cmd
 {
 }
+
+/// <summary>
+/// One published reading of the menu: the STATIC half, the DYNAMIC half, and
+/// the sequence number that dates it.
+///
+/// ⛔ IMMUTABLE, AND THAT IS THE THREAD CONTRACT. The render thread builds one
+/// and swaps the reference; the UI thread reads whatever is there. Nothing is
+/// edited in place, so the UI thread can never observe a half-written menu —
+/// which would look like a core defect and be a shell defect.
+///
+/// `Seq` is what turns §3.2's one-open staleness from a claim into a number on
+/// the receipt (`state-age`): the UI thread records the `Seq` it drew and the
+/// next row says how far behind it was.
+/// </summary>
+internal sealed record MenuSnapshot(string StructureJson, string StateJson, long Seq);
 
 /// <summary>
 /// ⭐ THE RETAINED CANVAS. One object, one render thread, one engine.
@@ -518,6 +560,59 @@ internal sealed unsafe class Canvas : IDisposable
     internal Action? SceneCompleted { get; set; }
 
     /// <summary>
+    /// The menu the UI thread should draw, published by the render thread.
+    ///
+    /// ⛔ THIS IS §3.2's DECISION MADE VISIBLE, AND IT IS NOT A CACHE FOR
+    /// SPEED. Coat 3's handoff is fire-and-forget by design — a blocking wait in
+    /// the resize path is the 09/03 freeze's deadlock. But a menu `Opening`
+    /// handler needs an ANSWER before it can populate, and it runs on the UI
+    /// thread while the render thread may be inside a 360 ms paint. So the menu
+    /// is drawn from the LAST published state and `Opening` enqueues a refresh
+    /// for the NEXT open. That is a bounded one-open staleness, and `Seq` is
+    /// what makes it visible on the receipt as `state-age` rather than merely
+    /// true.
+    ///
+    /// ⛔ A REFERENCE SWAP OF AN IMMUTABLE RECORD, NEVER A MUTATION. Two threads
+    /// touch this; an object edited in place would let the UI thread read a
+    /// half-written menu, which would look like a core defect.
+    /// </summary>
+    internal volatile MenuSnapshot? Menu;
+
+    /// <summary>The document has unsaved changes. Raised on the UI thread.</summary>
+    internal Action<bool>? DocumentDirtyChanged { get; set; }
+
+    /// <summary>
+    /// A new <see cref="Menu"/> has been published. Raised on the UI thread.
+    ///
+    /// ⚖️ THIS REPLACES §3.2's `Opening`-PULL, AND THE CHANGE IMPROVES THE
+    /// DESIGN RATHER THAN WORKING AROUND IT. §3.2 chose "draw from the last
+    /// published state, refresh on `Opening`" to avoid a UI-thread wait on a
+    /// render thread that may be mid-paint — the right instinct. But it rests on
+    /// a WinUI claim this seat cannot check (that a top-level `MenuBarItem`
+    /// raises an `Opening` the shell can hook), and it accepts a one-open
+    /// staleness as the price.
+    ///
+    /// ⇒ PUSHING COSTS NEITHER. The render thread already owns a
+    /// `DispatcherQueue` handle and already posts to the UI thread; publishing a
+    /// snapshot and announcing it is the same fire-and-forget handoff coat 3
+    /// uses everywhere else. **There is no blocking wait, no platform event to
+    /// verify, and no staleness at all** — the menu is rebuilt exactly when the
+    /// core's answer changes, which is startup, an open, and a mutation.
+    ///
+    /// `menu-rebuilds` still counts them, so §7 stop 4's per-frame regression
+    /// stays visible; it is now a count of CORE ANSWERS, not of menu openings.
+    /// </summary>
+    internal Action? MenuChanged { get; set; }
+
+    /// <summary>How many times the render thread has rebuilt the menu (P4).</summary>
+    private long _menuRebuilds;
+
+    /// <summary>The static half, read ONCE — it cannot change without a rebuild.</summary>
+    private string? _menuStructure;
+
+    private bool _dirty;
+
+    /// <summary>
     /// Raised ON THE UI THREAD after a hash row has been written. O1's
     /// `SB_RESIZE` walk steps on THIS and not on <see cref="SurfaceSettled"/>:
     /// the previous stop is not finished when its surface settles, it is
@@ -639,6 +734,25 @@ internal sealed unsafe class Canvas : IDisposable
 
     /// <summary>Paint once and hash the back buffer BEFORE presenting it (O1).</summary>
     internal void Hash(string label) => _queue.Add(new HashCmd { Label = label });
+
+    /// <summary>
+    /// Ask for a fresh menu reading. ⛔ ENQUEUED, NEVER AWAITED: the caller is
+    /// the UI thread inside an `Opening` handler, and a blocking wait there is a
+    /// UI-thread stall on a render thread that may be mid-paint (§3.2).
+    /// </summary>
+    internal void RefreshMenu(string cause) => _queue.Add(new MenuRefreshCmd { Cause = cause });
+
+    internal void Save(string path) => _queue.Add(new SaveCmd { Path = path });
+
+    internal void Open(string path) => _queue.Add(new OpenCmd { Path = path });
+
+    /// <summary>
+    /// Send one op envelope. BL1: the shell sends EVENTS, never state — and the
+    /// envelope is a literal from the shell's small action table, never composed
+    /// from a workspace expression.
+    /// </summary>
+    internal void Op(string opJson, string label) =>
+        _queue.Add(new OpCmd { OpJson = opJson, Label = label });
 
     internal void Quit() => _queue.Add(new QuitCmd());
 
@@ -895,6 +1009,28 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case UiStallDoneCmd u:
                     ApplyUiStallDone(u);
+                    break;
+
+                case MenuRefreshCmd mr:
+                    ApplyMenuRefresh(mr.Cause);
+                    break;
+
+                case SaveCmd sv:
+                    ApplySave(sv.Path);
+                    break;
+
+                case OpenCmd op:
+                    if (ApplyOpen(op.Path)) { dirty = true; cause = "open"; }
+                    break;
+
+                case OpCmd oc:
+                    if (ApplyOp(oc)) { dirty = true; cause = oc.Label; }
+                    // The menu's enabled set follows a document mutation, so the
+                    // published state is refreshed in the SAME drain. §7 stop 3
+                    // names this as the remedy if the one-open staleness is ever
+                    // visible to a person; it is cheap, so it is done here
+                    // rather than waited for.
+                    ApplyMenuRefresh("mutation");
                     break;
             }
         }
@@ -1908,6 +2044,10 @@ internal sealed unsafe class Canvas : IDisposable
             {
                 ok = RenderAbiProbe();
             }
+            else if (string.Equals(scene, "app", StringComparison.OrdinalIgnoreCase))
+            {
+                ok = RenderApp();
+            }
             else if (string.Equals(scene, "selection", StringComparison.OrdinalIgnoreCase))
             {
                 // ⛔ THE OLD NAME IS REFUSED, POINTING AT THE NEW ONE, AND THAT
@@ -1932,7 +2072,7 @@ internal sealed unsafe class Canvas : IDisposable
                 // square would report RUSTOK over the wrong workload.
                 LastStatus = $"SB_SCENE='{scene}' is not recognised; use 'benchmark', "
                            + "'goldens', 'document', 'retained', 'stall', 'pointer', "
-                           + "'stay', 'abi' or 'selection-marquee'";
+                           + "'stay', 'abi', 'app' or 'selection-marquee'";
                 _report($"RUSTFAIL {LastStatus} {Tids()}");
                 return;
             }
@@ -2634,6 +2774,300 @@ internal sealed unsafe class Canvas : IDisposable
         LastStatus = $"STAY pid={pid} surface={_width}x{_height} — run-and-stay: this scene "
                    + $"does NOT complete and does NOT exit; stop it by PID {Tids()}";
         return true;
+    }
+
+    /// <summary>
+    /// ⭐ THE APP ENTRY — what a person double-clicks. Wave 1's whole point.
+    ///
+    /// ⛔ IT DOES NOT COMPLETE AND IT DOES NOT EXIT, like `stay`. Every other
+    /// scene is a MEASUREMENT that ends; this one is an application. A scene
+    /// that posted `SceneCompleted` here would tear down a window a person is
+    /// using.
+    ///
+    /// ⚖️ WHY `SB_SCENE` UNSET STILL MEANS `benchmark` (§3.3): every historical
+    /// invocation — including the committed 4K sweep, which sets no knob — keeps
+    /// its meaning. **The app a person launches is not the app the harness
+    /// launches**, and that is a stated cost of not breaking the harness
+    /// contract, not an oversight. Wave 2 re-opens it once panels make `app` the
+    /// only sensible default.
+    ///
+    /// It opens `SB_SVG` if one is set, so the harness can drive it against a
+    /// pinned fixture; with nothing set it starts on an EMPTY document, which is
+    /// the state a person actually meets.
+    /// </summary>
+    private bool RenderApp()
+    {
+        if (_swapChain is null || _engine == IntPtr.Zero)
+        {
+            LastStatus = "APP FAILED: no swapchain";
+            return false;
+        }
+
+        // ⛔ THE PICKER'S FALLBACK, AND IT IS §7 STOP 2's NAMED ONE. WinAppSDK
+        // pickers need a window handle and, unpackaged, an initialisation call
+        // — unmeasured on the box. `SB_OPEN_PATH` drives the SAME code path so
+        // P1 can be measured through the fallback with the picker recorded NOT
+        // RUN. ⛔ Never a synthetic receipt wearing `PICKER`.
+        var preload = Environment.GetEnvironmentVariable("SB_OPEN_PATH")
+                   ?? Environment.GetEnvironmentVariable("SB_SVG");
+        if (!string.IsNullOrWhiteSpace(preload) && !ApplyOpen(preload))
+        {
+            return false;
+        }
+
+        ApplyMenuRefresh("startup");
+        RepaintOnce("app", 0);
+
+        var m = Menu;
+        var (items, enabled) = m is null ? (-1, -1) : CountMenu(m.StateJson);
+        LastStatus =
+            $"APP pid={Environment.ProcessId} surface={_width}x{_height} "
+          + $"menu-rebuilds={_menuRebuilds} menu-items={items} menu-enabled={enabled} "
+          + $"doc={(_documentPath is null ? "(empty)" : System.IO.Path.GetFileName(_documentPath))} "
+          + $"— run-and-stay: this scene does NOT complete and does NOT exit";
+        _scenePostsItsOwnCompletion = true;
+        return true;
+    }
+
+    /// <summary>`(items, enabled)` from a published `menu_state` array.</summary>
+    private static (int Items, int Enabled) CountMenu(string stateJson)
+    {
+        if (stateJson.Length == 0) { return (-1, -1); }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(stateJson);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return (-1, -1);
+            }
+            var items = 0;
+            var on = 0;
+            foreach (var row in doc.RootElement.EnumerateArray())
+            {
+                items++;
+                if (row.TryGetProperty("enabled", out var e)
+                    && e.ValueKind == System.Text.Json.JsonValueKind.True) { on++; }
+            }
+            return (items, on);
+        }
+        catch (Exception)
+        {
+            return (-1, -1);
+        }
+    }
+
+    /// <summary>
+    /// Re-read the menu and PUBLISH it. Both halves are calls for this engine's
+    /// process, so both happen here (BL2).
+    ///
+    /// ⛔ THE STATIC HALF IS READ ONCE. `jas_menu_structure` is a projection of
+    /// the compiled bundle and cannot change without a rebuild; re-reading it on
+    /// every open would be the per-frame regression §7 stop 4 names, one level
+    /// down. `menu-rebuilds` on the receipt is what makes that visible.
+    /// </summary>
+    private void ApplyMenuRefresh(string cause)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        _menuStructure ??= JasCore.TakeString(JasCore.jas_menu_structure());
+
+        var ctx = ShellMenuCtx();
+        // ⛔ NOT NAMED `state`. `check_shell_no_interpreter.py` bans the token
+        // `state.` in shell code because that is the workspace context's own
+        // spelling, and a local of that name collides with it. The gate cannot
+        // tell them apart and MUST NOT be taught to — narrowing it to exempt
+        // "locals" would exempt the real thing too. Renaming is the correct
+        // response to this gate, and it reads better anyway.
+        var menuState = JasCore.TakeString(
+            JasCore.jas_menu_state(_engine, ctx, (nuint)ctx.Length));
+
+        if (_menuStructure.Length == 0 || menuState.Length == 0)
+        {
+            // ⛔ AN EMPTY SPAN IS A REFUSAL THE CORE MAKES BY NAME, not "a menu
+            // with no items". Publishing it would draw an empty menubar and read
+            // as a working app with nothing in the File menu.
+            _report($"RUSTFAIL MENU REFUSED structure-bytes={_menuStructure.Length} "
+                  + $"state-bytes={menuState.Length} cause={cause} {Tids()}");
+            return;
+        }
+
+        _menuRebuilds++;
+        Menu = new MenuSnapshot(_menuStructure, menuState, _menuRebuilds);
+        // Published FIRST, announced second. The UI thread reads `Menu`, so the
+        // reference must already be the new one when the notification lands.
+        PostToUi(() => MenuChanged?.Invoke());
+    }
+
+    /// <summary>
+    /// The SHELL's half of the menu ctx (§4.1): session chrome only.
+    ///
+    /// ⛔ IT ASSERTS NOTHING THE ENGINE OWNS. `active_document.{has_selection,
+    /// selection_count, can_undo, can_redo, is_modified}` are the engine's and it
+    /// WINS on them — a shell that could claim `can_undo` would be holding
+    /// document state, which is BL1. Tabs, filenames and saved layouts have
+    /// never been the engine's, so they are supplied here.
+    /// </summary>
+    private byte[] ShellMenuCtx() =>
+        System.Text.Encoding.UTF8.GetBytes(
+            "{\"state\":{\"tab_count\":1},"
+          + "\"active_document\":{\"has_filename\":" + (_documentPath is null ? "false" : "true") + "},"
+          + "\"workspace\":{\"has_saved_layout\":false}}");
+
+    /// <summary>Where the open document came from, or null. Shell session state.</summary>
+    private string? _documentPath;
+
+    /// <summary>
+    /// Serialize the document and write it. P3's receipt.
+    ///
+    /// ⛔ THE SHA IS ON THE ROW BECAUSE "the file is non-empty" IS NOT AN
+    /// ORACLE. A serializer that wrote a constant would satisfy a byte count on
+    /// every save; two saves either side of an edit must differ, and only a
+    /// digest on the row lets a reader see that.
+    /// </summary>
+    private void ApplySave(string path)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        try
+        {
+            var svg = JasCore.TakeString(JasCore.jas_document_svg(_engine));
+            if (svg.Length == 0)
+            {
+                _report($"RUSTFAIL SAVE REFUSED path={path} — the core returned the "
+                      + $"EMPTY span; nothing was written {Tids()}");
+                return;
+            }
+            System.IO.File.WriteAllText(path, svg);
+            var sha = Sha256Of(svg);
+            _documentPath = path;
+            SetDirty(false);
+            _report($"RUSTOK SAVE path={path} bytes={svg.Length} sha={sha} {Tids()}");
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL SAVE path={path} threw {ex.GetType().Name}: {ex.Message} {Tids()}");
+        }
+    }
+
+    /// <summary>Load a document the UI thread chose. P1's receipt.</summary>
+    private bool ApplyOpen(string path)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        byte[] bytes;
+        try
+        {
+            bytes = System.IO.File.ReadAllBytes(path);
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL OPEN path={path} unreadable: {ex.GetType().Name} {Tids()}");
+            return false;
+        }
+
+        if (!ApplyLoad(new LoadCmd { Svg = bytes, Label = System.IO.Path.GetFileName(path) }))
+        {
+            // ⛔ THE REJECTION CLASS COMES FROM THE CORE, NOT FROM A GUESS HERE.
+            var detail = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL OPEN REFUSED path={path} "
+                  + $"detail={(detail.Length == 0 ? LastStatus : detail)} {Tids()}");
+            return false;
+        }
+
+        var elements = ElementCount();
+        _documentPath = path;
+        SetDirty(false);
+        ApplyMenuRefresh("open");
+        _report($"RUSTOK OPEN path={path} bytes={bytes.Length} elements={elements} {Tids()}");
+        return true;
+    }
+
+    /// <summary>
+    /// One op envelope through the ABI. P2's receipt for undo/redo.
+    ///
+    /// ⚠️ `Ok` IS NOT "SOMETHING HAPPENED" — `undo`/`redo` return it
+    /// unconditionally on an empty journal. So the row carries `can-undo` from
+    /// the CORE either side of the call, and `applied` is derived from that
+    /// transition rather than from the status code.
+    /// </summary>
+    private bool ApplyOp(OpCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        var before = CanUndoRedo();
+        var bytes = System.Text.Encoding.UTF8.GetBytes(cmd.OpJson);
+        var st = JasCore.jas_dispatch_event(_engine, bytes, (nuint)bytes.Length);
+        var after = CanUndoRedo();
+
+        if (st != JasCore.StatusOk)
+        {
+            var detail = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL {cmd.Label.ToUpperInvariant()} status={st} "
+                  + $"({JasCore.ExplainStatus(st)}) detail={detail} {Tids()}");
+            return false;
+        }
+
+        var applied = before != after ? 1 : 0;
+        if (applied == 1) { SetDirty(true); }
+        _report($"RUSTOK {cmd.Label.ToUpperInvariant()} applied={applied} "
+              + $"can-undo={after.CanUndo} can-redo={after.CanRedo} {Tids()}");
+        return true;
+    }
+
+    /// <summary>`(can_undo, can_redo)` read from the CORE's own menu evaluation.</summary>
+    private (bool CanUndo, bool CanRedo) CanUndoRedo()
+    {
+        var ctx = ShellMenuCtx();
+        var json = JasCore.TakeString(
+            JasCore.jas_menu_state(_engine, ctx, (nuint)ctx.Length));
+        if (json.Length == 0) { return (false, false); }
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+        {
+            return (false, false);
+        }
+        bool u = false, r = false;
+        foreach (var row in doc.RootElement.EnumerateArray())
+        {
+            if (!row.TryGetProperty("action", out var a)
+                || a.ValueKind != System.Text.Json.JsonValueKind.String) { continue; }
+            var on = row.TryGetProperty("enabled", out var e)
+                     && e.ValueKind == System.Text.Json.JsonValueKind.True;
+            if (a.GetString() == "undo") { u = on; }
+            else if (a.GetString() == "redo") { r = on; }
+        }
+        return (u, r);
+    }
+
+    /// <summary>How many elements the core says the document holds.</summary>
+    private int ElementCount()
+    {
+        try
+        {
+            var json = JasCore.TakeString(JasCore.jas_document_json(_engine));
+            if (json.Length == 0) { return -1; }
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty("elements", out var els)
+                   && els.ValueKind == System.Text.Json.JsonValueKind.Array
+                ? els.GetArrayLength()
+                : -1;
+        }
+        catch (Exception)
+        {
+            // -1, never 0: "I could not read it" and "it is empty" are different
+            // answers and a receipt must not collapse them.
+            return -1;
+        }
+    }
+
+    private void SetDirty(bool dirty)
+    {
+        if (_dirty == dirty) { return; }
+        _dirty = dirty;
+        PostToUi(() => DocumentDirtyChanged?.Invoke(dirty));
+    }
+
+    private static string Sha256Of(string text)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(text));
+        return Convert.ToHexString(bytes).ToLowerInvariant()[..16];
     }
 
     /// <summary>
