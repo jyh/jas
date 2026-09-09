@@ -3063,6 +3063,16 @@ internal sealed unsafe class Canvas : IDisposable
         _documentPath = path;
         SetDirty(false);
         ApplyMenuRefresh("open");
+        // ⭐ THE DUMP IS P1's SECOND READER, AND WITHOUT IT P1 IS `elements > 0`.
+        // That is satisfied by a walk that returns a constant, by a walk that
+        // counts the wrong nodes, and by a document nobody replaced. With the
+        // dump the harness performs its OWN walk of the same bytes
+        // (`Get-SbFlatElements`) and P1 asserts the two AGREE -- two
+        // implementations of one rule, and a mutant in either is visible.
+        // ⚠️ It is NOT a witness to the CORE: both readers read the same span,
+        // so a core that serialised the wrong document satisfies both. Named
+        // here so the agreement is not read as more than it is.
+        ApplyDump("sb-doc-open.json");
         _report($"RUSTOK OPEN path={path} bytes={bytes.Length} elements={elements} {Tids()}");
         return true;
     }
@@ -3124,6 +3134,31 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>How many elements the core says the document holds.</summary>
+    /// <summary>
+    /// P1's reading: how many elements the core is holding.
+    ///
+    /// ⛔⛔ THIS READ THE KEY `elements`, AND THE CORE HAS NEVER WRITTEN ONE.
+    /// Measured on kenai 2026-09-09 on a HEALTHY open of a real fixture:
+    /// `RUSTOK OPEN path=... bytes=819 elements=-1`. Confirmed at the source
+    /// rather than at the row -- `geometry::test_json::document_to_test_json`
+    /// emits `layers`, `selected_layer` and `selection` (plus four optional
+    /// keys), and no branch of it can produce `elements`.
+    /// ⇒ EVERY SUCCESSFUL OPEN REPORTED ITSELF UNREADABLE, so P1's own receipt
+    /// field could carry only one value and an assertion over it would be a
+    /// permanent red or decorative.
+    ///
+    /// ⭐ THE RULE IS `Get-SbFlatElements`'s, DELIBERATELY AND EXACTLY: a node
+    /// carrying a `type`, reached through `layers` and `children`. The harness
+    /// already walks documents that way, so the two counts are two independent
+    /// implementations of one rule over the same bytes -- which is what lets
+    /// P1 assert they AGREE instead of asserting a number is positive. A
+    /// walker that returned a constant satisfies `> 0` and fails that.
+    ///
+    /// ⚠️ Layer groups carry a `type` and are therefore COUNTED, as they are on
+    /// the harness's side. The number is "typed nodes in the document", not
+    /// "leaf shapes"; it is a witness that the document crossed, not a count
+    /// anyone should read as artwork.
+    /// </summary>
     private int ElementCount()
     {
         try
@@ -3131,17 +3166,32 @@ internal sealed unsafe class Canvas : IDisposable
             var json = JasCore.TakeString(JasCore.jas_document_json(_engine));
             if (json.Length == 0) { return -1; }
             using var doc = System.Text.Json.JsonDocument.Parse(json);
-            return doc.RootElement.TryGetProperty("elements", out var els)
-                   && els.ValueKind == System.Text.Json.JsonValueKind.Array
-                ? els.GetArrayLength()
-                : -1;
+            return CountTypedNodes(doc.RootElement);
         }
         catch (Exception)
         {
             // -1, never 0: "I could not read it" and "it is empty" are different
-            // answers and a receipt must not collapse them.
+            // answers and a receipt must not collapse them. Now that the walk
+            // is real, 0 is REACHABLE and means an empty document -- which is
+            // exactly why the two must stay distinguishable.
             return -1;
         }
+    }
+
+    /// <summary>Typed nodes under `node`, through `layers` and `children`.</summary>
+    private static int CountTypedNodes(System.Text.Json.JsonElement node)
+    {
+        if (node.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            var total = 0;
+            foreach (var item in node.EnumerateArray()) { total += CountTypedNodes(item); }
+            return total;
+        }
+        if (node.ValueKind != System.Text.Json.JsonValueKind.Object) { return 0; }
+        var n = node.TryGetProperty("type", out _) ? 1 : 0;
+        if (node.TryGetProperty("layers", out var layers)) { n += CountTypedNodes(layers); }
+        if (node.TryGetProperty("children", out var children)) { n += CountTypedNodes(children); }
+        return n;
     }
 
     private void SetDirty(bool dirty)
