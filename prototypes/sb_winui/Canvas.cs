@@ -2829,6 +2829,54 @@ internal sealed unsafe class Canvas : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// `(nodes, labelled, kinds)` from a `menu_structure` array.
+    ///
+    /// ⛔ `labelled` IS SEPARATE FROM `nodes` BECAUSE THAT IS THE FAILURE THIS
+    /// BINDING HAS. A structure that crossed as the right SHAPE with empty
+    /// strings in every label would give a menubar of blank items — and
+    /// `nodes` alone reads identically for both. `kinds` is the distinct kind
+    /// set, so a walk that collapsed separators into items is visible too.
+    ///
+    /// Returns `(-1, -1, "REFUSED")` for the empty span, which the core returns
+    /// by name. ⛔ Never `(0, 0, ...)`.
+    /// </summary>
+    private static (int Nodes, int Labelled, string Kinds) StructureReading(string json)
+    {
+        if (json.Length == 0) { return (-1, -1, "REFUSED"); }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return (-1, -1, "NOT-AN-ARRAY");
+            }
+            var nodes = 0;
+            var labelled = 0;
+            var kinds = new SortedSet<string>();
+            foreach (var row in doc.RootElement.EnumerateArray())
+            {
+                nodes++;
+                if (row.TryGetProperty("kind", out var k)
+                    && k.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    kinds.Add(k.GetString() ?? "?");
+                }
+                if (row.TryGetProperty("label", out var l)
+                    && l.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrEmpty(l.GetString()))
+                {
+                    labelled++;
+                }
+            }
+            return (nodes, labelled, string.Join("|", kinds));
+        }
+        catch (Exception)
+        {
+            return (-1, -1, "UNPARSEABLE");
+        }
+    }
+
     /// <summary>`(items, enabled)` from a published `menu_state` array.</summary>
     private static (int Items, int Enabled) CountMenu(string stateJson)
     {
@@ -3128,6 +3176,16 @@ internal sealed unsafe class Canvas : IDisposable
           + "\"active_document\":{\"has_filename\":false},"
           + "\"workspace\":{\"has_saved_layout\":false}}");
 
+        // ⛔ THE FIFTH BINDING, AND IT IS HERE FOR DIAGNOSTIC SEPARATION RATHER
+        // THAN COVERAGE TIDINESS. `jas_menu_structure` already has a consumer —
+        // the `app` scene materializes the menubar from it. But `app` is the
+        // scene most likely to fail for reasons that have nothing to do with
+        // marshalling: an unpackaged picker, a WinUI control, a window handle.
+        // If it will not launch on the box, nothing would then say whether this
+        // binding crosses correctly. The probe answers that on its own.
+        var structure = JasCore.TakeString(JasCore.jas_menu_structure());
+        var (nodes, labelled, kinds) = StructureReading(structure);
+
         var (items0, enabled0, undo0) = MenuReading(ctx);
         if (items0 < 0)
         {
@@ -3168,7 +3226,8 @@ internal sealed unsafe class Canvas : IDisposable
         LastStatus =
             $"ABI menu-items={structural} menu-enabled={enabled0}/{enabled2} "
           + $"can-undo={undo0}/{undo1}/{undo2} edit={edit} undo={undo} "
-          + $"detail={(detail.Length == 0 ? "none" : detail)} svg-bytes={svg0}/{svg1}";
+          + $"detail={(detail.Length == 0 ? "none" : detail)} svg-bytes={svg0}/{svg1} "
+          + $"struct-nodes={nodes} struct-labelled={labelled} struct-kinds={kinds}";
 
         // Every field must be capable of disagreeing with the shape wave 1
         // expects, and the ones that are NOT are named rather than assumed:
