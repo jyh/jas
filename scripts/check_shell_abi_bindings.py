@@ -14,11 +14,19 @@ could tell them apart:
   * `check_cbindgen_freshness.py` keeps `jas_dioxus/include/jas_ffi.h` CURRENT
     with the Rust, and stops there. Nothing reads the header back.
 
-Measured before this gate was written, over `prototypes/**/*.cs`:
+Measured before this gate was written, with a positive control (`check_` hits
+59 files under `scripts/`, so the one-line answer is a reading and not a broken
+query):
 
     grep -rln 'jas_ffi.h' scripts/ .github/workflows/  ->  check_cbindgen_freshness.py
-    ...and that file's own "WHAT IT DOES NOT COVER" says it compares the header
-    to the RUST, never to a caller.
+
+⛔ THAT COMMAND NOW RETURNS **TWO** FILES, AND THE SECOND IS THIS ONE. Written
+out because a measurement quoted in prose is exactly the kind of claim that goes
+stale the moment its own repair lands, and then reads as a defect in the
+sentence rather than as its subject. The finding was: ONE file named the header,
+and `check_cbindgen_freshness.py:57` says of itself that it compares the header
+to the RUST -- "it does not check that the header is CORRECT, only that it is
+CURRENT". Nothing read it back against a caller.
 
 `prototypes/sb_winui/JasCore.cs` already carries the defect class in PROSE, in
 the `JasBytes` doc comment:
