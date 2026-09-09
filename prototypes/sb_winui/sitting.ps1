@@ -79,7 +79,16 @@ param(
 
     # ---- F-2 -------------------------------------------------------------
     [switch]$Stay,
-    [string]$Scene = 'stay',
+    # ⛔ THE DEFAULT IS EMPTY, NOT `stay`, AND THAT IS WHAT MAKES THE REFUSAL
+    # BELOW POSSIBLE. `-Scene` binds only under `-Stay`; with `stay` as the
+    # default there is no way to tell `sitting.ps1 -Scene abi` (a caller who
+    # named a scene and will be ignored) from `sitting.ps1` (a caller who named
+    # nothing and wants the default sitting). Measured on kenai 2026-09-09: the
+    # first ran the DEFAULT NINE-RUN SITTING silently -- ~15 minutes of the
+    # wrong experiment and a log with no ABI row in it, which reads as "the abi
+    # scene printed nothing". Resolved to `stay`
+    # in the `-Stay` path below, so no existing invocation changes meaning.
+    [string]$Scene = '',
     [int]$Stop = 0,
     [switch]$Force,
 
@@ -182,6 +191,55 @@ if ($Stop -gt 0) {
 }
 
 # ===========================================================================
+# ⛔ `-Scene` WITHOUT `-Stay` IS REFUSED BY NAME, POINTING AT THE FLAG THAT WORKS
+# ===========================================================================
+#
+# THE DEFECT THIS CLOSES, MEASURED ON KENAI 2026-09-09: the fleet routed `sitting.ps1 -Scene abi` to the one seat with hands on
+# the box. `-Scene` is read only by the `-Stay` path; the sitting path reads
+# `-Scenes`. So the flag was ACCEPTED, IGNORED, and the default nine-run sitting
+# ran instead -- benchmark x2, document, retained, stall, pointer x3, goldens --
+# producing a log with no `ABI` row anywhere in it.
+#
+# ⇒ 🔑 A FLAG THAT IS ACCEPTED AND IGNORED IS WORSE THAN ONE THAT IS REJECTED,
+#   AND IT COSTS THE MOST ON THE SEAT LEAST ABLE TO DIAGNOSE IT. The reader gets
+#   a full, green, plausible run of an experiment they did not ask for, and the
+#   absence of their row reads as a finding about the scene.
+#
+# ⛔ AND IT IS A REFUSAL, NOT A HELPFUL RE-INTERPRETATION. Silently treating
+# `-Scene abi` as `-Scenes abi` would be the same defect with a better outcome:
+# the next flag that collides gets guessed at too. Refused BY NAME, pointing at
+# the flag that does what the caller meant, exactly as the `selection` rename is.
+if (-not $Stay -and $Scene -ne '') {
+    if (-not $sceneSpec.ContainsKey($Scene)) {
+        Write-Host "REFUSED: -Scene '$Scene' is not a scene this harness knows." -ForegroundColor Red
+        Write-Host "         Known: $(($sceneSpec.Keys | Sort-Object) -join ', ')"
+        exit 7
+    }
+    Write-Host "REFUSED: -Scene binds only under -Stay, and you did not pass -Stay." -ForegroundColor Red
+    Write-Host "         Without -Stay this script would have ACCEPTED and IGNORED the flag"
+    Write-Host "         and run the DEFAULT sitting ($($Scenes -join ', ')) -- a full green run"
+    Write-Host "         of an experiment you did not ask for, with no '$Scene' row in the log."
+    if ($sceneSpec[$Scene].Holds) {
+        Write-Host "         '$Scene' HOLDS (it does not complete and does not exit). Two routes:"
+        Write-Host "           hold it for a person :  sitting.ps1 -Stay -Scene $Scene"
+        Write-Host "           drive it and tear it down:  sitting.ps1 -Scenes $Scene"
+    } else {
+        Write-Host "         Drive it with:  sitting.ps1 -Scenes $Scene"
+    }
+    exit 7
+}
+# ⛔ RESOLVED ONLY NOW, AND ONLY FOR THE `-Stay` PATH. Everything above needed
+# to see the caller's EMPTY, and everything below needs a scene name.
+if ($Scene -eq '') { $Scene = 'stay' }
+if ($Stay -and -not $sceneSpec.ContainsKey($Scene)) {
+    Write-Host "REFUSED: -Scene '$Scene' is not a scene this harness knows how to wait for." -ForegroundColor Red
+    Write-Host "         Known: $(($sceneSpec.Keys | Sort-Object) -join ', ')"
+    Write-Host "         A -Stay with no completion row would be waited on by a SLEEP, which is"
+    Write-Host "         the defect the scene table replaces. Add it there with the row it holds on."
+    exit 7
+}
+
+# ===========================================================================
 # The cdylib, first, every time (see the header)
 # ===========================================================================
 if (-not $NoRebuild -and -not $DryRun) {
@@ -220,21 +278,21 @@ if ($needsSvg) {
     $svgAbs = (Resolve-Path $Svg).Path
 }
 
-# ⛔ `app` IS AN APPLICATION, NOT A MEASUREMENT, SO IT REFUSES WITHOUT `-Stay`.
-# Every other scene completes and this script waits for that; `app` never
-# completes by design (it is the entry a person double-clicks). Launched without
-# `-Stay` it would sit until the wait expired and then be torn down -- a window
-# that opened, worked, and was killed, which reads on the far side as "the app
-# is broken" rather than "the harness was asked the wrong question". Refused BY
-# NAME, pointing at the flag, exactly as the `selection` rename is.
-if ($Scene -eq 'app' -and -not $Stay) {
-    Write-Host "REFUSED: -Scene app is the APP ENTRY and does not complete." -ForegroundColor Red
-    Write-Host "         It must be launched to HOLD:  sitting.ps1 -Stay -Scene app"
-    Write-Host "         Without -Stay this script waits for a completion that never"
-    Write-Host "         comes and then tears the window down, which looks like a"
-    Write-Host "         broken app instead of a misused harness."
-    exit 7
-}
+# ⛔ THE `-Scene app` REFUSAL THAT STOOD HERE IS ABSORBED INTO THE GENERAL ONE
+# ABOVE, NOT DELETED. It was right and it was the model for the general case; it
+# was also narrower than its own reason. Its text said `app` "does not complete"
+# and named `-Stay -Scene app` as the only route -- both true of `stay` too,
+# which had no such refusal, and the general form now reads `Holds` off the
+# scene table so a THIRD holding scene inherits the refusal instead of needing
+# someone to remember to write it. ⇒ A rule stated about one instance reads as
+# covering the class, and nothing tests the difference.
+#
+# ⚠️ AND ONE CLAUSE OF IT IS NOW FALSE, WHICH IS WHY IT COULD NOT SIMPLY MOVE:
+# it said `-Scene app` without `-Stay` "waits for a completion that never comes
+# and then tears the window down". `app` is in the scene table now, so
+# `-Scenes app` is a legitimate machine route -- launch, wait for
+# `RUSTOK APP pid=`, assert, tear down by pid -- and the refusal above names
+# BOTH routes for a holding scene rather than only the holding one.
 
 $env:SB_TOPMOST = '1'   # Windows Terminal ignores -WindowStyle Hidden; without
                         # this the harness photographs its own console.
@@ -297,7 +355,7 @@ if ($Stay) {
         Write-Host "  scene        : $Scene"
         Write-Host "  svg          : $(if ($svgAbs) { $svgAbs } else { '(none)' })"
         Write-Host "  task         : $stayTask"
-        Write-Host "  waits for    : the app's own `"RUSTOK STAY pid=<n>`" row in $([IO.Path]::GetFileName($log))"
+        Write-Host "  waits for    : $($sceneSpec[$Scene].Label) in $([IO.Path]::GetFileName($log))"
         Write-Host "  timeout      : 90s, then a named refusal"
         Write-Host "  record       : $stayRecord"
         Write-Host "  already up   : $(($known -join ', '))"
@@ -316,15 +374,39 @@ if ($Stay) {
     }
 
     # ⛔ THE ROW IS THE ORACLE, NOT THE PROCESS. A process exists the moment the
-    # task starts it; the `STAY pid=` row exists only once the scene has loaded,
-    # painted and decided to hold. Waiting on the row is what makes the printed
-    # pid a pid of a window somebody can look at, and the wait is BOUNDED with a
-    # refusal that says which of the two happened.
-    $wait = Wait-SbRow -Log $log -Mark $logMark -Patterns @('RUSTOK STAY pid=') -TimeoutSeconds 90
+    # task starts it; the scene's own pid row exists only once the scene has
+    # loaded, painted and decided to hold. Waiting on the row is what makes the
+    # printed pid a pid of a window somebody can look at, and the wait is
+    # BOUNDED with a refusal that says which of the two happened.
+    #
+    # ⛔ AND THE PATTERN COMES OFF THE SCENE TABLE, NOT OUT OF THIS LINE. It read
+    # `@('RUSTOK STAY pid=')` for EVERY scene. `RenderStay` writes `STAY pid=`
+    # and `RenderApp` writes `APP pid=` -- different scenes, and this wait asked
+    # every one of them for the first. Measured on kenai 2026-09-09:
+    # `-Stay -Scene app` on a HEALTHY app timed out after 90 s and left the
+    # window alive to be stopped by hand.
+    # ⇒ A HARDCODED PATTERN IN A PARAMETERISED PATH IS A SECOND TABLE WITH ONE ROW.
+    $stayWait = $sceneSpec[$Scene]
+    $wait = Wait-SbRow -Log $log -Mark $logMark -Patterns $stayWait.Done -TimeoutSeconds 90
     if ($null -eq $wait.Row) {
-        Write-Host "  NOT RUN: timed out after $($wait.Waited)s waiting for the app's own STAY pid= row." -ForegroundColor Red
-        Write-Host "           Process $($start.Pid) IS running; it just never reported the stay scene."
+        Write-Host "  NOT RUN: timed out after $($wait.Waited)s waiting for $($stayWait.Label) (scene '$Scene')." -ForegroundColor Red
+        Write-Host "           Process $($start.Pid) IS running; it just never reported the '$Scene' scene."
         Write-Host "           Left alive deliberately -- stop it with:  sitting.ps1 -Stop $($start.Pid)"
+        "$($start.Pid)" | Set-Content -Path $stayRecord -Encoding utf8
+        exit 2
+    }
+
+    # ⛔ THE WAIT MATCHES BOTH VERDICTS, SO A REFUSAL MUST BE READ AS ONE. Every
+    # other entry in the scene table carries its RUSTFAIL pattern and lets the
+    # ASSERTIONS convict; this path runs no assertions, it hands a pid to a
+    # person. A RUSTFAIL row carries no `pid=` field, so without this branch the
+    # `$rowPid` read below returns empty and the "two identifications disagree"
+    # refusal fires -- a true sentence about the wrong thing, naming a pid
+    # mismatch where the app said plainly why it would not start.
+    if ($wait.Row -match 'RUSTFAIL') {
+        Write-Host "  REFUSED: the '$Scene' scene reported a failure rather than holding." -ForegroundColor Red
+        Write-Host "           row: $($wait.Row)"
+        Write-Host "           Process $($start.Pid) may still be up -- stop it with:  sitting.ps1 -Stop $($start.Pid)"
         "$($start.Pid)" | Set-Content -Path $stayRecord -Encoding utf8
         exit 2
     }

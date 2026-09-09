@@ -169,83 +169,17 @@ $o6ProbeReceipt = Join-Path $scratch 'sb-o6-probe.json'
 $liveReceipt = Join-Path $scratch 'sb-liveness.txt'
 
 # ---------------------------------------------------------------------------
-# THE SCENES, AND THE ROW EACH ONE FINISHES WITH
+# THE SCENES, AND THE ROW EACH ONE FINISHES WITH -- MOVED INTO `harness_common.ps1`
 # ---------------------------------------------------------------------------
 #
-# ⛔ THIS TABLE IS THE REPLACEMENT FOR THE FIXED SLEEPS, AND IT IS THE WHOLE
-# REPAIR. A sleep asks "has enough time passed"; a row asks "has the thing I am
-# measuring happened". The two differ exactly when the answer matters -- O3's
-# 20 s stall against an 8 s sleep.
-#
-# `Done` entries are matched as regular expressions against rows written SINCE
-# this run's mark. The leading tab is `Report`'s own separator, and it is there so
-# `A'` cannot be matched inside some other row's prose.
-$sceneSpec = @{
-    # ⛔ THE VERDICT PREFIX IS OPTIONAL IN THE PATTERN, AND THAT IS NOT
-    # LOOSENESS. The shell wave in this PR puts `RUSTOK `/`RUSTFAIL ` in front of
-    # every scene-COMPLETION row, because `Report` writes the last row into the
-    # window title and the session-1 oracle requires `| RUSTOK` there -- three
-    # successful runs were FAILED by it on kenai 2026-09-04. A pattern that
-    # REQUIRED the prefix would stop matching a bisected build's rows, which is
-    # the mirror defect of the one being repaired: this harness must read both
-    # shells. The tab is still the anchor, so `A'` cannot match inside prose.
-    'retained' = @{
-        Done    = @((Get-SbRowPattern "A'" " surface="))
-        Label   = "the A' hash row (the round trip's H2)"
-        Timeout = 150
-    }
-    'benchmark' = @{
-        Done    = @("RUSTOK BENCHMARK frames=", "RUSTFAIL BENCHMARK")
-        Label   = "the BENCHMARK row"
-        Timeout = 150
-    }
-    'document' = @{
-        Done    = @("RUSTOK DOCUMENT '", "RUSTFAIL DOCUMENT")
-        Label   = "the DOCUMENT control row"
-        Timeout = 120
-    }
-    'goldens' = @{
-        Done    = @("RUSTOK GOLDENS ", "GOLDENS FAILED")
-        Label   = "the GOLDENS row"
-        Timeout = 120
-    }
-    'selection-marquee' = @{
-        Done    = @("RUSTOK SELECTION '", "RUSTFAIL SELECTION")
-        Label   = "the SELECTION row"
-        Timeout = 120
-    }
-    'stall' = @{
-        Done    = @((Get-SbRowPattern 'STALL' ' render-stall='))
-        Label   = "the STALL row (written by the POST-stall drain, not at the end of the sleep)"
-        Timeout = 120
-    }
-    'pointer' = @{
-        # ⛔ THE THIRD PATTERN IS THE SYNTHETIC ARM'S, AND WITHOUT IT THAT RUN
-        # COULD NEVER COMPLETE. Measured 2026-09-06: the `SB_SYNTH_DRAG` run in
-        # `sitting.ps1`'s pointer set burned its full 120 s and reported
-        # `FAIL: NOT RUN: timed out`, on every sitting since `bf99ad62`, while
-        # its ten assertions PASSED off a row that had been on disk for two
-        # minutes. `Canvas.ApplyPointerReport` says why in its own comment --
-        # `if (_handDeadlineMs < 0 || provenance != "REAL") { return; }`, so the
-        # synthetic replay NEVER writes `HAND CLOSED` by design. The wait was
-        # asking for a row the arm is constructed not to produce.
-        #
-        # ⛔ AND IT IS THE SYNTHETIC-SPECIFIC SPELLING, NOT A BARE `POINTER `.
-        # A real hand writes its `POINTER REAL` row BEFORE `HAND CLOSED`, so a
-        # generic pattern would complete a real run early and skip the
-        # after-dump that O1.2 reads. `POINTER SYNTHETIC ` cannot appear in a
-        # real run at all: `Canvas.cs` derives the provenance from the kind and
-        # a row can never claim one its counters did not come from.
-        Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused", "POINTER SYNTHETIC press=")
-        Label   = "the HAND CLOSED row, its named refusal, or the SYNTHETIC control's own POINTER row"
-        Timeout = 120
-    }
-    'stay' = @{
-        Done    = @("RUSTOK STAY pid=")
-        Label   = "the STAY pid row"
-        Timeout = 120
-    }
-}
+# ⛔ IT MOVED BECAUSE `sitting.ps1` NEEDED IT AND TOOK A COPY INSTEAD. Its
+# `-Stay` path waited for a HARDCODED `RUSTOK STAY pid=` while launching
+# whatever `-Scene` named, so `-Stay -Scene app` waited 90 s for another
+# scene's row on a healthy app and left the window alive (measured on kenai
+# 2026-09-09). A second copy of a list is how the two halves
+# of one harness come to disagree, so there is now exactly ONE `$sceneSpec`
+# and `scripts/check_scene_tables.py` clause (d) REFUSES if a second appears.
+
 
 if ([string]::IsNullOrWhiteSpace($Scene)) { $Scene = $env:SB_SCENE }
 if ([string]::IsNullOrWhiteSpace($Scene)) { $Scene = 'benchmark' }
