@@ -53,10 +53,20 @@ pub(crate) fn eval_bool(expr: &str, ctx: &Value) -> bool {
 /// covered.  `enabled` defaults to `true` when there is no `enabled_when`;
 /// `checked` is the evaluated bool when `checked_when` is present, else `null`.
 //
-// The cross-app byte-gate (`cross_language_test::algorithm_menu_state_vectors`)
-// is the sole caller (this pass is not yet wired into a render path), so it
-// reads as dead without the test cfg.
-#[allow(dead_code)]
+// ⭐ LIVE SINCE W1 (2026-09-08): `ffi::jas_menu_state` is this pass's FIRST
+// production caller in any port, so the `#[allow(dead_code)]` this carried is
+// gone. It said "not yet wired into a render path", which was true for two
+// months and stopped being true without anything noticing — the allow is what
+// would have kept it invisible.
+//
+// ⚠️ AND THE THING THAT IS STILL OPEN, RECORDED WHERE THE NEXT READER IS: the
+// live Dioxus menubar does NOT come through here. It evaluates the same
+// predicates independently (`workspace/menu_bar.rs:783`, "Same eval the
+// menu_state gate pins") against a ctx it builds itself (`:880-883`). The two
+// are pinned to agree only by the corpus, which SEEDS its context — so whether
+// a live Dioxus ctx and an engine-assembled ctx produce the same booleans is
+// UNMEASURED, and it is now a two-consumer question rather than a one-consumer
+// one.
 pub fn menu_state(menubar: &Value, ctx: &Value) -> Value {
     let mut out: Vec<Value> = vec![];
     if let Some(menus) = menubar.as_array() {

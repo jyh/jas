@@ -346,6 +346,129 @@ pub unsafe extern "C" fn jas_document_json(e: *mut JasEngine) -> JasBytes {
     out
 }
 
+/// The session's document as SVG — the artefact a person SAVES.
+///
+/// ⛔ NOT [`jas_document_json`], AND THE DIFFERENCE IS THE WHOLE POINT. That one
+/// is canonical test JSON, *"a summary, not geometry"* (BL6): it is the corpus's
+/// comparison surface and it is lossy about the drawing. This is
+/// `geometry::svg::document_to_svg`, the same writer every port saves through,
+/// so a document saved on Windows and one saved on the web are the same bytes.
+///
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a live engine pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_svg(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::DocumentSvg, 0, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let out = JasBytes::from_string(
+        engine.with_document(crate::geometry::svg::document_to_svg),
+    );
+    ffi_instr::record_out(Crossing::DocumentSvg, out.len);
+    out
+}
+
+/// The five `active_document.*` facts the ENGINE owns, as a JSON object.
+///
+/// ⛔ THE LIST IS EXHAUSTIVE ON PURPOSE AND IT IS SHORTER THAN THE NAMESPACE.
+/// `menu_state.rs:19-25` names six `active_document` fields; the engine can
+/// answer five. `has_filename` is NOT here because `jas_load_svg` takes BYTES —
+/// the engine has never seen a path and inventing `false` for it would be the
+/// shell's answer wearing the engine's authority.
+fn engine_document_facts(engine: &JasEngine) -> serde_json::Map<String, serde_json::Value> {
+    let model = engine.model.borrow();
+    let selection_count = model.document().selection.len();
+    let mut m = serde_json::Map::new();
+    m.insert("has_selection".into(), (selection_count > 0).into());
+    m.insert("selection_count".into(), selection_count.into());
+    m.insert("can_undo".into(), model.can_undo().into());
+    m.insert("can_redo".into(), model.can_redo().into());
+    m.insert("is_modified".into(), model.is_modified().into());
+    m
+}
+
+/// The menubar's evaluated `enabled` / `checked` state — the tenth materializer
+/// function, and the one that keeps a shell from authoring a second menubar.
+///
+/// Returns the canonical `menu_state` array: a flat pre-order
+/// `{path, action, enabled, checked}` per action item, the SAME pass the
+/// cross-app byte-gate pins (`test_fixtures/algorithms/menu_state.json`).
+///
+/// # ⚠️ THE CTX IS A **MERGE**, AND IT IS NOT [`jas_widget_tree`]'S CONVENTION
+///
+/// A panel's scope is wholly the engine's, so `jas_widget_tree` can take NULL
+/// and assemble it. **A menubar's is not.** Its predicates read six namespaces
+/// (`menu_state.rs:19-25`) and this engine holds one document, no path, no tabs
+/// and no panel visibility. So:
+///
+/// * the **engine** supplies `active_document.{has_selection, selection_count,
+///   can_undo, can_redo, is_modified}` and **WINS** on them — a shell that could
+///   assert `can_undo` would be holding document state, which is **BL1**;
+/// * the **shell** supplies everything else (`state.tab_count`,
+///   `active_document.has_filename`, `workspace.has_saved_layout`, `panels.*`,
+///   `panes.*`) — tabs, filenames and chrome visibility are session facts and
+///   have never been the engine's.
+///
+/// A NULL or empty ctx is therefore **not** "empty scope": it is "the shell
+/// supplies nothing", and every session predicate falls to the evaluator's own
+/// falsy default. That is correct for a menu opened before a document exists.
+///
+/// **BL4**: copy the span, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or live; `ctx_json` must be NULL or valid for `ctx_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_menu_state(
+    e: *mut JasEngine,
+    ctx_json: *const u8,
+    ctx_len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::MenuState, ctx_len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    // The shell's half. A ctx that does not parse is refused as an EMPTY span
+    // rather than silently treated as `{}` — a shell whose marshalling broke
+    // would otherwise see a plausible menu built from no session state at all.
+    let mut ctx: serde_json::Map<String, serde_json::Value> = if ctx_len == 0 {
+        serde_json::Map::new()
+    } else {
+        match unsafe { utf8(ctx_json, ctx_len) }
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+        {
+            Some(serde_json::Value::Object(m)) => m,
+            _ => return JasBytes::empty(),
+        }
+    };
+
+    // The engine's half, applied LAST so it wins on every key it owns.
+    let mut active = match ctx.remove("active_document") {
+        Some(serde_json::Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    active.extend(engine_document_facts(engine));
+    ctx.insert("active_document".into(), serde_json::Value::Object(active));
+
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let menubar = ws.data()["menubar"].clone();
+    if !menubar.is_array() {
+        return JasBytes::empty();
+    }
+    let rows = crate::interpreter::menu_state::menu_state(
+        &menubar,
+        &serde_json::Value::Object(ctx),
+    );
+    let out = JasBytes::from_string(serde_json::to_string(&rows).unwrap_or_default());
+    ffi_instr::record_out(Crossing::MenuState, out.len);
+    out
+}
+
 /// Assemble the panel data scope INSIDE the engine.
 ///
 /// **BL1, and it is why the extern takes only a panel id.** Exposing the pure
@@ -849,5 +972,176 @@ mod tests {
         }
         assert!(checked >= 16, "expected the full panel set, checked {checked}");
         unsafe { jas_engine_free(e) };
+    }
+
+    // -----------------------------------------------------------------------
+    // W1 — THE APP ABI (freeze `2026-09-08-jas-FREEZE-windows-app.md` §4, A1+A2)
+    //
+    // ⛔ RED FIRST. Both functions under test are written AFTER these arms and
+    // these arms were seen to fail to COMPILE (the symbol does not exist), which
+    // is the strongest red a Rust ABI arm can be given: there is no way to
+    // mistake it for a passing assertion against a stub.
+    // -----------------------------------------------------------------------
+
+    /// A1 — the save half of the document loop. `jas_document_json` is a
+    /// SUMMARY (BL6); this is the artefact a person keeps.
+    ///
+    /// ⛔ THE LOAD SIDE IS NOT `jas_load_svg`, AND THAT IS A PLATFORM FACT, NOT
+    /// A SHORTCUT. `ffi_paint` is `cfg(all(feature = "ffi", feature = "d2d",
+    /// windows))` (`lib.rs:41`), so the ABI's own loader cannot be linked on
+    /// this host at all. This arm drives the SAME parser it wraps
+    /// (`svg_to_document`) through the same `replace_document` seam, so what is
+    /// untested here is exactly one `unsafe` span-to-`&str` conversion — stated
+    /// rather than implied.
+    #[test]
+    fn document_svg_is_wellformed_and_survives_a_round_trip() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+
+        // A document with something in it, so the round trip is not vacuous —
+        // an empty document round-trips through any serializer, including one
+        // that writes a constant.
+        //
+        // ⛔ `r##"..."##`, not `r#"..."#`: the fill colour contains `"#`, which
+        // closes a single-hash raw string. The FIRST run of this arm was a
+        // syntax error, not a red.
+        let src = r##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80">
+            <rect x="10" y="12" width="30" height="20" fill="#ff0000"/>
+        </svg>"##;
+        let doc = crate::geometry::svg::svg_to_document(src);
+        unsafe { e.as_ref() }.unwrap().replace_document(doc);
+
+        let svg = take(unsafe { jas_document_svg(e) });
+        assert!(svg.contains("<svg"), "not an SVG document: {svg}");
+
+        // THE ROUND TRIP, and it is the arm that can actually fail: re-parse our
+        // own output into a SECOND engine and compare the canonical JSON. A
+        // serializer that dropped the rect would produce well-formed SVG and
+        // fail here.
+        let e2 = jas_engine_new();
+        let doc2 = crate::geometry::svg::svg_to_document(&svg);
+        unsafe { e2.as_ref() }.unwrap().replace_document(doc2);
+        assert_eq!(
+            take(unsafe { jas_document_json(e) }),
+            take(unsafe { jas_document_json(e2) }),
+            "document_svg lost or altered content on the round trip"
+        );
+
+        // ⭐ AND THE CONTROL THE ROUND TRIP NEEDS: the comparison above is only
+        // evidence if it can DISAGREE. A different document must differ.
+        let e3 = jas_engine_new();
+        unsafe { e3.as_ref() }.unwrap().replace_document(
+            crate::geometry::svg::svg_to_document(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"/>"#,
+            ),
+        );
+        assert_ne!(
+            take(unsafe { jas_document_json(e) }),
+            take(unsafe { jas_document_json(e3) }),
+            "the round-trip oracle cannot distinguish two different documents"
+        );
+
+        unsafe { jas_engine_free(e3) };
+        unsafe { jas_engine_free(e2) };
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn document_svg_on_a_null_handle_is_the_empty_span() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let b = unsafe { jas_document_svg(std::ptr::null_mut()) };
+        assert!(b.ptr.is_null() && b.len == 0);
+    }
+
+    /// A2 arm (a) — the menu's DYNAMIC half, which is the whole reason the
+    /// shell must not author a menubar: `can_undo` is a document fact.
+    #[test]
+    fn menu_state_reports_undo_disabled_until_the_document_is_edited() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+
+        let before = take(unsafe { jas_menu_state(e, std::ptr::null(), 0) });
+        let before: serde_json::Value = serde_json::from_str(&before).expect("JSON");
+        assert_eq!(
+            undo_enabled(&before),
+            Some(false),
+            "an untouched engine must report Undo DISABLED: {before}"
+        );
+
+        // One real mutation through the ABI the shell will use.
+        //
+        // ⛔ THE VERB IS FROM `op_apply`'s OWN MATCH, not from memory: the first
+        // draft used `add_rect`, which does not exist, and the arm failed with
+        // `UnknownVerb` — a red that looked like a menu-state defect and was a
+        // fixture defect. A verb that is not in the vocabulary is refused, so a
+        // wrong one can never silently pass.
+        let op = r#"{"op":"create_artboard","id":"ab_w1_fixture"}"#;
+        let st = unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) };
+        assert_eq!(st, JasStatus::Ok, "the fixture op must apply: {st:?}");
+
+        let after = take(unsafe { jas_menu_state(e, std::ptr::null(), 0) });
+        let after: serde_json::Value = serde_json::from_str(&after).expect("JSON");
+        assert_eq!(
+            undo_enabled(&after),
+            Some(true),
+            "after an edit Undo must be ENABLED: {after}"
+        );
+
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A2 arm (b) — ⭐ THE MERGE BOUNDARY, IN BOTH DIRECTIONS (freeze §4.1).
+    ///
+    /// The engine cannot assemble `state.*` (no tabs below the shell) and the
+    /// shell must not be able to assert `active_document.*` (that is BL1 — a
+    /// shell that can claim `can_undo` is holding document state). One arm is
+    /// not enough: a merge that ignored the shell entirely would pass the first
+    /// half, and a merge that let the shell win everything would pass the
+    /// second.
+    #[test]
+    fn menu_state_merges_the_shells_session_ctx_but_the_engine_wins_on_the_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+
+        // The shell lies about a document fact and tells the truth about a
+        // session fact, in ONE call.
+        let ctx = r#"{"active_document":{"can_undo":true},"state":{"tab_count":1}}"#;
+        let got = take(unsafe { jas_menu_state(e, ctx.as_ptr(), ctx.len()) });
+        let got: serde_json::Value = serde_json::from_str(&got).expect("JSON");
+
+        assert_eq!(
+            undo_enabled(&got),
+            Some(false),
+            "the SHELL must not be able to assert a document fact: {got}"
+        );
+        assert_eq!(
+            action_enabled(&got, "save"),
+            Some(true),
+            "the shell's `state.tab_count` MUST be honoured (Save is enabled_when \
+             state.tab_count > 0): {got}"
+        );
+
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn menu_state_on_a_null_handle_is_the_empty_span() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let b = unsafe { jas_menu_state(std::ptr::null_mut(), std::ptr::null(), 0) };
+        assert!(b.ptr.is_null() && b.len == 0);
+    }
+
+    /// `enabled` for a named action in a `menu_state` array, or `None` if the
+    /// action is not in the menubar at all — the two are DIFFERENT and a test
+    /// that collapsed them would pass against a function returning `[]`.
+    fn action_enabled(rows: &serde_json::Value, action: &str) -> Option<bool> {
+        rows.as_array()?
+            .iter()
+            .find(|r| r["action"].as_str() == Some(action))?["enabled"]
+            .as_bool()
+    }
+
+    fn undo_enabled(rows: &serde_json::Value) -> Option<bool> {
+        action_enabled(rows, "undo")
     }
 }

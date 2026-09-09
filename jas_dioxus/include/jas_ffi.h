@@ -441,6 +441,56 @@ struct JasBytes jas_version(void);
 struct JasBytes jas_document_json(struct JasEngine *e);
 
 /**
+ * The session's document as SVG — the artefact a person SAVES.
+ *
+ * ⛔ NOT [`jas_document_json`], AND THE DIFFERENCE IS THE WHOLE POINT. That one
+ * is canonical test JSON, *"a summary, not geometry"* (BL6): it is the corpus's
+ * comparison surface and it is lossy about the drawing. This is
+ * `geometry::svg::document_to_svg`, the same writer every port saves through,
+ * so a document saved on Windows and one saved on the web are the same bytes.
+ *
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a live engine pointer.
+ */
+struct JasBytes jas_document_svg(struct JasEngine *e);
+
+/**
+ * The menubar's evaluated `enabled` / `checked` state — the tenth materializer
+ * function, and the one that keeps a shell from authoring a second menubar.
+ *
+ * Returns the canonical `menu_state` array: a flat pre-order
+ * `{path, action, enabled, checked}` per action item, the SAME pass the
+ * cross-app byte-gate pins (`test_fixtures/algorithms/menu_state.json`).
+ *
+ * # ⚠️ THE CTX IS A **MERGE**, AND IT IS NOT [`jas_widget_tree`]'S CONVENTION
+ *
+ * A panel's scope is wholly the engine's, so `jas_widget_tree` can take NULL
+ * and assemble it. **A menubar's is not.** Its predicates read six namespaces
+ * (`menu_state.rs:19-25`) and this engine holds one document, no path, no tabs
+ * and no panel visibility. So:
+ *
+ * * the **engine** supplies `active_document.{has_selection, selection_count,
+ *   can_undo, can_redo, is_modified}` and **WINS** on them — a shell that could
+ *   assert `can_undo` would be holding document state, which is **BL1**;
+ * * the **shell** supplies everything else (`state.tab_count`,
+ *   `active_document.has_filename`, `workspace.has_saved_layout`, `panels.*`,
+ *   `panes.*`) — tabs, filenames and chrome visibility are session facts and
+ *   have never been the engine's.
+ *
+ * A NULL or empty ctx is therefore **not** "empty scope": it is "the shell
+ * supplies nothing", and every session predicate falls to the evaluator's own
+ * falsy default. That is correct for a menu opened before a document exists.
+ *
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; `ctx_json` must be NULL or valid for `ctx_len`.
+ */
+struct JasBytes jas_menu_state(struct JasEngine *e, const uint8_t *ctx_json, uintptr_t ctx_len);
+
+/**
  * The panel's resolved bind VALUES — the ninth materializer function.
  *
  * `jas_widget_tree` is **value-blind by design**: it records the sorted KEY
