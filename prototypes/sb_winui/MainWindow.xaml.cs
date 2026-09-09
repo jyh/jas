@@ -3,6 +3,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.Graphics;
+// ⛔ NO `using Windows.System;` HERE. It would make `DispatcherQueue` ambiguous
+// between `Microsoft.UI.Dispatching.DispatcherQueue` (the field `_ui`) and
+// `Windows.System.DispatcherQueue`. `VirtualKey`/`VirtualKeyModifiers` are
+// therefore fully qualified below, which is what line ~560 already did.
 using Windows.Win32;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.HiDpi;
@@ -208,6 +212,8 @@ public sealed partial class MainWindow : Window
         _canvas = new global::SbWinUi.Canvas(Report);
         _canvas.SurfaceSettled = OnSurfaceSettled;
         _canvas.SceneCompleted = AfterScene;
+        _canvas.MenuChanged = OnMenuChanged;
+        _canvas.DocumentDirtyChanged = OnDocumentDirtyChanged;
         _canvas.HashTaken = OnHashTaken;
 
         // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
@@ -1230,6 +1236,360 @@ public sealed partial class MainWindow : Window
                 Title = title;
                 StatusLine.Text = text;
             });
+        }
+    }
+
+    // =======================================================================
+    // W4 — THE MENUBAR, MATERIALIZED
+    //
+    // ⛔ NOT ONE MENU ITEM IS AUTHORED HERE. The labels, shortcuts, dividers and
+    // submenu titles come from `jas_menu_structure`; `enabled` and `checked`
+    // come from `jas_menu_state`; the two are joined on `path`. This class
+    // still calls no core function — it reads the JSON `Canvas` published and
+    // turns it into WinUI controls, which is what "materializer" means.
+    // =======================================================================
+
+    /// <summary>
+    /// The `Seq` of the snapshot currently drawn.
+    ///
+    /// ⭐ IT IS NOT A SOUVENIR — IT DETECTS A LOST NOTIFICATION. `Canvas.PostToUi`
+    /// drops `TryEnqueue`'s bool and returns silently when the queue is null, so
+    /// a menu announcement CAN vanish. The failure mode is a stale menubar with
+    /// no diagnostic at all — an item enabled that should not be, which §7 stop 3
+    /// is written about. A jump in `Seq` is the only evidence that would ever
+    /// exist, so the row carries `missed=`.
+    /// </summary>
+    private long _menuDrawnSeq = 0;
+
+    /// <summary>
+    /// A new menu reading arrived. Rebuild, on the UI thread, from the snapshot.
+    ///
+    /// ⛔ PUSHED, NOT POLLED, AND NEVER PER FRAME. This fires when the CORE's
+    /// answer changes — startup, an open, a mutation — and `menu-rebuilds` on
+    /// the row is what makes a regression to per-frame visible rather than
+    /// merely slow (§7 stop 4).
+    /// </summary>
+    private void OnMenuChanged()
+    {
+        var snap = _canvas.Menu;
+        if (snap is null) { return; }
+        try
+        {
+            var (items, enabled) = BuildMenu(snap);
+
+            // ⭐ P4's RECEIPT. `disabled` is on the row and not derived by a
+            // reader, because the transition across an open is what catches a
+            // shell that hard-codes `Save` as always-enabled — the one defect
+            // the text gate explicitly cannot see.
+            //
+            // ⛔ `state-age=0` IS A CONSTANT HERE AND SAYS SO. The design block
+            // budgeted a one-open staleness for an `Opening`-pull; this shell
+            // is PUSHED, so the drawn snapshot is always the newest published
+            // one. The field stays on the row rather than being dropped: a
+            // reader comparing runs across the change needs to see that the
+            // number went to zero, not that the column vanished.
+            // A gap means a publication was announced and never arrived. Zero
+            // is the expected reading and it is on every row, so the field can
+            // be seen to be working rather than merely absent.
+            var missed = snap.Seq - _menuDrawnSeq - 1;
+            Report($"MENU rebuilds={snap.Seq} items={items} enabled={enabled} "
+                 + $"disabled={items - enabled} seq={snap.Seq} state-age=0 "
+                 + $"missed={(missed > 0 ? missed : 0)}");
+            _menuDrawnSeq = snap.Seq;
+        }
+        catch (Exception ex)
+        {
+            // A menubar that failed to build must SAY so. A silently empty
+            // MenuBar over a healthy status line is the ambiguous failure this
+            // shell keeps refusing.
+            Report($"RUSTFAIL MENU BUILD threw {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Join the two passes on `path` and materialize the result.
+    ///
+    /// The structure is a flat pre-order list of `{path, kind, id, label,
+    /// action, shortcut, dynamic}`; the state is `{path, action, enabled,
+    /// checked}`. A `path` of length 1 is a top-level menu, length 2 an entry in
+    /// it, length 3 an entry in a submenu.
+    /// </summary>
+    private (int Items, int Enabled) BuildMenu(MenuSnapshot snap)
+    {
+        using var structure = System.Text.Json.JsonDocument.Parse(snap.StructureJson);
+        // ⛔ NOT `state` — see the note in `Canvas.ApplyMenuRefresh`: that token
+        // is the workspace context's own spelling and the materializer gate bans
+        // it in shell code. The gate is right to be unable to tell a local from
+        // the real thing.
+        using var menuState = System.Text.Json.JsonDocument.Parse(snap.StateJson);
+
+        // path -> enabled, from the DYNAMIC half. Absent means "the core did not
+        // evaluate this node", which is true of menus, submenus and separators.
+        var enabled = new Dictionary<string, bool>();
+        foreach (var row in menuState.RootElement.EnumerateArray())
+        {
+            enabled[PathKey(row)] = row.TryGetProperty("enabled", out var e)
+                                    && e.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+
+        Menu.Items.Clear();
+        var items = 0;
+        var onCount = 0;
+        MenuBarItem? top = null;
+        MenuFlyoutSubItem? sub = null;
+        var subPath = "";
+
+        foreach (var node in structure.RootElement.EnumerateArray())
+        {
+            var kind = node.GetProperty("kind").GetString();
+            var path = node.GetProperty("path");
+            var label = Str(node, "label");
+
+            if (kind == "menu")
+            {
+                top = new MenuBarItem { Title = label ?? "" };
+                Menu.Items.Add(top);
+                sub = null;
+                continue;
+            }
+            if (top is null) { continue; }
+
+            // A node outside the open submenu closes it.
+            //
+            // ⛔ THE TRAILING COMMA IS LOAD-BEARING. Without it `"0,20"` starts
+            // with `"0,2"`, so the 21st entry of a menu would be adopted as a
+            // child of a submenu at index 2 — a prefix collision, which is the
+            // shape this seat lost a sitting to once (`scale` matching inside
+            // `composition-scale=`). Comparing depth-aware prefixes is what
+            // makes this a path test rather than a string test.
+            if (sub is not null && !PathKey(path).StartsWith(subPath + ",", StringComparison.Ordinal))
+            {
+                sub = null;
+            }
+
+            switch (kind)
+            {
+                case "separator":
+                    AddTo(top, sub, new MenuFlyoutSeparator());
+                    break;
+
+                case "submenu":
+                    var node_sub = new MenuFlyoutSubItem { Text = label ?? "" };
+                    AddTo(top, sub, node_sub);
+                    sub = node_sub;
+                    subPath = PathKey(path);
+                    break;
+
+                case "item":
+                    var action = Str(node, "action") ?? "";
+                    var isOn = enabled.TryGetValue(PathKey(path), out var on) && on;
+                    items++;
+                    if (isOn) { onCount++; }
+                    var item = new MenuFlyoutItem
+                    {
+                        Text = label ?? "",
+                        // ⛔ THE BOOLEAN IS THE CORE'S. This shell evaluates no
+                        // `enabled_when`; it reads the answer.
+                        IsEnabled = isOn,
+                    };
+                    var accel = Accelerator(Str(node, "shortcut"));
+                    if (accel is not null) { item.KeyboardAccelerators.Add(accel); }
+                    item.Click += (_, _) => Invoke(action);
+                    AddTo(top, sub, item);
+                    break;
+
+                default:
+                    // `unknown` — the core refused to categorise a bundle node.
+                    // Drawn as nothing and REPORTED, never as a divider.
+                    Report($"MENU UNKNOWN NODE path={PathKey(path)} — the core would "
+                         + "not categorise it; nothing was drawn for it");
+                    break;
+            }
+        }
+        return (items, onCount);
+    }
+
+    private static void AddTo(MenuBarItem top, MenuFlyoutSubItem? sub, MenuFlyoutItemBase item)
+    {
+        if (sub is not null) { sub.Items.Add(item); } else { top.Items.Add(item); }
+    }
+
+    private static string PathKey(System.Text.Json.JsonElement node)
+    {
+        var p = node.ValueKind == System.Text.Json.JsonValueKind.Array
+            ? node
+            : node.GetProperty("path");
+        return string.Join(",", p.EnumerateArray().Select(x => x.GetInt32()));
+    }
+
+    private static string? Str(System.Text.Json.JsonElement node, string name) =>
+        node.TryGetProperty(name, out var v)
+        && v.ValueKind == System.Text.Json.JsonValueKind.String
+            ? v.GetString()
+            : null;
+
+    /// <summary>
+    /// `"Ctrl+Shift+S"` -> a `KeyboardAccelerator`, or null.
+    ///
+    /// ⛔ AN UNPARSEABLE SHORTCUT RETURNS NULL AND IS REPORTED, never guessed.
+    /// A wrong accelerator is worse than none: it silently steals a keystroke
+    /// from another control and the menu still looks right.
+    /// </summary>
+    private KeyboardAccelerator? Accelerator(string? spec)
+    {
+        if (string.IsNullOrWhiteSpace(spec)) { return null; }
+        var mods = Windows.System.VirtualKeyModifiers.None;
+        Windows.System.VirtualKey? key = null;
+        foreach (var part in spec.Split('+', StringSplitOptions.RemoveEmptyEntries))
+        {
+            switch (part.Trim())
+            {
+                case "Ctrl": mods |= Windows.System.VirtualKeyModifiers.Control; break;
+                case "Shift": mods |= Windows.System.VirtualKeyModifiers.Shift; break;
+                case "Alt": mods |= Windows.System.VirtualKeyModifiers.Menu; break;
+                default:
+                    if (Enum.TryParse<Windows.System.VirtualKey>(part.Trim(), true, out var k)) { key = k; }
+                    else if (part.Trim().Length == 1
+                             && Enum.TryParse<Windows.System.VirtualKey>("Number" + part.Trim(), true, out var n))
+                    {
+                        key = n;
+                    }
+                    break;
+            }
+        }
+        if (key is null)
+        {
+            Report($"MENU SHORTCUT UNPARSED '{spec}' — no accelerator was attached, "
+                 + "which is deliberate: a wrong one steals a keystroke silently");
+            return null;
+        }
+        return new KeyboardAccelerator { Key = key.Value, Modifiers = mods };
+    }
+
+    // =======================================================================
+    // W4 — WHAT A CLICK DOES (§3.1, re-cut at v1.2)
+    // =======================================================================
+
+    /// <summary>
+    /// Dispatch by action id into a SMALL, EXPLICIT table.
+    ///
+    /// ⛔ EVERYTHING NOT IN IT IS REFUSED BY NAME. 64 of the 239 workspace
+    /// actions have log-only effect lists, so a generic "run the action" path
+    /// would report success and change nothing — the exact false success stop 1
+    /// fired on. A menu item that looks live and does nothing is the defect
+    /// `SB_SCENE_FINAL` was gated for.
+    ///
+    /// ⛔ AND THIS IS NOT AN EXPRESSION EVALUATOR. Dispatching a known id is not
+    /// evaluating an `enabled_when`; the core decided what is enabled before
+    /// this item was ever drawn.
+    /// </summary>
+    private void Invoke(string action)
+    {
+        switch (action)
+        {
+            case "undo":
+                _canvas.Op("{\"op\":\"undo\"}", "undo");
+                break;
+            case "redo":
+                _canvas.Op("{\"op\":\"redo\"}", "redo");
+                break;
+            case "open_file":
+                OpenViaPicker();
+                break;
+            case "save":
+            case "save_as":
+                SaveDocument(action == "save_as");
+                break;
+            case "quit":
+                _canvas.Quit();
+                Close();
+                break;
+            default:
+                Report($"ACTION UNIMPLEMENTED {action}");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// File ▸ Open… ⛔ §7 STOP 2 IS LIVE HERE AND IS NAMED ON THE ROW.
+    ///
+    /// WinAppSDK pickers need a window handle and, unpackaged, an
+    /// initialisation call — UNMEASURED on the box. If the picker throws, the
+    /// row says `open=PICKER-FAILED` and the fallback is `SB_OPEN_PATH` through
+    /// the SAME code path. ⛔ Never a synthetic receipt wearing `PICKER`.
+    /// </summary>
+    private async void OpenViaPicker()
+    {
+        try
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker();
+            WinRT.Interop.InitializeWithWindow.Initialize(
+                picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+            picker.FileTypeFilter.Add(".svg");
+            var file = await picker.PickSingleFileAsync();
+            if (file is null)
+            {
+                Report("OPEN CANCELLED open=PICKER");
+                return;
+            }
+            Report($"OPEN REQUESTED open=PICKER path={file.Path}");
+            _canvas.Open(file.Path);
+        }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL OPEN open=PICKER-FAILED {ex.GetType().Name}: {ex.Message} "
+                 + "— set SB_OPEN_PATH to drive the same path without the picker");
+        }
+    }
+
+    /// <summary>File ▸ Save / Save As. The path is the UI thread's; the bytes are the core's.</summary>
+    private async void SaveDocument(bool forceAsk)
+    {
+        try
+        {
+            var path = forceAsk ? null : _savePath;
+            if (path is null)
+            {
+                var picker = new Windows.Storage.Pickers.FileSavePicker();
+                WinRT.Interop.InitializeWithWindow.Initialize(
+                    picker, WinRT.Interop.WindowNative.GetWindowHandle(this));
+                picker.FileTypeChoices.Add("SVG", new List<string> { ".svg" });
+                picker.SuggestedFileName = "drawing";
+                var file = await picker.PickSaveFileAsync();
+                if (file is null) { Report("SAVE CANCELLED save=PICKER"); return; }
+                path = file.Path;
+            }
+            _savePath = path;
+            _canvas.Save(path);
+        }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL SAVE save=PICKER-FAILED {ex.GetType().Name}: {ex.Message} "
+                 + "— set SB_SAVE_PATH to drive the same path without the picker");
+        }
+    }
+
+    private string? _savePath = Environment.GetEnvironmentVariable("SB_SAVE_PATH");
+
+    /// <summary>
+    /// The document's dirty mark, folded into the TITLE VERDICT rather than
+    /// written to <c>Title</c>.
+    ///
+    /// ⛔ A DIRECT WRITE HERE WOULD BE ERASED BY THE NEXT ROW. `Report`
+    /// recomposes the whole title from `_titleVerdict` under `LogLock` and is
+    /// called constantly, so a mark set outside that fold appears, flickers and
+    /// vanishes — which reads as "implemented". The mark is appended by
+    /// `TitleVerdict.Compose` AFTER the verdict, so the session-1 oracle's
+    /// required `"&lt;name&gt; | RUSTOK"` substring is untouched. Both facts have
+    /// arms in `sb_winui_tests`.
+    /// </summary>
+    private void OnDocumentDirtyChanged(bool dirty)
+    {
+        lock (LogLock)
+        {
+            _titleVerdict = TitleVerdict.WithDirty(_titleVerdict, dirty);
+            var title = TitleVerdict.Compose(VerifyTitle, _titleVerdict);
+            _ui.TryEnqueue(() => Title = title);
         }
     }
 }

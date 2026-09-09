@@ -70,13 +70,45 @@ public readonly struct TitleVerdict
     public const string Ok = "RUSTOK";
     public const string Fail = "RUSTFAIL";
 
+    /// <summary>
+    /// The document has unsaved changes.
+    ///
+    /// ⛔ IT LIVES IN THIS TYPE RATHER THAN BESIDE `Title`, AND THAT IS NOT
+    /// TIDINESS. `Report` recomposes the ENTIRE title from this struct, under a
+    /// lock, on every row — and it is called constantly. A mark written straight
+    /// to `Title` would be erased by the next row: it would appear, flicker and
+    /// vanish, which reads as "implemented" to anyone not watching for seconds.
+    /// Carried by <see cref="Fold"/> exactly as the verdict is, because an
+    /// ordinary report is not a save.
+    /// </summary>
+    public bool Dirty { get; init; }
+
+    /// <summary>
+    /// The mark itself, as a named constant so the test can assert on the thing
+    /// rather than on a copy of it. A bullet, not an asterisk: `*` is a glob in
+    /// every shell that reads these titles.
+    /// </summary>
+    public const string DirtyMark = " \u25cf";
+
     public static TitleVerdict Empty => new()
     {
         Verdict = Pending,
         LastRow = "",
         Oks = 0,
         Fails = 0,
+        Dirty = false,
     };
+
+    /// <summary>Set or clear the dirty mark, leaving the run's verdict alone.</summary>
+    public static TitleVerdict WithDirty(TitleVerdict prev, bool dirty) =>
+        new()
+        {
+            Verdict = prev.Verdict,
+            LastRow = prev.LastRow,
+            Oks = prev.Oks,
+            Fails = prev.Fails,
+            Dirty = dirty,
+        };
 
     /// <summary>
     /// Read one row's verdict, or <c>null</c> when it carries none.
@@ -122,6 +154,9 @@ public readonly struct TitleVerdict
             LastRow = row ?? "",
             Oks = prev.Oks + (v == Ok ? 1 : 0),
             Fails = prev.Fails + (v == Fail ? 1 : 0),
+            // CARRIED, NOT RECOMPUTED. A row says nothing about whether the
+            // document is saved, and only a save clears the mark.
+            Dirty = prev.Dirty,
         };
     }
 
@@ -132,11 +167,21 @@ public readonly struct TitleVerdict
     /// oracle's required substring is `"<name> | RUSTOK"` and nothing may come
     /// between them.
     /// </summary>
+    /// <remarks>
+    /// ⛔ THE DIRTY MARK GOES AT THE END, AND THE PLACEMENT IS THE WHOLE POINT.
+    /// The oracle's required substring is `"&lt;name&gt; | RUSTOK"` and nothing may
+    /// come between them (see the summary above). A mark placed after the name
+    /// would blank the session-1 oracle in exactly the way the 2026-09-04 kenai
+    /// regression did — three runs that succeeded, read as failures. Appending
+    /// leaves every existing match intact, which the test asserts rather than
+    /// assumes.
+    /// </remarks>
     public static string Compose(string verifyTitle, TitleVerdict v)
     {
         var verdict = v.Fails > 0 ? $"{v.Verdict} fails={v.Fails}" : v.Verdict;
+        var mark = v.Dirty ? DirtyMark : "";
         return string.IsNullOrEmpty(v.LastRow)
-            ? $"{verifyTitle} | {verdict}"
-            : $"{verifyTitle} | {verdict} | {v.LastRow}";
+            ? $"{verifyTitle} | {verdict}{mark}"
+            : $"{verifyTitle} | {verdict} | {v.LastRow}{mark}";
     }
 }

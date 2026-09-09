@@ -185,6 +185,62 @@ static class Program
         Check("...and the pending title has no dangling separator",
             !pendingTitle.EndsWith("| "), $"'{pendingTitle}'");
 
+        // ===================================================================
+        // W4 — THE DOCUMENT'S DIRTY MARK, AND WHY IT IS IN THIS TYPE AT ALL
+        // ===================================================================
+        //
+        // ⛔ THE DESIGN BLOCK SAYS "the title loses its dirty mark" ON SAVE, AND
+        // THE OBVIOUS IMPLEMENTATION IS A SILENT NO-OP. `Report` recomposes the
+        // whole title from `TitleVerdict` under a lock on EVERY row, and it is
+        // called constantly. A mark written straight to `Title` would be erased
+        // by the next row — appearing, flickering, and vanishing, which reads as
+        // "implemented" to anyone who does not watch for seconds.
+        //
+        // ⛔ AND THE ORACLE IS THE HARDER CONSTRAINT. `Compose`'s own doc: "the
+        // verdict sits immediately after the name because the oracle's required
+        // substring is `<name> | RUSTOK` and NOTHING MAY COME BETWEEN THEM." A
+        // dirty mark placed there would blank the title oracle exactly as the
+        // 2026-09-04 kenai regression did — three runs that succeeded, read as
+        // failures. So the mark goes at the END, and these arms are what say so.
+
+        var dirty = TitleVerdict.WithDirty(
+            Run("RUSTOK APP menu-items=55"), true);
+
+        Check("W4: a dirty title STILL matches the session-1 oracle",
+            TitleVerdict.Compose(VerifyTitle, dirty).Contains(OracleRequires),
+            TitleVerdict.Compose(VerifyTitle, dirty));
+
+        Check("W4: ...and the mark is actually there (or the arm above is vacuous)",
+            TitleVerdict.Compose(VerifyTitle, dirty).EndsWith(TitleVerdict.DirtyMark),
+            TitleVerdict.Compose(VerifyTitle, dirty));
+
+        Check("W4: a clean document carries NO mark",
+            !TitleVerdict.Compose(VerifyTitle, Run("RUSTOK APP menu-items=55"))
+                .Contains(TitleVerdict.DirtyMark),
+            TitleVerdict.Compose(VerifyTitle, Run("RUSTOK APP menu-items=55")));
+
+        // ⭐ THE ARM THAT MATTERS MOST, because it is the one the obvious
+        // implementation fails: the mark must SURVIVE the rows that keep
+        // arriving after the edit. `Fold` carries it exactly as it carries the
+        // verdict — a report is not a save.
+        var stillDirty = TitleVerdict.Fold(
+            TitleVerdict.Fold(dirty, "DUMP sb-doc-after.json bytes=812"),
+            "RUSTOK REPAINT frames=1");
+        Check("W4: an ordinary row does not clear the dirty mark",
+            stillDirty.Dirty, TitleVerdict.Compose(VerifyTitle, stillDirty));
+
+        Check("W4: ...and saving DOES clear it",
+            !TitleVerdict.WithDirty(stillDirty, false).Dirty, "still dirty after a save");
+
+        // A pending run can be dirty too (an edit before any verdict-bearing
+        // row), and that must not manufacture a dangling separator.
+        var pendingDirty = TitleVerdict.Compose(
+            VerifyTitle, TitleVerdict.WithDirty(TitleVerdict.Empty, true));
+        Check("W4: CONTROL — a pending dirty title still does not match the oracle",
+            !pendingDirty.Contains(OracleRequires), pendingDirty);
+        Check("W4: ...and has no dangling separator",
+            !pendingDirty.Contains("|  "), $"'{pendingDirty}'");
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
