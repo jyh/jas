@@ -255,6 +255,14 @@ jobs:
       # a shape that happened to be satisfied.
       - run: python scripts/check_scene_tables.py --self-test
       - run: python scripts/check_scene_tables.py
+      # ⭐ THE DECLARATION JOIN. Same receipt as the scene join above: RED on
+      # `main` when written, naming THREE clauses that were emitted on one
+      # scene and nowhere else -- O5.1, O3.4 and O3.C1. Two of them were found
+      # by a person reading an assertion block against a list; the third could
+      # not be, because it was not on the list. It is a source-level property,
+      # so it needs no Windows -- only to have been noticed there.
+      - run: python scripts/check_assertion_declarations.py --self-test
+      - run: python scripts/check_assertion_declarations.py
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -939,6 +947,11 @@ jobs:
           # This lane is where that claim is actually tested.
           python scripts/check_scene_tables.py --self-test
           python scripts/check_scene_tables.py
+          # The declaration join reads the same `utf-8-sig` .ps1 the scene join
+          # does, and its parse is column-sensitive; this lane is where a
+          # platform difference in either claim would actually show.
+          python scripts/check_assertion_declarations.py --self-test
+          python scripts/check_assertion_declarations.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because
