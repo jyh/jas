@@ -70,6 +70,15 @@ pub enum Crossing {
     /// crossing -- and this one arrives at MOUSEMOVE RATES, so its cost is the
     /// one most worth having on the ledger rather than estimated.
     PointerEvent = 10,
+    /// W1/A1: the document as SVG — the save half of the document loop. Counted
+    /// separately from `DocumentJson` because they are different artefacts with
+    /// different sizes, and a shell that saved on every tick would otherwise
+    /// hide inside the summary's row.
+    DocumentSvg = 11,
+    /// W1/A2: the menubar's evaluated enabled/checked state. Counted because a
+    /// per-frame menu rebuild is the design's named regression (freeze §3.1),
+    /// and a counter is how it becomes visible rather than merely slow.
+    MenuState = 12,
 }
 
 impl Crossing {
@@ -87,6 +96,8 @@ impl Crossing {
         "jas_bind_values",
         "jas_panel_event",
         "jas_pointer_event",
+        "jas_document_svg",
+        "jas_menu_state",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -96,7 +107,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 11;
+    pub(crate) const COUNT: usize = 13;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -115,6 +126,8 @@ impl Crossing {
         Crossing::BindValues,
         Crossing::PanelEvent,
         Crossing::PointerEvent,
+        Crossing::DocumentSvg,
+        Crossing::MenuState,
     ];
 
     pub fn name(self) -> &'static str {
