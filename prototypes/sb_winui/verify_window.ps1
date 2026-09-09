@@ -326,6 +326,10 @@ $scaleSource = $resolved.Source
 
 $beforeDump = Join-Path $scratch 'sb-doc-before.json'
 $afterDump = Join-Path $scratch 'sb-doc-after.json'
+# P1's second reader. `ApplyOpen` writes it after a successful load, so the
+# harness can walk the SAME document the shell counted and compare -- two
+# implementations of one rule rather than one number asserted to be positive.
+$openDump = Join-Path $scratch 'sb-doc-open.json'
 
 # ---------------------------------------------------------------------------
 # THE ENVIRONMENT, RESOLVED ONCE
