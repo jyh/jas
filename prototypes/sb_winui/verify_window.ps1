@@ -576,7 +576,7 @@ if ($Scene -eq 'stall') {
     # entire residual of a 98.2 s run -- with that labelled row in the log the
     # whole time. A wait for a row that is never coming is not patience.
     $liveArmedWait = Wait-SbRow -Log $log -Mark $logMark `
-                                -Patterns (@('STALL ARMED render-stall=') + (Get-SbSceneRefusals $Scene)) `
+                                -Patterns (Get-SbWaitPatterns @('STALL ARMED render-stall=') $Scene) `
                                 -TimeoutSeconds ([math]::Min($timeout, 90)) -Tick $sampler
     if ($null -ne $liveArmedWait.Row -and $liveArmedWait.Row -notmatch 'STALL ARMED render-stall=') {
         # A REFUSAL, NOT A TIMEOUT, AND THE NOTE SAYS WHICH. The old text
@@ -611,7 +611,7 @@ if ($Hand) {
     # planned runs, every time with the scene's labelled refusal already in the
     # log. A refusal means the dump is never coming.
     $dumpWait = Wait-SbRow -Log $log -Mark $logMark `
-                           -Patterns (@("DUMP sb-doc-before\.json bytes=") + (Get-SbSceneRefusals $Scene)) `
+                           -Patterns (Get-SbWaitPatterns @("DUMP sb-doc-before\.json bytes=") $Scene) `
                            -TimeoutSeconds ([math]::Min($timeout, 90)) -Tick $sampler
     if ($null -ne $dumpWait.Row -and $dumpWait.Row -notmatch 'DUMP sb-doc-before\.json bytes=') {
         # ⛔ A REFUSAL IS NOT A TIMEOUT AND MUST NOT BORROW ITS SENTENCE. The old

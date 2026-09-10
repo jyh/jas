@@ -707,6 +707,69 @@ Test-Case 'P4: CONTROL -- a MENU row missing a field REFUSES rather than reading
 Test-Case 'P4: ...and names the field it could not read' { if ((Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Reason -match 'missed') { 'named' } else { 'not named' } } 'named'
 
 # ---------------------------------------------------------------------------
+# `Get-SbSceneRefusals` -- THE READER TWO WAITS INSIDE A RUN NOW DEPEND ON
+# ---------------------------------------------------------------------------
+#
+# ⛔ IT SHIPPED WITH NO ARM AT ALL, AND THE MUTANT IS THE ARGUMENT FOR THESE
+# CASES. Make the function `return @()` unconditionally and BOTH inside-run
+# waits silently revert to burning their full 90 s -- while this file stays at
+# its full count, `check_scene_tables` stays OK and CI stays green, because the
+# only consumers are two `Wait-SbRow` calls that need a desktop to reach. A
+# producer needs a consumer that can RED.
+#
+# ⭐ AND THE CASES BELOW ARE BEHAVIOURAL, NOT SHAPE CHECKS. `RUSTFAIL RETAINED `
+# was prescribed in a routed ruling on 2026-09-09 on the strength of its nine
+# sibling scenes, and at that moment it matched NOTHING that scene could print.
+# A pattern is only worth what it matches, so every case here drives it against
+# a row.
+
+# ⛔ `@(...)` AROUND THE CALL BEFORE `[0]`, AND IT IS NOT DECORATION. A
+# one-element array leaves a function as a SCALAR, and `'RUSTFAIL RETAINED '[0]`
+# is the CHARACTER 'R' -- which matches every row on this page, so the positive
+# arm would pass for the wrong reason and the control would fail.
+$refusalRow = "02:03:01`tRUSTFAIL RETAINED FAILED: no swapchain ui-tid=0 render-tid=0"
+$refusalOther = "02:03:01`tRUSTFAIL POINTER FAILED: no swapchain ui-tid=0 render-tid=0"
+$successRow = "02:03:01`tRUSTOK RETAINED 'tiger.svg' (1024 bytes) in the HELD engine; loads(shell)=1"
+
+Test-Case 'REFUSALS: a declared scene yields its class pattern' { (Get-SbSceneRefusals 'retained') -join '|' } 'RUSTFAIL RETAINED '
+Test-Case 'REFUSALS: the pattern MATCHES that scene''s refusal row' { if ($refusalRow -match @(Get-SbSceneRefusals 'retained')[0]) { 'matched' } else { 'MISSED' } } 'matched'
+# ⛔ THE ARM THAT STOPS A WAIT ENDING EARLY. `Done` and `Refused` answer
+# different questions precisely because a success pattern here would end a wait
+# on a row saying nothing about its own subject.
+Test-Case 'REFUSALS: CONTROL -- it does NOT match that scene''s SUCCESS row' { if ($successRow -match @(Get-SbSceneRefusals 'retained')[0]) { 'matched' } else { 'MISSED' } } 'MISSED'
+Test-Case 'REFUSALS: CONTROL -- it does NOT match another scene''s refusal row' { if ($refusalOther -match @(Get-SbSceneRefusals 'retained')[0]) { 'matched' } else { 'MISSED' } } 'MISSED'
+# ⛔⛔ THE PAIR BELOW IS THE ONE WORTH READING, AND IT IS A DEFECT #145 SHIPPED.
+# `+` is NOT safe against this reader. A PowerShell function whose output
+# stream is empty evaluates to `$null` in a parenthesised call, so
+# `@('DUMP ...') + (Get-SbSceneRefusals $Scene)` was a TWO-element list for
+# every scene with no `Refused` key -- and `[string[]]` then turned the second
+# element into `''`, a pattern that matches EVERY row. A wait built that way
+# ends at 0s on the last unrelated line and reports it as its subject.
+# `Get-SbWaitPatterns` is the fix and these are its arms.
+Test-Case 'PATTERNS: a declared scene contributes its refusal beside the caller''s own' { (Get-SbWaitPatterns @('DUMP sb-doc-before\.json bytes=') 'retained') -join '|' } 'DUMP sb-doc-before\.json bytes=|RUSTFAIL RETAINED '
+Test-Case 'PATTERNS: an unknown scene leaves the caller''s list EXACTLY as it was' { (Get-SbWaitPatterns @('DUMP sb-doc-before\.json bytes=') 'no-such-scene') -join '|' } 'DUMP sb-doc-before\.json bytes='
+Test-Case 'PATTERNS: ...and contributes NO empty pattern -- the defect itself' { $p = Get-SbWaitPatterns @('DUMP sb-doc-before\.json bytes=') 'no-such-scene'; @($p | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count } '0'
+# ⛔ AND THE BACKSTOP, WHICH CLOSES THE CLASS RATHER THAN THE INSTANCE: any
+# caller that reaches the row reader with an empty pattern is REFUSED BY NAME.
+# `'' -match ''` is true for every row, so the silent version of this returns a
+# confident answer about the wrong line.
+Test-Case 'PATTERNS: CONTROL -- an empty pattern REFUSES rather than matching every row' { try { Select-SbRow @('a','b') ''; 'matched' } catch { if ("$($_.Exception.Message)" -match 'refusing to match every row') { 'refused' } else { 'wrong refusal' } } } 'refused'
+Test-Case 'PATTERNS: CONTROL -- a real pattern still selects' { Select-SbRow @('alpha','beta') 'be' } 'beta'
+# ⛔ THE ANTI-VACUITY ARM, AND IT IS THE ONE THAT KILLS THE `return @()` MUTANT.
+# Every case above names ONE scene; a reader that answered only for `retained`
+# would pass all of them. This one asks the whole table, and it reds for a
+# neutered reader AND for an entry that loses its key.
+# ⭐ `scripts/check_scene_refusal_labels.py` is the other half: it holds the C#
+# side, that every refusal a scene can return begins with the prefix these
+# patterns anchor on. Neither half is checkable from where the other lives.
+Test-Case 'REFUSALS: EVERY scene in the table yields a non-empty pattern list' {
+    $missing = @()
+    foreach ($s in $sceneSpec.Keys) { if ((Get-SbSceneRefusals $s).Count -lt 1) { $missing += $s } }
+    if ($missing.Count -eq 0) { "all $($sceneSpec.Keys.Count)" } else { "MISSING: $($missing -join ',')" }
+} "all $($sceneSpec.Keys.Count)"
+Test-Case 'REFUSALS: CONTROL -- the table is not empty, so the case above is not vacuous' { if ($sceneSpec.Keys.Count -ge 8) { 'populated' } else { "only $($sceneSpec.Keys.Count)" } } 'populated'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

@@ -263,6 +263,17 @@ jobs:
       # so it needs no Windows -- only to have been noticed there.
       - run: python scripts/check_assertion_declarations.py --self-test
       - run: python scripts/check_assertion_declarations.py
+      # ⭐ THE REFUSAL-LABEL JOIN (step 0 of the ruled build order). Same
+      # receipt as the two joins above: RED on `main` when written, with 26
+      # findings -- 18 refusal paths whose row named no scene, and 8 table
+      # entries with no `Refused` key at all. It exists because PR #145 gave
+      # those strings their first machine reader: two waits inside a run now
+      # end on `RUSTFAIL <SCENE> `, so an unlabelled refusal is a MEASURED
+      # 90 s rather than a style note. The C# half cannot be seen from any
+      # PowerShell file and the table half cannot be seen from any .cs, which
+      # is why the gate is the only place the two meet.
+      - run: python scripts/check_scene_refusal_labels.py --self-test
+      - run: python scripts/check_scene_refusal_labels.py
       # The third WinUI-shell gate. Only its SELF-TEST can run here: the live
       # arm adjudicates a log that only exists where the C# suite runs, which is
       # `windows-shell-compile`. The self-test is not a token invocation -- its
@@ -952,6 +963,11 @@ jobs:
           # platform difference in either claim would actually show.
           python scripts/check_assertion_declarations.py --self-test
           python scripts/check_assertion_declarations.py
+          # The refusal-label join reads the same `utf-8-sig` .ps1 the two
+          # joins above do, and its C# side is read through `csharp_source`;
+          # this lane is where a platform difference in either would show.
+          python scripts/check_scene_refusal_labels.py --self-test
+          python scripts/check_scene_refusal_labels.py
 
       # cbindgen, for the header-freshness referee below. Prebuilt via binstall
       # (seconds) rather than compiled from source (minutes) — and PINNED, because

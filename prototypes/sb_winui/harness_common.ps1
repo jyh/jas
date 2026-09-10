@@ -109,7 +109,17 @@ function Read-SbRowsBefore([string]$Log, [long]$Mark) {
     return @($all[0..($keep - 1)])
 }
 
+# ⛔ AN EMPTY PATTERN IS A REFUSAL, NEVER A MATCH. `'' -match ''` is TRUE for
+# every row, so a caller that built its pattern list from a TABLE -- and got
+# `$null` back for a key that was not there -- would silently select the last
+# unrelated row and end its wait at 0s with a confident answer. That is not
+# hypothetical: `[string[]]` coercion turns a `$null` element into `''` before
+# this function ever sees it, so the empty pattern arrives looking deliberate.
+# Refusing by name is the only way an instrument's own bad input surfaces.
 function Select-SbRow($Rows, [string]$Pattern) {
+    if ([string]::IsNullOrWhiteSpace($Pattern)) {
+        throw "Select-SbRow: the pattern is empty -- refusing to match every row."
+    }
     $hit = @($Rows | Where-Object { $_ -match $Pattern })
     if ($hit.Count -eq 0) { return $null }
     return $hit[-1]
@@ -608,27 +618,31 @@ $sceneSpec = @{
         # `Done` would change nothing. They are here for the OTHER waits (the
         # hand's dump wait below), which have no terminal condition at all when
         # the scene refuses and burn 90 s each.
-        Refused = @("RUSTFAIL RETAINED ", "RUSTFAIL NOT RUN: uncalibrated SVG ")
+        Refused = @("RUSTFAIL RETAINED ")
         Label   = "the A' hash row (the round trip's H2)"
         Timeout = 150
     }
     'benchmark' = @{
         Done    = @("RUSTOK BENCHMARK frames=", "RUSTFAIL BENCHMARK")
+        Refused = @("RUSTFAIL BENCHMARK ")
         Label   = "the BENCHMARK row"
         Timeout = 150
     }
     'document' = @{
         Done    = @("RUSTOK DOCUMENT '", "RUSTFAIL DOCUMENT")
+        Refused = @("RUSTFAIL DOCUMENT ")
         Label   = "the DOCUMENT control row"
         Timeout = 120
     }
     'goldens' = @{
         Done    = @("RUSTOK GOLDENS ", "GOLDENS FAILED")
+        Refused = @("RUSTFAIL GOLDENS ")
         Label   = "the GOLDENS row"
         Timeout = 120
     }
     'selection-marquee' = @{
         Done    = @("RUSTOK SELECTION '", "RUSTFAIL SELECTION")
+        Refused = @("RUSTFAIL SELECTION ")
         Label   = "the SELECTION row"
         Timeout = 120
     }
@@ -686,6 +700,7 @@ $sceneSpec = @{
     # at it because `stay` is never in the default scene list.
     'stay' = @{
         Done    = @("RUSTOK STAY pid=", "RUSTFAIL STAY ")
+        Refused = @("RUSTFAIL STAY ")
         Label   = "the STAY pid row, or the stay scene's named refusal"
         Timeout = 120
         Holds   = $true
@@ -695,6 +710,7 @@ $sceneSpec = @{
     # measurement scene and belongs in a sitting.
     'abi' = @{
         Done    = @("RUSTOK ABI menu-items=", "RUSTFAIL ABI ")
+        Refused = @("RUSTFAIL ABI ")
         Label   = "the ABI probe row"
         Timeout = 120
     }
@@ -709,6 +725,7 @@ $sceneSpec = @{
     # learns the row to wait for.
     'app' = @{
         Done    = @("RUSTOK APP pid=", "RUSTFAIL APP ")
+        Refused = @("RUSTFAIL APP ")
         Label   = "the APP pid row, or the app entry's named refusal"
         Timeout = 120
         Holds   = $true
@@ -738,6 +755,26 @@ function Get-SbSceneRefusals([string]$Scene) {
     if ($null -eq $spec) { return @() }
     if (-not $spec.ContainsKey('Refused')) { return @() }
     return @($spec.Refused)
+}
+
+# ⭐ THE LIST A WAIT INSIDE A RUN ACTUALLY WANTS: the caller's own patterns plus
+# the scene's declared refusals, with any empty entry dropped.
+#
+# ⛔ IT EXISTS BECAUSE `+` IS NOT SAFE HERE AND THE UNSAFE CASE IS SILENT. A
+# PowerShell function whose output stream is empty evaluates to `$null` in a
+# parenthesised call, so `@('DUMP ...') + (Get-SbSceneRefusals $Scene)` is a
+# TWO-element list for any scene with no `Refused` key, and `[string[]]` then
+# turns the second element into `''` -- a pattern that matches every row. The
+# concatenation looks right at the call site and reads right in review.
+#
+# Every scene in `$sceneSpec` declares `Refused` today, and
+# `scripts/check_scene_refusal_labels.py` clause (d) keeps it that way, so the
+# empty case is unreachable through the table. This is the belt to that
+# braces: `verify_window.ps1 -Hand -Scene <anything>` is a legal invocation and
+# a future scene is one edit away.
+function Get-SbWaitPatterns([string[]]$Patterns, [string]$Scene) {
+    $all = @($Patterns) + @(Get-SbSceneRefusals $Scene)
+    return @($all | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
 
