@@ -1852,7 +1852,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private bool Benchmark()
     {
-        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+        if (_swapChain is null) { LastStatus = "BENCHMARK FAILED: no swapchain"; return false; }
 
         var frames = int.TryParse(Environment.GetEnvironmentVariable("SB_FRAMES"), out var f) ? f : 60;
         var offscreen = OffscreenMode && _offscreen is not null;
@@ -1934,7 +1934,7 @@ internal sealed unsafe class Canvas : IDisposable
         var route = offscreen ? "OFFSCREEN+copy" : "DIRECT";
         if (failure is not null)
         {
-            LastStatus = $"{route} FAILED at frame {paint.Count}: {failure} [{Stat("paint", paint)}]";
+            LastStatus = $"BENCHMARK {route} FAILED at frame {paint.Count}: {failure} [{Stat("paint", paint)}]";
             return false;
         }
 
@@ -2100,7 +2100,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private bool RenderGoldens()
     {
-        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+        if (_swapChain is null) { LastStatus = "GOLDENS FAILED: no swapchain"; return false; }
 
         var n = (nuint)JasCore.jas_corpus_len();
         if (n == 0)
@@ -2196,12 +2196,12 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private bool RenderDocumentControl()
     {
-        if (_swapChain is null) { LastStatus = "no swapchain"; return false; }
+        if (_swapChain is null) { LastStatus = "DOCUMENT FAILED: no swapchain"; return false; }
 
         var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
         if (string.IsNullOrWhiteSpace(svgPath))
         {
-            LastStatus = "SB_SCENE=document requires SB_SVG=<path to an .svg>";
+            LastStatus = "DOCUMENT NOT RUN: SB_SCENE=document requires SB_SVG=<path to an .svg>";
             return false;
         }
 
@@ -2316,12 +2316,12 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private bool RenderSelection()
     {
-        if (_swapChain is null || _engine == IntPtr.Zero) { LastStatus = "no swapchain"; return false; }
+        if (_swapChain is null || _engine == IntPtr.Zero) { LastStatus = "SELECTION FAILED: no swapchain"; return false; }
 
         var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
         if (string.IsNullOrWhiteSpace(svgPath))
         {
-            LastStatus = "SB_SCENE=selection-marquee requires SB_SVG=<path to an .svg>";
+            LastStatus = "SELECTION NOT RUN: SB_SCENE=selection-marquee requires SB_SVG=<path to an .svg>";
             return false;
         }
 
@@ -2474,14 +2474,14 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_swapChain is null || _engine == IntPtr.Zero)
         {
-            LastStatus = "no swapchain";
+            LastStatus = "RETAINED FAILED: no swapchain";
             return false;
         }
 
         var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
         if (string.IsNullOrWhiteSpace(svgPath))
         {
-            LastStatus = "SB_SCENE=retained requires SB_SVG=<path to an .svg>";
+            LastStatus = "RETAINED NOT RUN: SB_SCENE=retained requires SB_SVG=<path to an .svg>";
             return false;
         }
 
@@ -2493,7 +2493,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         if (!calibrated)
         {
-            LastStatus = $"NOT RUN: uncalibrated SVG '{name}' -- O1 compares hashes with no "
+            LastStatus = $"RETAINED NOT RUN: uncalibrated SVG '{name}' -- O1 compares hashes with no "
                        + $"tolerance and only these are calibrated: {string.Join(", ", CalibratedSvgs)}";
             return false;
         }
@@ -2533,7 +2533,17 @@ internal sealed unsafe class Canvas : IDisposable
             // needs no gesture at all -- went unmeasured with it. Both exits now
             // lead to `CompleteRetainedWithoutGesture`, which marks the mutation
             // clause NOT RUN and lets the round trip run.
-            if (!TryHandWaitMs(out var waitMs)) { return false; }
+            // ⛔ THE CALLEE OWNS THE STATUS AND DOES NOT KNOW THE SCENE.
+            // `TryHandWaitMs` sets a status naming the KNOB it refused (SB_POINTER_WAIT_MS),
+            // which is the right thing for it to say and says nothing a wait
+            // can match: the two waits inside a run end on `RUSTFAIL RETAINED `.
+            // Prefixing at the call site is the shape this file already uses
+            // for every other callee-owned refusal in these methods.
+            if (!TryHandWaitMs(out var waitMs))
+            {
+                LastStatus = $"RETAINED FAILED: {LastStatus}";
+                return false;
+            }
             if (waitMs == 0)
             {
                 CompleteRetainedWithoutGesture("SB_POINTER_WAIT_MS=0 declined the wait");
@@ -2550,7 +2560,17 @@ internal sealed unsafe class Canvas : IDisposable
             return true;
         }
 
-        if (!SyntheticDrag(synth, "retained")) { return false; }
+        // ⛔ THE CALLEE OWNS THE STATUS AND DOES NOT KNOW THE SCENE.
+        // `SyntheticDrag` sets a status naming the KNOB it refused (SB_SYNTH_DRAG),
+        // which is the right thing for it to say and says nothing a wait
+        // can match: the two waits inside a run end on `RUSTFAIL RETAINED `.
+        // Prefixing at the call site is the shape this file already uses
+        // for every other callee-owned refusal in these methods.
+        if (!SyntheticDrag(synth, "retained"))
+        {
+            LastStatus = $"RETAINED FAILED: {LastStatus}";
+            return false;
+        }
         _mutation = "SYNTHETIC";
         PaintAndHash("A-MUT");
         ApplyDump("sb-doc-after.json");
@@ -2588,7 +2608,7 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_swapChain is null || _engine == IntPtr.Zero)
         {
-            LastStatus = "no swapchain";
+            LastStatus = "STALL FAILED: no swapchain";
             return false;
         }
 
@@ -2596,7 +2616,7 @@ internal sealed unsafe class Canvas : IDisposable
         _uiStallMs = ParseMs(Environment.GetEnvironmentVariable("SB_UI_STALL_MS"));
         if (renderMs <= 0 && _uiStallMs <= 0)
         {
-            LastStatus = "SB_SCENE=stall needs SB_RENDER_STALL_MS or SB_UI_STALL_MS (a positive "
+            LastStatus = "STALL NOT RUN: SB_SCENE=stall needs SB_RENDER_STALL_MS or SB_UI_STALL_MS (a positive "
                        + "number of milliseconds); a stall scene that stalls for zero is a "
                        + "scene that measures nothing";
             return false;
@@ -2697,14 +2717,14 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_swapChain is null || _engine == IntPtr.Zero)
         {
-            LastStatus = "no swapchain";
+            LastStatus = "POINTER FAILED: no swapchain";
             return false;
         }
 
         var svgPath = Environment.GetEnvironmentVariable("SB_SVG");
         if (string.IsNullOrWhiteSpace(svgPath))
         {
-            LastStatus = "SB_SCENE=pointer requires SB_SVG=<path to an .svg>";
+            LastStatus = "POINTER NOT RUN: SB_SCENE=pointer requires SB_SVG=<path to an .svg>";
             return false;
         }
 
@@ -2729,14 +2749,34 @@ internal sealed unsafe class Canvas : IDisposable
         var synth = Environment.GetEnvironmentVariable("SB_SYNTH_DRAG");
         if (!string.IsNullOrWhiteSpace(synth))
         {
-            if (!SyntheticDrag(synth, "pointer")) { return false; }
+            // ⛔ THE CALLEE OWNS THE STATUS AND DOES NOT KNOW THE SCENE.
+            // `SyntheticDrag` sets a status naming the KNOB it refused (SB_SYNTH_DRAG),
+            // which is the right thing for it to say and says nothing a wait
+            // can match: the two waits inside a run end on `RUSTFAIL POINTER `.
+            // Prefixing at the call site is the shape this file already uses
+            // for every other callee-owned refusal in these methods.
+            if (!SyntheticDrag(synth, "pointer"))
+            {
+                LastStatus = $"POINTER FAILED: {LastStatus}";
+                return false;
+            }
             ApplyDump("sb-doc-after.json");
             LastStatus = $"POINTER '{name}' pointer=SYNTHETIC (the CONTROL arm; the hand was "
                        + $"not asked for) surface={_width}x{_height} {Tids()}";
             return true;
         }
 
-        if (!TryHandWaitMs(out var waitMs)) { return false; }
+        // ⛔ THE CALLEE OWNS THE STATUS AND DOES NOT KNOW THE SCENE.
+        // `TryHandWaitMs` sets a status naming the KNOB it refused (SB_POINTER_WAIT_MS),
+        // which is the right thing for it to say and says nothing a wait
+        // can match: the two waits inside a run end on `RUSTFAIL POINTER `.
+        // Prefixing at the call site is the shape this file already uses
+        // for every other callee-owned refusal in these methods.
+        if (!TryHandWaitMs(out var waitMs))
+        {
+            LastStatus = $"POINTER FAILED: {LastStatus}";
+            return false;
+        }
         if (waitMs == 0)
         {
             // The wait was DECLINED, which is a different fact from a wait that
