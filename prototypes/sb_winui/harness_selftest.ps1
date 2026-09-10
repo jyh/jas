@@ -770,6 +770,47 @@ Test-Case 'REFUSALS: EVERY scene in the table yields a non-empty pattern list' {
 Test-Case 'REFUSALS: CONTROL -- the table is not empty, so the case above is not vacuous' { if ($sceneSpec.Keys.Count -ge 8) { 'populated' } else { "only $($sceneSpec.Keys.Count)" } } 'populated'
 
 # ---------------------------------------------------------------------------
+# `Get-SbSceneVerdict` -- THE COMPLETION LINE CLASSIFIES, IT DOES NOT COMPLETE
+# ---------------------------------------------------------------------------
+#
+# ⛔ THE CASE THAT MATTERS IS `refusedAndDone`, AND IT IS THE MEASURED DEFECT,
+# NOT A HYPOTHETICAL. On kenai 2026-09-09 a `retained` run on a bad document
+# refused in under a second AND had its `A'` row written anyway, because the
+# `SB_RESIZE` walk runs independently of the scene's return value. The verdict
+# line read `ok  : scene 'retained' completed` over a hash of a blank white
+# surface. Both rows are in the region; the refusal must win.
+#
+# ⭐ AND THE ORDER OF THE ROWS IS DELIBERATELY WRONG-WAY-ROUND IN THAT FIXTURE:
+# `A'` comes AFTER the refusal. The whole point of the ruling is that arrival
+# order stops being an input, so the fixture is built to fail a reader that
+# takes "whichever came last".
+
+$refusedRow  = "02:03:01`tRUSTFAIL RETAINED NOT RUN: uncalibrated SVG 'x.svg' -- O1 compares hashes"
+$aPrimeRow   = "02:03:02`tA' surface=1000x600 hash=deadbeef"
+$retainedOk  = "02:03:02`tRUSTOK RETAINED 'tiger.svg' (1024 bytes) in the HELD engine"
+$refusedAndDone = @($refusedRow, $aPrimeRow)
+
+Test-Case 'VERDICT: a clean run with a Done row reads DONE' { (Get-SbSceneVerdict @($retainedOk, $aPrimeRow) 'retained' $aPrimeRow).Verdict } 'DONE'
+Test-Case 'VERDICT: no Done row and no refusal reads TIMEOUT' { (Get-SbSceneVerdict @($retainedOk) 'retained' $null).Verdict } 'TIMEOUT'
+# ⛔⛔ THE MEASURED DEFECT. Before the classifier this returned "completed".
+Test-Case 'VERDICT: a refusal WITH a Done row reads REFUSED, not DONE' { (Get-SbSceneVerdict $refusedAndDone 'retained' $aPrimeRow).Verdict } 'REFUSED'
+Test-Case 'VERDICT: ...and it quotes the SCENE''s row, not the row that ended the wait' { (Get-SbSceneVerdict $refusedAndDone 'retained' $aPrimeRow).Row.Trim() } $refusedRow.Trim()
+# ⭐ ORDER IS NOT AN INPUT: the same two rows the other way round, same verdict.
+Test-Case 'VERDICT: CONTROL -- reversing the row order changes nothing' { (Get-SbSceneVerdict @($aPrimeRow, $refusedRow) 'retained' $aPrimeRow).Verdict } 'REFUSED'
+# ⛔ A REFUSAL WITH NO Done ROW IS STILL REFUSED, NEVER TIMEOUT. The two have
+# different remedies and a timeout's sentence tells the reader nothing.
+Test-Case 'VERDICT: a refusal with NO Done row is REFUSED, not TIMEOUT' { (Get-SbSceneVerdict @($refusedRow) 'retained' $null).Verdict } 'REFUSED'
+# ⛔ CROSS-SCENE CONTROL, AND IT IS THE ARM THAT MAKES STEP (0) LOAD-BEARING:
+# another scene's refusal must NOT convict this one. Before every refusal path
+# carried its scene's prefix, this is the arm that could not have been written.
+Test-Case 'VERDICT: CONTROL -- another scene''s refusal does not convict this one' { (Get-SbSceneVerdict @("02:03:01`tRUSTFAIL POINTER FAILED: no swapchain", $aPrimeRow) 'retained' $aPrimeRow).Verdict } 'DONE'
+# ⭐ AND THE SUCCESS ROW OF THE SAME SCENE IS NOT A REFUSAL -- `RUSTOK` vs
+# `RUSTFAIL` is the whole discriminator, and a pattern missing the verdict
+# prefix would convict every healthy run.
+Test-Case 'VERDICT: CONTROL -- the scene''s own SUCCESS row is not a refusal' { (Get-SbSceneVerdict @($retainedOk, $aPrimeRow) 'retained' $aPrimeRow).Verdict } 'DONE'
+Test-Case 'VERDICT: an unknown scene has no refusals, so a Done row still reads DONE' { (Get-SbSceneVerdict @($refusedRow) 'no-such-scene' $aPrimeRow).Verdict } 'DONE'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

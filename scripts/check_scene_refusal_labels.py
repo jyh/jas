@@ -38,6 +38,22 @@ WHAT IT ASSERTS
     (c) every governing status begins with `<PREFIX> ` or `<PREFIX>'`.      RED
     (d) every `$sceneSpec` entry declares `Refused`, and every pattern in it
         is the scene's CLASS pattern `RUSTFAIL <PREFIX> `.                  RED
+    (e) NO report site anywhere in the shell writes a LITERAL
+        `RUSTFAIL <PREFIX> ` row. Only the dispatcher's terminal report may
+        write that shape, and it does so as `RUSTFAIL {LastStatus}`.        RED
+
+⛔ CLAUSE (e) IS THE INVARIANT THE COMPLETION CLASSIFIER RESTS ON, AND IT IS
+HERE BECAUSE A DERIVATION IS ONLY AS SOUND AS THE INVARIANT IT ASSUMES.
+`Get-SbSceneVerdict` reads REFUSED when `RUSTFAIL <PREFIX> ` appears ANYWHERE in
+a run's region -- deliberately, so arrival order stops being an input. That is
+sound only while the sole writer of that shape is the scene's own terminal
+verdict. Measured once, by hand, before the classifier was written: of the ~40
+report sites in the shell, none writes a literal scene prefix -- hash rows are
+`RUSTFAIL A'`, op rows are `RUSTFAIL UNDO`/`REDO`, repaint rows are
+`RUSTFAIL REPAINT-FAILED`, and the window's own rows are `RUSTFAIL SB_*`. ⇒ A
+hand measurement of an invariant is a fact about one afternoon; this clause is
+the fact about every afternoon after it, and the shell's OWN idiom is to prefix
+a row with a name, so the next mid-run diagnostic is one edit away.
 
 ⛔ CLAUSE (b) IS THE ONE THAT PROTECTS THE OTHER THREE, AND IT IS WRITTEN FROM A
 DEFECT IN THIS GATE'S OWN DRAFTS. Two earlier censuses of the same question --
@@ -69,6 +85,14 @@ WHAT IT DOES NOT COVER
   pattern to cover. Said out loud so the next head widens deliberately.
 * Whether a labelled refusal is REACHED. That is a run on the box, not a text
   gate, and `harness_selftest.ps1` arms the reader that consumes these labels.
+* Clause (e) reads LITERALS ONLY. `_report($"RUSTFAIL {expr} ...")` -- the
+  prefix arriving from an interpolation hole -- is invisible to it, and today
+  every such hole resolves to something that is not a scene name (`LastStatus`,
+  an exception type, a `REPAINT` row, an `undo`/`redo` label uppercased). That
+  bound is stated rather than hidden: a hole is where the next violation would
+  come from, and no text gate can see through one. What the clause DOES cover is
+  the shape a person writes by hand, which is the shape the shell already uses
+  everywhere else.
 """
 
 from __future__ import annotations
@@ -225,6 +249,43 @@ def read_paths(lexed: cs.Lexed, dispatch: dict[str, str]) -> tuple[list, list]:
     return resolved, unresolved
 
 
+MIN_REPORT_SITES = 25
+
+_REPORT_CALL = re.compile(r"\b_?[Rr]eport\s*\(")
+
+
+def read_report_sites(lexed: cs.Lexed) -> list[tuple[int, str]]:
+    """`(line, first string literal)` for every report call in the file.
+
+    The call is found in `code` (so a `Report(` inside a comment or a diagnostic
+    string is not a call) and the literal is read from `decommented` (so the
+    payload survives). One index space, so this is not a seam.
+    """
+    out: list[tuple[int, str]] = []
+    for m in _REPORT_CALL.finditer(lexed.code):
+        depth, end = 0, None
+        for j in range(m.end() - 1, len(lexed.code)):
+            if lexed.code[j] == "(":
+                depth += 1
+            elif lexed.code[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    end = j
+                    break
+        if end is None:
+            continue
+        lit = _LITERAL.search(lexed.decommented[m.end() : end])
+        out.append((lexed.line_of(m.start()), lit.group(1) if lit else ""))
+    if len(out) < MIN_REPORT_SITES:
+        raise Refuse(
+            f"{len(out)} report site(s) found, below the floor of "
+            f"{MIN_REPORT_SITES}. Clause (e) would pass over almost nothing -- "
+            "the call pattern stopped matching, it is not that the shell "
+            "stopped reporting"
+        )
+    return out
+
+
 def read_table() -> tuple[dict[str, list[str]], Path, dict[str, int]]:
     """`({scene: Refused patterns}, file, {scene: line})` from the ONE table.
 
@@ -292,6 +353,7 @@ def check() -> list[str]:
     dispatch = read_dispatch(lexed)
     resolved, unresolved = read_paths(lexed, dispatch)
     table, table_path, table_lines = read_table()
+    sites = read_report_sites(lexed)
     rel = _rel(CANVAS)
     trel = _rel(table_path)
     out: list[str] = []
@@ -359,6 +421,20 @@ def check() -> list[str]:
                     "and silently misses the rest; clause (c) is what makes the "
                     "class pattern cover all of them"
                 )
+
+    # (e) no report site writes a LITERAL scene-prefixed RUSTFAIL row.
+    for line, lit in sites:
+        for scene, want in sorted(PREFIX.items()):
+            if lit.startswith(f"RUSTFAIL {want} "):
+                out.append(
+                    f"{rel}:{line}: this report writes a literal "
+                    f"\"RUSTFAIL {want} \" row, and only scene '{scene}'s own "
+                    "terminal verdict may write that shape. The completion "
+                    "classifier reads it as the scene REFUSING, anywhere in the "
+                    "run's region and regardless of ordering -- so a mid-run "
+                    "diagnostic in this shape turns a healthy run's verdict "
+                    "FAIL. Name the row for what it reports, not for the scene"
+                )
     return out
 
 
@@ -370,7 +446,7 @@ def _summary() -> str:
     declared = sum(1 for s in table if table[s])
     return (f"{len(dispatch)} scenes · {len(resolved) + len(unresolved)} refusal "
             f"paths ({len(unresolved)} unresolved) · {declared}/{len(table)} table "
-            "entries declare Refused")
+            f"entries declare Refused · {len(read_report_sites(lexed))} report sites")
 
 
 # --------------------------------------------------------------------------
@@ -403,12 +479,18 @@ def self_test() -> int:
             f"            {{\n                ok = Render_{s.replace('-', '_')}();\n            }}"
             for s in PREFIX
         )
+        # ⛔ THREE REPORT CALLS PER METHOD, SO THE FIXTURE CLEARS CLAUSE (e)'s
+        # OWN FLOOR. A fixture that refuses the floor would make every arm
+        # below unreachable, and the arms would report that as a pass.
         methods = "\n".join(
             f"    private bool Render_{s.replace('-', '_')}()\n    {{\n"
             f'        if (x) {{ LastStatus = "{PREFIX[s]} FAILED: a"; return false; }}\n'
             f'        if (y) {{ LastStatus = "{PREFIX[s]} FAILED: b"; return false; }}\n'
             f'        if (z) {{ LastStatus = "{PREFIX[s]} FAILED: c"; return false; }}\n'
             f'        if (w) {{ LastStatus = "{PREFIX[s]} FAILED: d"; return false; }}\n'
+            f'        _report("REPAINT {s} one");\n'
+            f'        _report($"RUSTOK {PREFIX[s]} row=1");\n'
+            f'        _report("RUSTFAIL A\' surface=1");\n'
             "        return true;\n    }"
             for s in PREFIX
         )
@@ -497,7 +579,28 @@ def self_test() -> int:
         arm("(a) an undeclared scene reds", _run_on(cs_new, table(), tmp), 1,
             "declares no prefix for it")
 
-        # 9. ANTI-VACUITY: a reader that finds nothing REFUSES, it does not pass.
+        # 9. clause (e): a report site writing a LITERAL scene-prefixed RUSTFAIL
+        #    row. This is the invariant the completion classifier rests on, and
+        #    the mutant is the shape the shell's own idiom invites.
+        arm("(e) a literal RUSTFAIL <SCENE> report reds",
+            _run_on(canvas().replace('_report("REPAINT stall one");',
+                                     '_report("RUSTFAIL STALL mid-run diagnostic");'),
+                    table(), tmp), 1, "only scene 'stall's own")
+
+        # 10. clause (e) NEGATIVE CONTROL, and it is the one that stops the
+        #     clause becoming "no row may mention a scene". A SUCCESS row with
+        #     the same prefix is legitimate and must stay silent.
+        arm("(e) CONTROL -- a RUSTOK row with the same prefix is silent",
+            _run_on(canvas(), table(), tmp), 0)
+
+        # 11. clause (e) SECOND CONTROL: a RUSTFAIL row that is not a scene
+        #     prefix -- the hash rows the shell really writes.
+        arm("(e) CONTROL -- RUSTFAIL on a non-scene label is silent",
+            _run_on(canvas().replace('_report("REPAINT goldens one");',
+                                     '_report("RUSTFAIL A-MUT surface=2");'),
+                    table(), tmp), 0)
+
+        # 12. ANTI-VACUITY: a reader that finds nothing REFUSES, it does not pass.
         arms_run += 1
         try:
             _run_on("class C { private void ApplySceneInner(string s) { } }", table(), tmp)
@@ -506,16 +609,19 @@ def self_test() -> int:
         except Refuse:
             print("  ok   vacuous subject refuses rather than passing")
 
-        # 10. THE FLOORS DRIVEN AGAINST THE REAL FILE, not a fixture -- the arm
+        # 13. THE FLOORS DRIVEN AGAINST THE REAL FILE, not a fixture -- the arm
         #     that a floor's arithmetic self-test does not give you.
         arms_run += 1
         lexed = cs.lex((keep := ROOT / "prototypes/sb_winui/Canvas.cs")
                        .read_text(encoding="utf-8"))
         real_arms = len(read_dispatch(lexed))
-        if real_arms >= MIN_ARMS:
-            print(f"  ok   floors hold against the real tree ({real_arms} arms >= {MIN_ARMS})")
+        real_sites = len(read_report_sites(lexed))
+        if real_arms >= MIN_ARMS and real_sites >= MIN_REPORT_SITES:
+            print(f"  ok   floors hold against the real tree ({real_arms} arms >= "
+                  f"{MIN_ARMS}, {real_sites} report sites >= {MIN_REPORT_SITES})")
         else:
-            print(f"  FAIL floors: real tree has {real_arms} arms, floor {MIN_ARMS}")
+            print(f"  FAIL floors: real tree has {real_arms} arms (floor {MIN_ARMS}) "
+                  f"and {real_sites} report sites (floor {MIN_REPORT_SITES})")
             fails += 1
 
     print(f"\n{arms_run} arms driven, {fails} failed")
