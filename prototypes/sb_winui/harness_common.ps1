@@ -601,6 +601,14 @@ $sceneSpec = @{
     # shells. The tab is still the anchor, so `A'` cannot match inside prose.
     'retained' = @{
         Done    = @((Get-SbRowPattern "A'" " surface="))
+        # ⛔ `Refused` IS NOT IN `Done` HERE, AND THAT IS DELIBERATE. Measured on
+        # kenai 2026-09-09: this scene does NOT time out on a bad document -- the
+        # `SB_RESIZE` walk writes `A'` independently of the scene's return value,
+        # so `Done` already matches and the wait ends at 0s. Adding these to
+        # `Done` would change nothing. They are here for the OTHER waits (the
+        # hand's dump wait below), which have no terminal condition at all when
+        # the scene refuses and burn 90 s each.
+        Refused = @("RUSTFAIL RETAINED ", "RUSTFAIL NOT RUN: uncalibrated SVG ")
         Label   = "the A' hash row (the round trip's H2)"
         Timeout = 150
     }
@@ -634,6 +642,7 @@ $sceneSpec = @{
         # row` -- 237 s of wall-clock for a fault the shell had already named.
         # A labelled row nothing waits on is a label with no reader.
         Done    = @((Get-SbRowPattern 'STALL' ' render-stall='), "RUSTFAIL STALL ")
+        Refused = @("RUSTFAIL STALL ")
         Label   = "the STALL row, or the scene's own named refusal"
         Timeout = 120
     }
@@ -664,6 +673,7 @@ $sceneSpec = @{
         # planned per sitting, so the class cost 560 s in one measurement.
         Done    = @("HAND CLOSED scene=", "NOT RUN: hand refused", "POINTER SYNTHETIC press=",
                     "RUSTFAIL POINTER ")
+        Refused = @("RUSTFAIL POINTER ")
         Label   = "the HAND CLOSED row, its named refusal, the SYNTHETIC control's own POINTER row, or the scene's own named refusal"
         Timeout = 120
     }
@@ -704,6 +714,32 @@ $sceneSpec = @{
         Holds   = $true
     }
 }
+
+# ⭐ THE SCENE'S OWN NAMED REFUSALS, FOR WAITS THAT ARE NOT THE COMPLETION WAIT.
+#
+# ⛔ WHY THIS IS A SEPARATE KEY RATHER THAN A SECOND READ OF `Done`. `Done` is
+# the set that ENDS THE SCENE -- success or refusal, both are terminal and the
+# completion wait wants both. The waits inside a run (the hand's document dump,
+# the stall's ARMED row) want only the REFUSAL half: a refusal means the row
+# they are waiting for is never coming, while a SUCCESS pattern would end them
+# early on a row that says nothing about their own subject.
+#
+# Measured on kenai 2026-09-10, one bad-document run per scene: the hand's dump
+# wait burned 90.2 s and the stall's ARMED wait burned 90.2 s, in both cases
+# with the scene's own labelled refusal already sitting in the log. A third wait
+# of the same shape -- `retained`'s FIRST-PRESENT gate -- was censused and does
+# NOT burn, because the shell presents even on a refusal; it is left alone
+# rather than "fixed" on the strength of the other two.
+#
+# Returns an empty array for a scene with no declared refusals, so a caller can
+# always splat it into a pattern list.
+function Get-SbSceneRefusals([string]$Scene) {
+    $spec = $sceneSpec[$Scene]
+    if ($null -eq $spec) { return @() }
+    if (-not $spec.ContainsKey('Refused')) { return @() }
+    return @($spec.Refused)
+}
+
 
 # ---------------------------------------------------------------------------
 # THE ROWS THE RENDER THREAD WROTE (O3.1 / O3.2)

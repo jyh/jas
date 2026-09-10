@@ -570,9 +570,21 @@ if (Test-Path $dupExe) {
 $liveDispatched = $false
 $liveArmedWait = $null
 if ($Scene -eq 'stall') {
-    $liveArmedWait = Wait-SbRow -Log $log -Mark $logMark -Patterns @('STALL ARMED render-stall=') `
+    # ⛔ THE SCENE'S OWN REFUSAL ENDS THIS WAIT TOO. Measured on kenai
+    # 2026-09-10: a `stall` run on a non-SVG document refuses in under a second
+    # and labels the row, and this wait still burned its full 90.2 s -- the
+    # entire residual of a 98.2 s run -- with that labelled row in the log the
+    # whole time. A wait for a row that is never coming is not patience.
+    $liveArmedWait = Wait-SbRow -Log $log -Mark $logMark `
+                                -Patterns (@('STALL ARMED render-stall=') + (Get-SbSceneRefusals $Scene)) `
                                 -TimeoutSeconds ([math]::Min($timeout, 90)) -Tick $sampler
-    if ($null -eq $liveArmedWait.Row) {
+    if ($null -ne $liveArmedWait.Row -and $liveArmedWait.Row -notmatch 'STALL ARMED render-stall=') {
+        # A REFUSAL, NOT A TIMEOUT, AND THE NOTE SAYS WHICH. The old text
+        # ("no STALL ARMED row within 90s") was true and read as a hang.
+        $verdicts += "note: the scene REFUSED after $($liveArmedWait.Waited)s before arming the stall, so the session-1 liveness sampler was NOT dispatched and O3.3/O3.C1 will say so by name -- $($liveArmedWait.Row.Trim())"
+        $liveArmedWait = @{ Row = $null; Waited = $liveArmedWait.Waited; Rows = $liveArmedWait.Rows }
+    }
+    elseif ($null -eq $liveArmedWait.Row) {
         $verdicts += "note: no STALL ARMED row within $($liveArmedWait.Waited)s -- the session-1 liveness sampler was NOT dispatched, and O3.3/O3.C1 will say so by name"
     } else {
         $liveArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'sample_liveness.ps1') + '"' +
@@ -593,9 +605,21 @@ if ($Scene -eq 'stall') {
 $handReceipt = Join-Path $scratch 'sb-hand.txt'
 if ($Hand) {
     Remove-Item $handReceipt -ErrorAction SilentlyContinue
-    $dumpWait = Wait-SbRow -Log $log -Mark $logMark -Patterns @("DUMP sb-doc-before\.json bytes=") `
+    # ⛔ THE SCENE'S OWN REFUSAL ENDS THIS WAIT TOO -- the same class as the
+    # stall's ARMED wait above. Measured on kenai 2026-09-10: on a non-SVG
+    # document this burned 90.2 s in `retained` AND in each of `pointer`'s three
+    # planned runs, every time with the scene's labelled refusal already in the
+    # log. A refusal means the dump is never coming.
+    $dumpWait = Wait-SbRow -Log $log -Mark $logMark `
+                           -Patterns (@("DUMP sb-doc-before\.json bytes=") + (Get-SbSceneRefusals $Scene)) `
                            -TimeoutSeconds ([math]::Min($timeout, 90)) -Tick $sampler
-    if ($null -eq $dumpWait.Row) {
+    if ($null -ne $dumpWait.Row -and $dumpWait.Row -notmatch 'DUMP sb-doc-before\.json bytes=') {
+        # ⛔ A REFUSAL IS NOT A TIMEOUT AND MUST NOT BORROW ITS SENTENCE. The old
+        # text said the harness "never had a document to choose a point from",
+        # which is true of both and tells the reader nothing about which.
+        Add-NotRun 'O4 hand' "the scene REFUSED after $($dumpWait.Waited)s without writing a document dump, so there was no document to choose a point from -- $($dumpWait.Row.Trim())"
+    }
+    elseif ($null -eq $dumpWait.Row) {
         Add-NotRun 'O4 hand' "timed out after $($dumpWait.Waited)s waiting for the DUMP sb-doc-before.json row -- the harness never had a document to choose a point from"
     } else {
         # ⛔ THE SCALE IS RE-READ HERE, FROM THE ROWS THIS RUN HAS ALREADY
