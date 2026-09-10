@@ -614,10 +614,14 @@ $sceneSpec = @{
         # ⛔ `Refused` IS NOT IN `Done` HERE, AND THAT IS DELIBERATE. Measured on
         # kenai 2026-09-09: this scene does NOT time out on a bad document -- the
         # `SB_RESIZE` walk writes `A'` independently of the scene's return value,
-        # so `Done` already matches and the wait ends at 0s. Adding these to
-        # `Done` would change nothing. They are here for the OTHER waits (the
-        # hand's dump wait below), which have no terminal condition at all when
-        # the scene refuses and burn 90 s each.
+        # so `Done` already matches and the wait ends at 0s. Adding this pattern
+        # to `Done` would change nothing.
+        # ⭐ THIS SCENE IS WHY THE VERDICT IS CLASSIFIED AND NOT INFERRED FROM THE
+        # WAIT. Because `A'` arrives after a refusal, the completion line read
+        # `ok  : completed` over a hash of a blank white surface. The pattern
+        # below is what `Get-SbSceneVerdict` reads to say REFUSED instead -- and
+        # what ends the hand's dump wait, which has no terminal condition at all
+        # when the scene refuses and burned 90 s each time.
         Refused = @("RUSTFAIL RETAINED ")
         Label   = "the A' hash row (the round trip's H2)"
         Timeout = 150
@@ -732,14 +736,24 @@ $sceneSpec = @{
     }
 }
 
-# ⭐ THE SCENE'S OWN NAMED REFUSALS, FOR WAITS THAT ARE NOT THE COMPLETION WAIT.
+# ⭐ THE SCENE'S OWN NAMED REFUSALS. IT HAS TWO CONSUMERS AND THEY ARE NOT ALIKE.
+#
+# ⛔ THIS HEADING USED TO READ "FOR WAITS THAT ARE NOT THE COMPLETION WAIT" AND
+# THAT WENT FALSE ONE PR LATER. `Get-SbSceneVerdict` reads the same key to decide
+# the completion VERDICT. Corrected here rather than left, because a heading that
+# names one consumer reads as a statement that there is only one.
+#
+#   (a) THE WAITS INSIDE A RUN -- the hand's document dump, the stall's ARMED
+#       row. They want only the REFUSAL half: a refusal means the row they are
+#       waiting for is never coming, while a SUCCESS pattern would end them early
+#       on a row that says nothing about their own subject.
+#   (b) THE COMPLETION VERDICT -- `Get-SbSceneVerdict`, which reads REFUSED if
+#       any of these appears ANYWHERE in the region, regardless of what ended the
+#       wait.
 #
 # ⛔ WHY THIS IS A SEPARATE KEY RATHER THAN A SECOND READ OF `Done`. `Done` is
 # the set that ENDS THE SCENE -- success or refusal, both are terminal and the
-# completion wait wants both. The waits inside a run (the hand's document dump,
-# the stall's ARMED row) want only the REFUSAL half: a refusal means the row
-# they are waiting for is never coming, while a SUCCESS pattern would end them
-# early on a row that says nothing about their own subject.
+# completion wait wants both. Neither consumer above wants the success half.
 #
 # Measured on kenai 2026-09-10, one bad-document run per scene: the hand's dump
 # wait burned 90.2 s and the stall's ARMED wait burned 90.2 s, in both cases
@@ -748,8 +762,9 @@ $sceneSpec = @{
 # NOT burn, because the shell presents even on a refusal; it is left alone
 # rather than "fixed" on the strength of the other two.
 #
-# Returns an empty array for a scene with no declared refusals, so a caller can
-# always splat it into a pattern list.
+# Returns an empty array for a scene with no declared refusals -- but see
+# `Get-SbWaitPatterns` below: an empty return does NOT survive a parenthesised
+# call, so no caller should splat this directly.
 function Get-SbSceneRefusals([string]$Scene) {
     $spec = $sceneSpec[$Scene]
     if ($null -eq $spec) { return @() }
@@ -775,6 +790,53 @@ function Get-SbSceneRefusals([string]$Scene) {
 function Get-SbWaitPatterns([string[]]$Patterns, [string]$Scene) {
     $all = @($Patterns) + @(Get-SbSceneRefusals $Scene)
     return @($all | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
+# ⛔⛔ THE COMPLETION WAIT AND THE COMPLETION VERDICT ARE TWO QUESTIONS, AND ONE
+# MECHANISM WAS ANSWERING BOTH. That conflation IS the defect.
+#
+#   "May I stop waiting?"                 any `Done` row is a legitimate answer.
+#   "Did the scene do what it was asked?" ONLY the scene may answer that.
+#
+# Measured on kenai 2026-09-09: on a bad document `retained` refuses in under a
+# second, and the `SB_RESIZE` walk writes `A'` ANYWAY, because that walk runs
+# independently of the scene's return value. `A'` is in `Done`. So the wait ended
+# correctly and the verdict line read `ok  : scene 'retained' completed` over a
+# hash taken on a BLANK WHITE SURFACE.
+#
+# ⛔ THE FIX IS NOT TO STOP WRITING `A'`. That row is TRUE -- the walk really did
+# run and really did hash that surface -- and the blank window was only
+# diagnosable BECAUSE the row exists. Deleting a true record to stop a reader
+# misreading it is the wrong repair every time, and it would have made the
+# finding unfindable.
+#
+# ⇒ RULED: if the scene wrote its OWN named refusal anywhere in the region, the
+# verdict is REFUSED -- REGARDLESS of which pattern ended the wait. ⭐ That kills
+# the race by not depending on ordering at all: both rows landing in the same
+# second stops mattering, because arrival order stops being an input.
+#
+# ⛔ AND IT IS ONLY SOUND BECAUSE EVERY REFUSAL PATH NAMES ITS SCENE. "The scene
+# wrote its own named refusal" is `RUSTFAIL <PREFIX> `, and before that labelling
+# landed the pattern covered 26 of the shell's 44 refusal paths -- so this
+# function would have read REFUSED for some refusals and DONE for the rest, which
+# is WORSE than not classifying at all. `scripts/check_scene_refusal_labels.py`
+# is what keeps the premise true, and it is why the labelling had to come first.
+#
+# Returns a hashtable: Verdict ('DONE' | 'REFUSED' | 'TIMEOUT'), Row, Pattern.
+function Get-SbSceneVerdict($Rows, [string]$Scene, $DoneRow) {
+    # `@(...)` for the same reason `Get-SbWaitPatterns` has it: a function whose
+    # output stream is empty evaluates to `$null` here, and `foreach` over `$null`
+    # is a version-dependent question this seat cannot run. `@()` settles it.
+    foreach ($p in @(Get-SbSceneRefusals $Scene)) {
+        $hit = Select-SbRow $Rows $p
+        if ($null -ne $hit) {
+            return @{ Verdict = 'REFUSED'; Row = $hit; Pattern = $p }
+        }
+    }
+    if ($null -eq $DoneRow) {
+        return @{ Verdict = 'TIMEOUT'; Row = $null; Pattern = $null }
+    }
+    return @{ Verdict = 'DONE'; Row = $DoneRow; Pattern = $null }
 }
 
 

@@ -685,9 +685,21 @@ if ($Hand) {
 # ---- the scene's own completion row ---------------------------------------
 $done = Wait-SbRow -Log $log -Mark $logMark -Patterns $spec.Done -TimeoutSeconds $timeout -Tick $sampler
 $rows = $done.Rows
-$sceneTimedOut = ($null -eq $done.Row)
+# ⛔ THE LINE CLASSIFIES; IT DOES NOT MERELY COMPLETE. A `Done` row can be
+# written by a mechanism that runs whether or not the scene succeeded -- on
+# `retained` the `SB_RESIZE` walk writes `A'` after a refusal -- so "the wait
+# ended" and "the scene did what it was asked" are two questions. Only the scene
+# may answer the second, and it does, by name. See `Get-SbSceneVerdict`.
+$sceneOutcome = Get-SbSceneVerdict $rows $Scene $done.Row
+$sceneTimedOut = ($sceneOutcome.Verdict -eq 'TIMEOUT')
 if ($sceneTimedOut) {
     $verdicts += "FAIL: NOT RUN: timed out waiting for $($spec.Label) after $($done.Waited)s (scene '$Scene')"
+    $ok = $false
+} elseif ($sceneOutcome.Verdict -eq 'REFUSED') {
+    # ⛔ A REFUSAL IS NOT A TIMEOUT AND MUST NOT BORROW ITS SENTENCE, AND IT IS
+    # NOT A COMPLETION EITHER. The scene's own row is quoted so the reader sees
+    # the diagnosis the shell already made rather than an adjective about it.
+    $verdicts += "FAIL: scene '$Scene' REFUSED after $($done.Waited)s -- $($sceneOutcome.Row.Trim())"
     $ok = $false
 } else {
     $verdicts += "ok  : scene '$Scene' completed after $($done.Waited)s -- $($spec.Label)"
