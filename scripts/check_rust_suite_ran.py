@@ -597,6 +597,15 @@ def registered_counts(log: str) -> tuple[dict[str, int], int, int]:
     so the library's two runs contribute one entry each, and a test that stops
     running disappears from both. Escapes are stripped anyway, because a
     dependency that is absent today is not a dependency that was designed out.
+
+    ⚠️ ONE CONSEQUENCE OF READING THE WHOLE FILE, NAMED SO THE REFUSAL IS
+    DIAGNOSABLE: an INTEGRATION test binary whose top-level module happened to
+    be named like a declared area would have its tests counted into that area.
+    Today none can -- measured on the real log, all 35 integration tests are
+    flat function names with no `::` at all, and 3087 + 35 == the 3122 distinct
+    paths this gate reports. If one ever did, the area would read MORE than the
+    source declares, which is a loud REFUSAL rather than a silent wrong answer;
+    this note is here so whoever reads that refusal looks at `tests/` first.
     """
     per: dict[str, int] = {}
     seen: set[str] = set()
