@@ -1157,9 +1157,17 @@ def self_test() -> int:
         "is this gate's own fault",
         len(suppressed) == 1 and "largest run announces" in suppressed[0])
 
-    arm("a log with no banner is a count REFUSAL, not a skip",
-        bool(count_findings("test canvas::a::tests::one ... ok\n", "the log",
-                            cfg_web)))
+    # ⛔ THIS ARM ASSERTS *WHICH* FINDING, NOT MERELY THAT THERE IS ONE. With a
+    #    bare `bool(...)` it could not fail: a mutant that accepted an unfloored
+    #    log survived, because the per-area pass then reported every area as
+    #    short and the list was non-empty either way. That is the third arm in
+    #    this file to have had the same shape. ⇒ A TRUTHINESS TEST ON A FINDING
+    #    LIST CANNOT TELL THE RIGHT DIAGNOSIS FROM A CASCADE OF WRONG ONES.
+    unfloored = count_findings("test canvas::a::tests::one ... ok\n", "the log",
+                               cfg_web)
+    arm("a log with no banner is ONE count REFUSAL naming the missing floor, "
+        "not a shortfall reported against every area",
+        len(unfloored) == 1 and "no `running N tests` banner" in unfloored[0])
     arm("a log whose distinct paths fall below its own largest banner is a "
         "finding, and it SUPPRESSES the per-area counts",
         len(count_findings(_synthetic(expected_now).replace(
