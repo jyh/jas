@@ -74,7 +74,24 @@ param(
     [int]$Moves = 2,
     # Where the receipt goes. The caller reads it back from session 0.
     [Parameter(Mandatory = $true)][string]$Out,
-    [int]$SettleMs = 40
+    [int]$SettleMs = 40,
+    # ⛔⛔ THE HIT TARGET'S INSET FROM THE WINDOW CLIENT, IN DIP, MEASURED BY THE
+    # SHELL AND PASSED IN -- NEVER GUESSED HERE.
+    #
+    # This injector aims from `ClientToScreen(0,0)`, which is the WINDOW client:
+    # the top of `Grid.Row="0"`, the MenuBar. The pointer handlers live on
+    # `Grid.Row="1"`. Measured on kenai 2026-09-11: the target begins 40 DIP
+    # down, the aim pressed 54 physical px (36 DIP) from the client top, and
+    # 54 < 60 -- so every injected press landed SIX PHYSICAL PIXELS inside the
+    # MenuBar and the canvas never saw a gesture (STATUS-flask §54).
+    #
+    # ⭐ IT IS A PARAMETER AND NOT A CONSTANT ON PURPOSE. A hard-coded menubar
+    # height is correct until someone changes the layout and then silently wrong
+    # in the same direction. The shell reports `HITTARGET offset-dips=` and the
+    # caller forwards it, so the two sides can never drift apart without the row
+    # saying so.
+    [double]$TargetOffsetXDips = 0,
+    [double]$TargetOffsetYDips = 0
 )
 
 $ErrorActionPreference = 'Continue'
@@ -256,13 +273,19 @@ if ($dpi -le 0) { $dpi = 96 }
 $scale = $dpi / 96.0
 $log.Add("client=$($rc.Right)x$($rc.Bottom) origin=($($origin.X),$($origin.Y)) dpi=$dpi scale=$scale")
 
-# document DIP -> canvas physical px -> screen px. The canvas is Grid.Row 0 and
-# starts at the client origin (see the header).
-$px0 = $origin.X + ($DocX * $scale)
-$py0 = $origin.Y + ($DocY * $scale)
+# document DIP -> canvas physical px -> screen px.
+#
+# ⛔ THE COMMENT THAT USED TO SIT HERE SAID "the canvas is Grid.Row 0 and starts
+# at the client origin", AND IT WAS THE DEFECT, WRITTEN DOWN. It was true before
+# W4 added the MenuBar on 09/08; after it the canvas is `Grid.Row="1"` and starts
+# `$TargetOffsetYDips` BELOW the client origin. The assumption outlived the layout
+# it described and nothing re-read it -- so the aim stayed 6 px high and every
+# real gesture was refused for three days while the synthetic arm passed.
+$px0 = $origin.X + (($DocX + $TargetOffsetXDips) * $scale)
+$py0 = $origin.Y + (($DocY + $TargetOffsetYDips) * $scale)
 $px1 = $px0 + ($DocDx * $scale)
 $py1 = $py0 + ($DocDy * $scale)
-$log.Add("press-screen=($px0,$py0) release-screen=($px1,$py1)")
+$log.Add("press-screen=($px0,$py0) release-screen=($px1,$py1) target-offset-dips=($TargetOffsetXDips,$TargetOffsetYDips)")
 
 # ⛔⛔ WHO ACTUALLY OWNS THE PRESS PIXEL. Foreground is NOT the same claim:
 # mouse input is routed by POSITION. STATUS-flask §48 measured that this
