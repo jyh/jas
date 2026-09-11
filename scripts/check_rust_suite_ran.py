@@ -166,6 +166,7 @@ measured in this tree (`all`, `any`, `not`, `feature = "..."`, `target_os`,
 from __future__ import annotations
 
 import argparse
+import ast
 import pathlib
 import re
 import sys
@@ -1251,6 +1252,45 @@ def self_test() -> int:
     arm("the crate's default features are derived from Cargo.toml, not typed",
         feats_err is None and "web" in feats and "d2d" not in feats)
 
+    # ⛔⛔ EVERY STRING THIS GATE CAN PRINT MUST SURVIVE A cp1252 CONSOLE. The
+    #    Windows lane runs under `cp1252`, so a single non-ASCII character in an
+    #    output string raises UnicodeEncodeError and the step dies -- and it dies
+    #    on the SUCCESS path, after every check has passed, which is the worst
+    #    place for it: the gate reports nothing about its own subject and the red
+    #    looks like a finding. Measured: one `⛔` in the PASS line did exactly
+    #    that, and all three sibling gates print pure ASCII. This arm walks the
+    #    source so a future edit cannot reintroduce it -- prose in DOCSTRINGS is
+    #    exempt, because nothing prints them.
+    _tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    _docstrings = set()
+    for _n in ast.walk(_tree):
+        if isinstance(_n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                           ast.ClassDef)):
+            _b = _n.body
+            if (_b and isinstance(_b[0], ast.Expr)
+                    and isinstance(_b[0].value, ast.Constant)
+                    and isinstance(_b[0].value.value, str)):
+                _docstrings.add(id(_b[0].value))
+    _unprintable: list[str] = []
+    for _n in ast.walk(_tree):
+        if (isinstance(_n, ast.Constant) and isinstance(_n.value, str)
+                and id(_n) not in _docstrings):
+            try:
+                _n.value.encode("cp1252")
+            except UnicodeEncodeError:
+                _unprintable.append(
+                    f"line {_n.lineno}: "
+                    + "".join(c for c in _n.value if ord(c) > 127)
+                )
+    arm("every non-docstring string in this file survives a cp1252 console -- "
+        "the Windows lane dies on the SUCCESS path otherwise, and the red reads "
+        "as a finding about the suite",
+        not _unprintable)
+    arm("that console arm is not vacuous -- it really parses this file and "
+        "really finds its strings",
+        sum(1 for _n in ast.walk(_tree)
+            if isinstance(_n, ast.Constant) and isinstance(_n.value, str)) > 50)
+
     if failures:
         print(f"check_rust_suite_ran SELF-TEST: FAILED {len(failures)} of {arms} arm(s)")
         for f in failures:
@@ -1346,7 +1386,7 @@ def main() -> int:
         f"{','.join(sorted(cfg['features'])) or 'none'} / target_os "
         f"{cfg['target_os']}; {distinct_total} distinct test path(s) matched "
         f"against a largest-run floor of {max_banner}). "
-        f"⛔ TWO LIMITS, NAMED: the expected side is DERIVED from the source, so "
+        f"TWO LIMITS, NAMED: the expected side is DERIVED from the source, so "
         f"a test DELETED from the source moves both sides together and reads as "
         f"agreement -- this asks whether everything the source declares RAN, "
         f"never whether the source is still as large as it was. And `ignored` "
