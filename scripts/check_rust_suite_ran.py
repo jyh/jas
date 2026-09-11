@@ -87,18 +87,27 @@ exactly like a measurement:
      wrong. The count is of DISTINCT module paths, which are unique within a
      crate, so the two runs contribute one entry each.
      ⛔⛔ THE FIRST FORM OF THIS GATE SOLVED IT BY FINDING THE `lib.rs` BLOCK,
-     AND THAT VERSION REACHED CI AND REFUSED. It rested on a premise nobody
-     writes down: that a target's `Running unittests ...` line precedes its own
-     `running N tests` banner. ⇒ **THAT IS A FACT ABOUT THE PLUMBING, NOT ABOUT
-     CARGO.** `Running` is on STDERR, the banner and the test lines are on
-     STDOUT. Under `cargo test > log 2>&1` they interleave in order. Under
-     `cargo test 2>&1 | tee log` -- what BOTH CI steps do -- stdout is
-     block-buffered through the pipe and stderr is not, and the seven `Running`
-     lines land nowhere near their blocks. Same source, same cargo, same tests,
-     and the block was simply not there.
-     ⇒ 🔑 ***A LOG'S LINE ORDER ACROSS TWO STREAMS IS A PROPERTY OF HOW IT WAS
-     CAPTURED, AND I MEASURED THE ONE CAPTURE I HAD RATHER THAN THE ONE IN
-     PRODUCTION.*** Deduplication needs no ordering premise at all.
+     AND THAT VERSION REACHED CI AND REFUSED ON BOTH PLATFORMS. The cause,
+     measured at the real artifact: **cargo COLOURS ITS OWN STATUS LINES IN CI**,
+     so the line is not `     Running unittests src/lib.rs (...)` but
+
+         ESC[1m ESC[92m     Running ESC[0m unittests src/lib.rs (...)
+
+     which `^ \\s* Running unittests ...` cannot match. Locally there is no
+     terminal, cargo emits no colour, and the same regex matches perfectly.
+     ⭐ A CENSUS OF THE REAL CI LOG, AND IT IS THE WHOLE DESIGN ARGUMENT:
+
+         cargo's own `Running …` status lines      7 of 7   CARRY ESCAPES
+         the harness's `running N tests` banner    0 of 9   plain
+         the harness's `test … ok` outcome lines   0 of 6209 plain
+         the harness's `test result:` summaries    0 of 8   plain
+
+     ⇒ 🔑 ***THE BLOCK-FINDER WAS THE ONLY PART OF THIS GATE THAT READ A
+     CARGO-EMITTED LINE, AND IT IS THE ONLY PART THAT BROKE.*** Deduplicating
+     reads nothing but HARNESS output, which is plain in both environments --
+     so the repair removes the dependency rather than escaping the regex.
+     The escape-stripping below is belt-and-braces for the day libtest is asked
+     for colour too.
      ⭐ THE MECHANISM WAS ALREADY WRITTEN DOWN NEXT DOOR, and reading the
      sibling gate found it in a minute: `check_native_backend_lane.py` records
      that `src/main.rs` RE-DECLARES THE MODULE TREE instead of importing the
@@ -316,6 +325,12 @@ MOD_DECL = re.compile(
 # module path is unique within a crate, so counting each one ONCE is immune to
 # the repeat without needing to know where either run begins.
 BANNER_N = re.compile(r"^running (?P<n>\d+) tests?[ \t\r]*$")
+# ⛔ MEASURED, NOT ASSUMED: on the real CI log every harness line is PLAIN and
+# only cargo's own `Running …` status lines carry escapes. This is stripped
+# anyway -- the gate that broke did so because a colour code sat where a regex
+# expected a space, and "libtest is not asked for colour today" is a premise,
+# not a design.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 # ` - should panic` is not decoration: three tests in this suite report with it.
 OUTCOME = re.compile(
     r"^test (?P<path>[A-Za-z0-9_:]+)(?: - should panic)? \.\.\. "
@@ -569,25 +584,25 @@ def registered_counts(log: str) -> tuple[dict[str, int], int, int]:
     ⛔⛔ THIS READS THE WHOLE LOG AND DEDUPLICATES, RATHER THAN LOCATING THE
     LIBRARY'S BLOCK, AND THE REASON IS A DEFECT THAT REACHED CI. The first form
     of this function looked for `Running unittests src/lib.rs` and counted the
-    lines after it, on the premise that a target's `Running` line precedes its
-    own `running N tests` banner. **That premise is a property of the PLUMBING,
-    not of cargo.** `Running` goes to STDERR and the harness's banner and test
-    lines go to STDOUT. Under `cargo test > log 2>&1` the two interleave in
-    order and the premise holds; under `cargo test 2>&1 | tee log` -- which is
-    what both CI steps do -- stdout is block-buffered and stderr is not, so the
-    seven `Running` lines land nowhere near their blocks. Measured: identical
-    source, identical cargo, and the block was simply not there.
-    ⇒ 🔑 A LOG'S LINE ORDER ACROSS TWO STREAMS IS A FACT ABOUT HOW IT WAS
-      CAPTURED. It survived a local run and refused on the first real one.
+    lines after it. **Cargo colours its own status lines in CI**, so that line
+    begins with escape bytes and the anchored regex matched nothing; locally,
+    with no terminal, cargo emits no colour and it matched every time.
+    ⇒ 🔑 THE BLOCK-FINDER WAS THE ONLY PART OF THIS GATE THAT READ A
+      CARGO-EMITTED LINE, AND IT IS THE ONLY PART THAT BROKE. Measured on the
+      real CI log: all 7 `Running` lines carry escapes; all 9 banners, all 6209
+      outcome lines and all 8 summaries are plain.
 
-    Counting distinct paths needs no ordering premise at all: a full module path
-    is unique within a crate, so the library's two runs contribute one entry
-    each, and a test that stops running disappears from both.
+    Counting distinct paths reads HARNESS output only, so it needs neither the
+    block nor cargo's vocabulary: a full module path is unique within a crate,
+    so the library's two runs contribute one entry each, and a test that stops
+    running disappears from both. Escapes are stripped anyway, because a
+    dependency that is absent today is not a dependency that was designed out.
     """
     per: dict[str, int] = {}
     seen: set[str] = set()
     max_banner = 0
-    for line in log.splitlines():
+    for raw in log.splitlines():
+        line = ANSI.sub("", raw)
         banner = BANNER_N.match(line)
         if banner:
             max_banner = max(max_banner, int(banner.group("n")))
@@ -1067,10 +1082,37 @@ def self_test() -> int:
         "targets is one test, not two",
         per == {"canvas": 2} and distinct == 2 and banner == 2)
 
-    # ⛔ THE ARM CI TAUGHT, AND IT IS THE REASON THIS READER DEDUPLICATES RATHER
-    #    THAN LOCATING A BLOCK. `Running` is on stderr and the banner is on
-    #    stdout; through a pipe they land out of order. The first version of
-    #    this gate found its block locally and REFUSED on the first real run.
+    # ⛔⛔ THE ARM CI ACTUALLY TAUGHT, and it is the one that would have caught
+    #    the refusal before the push: CARGO COLOURS ITS OWN STATUS LINES IN CI.
+    #    The first version of this gate anchored a regex at `Running` and found
+    #    it locally, where there is no terminal and cargo emits no colour.
+    # ⛔ THE FIXTURE COLOURS THE *HARNESS* LINES, NOT ONLY CARGO'S. A fixture
+    #    that only colours `Running` cannot fail: this reader never looks at a
+    #    cargo line, so stripping or not stripping gives the same answer and the
+    #    arm would be one more that reads as coverage. What the stripper defends
+    #    is libtest being asked for colour -- so that is what is planted.
+    coloured = (
+        "\x1b[1m\x1b[92m     Running\x1b[0m unittests src/lib.rs (deps/x)\n"
+        "\n\x1b[1mrunning 2 tests\x1b[0m\n"
+        "test canvas::a::tests::one ... \x1b[32mok\x1b[0m\n"
+        "test canvas::a::tests::two ... \x1b[32mok\x1b[0m\n"
+        "test result: \x1b[32mok\x1b[0m. 2 passed; 0 failed; 0 ignored\n"
+    )
+    plain = (
+        "     Running unittests src/lib.rs (deps/x)\n"
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+    )
+    arm("a log carrying cargo's colour escapes reads identically to a plain one "
+        "-- the one dependency on a cargo-emitted line is what broke this gate "
+        "on CI while passing locally",
+        registered_counts(coloured) == registered_counts(plain)
+        and registered_counts(coloured)[0] == {"canvas": 2})
+    arm("that colour arm is not vacuous -- the fixture really carries escapes",
+        "\x1b[" in coloured)
+
+    # ⭐ ORDER-INDEPENDENCE, kept as a property in its own right: this reader
+    #    touches no cargo line at all, so where those lines land cannot matter.
     interleaved = (
         "\nrunning 2 tests\n" + _rows +
         "test result: ok. 2 passed; 0 failed; 0 ignored\n"
@@ -1079,8 +1121,8 @@ def self_test() -> int:
         "     Running unittests src/lib.rs (target/debug/deps/x)\n"
         "     Running unittests src/main.rs (target/debug/deps/x)\n"
     )
-    arm("a log whose stderr landed AFTER its stdout reads identically -- no "
-        "ordering between the two streams is assumed",
+    arm("a log whose cargo lines landed after its harness lines reads "
+        "identically -- no ordering between the two is assumed either",
         registered_counts(interleaved) == registered_counts(twice))
 
     arm("a log with no banner at all offers no floor and is REFUSED",
@@ -1213,9 +1255,8 @@ def self_test() -> int:
         f"proven FIRST; {len(AREAS)} declared area(s) each driven as a "
         f"stopped-running mutant; every declaration failure path NAMES findings; "
         f"and the COUNT half driven against this tree as it stands -- the cfg "
-        f"grammar with its refusals leading, the scanner, a double-counting log "
-        f"and the same log with its two streams out of order, and an area "
-        f"losing half its tests)"
+        f"grammar with its refusals leading, the scanner, a double-counting log, "
+        f"a colour-escaped log, and an area losing half its tests)"
     )
     return 0
 
