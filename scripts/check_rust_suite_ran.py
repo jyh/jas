@@ -82,9 +82,23 @@ running, more means this gate has misread its own subject.
 exactly like a measurement:
 
   1. `cargo test` RUNS THE LIBRARY SUITE TWICE -- once as `unittests src/lib.rs`
-     and once as `unittests src/main.rs`. A count taken over the whole log is
-     therefore EXACTLY DOUBLE the truth, and doubling is the error shape least
-     likely to look wrong.
+     and once as `unittests src/main.rs`. A count of LINES is therefore EXACTLY
+     DOUBLE the truth, and doubling is the error shape least likely to look
+     wrong. The count is of DISTINCT module paths, which are unique within a
+     crate, so the two runs contribute one entry each.
+     ⛔⛔ THE FIRST FORM OF THIS GATE SOLVED IT BY FINDING THE `lib.rs` BLOCK,
+     AND THAT VERSION REACHED CI AND REFUSED. It rested on a premise nobody
+     writes down: that a target's `Running unittests ...` line precedes its own
+     `running N tests` banner. ⇒ **THAT IS A FACT ABOUT THE PLUMBING, NOT ABOUT
+     CARGO.** `Running` is on STDERR, the banner and the test lines are on
+     STDOUT. Under `cargo test > log 2>&1` they interleave in order. Under
+     `cargo test 2>&1 | tee log` -- what BOTH CI steps do -- stdout is
+     block-buffered through the pipe and stderr is not, and the seven `Running`
+     lines land nowhere near their blocks. Same source, same cargo, same tests,
+     and the block was simply not there.
+     ⇒ 🔑 ***A LOG'S LINE ORDER ACROSS TWO STREAMS IS A PROPERTY OF HOW IT WAS
+     CAPTURED, AND I MEASURED THE ONE CAPTURE I HAD RATHER THAN THE ONE IN
+     PRODUCTION.*** Deduplication needs no ordering premise at all.
      ⭐ THE MECHANISM WAS ALREADY WRITTEN DOWN NEXT DOOR, and reading the
      sibling gate found it in a minute: `check_native_backend_lane.py` records
      that `src/main.rs` RE-DECLARES THE MODULE TREE instead of importing the
@@ -275,10 +289,11 @@ MOD_DECL = re.compile(
     r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;"
 )
 
-# ⛔ THE BLOCK, NOT THE LOG. `cargo test` runs the library suite TWICE -- as
+# ⛔ DISTINCT PATHS, NOT LINES. `cargo test` runs the library suite TWICE -- as
 # `unittests src/lib.rs` and again as `unittests src/main.rs`, the bin target
-# compiling the same modules -- so a whole-log count is exactly double.
-RUNNING_LIB = re.compile(r"^\s*Running unittests src[/\\]lib\.rs\b")
+# compiling the same modules -- so a count of LINES is exactly double. A full
+# module path is unique within a crate, so counting each one ONCE is immune to
+# the repeat without needing to know where either run begins.
 BANNER_N = re.compile(r"^running (?P<n>\d+) tests?[ \t\r]*$")
 # ` - should panic` is not decoration: three tests in this suite report with it.
 OUTCOME = re.compile(
@@ -527,54 +542,45 @@ def _host_target_os() -> str:
     return "linux"
 
 
-def lib_block(log: str) -> tuple[int, list[str]] | None:
-    """The `unittests src/lib.rs` region: its banner count and its outcome lines.
+def registered_counts(log: str) -> tuple[dict[str, int], int, int]:
+    """DISTINCT test paths per area, the distinct total, and the largest banner.
 
-    ⛔ SCOPED ON PURPOSE, AND THE WHOLE-LOG FORM IS THE TRAP: the bin target
-    compiles the same modules, so `cargo test` reports the library suite twice
-    and a log-wide count is exactly double the truth.
-    """
-    lines = log.splitlines()
-    for i, line in enumerate(lines):
-        if not RUNNING_LIB.match(line):
-            continue
-        j = i + 1
-        while j < len(lines) and not BANNER_N.match(lines[j]):
-            if RESULT_SUMMARY.match(lines[j]):
-                return None
-            j += 1
-        if j >= len(lines):
-            return None
-        total = int(BANNER_N.match(lines[j]).group("n"))
-        body: list[str] = []
-        k = j + 1
-        while k < len(lines) and not RESULT_SUMMARY.match(lines[k]):
-            body.append(lines[k])
-            k += 1
-        if k >= len(lines):
-            return None
-        return total, body
-    return None
+    ⛔⛔ THIS READS THE WHOLE LOG AND DEDUPLICATES, RATHER THAN LOCATING THE
+    LIBRARY'S BLOCK, AND THE REASON IS A DEFECT THAT REACHED CI. The first form
+    of this function looked for `Running unittests src/lib.rs` and counted the
+    lines after it, on the premise that a target's `Running` line precedes its
+    own `running N tests` banner. **That premise is a property of the PLUMBING,
+    not of cargo.** `Running` goes to STDERR and the harness's banner and test
+    lines go to STDOUT. Under `cargo test > log 2>&1` the two interleave in
+    order and the premise holds; under `cargo test 2>&1 | tee log` -- which is
+    what both CI steps do -- stdout is block-buffered and stderr is not, so the
+    seven `Running` lines land nowhere near their blocks. Measured: identical
+    source, identical cargo, and the block was simply not there.
+    ⇒ 🔑 A LOG'S LINE ORDER ACROSS TWO STREAMS IS A FACT ABOUT HOW IT WAS
+      CAPTURED. It survived a local run and refused on the first real one.
 
-
-def registered_counts(body: list[str]) -> tuple[dict[str, int], int]:
-    """Tests the runner REGISTERED, by area, plus the total it registered.
-
-    `ok`, `ignored` and `FAILED` all count: each one is a test the harness knew
-    about, which is what the banner counts and therefore what the expected side
-    must be compared against.
+    Counting distinct paths needs no ordering premise at all: a full module path
+    is unique within a crate, so the library's two runs contribute one entry
+    each, and a test that stops running disappears from both.
     """
     per: dict[str, int] = {}
-    total = 0
-    for line in body:
+    seen: set[str] = set()
+    max_banner = 0
+    for line in log.splitlines():
+        banner = BANNER_N.match(line)
+        if banner:
+            max_banner = max(max_banner, int(banner.group("n")))
+            continue
         m = OUTCOME.match(line)
         if not m:
             continue
-        total += 1
-        area = m.group("path").split("::")[0]
+        path = m.group("path")
+        if path in seen:
+            continue
+        seen.add(path)
+        area = path.split("::")[0]
         per[area] = per.get(area, 0) + 1
-    return per, total
-
+    return per, len(seen), max_banner
 
 
 def source_areas() -> set[str]:
@@ -754,29 +760,28 @@ def count_findings(log: str, label: str, cfg: dict) -> list[str]:
     from the source tree here, under `cfg`, so there is no number to go stale
     and no arm that could test a constant against itself.
     """
-    block = lib_block(log)
-    if block is None:
-        return [
-            f"{label} carries no complete `Running unittests src/lib.rs` region "
-            f"(banner and `test result:` summary). The per-area counts are taken "
-            f"from that block ALONE, because `cargo test` reports the library "
-            f"suite twice -- the bin target compiles the same modules -- so a "
-            f"whole-log count is exactly double. A missing block is a REFUSAL, "
-            f"never a skip"
-        ]
-    banner_total, body = block
-    per_area, registered_total = registered_counts(body)
+    per_area, distinct_total, max_banner = registered_counts(log)
 
     findings: list[str] = []
-    # ⛔ THE ANTI-VACUITY ARM, AND IT LEADS. If the outcome matcher has stopped
+    # ⛔ THE ANTI-VACUITY FLOOR, AND IT LEADS. If the outcome matcher has stopped
     # matching, every per-area count falls together and the comparison below
     # would report a tidy set of shortfalls that are all this gate's own fault.
-    if registered_total != banner_total:
+    # The floor is DERIVED FROM THE LOG: the largest `running N tests` banner is
+    # the biggest single run the harness announced, and the distinct set spans
+    # every run in the file, so it can never honestly be smaller.
+    if max_banner == 0:
+        return [
+            f"{label} announces no `running N tests` banner at all, so there is "
+            f"no floor to hold the per-area counts to. A log with nothing to "
+            f"measure against is a REFUSAL, never a skip"
+        ]
+    if distinct_total < max_banner:
         findings.append(
-            f"{label}: the lib.rs block announces {banner_total} test(s) and this "
-            f"gate matched {registered_total} outcome line(s). Until those agree "
-            f"the per-area counts are unsafe to read -- a matcher that has "
-            f"stopped matching reports every area as short"
+            f"{label}: the largest run announces {max_banner} test(s) and this "
+            f"gate matched only {distinct_total} distinct test path(s) in the "
+            f"whole file. Until that floor is met the per-area counts are unsafe "
+            f"to read -- a matcher that has stopped matching reports every area "
+            f"as short, which reads as a finding about the suite"
         )
         return findings
 
@@ -1030,38 +1035,44 @@ def self_test() -> int:
     # ── THE BLOCK. ⛔ THE DOUBLE-COUNT ARM IS THE ONE THAT MATTERS: this is the
     #    trap the real log sprang, and the only one whose wrong answer is a tidy
     #    round multiple of the right one.
-    twice = (
-        "     Running unittests src/lib.rs (target/debug/deps/x-1)\n"
-        "\nrunning 2 tests\n"
-        "test canvas::a::tests::one ... ok\n"
-        "test canvas::a::tests::two ... ok\n"
-        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
-        "     Running unittests src/main.rs (target/debug/deps/x-2)\n"
-        "\nrunning 2 tests\n"
-        "test canvas::a::tests::one ... ok\n"
-        "test canvas::a::tests::two ... ok\n"
-        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
-    )
-    block = lib_block(twice)
-    arm("the lib.rs block is found and the main.rs block is NOT added to it",
-        block is not None and block[0] == 2
-        and registered_counts(block[1])[1] == 2)
-    arm("a log with no lib.rs unittests block yields no block at all",
-        lib_block(_fake_log(all_anchors)) is None)
-    arm("a lib.rs Running line with no banner before its summary yields no block",
-        lib_block("     Running unittests src/lib.rs (x)\n"
-                  "test result: ok. 0 passed; 0 failed; 0 ignored\n") is None)
+    _rows = ("test canvas::a::tests::one ... ok\n"
+             "test canvas::a::tests::two ... ok\n")
+    _blk = ("     Running unittests src/{}.rs (target/debug/deps/x)\n"
+            "\nrunning 2 tests\n" + _rows +
+            "test result: ok. 2 passed; 0 failed; 0 ignored\n")
+    twice = _blk.format("lib") + _blk.format("main")
+    per, distinct, banner = registered_counts(twice)
+    arm("the library's two runs count ONCE -- the same path in the lib and bin "
+        "targets is one test, not two",
+        per == {"canvas": 2} and distinct == 2 and banner == 2)
 
-    outcomes = [
-        "test document::model::tests::plain ... ok",
-        "test document::model::tests::panics - should panic ... ok",
-        "test document::model::tests::skipped ... ignored, not yet supported",
-        "test document::model::tests::broke ... FAILED",
-        "test result: ok. 1 passed",
-    ]
-    per, total = registered_counts(outcomes)
+    # ⛔ THE ARM CI TAUGHT, AND IT IS THE REASON THIS READER DEDUPLICATES RATHER
+    #    THAN LOCATING A BLOCK. `Running` is on stderr and the banner is on
+    #    stdout; through a pipe they land out of order. The first version of
+    #    this gate found its block locally and REFUSED on the first real run.
+    interleaved = (
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+        "     Running unittests src/lib.rs (target/debug/deps/x)\n"
+        "     Running unittests src/main.rs (target/debug/deps/x)\n"
+    )
+    arm("a log whose stderr landed AFTER its stdout reads identically -- no "
+        "ordering between the two streams is assumed",
+        registered_counts(interleaved) == registered_counts(twice))
+
+    arm("a log with no banner at all offers no floor and is REFUSED",
+        registered_counts("test canvas::a::tests::one ... ok\n")[2] == 0)
+
+    outcomes = ("test document::model::tests::plain ... ok\n"
+                "test document::model::tests::panics - should panic ... ok\n"
+                "test document::model::tests::skipped ... ignored, not yet supported\n"
+                "test document::model::tests::broke ... FAILED\n"
+                "running 4 tests\n")
+    per, total, banner = registered_counts(outcomes)
     arm("ok, should-panic, ignored and FAILED all count as REGISTERED",
-        total == 4 and per == {"document": 4})
+        total == 4 and per == {"document": 4} and banner == 4)
 
     # ── count_findings END TO END, against THE REAL SOURCE TREE. The expected
     #    side is built by the gate itself, so this arm is a live check that the
@@ -1141,13 +1152,20 @@ def self_test() -> int:
         f"running {sum(starved.values())} tests",
         f"running {sum(starved.values()) + 7} tests")
     suppressed = count_findings(mismatched, "the log", cfg_web)
-    arm("a banner that disagrees with the matched outcome lines is a finding, "
-        "and it SUPPRESSES the per-area counts rather than reporting a "
-        "shortfall in every area that is this gate's own fault",
-        len(suppressed) == 1 and "announces" in suppressed[0])
+    arm("a log below its own floor is ONE finding, and it SUPPRESSES the "
+        "per-area counts rather than reporting a shortfall in every area that "
+        "is this gate's own fault",
+        len(suppressed) == 1 and "largest run announces" in suppressed[0])
 
-    arm("a log with no lib.rs block is a count REFUSAL, not a skip",
-        bool(count_findings(_fake_log(all_anchors), "the log", cfg_web)))
+    arm("a log with no banner is a count REFUSAL, not a skip",
+        bool(count_findings("test canvas::a::tests::one ... ok\n", "the log",
+                            cfg_web)))
+    arm("a log whose distinct paths fall below its own largest banner is a "
+        "finding, and it SUPPRESSES the per-area counts",
+        len(count_findings(_synthetic(expected_now).replace(
+            f"running {sum(expected_now.values())} tests",
+            f"running {sum(expected_now.values()) + 9} tests"),
+            "the log", cfg_web)) == 1)
 
     feats, feats_err = crate_features()
     arm("the crate's default features are derived from Cargo.toml, not typed",
@@ -1166,8 +1184,9 @@ def self_test() -> int:
         f"proven FIRST; {len(AREAS)} declared area(s) each driven as a "
         f"stopped-running mutant; every declaration failure path NAMES findings; "
         f"and the COUNT half driven against this tree as it stands -- the cfg "
-        f"grammar with its refusals leading, the scanner, the lib.rs block "
-        f"against a double-counting log, and an area losing half its tests)"
+        f"grammar with its refusals leading, the scanner, a double-counting log "
+        f"and the same log with its two streams out of order, and an area "
+        f"losing half its tests)"
     )
     return 0
 
@@ -1240,13 +1259,14 @@ def main() -> int:
             print(f"  {f}")
         return 1
 
-    block = lib_block(log)
+    _per, distinct_total, max_banner = registered_counts(log)
     print(
         f"check_rust_suite_ran: OK ({len(AREAS)} area(s), each proved to have RUN "
         f"by a named test passing in {args.log}, and each proved to have run IN "
         f"FULL against a count derived from the source under features "
         f"{','.join(sorted(cfg['features'])) or 'none'} / target_os "
-        f"{cfg['target_os']}; {block[0]} test(s) registered in the lib.rs block). "
+        f"{cfg['target_os']}; {distinct_total} distinct test path(s) matched "
+        f"against a largest-run floor of {max_banner}). "
         f"⛔ THE LIMIT, NAMED: the count compares REGISTERED tests, and `ignored` "
         f"counts as registered -- a test that gains #[ignore] stops running "
         f"without moving any number here. The eleven anchors cover that for "
