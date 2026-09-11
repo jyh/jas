@@ -127,10 +127,24 @@ exactly like a measurement:
      `executed_ok` below carries the suffix: an anchor that were ever marked
      `#[should_panic]` would otherwise read as a suite that did not run.
   3. AN IGNORED TEST IS STILL REGISTERED. `ok`, `ignored` and `FAILED` all count
-     toward the banner, so all three count here. ⛔ WHAT THIS COUNT THEREFORE
-     CANNOT SEE, stated rather than left to be discovered: a test that gains
-     `#[ignore]` stops running and the count does not move. The anchors cover
-     that for eleven tests; nothing covers it for the rest.
+     toward the banner, so all three count here.
+
+⛔ WHAT THIS COUNT CANNOT SEE, STATED RATHER THAN LEFT TO BE DISCOVERED. Both
+follow from the expected side being derived from the source, which is the same
+property that stops it going stale -- so neither is a hole to be plugged, and
+both are reasons NOT to read a green here as more than it says:
+
+  * A TEST DELETED FROM THE SOURCE. Expected falls with it and the two sides
+    still agree. This gate answers "did everything the source declares actually
+    RUN", never "is the source still as large as it was" -- the failure mode it
+    was built for is a `#[cfg(test)]` module dropping out of the BUILD, where
+    the source still declares what the runner no longer executes. A gate that
+    also caught deletion would need a remembered size, which is the number this
+    repo rejects and which this seat has twice measured drifting 40-odd files
+    below reality behind a green self-test.
+  * A TEST THAT GAINS `#[ignore]`. It stops running and stays registered, so no
+    number moves. The eleven anchors cover that for eleven tests, because an
+    anchor must be reported `... ok`; nothing covers it for the rest.
 
 ⛔ AND THE CFG EVALUATOR REFUSES WHAT IT DOES NOT UNDERSTAND. A resolver that
 cannot refuse reports the answer its filter allows, and the number still looks
@@ -1282,10 +1296,12 @@ def main() -> int:
         f"{','.join(sorted(cfg['features'])) or 'none'} / target_os "
         f"{cfg['target_os']}; {distinct_total} distinct test path(s) matched "
         f"against a largest-run floor of {max_banner}). "
-        f"⛔ THE LIMIT, NAMED: the count compares REGISTERED tests, and `ignored` "
-        f"counts as registered -- a test that gains #[ignore] stops running "
-        f"without moving any number here. The eleven anchors cover that for "
-        f"eleven tests; nothing covers it for the rest."
+        f"⛔ TWO LIMITS, NAMED: the expected side is DERIVED from the source, so "
+        f"a test DELETED from the source moves both sides together and reads as "
+        f"agreement -- this asks whether everything the source declares RAN, "
+        f"never whether the source is still as large as it was. And `ignored` "
+        f"counts as registered, so a test gaining #[ignore] moves no number "
+        f"here. The eleven anchors cover that for eleven tests only."
     )
     return 0
 
