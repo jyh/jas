@@ -1057,7 +1057,7 @@ jobs:
       # The same gate on the second platform family. Wired in BOTH jobs
       # deliberately: gating one of two identical invocations is how a defence
       # comes to sit next door to the site that needs it.
-      - name: Rust tests, and every area proved to have run
+      - name: Rust tests, every area proved to have run, and how much of it ran
         if: ${{ !cancelled() }}
         run: |
           set -o pipefail
@@ -1481,7 +1481,7 @@ jobs:
       # suite in the repo, carried none. `check_unregistered_tests.py` answers
       # the neighbouring question (was a test REGISTERED), not this one (did the
       # registered suite still RUN).
-      - name: Rust tests, and every area proved to have run
+      - name: Rust tests, every area proved to have run, and how much of it ran
         run: |
           set -o pipefail
           python3 scripts/check_rust_suite_ran.py --self-test

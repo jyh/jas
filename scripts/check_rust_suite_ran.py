@@ -52,11 +52,121 @@ A DISAGREEMENT IN EITHER DIRECTION IS A REFUSAL. An anchor that no longer exists
 in the source reds here rather than silently never matching the log -- an anchor
 that cannot be found is not a satisfied anchor, and a gate that tolerates being
 wrong about its own subject is worth nothing.
+
+THE ANCHOR'S SCOPE LIMIT, AND THE COUNT THAT CLOSES IT (#128 -> this)
+--------------------------------------------------------------------
+An anchor proves an area RAN. It cannot see an area that loses half its tests
+and keeps its anchor: the total falls, the anchor still passes, the step exits
+0. That limit was DEFERRED at #128 with a ripens-when -- "the gate has survived
+a handful of real merges without a spurious red" -- and measured met on
+2026-09-10: 27 merges since, zero maintenance commits, no spurious red.
+
+⛔ THE REASON IT WAS DEFERRED RATHER THAN GUESSED AT: a count needs an EXPECTED
+side, and every cheap expected side is unsound here. A single total is wrong
+because the total moves with the feature set. A per-invocation TABLE of totals
+is the remembered number this repo rejects -- and this seat has twice measured a
+floor sitting 40-odd files below reality with a green self-test, because a
+floor's arm drives the constant against ITSELF and so tests the comparison and
+never the value.
+
+⭐ SO THE EXPECTED SIDE IS DERIVED FROM THE SOURCE, ONCE PER INVOCATION, AND
+THERE IS NO CONSTANT ANYWHERE IN IT. For each area, count the `#[test]` fns the
+source declares, evaluate each one's `#[cfg]` against THIS invocation's features
+and target, and require the runner to have registered EXACTLY that many. The
+expected value is recomputed from the tree on every run, so it cannot go stale,
+and a disagreement in EITHER direction is a finding: fewer means tests stopped
+running, more means this gate has misread its own subject.
+
+⛔ THREE THINGS THE REAL ARTIFACT TAUGHT THIS COUNT, NONE OF THEM VISIBLE FROM
+`cargo test -- --list`, and each of which would have made a wrong number look
+exactly like a measurement:
+
+  1. `cargo test` RUNS THE LIBRARY SUITE TWICE -- once as `unittests src/lib.rs`
+     and once as `unittests src/main.rs`. A count of LINES is therefore EXACTLY
+     DOUBLE the truth, and doubling is the error shape least likely to look
+     wrong. The count is of DISTINCT module paths, which are unique within a
+     crate, so the two runs contribute one entry each.
+     ⛔⛔ THE FIRST FORM OF THIS GATE SOLVED IT BY FINDING THE `lib.rs` BLOCK,
+     AND THAT VERSION REACHED CI AND REFUSED ON BOTH PLATFORMS. The cause,
+     measured at the real artifact: **cargo COLOURS ITS OWN STATUS LINES IN CI**,
+     so the line is not `     Running unittests src/lib.rs (...)` but
+
+         ESC[1m ESC[92m     Running ESC[0m unittests src/lib.rs (...)
+
+     which `^ \\s* Running unittests ...` cannot match. Locally there is no
+     terminal, cargo emits no colour, and the same regex matches perfectly.
+     ⭐ A CENSUS OF THE REAL CI LOG, AND IT IS THE WHOLE DESIGN ARGUMENT:
+
+         cargo's own `Running …` status lines      7 of 7   CARRY ESCAPES
+         the harness's `running N tests` banner    0 of 9   plain
+         the harness's `test … ok` outcome lines   0 of 6209 plain
+         the harness's `test result:` summaries    0 of 8   plain
+
+     ⇒ 🔑 ***THE BLOCK-FINDER WAS THE ONLY PART OF THIS GATE THAT READ A
+     CARGO-EMITTED LINE, AND IT IS THE ONLY PART THAT BROKE.*** Deduplicating
+     reads nothing but HARNESS output, which is plain in both environments --
+     so the repair removes the dependency rather than escaping the regex.
+     The escape-stripping below is belt-and-braces for the day libtest is asked
+     for colour too.
+     ⭐ THE MECHANISM WAS ALREADY WRITTEN DOWN NEXT DOOR, and reading the
+     sibling gate found it in a minute: `check_native_backend_lane.py` records
+     that `src/main.rs` RE-DECLARES THE MODULE TREE instead of importing the
+     lib, so a module named by both roots compiles into the bin target as well.
+     That gate drew the opposite conclusion for its own question -- "assert
+     presence, never a count", because multiplicity is a property of a module's
+     position in the two source trees and is not stable per feature -- and it is
+     right -- multiplicity cannot be ASSERTED. Deduplicating removes it from
+     the question instead.
+     ⛔ AND THE UNION IS THE RIGHT SET, WHICH IS NOT OBVIOUS AND WAS MEASURED.
+     `main.rs` declares 14 modules and `lib.rs` 19, the five extra being the
+     `ffi` family. Every area this gate adjudicates is a `src/` SUBDIRECTORY
+     and appears under BOTH roots, so for these areas the two runs carry the
+     same paths and the union equals either one. The `ffi` family is reached
+     only through `lib.rs`, is not a subdirectory, and is adjudicated by
+     `check_native_backend_lane.py` on its own lane -- so it neither adds to
+     nor subtracts from any area's count here.
+     📌 THIS PARAGRAPH DESCRIBED THE BLOCK DESIGN FOR ONE COMMIT AFTER THE
+     BLOCK DESIGN WAS DELETED. It sits next to the point that was repaired, was
+     accurate when written, and said nothing false about its own subject --
+     which is exactly why it was not re-read. Check a repaired claim's
+     NEIGHBOURS.
+  2. A `#[should_panic]` test reports as `test <path> - should panic ... ok`.
+     Three of them sit in this suite. A matcher without that suffix silently
+     drops them and lands 3 short of the banner -- which is also why
+     `executed_ok` below carries the suffix: an anchor that were ever marked
+     `#[should_panic]` would otherwise read as a suite that did not run.
+  3. AN IGNORED TEST IS STILL REGISTERED. `ok`, `ignored` and `FAILED` all count
+     toward the banner, so all three count here.
+
+⛔ WHAT THIS COUNT CANNOT SEE, STATED RATHER THAN LEFT TO BE DISCOVERED. Both
+follow from the expected side being derived from the source, which is the same
+property that stops it going stale -- so neither is a hole to be plugged, and
+both are reasons NOT to read a green here as more than it says:
+
+  * A TEST DELETED FROM THE SOURCE. Expected falls with it and the two sides
+    still agree. This gate answers "did everything the source declares actually
+    RUN", never "is the source still as large as it was" -- the failure mode it
+    was built for is a `#[cfg(test)]` module dropping out of the BUILD, where
+    the source still declares what the runner no longer executes. A gate that
+    also caught deletion would need a remembered size, which is the number this
+    repo rejects and which this seat has twice measured drifting 40-odd files
+    below reality behind a green self-test.
+  * A TEST THAT GAINS `#[ignore]`. It stops running and stays registered, so no
+    number moves. The eleven anchors cover that for eleven tests, because an
+    anchor must be reported `... ok`; nothing covers it for the rest.
+
+⛔ AND THE CFG EVALUATOR REFUSES WHAT IT DOES NOT UNDERSTAND. A resolver that
+cannot refuse reports the answer its filter allows, and the number still looks
+like a measurement -- this seat shipped exactly that defect in a census three
+days ago. `evaluate_cfg` raises on any predicate outside the small grammar
+measured in this tree (`all`, `any`, `not`, `feature = "..."`, `target_os`,
+`target_arch`, `windows`, `unix`, `test`), and the raise becomes a FINDING.
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
 import pathlib
 import re
 import sys
@@ -181,6 +291,343 @@ MIN_AREAS = 8
 RESULT_SUMMARY = re.compile(r"^test result: (?:ok|FAILED)\.", re.MULTILINE)
 HARNESS_BANNER = re.compile(r"^running \d+ tests?[ \t\r]*$", re.MULTILINE)
 
+# ── THE PER-AREA COUNT ──────────────────────────────────────────────────────
+# Everything below derives its expected side from the source tree and this
+# invocation's cfg. Deliberately NO constant: see the docstring's scope section.
+
+CARGO_TOML = ROOT / "jas_dioxus" / "Cargo.toml"
+
+# `#[test]` is never on the same line as its `fn` in this tree (measured: 3,273
+# occurrences, zero inline), so the attribute and the declaration are found
+# separately. `#[wasm_bindgen_test]` is deliberately NOT matched -- those belong
+# to the lane `check_wasm_canvas_count.py` guards and no native run registers
+# one.
+TEST_ATTR = re.compile(r"^\s*#\[test\]\s*$")
+CFG_ATTR = re.compile(r"^\s*#\[cfg\((?P<cond>.*)\)\]\s*$")
+# What may sit BETWEEN a `#[test]` and its `fn`: further attributes, doc
+# comments, ordinary comments, blank lines. Anything else ends the run, which is
+# what stops a nested helper `fn` in a PREVIOUS test's body from being read as
+# the test's name.
+ATTR_OR_DOC = re.compile(r"^\s*(#\[|#!\[|///|//!|//|$)")
+# ⛔ `[A-Za-z0-9_]`, not `[a-z0-9_]`. A test name in this tree carries uppercase
+# (`a_blended_layer_requires_the_layer_AND_the_blend`), and a lowercase-only
+# pattern TRUNCATES it rather than missing it -- so the name still looks like a
+# name and the diff blames the wrong test.
+FN_DECL = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)"
+)
+MOD_DECL = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*;"
+)
+
+# ⛔ DISTINCT PATHS, NOT LINES. `cargo test` runs the library suite TWICE -- as
+# `unittests src/lib.rs` and again as `unittests src/main.rs`, the bin target
+# compiling the same modules -- so a count of LINES is exactly double. A full
+# module path is unique within a crate, so counting each one ONCE is immune to
+# the repeat without needing to know where either run begins.
+BANNER_N = re.compile(r"^running (?P<n>\d+) tests?[ \t\r]*$")
+# ⛔ MEASURED, NOT ASSUMED: on the real CI log every harness line is PLAIN and
+# only cargo's own `Running …` status lines carry escapes. This is stripped
+# anyway -- the gate that broke did so because a colour code sat where a regex
+# expected a space, and "libtest is not asked for colour today" is a premise,
+# not a design.
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# ` - should panic` is not decoration: three tests in this suite report with it.
+OUTCOME = re.compile(
+    r"^test (?P<path>[A-Za-z0-9_:]+)(?: - should panic)? \.\.\. "
+    r"(?P<verdict>ok|ignored|FAILED)"
+)
+
+
+class CfgUnknown(Exception):
+    """A cfg predicate outside the measured grammar. Raised, never defaulted."""
+
+
+_CFG_TOKEN = re.compile(
+    r'\s*(?:(?P<fn>all|any|not)\s*\(|'
+    r'(?P<key>[a-z_]+)\s*=\s*"(?P<val>[^"]*)"|'
+    r'(?P<ident>[a-z_][a-z0-9_]*)|(?P<close>\))|(?P<comma>,))'
+)
+
+
+def evaluate_cfg(cond: str, cfg: dict) -> bool:
+    """Is `cond` true under `cfg`? ⛔ RAISES on anything it does not understand.
+
+    A backward-compatible default here -- "assume false", or "assume true", or
+    "skip it" -- is the resolver-that-cannot-refuse defect: every unparsed
+    predicate would silently move the expected count and the result would still
+    look like a measurement. The grammar covers every form measured in this tree
+    and the raise is how a new one announces itself.
+    """
+    pos = 0
+
+    def parse() -> bool:
+        nonlocal pos
+        m = _CFG_TOKEN.match(cond, pos)
+        if not m:
+            raise CfgUnknown(cond)
+        pos = m.end()
+        if m.group("fn"):
+            fn = m.group("fn")
+            args: list[bool] = []
+            while True:
+                args.append(parse())
+                nxt = _CFG_TOKEN.match(cond, pos)
+                if not nxt:
+                    raise CfgUnknown(cond)
+                pos = nxt.end()
+                if nxt.group("close"):
+                    break
+                if not nxt.group("comma"):
+                    raise CfgUnknown(cond)
+            if fn == "all":
+                return all(args)
+            if fn == "any":
+                return any(args)
+            if len(args) != 1:
+                raise CfgUnknown(cond)
+            return not args[0]
+        if m.group("key"):
+            key, val = m.group("key"), m.group("val")
+            if key == "feature":
+                return val in cfg["features"]
+            if key == "target_os":
+                return val == cfg["target_os"]
+            if key == "target_arch":
+                return val == cfg["target_arch"]
+            raise CfgUnknown(cond)
+        if m.group("ident"):
+            ident = m.group("ident")
+            if ident == "test":
+                return True
+            if ident == "windows":
+                return cfg["target_os"] == "windows"
+            if ident == "unix":
+                return cfg["target_os"] != "windows"
+            raise CfgUnknown(cond)
+        raise CfgUnknown(cond)
+
+    value = parse()
+    if cond[pos:].strip():
+        raise CfgUnknown(cond)
+    return value
+
+
+def _cfg_above(lines: list[str], index: int) -> str | None:
+    """The nearest non-`test` `#[cfg(...)]` in the attribute block above `index`."""
+    j = index - 1
+    while j >= 0 and ATTR_OR_DOC.match(lines[j]):
+        m = CFG_ATTR.match(lines[j])
+        if m and m.group("cond").strip() != "test":
+            return m.group("cond").strip()
+        j -= 1
+    return None
+
+
+def conditional_module_paths() -> dict[str, str]:
+    """Source paths reachable only under a non-`test` cfg, and the cfg reaching them.
+
+    A whole backend is gated at its `mod` declaration, not at its tests:
+    `painter/mod.rs` carries `#[cfg(all(feature = "d2d", windows))] pub mod
+    direct2d;`, which gates 97 `#[test]` fns none of which carries an attribute
+    of its own. A scan that read only the attributes beside each test would call
+    all 97 unconditional and demand they run on a lane that cannot build them.
+    """
+    gated: dict[str, str] = {}
+    if not SRC.is_dir():
+        return gated
+    for path in SRC.rglob("*.rs"):
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        for i, line in enumerate(lines):
+            decl = MOD_DECL.match(line)
+            if not decl:
+                continue
+            cond = _cfg_above(lines, i)
+            if cond is None:
+                continue
+            base = (
+                path.parent
+                if path.name in ("mod.rs", "lib.rs", "main.rs")
+                else path.with_suffix("")
+            )
+            name = decl.group("name")
+            for cand in (base / f"{name}.rs", base / name):
+                try:
+                    gated[cand.relative_to(SRC).as_posix()] = cond
+                except ValueError:
+                    pass
+    return gated
+
+
+def _gate_on_path(rel: str, gated: dict[str, str]) -> str | None:
+    parts = rel.split("/")
+    for k in range(1, len(parts) + 1):
+        hit = gated.get("/".join(parts[:k]))
+        if hit is not None:
+            return hit
+    return None
+
+
+def declared_tests(area: str, gated: dict[str, str]) -> list[tuple[str, str, str | None]]:
+    """Every `#[test]` fn under `src/<area>/`, as (name, "file:line", cfg or None).
+
+    The cfg attached to a test is the nearest non-`test` `#[cfg]` beside it, or
+    failing that the one gating the module its file lives in.
+    """
+    out: list[tuple[str, str, str | None]] = []
+    area_dir = SRC / area
+    if not area_dir.is_dir():
+        return out
+    for path in sorted(area_dir.rglob("*.rs")):
+        rel = path.relative_to(SRC).as_posix()
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        out.extend(scan_tests(lines, rel, _gate_on_path(rel, gated)))
+    return out
+
+
+def scan_tests(
+    lines: list[str], rel: str, file_gate: str | None
+) -> list[tuple[str | None, str, str | None]]:
+    """The per-file half of `declared_tests`, taking LINES so it can be driven directly.
+
+    ⛔ BOTH OF THIS SCANNER'S RULES ARE REPAIRS OF A DEFECT MEASURED IN A
+    THROWAWAY VERSION OF IT, and both produced a plausible wrong name rather
+    than an error:
+
+      * a lowercase-only name pattern TRUNCATED
+        `a_blended_layer_requires_the_layer_AND_the_blend` at the uppercase, so
+        the source and the log disagreed about a test that was running fine;
+      * a fixed two-line window after `#[test]` picked up a helper `fn` nested
+        INSIDE the previous test's body (`arc_of`, `json_of`), inventing two
+        tests that never existed.
+
+    Only the second of those was visible at all, and only because the diff had
+    an impossible direction in it -- a name the runner reported that the source
+    did not declare. ⇒ A SCAN THAT CAN ONLY UNDER-REPORT HAS NO SUCH TELL.
+    """
+    out: list[tuple[str | None, str, str | None]] = []
+    for i, line in enumerate(lines):
+        if not TEST_ATTR.match(line):
+            continue
+        gate = _cfg_above(lines, i) or file_gate
+        name = None
+        k = i + 1
+        while k < len(lines):
+            decl = FN_DECL.match(lines[k])
+            if decl:
+                name = decl.group("name")
+            # ⛔ ONE GUARD, NOT TWO. A `break` beside the assignment above reads
+            # as the thing that stops the walk and is unobservable behind this
+            # line -- an `fn` is not an attribute or a doc comment, so this
+            # breaks on the same iteration. With both present, a mutant that
+            # took the LAST `fn` in the block instead of the FIRST survived the
+            # nested-helper arm, which is a fixture that then looks like
+            # coverage and is not. This is the line that owns stopping.
+            if not ATTR_OR_DOC.match(lines[k]):
+                break
+            below = CFG_ATTR.match(lines[k])
+            if below and below.group("cond").strip() != "test":
+                gate = below.group("cond").strip()
+            k += 1
+        # ⛔ AN UNRESOLVED `#[test]` IS CARRIED WITH A None NAME, NOT DROPPED, so
+        # the caller reds rather than quietly counting one test fewer and still
+        # reporting an exact match.
+        out.append((name, f"{rel}:{i + 1}", gate))
+    return out
+
+
+def crate_features() -> tuple[set[str], str | None]:
+    """The default feature set, resolved transitively from `Cargo.toml`.
+
+    Derived, not typed: the CI steps this gate guards run a bare `cargo test`,
+    so the invocation's features ARE the crate's defaults, and a default list
+    copied into this file would be one more number nobody re-reads. Returns
+    (features, error); a parse that cannot find `[features]` returns an error
+    rather than an empty set, because an empty set silently makes every
+    `feature = "..."` predicate false.
+    """
+    if not CARGO_TOML.is_file():
+        return set(), f"{CARGO_TOML.as_posix()} does not exist"
+    text = CARGO_TOML.read_text(encoding="utf-8", errors="replace")
+    section = re.search(r"^\[features\]\s*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    if not section:
+        return set(), f"no [features] table in {CARGO_TOML.as_posix()}"
+    table: dict[str, list[str]] = {}
+    for key, body in re.findall(
+        r"^([A-Za-z0-9_-]+)\s*=\s*\[(.*?)\]", section.group(1), re.M | re.S
+    ):
+        table[key] = re.findall(r'"([^"]*)"', body)
+    if "default" not in table:
+        return set(), f"no `default` key in the [features] table of {CARGO_TOML.name}"
+    resolved: set[str] = set()
+    pending = ["default"]
+    while pending:
+        feat = pending.pop()
+        if feat in resolved or feat.startswith("dep:"):
+            continue
+        resolved.add(feat)
+        pending.extend(table.get(feat, []))
+    return resolved, None
+
+
+def _host_target_os() -> str:
+    """The cfg-relevant OS name for THIS machine, in Rust's vocabulary."""
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "macos"
+    return "linux"
+
+
+def registered_counts(log: str) -> tuple[dict[str, int], int, int]:
+    """DISTINCT test paths per area, the distinct total, and the largest banner.
+
+    ⛔⛔ THIS READS THE WHOLE LOG AND DEDUPLICATES, RATHER THAN LOCATING THE
+    LIBRARY'S BLOCK, AND THE REASON IS A DEFECT THAT REACHED CI. The first form
+    of this function looked for `Running unittests src/lib.rs` and counted the
+    lines after it. **Cargo colours its own status lines in CI**, so that line
+    begins with escape bytes and the anchored regex matched nothing; locally,
+    with no terminal, cargo emits no colour and it matched every time.
+    ⇒ 🔑 THE BLOCK-FINDER WAS THE ONLY PART OF THIS GATE THAT READ A
+      CARGO-EMITTED LINE, AND IT IS THE ONLY PART THAT BROKE. Measured on the
+      real CI log: all 7 `Running` lines carry escapes; all 9 banners, all 6209
+      outcome lines and all 8 summaries are plain.
+
+    Counting distinct paths reads HARNESS output only, so it needs neither the
+    block nor cargo's vocabulary: a full module path is unique within a crate,
+    so the library's two runs contribute one entry each, and a test that stops
+    running disappears from both. Escapes are stripped anyway, because a
+    dependency that is absent today is not a dependency that was designed out.
+
+    ⚠️ ONE CONSEQUENCE OF READING THE WHOLE FILE, NAMED SO THE REFUSAL IS
+    DIAGNOSABLE: an INTEGRATION test binary whose top-level module happened to
+    be named like a declared area would have its tests counted into that area.
+    Today none can -- measured on the real log, all 35 integration tests are
+    flat function names with no `::` at all, and 3087 + 35 == the 3122 distinct
+    paths this gate reports. If one ever did, the area would read MORE than the
+    source declares, which is a loud REFUSAL rather than a silent wrong answer;
+    this note is here so whoever reads that refusal looks at `tests/` first.
+    """
+    per: dict[str, int] = {}
+    seen: set[str] = set()
+    max_banner = 0
+    for raw in log.splitlines():
+        line = ANSI.sub("", raw)
+        banner = BANNER_N.match(line)
+        if banner:
+            max_banner = max(max_banner, int(banner.group("n")))
+            continue
+        m = OUTCOME.match(line)
+        if not m:
+            continue
+        path = m.group("path")
+        if path in seen:
+            continue
+        seen.add(path)
+        area = path.split("::")[0]
+        per[area] = per.get(area, 0) + 1
+    return per, len(seen), max_banner
+
 
 def source_areas() -> set[str]:
     """Top-level `src/` subdirectories holding a PLAIN `#[cfg(test)]` module.
@@ -241,10 +688,14 @@ def executed_ok(log: str, anchor: str) -> bool:
     """Did the runner report `anchor` as executed and PASSING?
 
     `\\r` in the trailing class, not decoration: a Windows lane tees this log and
-    the line arrives CRLF-terminated.
+    the line arrives CRLF-terminated. ` - should panic` likewise: a
+    `#[should_panic]` test reports as `test <path> - should panic ... ok`, so
+    without the suffix an anchor that were ever marked `#[should_panic]` could
+    never match, and this gate would report a suite that did not run.
     """
     pattern = re.compile(
-        r"^test " + re.escape(anchor) + r" \.\.\. ok[ \t\r]*$", re.MULTILINE
+        r"^test " + re.escape(anchor) + r"(?: - should panic)? \.\.\. ok[ \t\r]*$",
+        re.MULTILINE,
     )
     return bool(pattern.search(log))
 
@@ -344,6 +795,91 @@ def log_findings(log: str, label: str) -> list[str]:
                 f"in {label} -- either the suite did not run it, or its "
                 f"#[cfg(test)] module stopped being compiled. The total would "
                 f"fall and every remaining test would still pass"
+            )
+    return findings
+
+
+def count_findings(log: str, label: str, cfg: dict) -> list[str]:
+    """Findings about HOW MUCH of each area ran, against a per-invocation expectation.
+
+    This is the half an anchor cannot reach. The expected side is recomputed
+    from the source tree here, under `cfg`, so there is no number to go stale
+    and no arm that could test a constant against itself.
+    """
+    per_area, distinct_total, max_banner = registered_counts(log)
+
+    findings: list[str] = []
+    # ⛔ THE ANTI-VACUITY FLOOR, AND IT LEADS. If the outcome matcher has stopped
+    # matching, every per-area count falls together and the comparison below
+    # would report a tidy set of shortfalls that are all this gate's own fault.
+    # The floor is DERIVED FROM THE LOG: the largest `running N tests` banner is
+    # the biggest single run the harness announced, and the distinct set spans
+    # every run in the file, so it can never honestly be smaller.
+    if max_banner == 0:
+        return [
+            f"{label} announces no `running N tests` banner at all, so there is "
+            f"no floor to hold the per-area counts to. A log with nothing to "
+            f"measure against is a REFUSAL, never a skip"
+        ]
+    if distinct_total < max_banner:
+        findings.append(
+            f"{label}: the largest run announces {max_banner} test(s) and this "
+            f"gate matched only {distinct_total} distinct test path(s) in the "
+            f"whole file. Until that floor is met the per-area counts are unsafe "
+            f"to read -- a matcher that has stopped matching reports every area "
+            f"as short, which reads as a finding about the suite"
+        )
+        return findings
+
+    gated = conditional_module_paths()
+    for area in sorted(AREAS):
+        declared = declared_tests(area, gated)
+        unresolved = [where for name, where, _ in declared if name is None]
+        if unresolved:
+            findings.append(
+                f"area {area!r}: {len(unresolved)} `#[test]` attribute(s) with no "
+                f"resolvable `fn` ({', '.join(unresolved[:3])}) -- this gate could "
+                f"not read its own subject, which is a refusal and not a count"
+            )
+            continue
+        expected = 0
+        for _name, where, cond in declared:
+            if cond is None:
+                expected += 1
+                continue
+            try:
+                if evaluate_cfg(cond, cfg):
+                    expected += 1
+            except CfgUnknown:
+                findings.append(
+                    f"area {area!r}: the cfg `{cond}` at {where} is outside this "
+                    f"gate's measured grammar. It is REFUSED rather than assumed "
+                    f"true or false -- either assumption would move the expected "
+                    f"count silently and the result would still look like a "
+                    f"measurement"
+                )
+                expected = None
+                break
+        if expected is None:
+            continue
+        actual = per_area.get(area, 0)
+        if actual == expected:
+            continue
+        if actual < expected:
+            findings.append(
+                f"area {area!r}: the source declares {expected} test(s) that this "
+                f"invocation should build (features "
+                f"{', '.join(sorted(cfg['features'])) or 'none'}; target_os "
+                f"{cfg['target_os']}) and the runner registered {actual} -- "
+                f"{expected - actual} test(s) stopped running while the area's "
+                f"anchor still passed, which is exactly what an anchor cannot see"
+            )
+        else:
+            findings.append(
+                f"area {area!r}: the runner registered {actual} test(s) and the "
+                f"source declares only {expected} for this invocation. MORE than "
+                f"expected is this gate misreading its own subject, not a healthy "
+                f"suite -- a disagreement in either direction is a refusal"
             )
     return findings
 
@@ -461,25 +997,338 @@ def self_test() -> int:
 
     arm("the declaration is restored after the mutations", declaration_findings() == [])
 
+    # ── 7. THE COUNT'S ARMS. ⛔ THE REFUSAL ARM LEADS, for the same reason the
+    #    empty-log arm leads above: `evaluate_cfg` deciding an unknown predicate
+    #    instead of raising is the one failure that would leave every number
+    #    below looking exactly like a measurement.
+    unknown_forms = [
+        'target_family = "wasm"',        # a key the grammar does not carry
+        "some_future_cfg",               # a bare ident it does not carry
+        'not(feature = "a", feature = "b")',   # `not` is unary
+        'all(feature = "a"',             # unbalanced
+        'feature = "a" garbage',         # trailing junk
+    ]
+    for form in unknown_forms:
+        raised = False
+        try:
+            evaluate_cfg(form, {"features": {"a"}, "target_os": "macos",
+                                "target_arch": "x86_64"})
+        except CfgUnknown:
+            raised = True
+        arm(f"the cfg {form!r} is REFUSED, not decided", raised)
+
+    cfg_web = {"features": {"default", "web"}, "target_os": "macos",
+               "target_arch": "x86_64"}
+    cfg_win = {"features": {"default", "web", "d2d"}, "target_os": "windows",
+               "target_arch": "x86_64"}
+    for cond, under, want, why in [
+        ("test", cfg_web, True, "a plain `test` cfg is always true here"),
+        ('feature = "web"', cfg_web, True, "a feature that is on"),
+        ('feature = "d2d"', cfg_web, False, "a feature that is off"),
+        ('all(feature = "d2d", windows)', cfg_web, False, "`all` with a false arm"),
+        ('all(feature = "d2d", windows)', cfg_win, True, "`all` with both arms true"),
+        ('not(all(feature = "d2d", windows))', cfg_web, True, "`not` of a false `all`"),
+        ('any(feature = "d2d", feature = "web")', cfg_web, True, "`any` with one true"),
+        ("windows", cfg_web, False, "the bare `windows` ident off Windows"),
+        ("windows", cfg_win, True, "the bare `windows` ident on Windows"),
+        ("unix", cfg_web, True, "the bare `unix` ident off Windows"),
+        ('target_os = "macos"', cfg_web, True, "an explicit target_os"),
+    ]:
+        arm(f"cfg {cond!r}: {why}", evaluate_cfg(cond, under) is want)
+
+    # ── THE SCANNER, driven on source text rather than on a path. Each arm is a
+    #    defect this scanner actually had, written from the tree's own lines.
+    upper = ["#[test]", "fn a_blended_layer_requires_the_layer_AND_the_blend() {", "}"]
+    arm("an uppercase run in a test name survives the scan",
+        scan_tests(upper, "f.rs", None)
+        == [("a_blended_layer_requires_the_layer_AND_the_blend", "f.rs:1", None)])
+
+    nested = [
+        "#[test]",
+        "fn a_non_centre_ellipse_stroke_describes_the_same_conic() {",
+        "    fn arc_of(align: StrokeAlign) -> EllipseArc {",
+        "        todo!()",
+        "    }",
+        "}",
+    ]
+    arm("a helper fn nested in a test's body is not read as a second test",
+        [n for n, _, _ in scan_tests(nested, "f.rs", None)]
+        == ["a_non_centre_ellipse_stroke_describes_the_same_conic"])
+
+    gated_above = ['#[cfg(all(feature = "d2d", windows))]', "#[test]", "fn t() {", "}"]
+    arm("a cfg ABOVE the #[test] gates it",
+        scan_tests(gated_above, "f.rs", None)
+        == [("t", "f.rs:2", 'all(feature = "d2d", windows)')])
+
+    gated_below = ["#[test]", '#[cfg(feature = "web")]', "fn t() {", "}"]
+    arm("a cfg BELOW the #[test] gates it too",
+        scan_tests(gated_below, "f.rs", None) == [("t", "f.rs:1", 'feature = "web"')])
+
+    arm("a plain #[cfg(test)] beside a test does NOT gate it",
+        scan_tests(["#[cfg(test)]", "#[test]", "fn t() {", "}"], "f.rs", None)
+        == [("t", "f.rs:2", None)])
+
+    arm("a test in a module-gated file inherits the module's cfg",
+        scan_tests(["#[test]", "fn t() {", "}"], "f.rs", 'feature = "ffi"')
+        == [("t", "f.rs:1", 'feature = "ffi"')])
+
+    arm("a #[test] with no reachable fn is carried as UNRESOLVED, not dropped",
+        scan_tests(["#[test]", "let x = 1;"], "f.rs", None) == [(None, "f.rs:1", None)])
+
+    arm("#[wasm_bindgen_test] is not counted as a #[test]",
+        scan_tests(["#[wasm_bindgen_test]", "fn t() {", "}"], "f.rs", None) == [])
+
+    # ── THE BLOCK. ⛔ THE DOUBLE-COUNT ARM IS THE ONE THAT MATTERS: this is the
+    #    trap the real log sprang, and the only one whose wrong answer is a tidy
+    #    round multiple of the right one.
+    _rows = ("test canvas::a::tests::one ... ok\n"
+             "test canvas::a::tests::two ... ok\n")
+    _blk = ("     Running unittests src/{}.rs (target/debug/deps/x)\n"
+            "\nrunning 2 tests\n" + _rows +
+            "test result: ok. 2 passed; 0 failed; 0 ignored\n")
+    twice = _blk.format("lib") + _blk.format("main")
+    per, distinct, banner = registered_counts(twice)
+    arm("the library's two runs count ONCE -- the same path in the lib and bin "
+        "targets is one test, not two",
+        per == {"canvas": 2} and distinct == 2 and banner == 2)
+
+    # ⛔⛔ THE ARM CI ACTUALLY TAUGHT, and it is the one that would have caught
+    #    the refusal before the push: CARGO COLOURS ITS OWN STATUS LINES IN CI.
+    #    The first version of this gate anchored a regex at `Running` and found
+    #    it locally, where there is no terminal and cargo emits no colour.
+    # ⛔ THE FIXTURE COLOURS THE *HARNESS* LINES, NOT ONLY CARGO'S. A fixture
+    #    that only colours `Running` cannot fail: this reader never looks at a
+    #    cargo line, so stripping or not stripping gives the same answer and the
+    #    arm would be one more that reads as coverage. What the stripper defends
+    #    is libtest being asked for colour -- so that is what is planted.
+    coloured = (
+        "\x1b[1m\x1b[92m     Running\x1b[0m unittests src/lib.rs (deps/x)\n"
+        "\n\x1b[1mrunning 2 tests\x1b[0m\n"
+        "test canvas::a::tests::one ... \x1b[32mok\x1b[0m\n"
+        "test canvas::a::tests::two ... \x1b[32mok\x1b[0m\n"
+        "test result: \x1b[32mok\x1b[0m. 2 passed; 0 failed; 0 ignored\n"
+    )
+    plain = (
+        "     Running unittests src/lib.rs (deps/x)\n"
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+    )
+    arm("a log carrying cargo's colour escapes reads identically to a plain one "
+        "-- the one dependency on a cargo-emitted line is what broke this gate "
+        "on CI while passing locally",
+        registered_counts(coloured) == registered_counts(plain)
+        and registered_counts(coloured)[0] == {"canvas": 2})
+    arm("that colour arm is not vacuous -- the fixture really carries escapes",
+        "\x1b[" in coloured)
+
+    # ⭐ ORDER-INDEPENDENCE, kept as a property in its own right: this reader
+    #    touches no cargo line at all, so where those lines land cannot matter.
+    interleaved = (
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+        "\nrunning 2 tests\n" + _rows +
+        "test result: ok. 2 passed; 0 failed; 0 ignored\n"
+        "     Running unittests src/lib.rs (target/debug/deps/x)\n"
+        "     Running unittests src/main.rs (target/debug/deps/x)\n"
+    )
+    arm("a log whose cargo lines landed after its harness lines reads "
+        "identically -- no ordering between the two is assumed either",
+        registered_counts(interleaved) == registered_counts(twice))
+
+    arm("a log with no banner at all offers no floor and is REFUSED",
+        registered_counts("test canvas::a::tests::one ... ok\n")[2] == 0)
+
+    outcomes = ("test document::model::tests::plain ... ok\n"
+                "test document::model::tests::panics - should panic ... ok\n"
+                "test document::model::tests::skipped ... ignored, not yet supported\n"
+                "test document::model::tests::broke ... FAILED\n"
+                "running 4 tests\n")
+    per, total, banner = registered_counts(outcomes)
+    arm("ok, should-panic, ignored and FAILED all count as REGISTERED",
+        total == 4 and per == {"document": 4} and banner == 4)
+
+    # ── count_findings END TO END, against THE REAL SOURCE TREE. The expected
+    #    side is built by the gate itself, so this arm is a live check that the
+    #    scanner and the comparison agree about the tree as it stands today.
+    gated_now = conditional_module_paths()
+
+    def _expected_now(area: str) -> int:
+        n = 0
+        for name, _where, cond in declared_tests(area, gated_now):
+            if name is None:
+                return -1
+            if cond is None or evaluate_cfg(cond, cfg_web):
+                n += 1
+        return n
+
+    expected_now = {a: _expected_now(a) for a in AREAS}
+    arm("every declared area resolves a non-negative expected count",
+        all(v >= 0 for v in expected_now.values()))
+
+    # ⛔ THE ARM BELOW EXISTS BECAUSE THE END-TO-END ARMS CANNOT HOLD THIS.
+    #    They build their log FROM the expected counts, so a systematic error in
+    #    the expected side agrees with itself and every arm stays green --
+    #    measured: a mutant that stopped module-level cfgs from gating their
+    #    files moved `painter` by 97 tests and survived every other arm here.
+    #    This one asks a question the counting cannot answer: is a test whose
+    #    FILE is gated reported as conditional at all?
+    ungated_under_a_gate: list[str] = []
+    for area in sorted(AREAS):
+        for _name, where, cond in declared_tests(area, gated_now):
+            if cond is None and _gate_on_path(where.split(":")[0], gated_now):
+                ungated_under_a_gate.append(where)
+    arm("a test inside a module-gated file is reported as CONDITIONAL -- the "
+        "expected side cannot check this, because it is built from it",
+        not ungated_under_a_gate)
+    arm("some test in this tree IS gated, so the arm above is not vacuous",
+        any(cond is not None
+            for area in AREAS
+            for _n, _w, cond in declared_tests(area, gated_now)))
+    arm("the expected counts are not all zero -- an all-zero expectation is "
+        "satisfied by a log with no tests in it at all",
+        sum(expected_now.values()) > 0)
+
+    def _synthetic(counts: dict[str, int]) -> str:
+        rows = []
+        for area, n in sorted(counts.items()):
+            rows += [f"test {area}::m::tests::t{i} ... ok" for i in range(n)]
+        return (
+            "     Running unittests src/lib.rs (target/debug/deps/x-1)\n"
+            f"\nrunning {len(rows)} tests\n" + "\n".join(rows) +
+            "\ntest result: ok. %d passed; 0 failed; 0 ignored\n" % len(rows)
+        )
+
+    arm("a log matching the tree's own per-area counts yields NO count findings",
+        count_findings(_synthetic(expected_now), "the log", cfg_web) == [])
+
+    short = dict(expected_now)
+    victim_area = max(expected_now, key=lambda a: expected_now[a])
+    short[victim_area] = expected_now[victim_area] // 2
+    found = count_findings(_synthetic(short), "the log", cfg_web)
+    arm("an area that loses half its tests IS a finding -- the case an anchor "
+        "cannot see, and the whole reason this count exists",
+        any(victim_area in f and "stopped running" in f for f in found))
+
+    over = dict(expected_now)
+    over[victim_area] = expected_now[victim_area] + 1
+    arm("an area with MORE tests than the source declares is also a finding",
+        any(victim_area in f and "misreading its own subject" in f
+            for f in count_findings(_synthetic(over), "the log", cfg_web)))
+
+    # ⛔ THIS FIXTURE IS SHORT IN EVERY AREA *AND* MIS-BANNERED, and both halves
+    #    are load-bearing. With correct per-area counts, "suppressed" and "not
+    #    suppressed" both yield exactly one finding, so the arm could not see
+    #    the behaviour it names -- measured: a mutant removing the suppression
+    #    survived it.
+    starved = {a: max(0, n - 1) for a, n in expected_now.items()}
+    mismatched = _synthetic(starved).replace(
+        f"running {sum(starved.values())} tests",
+        f"running {sum(starved.values()) + 7} tests")
+    suppressed = count_findings(mismatched, "the log", cfg_web)
+    arm("a log below its own floor is ONE finding, and it SUPPRESSES the "
+        "per-area counts rather than reporting a shortfall in every area that "
+        "is this gate's own fault",
+        len(suppressed) == 1 and "largest run announces" in suppressed[0])
+
+    # ⛔ THIS ARM ASSERTS *WHICH* FINDING, NOT MERELY THAT THERE IS ONE. With a
+    #    bare `bool(...)` it could not fail: a mutant that accepted an unfloored
+    #    log survived, because the per-area pass then reported every area as
+    #    short and the list was non-empty either way. That is the third arm in
+    #    this file to have had the same shape. ⇒ A TRUTHINESS TEST ON A FINDING
+    #    LIST CANNOT TELL THE RIGHT DIAGNOSIS FROM A CASCADE OF WRONG ONES.
+    unfloored = count_findings("test canvas::a::tests::one ... ok\n", "the log",
+                               cfg_web)
+    arm("a log with no banner is ONE count REFUSAL naming the missing floor, "
+        "not a shortfall reported against every area",
+        len(unfloored) == 1 and "no `running N tests` banner" in unfloored[0])
+    arm("a log whose distinct paths fall below its own largest banner is a "
+        "finding, and it SUPPRESSES the per-area counts",
+        len(count_findings(_synthetic(expected_now).replace(
+            f"running {sum(expected_now.values())} tests",
+            f"running {sum(expected_now.values()) + 9} tests"),
+            "the log", cfg_web)) == 1)
+
+    feats, feats_err = crate_features()
+    arm("the crate's default features are derived from Cargo.toml, not typed",
+        feats_err is None and "web" in feats and "d2d" not in feats)
+
+    # ⛔⛔ EVERY STRING THIS GATE CAN PRINT MUST SURVIVE A cp1252 CONSOLE. The
+    #    Windows lane runs under `cp1252`, so a single non-ASCII character in an
+    #    output string raises UnicodeEncodeError and the step dies -- and it dies
+    #    on the SUCCESS path, after every check has passed, which is the worst
+    #    place for it: the gate reports nothing about its own subject and the red
+    #    looks like a finding. Measured: one `⛔` in the PASS line did exactly
+    #    that, and all three sibling gates print pure ASCII. This arm walks the
+    #    source so a future edit cannot reintroduce it -- prose in DOCSTRINGS is
+    #    exempt, because nothing prints them.
+    _tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    _docstrings = set()
+    for _n in ast.walk(_tree):
+        if isinstance(_n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                           ast.ClassDef)):
+            _b = _n.body
+            if (_b and isinstance(_b[0], ast.Expr)
+                    and isinstance(_b[0].value, ast.Constant)
+                    and isinstance(_b[0].value.value, str)):
+                _docstrings.add(id(_b[0].value))
+    _unprintable: list[str] = []
+    for _n in ast.walk(_tree):
+        if (isinstance(_n, ast.Constant) and isinstance(_n.value, str)
+                and id(_n) not in _docstrings):
+            try:
+                _n.value.encode("cp1252")
+            except UnicodeEncodeError:
+                _unprintable.append(
+                    f"line {_n.lineno}: "
+                    + "".join(c for c in _n.value if ord(c) > 127)
+                )
+    arm("every non-docstring string in this file survives a cp1252 console -- "
+        "the Windows lane dies on the SUCCESS path otherwise, and the red reads "
+        "as a finding about the suite",
+        not _unprintable)
+    arm("that console arm is not vacuous -- it really parses this file and "
+        "really finds its strings",
+        sum(1 for _n in ast.walk(_tree)
+            if isinstance(_n, ast.Constant) and isinstance(_n.value, str)) > 50)
+
     if failures:
         print(f"check_rust_suite_ran SELF-TEST: FAILED {len(failures)} of {arms} arm(s)")
         for f in failures:
             print(f"  ARM FAILED: {f}")
         return 1
+    # ⛔ THE SUMMARY NAMES BOTH HALVES. It described only the anchor arms while
+    # driving the count arms too, and an accurate sentence about half a thing is
+    # what stops anyone asking after the other half.
     print(
         f"check_rust_suite_ran SELF-TEST: OK ({arms} arms driven; empty-log fatal "
         f"proven FIRST; {len(AREAS)} declared area(s) each driven as a "
-        f"stopped-running mutant; every declaration failure path NAMES findings)"
+        f"stopped-running mutant; every declaration failure path NAMES findings; "
+        f"and the COUNT half driven against this tree as it stands -- the cfg "
+        f"grammar with its refusals leading, the scanner, a double-counting log, "
+        f"a colour-escaped log, and an area losing half its tests)"
     )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Prove the main Rust suite RAN, area by area."
+        description="Prove the main Rust suite RAN, area by area, and how much of it."
     )
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--log", help="the cargo-test stdout to adjudicate")
+    parser.add_argument(
+        "--features",
+        help="comma-separated features this invocation built with. DEFAULT: the "
+             "crate's own `default` list, resolved from Cargo.toml -- which is "
+             "what a bare `cargo test` uses, and both CI steps run a bare one.",
+    )
+    parser.add_argument(
+        "--target-os",
+        help="the target OS the suite ran on, for cfgs like `windows`. DEFAULT: "
+             "this machine, which both CI steps make true by running the suite "
+             "and this gate in the same job. A wrong value is LOUD, not silent: "
+             "it moves the expected counts and reds.",
+    )
     args = parser.parse_args()
 
     if args.self_test:
@@ -503,19 +1352,46 @@ def main() -> int:
               f"A missing log is absent evidence, which is RED, never a skip.")
         return 2
 
+    if args.features is not None:
+        features = {f.strip() for f in args.features.split(",") if f.strip()}
+    else:
+        features, err = crate_features()
+        if err:
+            print(
+                f"check_rust_suite_ran: REFUSED -- the default feature set could "
+                f"not be derived ({err}). An empty feature set would make every "
+                f"`feature = \"...\"` predicate false and silently lower every "
+                f"expected count, so it is refused rather than assumed."
+            )
+            return 2
+    cfg = {
+        "features": features,
+        "target_os": args.target_os or _host_target_os(),
+        "target_arch": "unknown",
+    }
+
     log = path.read_text(encoding="utf-8", errors="replace")
-    findings = log_findings(log, args.log)
+    findings = log_findings(log, args.log) + count_findings(log, args.log, cfg)
     if findings:
         print(f"check_rust_suite_ran: FAIL -- {len(findings)} finding(s):")
         for f in findings:
             print(f"  {f}")
         return 1
 
+    _per, distinct_total, max_banner = registered_counts(log)
     print(
-        f"check_rust_suite_ran: OK ({len(AREAS)} area(s) each proved by a named "
-        f"test executed and passing in {args.log}). "
-        f"SCOPE: this asserts each area RAN, never how much of it ran -- a count "
-        f"is unsound here because the total moves with the feature set."
+        f"check_rust_suite_ran: OK ({len(AREAS)} area(s), each proved to have RUN "
+        f"by a named test passing in {args.log}, and each proved to have run IN "
+        f"FULL against a count derived from the source under features "
+        f"{','.join(sorted(cfg['features'])) or 'none'} / target_os "
+        f"{cfg['target_os']}; {distinct_total} distinct test path(s) matched "
+        f"against a largest-run floor of {max_banner}). "
+        f"TWO LIMITS, NAMED: the expected side is DERIVED from the source, so "
+        f"a test DELETED from the source moves both sides together and reads as "
+        f"agreement -- this asks whether everything the source declares RAN, "
+        f"never whether the source is still as large as it was. And `ignored` "
+        f"counts as registered, so a test gaining #[ignore] moves no number "
+        f"here. The eleven anchors cover that for eleven tests only."
     )
     return 0
 
