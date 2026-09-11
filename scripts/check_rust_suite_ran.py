@@ -82,11 +82,24 @@ running, more means this gate has misread its own subject.
 exactly like a measurement:
 
   1. `cargo test` RUNS THE LIBRARY SUITE TWICE -- once as `unittests src/lib.rs`
-     and once as `unittests src/main.rs`, because the bin target compiles the
-     same modules. A count taken over the whole log is therefore EXACTLY DOUBLE
-     the truth, and doubling is the error shape least likely to look wrong. The
-     count is scoped to the `src/lib.rs` block alone, and the absence of that
-     block is a REFUSAL, never a skip.
+     and once as `unittests src/main.rs`. A count taken over the whole log is
+     therefore EXACTLY DOUBLE the truth, and doubling is the error shape least
+     likely to look wrong.
+     ⭐ THE MECHANISM WAS ALREADY WRITTEN DOWN NEXT DOOR, and reading the
+     sibling gate found it in a minute: `check_native_backend_lane.py` records
+     that `src/main.rs` RE-DECLARES THE MODULE TREE instead of importing the
+     lib, so a module named by both roots compiles into the bin target as well.
+     That gate drew the opposite conclusion for its own question -- "assert
+     presence, never a count", because multiplicity is a property of a module's
+     position in the two source trees and is not stable per feature -- and it is
+     right. Scoping to ONE block is what makes a count sound here instead.
+     ⛔ AND `lib.rs` IS THE RIGHT BLOCK, NOT MERELY THE FIRST. Verified at the
+     object: `main.rs` declares 14 modules and `lib.rs` 19, the five extra being
+     the `ffi` family. Every area this gate adjudicates is a `src/`
+     SUBDIRECTORY and appears under both roots, so the two blocks happen to
+     carry equal totals under the default features -- but under `--features
+     ffi` they would not, and `lib.rs` is the library whose subdirectories the
+     areas ARE. The absence of that block is a REFUSAL, never a skip.
   2. A `#[should_panic]` test reports as `test <path> - should panic ... ok`.
      Three of them sit in this suite. A matcher without that suffix silently
      drops them and lands 3 short of the banner -- which is also why
@@ -1145,10 +1158,16 @@ def self_test() -> int:
         for f in failures:
             print(f"  ARM FAILED: {f}")
         return 1
+    # ⛔ THE SUMMARY NAMES BOTH HALVES. It described only the anchor arms while
+    # driving the count arms too, and an accurate sentence about half a thing is
+    # what stops anyone asking after the other half.
     print(
         f"check_rust_suite_ran SELF-TEST: OK ({arms} arms driven; empty-log fatal "
         f"proven FIRST; {len(AREAS)} declared area(s) each driven as a "
-        f"stopped-running mutant; every declaration failure path NAMES findings)"
+        f"stopped-running mutant; every declaration failure path NAMES findings; "
+        f"and the COUNT half driven against this tree as it stands -- the cfg "
+        f"grammar with its refusals leading, the scanner, the lib.rs block "
+        f"against a double-counting log, and an area losing half its tests)"
     )
     return 0
 
