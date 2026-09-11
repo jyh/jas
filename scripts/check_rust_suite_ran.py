@@ -106,14 +106,21 @@ exactly like a measurement:
      That gate drew the opposite conclusion for its own question -- "assert
      presence, never a count", because multiplicity is a property of a module's
      position in the two source trees and is not stable per feature -- and it is
-     right. Scoping to ONE block is what makes a count sound here instead.
-     ⛔ AND `lib.rs` IS THE RIGHT BLOCK, NOT MERELY THE FIRST. Verified at the
-     object: `main.rs` declares 14 modules and `lib.rs` 19, the five extra being
-     the `ffi` family. Every area this gate adjudicates is a `src/`
-     SUBDIRECTORY and appears under both roots, so the two blocks happen to
-     carry equal totals under the default features -- but under `--features
-     ffi` they would not, and `lib.rs` is the library whose subdirectories the
-     areas ARE. The absence of that block is a REFUSAL, never a skip.
+     right -- multiplicity cannot be ASSERTED. Deduplicating removes it from
+     the question instead.
+     ⛔ AND THE UNION IS THE RIGHT SET, WHICH IS NOT OBVIOUS AND WAS MEASURED.
+     `main.rs` declares 14 modules and `lib.rs` 19, the five extra being the
+     `ffi` family. Every area this gate adjudicates is a `src/` SUBDIRECTORY
+     and appears under BOTH roots, so for these areas the two runs carry the
+     same paths and the union equals either one. The `ffi` family is reached
+     only through `lib.rs`, is not a subdirectory, and is adjudicated by
+     `check_native_backend_lane.py` on its own lane -- so it neither adds to
+     nor subtracts from any area's count here.
+     📌 THIS PARAGRAPH DESCRIBED THE BLOCK DESIGN FOR ONE COMMIT AFTER THE
+     BLOCK DESIGN WAS DELETED. It sits next to the point that was repaired, was
+     accurate when written, and said nothing false about its own subject --
+     which is exactly why it was not re-read. Check a repaired claim's
+     NEIGHBOURS.
   2. A `#[should_panic]` test reports as `test <path> - should panic ... ok`.
      Three of them sit in this suite. A matcher without that suffix silently
      drops them and lands 3 short of the banner -- which is also why
