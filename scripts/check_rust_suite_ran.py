@@ -451,7 +451,13 @@ def scan_tests(
             decl = FN_DECL.match(lines[k])
             if decl:
                 name = decl.group("name")
-                break
+            # ⛔ ONE GUARD, NOT TWO. A `break` beside the assignment above reads
+            # as the thing that stops the walk and is unobservable behind this
+            # line -- an `fn` is not an attribute or a doc comment, so this
+            # breaks on the same iteration. With both present, a mutant that
+            # took the LAST `fn` in the block instead of the FIRST survived the
+            # nested-helper arm, which is a fixture that then looks like
+            # coverage and is not. This is the line that owns stopping.
             if not ATTR_OR_DOC.match(lines[k]):
                 break
             below = CFG_ATTR.match(lines[k])
@@ -1061,6 +1067,26 @@ def self_test() -> int:
     expected_now = {a: _expected_now(a) for a in AREAS}
     arm("every declared area resolves a non-negative expected count",
         all(v >= 0 for v in expected_now.values()))
+
+    # ⛔ THE ARM BELOW EXISTS BECAUSE THE END-TO-END ARMS CANNOT HOLD THIS.
+    #    They build their log FROM the expected counts, so a systematic error in
+    #    the expected side agrees with itself and every arm stays green --
+    #    measured: a mutant that stopped module-level cfgs from gating their
+    #    files moved `painter` by 97 tests and survived every other arm here.
+    #    This one asks a question the counting cannot answer: is a test whose
+    #    FILE is gated reported as conditional at all?
+    ungated_under_a_gate: list[str] = []
+    for area in sorted(AREAS):
+        for _name, where, cond in declared_tests(area, gated_now):
+            if cond is None and _gate_on_path(where.split(":")[0], gated_now):
+                ungated_under_a_gate.append(where)
+    arm("a test inside a module-gated file is reported as CONDITIONAL -- the "
+        "expected side cannot check this, because it is built from it",
+        not ungated_under_a_gate)
+    arm("some test in this tree IS gated, so the arm above is not vacuous",
+        any(cond is not None
+            for area in AREAS
+            for _n, _w, cond in declared_tests(area, gated_now)))
     arm("the expected counts are not all zero -- an all-zero expectation is "
         "satisfied by a log with no tests in it at all",
         sum(expected_now.values()) > 0)
@@ -1092,12 +1118,20 @@ def self_test() -> int:
         any(victim_area in f and "misreading its own subject" in f
             for f in count_findings(_synthetic(over), "the log", cfg_web)))
 
-    mismatched = _synthetic(expected_now).replace(
-        f"running {sum(expected_now.values())} tests",
-        f"running {sum(expected_now.values()) + 7} tests")
+    # ⛔ THIS FIXTURE IS SHORT IN EVERY AREA *AND* MIS-BANNERED, and both halves
+    #    are load-bearing. With correct per-area counts, "suppressed" and "not
+    #    suppressed" both yield exactly one finding, so the arm could not see
+    #    the behaviour it names -- measured: a mutant removing the suppression
+    #    survived it.
+    starved = {a: max(0, n - 1) for a, n in expected_now.items()}
+    mismatched = _synthetic(starved).replace(
+        f"running {sum(starved.values())} tests",
+        f"running {sum(starved.values()) + 7} tests")
+    suppressed = count_findings(mismatched, "the log", cfg_web)
     arm("a banner that disagrees with the matched outcome lines is a finding, "
-        "and it SUPPRESSES the per-area counts rather than reporting them",
-        len(count_findings(mismatched, "the log", cfg_web)) == 1)
+        "and it SUPPRESSES the per-area counts rather than reporting a "
+        "shortfall in every area that is this gate's own fault",
+        len(suppressed) == 1 and "announces" in suppressed[0])
 
     arm("a log with no lib.rs block is a count REFUSAL, not a skip",
         bool(count_findings(_fake_log(all_anchors), "the log", cfg_web)))
