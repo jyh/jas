@@ -668,9 +668,34 @@ if ($Hand) {
             }
             if ($null -ne $handTarget) {
                 $handAsked = @{ X = $aimX; Y = $aimY; Dx = $handDx; Dy = $handDy; K = $HandMoves }
+                # ⛔⛔ THE HIT TARGET'S INSET, READ FROM THE SHELL'S OWN ROW AND
+                # FORWARDED. The injector aims from the WINDOW client; the pointer
+                # handlers live on `Grid.Row="1"`, below the MenuBar. Measured on
+                # kenai 2026-09-11: 40 DIP of inset against a 36 DIP aim, so every
+                # press landed 6 physical px inside the MenuBar (STATUS-flask §54).
+                #
+                # ⭐ DERIVED, NEVER PINNED: the shell measures its own layout and
+                # says so; this side only forwards. A constant here would be right
+                # until the next layout change and silently wrong after it.
+                # ⚠️ AND AN ABSENT ROW IS REPORTED, NOT DEFAULTED TO ZERO -- zero is
+                # the old, wrong behaviour and must not be reachable by silence.
+                $htRow = Select-SbRow (Read-SbRows $log $logMark) 'HITTARGET which='
+                $offX = 0.0; $offY = 0.0
+                if ($null -eq $htRow) {
+                    $verdicts += "note: no HITTARGET row -- the hand aims at the WINDOW client, which is the pre-§54 behaviour and misses a canvas that is inset"
+                } else {
+                    $offRaw = Get-SbField $htRow 'offset-dips'
+                    if ($offRaw -match '^\(([-0-9.]+),([-0-9.]+)\)$') {
+                        $offX = [double]$Matches[1]; $offY = [double]$Matches[2]
+                        $verdicts += "ok  : hit-target inset ($offX,$offY) DIP, read from the shell's HITTARGET row"
+                    } else {
+                        $verdicts += "note: HITTARGET row present but offset-dips='$offRaw' did not parse -- aiming without an inset"
+                    }
+                }
                 $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
                             " -ProcessId $appPid -DocX $aimX -DocY $aimY -DocDx $handDx -DocDy $handDy" +
                             " -Moves $HandMoves -Out `"$handReceipt`"" +
+                            " -TargetOffsetXDips $offX -TargetOffsetYDips $offY" +
                             $(if ($HandSettleMs -gt 0) { " -SettleMs $HandSettleMs" } else { '' }))
                 $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
                 $handAction = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $handArg
