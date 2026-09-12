@@ -179,6 +179,38 @@ jobs:
           # Anything NEW reds.
           python scripts/check_private_paths.py --messages
 
+      - name: History ratchet (what each commit INTRODUCED -- the arm --range cannot be)
+        run: |
+          # ⭐⭐⭐ PORTED FROM salt 2026-09-11 BY THE 46th HELM HEAD, on the fleet
+          # CLAUDE.md's own ruling for this repo: "jas: PORT IT." The ruling's ground
+          # was not the findings -- it was that jas is ACTIVE, its seat will be lit
+          # again, and it is the repo where a real leak once reached the public remote.
+          #
+          # ⛔ THE FLAG WAS ABSENT HERE, NOT MERELY UNRUN: argparse rejected `--history`,
+          # so this repository's INTERMEDIATE commits had never been read by any gate.
+          #
+          # THE POPULATION NO OTHER ARM SEES, DRIVEN IN A CLONE OF THIS REPO BEFORE THIS
+          # STEP WAS WRITTEN -- add a private-record path in one commit, remove it in the
+          # next, then run all three arms:
+          #     --tree                rc 0   the TREE has no such file
+          #     --range HEAD~1..HEAD  rc 0   the NET DIFF only REMOVES
+          #     --history             rc 1   names the intermediate commit and the blob
+          # The blob is pushed to a public remote and every other gate is green. A clone
+          # receives it. ⇒ a tree repair does NOT answer this arm; only a history
+          # rewrite does, and that is a council act.
+          #
+          # ⚠️ THE BASELINE IS ACCEPTED HISTORICAL DEBT AND IT WAS **READ, NOT COUNTED**:
+          # 23 findings across 16 commits in 14 files, every one a citation of a
+          # private-record FILENAME (a scope lock, an FFI-surface design, a marquee
+          # review, two rulings) in a comment or a doc, plus this gate's own self-test
+          # fixture. Controls run against a grep proven to fire: 0 employer-lane names,
+          # 0 accounts, 0 addresses, 0 host names, 0 home paths. Nothing of substance --
+          # but the ratchet is what keeps it from growing.
+          #
+          # ⚠️ `fetch-depth: 0` is load-bearing -- the arm REFUSES a shallow clone by
+          # name rather than walking a truncated history and reporting success.
+          python scripts/check_private_paths.py --history
+
   commit-msg-proof:
     name: the commit-msg proof holds where `python` does not exist
     runs-on: ubuntu-latest

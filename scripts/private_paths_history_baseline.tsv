@@ -1,0 +1,28 @@
+# private_paths_history_baseline.tsv -- ACCEPTED HISTORICAL DEBT: content a
+# commit INTRODUCED, which every clone receives whatever the tree now says.
+# sha<TAB>file<TAB>line-sha16<TAB>what.
+# A TREE REPAIR NEVER SHRINKS THIS FILE. Only a history rewrite does, and
+# that is a council act -- so a shrink here is a diff somebody must have ruled.
+1ab060757b0951412ed6061e0ad4b0a4c708d9e7	prototypes/sc_panel/REPORT-C1.md	84178650c7b041c0	a path into a private-record repo
+1eccd7a073020d62c53d3ba82ab8b58a54950946	prototypes/sb_winui/REPORT-RESIZE.md	1fa3cb2f086154e1	a path into a private-record repo
+212dd135e133bbc49d392cb3cd5dc877e3384d30	scripts/check_private_paths.py	091697a6b6d654bc	a rootless path into the private record (briefs-/fleet-shape)
+26e6b56b2296e69b0c71fe92d644ff6acf364c30	jas_dioxus/src/geometry/svg.rs	ba1424841fd19a17	a rootless path into the private record (briefs-/fleet-shape)
+26e6b56b2296e69b0c71fe92d644ff6acf364c30	test_fixtures/algorithms/float_format.json	b12d417825e72cc6	a rootless path into the private record (briefs-/fleet-shape)
+27f4a24749b38d99b6ab9abf4f142b094b1d2107	JasSwift/Tests/Tools/ToolInteractionTests.swift	5912a37ef528bfbc	a path into a private-record repo
+27f4a24749b38d99b6ab9abf4f142b094b1d2107	jas_dioxus/src/tools/type_on_path_tool.rs	47a779b5f3629c0d	a path into a private-record repo
+32abb03e65d53c2d12feaec69cdadfbee0b62fd7	transcripts/LAYER_STRUCTURE.md	f85fd2871186ba83	a path into a private-record repo
+580dab1ef99583b246192647228f37c023cfa9f8	jas_dioxus/src/tools/type_on_path_tool.rs	a20ffc90dce8a254	a path into a private-record repo
+7568e001b484ee39d2d6ee7b03449c0cfc67be6e	transcripts/LAYER_STRUCTURE.md	396f61a585b3bfe6	a path into a private-record repo
+805f0ec203386a254bb0df7a1e644b9ec05f05a2	jas_dioxus/cbindgen.toml	3cbace47fb3c1d18	a path into a private-record repo
+805f0ec203386a254bb0df7a1e644b9ec05f05a2	jas_dioxus/src/ffi.rs	84cdccc70eb6aae4	a path into a private-record repo
+805f0ec203386a254bb0df7a1e644b9ec05f05a2	prototypes/ffi_spike/Program.cs	a80b5b05cc81b460	a path into a private-record repo
+805f0ec203386a254bb0df7a1e644b9ec05f05a2	prototypes/ffi_spike/README.md	1dd36e2eebd657c1	a path into a private-record repo
+8800c172ded9c213acbaea8d928ca05656f95bad	transcripts/LAYER_STRUCTURE.md	175690fa2405b42c	a path into a private-record repo
+94907d86d49b9d53b43924e8768d5942fd2582be	JasSwift/Sources/Canvas/CanvasSubwindow.swift	8f579580c46d2139	a path into a private-record repo
+94907d86d49b9d53b43924e8768d5942fd2582be	JasSwift/Tests/Tools/ToolInteractionTests.swift	05cbc864c9ff5214	a path into a private-record repo
+c9ad7505c8f724efe3a0f4a49275e27316356d29	JasSwift/Tests/Document/PaintRecursionTests.swift	7aa78d622bab50dc	a path into a private-record repo
+d32e6616bb4dd51785f9eb35fd2a1978b34621d0	transcripts/LAYER_STRUCTURE.md	6bef3ee624aad7e7	a path into a private-record repo
+dd7090c94d8e8a8d219d77ef8f2b14f1a2b6f49a	prototypes/sb_winui/REPORT-RESIZE.md	a25b0360960036d0	a path into a private-record repo
+ed27bb2a826c66b678deac1eafc33ebdcd316b26	transcripts/LAYER_STRUCTURE.md	b7c78889b13f643d	a path into a private-record repo
+ffa8f683a3f1f05b45dba7c3f813350000bad522	transcripts/LAYER_STRUCTURE.md	2e8bf578b9cc752f	a path into a private-record repo
+ffa8f683a3f1f05b45dba7c3f813350000bad522	transcripts/LAYER_STRUCTURE.md	bb98f93feeb7c2f5	a path into a private-record repo
