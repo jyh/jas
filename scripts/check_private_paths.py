@@ -1535,6 +1535,21 @@ def history_mode(write: bool, path: str | None = None) -> int:
     found = history_findings()
     keys = {history_key(sha, f, line) for sha, f, _, line in found}
     ncommits = len({sha for sha, _, _, _ in found})
+    # ⛔⛔ TWO NUMBERS, AND NEITHER MAY WEAR THE OTHER'S NAME. Carried from `saltbench`
+    #   2026-09-11 (its PR #99), where this arm's pass line said "N commits scanned" while
+    #   reporting the commits that CONTRIBUTED ADDED LINES -- a figure that fell 359 -> 254
+    #   on an UNCHANGED history when merge semantics were fixed.
+    #   ⇒ 🔑 IT IS THE WORST POSSIBLE FIELD TO MISLABEL: this number is how a truncated walk
+    #     is caught at all -- a run printing "OK (1 commit)" beside a sibling printing 358.
+    #     A reader who cannot trust the DENOMINATOR has lost the one signal separating
+    #     "passed" from "ran on almost nothing".
+    #   ⛔ COUNTED FROM GIT, never derived from `found`: the walk is the thing being reported,
+    #     and deriving it from the findings is exactly how the two got conflated.
+    #   📌 This repo already refuses a shallow clone BY NAME in main(), so the truncation it
+    #     guards against cannot arrive that way -- this is disclosure, not a second gate:
+    #     an instrument states the size of the population it read.
+    nwalked = len(subprocess.run(["git", "rev-list", "HEAD"], capture_output=True,
+                                 text=True, encoding="utf-8", check=True).stdout.split())
     if write:
         with open(target, "w", encoding="utf-8", newline="") as fh:
             fh.write("# private_paths_history_baseline.tsv -- ACCEPTED HISTORICAL DEBT: content a\n"
@@ -1561,15 +1576,16 @@ def history_mode(write: bool, path: str | None = None) -> int:
     new = [x for x in found if history_key(x[0], x[1], x[3]) not in base]
     absent = sorted(base - keys)
     if new:
-        print(f"FAIL [gate {self_id()}] HISTORY RATCHET: {len(new)} private-record "
+        print(f"FAIL [gate {self_id()}] HISTORY RATCHET ({nwalked} commits walked): "
+              f"{len(new)} private-record "
               f"path(s) introduced by a commit the baseline does not accept.\n")
         print("⛔ A TREE REPAIR DOES NOT ANSWER THIS ARM. The blob is in the history")
         print("every clone receives. Either the commit is not yet pushed and should be")
         print("amended, or the debt is accepted by a ruling and recorded here.\n")
         print("\n".join(_history_lines(new)))
         return 1
-    print(f"check_private_paths --history [gate {self_id()}]: OK ({len(found)} accepted "
-          f"historical finding(s) across {ncommits} commit(s), all in the baseline; "
+    print(f"check_private_paths --history [gate {self_id()}]: OK ({nwalked} commits WALKED; "
+          f"{len(found)} accepted historical finding(s) across {ncommits} of them, all in the baseline; "
           f"{len(absent)} baseline entr{'y' if len(absent)==1 else 'ies'} not in this "
           f"history (a branch may predate them -- membership, never existence)). "
           f"0 NEW historical findings.")
