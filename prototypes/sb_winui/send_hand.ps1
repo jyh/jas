@@ -74,7 +74,24 @@ param(
     [int]$Moves = 2,
     # Where the receipt goes. The caller reads it back from session 0.
     [Parameter(Mandatory = $true)][string]$Out,
-    [int]$SettleMs = 40
+    [int]$SettleMs = 40,
+    # ⛔⛔ THE HIT TARGET'S INSET FROM THE WINDOW CLIENT, IN DIP, MEASURED BY THE
+    # SHELL AND PASSED IN -- NEVER GUESSED HERE.
+    #
+    # This injector aims from `ClientToScreen(0,0)`, which is the WINDOW client:
+    # the top of `Grid.Row="0"`, the MenuBar. The pointer handlers live on
+    # `Grid.Row="1"`. Measured on kenai 2026-09-11: the target begins 40 DIP
+    # down, the aim pressed 54 physical px (36 DIP) from the client top, and
+    # 54 < 60 -- so every injected press landed SIX PHYSICAL PIXELS inside the
+    # MenuBar and the canvas never saw a gesture (STATUS-flask §54).
+    #
+    # ⭐ IT IS A PARAMETER AND NOT A CONSTANT ON PURPOSE. A hard-coded menubar
+    # height is correct until someone changes the layout and then silently wrong
+    # in the same direction. The shell reports `HITTARGET offset-dips=` and the
+    # caller forwards it, so the two sides can never drift apart without the row
+    # saying so.
+    [double]$TargetOffsetXDips = 0,
+    [double]$TargetOffsetYDips = 0
 )
 
 $ErrorActionPreference = 'Continue'
@@ -144,6 +161,23 @@ public static class SbHand
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
+    // ⛔ THE DIAGNOSTIC PAIR FOR A CALL THAT FAILS BY RETURNING false.
+    // Windows REFUSES a cross-process foreground change rather than throwing,
+    // so the only evidence a refusal ever leaves is the bool below and the
+    // window that actually holds the foreground afterwards.
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    // ⛔ WHO OWNS THE PIXEL. Mouse input is delivered by POSITION, not by focus,
+    // so a foreground target is not the same claim as a target that will receive
+    // the press. `WindowFromPoint` answers the second question and no other call
+    // in this injector does.
+    [DllImport("user32.dll")]
+    public static extern IntPtr WindowFromPoint(POINT p);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
     public const uint MOVE = 0x0001;
     public const uint LEFTDOWN = 0x0002;
     public const uint LEFTUP = 0x0004;
@@ -201,7 +235,24 @@ if ($hwnd -eq [IntPtr]::Zero) {
     exit 4
 }
 $log.Add("hwnd=$hwnd title='$($proc.MainWindowTitle)'")
-[void][SbHand]::SetForegroundWindow($hwnd)
+# ⛔⛔ THE RETURN VALUE WAS DISCARDED HERE AND IT IS THE ONLY WITNESS THIS CALL
+# EVER PRODUCES. `SetForegroundWindow` is REFUSED -- returning false, never
+# throwing -- when the calling process does not hold the foreground privilege,
+# which is the ordinary case for one scheduled task aiming at another's window.
+#
+# Why it matters here and not in the control: `probe_hold.ps1` creates its window
+# IN ITS OWN PROCESS and reads arrivals == k in ten of ten configurations, while
+# this injector aims at a window owned by a DIFFERENT process and the shell sees
+# no press at all (STATUS-flask §48). A refused foreground change explains both
+# halves with one mechanism, and it is invisible unless the bool is read.
+#
+# ⚠️ `foreground-after=` is the second half on purpose: the bool says whether the
+# request was ACCEPTED, and the handle says which window actually holds the
+# foreground when the events are inserted. They can disagree -- the call can
+# return true and a race can take it away -- and a receipt must not collapse them.
+$fgOk = [SbHand]::SetForegroundWindow($hwnd)
+$fgNow = [SbHand]::GetForegroundWindow()
+$log.Add("set-foreground=$fgOk foreground-after=$fgNow target=$hwnd foreground-is-target=$($fgNow -eq $hwnd)")
 
 $rc = New-Object 'SbHand+RECT'
 if (-not [SbHand]::GetClientRect($hwnd, [ref]$rc)) {
@@ -222,13 +273,36 @@ if ($dpi -le 0) { $dpi = 96 }
 $scale = $dpi / 96.0
 $log.Add("client=$($rc.Right)x$($rc.Bottom) origin=($($origin.X),$($origin.Y)) dpi=$dpi scale=$scale")
 
-# document DIP -> canvas physical px -> screen px. The canvas is Grid.Row 0 and
-# starts at the client origin (see the header).
-$px0 = $origin.X + ($DocX * $scale)
-$py0 = $origin.Y + ($DocY * $scale)
+# document DIP -> canvas physical px -> screen px.
+#
+# ⛔ THE COMMENT THAT USED TO SIT HERE SAID "the canvas is Grid.Row 0 and starts
+# at the client origin", AND IT WAS THE DEFECT, WRITTEN DOWN. It was true before
+# W4 added the MenuBar on 09/08; after it the canvas is `Grid.Row="1"` and starts
+# `$TargetOffsetYDips` BELOW the client origin. The assumption outlived the layout
+# it described and nothing re-read it -- so the aim stayed 6 px high and every
+# real gesture was refused for three days while the synthetic arm passed.
+$px0 = $origin.X + (($DocX + $TargetOffsetXDips) * $scale)
+$py0 = $origin.Y + (($DocY + $TargetOffsetYDips) * $scale)
 $px1 = $px0 + ($DocDx * $scale)
 $py1 = $py0 + ($DocDy * $scale)
-$log.Add("press-screen=($px0,$py0) release-screen=($px1,$py1)")
+$log.Add("press-screen=($px0,$py0) release-screen=($px1,$py1) target-offset-dips=($TargetOffsetXDips,$TargetOffsetYDips)")
+
+# ⛔⛔ WHO ACTUALLY OWNS THE PRESS PIXEL. Foreground is NOT the same claim:
+# mouse input is routed by POSITION. STATUS-flask §48 measured that this
+# injector inserts 10/10 events into a window that IS foreground and IS the
+# target, and the shell still sees no press -- so the next thing that can be
+# false is that the pixel under the press belongs to some other window.
+#
+# GA_ROOT (2) is reported beside the raw handle because `WindowFromPoint`
+# returns the deepest CHILD at that point, and a XAML island is a child HWND:
+# a raw handle that differs from the target is EXPECTED and proves nothing,
+# while a ROOT that differs is the finding.
+$wfpPoint = New-Object 'SbHand+POINT'
+$wfpPoint.X = [int]$px0
+$wfpPoint.Y = [int]$py0
+$wfpRaw = [SbHand]::WindowFromPoint($wfpPoint)
+$wfpRoot = if ($wfpRaw -ne [IntPtr]::Zero) { [SbHand]::GetAncestor($wfpRaw, 2) } else { [IntPtr]::Zero }
+$log.Add("window-at-press raw=$wfpRaw root=$wfpRoot target=$hwnd root-is-target=$($wfpRoot -eq $hwnd)")
 $log.Add("canvas-physical press=($($DocX * $scale),$($DocY * $scale)) delta=($($DocDx * $scale),$($DocDy * $scale))")
 
 # SM_XVIRTUALSCREEN 76, SM_YVIRTUALSCREEN 77, SM_CXVIRTUALSCREEN 78,

@@ -313,6 +313,47 @@ public sealed partial class MainWindow : Window
         target.PointerReleased += OnPointerReleased;
         target.PointerCaptureLost += OnPointerCaptureLost;
         target.PointerCanceled += OnPointerCanceled;
+
+        // ⛔⛔ WHERE THE HIT TARGET ACTUALLY IS, IN THE COORDINATES THE INJECTOR
+        // AIMS IN. This is the one number nothing on either side reports, and
+        // without it the two sides cannot be compared at all.
+        //
+        // The injector computes its press from `GetClientRect`, which is the
+        // WINDOW client -- the top of Grid.Row 0. The hit target (panel or
+        // sibling; both) lives in Grid.Row 1, BELOW the MenuBar. So the offset
+        // below is exactly the amount by which every injected aim point is high,
+        // and a press shallower than it lands in the menubar and is never raised
+        // on this element.
+        //
+        // Measured context (STATUS-flask §48/§52, kenai): the window client is
+        // 1481 physical tall against a 1370 physical canvas -- 112 px unexplained
+        // -- while the injector presses 54 physical (36 DIP) from the client top.
+        // ⚠️ REPORTED, NOT ASSERTED: if this offset is small the geometry is
+        // innocent and the search moves on. The row exists so the next head does
+        // not have to rebuild it.
+        var reported = false;
+        void OnceLaidOut(object s2, object e2)
+        {
+            if (reported) { return; }
+            var el = (FrameworkElement)target;
+            if (el.ActualHeight <= 0) { return; }   // layout has not run yet
+            reported = true;
+            el.LayoutUpdated -= OnceLaidOut;
+            try
+            {
+                var origin = el.TransformToVisual(this.Content).TransformPoint(new Windows.Foundation.Point(0, 0));
+                Report($"HITTARGET which={_hit} offset-dips=({origin.X:0.##},{origin.Y:0.##}) "
+                     + $"size-dips={el.ActualWidth:0.##}x{el.ActualHeight:0.##} "
+                     + $"root-dips={((FrameworkElement)this.Content).ActualWidth:0.##}x{((FrameworkElement)this.Content).ActualHeight:0.##}");
+            }
+            catch (Exception ex)
+            {
+                // A REFUSAL BY NAME. A transform that throws must not read as an
+                // offset of zero, which is the innocent answer.
+                Report($"RUSTFAIL HITTARGET could not be located: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+        ((FrameworkElement)target).LayoutUpdated += OnceLaidOut;
     }
 
     /// <summary>
