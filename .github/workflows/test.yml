@@ -1065,6 +1065,17 @@ jobs:
           (cd jas_dioxus && cargo test) 2>&1 | tee rust-test.log
           python scripts/check_rust_suite_ran.py --log rust-test.log
 
+      # The Swift execution gate's READER, on Windows. There is no Swift
+      # toolchain on this runner and no log to read, so only the self-test runs
+      # -- which is the whole gate minus its subject, and is what
+      # check_lane_coverage.py asks for: a gate that cannot fail on a platform
+      # is not watching that platform. Its comment stripper and its two log
+      # spellings are pure text handling, and text is exactly what differs
+      # between these two runners.
+      - name: The Swift execution gate's reader, on the second platform family
+        if: ${{ !cancelled() }}
+        run: python scripts/check_swift_suite_ran.py --self-test
+
       # The native half of the same claim. Windows is the platform that would
       # ship a frontend-less core, so this lane is where the assertion earns its
       # keep: on 2026-07-29 `cargo test --no-default-features --lib` exited 101
@@ -1613,7 +1624,47 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - run: cd JasSwift && swift test
+      # For check_swift_suite_ran.py below. Pinned like every other job here
+      # rather than leaning on the image's preinstalled interpreter, which is
+      # not a version this repo chose.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ⛔ ONE RUN, AND THE COUNT IS READ BACK FROM IT. Until 2026-09-14 this
+      # job was the bare line `cd JasSwift && swift test`, with no execution
+      # gate -- the only test run in this workflow without one, on the larger
+      # of the two ACTIVE ports. `swift test` exits 0 for a package whose test
+      # target registers zero cases: a renamed module, a target that stops
+      # listing `Tests/`, a swift-testing version whose macro stops expanding.
+      # The suite is over three thousand tests; it could silently become twelve
+      # and this lane would still be green.
+      #
+      # `tee` under `pipefail` keeps the real exit status of the single run, so
+      # the suite is not run twice for the count -- the mistake the wasm-canvas
+      # step above records making and undoing.
+      #
+      # ⛔ AND THE COUNT IS JUDGED AGAINST THE SOURCE, NOT A FLOOR.
+      # check_swift_suite_ran.py derives BOTH sides on every run: every `@Test`
+      # the Swift sources declare, against every case the run reports, matched
+      # by NAME and by MULTIPLICITY so a name shared across suites cannot
+      # collapse three executions into one. There is no constant to bump and
+      # nothing to go stale -- the rule this workflow already adopted in
+      # writing for the wasm-canvas and title-oracle lanes.
+      #
+      # SELF-TEST FIRST: a check that can only pass is not a check, and this one
+      # is trusted for its red. Its arms include the REAL Swift sources, because
+      # a parser tuned on a fixture and never pointed at production is a defect
+      # this repo has already paid for -- and this gate paid it on its first
+      # run, when three live files opened a block comment inside a line comment
+      # (`test_fixtures/operations/*`) and the census refused the whole tree.
+      - name: The Swift suite, and every case it declares read back by name
+        shell: bash
+        run: |
+          set -o pipefail
+          python3 scripts/check_swift_suite_ran.py --self-test
+          (cd JasSwift && swift test) 2>&1 | tee swift-test.log
+          python3 scripts/check_swift_suite_ran.py --log swift-test.log
 
   # Flask is a non-gating reference renderer (TESTING_STRATEGY.md §6), so this
   # job does not block the merge (continue-on-error) — but it keeps the flask

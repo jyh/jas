@@ -64,6 +64,7 @@ checker-report.json
 # native-ffi). The lane guard reads them; nothing tracks them.
 native-lane.log
 ffi-lane.log
+swift-test.log
 
 # S-B spike build output (prototypes/sb_winui). The ffi_spike's bin/obj are
 # already in the tree; these are not, and a WinUI restore drags in ~200MB.
