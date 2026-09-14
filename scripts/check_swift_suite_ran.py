@@ -102,6 +102,15 @@ _XCTEST_TOTAL = re.compile(r"Executed (\d+) tests?,")
 # axis and loudly on the count. The doc-comment mention this tree carries
 # is excluded by the COMMENT STRIPPER instead, which is the mechanism that
 # actually knows what a comment is.
+# swift-testing colours its own result lines when it believes it is attached to
+# a terminal, and CI images set enough of the environment that "piped" is not a
+# guarantee. THIS SEAT HAS ALREADY PAID FOR THIS EXACT FAILURE MODE ONCE, in
+# the other direction: a sibling lane's red was cargo colouring its status
+# lines, and the wrong diagnosis survived because the reconstruction stripped
+# the codes in the same step. The strip belongs HERE, in the production path,
+# where it is armed -- not in a reconstruction, where it repairs the input and
+# hides what it repaired.
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _ATTR = re.compile(r"@Test\b")
 _FUNC = re.compile(r"\bfunc\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
 
@@ -119,10 +128,10 @@ def _cite(f: pathlib.Path, base: pathlib.Path) -> str:
     """
     for anchor in (ROOT, base):
         try:
-            return str(f.relative_to(anchor))
+            return f.relative_to(anchor).as_posix()
         except ValueError:
             continue
-    return str(f)
+    return f.as_posix()
 
 
 def _strip_comments(text: str) -> str:
@@ -279,7 +288,7 @@ def read_log(path: pathlib.Path) -> str:
     # Explicit UTF-8: the log carries swift-testing's result glyphs, and a
     # locale-dependent read would raise on them. Nothing from the log is ever
     # printed back, so this file's own output stays ASCII.
-    return path.read_text(encoding="utf-8", errors="replace")
+    return _ANSI.sub("", path.read_text(encoding="utf-8", errors="replace"))
 
 
 def reported(log: str) -> collections.Counter:
@@ -444,7 +453,7 @@ final class I: XCTestCase {
 def _write(tmp: pathlib.Path, name: str, text: str) -> pathlib.Path:
     p = tmp / name
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    p.write_text(text, encoding="utf-8", newline="\n")
     return p
 
 
@@ -649,6 +658,22 @@ def self_test() -> int:
         arm("a test-shaped func in a file importing XCTest is an XCTest case",
             [n for _, _, n in declared_xctest(tmp)] == ["testReal"])
 
+        # 12i. COLOURED OUTPUT MUST READ THE SAME AS PLAIN. Every byte of the
+        #      clean log wrapped in SGR codes, including inside the glyph, the
+        #      name and the verdict.
+        coloured = "".join(
+            "\x1b[32m" + c + "\x1b[0m" if c not in "\n" else c for c in _LOG_OK)
+        arm("the ANSI fixture must actually carry escape codes", "\x1b[" in coloured)
+        #      Driven through read_log(), which is the ONLY stripper and the path
+        #      production takes. An arm that stripped inside check() instead
+        #      would have left read_log's strip unkillable -- measured: that
+        #      mutant survived, and the honest fix was to delete the second
+        #      strip rather than keep a guard no arm could reach.
+        lit = tmp / "coloured.log"
+        lit.write_text(coloured, encoding="utf-8", newline="\n")
+        arm("a colourised log must read exactly as the plain one",
+            check(read_log(lit), decl, []) == check(_LOG_OK, decl, []) == [])
+
         # 13. AN EMPTY TREE REFUSES. A census over no files returns a
         #     well-formed zero, which is a number indistinguishable from a
         #     measurement (`a-count-has-no-failure-mode`).
@@ -672,7 +697,7 @@ def self_test() -> int:
     except Refusal as e:
         failures.append(f"the live tree refused: {e}")
     except FileNotFoundError:
-        failures.append(f"the live tree {TESTS} is not there")
+        failures.append(f"the live tree {TESTS.as_posix()} is not there")
 
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
@@ -707,7 +732,11 @@ def main() -> int:
     try:
         decl = declared_tests(TESTS)
         xc = declared_xctest(TESTS)
-        bad = check(read_log(path), decl, xc)
+        # ONE read, ONE strip, and everything below judges the same bytes. Two
+        # reads of the same file is two chances to disagree, which is the shape
+        # the wasm-canvas step above records removing.
+        text = read_log(path)
+        bad = check(text, decl, xc)
     except Refusal as e:
         print(f"REFUSED: {e}")
         return 2
@@ -718,11 +747,11 @@ def main() -> int:
             print(f"  - {b}")
         return 1
 
-    total, suites = run_summary(read_log(path))
+    total, suites = run_summary(text)
     print(f"check_swift_suite_ran: OK ({len(decl)} @Test cases declared by the "
           f"sources, {total} reported by the run across {suites} suites, every "
           f"name matched by multiplicity; XCTest {len(xc)} declared / "
-          f"{xctest_total(read_log(path))} executed). "
+          f"{xctest_total(text)} executed). "
           "A test DELETED from the source moves both sides together and reads "
           "as agreement: this is not a claim that the suite is as large as it was.")
     return 0
