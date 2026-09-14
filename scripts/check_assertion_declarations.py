@@ -64,17 +64,48 @@ assignment (the idiom this harness uses deliberately, and says so at line 191),
 function PARAMETERS are excluded BY NAME because their call sites carry the
 literals this gate already reads, and anything else refuses.
 
+⛔ (d) AN ARM-SELECTED FAMILY MUST DECLARE ITS UNSELECTED ARMS.           RED
+Added 2026-09-14. Clauses (a)-(c) join on the SCENE and are sound there. A name
+built from `$v = if (..) { 'A' } elseif (..) { 'B' } else { 'C' }` has a SECOND
+axis under them: exactly ONE arm exists per run, so the other N-1 arms' keys are
+emitted NOWHERE -- not PASS, not FAIL, not NOT RUN, which is what (a) exists to
+forbid, one axis in.
+  ⇒ AND (a)/(b) COULD NOT SEE IT, BY CONSTRUCTION. The union `keys_of` takes is
+    applied to the emitting side AND the declaring side, so `covers()` compared a
+    set against itself and passed whichever arm ran. MEASURED on this subject
+    before (d) existed: 24 of 53 clause keys absent from EVERY run, gate `OK`.
+    `keys_of`'s comment still calls that union "safe in both directions" -- TRUE
+    of (b)'s axis, and it is the sentence that stopped anyone asking about this
+    one. The comment is kept, with this clause as its qualifier.
+  ⇒ THE EVIDENCE (d) ACCEPTS is a COLUMN-0 `foreach` over an array literal of
+    the arms whose body calls `Add-NotRun` -- unconditional w.r.t. every scene
+    chain, because those are column-0 too. Derived from the assignment the file
+    already writes; there is no hand-maintained list.
+  ⇒ (d) RULES ONLY ON PREFIX VARIABLES -- ones ever used with a suffix, as
+    `"$v.1 ..."`. A WHOLE-NAME variable (`Add-NotRun $preName`) picks one clause
+    among clauses the chain reports independently; nothing vanishes, and the
+    remedy (d) prescribes is unavailable there. Those are EXCLUDED BY NAME and
+    the exclusion list is PRINTED on both verdicts. Ruled in STATUS-flask.md 65.
+
 WHAT IT DOES NOT COVER -- AND THERE IS NOTHING MISSING FROM THIS LIST
 ---------------------------------------------------------------------
 ⛔ Read this as a boundary, not as an omission. Each line is a decision.
 
-  * NON-SCENE axes. `O3.C2` is guarded by `if ($paintOnUi)` and `O4.C1`'s
-    declarations by `if ($Hand)`; both vanish on a run that did not ask for
-    that control. Same defect CLASS, different axis, and the axis is what this
-    gate joins on. Widening to every conditional in the file would make the
-    default path undefinable -- there is no "the scene did not match" for
-    `if ($Hand)`, only a decision about whether an unrequested control should
-    declare. That decision is not made here.
+  * NON-SCENE axes, MINUS THE ONE CLAUSE (d) TOOK. ⛔ THIS BULLET SAID "NON-SCENE
+    axes" FLATLY UNTIL 2026-09-14 AND THAT IS NO LONGER TRUE: clause (d) now
+    covers the ARM axis for PREFIX variables, and a block headed "there is
+    nothing missing from this list" is the one place a stale boundary is read as
+    a current one. Re-cut in the same commit as the clause, which is the only
+    moment anyone looks.
+    STILL UNCOVERED, and each line is a decision rather than an omission:
+      - `O3.C2` guarded by `if ($paintOnUi)`, and `O4.C1`'s declarations by
+        `if ($Hand)`. Both vanish on a run that did not ask for that control.
+        Widening to every conditional would make the default path undefinable --
+        there is no "the scene did not match" for `if ($Hand)`, only a decision
+        about whether an unrequested control should declare. NOT MADE HERE.
+      - WHOLE-NAME variables, excluded by clause (d) itself and PRINTED. See
+        `name_vars()` for why (d)'s remedy does not fit them.
+      - `verify_window.ps1` entirely, as below.
   * INDENTED scene guards, and `verify_window.ps1` entirely. Its four scene
     guards emit no clauses today (measured); its `Add-NotRun` sites sit under
     `if ($Hand)`, which is the axis above.
