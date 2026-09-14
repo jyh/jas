@@ -383,7 +383,17 @@ def main() -> int:
     try:
         rows = commit_messages(args.range)
     except subprocess.CalledProcessError as e:
-        print(f"FAIL: could not read history for '{args.range}': {e}")
+        # NAME THE REPOSITORY, because the commonest cause of this is a range
+        # that belongs to a DIFFERENT one. Since this gate reads ROOT rather
+        # than the caller's cwd, running it from inside another checkout and
+        # handing it that checkout's shas lands exactly here -- and without the
+        # path the message reads as "git is broken" rather than "you pointed me
+        # at the wrong tree." Measured: it cost one CI red to diagnose.
+        print(f"FAIL: could not read history for '{args.range}' in "
+              f"{ROOT.as_posix()} -- that is the repository this gate reads, "
+              f"whatever directory it was run from. If the range belongs to a "
+              f"different checkout, run THAT checkout's copy of this gate.\n"
+              f"      {e}")
         return 1
 
     # FAIL CLOSED: nothing scanned is not the same as nothing wrong.
