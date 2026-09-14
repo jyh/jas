@@ -102,6 +102,23 @@ git config user.name "Test"
 git config commit.gpgsign false
 git config core.autocrlf false
 cp "$GATE" scripts/check_commit_trailers.py
+# ⛔ THE ADJUDICATING PHASES RUN THE LAB'S COPY, NOT THE REPO'S, AND THAT IS NOT
+# A TIDY-UP. As of 2026-09-14 the gate resolves its repository from its OWN
+# location (`ROOT = __file__/../..`) and passes `cwd=ROOT` to every git call, so
+# it reads THAT tree whatever directory it is run from -- which is the whole
+# point of the repair, and is what makes a hand-run from elsewhere stop printing
+# a confident green about the wrong repository.
+#
+# Running "$GATE" (the repo's copy) with cwd=LAB therefore hands the jas
+# repository a range built from the LAB's shas, which do not exist there:
+# `git log` exits 128 and the gate reds. PHASE 2 read that as "gate still reds
+# with the hook installed" -- a true statement about the wrong object, and a red
+# that says nothing about the hook it is testing.
+#
+# The copy above already exists for the HOOK to find (PHASE 7 hides it to prove
+# fail-closed), and ITS root is the lab. So the lab's copy is the one that can
+# adjudicate the lab. The repo's copy stays addressable as $GATE for the cp.
+LABGATE="$LAB/scripts/check_commit_trailers.py"
 echo seed > seed.txt; git add -A 2>/dev/null; git commit -q -m "seed" 2>/dev/null
 BASE=$(git rev-parse HEAD)
 
@@ -147,7 +164,7 @@ committed() {
 # ---- PHASE 1 (RED): without the hook, the trailer survives and the gate reds
 if ! committed a "$MSG_DIRTY"; then
   fail "PHASE 1: no commit was created even without a hook -- lab is broken"
-elif "$PYEXE" "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
+elif "$PYEXE" "$LABGATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
   fail "PHASE 1: gate PASSED on an unscrubbed commit -- this test proves nothing"
 else
   ok "PHASE 1 (RED): no hook -> trailer survives, gate reds"
@@ -164,7 +181,7 @@ chmod +x .git/hooks/commit-msg
 if ! committed a "$MSG_DIRTY"; then
   fail "PHASE 2: the hook ABORTED the commit -- it must scrub, not refuse"
 else
-  if "$PYEXE" "$GATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
+  if "$PYEXE" "$LABGATE" --range "$BASE..HEAD" >/dev/null 2>&1; then
     ok "PHASE 2 (GREEN): hook present -> gate passes on the same input"
   else
     fail "PHASE 2: gate still reds with the hook installed"
