@@ -741,6 +741,34 @@ $wantProvenance = if ($synthAsked -and -not $Hand) { 'SYNTHETIC' } else { 'REAL'
 $o4Prefix = if ($HandEmpty) { 'O4.C1' } elseif ($wantProvenance -eq 'SYNTHETIC') { 'O4.C2' } else { 'O4' }
 $o4Arm = if ($HandEmpty) { ' [empty-canvas control]' } elseif ($wantProvenance -eq 'SYNTHETIC') { ' [SB_SYNTH_DRAG seam control]' } else { '' }
 
+# THE UNSELECTED ARMS DECLARE, AND UNTIL 2026-09-14 THEY DID NOT.
+# $o4Prefix renames the WHOLE O4 family, so exactly one of O4 / O4.C1 / O4.C2
+# exists in any run and the other two were emitted NOWHERE -- not PASS, not
+# FAIL, not NOT RUN. That is the condition the three-verdict law exists to
+# forbid, one axis below the scene: 12 suffixes hang off this prefix, so 24 of
+# the 36 family keys were absent from every single run.
+#
+# THE COST, measured: O4's REAL arm sat dark for three days while SB_SYNTH_DRAG
+# passed under the name O4.C2, and nothing escalated -- because there was no
+# NOT RUN to escalate. A reader comparing two sittings could not tell a family
+# that vanished from one that never existed, which is the whole reason NOT RUN
+# was invented in this file.
+#
+# WHY THIS LOOP AND NOT A PER-BRANCH DECLARATION: it is at COLUMN 0, so it is
+# reached on every run whatever the scene, and it is the only place that knows
+# all three arms at once. Where-Object drops the arm this run actually selected,
+# so a clause is never both asserted and declared NOT RUN. Declaring the bare
+# prefix is enough: `O4.C1` covers `O4.C1.1` .. `O4.C1.8` the same way
+# `Add-NotRun 'O1 (all clauses)'` stands for the O1 family.
+#
+# Gated by check_assertion_declarations.py clause (d), which was RED on this
+# file before this loop existed. Ruled in STATUS-flask.md section 65 (jas) from
+# desk row LZ -- flask's ask 1, "should some NOT RUNs be REGRESSIONS?". The
+# answer was that O4 was never a NOT RUN at all.
+foreach ($otherArm in @('O4', 'O4.C1', 'O4.C2') | Where-Object { $_ -ne $o4Prefix }) {
+    Add-NotRun "$otherArm gesture" "this run's O4 arm is '$o4Prefix'$o4Arm, so the '$otherArm' family is not in this run's population: HandEmpty=$HandEmpty, provenance=$wantProvenance, synthAsked=$synthAsked, Hand=$Hand. This is a scoped-out arm and NOT a measurement that failed to happen -- but it is now SAID, which it was not before"
+}
+
 if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     Add-NotRun "$o4Prefix gesture" "this run is scene '$Scene'; only 'pointer' and 'retained' carry a gesture"
 } elseif ($null -eq $gestureRow) {
