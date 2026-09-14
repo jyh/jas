@@ -55,10 +55,14 @@ WHAT THIS DELIBERATELY DOES NOT DO
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
+import os
 import re
 import pathlib
 import subprocess
 import sys
+import tempfile
 
 # The forbidden shapes. Assembled from parts so that this file's own source can
 # be grepped for the literal without matching, and so a commit message
@@ -86,7 +90,7 @@ def commit_messages(rev_range: str) -> list[tuple[str, str]]:
     # argv bytes: a NUL in argv raises ValueError before git is ever reached.
     sep = "@@JASCOMMIT@@"
     out = subprocess.run(
-        ["git", "log", f"--format=%H%x1f%B{sep}", rev_range],
+        ["git", "log", f"--format=%H%x1f%B{sep}", rev_range], cwd=ROOT,
         capture_output=True, text=True, encoding="utf-8", check=True,
     ).stdout
     rows = []
@@ -119,19 +123,30 @@ def tracked_files() -> list[tuple[str, str]]:
     verified by the self-test, which would otherwise pass vacuously by
     excluding the only interesting file.
     """
-    out = subprocess.run(["git", "ls-files", "-z"],
+    out = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT,
                          capture_output=True, text=True, encoding="utf-8",
                          check=True)
     rows: list[tuple[str, str]] = []
+    missing: list[str] = []
     for rel in out.stdout.split("\0"):
         if not rel:
             continue
         path = ROOT / rel
         try:
             text = path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
-            continue  # binary, or a submodule/symlink pointing nowhere
+        except (UnicodeDecodeError, IsADirectoryError):
+            continue  # binary, or a submodule directory
+        except FileNotFoundError:
+            if path.is_symlink():
+                continue  # a symlink pointing nowhere is tracked but unreadable
+            missing.append(rel)  # a tracked file absent under ROOT: list and tree disagree
+            continue
         rows.append((rel, text))
+    if missing:
+        print(f"FAIL: {len(missing)} tracked file(s) listed by git but absent under "
+              f"{ROOT}: {missing[:3]}{' ...' if len(missing) > 3 else ''}. The file list "
+              "and the tree being scanned are not the same repository.")
+        raise SystemExit(1)
     return rows
 
 
@@ -151,6 +166,7 @@ def scan(rows: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
 def self_test() -> int:
     """Prove the gate FAILS on an empty scan and on a planted violation, in
     that order, before trusting any green it reports."""
+    global ROOT  # arm 6 rebinds it over a scratch repo and restores it
     failures = []
 
     # 1. THE EMPTY SET, FIRST. A scan with nothing in it must not read as clean.
@@ -192,13 +208,138 @@ def self_test() -> int:
     if scan(meta):
         failures.append("a message describing the rule must not trip it")
 
+    # 5. THE SCAN MUST NOT DEPEND ON THE CALLER'S CWD. Hand-run from another
+    #    repository, `git ls-files` and `git log` used to answer about THAT
+    #    repo. Measured here on 2026-09-14 before the repair, in a throwaway
+    #    repo holding one file and one commit: `tracked_files()` returned
+    #    **0 rows** (the foreign name does not exist under ROOT, so the read
+    #    raised FileNotFoundError and was swallowed as "binary"), and
+    #    `commit_messages("HEAD")` returned the FOREIGN commit -- 1 row where
+    #    ROOT has 3615. A vacuous scan and a scan of the wrong repository, both
+    #    silent. The empty-scan rule catches the first only when the caller
+    #    happens to route it through `_is_empty_scan_fatal`; nothing at all
+    #    caught the second. Ported from salt's copy, which fixed all three call
+    #    sites and armed one of them; both readers are armed here because both
+    #    were measured to move.
+    #    ⛔ THE FOREIGN REPO HOLDS A NAME ROOT ALSO HAS, AND THAT CHOICE IS THE
+    #    ARM. A foreign file ROOT lacks is caught one frame earlier by arm 6's
+    #    refusal, so the cwd assertion below would never be reached and would be
+    #    a guard no mutant can kill (`two-guards-one-predicate`). Sharing the
+    #    name puts the refusal out of the way and leaves the count -- 1 file
+    #    from the foreign list against ROOT's whole tree -- as the only thing
+    #    that can fire. Driven: with `cwd=ROOT` removed from `git ls-files`,
+    #    this is the assertion that reds.
+    here = os.getcwd()
+    shared = "README.md"
+    if not (ROOT / shared).is_file():
+        failures.append(f"the cwd arm's fixture needs a file ROOT has; {shared} is not one")
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        pathlib.Path(tmp, shared).write_text("a foreign README\n", encoding="utf-8", newline="\n")
+        subprocess.run(["git", "add", shared], cwd=tmp, check=True)
+        subprocess.run(["git", "-c", "user.email=self@test", "-c", "user.name=self",
+                        "commit", "-q", "-m", "a foreign commit"], cwd=tmp, check=True)
+        try:
+            os.chdir(tmp)
+            from_foreign = tracked_files()
+            msgs_foreign = commit_messages("HEAD")
+        finally:
+            os.chdir(here)
+    from_root = tracked_files()
+    msgs_root = commit_messages("HEAD")
+    if len(from_root) < 2:
+        failures.append("the cwd arm is vacuous: ROOT itself lists fewer than two "
+                        f"tracked files ({len(from_root)})")
+    if len(from_foreign) != len(from_root):
+        failures.append("tracked_files() must not depend on cwd: "
+                        f"{len(from_foreign)} from a foreign repo vs {len(from_root)} from ROOT")
+    if len(msgs_root) < 2:
+        failures.append("the cwd arm is vacuous: ROOT itself has fewer than two commits "
+                        f"({len(msgs_root)})")
+    if len(msgs_foreign) != len(msgs_root):
+        failures.append("commit_messages() must not depend on cwd: "
+                        f"{len(msgs_foreign)} from a foreign repo vs {len(msgs_root)} from ROOT")
+
+    #    ...and the third git call is armed too, because a repair with no arm
+    #    is what this port exists to correct. `--is-shallow-repository` answers
+    #    `true` exactly when `.git/shallow` exists, so a scratch repo with that
+    #    file planted is a foreign SHALLOW repo: run from inside it, is_shallow()
+    #    must still answer about ROOT, which is not shallow.
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        pathlib.Path(tmp, ".git", "shallow").write_text("", encoding="utf-8", newline="\n")
+        try:
+            os.chdir(tmp)
+            shallow_says = is_shallow()
+        finally:
+            os.chdir(here)
+    if shallow_says:
+        failures.append("is_shallow() must not depend on cwd: it reported the FOREIGN "
+                        "repo's shallowness while ROOT is not shallow")
+
+    # 6. A TRACKED FILE THE TREE DOES NOT HAVE MUST REFUSE, NOT BE SKIPPED.
+    #    This is the arm salt's copy does not carry, and it is the half that
+    #    makes arm 5's defect SILENT: every "absent under ROOT" name used to
+    #    leave by the same door as a binary. Driven against a scratch repo by
+    #    rebinding ROOT, because the only honest subject is a real disagreement
+    #    between `git ls-files` and the tree.
+    saved_root = ROOT
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+            victim = pathlib.Path(tmp, "TRACKED-THEN-DELETED.txt")
+            victim.write_text("present at add time\n", encoding="utf-8", newline="\n")
+            subprocess.run(["git", "add", victim.name], cwd=tmp, check=True)
+            ROOT = pathlib.Path(tmp)
+            # ⛔ THE CONTROL CATCHES SystemExit, AND THAT IS NOT DEFENSIVENESS.
+            # An uncaught refusal here leaves the function before the
+            # `SELF-TEST FAIL` lines are printed, so EVERY earlier arm's
+            # finding is swallowed and only this arm's refusal text survives.
+            # Measured: with `cwd=ROOT` dropped from `git ls-files`, arm 5
+            # recorded its failure correctly and the run printed nothing but
+            # arm 6's refusal -- a correct red carrying the wrong diagnosis.
+            try:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    present = tracked_files()
+                if len(present) != 1:
+                    failures.append("the missing-file arm's own control failed: a present "
+                                    f"tracked file must be read, got {len(present)} rows")
+            except SystemExit:
+                failures.append("the missing-file arm's own control failed: a present "
+                                "tracked file must be read, not refused")
+            victim.unlink()
+            # The refusal PRINTS, and its print belongs to the arm, not to the
+            # self-test's own report: a bare `FAIL:` line inside a run that
+            # ends `OK` is exactly the reading a hurried eye gets wrong.
+            said = io.StringIO()
+            try:
+                with contextlib.redirect_stdout(said):
+                    tracked_files()
+                failures.append("a tracked file absent under ROOT must REFUSE, not be "
+                                "skipped as if it were binary")
+            except SystemExit as e:
+                if e.code != 1:
+                    failures.append(f"the missing-file refusal must exit 1, got {e.code}")
+                if victim.name not in said.getvalue():
+                    failures.append("the missing-file refusal must NAME the absent file; "
+                                    f"it said {said.getvalue()!r}")
+    finally:
+        ROOT = saved_root
+    #    ...and the restore is ASSERTED, not merely written. Arm 6 is the last
+    #    arm, so a `finally` that stopped running would leave ROOT pointing at
+    #    a deleted temporary directory with every arm still green -- and this
+    #    module is IMPORTED by the pre-push hook, which then scans nothing.
+    if ROOT != saved_root:
+        failures.append("arm 6 left ROOT at "
+                        f"{ROOT.as_posix()}, not {saved_root.as_posix()}")
+
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
     if failures:
         return 1
     print("check_commit_trailers SELF-TEST: OK "
           "(empty scan fatal proven FIRST, both forbidden shapes caught, "
-          f"{PRESERVED} preserved, self-describing message safe)")
+          f"{PRESERVED} preserved, self-describing message safe, cwd-independent, absent tracked file refused)")
     return 0
 
 
@@ -216,7 +357,7 @@ def is_shallow() -> bool:
     therefore sets `fetch-depth: 0`, and this refuses to run without it rather
     than trusting the workflow to stay correct.
     """
-    out = subprocess.run(["git", "rev-parse", "--is-shallow-repository"],
+    out = subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=ROOT,
                          capture_output=True, text=True, encoding="utf-8")
     return out.stdout.strip() == "true"
 
