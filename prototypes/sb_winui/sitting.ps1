@@ -260,8 +260,8 @@ if (-not $NoRebuild -and -not $DryRun) {
 # The document
 # ===========================================================================
 $svgAbs = $null
-# ⛔ `o6` IS IN THIS LIST THOUGH NO SCENE IS CALLED THAT. It is a PSEUDO-SCENE
-# whose two runs both drive `retained`, and this list is keyed by what the CALLER
+# ⛔ `o6` AND `q6` ARE IN THIS LIST THOUGH NO SCENE IS CALLED EITHER. Each is a PSEUDO-SCENE
+# (`o6`'s two runs drive `retained`, `q6`'s one drives `app`), and this list is keyed by what the CALLER
 # asked for, not by what the runs resolve to -- so leaving it out would have
 # resolved no document, set SB_SVG empty, and made both O6 runs refuse by name on
 # a knob the operator did set. The guard below catches the next one of these

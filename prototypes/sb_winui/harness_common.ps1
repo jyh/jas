@@ -1566,3 +1566,348 @@ function Format-SbArmSummary {
     "  --- {0} arm '{1}'{2}: {3} key(s) verdicted under it ({4} PASS, {5} FAIL, {6} NOT RUN); unselected arms declared: {7} ---" -f `
         $family, $Prefix, $Arm, $n, $nPass, $nFail, $nNotRun, $unselectedText
 }
+
+# ===========================================================================
+# Q6 -- THE ALIGN PANE, READ OFF ITS OWN ROWS (W2-6)
+# ===========================================================================
+#
+# ⛔ PURE FUNCTIONS OVER ROWS, FOR THE REASON P1-P4's READERS ARE HERE: the
+# assertions that use them live in `verify_assertions.ps1`, which cannot be
+# dot-sourced without a desktop, so anything decided THERE has no arm.
+# `harness_selftest.ps1` drives every branch below with no app and no session.
+#
+# ⛔ AND THE SHELL DECIDES NONE OF IT. `Canvas.ApplyPanelSynth` replays the
+# clicks and writes what the core answered; whether the canvas SHOULD have
+# moved is asked only here.
+
+# The one scene that opens the pane. `MainWindow` compares SB_SCENE to it
+# ignoring case, as `-eq` does.
+$SbPaneScene = 'app'
+
+# ⛔ THE SHELL'S PREDICATE, NOT A NEARBY ONE. `MainWindow.StartFirstLayout`
+# reads a whitespace-only `SB_PANEL_SYNTH` as unset; a harness that read it as
+# set would wait out a replay that was never queued.
+function Test-SbSynthAsked([string]$Synth) {
+    return -not [string]::IsNullOrWhiteSpace($Synth)
+}
+
+# ⭐ THE WAITS A RUN OWES AFTER ITS COMPLETION ROW. `app` writes its pid row
+# from the scene and the pane opens on the NEXT queued command, so the rows
+# snapshotted at `Done` hold no pane at all.
+#
+# ⛔ EACH WAIT ENDS ON ITS SUBJECT'S OWN TERMINAL ROW, OR ON A REFUSAL THAT MEANS
+# THAT ROW IS NEVER COMING -- AND ON NOTHING ELSE. A click's delta-mismatch red
+# says nothing about whether the pane was drawn, and ending there would read a
+# drawn pane as absent. The replay is waited for first: it finishes later.
+function Get-SbPaneWaits([string]$Scene, [string]$Synth) {
+    $waits = @()
+    if ($Scene -ne $SbPaneScene) { return $waits }
+    if (Test-SbSynthAsked $Synth) {
+        $waits += @{
+            Label    = 'the PANEL SYNTH DONE row'
+            Patterns = @((Get-SbRowPattern 'PANEL SYNTH DONE' ' panel='), 'RUSTFAIL PANEL SYNTH ')
+            Timeout  = 60
+        }
+    }
+    $waits += @{
+        Label    = 'the PANEL DRAWN row'
+        Patterns = @((Get-SbRowPattern 'PANEL DRAWN' ' panel='), 'RUSTFAIL PANEL REFUSED ', 'RUSTFAIL PANEL DRAW ')
+        Timeout  = 60
+    }
+    return $waits
+}
+
+# ⛔ SEVEN CLAUSES, AND EVERY PATH NAMES ALL SEVEN EXACTLY ONCE. P4.3 vanished
+# on one branch while its siblings said NOT RUN; the self-test runs the census.
+$SbQ6Names = [ordered]@{
+    Open    = 'Q6.1 the pane opened on a plan the core resolved'
+    Cross   = 'Q6.2 the open cost two boundary crossings'
+    Drawn   = 'Q6.3 the pane drew every leaf of that plan'
+    Moves   = 'Q6.4 a click on a selection moves the canvas and the document'
+    Undo    = 'Q6.5 one undo restores the canvas and the document'
+    Refused = 'Q6.C1 a click with nothing selected is refused Disabled and moves nothing'
+    Aligned = 'Q6.C2 the same click again is Unchanged and moves nothing'
+}
+
+# The replay's hash labels, in the order `Canvas.ApplyPanelSynth` takes them;
+# `doc-sha=` carries one digest per label, in the same order.
+$SbSynthHashLabels = @('SYNTH-H0', 'SYNTH-H0B', 'SYNTH-HS', 'SYNTH-H1', 'SYNTH-H1B', 'SYNTH-H2')
+
+function New-SbVerdict([string]$Name, [string]$Verdict, [string]$Detail, $Row = '') {
+    return [pscustomobject]@{ Name = $Name; Verdict = $Verdict; Detail = $Detail; Row = [string]$Row }
+}
+
+function Test-SbRowFailed([string]$Row) {
+    return ($Row -match "`tRUSTFAIL ")
+}
+
+# One `SYNTH-*` hash row as a reading. A row the shell marked RUSTFAIL, or a
+# hash that is not 64 hex digits, is UNREADABLE -- never a value to compare.
+function Get-SbSynthHash($Rows, [string]$Label) {
+    $row = Select-SbRow $Rows (Get-SbRowPattern $Label ' surface=')
+    if ($null -eq $row) { return @{ Ok = $false; Row = ''; Reason = "no $Label row" } }
+    $hash = Get-SbField $row 'hash'
+    if ((Test-SbRowFailed $row) -or ($hash -cnotmatch '^[0-9a-f]{64}$')) {
+        return @{ Ok = $false; Row = $row; Reason = "$Label was not taken (hash=$hash)" }
+    }
+    return @{ Ok = $true; Hash = $hash; Surface = (Get-SbField $row 'surface'); Row = $row; Reason = '' }
+}
+
+# 'SAME' | 'DIFFERENT' | 'UNREADABLE' | 'SURFACES'. ⛔ Two hashes taken at two
+# surfaces are never compared: they differ for a reason that is not the click.
+function Compare-SbSynthHash($A, $B) {
+    if (-not $A.Ok -or -not $B.Ok) { return 'UNREADABLE' }
+    if ($A.Surface -cne $B.Surface) { return 'SURFACES' }
+    if ($A.Hash -ceq $B.Hash) { return 'SAME' }
+    return 'DIFFERENT'
+}
+
+# The replay's click row for one step, in any of the four shapes the shell
+# writes it. ⛔ KEYED ON `via=`: a person's click (`via=hand`) is never read
+# as a replay step, and a replay step is never read as another step.
+function Select-SbSynthClick($Rows, [string]$Via) {
+    return Select-SbRow $Rows ('PANEL CLICK(?: REFUSED| SILENT| REPLY UNREADABLE)? panel=\S+ widget=\S+ via=' +
+                               [regex]::Escape($Via) + '(?:\s|$)')
+}
+
+# The error channel's refusal class (`Disabled`, `Unchanged`, ...), or ''.
+function Get-SbChannelClass([string]$Row) {
+    $c = Get-SbField $Row 'channel'
+    if ($null -eq $c) { return '' }
+    $m = [regex]::Match($c, '"panel_event":"([^"]+)"')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return ''
+}
+
+# Q6.1-Q6.3 and the four replay clauses, as `New-SbVerdict` objects in the
+# order of `$SbQ6Names`. `$Scene` is the run's scene; `$Synth` the knob.
+function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth) {
+    $n = $SbQ6Names
+    $out = New-Object System.Collections.Generic.List[object]
+    $asked = Test-SbSynthAsked $Synth
+
+    if ($Scene -ne $SbPaneScene) {
+        $why = "this run is scene '$Scene'; only '$SbPaneScene' opens the pane"
+        $out.Add((New-SbVerdict $n.Open 'NOT RUN' $why))
+        $out.Add((New-SbVerdict $n.Cross 'NOT RUN' $why))
+        $out.Add((New-SbVerdict $n.Drawn 'NOT RUN' $why))
+        if ($asked) {
+            # ⛔ A FAILURE, NEVER A QUIET NOT RUN: the run asked for a replay
+            # that its scene cannot give.
+            $ref = Select-SbRow $Rows 'RUSTFAIL PANEL SYNTH '
+            $tail = if ($null -eq $ref) { 'and the shell wrote NO refusal saying so' } else { 'and the shell refused it by name' }
+            $out.Add((New-SbVerdict $n.Moves 'FAIL' "SB_PANEL_SYNTH='$Synth' was set on scene '$Scene', which opens no pane, so no replay could run -- $tail" $ref))
+        } else {
+            $out.Add((New-SbVerdict $n.Moves 'NOT RUN' $why))
+        }
+        foreach ($k in @('Undo', 'Refused', 'Aligned')) { $out.Add((New-SbVerdict $n[$k] 'NOT RUN' $why)) }
+        return $out.ToArray()
+    }
+
+    # ---- the open ----------------------------------------------------------
+    $open = Select-SbRow $Rows (Get-SbRowPattern 'PANEL OPEN' ' panel=')
+    $leaves = $null
+    if ($null -eq $open) {
+        $planRefusal = Select-SbRow $Rows 'RUSTFAIL PANEL REFUSED '
+        $why = "no PANEL OPEN row: scene '$Scene' opened no pane"
+        if ($null -ne $planRefusal) { $why = 'the core refused the plan, so no pane opened' }
+        $out.Add((New-SbVerdict $n.Open 'FAIL' $why $planRefusal))
+        $out.Add((New-SbVerdict $n.Cross 'NOT RUN' 'no PANEL OPEN row to read crossings= from'))
+        $out.Add((New-SbVerdict $n.Drawn 'NOT RUN' 'no PANEL OPEN row: there is no plan to compare the pane with'))
+    } else {
+        $lv = Get-SbField $open 'leaves'
+        $uj = Get-SbField $open 'unjoined'
+        if ($lv -match '^[0-9]+$') { $leaves = [int]$lv }
+        $reading = "leaves=$lv unjoined=$uj withheld=$(Get-SbField $open 'withheld') icons=$(Get-SbField $open 'icons') " +
+                   "icons-missing=$(Get-SbField $open 'icons-missing') height=$(Get-SbField $open 'height') plan=$(Get-SbField $open 'plan')"
+        if ($null -ne $leaves -and $leaves -gt 0 -and $uj -eq '0') {
+            $out.Add((New-SbVerdict $n.Open 'PASS' "$reading. A plan with leaves and every bound row placed; withheld templates are reported here, not judged" $open))
+        } else {
+            $out.Add((New-SbVerdict $n.Open 'FAIL' "$reading. A healthy open carries at least one leaf and unjoined=0 (a bound row the layout never placed is a core defect)" $open))
+        }
+
+        $cx = Get-SbField $open 'crossings'
+        if ($cx -eq '2') {
+            $out.Add((New-SbVerdict $n.Cross 'PASS' "crossings=2 bytes=$(Get-SbField $open 'bytes'): the plan call and its release, with the counter dump's own release subtracted" $open))
+        } elseif ($cx -match '^-?[0-9]+$') {
+            $out.Add((New-SbVerdict $n.Cross 'FAIL' "crossings=$cx; a healthy open is the plan call and its release, 2" $open))
+        } else {
+            $out.Add((New-SbVerdict $n.Cross 'NOT RUN' "crossings=$($cx): the shell could not read the core's counters, so there is no count to compare" $open))
+        }
+
+        $built = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL BUILT' ' panel='))
+        $drawn = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL DRAWN' ' panel='))
+        $drawFail = Select-SbRow $Rows 'RUSTFAIL PANEL DRAW '
+        $icons = Select-SbRow $Rows (Get-SbRowPattern 'PANEL ICONS' ' panel=')
+        $iconText = 'no PANEL ICONS row'
+        if ($null -ne $icons) {
+            $iconText = "icons svg=$(Get-SbField $icons 'svg') text=$(Get-SbField $icons 'text') failed=$(Get-SbField $icons 'failed') icon=$(Get-SbField $icons 'icon')"
+        }
+        if ($null -eq $leaves) {
+            $out.Add((New-SbVerdict $n.Drawn 'NOT RUN' "the open row carries no readable leaves= ($reading), so there is no count to draw against" $open))
+        } elseif ($null -ne $drawFail) {
+            $out.Add((New-SbVerdict $n.Drawn 'FAIL' 'drawing the pane threw' $drawFail))
+        } elseif ($built.Count -eq 0) {
+            $out.Add((New-SbVerdict $n.Drawn 'FAIL' 'no PANEL BUILT row: the pane never built its controls' $open))
+        } elseif ($drawn.Count -eq 0) {
+            $out.Add((New-SbVerdict $n.Drawn 'FAIL' "no PANEL DRAWN row: the pane never drew a plan ($($built.Count) build(s))" $built[-1]))
+        } else {
+            $badBuilt = @($built | Where-Object { (Get-SbField $_ 'leaves') -ne [string]$leaves })
+            $badDrawn = @($drawn | Where-Object { (Get-SbField $_ 'controls') -ne [string]$leaves })
+            if ($badBuilt.Count -eq 0 -and $badDrawn.Count -eq 0) {
+                $out.Add((New-SbVerdict $n.Drawn 'PASS' "all $($built.Count) build(s) placed $leaves leaves and all $($drawn.Count) draw(s) show $leaves controls, the plan's own count; $iconText" $drawn[-1]))
+            } else {
+                $first = if ($badBuilt.Count -gt 0) { $badBuilt[0] } else { $badDrawn[0] }
+                $out.Add((New-SbVerdict $n.Drawn 'FAIL' "the plan has $leaves leaves; $($badBuilt.Count) of $($built.Count) build(s) and $($badDrawn.Count) of $($drawn.Count) draw(s) disagree -- a control missing from the pane is the silent failure this clause exists for" $first))
+            }
+        }
+    }
+
+    Add-SbSynthVerdicts $out $Rows $Synth $asked
+    return $out.ToArray()
+}
+
+# The four replay clauses, appended to `$Out` (always four).
+function Add-SbSynthVerdicts($Out, $Rows, [string]$Synth, [bool]$Asked) {
+    $n = $SbQ6Names
+    $four = @('Moves', 'Undo', 'Refused', 'Aligned')
+    if (-not $Asked) {
+        foreach ($k in $four) {
+            $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'SB_PANEL_SYNTH is unset: this run replayed no click (sitting.ps1 -Scenes q6 does)'))
+        }
+        return
+    }
+    $refused = Select-SbRow $Rows 'RUSTFAIL PANEL SYNTH '
+    if ($null -ne $refused) {
+        $Out.Add((New-SbVerdict $n.Moves 'FAIL' "the shell did not run the replay it was asked for (SB_PANEL_SYNTH='$Synth')" $refused))
+        foreach ($k in @('Undo', 'Refused', 'Aligned')) {
+            $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'the replay did not run; Q6.4 quotes why' $refused))
+        }
+        return
+    }
+    $done = Select-SbRow $Rows (Get-SbRowPattern 'PANEL SYNTH DONE' ' panel=')
+    if ($null -eq $done) {
+        foreach ($k in $four) {
+            $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' "no PANEL SYNTH DONE row: the replay of '$Synth' did not finish inside the wait"))
+        }
+        return
+    }
+
+    # ---- the readings ------------------------------------------------------
+    $h = @{}
+    foreach ($l in $SbSynthHashLabels) { $h[$l] = Get-SbSynthHash $Rows $l }
+    $docs = Get-SbSlashField $done 'doc-sha' $SbSynthHashLabels.Count
+    $docOk = $docs.Ok -and (@($docs.Parts | Where-Object { $_ -cnotmatch '^[0-9a-f]{16}$' }).Count -eq 0)
+    $d = @{}
+    if ($docOk) { for ($i = 0; $i -lt $SbSynthHashLabels.Count; $i++) { $d[$SbSynthHashLabels[$i]] = $docs.Parts[$i] } }
+    $docWhy = ''
+    if (-not $docs.Ok) {
+        $docWhy = $docs.Reason
+    } elseif (-not $docOk) {
+        $docWhy = "doc-sha=$($docs.Raw) holds a digest the core could not give"
+    }
+    $docCmp = {
+        param([string]$A, [string]$B)
+        if (-not $docOk) { return 'UNREADABLE' }
+        if ($d[$A] -ceq $d[$B]) { return 'SAME' }
+        return 'DIFFERENT'
+    }
+    # ⛔ THE ANTI-VACUITY READINGS. An "unchanged" clause is an EQUALITY, and an
+    # instrument that returns a constant satisfies every equality there is, so
+    # each instrument must have read two distinct values somewhere in this run.
+    $hashes = @($SbSynthHashLabels | Where-Object { $h[$_].Ok } | ForEach-Object { $h[$_].Hash })
+    $pixelLive = (@($hashes | Sort-Object -Unique).Count -ge 2)
+    $docLive = $docOk -and (@($docs.Parts | Sort-Object -Unique).Count -ge 2)
+    $liveWhy = ''
+    if (-not $pixelLive) {
+        $liveWhy = "the canvas hash read $(@($hashes | Sort-Object -Unique).Count) distinct value(s) across the replay's $($hashes.Count) readable hash(es), so an equality proves nothing"
+    } elseif (-not $docOk) {
+        $liveWhy = $docWhy
+    } elseif (-not $docLive) {
+        $liveWhy = 'the document digest read one value across the whole replay, so an equality proves nothing'
+    }
+
+    $selected = Get-SbField $done 'selected'
+    $pxMove = Compare-SbSynthHash $h['SYNTH-HS'] $h['SYNTH-H1']
+    $docMove = & $docCmp 'SYNTH-HS' 'SYNTH-H1'
+
+    # ---- Q6.4: the click moves ---------------------------------------------
+    $c1 = Select-SbSynthClick $Rows 'synth:click'
+    if ($selected -notmatch '^[0-9]+$' -or [int]$selected -lt 2) {
+        $Out.Add((New-SbVerdict $n.Moves 'NOT RUN' "select_all selected $selected; Align needs two, so the click had nothing to do" $done))
+    } elseif ($null -eq $c1) {
+        $Out.Add((New-SbVerdict $n.Moves 'FAIL' 'the replay finished and no row carries via=synth:click' $done))
+    } elseif ((Test-SbRowFailed $c1) -or (Get-SbField $c1 'outcome') -ne 'changed' -or
+              (Get-SbField $c1 'doc-changed') -ne 'true' -or (Get-SbField $c1 'delta-mismatch') -ne '0') {
+        $Out.Add((New-SbVerdict $n.Moves 'FAIL' "the core did not report a clean change: outcome=$(Get-SbField $c1 'outcome') doc-changed=$(Get-SbField $c1 'doc-changed') delta-mismatch=$(Get-SbField $c1 'delta-mismatch') channel=$(Get-SbField $c1 'channel')" $c1))
+    } elseif ($pxMove -eq 'UNREADABLE' -or $pxMove -eq 'SURFACES') {
+        $Out.Add((New-SbVerdict $n.Moves 'NOT RUN' "the canvas hashes either side of the click are not comparable ($pxMove): $($h['SYNTH-HS'].Reason) $($h['SYNTH-H1'].Reason) surface=$($h['SYNTH-HS'].Surface)/$($h['SYNTH-H1'].Surface)" $h['SYNTH-H1'].Row))
+    } elseif ($docMove -eq 'UNREADABLE') {
+        $Out.Add((New-SbVerdict $n.Moves 'NOT RUN' "the document digests are unreadable: $docWhy" $done))
+    } elseif ($pxMove -ne 'DIFFERENT' -or $docMove -ne 'DIFFERENT') {
+        $Out.Add((New-SbVerdict $n.Moves 'FAIL' "the core reported a change, and across the click the canvas is $pxMove and the document is $docMove" $c1))
+    } else {
+        $Out.Add((New-SbVerdict $n.Moves 'PASS' "selected=$selected; the core reported a change with 0 delta mismatches, and the canvas hash AND the document digest both moved across the click" $c1))
+    }
+
+    # ---- Q6.5: one undo restores -------------------------------------------
+    $undo = Select-SbRow $Rows (Get-SbRowPattern 'SYNTH-UNDO' ' ')
+    if ($pxMove -ne 'DIFFERENT' -or $docMove -ne 'DIFFERENT') {
+        $Out.Add((New-SbVerdict $n.Undo 'NOT RUN' "the click moved nothing measurable (canvas $pxMove, document $docMove), so there is nothing for an undo to restore" $done))
+    } elseif ($null -eq $undo) {
+        $Out.Add((New-SbVerdict $n.Undo 'FAIL' 'the replay finished and wrote no SYNTH-UNDO row' $done))
+    } elseif ((Test-SbRowFailed $undo) -or (Get-SbField $undo 'applied') -ne '1') {
+        $Out.Add((New-SbVerdict $n.Undo 'FAIL' "the undo was refused or applied nothing (applied=$(Get-SbField $undo 'applied'))" $undo))
+    } else {
+        $pxBack = Compare-SbSynthHash $h['SYNTH-HS'] $h['SYNTH-H2']
+        $docBack = & $docCmp 'SYNTH-HS' 'SYNTH-H2'
+        if ($pxBack -eq 'UNREADABLE' -or $pxBack -eq 'SURFACES') {
+            $Out.Add((New-SbVerdict $n.Undo 'NOT RUN' "the canvas hashes before the click and after the undo are not comparable ($pxBack): $($h['SYNTH-H2'].Reason)" $h['SYNTH-H2'].Row))
+        } elseif ($pxBack -eq 'SAME' -and $docBack -eq 'SAME') {
+            $Out.Add((New-SbVerdict $n.Undo 'PASS' "applied=1 can-undo=$(Get-SbField $undo 'can-undo'); the canvas hash and the document digest after ONE undo equal the pre-click ones, byte for byte" $undo))
+        } else {
+            $Out.Add((New-SbVerdict $n.Undo 'FAIL' "after one undo the canvas is $pxBack and the document is $docBack against the pre-click reading" $h['SYNTH-H2'].Row))
+        }
+    }
+
+    # ---- Q6.C1: nothing selected -------------------------------------------
+    $c0 = Select-SbSynthClick $Rows 'synth:no-selection'
+    if ($null -eq $c0) {
+        $Out.Add((New-SbVerdict $n.Refused 'FAIL' 'the replay finished and no row carries via=synth:no-selection' $done))
+    } elseif ($c0 -notmatch 'PANEL CLICK REFUSED ' -or (Test-SbRowFailed $c0) -or (Get-SbChannelClass $c0) -cne 'Disabled') {
+        $Out.Add((New-SbVerdict $n.Refused 'FAIL' "with nothing selected the core must refuse the click as Disabled; it answered channel=$(Get-SbField $c0 'channel') outcome=$(Get-SbField $c0 'outcome')" $c0))
+    } elseif ($liveWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Refused 'NOT RUN' $liveWhy $c0))
+    } else {
+        $px = Compare-SbSynthHash $h['SYNTH-H0'] $h['SYNTH-H0B']
+        $dc = & $docCmp 'SYNTH-H0' 'SYNTH-H0B'
+        if ($px -eq 'UNREADABLE' -or $px -eq 'SURFACES') {
+            $Out.Add((New-SbVerdict $n.Refused 'NOT RUN' "the hashes either side of the refused click are not comparable ($px): $($h['SYNTH-H0'].Reason) $($h['SYNTH-H0B'].Reason)" $c0))
+        } elseif ($px -eq 'SAME' -and $dc -eq 'SAME') {
+            $Out.Add((New-SbVerdict $n.Refused 'PASS' 'refused Disabled, and the canvas hash and the document digest are unchanged across it' $c0))
+        } else {
+            $Out.Add((New-SbVerdict $n.Refused 'FAIL' "refused Disabled, and yet the canvas is $px and the document is $dc across it" $c0))
+        }
+    }
+
+    # ---- Q6.C2: the same click again ---------------------------------------
+    $c2 = Select-SbSynthClick $Rows 'synth:again'
+    if ($null -eq $c2) {
+        $Out.Add((New-SbVerdict $n.Aligned 'FAIL' 'the replay finished and no row carries via=synth:again' $done))
+    } elseif ((Test-SbRowFailed $c2) -or (Get-SbField $c2 'outcome') -ne 'unchanged' -or
+              (Get-SbField $c2 'doc-changed') -ne 'false' -or (Get-SbChannelClass $c2) -cne 'Unchanged') {
+        $Out.Add((New-SbVerdict $n.Aligned 'FAIL' "an aligned selection must answer Unchanged and move nothing; it answered outcome=$(Get-SbField $c2 'outcome') doc-changed=$(Get-SbField $c2 'doc-changed') channel=$(Get-SbField $c2 'channel')" $c2))
+    } elseif ($liveWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Aligned 'NOT RUN' $liveWhy $c2))
+    } else {
+        $px = Compare-SbSynthHash $h['SYNTH-H1'] $h['SYNTH-H1B']
+        $dc = & $docCmp 'SYNTH-H1' 'SYNTH-H1B'
+        if ($px -eq 'UNREADABLE' -or $px -eq 'SURFACES') {
+            $Out.Add((New-SbVerdict $n.Aligned 'NOT RUN' "the hashes either side of the second click are not comparable ($px): $($h['SYNTH-H1'].Reason) $($h['SYNTH-H1B'].Reason)" $c2))
+        } elseif ($px -eq 'SAME' -and $dc -eq 'SAME') {
+            $Out.Add((New-SbVerdict $n.Aligned 'PASS' 'Unchanged, and the canvas hash and the document digest are unchanged across it' $c2))
+        } else {
+            $Out.Add((New-SbVerdict $n.Aligned 'FAIL' "Unchanged, and yet the canvas is $px and the document is $dc across it" $c2))
+        }
+    }
+}

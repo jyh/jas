@@ -1001,19 +1001,19 @@ Test-Case 'Q6 WAIT: app with the replay waits for the replay first, then the pan
 Test-Case 'Q6 WAIT: a whitespace knob is unset, exactly as the shell reads it' `
     { @(Get-SbPaneWaits 'app' '   ').Count } '1'
 Test-Case 'Q6 WAIT: the pane wait ends on the drawn row' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' '')[0] (New-SbQ6Fixture $q6NoSynth) } 'ENDS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) (New-SbQ6Fixture $q6NoSynth) } 'ENDS'
 # ⛔ AND IT DOES NOT END ON A CLICK'S RED: a delta mismatch says nothing about
 # whether the pane has been drawn, and ending there reads a drawn pane as absent.
 Test-Case 'Q6 WAIT: the pane wait does not end on a click row''s RUSTFAIL' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' '')[0] @(New-SbQ6Row "RUSTFAIL PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids") } 'WAITS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) @(New-SbQ6Row "RUSTFAIL PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids") } 'WAITS'
 Test-Case 'Q6 WAIT: the pane wait ends on the plan''s own refusal' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' '')[0] @(New-SbQ6Row "RUSTFAIL PANEL REFUSED panel=align_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids") } 'ENDS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) @(New-SbQ6Row "RUSTFAIL PANEL REFUSED panel=align_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids") } 'ENDS'
 Test-Case 'Q6 WAIT: the replay wait ends on the replay''s own refusal' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' 'x')[0] @(New-SbQ6Row "RUSTFAIL PANEL SYNTH REFUSED panel=align_panel_content widget=x -- no leaf of the open plan has that id; it has 1: align_left_button $q6Tids") } 'ENDS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'x')[0]) @(New-SbQ6Row "RUSTFAIL PANEL SYNTH REFUSED panel=align_panel_content widget=x -- no leaf of the open plan has that id; it has 1: align_left_button $q6Tids") } 'ENDS'
 Test-Case 'Q6 WAIT: the replay wait does not end on everything before its last row' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' 'align_left_button')[0] (New-SbQ6Fixture @{ done = $null }) } 'WAITS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) (New-SbQ6Fixture @{ done = $null }) } 'WAITS'
 Test-Case 'Q6 WAIT: CONTROL -- the replay wait ends on the healthy run' `
-    { Test-SbQ6WaitEnds @(Get-SbPaneWaits 'app' 'align_left_button')[0] (New-SbQ6Fixture) } 'ENDS'
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) (New-SbQ6Fixture) } 'ENDS'
 
 # ---- the verdicts -----------------------------------------------------------
 Test-Case 'Q6: the healthy run passes every clause' { Get-SbQ6Summary } $q6AllPass

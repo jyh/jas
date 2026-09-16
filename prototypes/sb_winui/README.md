@@ -652,6 +652,7 @@ gone rather than reporting a clean teardown.
 powershell -File prototypes\sb_winui\sitting.ps1 -DryRun        # resolve every knob, launch nothing
 powershell -File prototypes\sb_winui\sitting.ps1                # benchmark x2, document, retained, stall, pointer x3, goldens
 powershell -File prototypes\sb_winui\sitting.ps1 -Scenes o6    # the two O6 runs: the squeeze, then the probe
+powershell -File prototypes\sb_winui\sitting.ps1 -Scenes q6    # one app run with the Align pane's synthetic replay (Q6)
 ```
 
 `-DryRun` (alias `-WhatIf`) exists on both entry points: it prints the resolved
