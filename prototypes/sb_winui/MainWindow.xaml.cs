@@ -224,7 +224,9 @@ public sealed partial class MainWindow : Window
         // measurement scene leaves it collapsed and keeps the surface it
         // always had. The plan itself is read after the scene has run -- see
         // `StartFirstLayout` -- because the engine does not exist yet.
-        if (string.Equals(Environment.GetEnvironmentVariable("SB_SCENE")?.Trim(), "app",
+        // The SAME comparison the scene dispatch makes (no trim), so the pane
+        // is shown exactly when the `app` scene is the one that will run.
+        if (string.Equals(Environment.GetEnvironmentVariable("SB_SCENE"), "app",
                           StringComparison.OrdinalIgnoreCase))
         {
             _paneWanted = true;
