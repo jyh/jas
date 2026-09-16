@@ -440,7 +440,8 @@ def _drive(root: pathlib.Path, argv: list[str]) -> tuple[object, str]:
 def _scratch_repo(where: pathlib.Path, files: dict[str, bytes], message: str) -> None:
     """A one-commit repository at `where`. `--no-verify`, because a planted
     trailer is the point and a caller's global hook would refuse it."""
-    subprocess.run(["git", "init", "-q", str(where)], check=True)
+    where.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=where, check=True)
     for name, data in files.items():
         (where / name).write_bytes(data)
     subprocess.run(["git", "add", "--", *files], cwd=where, check=True)
