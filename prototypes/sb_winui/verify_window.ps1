@@ -1022,6 +1022,21 @@ if ($assertions.Count -gt 0) {
     }
     # THE TOTALS MUST CLOSE, same law as the sitting's summary.
     Write-Output ("  --- {0} PASS, {1} FAIL, {2} NOT RUN, of {3} ---" -f $nPass, $nFail, $nNotRun, $assertions.Count)
+    # ⛔ ONE LINE, DIRECTLY UNDER THE LINE ABOVE, WHICH IS UNTOUCHED. Anything
+    # parsing `--- N PASS, ...` keeps parsing it; this adds the ARM beneath it.
+    # STATUS-flask section 72 (jas), desk row `FB`. The line above counts the RUN;
+    # this one counts the O4 ARM, so a reader sees `11 key(s)` for a whole arm and
+    # `10` for one missing -- section 66 had to infer that.
+    # ⚠️ IT IS GUARDED, AND THE GUARD IS NOT DECORATION: `$o4Prefix` is set by
+    # `verify_assertions.ps1` at column 0, so it exists on every path THAT FILE
+    # reaches its end on. If it is ever absent the arm is UNKNOWN, and an unknown
+    # arm is said out loud rather than passed over in silence -- the same law as
+    # NOT RUN, one level up.
+    if ([string]::IsNullOrEmpty($o4Prefix)) {
+        Write-Output "  --- O4 arm UNKNOWN: verify_assertions.ps1 did not set `$o4Prefix, so this run's arm cannot be named or counted ---"
+    } else {
+        Write-Output (Format-SbArmSummary $assertions $o4Prefix $o4Arm $o4AllArms)
+    }
     if (($nPass + $nFail + $nNotRun) -ne $assertions.Count) {
         Write-Output "  |X| THE ASSERTION TOTALS DO NOT CLOSE -- this verdict is void."
         exit 3
