@@ -433,6 +433,24 @@ def msg_file_mode(path: str) -> int:
 
 
 def ref_mode(name: str) -> int:
+    """One ref name: a branch a push creates, or a PR's head. Subject-class,
+    because a merge commit's subject quotes it and the forge writes that
+    subject where no local hook runs (two of the eleven accepted subjects are
+    exactly that). The finding never echoes the name."""
+    tag = f"[pr-gate {self_id()}]"
+    if not (name or "").strip():
+        print(f"FAIL {tag}: --ref was given an EMPTY name. A check that read "
+              "nothing is not a clean check.")
+        return 1
+    bad = subject_scan([("the ref name", name, "subject")])
+    if bad:
+        print(f"REFUSED {tag}: the ref name carries a refused word (withheld).\n")
+        print("\n".join(subject_finding_lines(bad)))
+        print("\nA merge commit's subject will quote this name, and the forge writes")
+        print("that subject where no hook runs. Push the work under a neutral name.")
+        return 1
+    print(f"check_pr_descriptions --ref {tag}: OK -- the ref name carries no "
+          f"refused word. {_vocab_id()}.")
     return 0
 
 
@@ -820,6 +838,8 @@ def _subject_arms() -> list[str]:
             ("--ref <clean>", ["--ref", "refs/heads/main"], 0),
             ("--ref <family word>", ["--ref", "tidy-" + k0], 1),
             ("--ref <empty>", ["--ref", ""], 1),
+            ("--range <empty>", ["--range", ""], 1),
+            ("--msg-file <empty>", ["--msg-file", ""], 1),
         ]
         for label, argv, want_rc in clis:
             r = subprocess.run([sys.executable, me] + argv, cwd=d, capture_output=True,
@@ -943,23 +963,30 @@ def main() -> int:
                            "baseline, both directions (needs full depth)")
     mode.add_argument("--msg-file", metavar="PATH",
                       help="one commit-message file (the commit-msg hook)")
+    mode.add_argument("--ref", metavar="NAME",
+                      help="one ref name (the pushed branch, or a PR's head): a merge "
+                           "subject will quote it")
     ap.add_argument("--baseline", metavar="PATH",
                     help="accepted-debt baseline for --range/--history "
                          "(default: subject_debt_baseline.tsv beside this file)")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""),
                     help="owner/name for --open; defaults to GITHUB_REPOSITORY")
     args = ap.parse_args()
-    if args.baseline and not (args.range or args.history):
+    if args.baseline is not None and not (args.range is not None or args.history):
         # A flag accepted and ignored runs a different check than the one asked.
         ap.error("--baseline applies only to --range and --history")
     if args.self_test:
         return self_test()
-    if args.range:
+    # `is not None`: an EMPTY value was asked for, and must reach the mode that
+    # refuses it rather than fall through to the help text.
+    if args.range is not None:
         return range_mode(args.range, None, args.baseline)
     if args.history:
         return history_mode(None, args.baseline)
-    if args.msg_file:
+    if args.msg_file is not None:
         return msg_file_mode(args.msg_file)
+    if args.ref is not None:
+        return ref_mode(args.ref)
     if args.open:
         if not args.repo:
             print("FAIL: no repo — pass --repo owner/name or set GITHUB_REPOSITORY")
