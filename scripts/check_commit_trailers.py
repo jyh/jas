@@ -55,7 +55,9 @@ WHAT THIS DELIBERATELY DOES NOT DO
 from __future__ import annotations
 
 import argparse
+import ast
 import contextlib
+import hashlib
 import io
 import os
 import re
@@ -82,6 +84,23 @@ FORBIDDEN = [
 PRESERVED = "Co-Authored-By"
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+
+def self_id() -> str:
+    """This file's own content hash, printed in every verdict (desk ML).
+
+    Its two siblings, `check_private_paths.py` and `check_pr_descriptions.py`,
+    already name the bytes that printed each verdict; this gate printed a bare
+    `FAIL:`, so a CI log could not say WHICH copy of it ran. It is the same
+    form as salt's copy -- sha256 of the file, first 16 hex -- so one reader
+    can compare the ids across repos. Arm 7 recomputes it rather than trusting
+    it.
+    """
+    try:
+        return hashlib.sha256(
+            pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "unreadable"
 
 
 def commit_messages(rev_range: str) -> list[tuple[str, str]]:
@@ -143,7 +162,7 @@ def tracked_files() -> list[tuple[str, str]]:
             continue
         rows.append((rel, text))
     if missing:
-        print(f"FAIL: {len(missing)} tracked file(s) listed by git but absent under "
+        print(f"FAIL [gate {self_id()}]: {len(missing)} tracked file(s) listed by git but absent under "
               f"{ROOT}: {missing[:3]}{' ...' if len(missing) > 3 else ''}. The file list "
               "and the tree being scanned are not the same repository.")
         raise SystemExit(1)
@@ -333,14 +352,178 @@ def self_test() -> int:
         failures.append("arm 6 left ROOT at "
                         f"{ROOT.as_posix()}, not {saved_root.as_posix()}")
 
+    # 7. EVERY VERDICT NAMES THE BYTES THAT PRINTED IT (desk ML). This gate's
+    #    two siblings print `[gate <16-hex>]` on every verdict and this one
+    #    printed a bare `FAIL:`, so a CI log could not say WHICH copy ran --
+    #    and it runs from two workflows and is imported by a hook. Two passes,
+    #    deliberately: the CENSUS finds every verdict string in this file's
+    #    AST, so a verdict added later is counted without anyone listing it;
+    #    the DRIVE runs main() into each one against a scratch repo and reads
+    #    what it PRINTED, because a hit on the source is a label, not the
+    #    instrument. See `_verdict_arm`.
+    arm7, sites = _verdict_arm()
+    failures.extend(arm7)
+
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
+    print(_self_test_verdict(failures, sites))
+    return 1 if failures else 0
+
+
+def _self_test_verdict(failures: list[str], sites: int) -> str:
+    """The self-test's summary line, as a function so arm 7 can drive it."""
     if failures:
-        return 1
-    print("check_commit_trailers SELF-TEST: OK "
-          "(empty scan fatal proven FIRST, both forbidden shapes caught, "
-          f"{PRESERVED} preserved, self-describing message safe, cwd-independent, absent tracked file refused)")
-    return 0
+        return (f"check_commit_trailers SELF-TEST [gate {self_id()}]: FAIL "
+                f"({len(failures)} finding(s) above)")
+    return (f"check_commit_trailers SELF-TEST [gate {self_id()}]: OK "
+            "(empty scan fatal proven FIRST, both forbidden shapes caught, "
+            f"{PRESERVED} preserved, self-describing message safe, cwd-independent, "
+            f"absent tracked file refused, all {sites} verdict sites driven and naming the gate)")
+
+
+# A verdict string opens with one of these. Kept in one place because the
+# census and this comment would otherwise disagree the first time a verdict
+# is reworded.
+_VERDICT_LEAD = re.compile(r"(FAIL|check_commit_trailers)\b")
+
+
+def _verdict_sites() -> dict[tuple[int, int], re.Pattern]:
+    """{(line, col): pattern} for every verdict string in this file.
+
+    A verdict string is a str literal or f-string whose LEADING literal opens
+    with `_VERDICT_LEAD`. Each becomes a pattern for the text it prints:
+    literal parts escaped, each interpolation `[^\\n]*?`. The literal parts
+    inside an f-string are nodes of their own, so they are skipped as
+    stand-alone strings -- otherwise every f-string verdict would be counted
+    twice, once whole and once as its opening fragment.
+    """
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    inner = {id(v) for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)
+             for v in node.values}
+    sites = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.JoinedStr):
+            parts = node.values
+        elif (isinstance(node, ast.Constant) and isinstance(node.value, str)
+              and id(node) not in inner):
+            parts = [node]
+        else:
+            continue
+        lead = parts[0] if parts else None
+        if not (isinstance(lead, ast.Constant) and _VERDICT_LEAD.match(lead.value)):
+            continue
+        sites[(node.lineno, node.col_offset)] = re.compile("".join(
+            re.escape(p.value) if isinstance(p, ast.Constant) else r"[^\n]*?"
+            for p in parts))
+    return sites
+
+
+def _drive(root: pathlib.Path, argv: list[str]) -> tuple[object, str]:
+    """main(argv) run against `root`: (exit code, everything it printed).
+
+    A refusal that raises SystemExit is caught and reported as its code, since
+    the missing-file verdict leaves that way."""
+    global ROOT
+    saved, ROOT = ROOT, root
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(said):
+            try:
+                rc = main(argv)
+            except SystemExit as e:
+                rc = e.code
+    finally:
+        ROOT = saved
+    return rc, said.getvalue()
+
+
+def _scratch_repo(where: pathlib.Path, files: dict[str, bytes], message: str) -> None:
+    """A one-commit repository at `where`. `--no-verify`, because a planted
+    trailer is the point and a caller's global hook would refuse it."""
+    where.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=where, check=True)
+    for name, data in files.items():
+        (where / name).write_bytes(data)
+    subprocess.run(["git", "add", "--", *files], cwd=where, check=True)
+    subprocess.run(["git", "-c", "user.email=self@test", "-c", "user.name=self",
+                    "-c", "commit.gpgsign=false", "commit", "-q", "--no-verify",
+                    "-m", message], cwd=where, check=True)
+
+
+def _verdict_arm() -> tuple[list[str], int]:
+    """Arm 7: (findings, how many verdict sites the census found).
+
+    Every driven output must match EXACTLY ONE census site, name the gate on
+    its first line, and say OK or FAIL as the outcome was a pass or a failure;
+    every site must be reached; and a table row must exit with its code.
+    (The word check was added after a mutant that made the failing summary
+    say OK survived: matching a site says WHICH verdict printed, not whether
+    it told the truth.)
+    ⛔ THE EXPECTED ID IS COMPUTED HERE, NEVER READ FROM self_id(): a
+    self_id() returning any constant 16-hex would otherwise agree with itself
+    on every line and the arm could not fail.
+    """
+    global ROOT
+    want = hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+    sites = _verdict_sites()
+    findings: list[str] = []
+    reached: set[tuple[int, int]] = set()
+
+    def check(name: str, said: str, passed: bool) -> None:
+        first = said.splitlines()[0] if said else ""
+        hits = [s for s, pat in sites.items() if pat.match(said)]
+        if len(hits) != 1:
+            findings.append(f"arm 7, {name}: the output matched {len(hits)} verdict "
+                            f"site(s), want exactly 1: {first!r}")
+        reached.update(hits)
+        if f"[gate {want}]" not in first:
+            findings.append(f"arm 7, {name}: the verdict does not name the gate "
+                            f"{want}: {first!r}")
+        says = (re.search(r"\]: OK\b", first) is not None,
+                re.search(r"\bFAIL\b", first) is not None)
+        if says != (passed, not passed):
+            findings.append(f"arm 7, {name}: the verdict word disagrees with a "
+                            f"{'pass' if passed else 'failure'}: {first!r}")
+
+    # Planted shapes ASSEMBLED, as arm 2 does: this file scans file contents.
+    url = "https://" + _HOST.replace(chr(92), "") + "/code/session_abc"
+    text = {"a.txt": b"clean text\n"}
+    table = [  # (name, files, message, argv, exit code, what to do after the commit)
+        ("a shallow clone", text, "clean", [], 1, "shallow"),
+        ("an unreadable range", text, "clean", ["--range", "no-such-ref"], 1, None),
+        ("an empty range", text, "clean", ["--range", "HEAD..HEAD"], 1, None),
+        ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: x\n", [], 1, None),
+        ("no readable text file", {"a.bin": b"\xff\xfe\x00"}, "clean", [], 1, None),
+        ("a URL in a file", {"a.txt": url.encode("ascii")}, "clean", [], 1, None),
+        ("a tracked file missing", text, "clean", [], 1, "unlink"),
+        ("a clean repository", text, "clean", [], 0, None),
+    ]
+    saved_root = ROOT
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, (name, files, message, argv, code, after) in enumerate(table):
+            repo = pathlib.Path(tmp, str(i))
+            _scratch_repo(repo, files, message)
+            if after == "shallow":
+                (repo / ".git" / "shallow").write_text("", encoding="utf-8", newline="\n")
+            elif after == "unlink":
+                (repo / "a.txt").unlink()
+            rc, said = _drive(repo, argv)
+            if rc != code:
+                findings.append(f"arm 7, {name}: exit {rc}, want {code}")
+            check(name, said, code == 0)
+    # The self-test's own summary cannot be driven by running the self-test
+    # inside itself, so its formatter is driven directly, both ways. What that
+    # leaves unwitnessed, and is recorded rather than faked: self_test() not
+    # PRINTING the line at all. Its exit code still carries the verdict.
+    check("the self-test passing", _self_test_verdict([], len(sites)), True)
+    check("the self-test failing", _self_test_verdict(["x"], len(sites)), False)
+
+    for line, col in sorted(set(sites) - reached):
+        findings.append(f"arm 7: the verdict string at line {line} was never driven; "
+                        "give it a row in the table")
+    if ROOT != saved_root:
+        findings.append(f"arm 7 left ROOT at {ROOT.as_posix()}")
+    return findings, len(sites)
 
 
 def _is_empty_scan_fatal(rows) -> bool:
@@ -362,18 +545,18 @@ def is_shallow() -> bool:
     return out.stdout.strip() == "true"
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--range", default="HEAD",
                     help="git revision range to scan (default: all of HEAD)")
     ap.add_argument("--self-test", action="store_true")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     if args.self_test:
         return self_test()
 
     if is_shallow():
-        print("FAIL: this is a SHALLOW clone, so history is not all here and a "
+        print(f"FAIL [gate {self_id()}]: this is a SHALLOW clone, so history is not all here and a "
               "clean result would be meaningless.\n"
               "      A history gate on a one-commit checkout scans one commit "
               "and reports success.\n"
@@ -389,7 +572,7 @@ def main() -> int:
         # handing it that checkout's shas lands exactly here -- and without the
         # path the message reads as "git is broken" rather than "you pointed me
         # at the wrong tree." Measured: it cost one CI red to diagnose.
-        print(f"FAIL: could not read history for '{args.range}' in "
+        print(f"FAIL [gate {self_id()}]: could not read history for '{args.range}' in "
               f"{ROOT.as_posix()} -- that is the repository this gate reads, "
               f"whatever directory it was run from. If the range belongs to a "
               f"different checkout, run THAT checkout's copy of this gate.\n"
@@ -398,13 +581,13 @@ def main() -> int:
 
     # FAIL CLOSED: nothing scanned is not the same as nothing wrong.
     if _is_empty_scan_fatal(rows):
-        print(f"FAIL: scanned ZERO commits for '{args.range}'. An empty scan is "
+        print(f"FAIL [gate {self_id()}]: scanned ZERO commits for '{args.range}'. An empty scan is "
               f"not a clean scan — this gate refuses to report success on it.")
         return 1
 
     bad = scan(rows)
     if bad:
-        print(f"FAIL: {len(bad)} commit message(s) carry a forbidden trailer.\n")
+        print(f"FAIL [gate {self_id()}]: {len(bad)} commit message(s) carry a forbidden trailer.\n")
         print("This repository's public history was rewritten on 2026-07-22 to")
         print("remove exactly this. A commit that reaches a published branch")
         print("cannot be edited without breaking every clone, so this must be")
@@ -425,12 +608,12 @@ def main() -> int:
     # test data, and caught it BY EYE.
     files = tracked_files()
     if not files:
-        print("FAIL: scanned ZERO tracked files. An empty scan is a failure, "
+        print(f"FAIL [gate {self_id()}]: scanned ZERO tracked files. An empty scan is a failure, "
               "not a pass — the ls-files call or the decode filter has drifted.")
         return 1
     bad_files = scan(files)
     if bad_files:
-        print(f"FAIL: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
+        print(f"FAIL [gate {self_id()}]: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
         print("Unlike a commit message this is trivially fixable — edit the file")
         print("— but only BEFORE it is pushed. This repository is public.\n")
         for path, what, line in bad_files:
@@ -438,7 +621,7 @@ def main() -> int:
             print(f"      {line[:100]}")
         return 1
 
-    print(f"check_commit_trailers: OK ({len(rows)} commit messages and "
+    print(f"check_commit_trailers [gate {self_id()}]: OK ({len(rows)} commit messages and "
           f"{len(files)} tracked files scanned, 0 forbidden strings; "
           f"{PRESERVED} attribution untouched)")
     return 0
