@@ -83,6 +83,10 @@ FORBIDDEN = [
 # not "tidy" it into the forbidden list.
 PRESERVED = "Co-Authored-By"
 
+# What a finding prints in place of the matched text. A CI log on a public
+# repository is public (desk PX).
+WITHHELD = "matched text withheld: this log is public"
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -169,16 +173,22 @@ def tracked_files() -> list[tuple[str, str]]:
     return rows
 
 
-def scan(rows: list[tuple[str, str]]) -> list[tuple[str, str, str]]:
-    """(sha, what, line) for every violation found."""
+def scan(rows: list[tuple[str, str]]) -> list[tuple[str, str, int]]:
+    """(where, what, lineno) for every violation found: the 1-based line on
+    which the match begins.
+
+    NEVER the matched text (desk PX). A CI log on a public repository is
+    public, and a caller that never receives the text cannot republish it.
+    Three fields, because the callers unpack three."""
     bad = []
     for sha, body in rows:
         for pattern, what in FORBIDDEN:
             m = pattern.search(body)
             if m:
-                line = next((l for l in body.splitlines() if m.group(0)[:40] in l),
-                            m.group(0))
-                bad.append((sha, what, line.strip()))
+                # The trailer pattern's `^\s*` can take the line break before
+                # the key with it; the line is the one the key is on.
+                start = m.start() + len(m.group(0)) - len(m.group(0).lstrip())
+                bad.append((sha, what, body.count("\n", 0, start) + 1))
     return bad
 
 
@@ -378,7 +388,8 @@ def _self_test_verdict(failures: list[str], sites: int) -> str:
     return (f"check_commit_trailers SELF-TEST [gate {self_id()}]: OK "
             "(empty scan fatal proven FIRST, both forbidden shapes caught, "
             f"{PRESERVED} preserved, self-describing message safe, cwd-independent, "
-            f"absent tracked file refused, all {sites} verdict sites driven and naming the gate)")
+            f"absent tracked file refused, all {sites} verdict sites driven and naming the gate, "
+            "findings give their site and line and never their text)")
 
 
 # A verdict string opens with one of these. Kept in one place because the
@@ -443,6 +454,7 @@ def _scratch_repo(where: pathlib.Path, files: dict[str, bytes], message: str) ->
     where.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=where, check=True)
     for name, data in files.items():
+        (where / name).parent.mkdir(parents=True, exist_ok=True)
         (where / name).write_bytes(data)
     subprocess.run(["git", "add", "--", *files], cwd=where, check=True)
     subprocess.run(["git", "-c", "user.email=self@test", "-c", "user.name=self",
@@ -486,15 +498,24 @@ def _verdict_arm() -> tuple[list[str], int]:
                             f"{'pass' if passed else 'failure'}: {first!r}")
 
     # Planted shapes ASSEMBLED, as arm 2 does: this file scans file contents.
-    url = "https://" + _HOST.replace(chr(92), "") + "/code/session_abc"
+    # `secret` is the planted TEXT of each finding. It must never reach the
+    # output: a CI log on this repository is public (desk PX), and the line
+    # above a finding already names its site.
+    secret = "zz_withheld_" + "payload"
+    url = "https://" + _HOST.replace(chr(92), "") + "/code/" + secret
     text = {"a.txt": b"clean text\n"}
     table = [  # (name, files, message, argv, exit code, what to do after the commit)
         ("a shallow clone", text, "clean", [], 1, "shallow"),
         ("an unreadable range", text, "clean", ["--range", "no-such-ref"], 1, None),
         ("an empty range", text, "clean", ["--range", "HEAD..HEAD"], 1, None),
-        ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: x\n", [], 1, None),
+        # The trailer carries a URL, as the harness writes it. The trailer
+        # pattern's own echo is only its key (its `^\s*` swallows the line
+        # break), so it is the URL finding beside it that would print the text.
+        ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: {url}\n", [], 1, None),
         ("no readable text file", {"a.bin": b"\xff\xfe\x00"}, "clean", [], 1, None),
-        ("a URL in a file", {"a.txt": url.encode("ascii")}, "clean", [], 1, None),
+        # Nested and longer than twelve characters, so a print that shortened
+        # the path (to the sha's width, or to its basename) is caught by arm 8.
+        ("a URL in a file", {"sub/planted-path-longer-than-twelve.txt": url.encode("ascii")}, "clean", [], 1, None),
         ("a tracked file missing", text, "clean", [], 1, "unlink"),
         ("a clean repository", text, "clean", [], 0, None),
     ]
@@ -511,6 +532,27 @@ def _verdict_arm() -> tuple[list[str], int]:
             if rc != code:
                 findings.append(f"arm 7, {name}: exit {rc}, want {code}")
             check(name, said, code == 0)
+            # 8. A FINDING GIVES ITS SITE AND LINE AND NEVER ITS TEXT (desk PX).
+            #    The site is the sha or the path, and the text is what matched.
+            if secret in said:
+                findings.append(f"arm 8, {name}: the matched text reached the output")
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                                  text=True, encoding="utf-8", check=True).stdout.strip()
+            where = {"a trailer in a message": (head[:12], 3), "a URL in a file": ("sub/planted-path-longer-than-twelve.txt", 1)}
+            if name in where:
+                site, lineno = where[name]
+                if f"  {site}  " not in said:
+                    findings.append(f"arm 8, {name}: the finding does not name its site {site}")
+                if f"(line {lineno}; {WITHHELD})" not in said:
+                    findings.append(f"arm 8, {name}: the finding does not give line {lineno}")
+    # ...and the scan itself: its third field is a line number, and no field
+    # carries the text (a caller that never receives it cannot print it).
+    rows = scan([("w", f"subject\n\n{_SESSION_KEY}: {url}\n")])
+    if len(rows) != 2 or any(r[2] != 3 for r in rows):
+        findings.append(f"arm 8: scan must return line 3 for both findings, got "
+                     f"{[r[2] if isinstance(r[2], int) else type(r[2]).__name__ for r in rows]}")
+    if any(secret in str(field) for r in rows for field in r):
+        findings.append("arm 8: scan returned the matched text")
     # The self-test's own summary cannot be driven by running the self-test
     # inside itself, so its formatter is driven directly, both ways. What that
     # leaves unwitnessed, and is recorded rather than faked: self_test() not
@@ -592,9 +634,9 @@ def main(argv: list[str] | None = None) -> int:
         print("remove exactly this. A commit that reaches a published branch")
         print("cannot be edited without breaking every clone, so this must be")
         print("fixed BEFORE the merge, by rewriting the offending messages.\n")
-        for sha, what, line in bad:
-            print(f"  {sha[:12]}  {what}")
-            print(f"      {line[:100]}")
+        # The site and the line, never the text (desk PX).
+        for sha, what, lineno in bad:
+            print(f"  {sha[:12]}  {what}  (line {lineno}; {WITHHELD})")
         print(f"\nTo repair an unpushed range:  git rebase -i --exec "
               f"'git commit --amend --no-edit' <base>")
         print("For a pushed feature branch, rewrite and force-push THAT branch "
@@ -616,9 +658,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAIL [gate {self_id()}]: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
         print("Unlike a commit message this is trivially fixable — edit the file")
         print("— but only BEFORE it is pushed. This repository is public.\n")
-        for path, what, line in bad_files:
-            print(f"  {path}  {what}")
-            print(f"      {line[:100]}")
+        for path, what, lineno in bad_files:
+            print(f"  {path}  {what}  (line {lineno}; {WITHHELD})")
         return 1
 
     print(f"check_commit_trailers [gate {self_id()}]: OK ({len(rows)} commit messages and "
