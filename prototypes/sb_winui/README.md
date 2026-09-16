@@ -152,8 +152,9 @@ scene leaves it collapsed and keeps the surface it always had.
 | `PANEL BUILT` | UI thread, per rebuild | controls by kind; `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a button with no id, never enabled) |
 | `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
 | `PANEL DRAWN` | UI thread, per published plan | `seq`, `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, pane and canvas sizes |
-| `PANEL CLICK` | render thread, per click | `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
-| `PANEL CLICK REFUSED` | render thread | the core's refusal class and detail; nothing ran |
+| `PANEL CLICK` | render thread, per click | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH`), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
+| `PANEL CLICK REFUSED` | render thread | `via`, and the core's refusal class and detail; nothing ran |
+| `PANEL SYNTH DONE` | render thread, once, under `SB_PANEL_SYNTH` | `selected` (after the replay's `select_all`) and `doc-sha=h0/h0b/hs/h1/h1b/h2`, the core's document digest at each of the six `SYNTH-*` hash rows |
 
 `RUSTFAIL` is written for a plan refusal, a draw that threw, a click answered
 by an empty reply AND an empty channel (`SILENT`), and a click whose reply rows
@@ -167,8 +168,23 @@ against it rather than applied.
 `chrome` and `containers` entries are counted and not drawn (align has none); a
 `bind.icon` that a tick moves outside the plan's `icons` map shows its text
 face; whether WinUI's SVG reader honours `currentColor` is read, not measured,
-which is why the pane is light and the ink is substituted; the harness row and
-the route are W2-6.
+which is why the pane is light and the ink is substituted.
+
+### Q6's synthetic arm (W2-6)
+
+`SB_PANEL_SYNTH=<widget id>` replays one click sequence on the render thread
+once the pane is open, hashing the canvas between steps: `SYNTH-H0` · a click
+with nothing selected (`via=synth:no-selection`) · `SYNTH-H0B` · the op
+`select_all` · `SYNTH-HS` · a click (`via=synth:click`) · `SYNTH-H1` · the same
+click again (`via=synth:again`) · `SYNTH-H1B` · the op `undo` · `SYNTH-H2` ·
+`PANEL SYNTH DONE`. Clicks go through the method a person's click reaches and
+ops through the method Ctrl+Z's command reaches, and each writes its own row
+(`RUSTOK SYNTH-SELECT-ALL`, `RUSTOK SYNTH-UNDO`). The shell judges none of it:
+the harness reads the rows (`Get-SbPaneVerdicts`, Q6). A widget id the open plan
+does not hold is `RUSTFAIL PANEL SYNTH REFUSED`, naming the ids it does hold;
+the knob on any scene but `app` is refused the same way, never ignored.
+`sitting.ps1 -Scenes q6` is the route. **What it does not drive:** the Ctrl+Z
+key and a real mouse — those are the hands row's.
 
 ## Knobs
 
@@ -200,6 +216,7 @@ different question from either.
 | `SB_HIT` | which element carries the pointer handlers: `panel` (the `SwapChainPanel` itself) or `sibling` (a transparent `Border` in the same grid cell, made visible only on this arm); any other value is REFUSED by name rather than falling back, because a run asked for the sibling that quietly used the panel would report the wrong arm in the one field the branch exists to answer (`MainWindow.xaml.cs:182-201`). The receipt says `hit=PANEL` or `hit=SIBLING`. **DECIDED on kenai 2026-09-03, one box: both arms fired and reported identical coordinates, so the answer is `panel`.** The `sibling` arm is KEPT as a switch because the docs do not settle hit-testability of a `Background`-less `SwapChainPanel`, and one box is one box | `panel` | all | interaction |
 | `SB_MODE` | `direct` lets the core paint the back buffer; anything else uses an offscreen target plus one full-surface GPU copy (`Canvas.cs:484`). **It changes what `Benchmark()` measures and nothing else** (`Canvas.cs:1562`): the offscreen target is created on every attach and every resize whatever the scene (`Canvas.cs:1050`, `:1196`), but `Repaint()` always paints the back buffer directly through `jas_paint_frame`, so a `retained`, `pointer` or `stall` row is a DIRECT-route row however this is set | *(unset: offscreen)* | `benchmark` | benchmark |
 | `SB_PAINT_ON_UI` | `1` marshals the paint AND the present through the `DispatcherQueue`, so `paint-tid == present-tid == ui-tid` on every row. O3's DESIGN-RED control: it exists to make the residency assertion fail by construction, so a green one is known to have been capable of red. Read ONCE into a static (`Canvas.cs:279`) — a run cannot change its answer half way through — and it switches the thread INSIDE the one paint step rather than forking a second paint path, because two paths would drift and the control would then measure the drift | *(unset: paint and present on the render thread)* | all | interaction |
+| `SB_PANEL_SYNTH` | a widget id of the open Align plan (Q6 uses `align_left_button`). Under `app`, after the pane opens, the render thread replays Q6's click sequence on that widget with a canvas hash between steps and writes `PANEL SYNTH DONE` (`Canvas.ApplyPanelSynth`; the steps are in "Q6's synthetic arm" above). An id the plan does not hold is refused BY NAME with the ids it does hold, and the knob set on any other scene is refused rather than ignored (`MainWindow.StartFirstLayout`). Whitespace is unset. The clicks and ops move the menubar's answer, so P4.4 reads NOT RUN on such a run | *(unset: no replay)* | `app` | interaction |
 | `SB_POINTER_WAIT_MS` | how long a scene waits for a REAL gesture before writing `NOT RUN: hand refused`; a timeout is never a synthetic receipt wearing `REAL`. The wait is a deadline, not a sleep — the thread that would sleep is the one that drains the gesture's own events (`ArmHandWait`). **`0` DECLINES the wait, and that is a different answer from unset** (`TryHandWaitMs` reads the raw value, because `ParseMs` cannot tell the two apart): the scene goes straight to its no-gesture path instead of paying a refusal it already knew was coming. On `retained` that path is NOT the end of the scene — the mutation clause is `NOT RUN: no gesture (…)` on its own row, `A-MUT` is hashed anyway carrying `mutation=NONE` because it equals `A` by construction, and the `SB_RESIZE` round trip still writes `H1` and `A'`. A non-numeric value is refused by name | `30000` | `pointer`, `retained` | interaction |
 | `SB_RENDER_STALL_MS` | milliseconds the RENDER thread sleeps inside ONE repaint (`Canvas.cs:2251`, applied at `Canvas.cs:1421-1428`). The sleep is latched to that single repaint — the field is zeroed before it starts — so a stalled scene does not stall every later frame. A resize posted during the sleep appears as exactly one row after it, at the latest size; `Responding` stays `True`, because the thread that sleeps is not the one that pumps. Unset it and `SB_UI_STALL_MS` together and the `stall` scene REFUSES: a stall that stalls for zero measures nothing | *(unset: no render-thread stall)* | `stall` | interaction |
 | `SB_RESIZE` | a comma-separated LIST of window sizes to drive after the scene, e.g. `1000x600,original`; `original` is the `AppWindow` size recorded at first layout, and it is a sentinel because this knob sets a WINDOW size while a hash is of the SURFACE, so a window size fed back returns a smaller surface. Each step is posted when the previous one has LANDED on the render thread, never after a sleep; a malformed token refuses by name rather than falling back to no resize (`MainWindow.xaml.cs:625-656`) | *(unset: no driven resize)* | all | interaction |
