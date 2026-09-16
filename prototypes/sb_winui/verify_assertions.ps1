@@ -765,9 +765,24 @@ $o4Arm = if ($HandEmpty) { ' [empty-canvas control]' } elseif ($wantProvenance -
 # file before this loop existed. Ruled in STATUS-flask.md section 65 (jas) from
 # desk row LZ -- flask's ask 1, "should some NOT RUNs be REGRESSIONS?". The
 # answer was that O4 was never a NOT RUN at all.
+# THE ARM SET IS ACCUMULATED FROM THIS LOOP, NOT COPIED BESIDE IT. The summary
+# line in verify_window.ps1 declares the unselected arms and decides key OWNERSHIP
+# from `$o4AllArms`; a second literal there could drift from this loop, and the
+# drift would surface as a key count wrong in a way no arm could catch.
+# ⛔ AND THE LITERAL STAYS ON THE `foreach` LINE, WHICH IS NOT A STYLE CHOICE.
+# `check_assertion_declarations.py` clause (d) reads the arm set with
+# `_LITERAL_IN_ARRAY` applied to the text of THIS LINE. Lifting it to a named
+# variable above the loop -- which I did first -- resolves to NO literals, the
+# declaration stops being recognised, and the gate goes RED while the behaviour
+# is unchanged. Accumulating in the body keeps one source of truth AND the
+# evidence the gate reads.
+$o4AllArms = @()
 foreach ($otherArm in @('O4', 'O4.C1', 'O4.C2') | Where-Object { $_ -ne $o4Prefix }) {
+    $o4AllArms += $otherArm
     Add-NotRun "$otherArm gesture" "this run's O4 arm is '$o4Prefix'$o4Arm, so the '$otherArm' family is not in this run's population: HandEmpty=$HandEmpty, provenance=$wantProvenance, synthAsked=$synthAsked, Hand=$Hand. This is a scoped-out arm and NOT a measurement that failed to happen -- but it is now SAID, which it was not before"
 }
+# The run's OWN arm completes the set; the loop above sees only the other two.
+$o4AllArms += $o4Prefix
 
 if ($Scene -ne 'pointer' -and $Scene -ne 'retained') {
     Add-NotRun "$o4Prefix gesture" "this run is scene '$Scene'; only 'pointer' and 'retained' carry a gesture"

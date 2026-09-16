@@ -811,6 +811,97 @@ Test-Case 'VERDICT: CONTROL -- the scene''s own SUCCESS row is not a refusal' { 
 Test-Case 'VERDICT: an unknown scene has no refusals, so a Done row still reads DONE' { (Get-SbSceneVerdict @($refusedRow) 'no-such-scene' $aPrimeRow).Verdict } 'DONE'
 
 # ---------------------------------------------------------------------------
+# THE O4 ARM SUMMARY LINE (STATUS-flask section 72, jas) -- `Format-SbArmSummary`
+# ---------------------------------------------------------------------------
+#
+# ⛔ WHY IT IS A PURE FUNCTION AND WHY ITS ARMS LIVE HERE. The line it builds is
+# the one a reader parses to tell "the whole arm ran" from "one key is missing",
+# and it is emitted by `verify_window.ps1`, which cannot run without a Windows
+# desktop. CI runs THIS file on Windows with no app. Same argument as the chooser.
+#
+# ⛔⛔ AND IT DOES NOT COUNT BY THE ANCHORED PREFIX ALONE, WHICH IS WHAT THE
+# COMMISSION ASKED FOR. `^<prefix>(\.| )` is right for `O4.C2` and WRONG for the
+# bare `O4`: the `:768` loop DECLARES `O4.C1 gesture` and `O4.C2 gesture` as
+# NOT RUN in every run, and both of those anchor-match `^O4(\.| )`. A run whose
+# arm is `O4` would have counted its two scoped-OUT siblings as its own keys and
+# reported 13 where the arm is 11 -- the section 66 lesson (`O4.` hides inside
+# `O4.C2.`) firing one level further up than the commission spotted it.
+# ⇒ A KEY BELONGS TO THE **LONGEST DECLARED ARM** THAT ANCHOR-MATCHES IT. That
+# rule subsumes the anchored rule, gives the same answer for `O4.C2`, and is the
+# only one that is correct for all three arms. Arms A7/A7b are that case.
+function New-SbArmFixture([string[]]$Spec) {
+    $l = New-Object System.Collections.Generic.List[object]
+    foreach ($s in $Spec) {
+        $p = $s -split '\|'
+        $l.Add([pscustomobject]@{ Name = $p[0]; Verdict = $p[1]; Detail = ''; Row = '' })
+    }
+    ,$l
+}
+$ARMS3 = @('O4', 'O4.C1', 'O4.C2')
+
+# A1 -- THE COMMISSION'S OWN CASE: `O4.C2.1` and `O4.C21.x` must count ONE.
+$fxAnchor = Get-SbFixture { New-SbArmFixture @('O4.C2.1|PASS', 'O4.C21.x|PASS') }
+Test-Case 'ARM: anchored -- O4.C21.x does NOT count under O4.C2' `
+    { (Format-SbArmSummary $fxAnchor 'O4.C2' '' $ARMS3).Split(':')[1].Trim().Split(' ')[0] } '1'
+# A1b -- MUTATION CONTROL: the fixture is not vacuous. An UNANCHORED `StartsWith`
+#        count over the same two rows is 2, so A1 is discriminating, not decorative.
+Test-Case 'ARM: MUTATION CONTROL -- an unanchored count over that fixture would be 2' `
+    { @($fxAnchor | Where-Object { $_.Name.StartsWith('O4.C2') }).Count } '2'
+
+# A2 -- AN ARM THAT SELECTED NOTHING PRINTS `0 key(s)`. It must never omit the line:
+#       an absent line and a zero are the two states this whole file exists to separate.
+$fxNone = Get-SbFixture { New-SbArmFixture @('O9.1|PASS') }
+Test-Case 'ARM: an arm that selected nothing still prints its line, with 0 key(s)' `
+    { if ((Format-SbArmSummary $fxNone 'O4.C2' '' $ARMS3) -match '(\d+) key\(s\)') { $Matches[1] } else { 'NO LINE' } } '0'
+
+# A3 -- THE THREE VERDICTS SPLIT, and NOT RUN is counted as itself.
+$fxMixed = Get-SbFixture { New-SbArmFixture @('O4.C2 gesture|NOT RUN', 'O4.C2.1|PASS', 'O4.C2.2|FAIL', 'O4.C2.3|PASS') }
+Test-Case 'ARM: the split reads 2 PASS, 1 FAIL, 1 NOT RUN' `
+    { if ((Format-SbArmSummary $fxMixed 'O4.C2' '' $ARMS3) -match '\((\d+) PASS, (\d+) FAIL, (\d+) NOT RUN\)') { "$($Matches[1])/$($Matches[2])/$($Matches[3])" } else { 'NO MATCH' } } '2/1/1'
+# A3b -- and the total is the sum, i.e. the line CLOSES, same law as the summary above it.
+Test-Case 'ARM: the key count equals PASS+FAIL+NOT RUN (the line closes)' `
+    { if ((Format-SbArmSummary $fxMixed 'O4.C2' '' $ARMS3) -match '(\d+) key\(s\) verdicted under it \((\d+) PASS, (\d+) FAIL, (\d+) NOT RUN\)') { [int]$Matches[1] - ([int]$Matches[2] + [int]$Matches[3] + [int]$Matches[4]) } else { 'NO MATCH' } } '0'
+
+# A4 -- A SPACE SUFFIX IS A SUFFIX. `O4.C2 gesture` is the key the whole arm hangs on.
+Test-Case 'ARM: the space-separated suffix (O4.C2 gesture) is counted' `
+    { $f = New-SbArmFixture @('O4.C2 gesture|PASS'); (Format-SbArmSummary $f 'O4.C2' '' $ARMS3) -match '1 key\(s\)' } 'True'
+# A4b -- CONTROL: the BARE prefix with no suffix at all is NOT a key of the arm.
+Test-Case 'ARM: CONTROL -- a bare "O4.C2" with no suffix is not counted' `
+    { $f = New-SbArmFixture @('O4.C2|PASS'); (Format-SbArmSummary $f 'O4.C2' '' $ARMS3) -match '0 key\(s\)' } 'True'
+
+# A5 -- THE UNSELECTED ARMS ARE DECLARED, in the order the :768 loop declares them.
+Test-Case 'ARM: the unselected arms are named' `
+    { if ((Format-SbArmSummary $fxMixed 'O4.C2' '' $ARMS3) -match 'unselected arms declared: (.+) ---$') { $Matches[1] } else { 'NO MATCH' } } 'O4, O4.C1'
+
+# A6 -- THE WHOLE LINE, BYTE FOR BYTE, IN THE SHAPE THE COMMISSION SPECIFIED.
+#       11 keys is the FULL arm on a gesture run (12 suffixes, the gesture verdicts the other 11).
+$fx11 = Get-SbFixture {
+    New-SbArmFixture (@('O4.C2 gesture|PASS') + (1..10 | ForEach-Object { "O4.C2.$_|PASS" }) +
+                      @('O4 gesture|NOT RUN', 'O4.C1 gesture|NOT RUN'))
+}
+Test-Case 'ARM: the full line, exactly as section 72 specified it' `
+    { Format-SbArmSummary $fx11 'O4.C2' ' [SB_SYNTH_DRAG seam control]' $ARMS3 } `
+    "  --- O4 arm 'O4.C2' [SB_SYNTH_DRAG seam control]: 11 key(s) verdicted under it (11 PASS, 0 FAIL, 0 NOT RUN); unselected arms declared: O4, O4.C1 ---"
+
+# A7 -- ⛔ THE CORRECTION. Same fixture, but the run's arm is the BARE `O4`. Its own
+#       own key is `O4 gesture` and nothing else: the two DECLARED siblings, and every
+#       key hanging off them, belong to THEM. Anchored-only reads 13 here; the arm is 1.
+Test-Case 'ARM: the bare O4 owns ONLY its own key, never its declared siblings' `
+    { if ((Format-SbArmSummary $fx11 'O4' '' $ARMS3) -match '(\d+) key\(s\)') { $Matches[1] } else { 'NO MATCH' } } '1'
+# A7b -- MUTATION CONTROL: anchored-only over that same fixture annexes 13, so A7
+#        is pinning a real difference and not restating A2.
+Test-Case 'ARM: MUTATION CONTROL -- anchored-only would have annexed all 13 to O4' `
+    { @($fx11 | Where-Object { $_.Name -match '^O4(\.| )' }).Count } '13'
+# A7c -- and the bare O4 DOES own its own suffixes when they are present.
+Test-Case 'ARM: CONTROL -- the bare O4 still owns O4.1 and O4 gesture' `
+    { $f = New-SbArmFixture @('O4 gesture|PASS', 'O4.1|PASS', 'O4.C2.1|PASS')
+      if ((Format-SbArmSummary $f 'O4' '' $ARMS3) -match '(\d+) key\(s\)') { $Matches[1] } else { 'NO MATCH' } } '2'
+
+# A8 -- A REGEX METACHARACTER IN AN ARM NAME IS A NAME, NOT A PATTERN.
+Test-Case 'ARM: a prefix is escaped, never used as a pattern' `
+    { $f = New-SbArmFixture @('O4xC2.1|PASS'); (Format-SbArmSummary $f 'O4.C2' '' @('O4.C2')) -match '0 key\(s\)' } 'True'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
