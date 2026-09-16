@@ -425,6 +425,44 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_menu_structure();
 
+    // -- wave 2: the panels (W2-5) -------------------------------------------
+    //
+    // ⛔ THE SHELL HOLDS NO PANEL SPEC. It never sees a node, a binding or a
+    // behavior: the plan says where each control goes and what it shows, and a
+    // click names a widget. Both are BYTE SPANS (BL5), and both replies are
+    // Rust-owned (BL4) -- `TakeString` copies and frees.
+
+    /// <summary>
+    /// A panel's PLAN: each control's canonical rect, its resolved `values`, its
+    /// literal `static` display strings, and the workspace definition of every
+    /// icon it names (`jas_panel_plan`, A5 + W2-5a).
+    ///
+    /// `panelId` is the panel's CONTENT id (`align_panel_content`, not `align`).
+    /// `availW` / `availH` are canonical panel units; `availH == 0` is the
+    /// content height. ⛔ `long`, NOT `int`: the header says `int64_t`, and an
+    /// `int` would read the low half of the register (the ABI gate reds it).
+    ///
+    /// It ENROLS the panel, so later ticks send it the rows that move. An empty
+    /// span is a refusal (null handle, bad UTF-8, unknown panel).
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_panel_plan(
+        IntPtr engine, byte[] panelId, nuint len, long availW, long availH);
+
+    /// <summary>
+    /// Run a widget's behavior IN THE ENGINE (`jas_panel_behavior`, A6).
+    ///
+    /// `eventJson` is `{"widget","event","alt","shift","meta","ctrl"}`. The reply
+    /// is `{"changed":[rows],"doc_changed":bool}`. ⛔ A REFUSAL IS THE EMPTY SPAN
+    /// and runs NOTHING; its class and detail are in
+    /// <see cref="jas_last_error_json"/> as `{"panel_event","detail"}`. A click
+    /// that changed nothing replies normally AND reads `Unchanged` there, so
+    /// "nothing happened" is never a silent Ok.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_panel_behavior(
+        IntPtr engine, byte[] panelId, nuint panelLen, byte[] eventJson, nuint eventLen);
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>

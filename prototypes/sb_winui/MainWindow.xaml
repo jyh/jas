@@ -10,6 +10,15 @@
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <!--
+          THE SECOND COLUMN IS THE PANEL PANE (W2-5), and it is COLLAPSED unless
+          the scene is the app. An Auto column holding a collapsed element takes
+          no width, so every measurement scene keeps the surface it always had.
+        -->
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
 
         <!--
           THE MENUBAR, AND IT IS EMPTY IN THIS FILE ON PURPOSE.
@@ -25,7 +34,7 @@
           So this element is a MOUNT POINT. If it ever gains a child in this
           file, that gate should be the thing that says so.
         -->
-        <MenuBar x:Name="Menu" Grid.Row="0" />
+        <MenuBar x:Name="Menu" Grid.Row="0" Grid.ColumnSpan="2" />
 
         <!--
           The canvas the Rust core draws into. Everything inside it is painted by
@@ -37,7 +46,7 @@
           height gives the panel ZERO, and `SizeChanged` fires with height 0
           through the real window manager rather than through a test hook.
         -->
-        <SwapChainPanel x:Name="Canvas" Grid.Row="1" />
+        <SwapChainPanel x:Name="Canvas" Grid.Row="1" Grid.Column="0" />
 
         <!--
           ⚠️ THE HIT-TESTABILITY FALLBACK, AND IT IS COLLAPSED BY DEFAULT.
@@ -58,8 +67,39 @@
         <Border
             x:Name="HitShield"
             Grid.Row="1"
+            Grid.Column="0"
             Background="Transparent"
             Visibility="Collapsed" />
+
+        <!--
+          THE PANEL PANE, AND IT IS A MOUNT POINT LIKE THE MENUBAR (W2-5).
+
+          Every control inside it is materialized at runtime from the core's
+          panel plan: jas_panel_plan supplies each control's canonical rect, its
+          resolved values and its literal display strings, and a click is sent
+          back as a widget id through jas_panel_behavior. Nothing here names a
+          panel's content. LIGHT on purpose: the workspace icons draw in
+          currentColor, and whether this platform's SVG reader honours that is
+          read, not measured, so a dark default must still be legible.
+
+          Its width is set in code from the width the plan is laid out at, so
+          the number lives in one place. Visible only under SB_SCENE=app, and
+          made visible BEFORE the first layout, so opening it resizes nothing.
+        -->
+        <Border
+            x:Name="PaneHost"
+            Grid.Row="1"
+            Grid.Column="1"
+            Background="#FFF3F3F3"
+            BorderBrush="#FF2A2F36"
+            BorderThickness="1,0,0,0"
+            RequestedTheme="Light"
+            Visibility="Collapsed">
+            <ScrollViewer
+                x:Name="PaneScroll"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto" />
+        </Border>
 
         <!--
           Status is XAML, not painted content, so a blank canvas over a healthy
@@ -68,6 +108,7 @@
         <TextBlock
             x:Name="StatusLine"
             Grid.Row="2"
+            Grid.ColumnSpan="2"
             Margin="12,8"
             FontSize="14"
             Foreground="#CCFFFFFF"
