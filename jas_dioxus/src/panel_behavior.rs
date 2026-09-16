@@ -1,21 +1,64 @@
 //! A widget's BEHAVIOR, run in the engine (FB wave 2, A6).
 //!
-//! The shell reports what the user did to a control — `{"widget":
-//! "align_left_button", "event": "click"}` — and the engine runs what the
-//! panel spec declares for it, against the engine's own store and document.
-//! The shell never sees a behavior, an action, an expression or an effect.
+//! The shell reports what the user did to a control, as
+//! `{"widget": "align_left_button", "event": "click", "alt": false}`. The engine
+//! runs what the panel spec declares for that event, against its own store and
+//! document. The shell never sees a behavior, an action, an expression or an
+//! effect.
 //!
-//! RED-FIRST STUB: the arms below and in `ffi.rs` are written against this
-//! shape before it does anything.
+//! # The order, and why each step is where it is
+//!
+//! 1. **The widget is found, or refused by name.** Refusals: `PanelNotHosted`
+//!    (the colour panel's state is not in the store), `MissingTarget`, and
+//!    `NotAddressable` (a widget under a `foreach`: its id names a template,
+//!    not one row).
+//! 2. **`disabled` is evaluated in the engine's scope**, and a disabled widget
+//!    is refused as `Disabled`. The web app never gets this far, because the
+//!    browser does not deliver a click to a disabled button. The engine has no
+//!    DOM to do that for it.
+//! 3. **The behaviors for the event are chosen**, each by its `condition`,
+//!    against the scope plus `event.{alt,shift,meta,ctrl}`, as the web click
+//!    handler does (`renderer.rs`, `build_mouse_event_handler`). Their effects,
+//!    and then their action as a `dispatch`, form ONE batch. No behavior, or one
+//!    with no body, is refused as `EmptyBehavior`.
+//! 4. **PRE-FLIGHT.** The batch runs on CLONES of the store and the model. If
+//!    the report names anything, NOTHING runs, and the refusal is
+//!    `PlatformEffect` with `<Kind>:<payload>` of the first item. A
+//!    half-applied behavior is worse than a refused one. The dry run is exact
+//!    for THIS click: the report is dynamic, and a clone is the real state.
+//!    ⛔ It is sound only because no panel behavior reaches an effect whose
+//!    state lives outside the model and the store. An arm below walks every
+//!    panel and fails if one ever does.
+//! 5. **The batch runs for real**, and the runner's owner rule makes it one
+//!    undo step. The host runs `snapshot` as `begin_txn`, as the web renderer
+//!    does, so the step is named by the action that opened it.
+//!
+//! # What this does NOT do, stated as negatives
+//!
+//! * `init:` is not evaluated when a panel's store scope is seeded (the web
+//!   app does not evaluate it either). Align's `init:` only mirrors
+//!   `state.yaml` defaults that agree with its own.
+//! * A behavior's `params` go to the runner, which evaluates them. The web
+//!   click handler resolves them first, against the render scope. The two agree
+//!   on a bare identifier (`dispatch_param_value`), and they are not otherwise
+//!   compared.
+//! * There is no Artboards panel selection in the engine, so Artboard mode
+//!   aligns to the FIRST artboard (`EngineHost::artboard_selection` is `[]`).
+//! * A behavior that WRITES one of the colour slice's three `state.*` keys
+//!   writes the store's copy only. No align behavior does.
 
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
 use crate::document::model::Model;
-use crate::interpreter::effects::EffectHost;
+use crate::interpreter::align_host::{self, AlignInput};
+use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
+use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+pub use crate::panel_scope::COLOUR_PANEL;
 
-/// The colour panel's id. Its state lives in `PanelState`, not in the store.
-pub const COLOUR_PANEL: &str = "color_panel_content";
+/// The Align panel's id. Its store scope is where [`EngineHost`] reads the
+/// align settings, whichever panel's behavior dispatched the operation.
+pub const ALIGN_PANEL: &str = "align_panel_content";
 
 /// Why a behavior did not run. `class` is the `panel_event` field of
 /// `jas_last_error_json`, and `detail` its `detail`.
@@ -25,10 +68,21 @@ pub struct Refusal {
     pub detail: String,
 }
 
-/// What a behavior that ran did to the document.
+impl Refusal {
+    fn new(class: &'static str, detail: impl Into<String>) -> Self {
+        Refusal { class, detail: detail.into() }
+    }
+}
+
+/// What a behavior that ran changed. Both halves, because a click can move
+/// the engine's state and leave the document alone (an Align-To toggle on a
+/// closed panel), and that is not "nothing happened".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Ran {
     pub doc_changed: bool,
+    /// The store read differently after the run: global state, the panel's
+    /// own state, a dialog.
+    pub state_changed: bool,
 }
 
 /// The shell's report of one act on one control.
@@ -36,16 +90,39 @@ pub struct Ran {
 pub struct UserEvent {
     pub widget: String,
     pub event: String,
-    /// `event.alt` / `event.shift` / `event.meta` / `event.ctrl`.
+    /// `event.alt` / `event.shift` / `event.meta` / `event.ctrl`, the names the
+    /// web click handler gives a behavior's `condition`.
     pub modifiers: Value,
 }
 
-/// Read the shell's event JSON.
-pub fn parse_event(_v: &Value) -> Result<UserEvent, Refusal> {
-    Err(Refusal { class: "Stub", detail: String::new() })
+/// Read the shell's event JSON. `event` defaults to `click`, as a behavior's
+/// own `event` does; each modifier defaults to `false`.
+pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
+    let Some(obj) = v.as_object() else {
+        return Err(Refusal::new("BadJson", ""));
+    };
+    let widget = obj.get("widget").and_then(Value::as_str).unwrap_or("");
+    if widget.is_empty() {
+        return Err(Refusal::new("MissingTarget", ""));
+    }
+    let event = obj.get("event").and_then(Value::as_str).unwrap_or("click");
+    let flag = |k: &str| Value::Bool(obj.get(k).and_then(Value::as_bool).unwrap_or(false));
+    Ok(UserEvent {
+        widget: widget.to_string(),
+        event: event.to_string(),
+        modifiers: json!({"alt": flag("alt"), "shift": flag("shift"),
+                          "meta": flag("meta"), "ctrl": flag("ctrl")}),
+    })
 }
 
-/// The engine's own effects.
+/// The engine's own effects: the ones the web renderer runs outside the
+/// effects runner, for the panels wave 2a hosts.
+///
+/// * `snapshot` opens the transaction (`renderer.rs`, both spellings).
+/// * The fourteen Align operations run through `align_host`, the one
+///   implementation the web app calls too.
+///
+/// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
     pub artboard_selection: Vec<String>,
 }
@@ -53,29 +130,165 @@ pub struct EngineHost {
 impl EffectHost for EngineHost {
     fn run(
         &mut self,
-        _key: &str,
+        key: &str,
         _arg: &Value,
-        _store: &mut StateStore,
-        _model: Option<&mut Model>,
+        store: &mut StateStore,
+        model: Option<&mut Model>,
     ) -> bool {
+        let Some(model) = model else { return false };
+        if key == "snapshot" {
+            model.begin_txn();
+            return true;
+        }
+        if align_host::hosts(key) {
+            let input = AlignInput::from_panel_state(store, ALIGN_PANEL,
+                                                     self.artboard_selection.clone());
+            align_host::apply_align_operation(model, key, &input);
+            return true;
+        }
         false
     }
 }
 
-/// Run the behavior `ev` names, on panel `panel_id` whose spec is `spec`.
+/// `<Kind>:<payload>`, the refusal detail for one report item.
+fn unhandled_detail(u: &Unhandled) -> String {
+    let (kind, payload) = match u {
+        Unhandled::UnknownEffect(s) => ("UnknownEffect", s),
+        Unhandled::UnknownDocEffect(s) => ("UnknownDocEffect", s),
+        Unhandled::NoModel(s) => ("NoModel", s),
+        Unhandled::BareString(s) => ("BareString", s),
+        Unhandled::NotAnEffect(s) => ("NotAnEffect", s),
+        Unhandled::Logged(s) => ("Logged", s),
+        Unhandled::UnknownAction(s) => ("UnknownAction", s),
+        Unhandled::EmptyAction(s) => ("EmptyAction", s),
+        Unhandled::UnknownDialog(s) => ("UnknownDialog", s),
+    };
+    format!("{kind}:{payload}")
+}
+
+/// The first node with id `widget` under `node`, and whether it sits under a
+/// `foreach`. First wins, as `panel_scope::binding_of` has it.
+fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&'a Value, bool)> {
+    if node.get("id").and_then(Value::as_str) == Some(widget) {
+        return Some((node, in_foreach));
+    }
+    let under = in_foreach || node.get("foreach").is_some();
+    for k in ["children", "do"] {
+        match node.get(k) {
+            Some(Value::Array(items)) => {
+                for c in items {
+                    if let Some(hit) = find_widget(c, widget, under) {
+                        return Some(hit);
+                    }
+                }
+            }
+            Some(c @ Value::Object(_)) => {
+                if let Some(hit) = find_widget(c, widget, under) {
+                    return Some(hit);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Run the behavior `ev` names, on panel `panel_id` whose spec is `spec`,
+/// with `scope` the engine's scope for that panel. See the module doc for the
+/// order of the steps.
 #[allow(clippy::too_many_arguments)]
 pub fn run_widget_behavior(
-    _panel_id: &str,
-    _spec: &Value,
-    _ev: &UserEvent,
-    _scope: &Value,
-    _store: &mut StateStore,
-    _model: &mut Model,
-    _actions: &Value,
-    _dialogs: &Value,
-    _host: &mut dyn EffectHost,
+    panel_id: &str,
+    spec: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
 ) -> Result<Ran, Refusal> {
-    Err(Refusal { class: "Stub", detail: String::new() })
+    if panel_id == COLOUR_PANEL {
+        return Err(Refusal::new("PanelNotHosted", panel_id));
+    }
+    let content = spec.get("content").unwrap_or(&Value::Null);
+    let Some((node, in_foreach)) = find_widget(content, &ev.widget, false) else {
+        return Err(Refusal::new("MissingTarget", ev.widget.clone()));
+    };
+    if in_foreach {
+        return Err(Refusal::new("NotAddressable", ev.widget.clone()));
+    }
+    if let Some(expr) = node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str) {
+        if eval(expr, scope).to_bool() {
+            return Err(Refusal::new("Disabled", ev.widget.clone()));
+        }
+    }
+
+    let mut cond_scope = scope.clone();
+    if let Some(m) = cond_scope.as_object_mut() {
+        m.insert("event".into(), ev.modifiers.clone());
+    }
+    let mut batch: Vec<Value> = vec![];
+    let mut chosen = 0usize;
+    for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
+        if b.get("event").and_then(Value::as_str).unwrap_or("click") != ev.event {
+            continue;
+        }
+        if let Some(cond) = b.get("condition").and_then(Value::as_str) {
+            if !eval(cond, &cond_scope).to_bool() {
+                continue;
+            }
+        }
+        chosen += 1;
+        let effects = b.get("effects").and_then(Value::as_array);
+        let action = b.get("action").and_then(Value::as_str);
+        if effects.map_or(true, |e| e.is_empty()) && action.is_none() {
+            return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+        }
+        batch.extend(effects.into_iter().flatten().cloned());
+        if let Some(action) = action {
+            let mut d = Map::new();
+            d.insert("action".into(), Value::String(action.to_string()));
+            if let Some(params) = b.get("params") {
+                d.insert("params".into(), params.clone());
+            }
+            batch.push(json!({"dispatch": Value::Object(d)}));
+        }
+    }
+    if chosen == 0 {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+
+    // The runner reads `state` and `panel` from the STORE, live, so a `set`
+    // early in the batch is seen by an expression later in it. The context
+    // carries only what the store does not hold.
+    let ctx = json!({
+        "active_document": scope.get("active_document").cloned().unwrap_or(Value::Null),
+        "event": ev.modifiers.clone(),
+    });
+    // `set_panel_state` writes the ACTIVE panel. It is set on the copy for the
+    // pre-flight and on the live store only once the pre-flight passes: a
+    // refusal changes nothing, not even which panel is active.
+    let mut dry_store = store.clone();
+    dry_store.set_active_panel(Some(panel_id));
+    let mut dry_model = model.clone();
+    let preflight = run_effects_hosted(&batch, &ctx, &mut dry_store, Some(&mut dry_model),
+                                       Some(actions), Some(dialogs), None, &mut *host);
+    if let Some(first) = preflight.unhandled.first() {
+        return Err(Refusal::new("PlatformEffect", unhandled_detail(first)));
+    }
+
+    store.set_active_panel(Some(panel_id));
+    let state_before = store.eval_context();
+    let generation = model.generation();
+    let report = run_effects_hosted(&batch, &ctx, store, Some(&mut *model), Some(actions),
+                                    Some(dialogs), None, host);
+    debug_assert!(report.all_handled(),
+                  "the pre-flight passed and the real run did not: {report:?}");
+    Ok(Ran {
+        doc_changed: model.generation() != generation,
+        state_changed: store.eval_context() != state_before,
+    })
 }
 
 /// Document fixtures shared by this module's arms and the ABI's.
@@ -233,6 +446,145 @@ mod tests {
             assert!(!host.run(declined, &Value::Null, &mut store, Some(&mut model)),
                     "the engine host claimed {declined}");
         }
+    }
+
+    /// Every report kind gets its own name in a refusal. The second method is
+    /// the variant's `Debug` name, so a swapped or shared arm reds.
+    #[test]
+    fn a_refusal_names_every_report_kind() {
+        let all = [
+            Unhandled::UnknownEffect("k".into()),
+            Unhandled::UnknownDocEffect("k".into()),
+            Unhandled::NoModel("k".into()),
+            Unhandled::BareString("k".into()),
+            Unhandled::NotAnEffect("k".into()),
+            Unhandled::Logged("k".into()),
+            Unhandled::UnknownAction("k".into()),
+            Unhandled::EmptyAction("k".into()),
+            Unhandled::UnknownDialog("k".into()),
+        ];
+        let mut names = vec![];
+        for u in &all {
+            let debug = format!("{u:?}");
+            let kind = debug.split('(').next().unwrap();
+            assert_eq!(unhandled_detail(u), format!("{kind}:k"));
+            names.push(kind.to_string());
+        }
+        names.dedup();
+        assert_eq!(names.len(), all.len(), "two kinds share a name");
+    }
+
+    /// A synthetic panel: one widget per property the real panels cannot
+    /// reach. `zz_mark` is claimed by the test host below, which counts it.
+    fn synthetic_panel() -> Value {
+        json!({"content": {"type": "container", "id": "root", "children": [
+            {"id": "edits_first", "type": "icon_button", "behavior": [{"event": "click", "effects": [
+                "snapshot",
+                {"doc.clear_selection": {}},
+                {"zz_first": true},
+                {"zz_second": true},
+            ]}]},
+            {"id": "reads_live", "type": "icon_button", "behavior": [{"event": "click", "effects": [
+                {"set_panel_state": {"key": "x", "value": "1"}},
+                {"if": {"condition": "panel.x == 1 and active_document.selection_count == 2",
+                        "then": [{"zz_mark": true}]}},
+            ]}]},
+            {"id": "clicks_only", "type": "icon_button", "behavior": [
+                {"event": "click", "effects": [{"zz_mark": true}]},
+            ]},
+        ]}})
+    }
+
+    struct MarkHost {
+        engine: EngineHost,
+        marks: usize,
+    }
+
+    impl EffectHost for MarkHost {
+        fn run(&mut self, key: &str, arg: &Value, store: &mut StateStore,
+               model: Option<&mut Model>) -> bool {
+            if key == "zz_mark" {
+                self.marks += 1;
+                return true;
+            }
+            self.engine.run(key, arg, store, model)
+        }
+    }
+
+    fn run_synthetic(widget: &str, event: &str, model: &mut Model, store: &mut StateStore,
+                     host: &mut MarkHost) -> Result<Ran, Refusal> {
+        let ev = parse_event(&json!({"widget": widget, "event": event})).unwrap();
+        let empty = json!({});
+        let scope = json!({"state": {}, "panel": {},
+                           "active_document": {"selection_count": model.document().selection.len()}});
+        run_widget_behavior("zz_panel", &synthetic_panel(), &ev, &scope, store, model,
+                            &empty, &empty, host)
+    }
+
+    /// Q5 where it is hardest: the batch EDITS the document before the effect
+    /// the engine cannot run. Nothing reaches the live model, and the refusal
+    /// names the FIRST unhosted effect.
+    #[test]
+    fn a_refused_batch_that_edits_first_leaves_the_model_untouched() {
+        let mut model = misaligned(&[0, 1]);
+        let mut store = StateStore::new();
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let generation = model.generation();
+        let r = run_synthetic("edits_first", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Err(Refusal::new("PlatformEffect", "UnknownEffect:zz_first")));
+        assert_eq!(model.document().selection.len(), 2, "the dry run's edit reached the model");
+        assert_eq!(model.generation(), generation);
+        assert!(!model.in_txn());
+    }
+
+    /// The runner reads `panel.*` from the store LIVE, so a `set_panel_state`
+    /// early in the batch is seen by a condition later in it; and the context
+    /// carries `active_document`. A context holding the scope's `panel` would
+    /// have shadowed the write, and the mark would never run.
+    #[test]
+    fn a_batch_reads_its_own_panel_writes_and_the_document_facts() {
+        let mut model = misaligned(&[0, 1]);
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", Default::default());
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let r = run_synthetic("reads_live", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: true }));
+        assert_eq!(host.marks, 2, "once in the pre-flight and once for real");
+        assert_eq!(store.get_panel("zz_panel", "x"), &json!(1));
+        // The control: with one element selected the condition is false.
+        let mut one = misaligned(&[0]);
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", Default::default());
+        host.marks = 0;
+        let r = run_synthetic("reads_live", "click", &mut one, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: true }));
+        assert_eq!(host.marks, 0);
+    }
+
+    /// Only the behaviors for THIS event run. A widget with a click behavior
+    /// and no double-click behavior refuses a double click, by name.
+    #[test]
+    fn only_the_named_events_behaviors_run() {
+        let mut model = misaligned(&[0, 1]);
+        let mut store = StateStore::new();
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let r = run_synthetic("clicks_only", "double_click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Err(Refusal::new("EmptyBehavior", "clicks_only")));
+        assert_eq!(host.marks, 0);
+        let r = run_synthetic("clicks_only", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: false }));
+        assert_eq!(host.marks, 2);
+    }
+
+    /// A declared behavior with no body (`layers.yaml`'s tree drag, whose work
+    /// is native) is refused by name. The runner never sees it.
+    #[test]
+    fn a_behavior_with_no_body_is_refused_by_name() {
+        let mut model = misaligned(&[0, 1]);
+        let ev = parse_event(&json!({"widget": "lp_tree", "event": "drag_move"})).unwrap();
+        let r = run("layers_panel_content", &ev, &mut model,
+                    &mut EngineHost { artboard_selection: vec![] });
+        assert_eq!(r, Err(Refusal::new("EmptyBehavior", "lp_tree")));
     }
 
     /// D3: the pre-flight runs a batch on CLONES of the model and the store,

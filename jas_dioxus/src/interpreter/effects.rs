@@ -98,7 +98,7 @@ pub fn run_effects(
 ) -> EffectsReport {
     let mut report = EffectsReport::default();
     run_effects_into(effects, ctx, store, model, actions, dialogs, action_name,
-                     &mut report);
+                     None, &mut report);
     report
 }
 
@@ -133,13 +133,30 @@ pub fn run_effects_hosted(
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
     action_name: Option<&str>,
-    _host: &mut dyn EffectHost,
+    host: &mut dyn EffectHost,
 ) -> EffectsReport {
-    // RED-FIRST STUB: the host is not consulted yet.
-    run_effects(effects, ctx, store, model, actions, dialogs, action_name)
+    let mut report = EffectsReport::default();
+    run_effects_into(effects, ctx, store, model, actions, dialogs, action_name,
+                     Some(host), &mut report);
+    report
 }
 
-fn run_effects_into(
+/// A dispatch parameter's value. A bare identifier that evaluates to null is
+/// its own NAME: `params: {target: artboard}` means the string "artboard". The
+/// web renderer's dispatch and Swift's runner both read it this way. This is
+/// the crate's one statement of the rule, and `renderer.rs` calls it.
+pub fn dispatch_param_value(expr: &str, val: &Value) -> serde_json::Value {
+    let bare = !expr.is_empty() && expr.chars().all(|c| c.is_alphanumeric() || c == '_');
+    if matches!(val, Value::Null) && bare {
+        serde_json::Value::String(expr.to_string())
+    } else {
+        value_to_json(val)
+    }
+}
+
+// `'h` is the host's own lifetime, named once so that reborrowing it for a
+// nested batch keeps the same trait-object type.
+fn run_effects_into<'h>(
     effects: &[serde_json::Value],
     ctx: &serde_json::Value,
     store: &mut StateStore,
@@ -147,6 +164,7 @@ fn run_effects_into(
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
     action_name: Option<&str>,
+    mut host: Option<&mut (dyn EffectHost + 'h)>,
     report: &mut EffectsReport,
 ) {
     // OP_LOG.md Increment 1, sub-step 5: a YAML action opens its undo
@@ -161,12 +179,19 @@ fn run_effects_into(
         match effect {
             serde_json::Value::Object(map) => {
                 run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs,
-                        report);
+                        host.as_deref_mut(), report);
             }
             // `- snapshot` (every align and boolean action's first effect) is
-            // a string. The web renderer runs it; this runner does not.
+            // a string. Both references offer it to the host as a key with a
+            // null argument; with no host, or one that declines it, this
+            // runner skips it, as it always has.
             serde_json::Value::String(s) => {
-                report.unhandled.push(Unhandled::BareString(s.clone()));
+                let hosted = host.as_deref_mut().map_or(false, |h| {
+                    h.run(s, &serde_json::Value::Null, store, model.as_deref_mut())
+                });
+                if !hosted {
+                    report.unhandled.push(Unhandled::BareString(s.clone()));
+                }
             }
             other => {
                 report.unhandled.push(Unhandled::NotAnEffect(other.to_string()));
@@ -187,7 +212,7 @@ fn run_effects_into(
             });
             if let serde_json::Value::Object(map) = &dispatch_effect {
                 run_one(map, ctx, store, model.as_deref_mut(),
-                        actions, dialogs, report);
+                        actions, dialogs, host.as_deref_mut(), report);
             }
             store.set_firing_on_change(false);
         }
@@ -246,15 +271,27 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
     }
 }
 
-fn run_one(
+fn run_one<'h>(
     effect: &serde_json::Map<String, serde_json::Value>,
     ctx: &serde_json::Value,
     store: &mut StateStore,
     mut model: Option<&mut Model>,
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
+    mut host: Option<&mut (dyn EffectHost + 'h)>,
     report: &mut EffectsReport,
 ) {
+    // ── A platform host is asked FIRST, before every built-in arm, as both
+    // references do. The first key it implements is the effect. `as` is a
+    // return binding, never an effect.
+    if let Some(h) = host.as_deref_mut() {
+        for (key, arg) in effect {
+            if key != "as" && h.run(key, arg, store, model.as_deref_mut()) {
+                return;
+            }
+        }
+    }
+
     // ── Document mutations (doc.*) — dispatched before generic effects
     // so a stray `doc.` key in an effect object doesn't silently fall
     // through to "unknown".
@@ -358,7 +395,7 @@ fn run_one(
                 actions,
                 dialogs,
                 None,
-                report,
+                host.as_deref_mut(), report,
             );
         }
         return;
@@ -390,7 +427,7 @@ fn run_one(
                 }
                 run_effects_into(
                     body, &iter_ctx, store,
-                    model.as_deref_mut(), actions, dialogs, None, report);
+                    model.as_deref_mut(), actions, dialogs, None, host.as_deref_mut(), report);
             }
         }
         return;
@@ -453,11 +490,11 @@ fn run_one(
         if result.to_bool() {
             run_effects_into(
                 &then_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs, None, report);
+                model.as_deref_mut(), actions, dialogs, None, host.as_deref_mut(), report);
         } else {
             run_effects_into(
                 &else_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs, None, report);
+                model.as_deref_mut(), actions, dialogs, None, host.as_deref_mut(), report);
         }
         return;
     }
@@ -522,7 +559,7 @@ fn run_one(
                         for (k, v) in p {
                             if let Some(expr) = v.as_str() {
                                 let val = eval_expr(expr, store, &serde_json::Value::Object(c.clone()));
-                                resolved.insert(k.clone(), value_to_json(&val));
+                                resolved.insert(k.clone(), dispatch_param_value(expr, &val));
                             } else {
                                 resolved.insert(k.clone(), v.clone());
                             }
@@ -538,7 +575,7 @@ fn run_one(
                 run_effects_into(
                     action_effects, &dispatch_ctx, store,
                     model.as_deref_mut(), actions, dialogs,
-                    Some(action_name), report);
+                    Some(action_name), host.as_deref_mut(), report);
             }
             // No effects list at all: nothing runs. The compiled workspace
             // gives every action a list (a declared placeholder such as
@@ -12417,10 +12454,11 @@ mod tests {
     //
     // The arms above plant their own no-ops. These run REAL actions from
     // `actions.yaml`, so the report is shown to see the surfaces the wave-2
-    // census found (FB wave-2 block v1.1 §2.2). ⚠️ They pin TODAY's hosting:
-    // when the core learns to host `align_left` (W2-3) or `- snapshot`
-    // (W2-4's transaction), the first arm changes ON PURPOSE, and the edit
-    // belongs in that node's PR.
+    // census found (FB wave-2 block v1.1 §2.2). They pin the UNHOSTED runner:
+    // W2-3 and W2-4 taught the ENGINE to run `align_left` and `- snapshot`,
+    // through a host this runner is only handed by `run_effects_hosted`
+    // (`panel_behavior::EngineHost`). With no host, both are still reported,
+    // and that is what these arms say.
 
     fn report_of_real_action(name: &str) -> Vec<Unhandled> {
         let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
@@ -12519,7 +12557,8 @@ mod tests {
         let batch = vec![
             serde_json::json!("snapshot"),
             serde_json::json!({"set": {"x": "5"}}),
-            serde_json::json!({"zz_platform": true}),
+            // `as` is a binding, never an effect, so it is never offered.
+            serde_json::json!({"zz_platform": true, "as": "zz_result"}),
         ];
         let mut plain = StateStore::new();
         let unhosted = run_effects(&batch, &serde_json::json!({}), &mut plain, None, None,
@@ -12528,8 +12567,10 @@ mod tests {
         let mut host = RecordingHost::claiming(&[]);
         let report = hosted_report(batch, &mut store, None, &mut host);
         assert_eq!(report, unhosted);
+        // The runner's own report still names every key of the object it
+        // could not run, `as` included (the W2-1 shape).
         assert_eq!(report, vec![Unhandled::BareString("snapshot".into()),
-                                Unhandled::UnknownEffect("zz_platform".into())]);
+                                Unhandled::UnknownEffect("as,zz_platform".into())]);
         assert_eq!(store.get("x"), &serde_json::json!(5));
         assert_eq!(host.seen_keys(), vec!["snapshot", "set", "zz_platform"]);
     }
@@ -12555,16 +12596,45 @@ mod tests {
             serde_json::json!({"dispatch": "zz_act"}),
             serde_json::json!({"let": {"v": "1"}, "in": [{"zz_in_let": true}]}),
             serde_json::json!({"if": {"condition": "true", "then": [{"zz_in_if": true}]}}),
+            serde_json::json!({"if": {"condition": "false", "then": [],
+                                      "else": [{"zz_in_else": true}]}}),
+            serde_json::json!({"foreach": {"source": "[1]", "as": "item"},
+                               "do": [{"zz_in_foreach": true}]}),
         ];
+        let nested = ["snapshot", "zz_in_action", "zz_in_let", "zz_in_if", "zz_in_else",
+                      "zz_in_foreach"];
         let mut store = StateStore::new();
-        let mut host = RecordingHost::claiming(&["snapshot", "zz_in_action", "zz_in_let",
-                                                 "zz_in_if"]);
+        let mut host = RecordingHost::claiming(&nested);
         let report = hosted_report(batch, &mut store, Some(&actions), &mut host);
         assert_eq!(report, vec![], "a nested key the host implements was reported");
         let seen = host.seen_keys();
-        for key in ["snapshot", "zz_in_action", "zz_in_let", "zz_in_if"] {
+        for key in nested {
             assert!(seen.contains(&key), "the host was never asked about {key}: {seen:?}");
         }
+    }
+
+    /// The dialog `on_change` hook dispatches outside the effect loop, so the
+    /// host must reach it on its own path.
+    #[test]
+    fn a_host_is_asked_inside_a_dialog_on_change_dispatch() {
+        let dialogs = serde_json::json!({
+            "live": {
+                "summary": "Live",
+                "state": {"v": {"type": "number", "default": 0}},
+                "on_change": "zz_hook",
+                "content": {"type": "container"},
+            }
+        });
+        let actions = serde_json::json!({"zz_hook": {"effects": [{"zz_in_hook": true}]}});
+        let mut store = StateStore::new();
+        let mut host = RecordingHost::claiming(&["zz_in_hook"]);
+        let report = run_effects_hosted(
+            &[serde_json::json!({"open_dialog": {"id": "live"}}),
+              serde_json::json!({"set": {"dialog.v": "1"}})],
+            &serde_json::json!({}), &mut store, None, Some(&actions), Some(&dialogs), None,
+            &mut host).unhandled;
+        assert_eq!(report, vec![]);
+        assert!(host.seen_keys().contains(&"zz_in_hook"), "{:?}", host.seen_keys());
     }
 
     /// D11: `align.yaml`'s Align-To toggles dispatch `set_align_to` with

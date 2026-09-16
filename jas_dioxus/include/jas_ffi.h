@@ -617,6 +617,44 @@ struct JasBytes jas_panel_plan(struct JasEngine *e,
                                int64_t avail_h);
 
 /**
+ * **A widget's behavior**, run in the engine (wave 2, A6).
+ *
+ * `{"widget":"align_left_button","event":"click","alt":false}`: the shell
+ * reports what the user did to a control, and the engine runs what the panel
+ * spec declares for it. `event` defaults to `click`; `alt` / `shift` /
+ * `meta` / `ctrl` default to `false` and reach a behavior's `condition` as
+ * `event.*`. The steps and their refusals are `crate::panel_behavior`'s.
+ *
+ * # The reply
+ *
+ * `{"changed": [<row>...], "doc_changed": <bool>}`. Each row is a
+ * [`jas_panel_event`] delta row, tagged with its `panel`, across every open
+ * panel. `doc_changed` says the document moved, so the shell repaints.
+ *
+ * # ⛔ A refusal runs NOTHING
+ *
+ * A refused behavior returns the empty span, and [`jas_last_error_json`]
+ * reads `{"panel_event":"<class>","detail":"<detail>"}`. Among the classes,
+ * `PlatformEffect` carries `<Kind>:<key>` of the first effect the engine
+ * cannot run, found by a pre-flight on copies before anything touches the
+ * document or the store. A click that ran and changed nothing (not the
+ * document, not the engine's state, no open panel's rows) replies normally
+ * and ALSO reads `Unchanged`, so "nothing happened" is never a silent Ok. A
+ * click that changed something clears the channel.
+ *
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; both spans must be NULL or valid for their
+ * stated lengths.
+ */
+struct JasBytes jas_panel_behavior(struct JasEngine *e,
+                                   const uint8_t *panel_id,
+                                   uintptr_t panel_len,
+                                   const uint8_t *event_json,
+                                   uintptr_t event_len);
+
+/**
  * Zero every boundary counter. Call at the START of a named interaction so the
  * dump that follows describes that interaction alone.
  */

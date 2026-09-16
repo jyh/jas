@@ -1136,23 +1136,10 @@ fn resolve_dispatch_params(
     let mut resolved = serde_json::Map::new();
     for (k, v) in raw {
         let val = if let Some(expr_str) = v.as_str() {
-            let result = super::expr::eval(expr_str, ctx);
-            match result {
-                Value::Null => {
-                    // Bare identifier (no dots / operators) → string literal,
-                    // matching the convention used by click-handler params
-                    // (e.g. `{ target: artboard }` means the string
-                    // "artboard", not the variable `artboard`).
-                    let bare = !expr_str.is_empty()
-                        && expr_str.chars().all(|c| c.is_alphanumeric() || c == '_');
-                    if bare {
-                        serde_json::Value::String(expr_str.to_string())
-                    } else {
-                        serde_json::Value::Null
-                    }
-                }
-                _ => super::effects::value_to_json(&result),
-            }
+            // A bare identifier that evaluates to null is its own name
+            // (`{ target: artboard }` is the string "artboard"). The rule is
+            // the effects runner's, shared so the two dispatches cannot drift.
+            super::effects::dispatch_param_value(expr_str, &super::expr::eval(expr_str, ctx))
         } else {
             v.clone()
         };
