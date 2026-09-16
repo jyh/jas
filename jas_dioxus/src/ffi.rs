@@ -156,6 +156,9 @@ pub struct JasEngine {
     /// served — the state a DELTA needs. Enrolled by [`jas_bind_values`]:
     /// reading a panel's values is what tells the engine it is open.
     registry: RefCell<PanelRegistry>,
+    /// The engine's state store: global `state.*` and every panel's own
+    /// `panel.*` except the colour panel's (wave 2, A6). RED-FIRST SEAM.
+    store: RefCell<crate::interpreter::state_store::StateStore>,
     /// ⭐ ROW DU: physical pixels per DIP, as the shell's display reports it.
     ///
     /// ⛔ IT LIVES HERE, NOT IN THE SHELL. The shell sends the physical pixels
@@ -235,6 +238,7 @@ impl JasEngine {
             last_error: RefCell::new(None),
             panel: RefCell::new(PanelState::default()),
             registry: RefCell::new(PanelRegistry::default()),
+            store: RefCell::new(crate::interpreter::state_store::StateStore::new()),
             dpi_scale: std::cell::Cell::new(1.0),
             tool: RefCell::new(None),
         }
@@ -720,6 +724,26 @@ pub unsafe extern "C" fn jas_panel_plan(
     let out = JasBytes::from_string(serde_json::to_string(&plan).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelPlan, out.len);
     out
+}
+
+/// **A widget's behavior**, run in the engine (wave 2, A6).
+///
+/// RED-FIRST STUB.
+///
+/// # Safety
+/// `e` must be NULL or live; both spans must be NULL or valid for their
+/// stated lengths.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_panel_behavior(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    panel_len: usize,
+    event_json: *const u8,
+    event_len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::PanelBehavior, panel_len + event_len, 0);
+    let _ = (e, panel_id, event_json);
+    JasBytes::empty()
 }
 
 /// The panel-event channel's diagnostic, in the same shape
@@ -1535,6 +1559,256 @@ mod tests {
         assert!(b.ptr.is_null() && b.len == 0, "bad UTF-8");
         // The control: the same engine answers a real panel.
         assert!(plan_of(e, id, 228, 0).contains("\"leaves\""));
+        unsafe { jas_engine_free(e) };
+    }
+
+    // -----------------------------------------------------------------------
+    // jas_panel_behavior -- wave 2, A6: a click runs the widget's behavior in
+    // the engine, or is refused by name before any effect of it runs.
+    // -----------------------------------------------------------------------
+
+    const ALIGN: &str = "align_panel_content";
+    const BOOLEAN: &str = "boolean_panel_content";
+    const LEFT: &str = r#"{"widget":"align_left_button","event":"click"}"#;
+
+    /// An engine whose document is `model`.
+    fn engine_with(model: Model) -> *mut JasEngine {
+        let e = jas_engine_new();
+        unsafe { e.as_ref() }.unwrap().with_model_mut(|m| *m = model);
+        e
+    }
+
+    /// (reply, error channel) for one behavior crossing.
+    fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
+        let reply = take(unsafe {
+            jas_panel_behavior(e, panel.as_ptr(), panel.len(), event.as_ptr(), event.len())
+        });
+        (reply, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    fn refusal(class: &str, detail: &str) -> String {
+        format!(r#"{{"panel_event":"{class}","detail":"{detail}"}}"#)
+    }
+
+    fn doc_json(e: *mut JasEngine) -> String {
+        take(unsafe { jas_document_json(e) })
+    }
+
+    fn undo(e: *mut JasEngine) {
+        let op = r#"{"op":"undo"}"#;
+        assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+    }
+
+    fn engine_of<'a>(e: *mut JasEngine) -> &'a JasEngine {
+        unsafe { e.as_ref() }.unwrap()
+    }
+
+    /// The plan leaf with widget id `id`, from a fresh plan of `panel`.
+    fn leaf(e: *mut JasEngine, panel: &str, id: &str) -> serde_json::Value {
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, panel, 228, 0)).unwrap();
+        plan["leaves"].as_array().unwrap().iter()
+            .find(|l| l["id"] == id)
+            .unwrap_or_else(|| panic!("no leaf {id} in the {panel} plan"))
+            .clone()
+    }
+
+    /// **Q4.** Align Left on a two-element selection gives the document the
+    /// shared host gives, in ONE undo step, named as the web path names it.
+    #[test]
+    fn panel_behavior_align_left_is_the_shared_host_in_one_undo_step() {
+        use crate::interpreter::align_host::{apply_align_operation, AlignInput, AlignTo};
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0, 1]));
+        let before = doc_json(e);
+        // The oracle: the host every port's Align button reaches, run directly
+        // on a copy, with the panel's declared defaults.
+        let mut copy = engine_of(e).with_model(|m| m.clone());
+        let input = AlignInput { align_to: AlignTo::Selection, key_object_path: None,
+                                 distribute_spacing: 0.0, use_preview_bounds: false,
+                                 artboard_selection: vec![] };
+        apply_align_operation(&mut copy, "align_left", &input);
+        let expected = crate::geometry::test_json::document_to_test_json(copy.document());
+        assert_ne!(expected, before, "fixture: Align Left must move something here");
+
+        let (reply, err) = behave(e, ALIGN, LEFT);
+        let reply: serde_json::Value = serde_json::from_str(&reply)
+            .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
+        assert_eq!(reply["doc_changed"], true, "{reply}");
+        assert_eq!(err, "", "a change leaves the error channel empty");
+        assert_eq!(doc_json(e), expected, "the engine's click is not the shared host's move");
+        let name = engine_of(e).with_model(|m| {
+            assert!(!m.in_txn(), "the click left its transaction open");
+            m.journal()[..m.journal_head()].last().and_then(|t| t.name.clone())
+        });
+        assert_eq!(name.as_deref(), Some("align_left"), "the web path names it align_left");
+
+        undo(e);
+        assert_eq!(doc_json(e), before, "ONE undo must restore the pre-click document");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()),
+                "a second undo step exists, so the click took more than one");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **D8.** The reply is `{"changed": [...], "doc_changed": bool}` and a
+    /// changed row carries its panel. An Align-To toggle moves the panel's own
+    /// rows (its `checked` bindings) without touching the document.
+    #[test]
+    fn panel_behavior_replies_with_the_changed_rows_and_doc_changed() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0, 1]));
+        let before = doc_json(e);
+        // Values are canonical strings (`bind_values`' row shape): "true" / "false".
+        assert_eq!(leaf(e, ALIGN, "align_to_artboard_button")["values"]["bind.checked"], "false");
+        let (reply, err) = behave(e, ALIGN,
+                                  r#"{"widget":"align_to_artboard_button","event":"click"}"#);
+        let reply: serde_json::Value = serde_json::from_str(&reply)
+            .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
+        let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
+        assert_eq!(keys, vec!["changed", "doc_changed"], "{reply}");
+        assert_eq!(reply["doc_changed"], false);
+        assert_eq!(err, "", "rows moved, so this is not Unchanged");
+        let changed = reply["changed"].as_array().expect("changed is an array");
+        let row = changed.iter()
+            .find(|r| r["id"] == "align_to_artboard_button" && r["key"] == "bind.checked")
+            .unwrap_or_else(|| panic!("the toggle's own checked row did not move: {reply}"));
+        assert_eq!(row["value"], "true");
+        assert_eq!(row["panel"], ALIGN);
+        assert!(changed.iter().all(|r| r["panel"] == ALIGN), "{reply}");
+        assert_eq!(doc_json(e), before);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **Q4's control.** A pair already aligned moves nothing, and the engine
+    /// SAYS so: never a silent Ok.
+    #[test]
+    fn panel_behavior_an_aligned_pair_is_unchanged_and_says_so() {
+        use crate::panel_behavior::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(model_with(
+            vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
+        let before = doc_json(e);
+        let (reply, err) = behave(e, ALIGN, LEFT);
+        assert_eq!(reply, r#"{"changed":[],"doc_changed":false}"#);
+        assert_eq!(err, refusal("Unchanged", "align_left_button"));
+        assert_eq!(doc_json(e), before);
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **D5.** A disabled widget is refused by name before anything runs, and
+    /// the plan the shell draws from shows the same state. Align needs two.
+    #[test]
+    fn panel_behavior_refuses_a_disabled_widget_and_the_plan_agrees() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for (selected, disabled) in [(&[][..], true), (&[0][..], true), (&[0, 1][..], false)] {
+            let e = engine_with(misaligned(selected));
+            assert_eq!(leaf(e, ALIGN, "align_left_button")["values"]["bind.disabled"],
+                       if disabled { "true" } else { "false" },
+                       "the plan with {} selected", selected.len());
+            let before = doc_json(e);
+            let (reply, err) = behave(e, ALIGN, LEFT);
+            if disabled {
+                assert_eq!(reply, "", "{} selected", selected.len());
+                assert_eq!(err, refusal("Disabled", "align_left_button"));
+                assert_eq!(doc_json(e), before);
+            } else {
+                assert!(reply.contains(r#""doc_changed":true"#), "{reply} {err}");
+            }
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
+    /// **Q5.** A behavior that reaches an effect the engine cannot run is
+    /// refused by name, and NO effect of its batch ran: not the snapshot that
+    /// opens it, not the `set` that closes it.
+    #[test]
+    fn panel_behavior_refuses_an_unhosted_effect_before_any_effect_runs() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0, 1]));
+        let _ = plan_of(e, BOOLEAN, 228, 0);
+        let before = doc_json(e);
+        let store_before = engine_of(e).store.borrow().eval_context();
+        let (reply, err) = behave(e, BOOLEAN,
+                                  r#"{"widget":"boolean_union_button","event":"click"}"#);
+        assert_eq!(reply, "");
+        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:boolean_union"));
+        assert_eq!(doc_json(e), before);
+        engine_of(e).with_model(|m| {
+            assert!(!m.in_txn(), "the refused batch's snapshot ran on the live model");
+            assert!(!m.can_undo());
+        });
+        assert_eq!(engine_of(e).store.borrow().eval_context(), store_before,
+                   "the refused batch's `set` ran on the live store");
+        // The modifier routes to the other declared behavior, and it is named.
+        let (_, err) = behave(e, BOOLEAN,
+            r#"{"widget":"boolean_union_button","event":"click","alt":true}"#);
+        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:boolean_union_compound"));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
+    /// it is refused as one.
+    #[test]
+    fn panel_behavior_refuses_a_log_only_action_by_name() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let (reply, err) = behave(e, "symbols_panel_content",
+                                  r#"{"widget":"sym_new","event":"click"}"#);
+        assert_eq!(reply, "");
+        assert_eq!(err, refusal("PlatformEffect", "Logged:new_symbol"));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **D7.** Every other refusal, each with its exact string.
+    #[test]
+    fn panel_behavior_refuses_by_name_where_there_is_nothing_to_run() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0, 1]));
+        let cases: [(&str, &str, String); 6] = [
+            // The colour panel's state is PanelState's, not the store's.
+            ("color_panel_content", r#"{"widget":"cp_h","event":"click"}"#,
+             refusal("PanelNotHosted", "color_panel_content")),
+            ("zz_no_such_panel", LEFT, refusal("MissingTarget", "zz_no_such_panel")),
+            (ALIGN, r#"{"widget":"zz_no_such_widget","event":"click"}"#,
+             refusal("MissingTarget", "zz_no_such_widget")),
+            // A container with an id and no behavior at all.
+            (ALIGN, r#"{"widget":"align_content","event":"click"}"#,
+             refusal("EmptyBehavior", "align_content")),
+            // A widget stamped out by a `foreach`: an id names a template, not
+            // one row, so it is not addressable by id.
+            ("symbols_panel_content", r#"{"widget":"sym_name","event":"click"}"#,
+             refusal("NotAddressable", "sym_name")),
+            (ALIGN, r#"{"event":"click"}"#, refusal("MissingTarget", "")),
+        ];
+        for (panel, event, want) in &cases {
+            let before = doc_json(e);
+            let (reply, err) = behave(e, panel, event);
+            assert_eq!(reply, "", "{panel} {event}");
+            assert_eq!(&err, want, "{panel} {event}");
+            assert_eq!(doc_json(e), before);
+        }
+        let (_, err) = behave(e, ALIGN, "{not json");
+        assert_eq!(err, refusal("BadJson", ""));
+        let bad = [0xff_u8, 0xfe];
+        let reply = take(unsafe {
+            jas_panel_behavior(e, ALIGN.as_ptr(), ALIGN.len(), bad.as_ptr(), bad.len())
+        });
+        assert_eq!(reply, "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("BadUtf8", ""));
+        let reply = take(unsafe {
+            jas_panel_behavior(std::ptr::null_mut(), ALIGN.as_ptr(), ALIGN.len(),
+                               LEFT.as_ptr(), LEFT.len())
+        });
+        assert_eq!(reply, "", "a null handle");
+        // The control: the same engine runs a real click.
+        let (reply, err) = behave(e, ALIGN, LEFT);
+        assert!(reply.contains(r#""doc_changed":true"#), "{reply} {err}");
         unsafe { jas_engine_free(e) };
     }
 }

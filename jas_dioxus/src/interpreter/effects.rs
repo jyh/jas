@@ -102,6 +102,43 @@ pub fn run_effects(
     report
 }
 
+/// A platform's own effects: the keys this runner has no arm for, which a
+/// host application implements (FB wave 2, A6).
+///
+/// This is the Python reference's `platform_effects` argument and Swift's
+/// `platformEffects` map, in one shape. Both references ask the host FIRST,
+/// before any built-in arm, and both offer it bare-string effects (`-
+/// snapshot`) as well as keyed ones. A host that declines a key returns
+/// `false`, and the runner then treats the key as it always has, including
+/// reporting it.
+pub trait EffectHost {
+    /// Run the effect `key` with its argument (`Null` for a bare string), and
+    /// say whether this host implements it.
+    fn run(
+        &mut self,
+        key: &str,
+        arg: &serde_json::Value,
+        store: &mut StateStore,
+        model: Option<&mut Model>,
+    ) -> bool;
+}
+
+/// [`run_effects`] with a platform host asked before every built-in arm, in
+/// this batch and in every batch nested under it.
+pub fn run_effects_hosted(
+    effects: &[serde_json::Value],
+    ctx: &serde_json::Value,
+    store: &mut StateStore,
+    model: Option<&mut Model>,
+    actions: Option<&serde_json::Value>,
+    dialogs: Option<&serde_json::Value>,
+    action_name: Option<&str>,
+    _host: &mut dyn EffectHost,
+) -> EffectsReport {
+    // RED-FIRST STUB: the host is not consulted yet.
+    run_effects(effects, ctx, store, model, actions, dialogs, action_name)
+}
+
 fn run_effects_into(
     effects: &[serde_json::Value],
     ctx: &serde_json::Value,
@@ -12413,5 +12450,150 @@ mod tests {
         // no-list path is driven by the hand-built catalog above.
         assert_eq!(report_of_real_action("set_fill_type_gradient"),
                    vec![Unhandled::EmptyAction("set_fill_type_gradient".into())]);
+    }
+
+    // -----------------------------------------------------------------------
+    // The host: a platform's own effects, asked first (FB wave 2, A6)
+    // -----------------------------------------------------------------------
+    //
+    // `seen` records every key the host was OFFERED, claimed or not, because
+    // "asked first" is a claim about the offer, and a host that is never asked
+    // would pass every arm that only checks what it claimed.
+
+    #[derive(Default)]
+    struct RecordingHost {
+        claims: Vec<&'static str>,
+        seen: Vec<(String, serde_json::Value)>,
+    }
+
+    impl RecordingHost {
+        fn claiming(claims: &[&'static str]) -> Self {
+            RecordingHost { claims: claims.to_vec(), seen: vec![] }
+        }
+        fn seen_keys(&self) -> Vec<&str> {
+            self.seen.iter().map(|(k, _)| k.as_str()).collect()
+        }
+    }
+
+    impl EffectHost for RecordingHost {
+        fn run(
+            &mut self,
+            key: &str,
+            arg: &serde_json::Value,
+            _store: &mut StateStore,
+            _model: Option<&mut Model>,
+        ) -> bool {
+            self.seen.push((key.to_string(), arg.clone()));
+            self.claims.contains(&key)
+        }
+    }
+
+    fn hosted_report(
+        effects: Vec<serde_json::Value>,
+        store: &mut StateStore,
+        actions: Option<&serde_json::Value>,
+        host: &mut RecordingHost,
+    ) -> Vec<Unhandled> {
+        run_effects_hosted(&effects, &serde_json::json!({}), store, None, actions, None,
+                           None, host).unhandled
+    }
+
+    #[test]
+    fn a_host_is_asked_before_the_built_in_arms() {
+        // The host claims a key the runner ALSO implements. Both references
+        // give the host priority, so the built-in `set` must not run.
+        let mut store = StateStore::new();
+        let mut host = RecordingHost::claiming(&["set"]);
+        let report = hosted_report(vec![serde_json::json!({"set": {"x": "5"}})],
+                                   &mut store, None, &mut host);
+        assert_eq!(report, vec![]);
+        assert_eq!(host.seen, vec![("set".to_string(), serde_json::json!({"x": "5"}))]);
+        assert_eq!(store.get("x"), &serde_json::Value::Null, "the built-in set ran anyway");
+    }
+
+    #[test]
+    fn a_host_that_declines_changes_nothing_the_runner_does() {
+        // The negative control for the arm above: a host that claims nothing
+        // is asked about every key, and the store and the report come out
+        // exactly as they do with no host at all.
+        let batch = vec![
+            serde_json::json!("snapshot"),
+            serde_json::json!({"set": {"x": "5"}}),
+            serde_json::json!({"zz_platform": true}),
+        ];
+        let mut plain = StateStore::new();
+        let unhosted = run_effects(&batch, &serde_json::json!({}), &mut plain, None, None,
+                                   None, None).unhandled;
+        let mut store = StateStore::new();
+        let mut host = RecordingHost::claiming(&[]);
+        let report = hosted_report(batch, &mut store, None, &mut host);
+        assert_eq!(report, unhosted);
+        assert_eq!(report, vec![Unhandled::BareString("snapshot".into()),
+                                Unhandled::UnknownEffect("zz_platform".into())]);
+        assert_eq!(store.get("x"), &serde_json::json!(5));
+        assert_eq!(host.seen_keys(), vec!["snapshot", "set", "zz_platform"]);
+    }
+
+    #[test]
+    fn a_host_is_offered_a_bare_string_with_a_null_argument() {
+        let mut store = StateStore::new();
+        let mut host = RecordingHost::claiming(&["snapshot"]);
+        let report = hosted_report(vec![serde_json::json!("snapshot")], &mut store, None,
+                                   &mut host);
+        assert_eq!(report, vec![], "a hosted bare string is not reported");
+        assert_eq!(host.seen, vec![("snapshot".to_string(), serde_json::Value::Null)]);
+    }
+
+    #[test]
+    fn a_host_is_asked_inside_every_nested_batch() {
+        // dispatch → an action; let/in; if/then. A host threaded only through
+        // the top level would see the dispatch and none of the keys under it.
+        let actions = serde_json::json!({
+            "zz_act": {"effects": ["snapshot", {"zz_in_action": true}]},
+        });
+        let batch = vec![
+            serde_json::json!({"dispatch": "zz_act"}),
+            serde_json::json!({"let": {"v": "1"}, "in": [{"zz_in_let": true}]}),
+            serde_json::json!({"if": {"condition": "true", "then": [{"zz_in_if": true}]}}),
+        ];
+        let mut store = StateStore::new();
+        let mut host = RecordingHost::claiming(&["snapshot", "zz_in_action", "zz_in_let",
+                                                 "zz_in_if"]);
+        let report = hosted_report(batch, &mut store, Some(&actions), &mut host);
+        assert_eq!(report, vec![], "a nested key the host implements was reported");
+        let seen = host.seen_keys();
+        for key in ["snapshot", "zz_in_action", "zz_in_let", "zz_in_if"] {
+            assert!(seen.contains(&key), "the host was never asked about {key}: {seen:?}");
+        }
+    }
+
+    /// D11: `align.yaml`'s Align-To toggles dispatch `set_align_to` with
+    /// `params: {target: artboard}`, where `artboard` means the STRING. The web
+    /// renderer's dispatch reads a bare identifier that evaluates to null as its
+    /// own name (`resolve_dispatch_params`), and so does Swift's runner. This
+    /// runner evaluated it to null, so an engine click would have set the
+    /// mode to null.
+    #[test]
+    fn a_dispatch_param_that_is_a_bare_identifier_is_its_own_name() {
+        let actions = serde_json::json!({
+            "zz_take": {"effects": [{"set": {
+                "got": "param.target", "dotted": "param.dotted", "known": "param.known",
+            }}]},
+        });
+        let mut store = StateStore::new();
+        store.set("five", serde_json::json!(5));
+        let report = run_effects(
+            &[serde_json::json!({"dispatch": {"action": "zz_take", "params": {
+                "target": "artboard",
+                // Not bare: a null from a PATH stays null, as the web's rule has it.
+                "dotted": "state.zz_absent",
+                // A path that resolves keeps its value.
+                "known": "state.five",
+            }}})],
+            &serde_json::json!({}), &mut store, None, Some(&actions), None, None);
+        assert!(report.all_handled(), "{report:?}");
+        assert_eq!(store.get("got"), &serde_json::json!("artboard"));
+        assert_eq!(store.get("dotted"), &serde_json::Value::Null);
+        assert_eq!(store.get("known"), &serde_json::json!(5));
     }
 }
