@@ -83,6 +83,10 @@ FORBIDDEN = [
 # not "tidy" it into the forbidden list.
 PRESERVED = "Co-Authored-By"
 
+# What a finding prints in place of the matched text. A CI log on a public
+# repository is public (desk PX).
+WITHHELD = "matched text withheld: this log is public"
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -518,15 +522,27 @@ def _verdict_arm() -> tuple[list[str], int]:
             if rc != code:
                 findings.append(f"arm 7, {name}: exit {rc}, want {code}")
             check(name, said, code == 0)
-            # 8. A FINDING NAMES ITS SITE AND WITHHOLDS ITS TEXT (desk PX). The
-            #    site is the sha or the path; the text is what matched.
+            # 8. A FINDING GIVES ITS SITE AND LINE AND NEVER ITS TEXT (desk PX).
+            #    The site is the sha or the path, and the text is what matched.
             if secret in said:
                 findings.append(f"arm 8, {name}: the matched text reached the output")
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
                                   text=True, encoding="utf-8", check=True).stdout.strip()
-            site = {"a trailer in a message": head[:12], "a URL in a file": "a.txt"}.get(name)
-            if site is not None and f"  {site}  " not in said:
-                findings.append(f"arm 8, {name}: the finding does not name its site {site}")
+            where = {"a trailer in a message": (head[:12], 3), "a URL in a file": ("a.txt", 1)}
+            if name in where:
+                site, lineno = where[name]
+                if f"  {site}  " not in said:
+                    findings.append(f"arm 8, {name}: the finding does not name its site {site}")
+                if f"(line {lineno}; {WITHHELD})" not in said:
+                    findings.append(f"arm 8, {name}: the finding does not give line {lineno}")
+    # ...and the scan itself: its third field is a line number, and no field
+    # carries the text (a caller that never receives it cannot print it).
+    rows = scan([("w", f"subject\n\n{_SESSION_KEY}: {url}\n")])
+    if len(rows) != 2 or any(r[2] != 3 for r in rows):
+        findings.append(f"arm 8: scan must return line 3 for both findings, got "
+                     f"{[r[2] if isinstance(r[2], int) else type(r[2]).__name__ for r in rows]}")
+    if any(secret in str(field) for r in rows for field in r):
+        findings.append("arm 8: scan returned the matched text")
     # The self-test's own summary cannot be driven by running the self-test
     # inside itself, so its formatter is driven directly, both ways. What that
     # leaves unwitnessed, and is recorded rather than faked: self_test() not
