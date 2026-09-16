@@ -1531,21 +1531,7 @@ fn set_app_state_field(
 /// `null` for an absent path, and passes through arrays for
 /// plain-list paths.
 fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document::ElementPath> {
-    if val.is_null() {
-        return None;
-    }
-    let arr = if let Some(obj) = val.as_object() {
-        obj.get("__path__")?.as_array()?
-    } else if let Some(a) = val.as_array() {
-        a
-    } else {
-        return None;
-    };
-    let path: Vec<usize> = arr
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as usize))
-        .collect();
-    Some(path)
+    super::align_host::path_value(val)
 }
 
 /// As `apply_set_panel_state` but threads the action's eval ctx so

@@ -1225,13 +1225,9 @@ pub(crate) struct AlignPanelState {
     pub use_preview_bounds: bool,
 }
 
-/// Align-To target mode. See ALIGN.md §Align To target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AlignTo {
-    Selection,
-    Artboard,
-    KeyObject,
-}
+/// Align-To target mode. Defined beside the web-free align host, which the
+/// native engine shares; re-exported here for the web panel state.
+pub(crate) use crate::interpreter::align_host::AlignTo;
 
 impl Default for AlignPanelState {
     fn default() -> Self {
@@ -1355,25 +1351,6 @@ impl Default for SwatchesPanelState {
             open_libraries: serde_json::json!([
                 {"id": "web_colors", "collapsed": false}
             ]),
-        }
-    }
-}
-
-impl AlignTo {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AlignTo::Selection => "selection",
-            AlignTo::Artboard => "artboard",
-            AlignTo::KeyObject => "key_object",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "selection" => Some(AlignTo::Selection),
-            "artboard" => Some(AlignTo::Artboard),
-            "key_object" => Some(AlignTo::KeyObject),
-            _ => None,
         }
     }
 }
@@ -2810,154 +2787,24 @@ impl AppState {
         }
     }
 
-    /// Execute one of the 14 Align panel operations by name. The
-    /// operation reads the current selection, builds an
-    /// [`crate::algorithms::align::AlignReference`] from
-    /// `self.align_panel`, calls the algorithm, and applies the
-    /// resulting translations to each moved element's transform.
+    /// Execute one of the 14 Align panel operations by name, on the active
+    /// tab's model. The work is `interpreter::align_host`'s, which the native
+    /// engine shares; this hands it `self.align_panel` and the Artboards
+    /// panel's selection.
     ///
-    /// Zero-delta outputs are discarded, so idempotent clicks
-    /// don't touch the document. A snapshot must have been taken
-    /// before this call (the yaml-emitted `snapshot` effect runs
-    /// first, producing a single undoable transaction per button
-    /// press per ALIGN.md §Undo semantics).
+    /// The yaml-emitted `snapshot` effect runs first in production, so a
+    /// button press is a single undoable transaction (ALIGN.md §Undo
+    /// semantics).
     pub(crate) fn apply_align_operation(&mut self, op: &str) {
-        use crate::algorithms::align as aa;
-
-        // Gather (path, &Element) pairs from the current selection.
-        let Some(tab) = self.tabs.get(self.active_tab) else { return; };
-        let doc = tab.model.document();
-        let mut elements: Vec<(crate::document::document::ElementPath, &crate::geometry::element::Element)> = Vec::new();
-        for es in &doc.selection {
-            if let Some(e) = doc.get_element(&es.path) {
-                elements.push((es.path.clone(), e));
-            }
-        }
-        if elements.len() < 2 {
-            return;
-        }
-
-        // Pick the LEAF measurement per Use Preview Bounds, then wrap it so the
-        // three kinds whose geometry lives behind an id resolve (RESOLVEDALIGN).
-        // Both modes were affected: `preview_bounds` and `geometric_bounds` are
-        // each resolver-less, so an instance measured as a zero box at the
-        // origin whichever way the flag was set.
-        let leaf: fn(&crate::geometry::element::Element) -> crate::geometry::element::Bounds =
-            if self.align_panel.use_preview_bounds {
-                crate::geometry::element::Element::bounds
-            } else {
-                crate::geometry::element::Element::geometric_bounds
-            };
-        let resolver = crate::document::id_index::IndexResolver(tab.model.id_index());
-        let bounds_fn_body = |e: &crate::geometry::element::Element| {
-            aa::resolved_bounds(e, &resolver, leaf)
+        let input = crate::interpreter::align_host::AlignInput {
+            align_to: self.align_panel.align_to,
+            key_object_path: self.align_panel.key_object_path.clone(),
+            distribute_spacing: self.align_panel.distribute_spacing,
+            use_preview_bounds: self.align_panel.use_preview_bounds,
+            artboard_selection: self.artboards_panel_selection.clone(),
         };
-        let bounds_fn: aa::BoundsFn = &bounds_fn_body;
-
-        // Build reference from panel state.
-        let reference = match self.align_panel.align_to {
-            AlignTo::Selection => {
-                let refs: Vec<&crate::geometry::element::Element> =
-                    elements.iter().map(|(_, e)| *e).collect();
-                aa::AlignReference::Selection(aa::union_bounds(&refs, bounds_fn))
-            }
-            AlignTo::Artboard => {
-                // ARTBOARDS.md §Selection semantics — current =
-                // topmost panel-selected artboard, else first. The
-                // at-least-one invariant guarantees artboards[0]
-                // exists; if it somehow doesn't, fall back to the
-                // selection union so the op still moves elements.
-                let current_ab = crate::document::artboard::current_artboard(
-                    &doc.artboards,
-                    &self.artboards_panel_selection,
-                );
-                if let Some(ab) = current_ab {
-                    aa::AlignReference::Artboard((ab.x, ab.y, ab.width, ab.height))
-                } else {
-                    let refs: Vec<&crate::geometry::element::Element> =
-                        elements.iter().map(|(_, e)| *e).collect();
-                    aa::AlignReference::Artboard(aa::union_bounds(&refs, bounds_fn))
-                }
-            }
-            AlignTo::KeyObject => {
-                let Some(key_path) = self.align_panel.key_object_path.clone() else {
-                    return;
-                };
-                let Some(key_elem) = doc.get_element(&key_path) else {
-                    return;
-                };
-                aa::AlignReference::KeyObject {
-                    bbox: bounds_fn(key_elem),
-                    path: key_path,
-                }
-            }
-        };
-
-        // Dispatch to the algorithm.
-        let translations: Vec<aa::AlignTranslation> = match op {
-            "align_left" => aa::align_left(&elements, &reference, bounds_fn),
-            "align_horizontal_center" => aa::align_horizontal_center(&elements, &reference, bounds_fn),
-            "align_right" => aa::align_right(&elements, &reference, bounds_fn),
-            "align_top" => aa::align_top(&elements, &reference, bounds_fn),
-            "align_vertical_center" => aa::align_vertical_center(&elements, &reference, bounds_fn),
-            "align_bottom" => aa::align_bottom(&elements, &reference, bounds_fn),
-            "distribute_left" => aa::distribute_left(&elements, &reference, bounds_fn),
-            "distribute_horizontal_center" => aa::distribute_horizontal_center(&elements, &reference, bounds_fn),
-            "distribute_right" => aa::distribute_right(&elements, &reference, bounds_fn),
-            "distribute_top" => aa::distribute_top(&elements, &reference, bounds_fn),
-            "distribute_vertical_center" => aa::distribute_vertical_center(&elements, &reference, bounds_fn),
-            "distribute_bottom" => aa::distribute_bottom(&elements, &reference, bounds_fn),
-            "distribute_vertical_spacing" => {
-                let explicit = self.align_panel_explicit_gap();
-                aa::distribute_vertical_spacing(&elements, &reference, explicit, bounds_fn)
-            }
-            "distribute_horizontal_spacing" => {
-                let explicit = self.align_panel_explicit_gap();
-                aa::distribute_horizontal_spacing(&elements, &reference, explicit, bounds_fn)
-            }
-            _ => return,
-        };
-
-        if translations.is_empty() {
-            return;
-        }
-
-        // Apply translations: clone the document once, mutate each
-        // Translate each element by baking dx/dy into its
-        // coordinates (translate_element). Stuffing the offset into
-        // common().transform produces a visual move but leaves the
-        // element's own coords — and therefore bounds() and
-        // hit_test — at the original position, so subsequent clicks
-        // and the selection overlay disagree with the rendered
-        // element. The bake keeps coords, bounds, hit-test, and
-        // overlay in lockstep.
-        let tab = self.tabs.get_mut(self.active_tab).unwrap();
-        let mut new_doc = tab.model.document().clone();
-        for t in &translations {
-            if let Some(elem) = new_doc.get_element_mut(&t.path) {
-                let translated = crate::geometry::element::translate_element(
-                    elem, t.dx, t.dy,
-                );
-                *elem = translated;
-            }
-        }
-        // Self-bracketing (OP_LOG.md Increment 1): a direct call (tests) opens
-        // and commits its own undo step; in production the align YAML action's
-        // `snapshot` effect already opened the txn, so this joins it.
-        tab.model.edit_document(new_doc);
-    }
-
-    /// Distribute Spacing explicit gap: `Some(gap)` when the panel
-    /// is in Key Object mode with a designated key, else `None`
-    /// (average mode). See ALIGN.md §Distribute Spacing.
-    fn align_panel_explicit_gap(&self) -> Option<f64> {
-        if self.align_panel.align_to == AlignTo::KeyObject
-            && self.align_panel.key_object_path.is_some()
-        {
-            Some(self.align_panel.distribute_spacing)
-        } else {
-            None
-        }
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else { return; };
+        crate::interpreter::align_host::apply_align_operation(&mut tab.model, op, &input);
     }
 
     /// Canvas-click intercept for key-object designation. Per
