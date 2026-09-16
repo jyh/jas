@@ -15,21 +15,52 @@ that stops listing `Tests/`, a `swift-testing` version whose macro stops
 expanding, and the job stays green having measured nothing. The suite is 3040
 tests; it could silently become 12 and this lane would still be green.
 
+WHERE EACH FACT IS READ FROM -- AND WHY THE PER-TEST FACTS ARE NOT THE CONSOLE'S
+------------------------------------------------------------------------------
+The per-test facts come from the xUnit RECORD swift-testing writes itself
+(`swift test --xunit-output <base>.xml` writes `<base>-swift-testing.xml`),
+never from the console.
+
+⛔ MEASURED ON THIS WORKFLOW'S OWN `main` (run 34882025346, 2026-09-14, the
+merge that introduced this gate): the console carried 3040 `started` lines and
+2880 verdict lines, while swift-testing's own summary said all 3040 PASSED --
+and one surviving line read `actionWithNoParamBlocNamesAtEveryDepth`, two test
+names spliced mid-word. The console reaches the log through SwiftPM's relay of
+the test helper's output, and the relay DROPPED CHUNKS OF BYTES. The same tree
+was green on its PR run and on the next push. A gate that reads that channel
+line by line reds AT RANDOM on a healthy suite, with a list of NOT REPORTED
+names that reads exactly like a finding about the suite. The record is a
+regular file written by the test process, so nothing sits between the verdicts
+and this reader.
+
+The console is read for ONE line: XCTest's `Executed N tests`, which SwiftPM
+prints before swift-testing starts. The workflow also sends the console to a
+FILE rather than a pipe, so the relay has no back-pressure to drop bytes under.
+(Why a pipe drops bytes is INFERRED, not measured: a relay that ignores a
+failed or short write. The loss itself is measured, and it is what matters.)
+
 WHAT IT ASSERTS
 ---------------
-(a) THE RUN SUMMARY EXISTS. `swift test` must have printed its own
-    `Test run with N tests in M suites ...` line. A log with no summary is a
-    run that did not finish, and it REFUSES rather than reporting anything.
-(b) THE TOTAL IS THE SOURCE'S OWN. N above must equal the number of `@Test`
-    declarations the Swift sources under `JasSwift/Tests/` carry. There is NO
-    constant here and no floor to bump: both sides are derived on every run,
-    which is the rule this workflow already adopted in writing for the wasm and
-    title-oracle lanes.
-(c) EVERY DECLARED TEST IS REPORTED, BY NAME AND BY MULTIPLICITY. Names repeat
+(a) THE RECORD EXISTS AND PARSES, in the one shape measured: a `testsuites`
+    root holding exactly one `testsuite`. swift-testing writes it when the run
+    ends, so a missing or cut-off record is a run that did not finish, and it
+    REFUSES rather than reporting anything.
+(b) THE TOTAL IS THE SOURCE'S OWN. The number of `testcase` records must equal
+    the number of `@Test` declarations the Swift sources under
+    `JasSwift/Tests/` carry. There is NO constant here and no floor to bump:
+    both sides are derived on every run, which is the rule this workflow
+    already adopted in writing for the wasm and title-oracle lanes.
+    ⛔ The records are COUNTED; the suite's `tests` attribute is not read. It
+    EXCLUDES skipped cases -- measured: `tests="3039"`, `skipped="1"`, and 3040
+    records -- so reading it would put a skip on the COUNT axis.
+(c) EVERY DECLARED TEST IS RECORDED, BY NAME AND BY MULTIPLICITY. Names repeat
     across suites, so a set would collapse three real executions of a shared
     name into one. The comparison is a MULTISET: a name declared three times
-    must be reported three times. This is the half that says WHICH test stopped
+    must be recorded three times. This is the half that says WHICH test stopped
     running instead of only that the count moved.
+    The record names a case by its FUNCTION -- `name="foo()"` -- even when
+    `@Test("...")` gives it a display name (measured: all seven display-named
+    cases in this tree). A record name of any other shape REFUSES, naming it.
 (d) THE XCTEST SIDE AGREES TOO. SwiftPM prints its own `Executed N tests` line
     for the XCTest bundle. This repository's Swift tests are all swift-testing
     (`import XCTest` appears in zero test files) so both sides are currently 0 --
@@ -42,10 +73,12 @@ WHAT IT DOES NOT COVER -- AND THERE IS NOTHING MISSING FROM THIS LIST
 * Whether the tests PASS. `swift test`'s own exit status is that oracle, and
   this gate reads a log it is handed; duplicating the verdict here would give
   the lane two answers that can disagree.
-* The SUITE count. `Test run with ... in M suites` counts implicit suites --
-  any type holding a `@Test` -- which the source does not declare, so M has no
-  derived counterpart. Asserting it would need a constant, which is the defect
-  this file exists to avoid.
+* The SUITE a case belongs to. Each record carries a `classname`, but the
+  census does not model enclosing types, so names are compared bare, as a
+  multiset -- which is exactly as strong as the census.
+* The console's per-test lines, for the reason above. A console log missing
+  verdicts is NOT a finding here, and a person reading that console must not
+  treat its gaps as one either: they are the relay's, not the suite's.
 * A test DELETED from the source. Both sides move together and the agreement is
   real. `check_rust_suite_ran.py` names the same limit in its own PASS line; a
   green here is never "the suite is as large as it was."
@@ -64,36 +97,22 @@ from __future__ import annotations
 
 import argparse
 import collections
-import io
 import pathlib
 import re
 import sys
 import tempfile
+import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 TESTS = ROOT / "JasSwift" / "Tests"
 
-# The run summary swift-testing prints last. The glyph in front of it varies
-# with the terminal and with the presence of known issues, so it is not part of
-# the pattern.
-_RUN_SUMMARY = re.compile(r"Test run with (\d+) tests? in (\d+) suites?")
-# A per-test line that carries a TERMINAL verdict. `... started.` lines are
-# deliberately not matched: a test that starts and never ends must not count as
-# reported, which is the whole failure mode a hung case produces.
-# ⛔ TWO SPELLINGS, BECAUSE SWIFT-TESTING REPORTS THE DISPLAY NAME WHEN THE
-# DECLARATION GIVES ONE. `@Test("the shared field-scoped apply corpus")` is
-# reported as `Test "the shared field-scoped apply corpus" passed`, with the
-# function name appearing NOWHERE. This gate's first run against the real log
-# named six such cases as NOT REPORTED -- every one of them a defect in the
-# gate, not in the suite, and all six of them green in the run. A new gate's
-# first red is a claim about the gate.
-_TEST_RESULT = re.compile(
-    r"\bTest\s+(?:([A-Za-z_][A-Za-z0-9_]*)\([^)]*\)|\"((?:[^\"\\\\]|\\\\.)*)\")"
-    r"\s+(?:passed|failed|skipped)\b")
-# The display name a declaration supplies, which is a STRING LITERAL as the
-# first argument. `@Test(.disabled("..."))` supplies none: its first argument is
-# a trait, and the quoted text inside it is the trait's comment.
-_DISPLAY = re.compile(r'@Test\(\s*"((?:[^"\\]|\\.)*)"')
+# A record's case name. Only `function()` is modelled: swift-testing records a
+# case by its function even when the declaration gives a display name, and the
+# parenthesis list is empty because a parameterized declaration REFUSES in the
+# census first. Anything else in a record REFUSES, naming what it found -- the
+# rule the display-name spelling taught this gate when it still read the
+# console, where `@Test("a name")` is reported by the display name ALONE.
+_CASE_NAME = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\(\)")
 # SwiftPM's XCTest bundle summary.
 _XCTEST_TOTAL = re.compile(r"Executed (\d+) tests?,")
 
@@ -224,16 +243,11 @@ def declared_tests(tests_dir: pathlib.Path) -> list[tuple[str, int, str]]:
         raise Refusal(f"no Swift sources under {tests_dir}")
     for f in files:
         rel = _cite(f, tests_dir)
-        raw = f.read_text(encoding="utf-8")
-        # ⛔ TWO VIEWS OF THE SAME FILE, AND THE DISPLAY NAME COMES FROM THE RAW
-        # ONE. The stripper blanks string CONTENTS, so reading the display name
-        # off the stripped line yields a run of spaces -- which is what the
-        # second live run reported, as six blank names and six UNDECLARED
-        # partners. The stripped view decides WHETHER a line is a declaration;
-        # the raw view supplies what it SAYS. Line numbers are preserved by the
-        # stripper precisely so the two can be indexed together.
-        lines = _strip_comments(raw).splitlines()
-        raw_lines = raw.splitlines()
+        # The FUNCTION name is the declared name, display name or not: it is
+        # what the xUnit record carries. (When this gate read the console it
+        # needed the display name as well, off the RAW line -- the stripper
+        # blanks string contents -- and paid for both halves of that twice.)
+        lines = _strip_comments(f.read_text(encoding="utf-8")).splitlines()
         for i, line in enumerate(lines):
             stripped = line.lstrip()
             if stripped.startswith("#if") or stripped.startswith("#elseif"):
@@ -258,8 +272,7 @@ def declared_tests(tests_dir: pathlib.Path) -> list[tuple[str, int, str]]:
                 raise Refusal(
                     f"{rel}:{i + 1} carries @Test with no `func` within eight "
                     "lines. The declaration cannot be resolved to a name.")
-            shown = _DISPLAY.search(raw_lines[i] if i < len(raw_lines) else "")
-            found.append((rel, i + 1, shown.group(1) if shown else name))
+            found.append((rel, i + 1, name))
     return found
 
 
@@ -284,6 +297,14 @@ def declared_xctest(tests_dir: pathlib.Path) -> list[tuple[str, int, str]]:
     return found
 
 
+def _ascii(name: str) -> str:
+    # ⛔ ASCII ON EVERY OUTPUT PATH. A name is free text and these gates run on
+    # a Windows console whose encoding is cp1252; a sibling gate raised
+    # UnicodeEncodeError on its SUCCESS path once, after every check had
+    # passed, and the red read as a finding about the subject.
+    return name.encode("ascii", "backslashreplace").decode("ascii")
+
+
 def read_log(path: pathlib.Path) -> str:
     # Explicit UTF-8: the log carries swift-testing's result glyphs, and a
     # locale-dependent read would raise on them. Nothing from the log is ever
@@ -291,23 +312,42 @@ def read_log(path: pathlib.Path) -> str:
     return _ANSI.sub("", path.read_text(encoding="utf-8", errors="replace"))
 
 
-def reported(log: str) -> collections.Counter:
-    return collections.Counter(m.group(1) or m.group(2)
-                               for m in _TEST_RESULT.finditer(log))
+def read_xunit(path: pathlib.Path) -> list[str]:
+    """The function name of every case the record holds, one entry per record.
 
-
-def run_summary(log: str) -> tuple[int, int]:
-    hits = _RUN_SUMMARY.findall(log)
-    if not hits:
+    REFUSES -- never returns a short list -- when the record is missing, cut
+    off, of a shape not measured, or names a case in a form not modelled. Each
+    of those is a fact about the RUN or about this reader, and a short list
+    would report it as a finding about the suite.
+    """
+    if not path.is_file():
         raise Refusal(
-            "the log carries no `Test run with N tests in M suites` summary. "
-            "swift-testing prints that line last, so a log without it is a run "
-            "that did not finish -- not a run that found nothing.")
-    if len(hits) > 1:
+            f"no xUnit record at {_ascii(path.as_posix())}. swift-testing writes "
+            "it when the run ends, so its absence is a run that did not finish "
+            "(or `swift test` was not given --xunit-output) -- not a run that "
+            "found nothing.")
+    try:
+        root = ET.parse(path).getroot()
+    except ET.ParseError as e:
         raise Refusal(
-            f"the log carries {len(hits)} run summaries. This gate reads one "
-            "run; two mean two invocations, whose counts cannot be attributed.")
-    return int(hits[0][0]), int(hits[0][1])
+            f"the xUnit record does not parse ({_ascii(str(e))}). A record cut "
+            "off mid-write is a run that did not finish.")
+    suites = root.findall("testsuite")
+    if root.tag != "testsuites" or len(suites) != 1:
+        raise Refusal(
+            f"the xUnit record is a <{_ascii(root.tag)}> holding {len(suites)} "
+            "<testsuite>. The one shape measured is <testsuites> holding exactly "
+            "one; any other is a toolchain this reader has not been shown.")
+    names: list[str] = []
+    for case in suites[0].iter("testcase"):
+        raw = case.get("name", "")
+        m = _CASE_NAME.fullmatch(raw)
+        if not m:
+            raise Refusal(
+                f"the xUnit record names a case {_ascii(raw)!r}, which is not "
+                "`function()`. This reader does not model that spelling.")
+        names.append(m.group(1))
+    return names
 
 
 def xctest_total(log: str) -> int:
@@ -321,41 +361,38 @@ def xctest_total(log: str) -> int:
 
 
 def check(log_text: str,
+          recorded: list[str],
           decl: list[tuple[str, int, str]],
           xc: list[tuple[str, int, str]]) -> list[str]:
-    """Every failure found, as printable ASCII lines. Empty means clean."""
+    """Every failure found, as printable ASCII lines. Empty means clean.
+
+    `recorded` is `read_xunit`'s answer; `log_text` is read for the XCTest line
+    ALONE, and nothing else in it can move the verdict.
+    """
     bad: list[str] = []
-    total, suites = run_summary(log_text)
 
     if not decl:
         bad.append("ANTI-VACUITY: the sources declare zero @Test cases. A gate "
                    "comparing 0 to 0 is not a gate.")
-    if total != len(decl):
-        bad.append(f"COUNT: the sources declare {len(decl)} @Test cases; the run "
-                   f"reports {total}. {abs(total - len(decl))} case(s) differ.")
+    if len(recorded) != len(decl):
+        bad.append(f"COUNT: the sources declare {len(decl)} @Test cases; the "
+                   f"xUnit record holds {len(recorded)}. "
+                   f"{abs(len(recorded) - len(decl))} case(s) differ.")
 
-    seen = reported(log_text)
+    seen = collections.Counter(recorded)
     want = collections.Counter(name for _, _, name in decl)
-    def show(name: str) -> str:
-        # ⛔ ASCII ON EVERY OUTPUT PATH. A test's display name is free text and
-        # these gates are run on a Windows console whose encoding is cp1252; a
-        # sibling gate raised UnicodeEncodeError on its SUCCESS path once, after
-        # every check had passed, and the red read as a finding about the
-        # subject. Escaping here keeps the diagnosis printable everywhere.
-        return name.encode("ascii", "backslashreplace").decode("ascii")
-
     where = {}
     for rel, line, name in decl:
         where.setdefault(name, f"{rel}:{line}")
     for name in sorted(want):
         if seen[name] < want[name]:
-            bad.append(f"NOT REPORTED: {show(name)} is declared {want[name]} time(s) "
-                       f"(first at {where[name]}) and reported {seen[name]} "
-                       "time(s) with a terminal verdict.")
+            bad.append(f"NOT RECORDED: {_ascii(name)} is declared {want[name]} "
+                       f"time(s) (first at {where[name]}) and recorded "
+                       f"{seen[name]} time(s) in the xUnit record.")
     for name in sorted(seen):
         if name not in want:
-            bad.append(f"UNDECLARED: the run reports {show(name)}, which no @Test "
-                       "declaration in the sources names.")
+            bad.append(f"UNDECLARED: the xUnit record names {_ascii(name)}, which "
+                       "no @Test declaration in the sources names.")
 
     xc_ran = xctest_total(log_text)
     if xc_ran != len(xc):
@@ -368,15 +405,31 @@ def check(log_text: str,
 # SELF-TEST
 # --------------------------------------------------------------------------
 
+# The console fixture carries NO per-test line at all. That is deliberate and
+# it is the point: nothing in the console but the XCTest line may move the
+# verdict, so the clean pairing below is only clean if the per-test lines are
+# ignored. The summary line stays so the fixture still looks like a run.
 _LOG_OK = (
     "Building for debugging...\n"
-    "\u25c7 Test alpha() started.\n"
-    "\u2714 Test alpha() passed after 0.001 seconds.\n"
-    "\u2714 Test beta() passed after 0.002 seconds.\n"
-    "\u2714 Test beta() passed after 0.002 seconds.\n"
-    "\u279c Test gamma() skipped: \"not yet\"\n"
     "\t Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.002) seconds\n"
-    "\u2501 Test run with 4 tests in 2 suites passed after 1.0 seconds.\n")
+    "━ Test run with 4 tests in 2 suites passed after 1.0 seconds.\n")
+
+# THE RECORD, each line copied from the shape the real one carries -- a
+# classname qualified by its suite, a skipped case with NO `time` attribute, a
+# space before its `>`, and its reason as element text -- and the `tests`
+# attribute EXCLUDING the skip, as the real one does (3 here, beside 4 records).
+_XU_HEAD = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<testsuites>\n'
+            '  <testsuite name="TestResults" errors="0" tests="3" failures="0" '
+            'skipped="1" time="1.0">\n')
+_XU_ALPHA = '    <testcase classname="Mod.A" name="alpha()" time="0.1" />\n'
+_XU_BETA_A = '    <testcase classname="Mod.A" name="beta()" time="0.1" />\n'
+_XU_BETA_B = '    <testcase classname="Mod.B" name="beta()" time="0.1" />\n'
+_XU_GAMMA = ('    <testcase classname="Mod.B" name="gamma()" >\n'
+             '      <skipped>not yet</skipped>\n'
+             '    </testcase>\n')
+_XU_TAIL = '  </testsuite>\n</testsuites>\n'
+_XU_OK = _XU_HEAD + _XU_ALPHA + _XU_BETA_A + _XU_BETA_B + _XU_GAMMA + _XU_TAIL
 
 _SRC_OK = '''import Testing
 
@@ -405,11 +458,12 @@ struct C {
 }
 '''
 
-_LOG_NAMED = (
-    "\u2714 Test \"a named case\" passed after 0.1 seconds.\n"
-    "\u279c Test traitOnly() skipped: \"a trait comment, not a display name\"\n"
-    "\t Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds\n"
-    "\u2501 Test run with 2 tests in 1 suites passed after 0.2 seconds.\n")
+_XU_NAMED = (_XU_HEAD
+             + '    <testcase classname="Mod.C" name="namedCase()" time="0.1" />\n'
+             + '    <testcase classname="Mod.C" name="traitOnly()" >\n'
+             + '      <skipped>a trait comment, not a display name</skipped>\n'
+             + '    </testcase>\n'
+             + _XU_TAIL)
 
 _SRC_SLASHSTAR = '''import Testing
 // The shared test_fixtures/operations/* fixtures are replayed here.
@@ -467,82 +521,121 @@ def self_test() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = pathlib.Path(td)
 
+        def record(text: str) -> list[str]:
+            # Every record goes through read_xunit from a FILE, which is the
+            # path production takes; no arm hands check() a hand-built list.
+            return read_xunit(_write(tmp, "record.xml", text))
+
         # 1. THE CLEAN CASE, FIRST -- and it is not a formality. Every red arm
         #    below is only meaningful if this exact pairing is green.
         _write(tmp, "AB.swift", _SRC_OK)
         decl = declared_tests(tmp)
         arm("the clean source must declare four cases", len(decl) == 4)
-        arm("the clean pairing must be clean", check(_LOG_OK, decl, []) == [])
+        ok = record(_XU_OK)
+        arm("the clean record must hold four cases in order",
+            ok == ["alpha", "beta", "beta", "gamma"])
+        arm("the clean pairing must be clean", check(_LOG_OK, ok, decl, []) == [])
 
         # 2. THE MULTISET, WHICH A SET WOULD COLLAPSE. `beta` is declared twice
-        #    in two suites. A log reporting it ONCE has the right NAMES and the
+        #    in two suites. A record holding it ONCE has the right NAMES and the
         #    wrong suite -- the exact shape a-set-collapses-colliding-executions
         #    describes, and the reason the comparison is not `set(...)`.
-        one_beta = _LOG_OK.replace("\u2714 Test beta() passed after 0.002 seconds.\n", "", 1)
-        one_beta = one_beta.replace("with 4 tests", "with 3 tests")
-        found = check(one_beta, decl, [])
-        arm("one beta short must be caught", any("NOT REPORTED: beta" in f for f in found))
+        found = check(_LOG_OK, record(_XU_OK.replace(_XU_BETA_B, "", 1)), decl, [])
+        arm("one beta short must be caught", any("NOT RECORDED: beta" in f for f in found))
         arm("...and named with its multiplicity",
-            any("declared 2 time(s)" in f and "reported 1 time(s)" in f for f in found))
+            any("declared 2 time(s)" in f and "recorded 1 time(s)" in f for f in found))
 
-        # 3. A SUITE THAT STOPS REGISTERING. The run line and the reports agree
-        #    with each other and disagree with the SOURCE -- which is the whole
-        #    reason both sides are derived rather than one read back from the
-        #    other.
-        gone = ("Building for debugging...\n"
-                "\u2714 Test alpha() passed after 0.001 seconds.\n"
-                "\u2714 Test beta() passed after 0.002 seconds.\n"
-                "\t Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds\n"
-                "\u2501 Test run with 2 tests in 1 suites passed after 1.0 seconds.\n")
-        found = check(gone, decl, [])
+        # 3. A SUITE THAT STOPS REGISTERING. The record agrees with itself and
+        #    disagrees with the SOURCE -- which is the whole reason both sides
+        #    are derived rather than one read back from the other.
+        gone = _XU_HEAD + _XU_ALPHA + _XU_BETA_A + _XU_TAIL
+        found = check(_LOG_OK, record(gone), decl, [])
         arm("a vanished suite must be caught by COUNT",
-            any(f.startswith("COUNT:") and "declare 4" in f and "reports 2" in f
+            any(f.startswith("COUNT:") and "declare 4" in f and "holds 2" in f
                 for f in found))
-        arm("...and by name, for gamma", any("NOT REPORTED: gamma" in f for f in found))
+        arm("...and by name, for gamma", any("NOT RECORDED: gamma" in f for f in found))
 
         # 4. ZERO TESTS, THE FAILURE THIS FILE EXISTS FOR. `swift test` exits 0.
-        empty = ("Building for debugging...\n"
-                 "\t Executed 0 tests, with 0 failures (0 unexpected) in 0.0 (0.0) seconds\n"
-                 "\u2501 Test run with 0 tests in 0 suites passed after 0.1 seconds.\n")
         arm("a zero-test run must be caught",
-            any(f.startswith("COUNT:") for f in check(empty, decl, [])))
+            any(f.startswith("COUNT:")
+                for f in check(_LOG_OK, record(_XU_HEAD + _XU_TAIL), decl, [])))
 
-        # 5. A STARTED TEST THAT NEVER ENDS IS NOT A REPORTED TEST.
-        hung = _LOG_OK.replace("\u2714 Test alpha() passed after 0.001 seconds.\n", "")
-        hung = hung.replace("with 4 tests", "with 3 tests")
-        arm("a started-but-never-finished test must not count as reported",
-            any("NOT REPORTED: alpha" in f for f in check(hung, decl, [])))
+        # 5. ⭐ THE LOSSY CONSOLE -- THE ARM THIS READER EXISTS FOR. `main` went
+        #    red on a healthy suite because the console lost verdict lines in
+        #    CHUNKS, one of them splicing two names into a third. A console
+        #    carrying every per-test line, one carrying none, and one carrying
+        #    only a spliced ghost must all read the SAME as the clean pairing.
+        #    ⛔ Each variant asserts it mutated before its verdict is trusted.
+        full = (_LOG_OK
+                + "✔ Test alpha() passed after 0.001 seconds.\n"
+                + "✔ Test beta() passed after 0.002 seconds.\n")
+        spliced = _LOG_OK + "✔ Test alphBetaGhost() passed after 1.9 seconds.\n"
+        arm("the full-console fixture must carry per-test lines",
+            "Test alpha()" in full and "Test alpha()" not in _LOG_OK)
+        arm("the spliced-console fixture must carry the ghost",
+            "alphBetaGhost" in spliced)
+        for label, text in (("a console with every verdict", full),
+                            ("a console with none", _LOG_OK),
+                            ("a console with a spliced ghost", spliced)):
+            arm(f"{label} must not move the verdict",
+                check(text, ok, decl, []) == [])
 
-        # 6. NO RUN SUMMARY AT ALL -- REFUSE, never report a finding about the
-        #    suite. A truncated log is a fact about the log.
-        #    ⛔ ONE VARIABLE. The first cut of this arm passed a log with no
-        #    XCTest line either, so a mutant that made the missing summary
-        #    return zeros still "refused" -- from the OTHER check. The fixture
-        #    below is the clean log with its summary line removed and nothing
-        #    else changed.
-        no_summary = "".join(l + "\n" for l in _LOG_OK.splitlines()
-                             if "Test run with" not in l)
-        arm("the no-summary fixture must still carry its XCTest line",
-            "Executed 0 tests" in no_summary)
+        # 6. THE RECORD REFUSES WHAT IT CANNOT READ, and says why. Each of these
+        #    is a fact about the RUN or the reader; a short list would report it
+        #    as a finding about the suite.
+        for label, text, needle in (
+                ("a record cut off mid-write",
+                 _XU_OK[:len(_XU_OK) // 2], "does not parse"),
+                ("a bare <testsuite> root",
+                 _XU_OK.replace("<testsuites>\n", "").replace("</testsuites>\n", ""),
+                 "one shape measured"),
+                # A renamed root still holding ONE suite: only the TAG test can
+                # refuse it. The bare root above is refused by the suite count
+                # as well, so it could not show the tag test is load-bearing.
+                ("a renamed root",
+                 _XU_OK.replace("<testsuites>", "<results>")
+                 .replace("</testsuites>", "</results>"), "<results>"),
+                ("two <testsuite> elements",
+                 _XU_OK.replace(_XU_TAIL, "  </testsuite>\n" + _XU_HEAD.split("\n", 2)[2]
+                                + _XU_TAIL), "holding 2"),
+                # A display name that MENTIONS a function: a reader that
+                # searched for `name()` instead of matching the whole name would
+                # take `alpha` out of it and never refuse.
+                ("a display-name spelling",
+                 _XU_OK.replace('name="alpha()"', 'name="checks alpha() twice"'),
+                 "checks alpha() twice"),
+                ("an argument list",
+                 _XU_OK.replace('name="alpha()"', 'name="alpha(n:)"'), "alpha(n:)")):
+            try:
+                record(text)
+                failures.append(f"{label} must REFUSE")
+            except Refusal as e:
+                arm(f"the refusal for {label} must say why", needle in str(e))
         try:
-            check(no_summary, decl, [])
-            failures.append("a log with no run summary must REFUSE")
-        except Refusal:
-            pass
+            read_xunit(tmp / "no-such-record.xml")
+            failures.append("a missing record must REFUSE")
+        except Refusal as e:
+            arm("the missing-record refusal must name the path",
+                "no-such-record.xml" in str(e))
 
-        # 7. TWO RUNS IN ONE LOG -- REFUSE. Two invocations' counts cannot be
-        #    attributed to one source census.
-        try:
-            check(_LOG_OK + _LOG_OK, decl, [])
-            failures.append("two run summaries must REFUSE")
-        except Refusal:
-            pass
+        # 7. THE SUITE'S TOTALS ARE NOT THE COUNT. The clean record says
+        #    tests="3" beside four records, exactly as the real one excludes its
+        #    skip, so arm 1 is green only because a reader of `tests` is not the
+        #    reader here. The subtler reader -- `tests` + `skipped` -- agrees
+        #    with arm 1, so it is killed HERE: a record one case short whose
+        #    header totals still add up to the declared four.
+        short = _XU_OK.replace(_XU_BETA_B, "", 1)
+        arm("the short-record fixture must hold three records under totals of four",
+            short.count("<testcase ") == 3
+            and 'tests="3"' in short and 'skipped="1"' in short)
+        arm("a record short of a case must be caught by COUNT whatever the totals say",
+            any(f.startswith("COUNT:") for f in check(_LOG_OK, record(short), decl, [])))
 
         # 8. NO XCTEST LINE -- REFUSE. SwiftPM prints one on every run.
         try:
             check(_LOG_OK.replace("\t Executed 0 tests, with 0 failures "
                                   "(0 unexpected) in 0.000 (0.002) seconds\n", ""),
-                  decl, [])
+                  ok, decl, [])
             failures.append("a log with no `Executed N tests` line must REFUSE")
         except Refusal:
             pass
@@ -551,7 +644,7 @@ def self_test() -> int:
         #    source is a different thing from a 0 nobody looks at.
         xc_log = _LOG_OK.replace("Executed 0 tests", "Executed 2 tests")
         arm("an XCTest bundle running cases the source does not declare must be caught",
-            any(f.startswith("XCTEST:") for f in check(xc_log, decl, [])))
+            any(f.startswith("XCTEST:") for f in check(xc_log, ok, decl, [])))
 
         # 10. A DOC-COMMENT MENTION OF @Test IS NOT A DECLARATION. This tree has
         #     exactly one, and counting it would put the derived side one over.
@@ -583,18 +676,18 @@ def self_test() -> int:
                 arm(f"the {label} refusal must cite a file and line",
                     "AB.swift:" in str(e))
 
-        # 12b. THE DISPLAY NAME IS WHAT THE RUN REPORTS, AND THE TRAIT'S
-        #      COMMENT IS NOT ONE. Both halves were live defects in this gate:
-        #      the first live run read function names the log never prints, and
-        #      the second read the display name off the COMMENT-STRIPPED line
-        #      and got a run of spaces. Six real, passing tests were reported as
-        #      NOT REPORTED each time, and the count axis was green throughout.
+        # 12b. A DISPLAY-NAMED CASE IS DECLARED BY ITS FUNCTION, AND A TRAIT'S
+        #      COMMENT IS NEITHER. The record names `namedCase()`, never "a
+        #      named case" -- measured on all seven such cases in this tree.
+        #      (The console spelling was the opposite, and this gate paid for
+        #      reading it twice: function names the console never prints, then
+        #      a display name read off the comment-stripped line as spaces.)
         _write(tmp, "AB.swift", _SRC_NAMED)
         named = declared_tests(tmp)
-        arm("a display name must be the declared name, and a trait's comment "
-            "must not be mistaken for one",
-            sorted(n for _, _, n in named) == ["a named case", "traitOnly"])
-        arm("a display-named run must be clean", check(_LOG_NAMED, named, []) == [])
+        arm("a display-named case must be declared by its function name",
+            sorted(n for _, _, n in named) == ["namedCase", "traitOnly"])
+        arm("a display-named record must pair clean",
+            check(_LOG_OK, record(_XU_NAMED), named, []) == [])
 
         # 12c. A `/*` THAT IS NOT A COMMENT. Three files in the LIVE tree open a
         #      block comment inside a LINE comment (`test_fixtures/operations/*`)
@@ -611,16 +704,18 @@ def self_test() -> int:
         #      `check` is unreachable through that door and would be a guard no
         #      mutant can kill (`two-guards-one-predicate`). It is kept rather
         #      than deleted because `check` is called with a census it does not
-        #      compute, and armed here through the door a caller would use.
+        #      compute, and armed here through the door a caller would use --
+        #      with an EMPTY record too, so COUNT agrees and only the floor fires.
         arm("check() must refuse to compare zero declarations to anything",
-            any(f.startswith("ANTI-VACUITY:") for f in check(_LOG_OK, [], [])))
+            any(f.startswith("ANTI-VACUITY:")
+                for f in check(_LOG_OK, record(_XU_HEAD + _XU_TAIL), [], [])))
 
         # 12e. AN INLINE DECLARATION IS A DECLARATION. Legal Swift, and a
-        #      head-anchored census would miss it.
+        #      head-anchored census would miss it -- display name or not.
         _write(tmp, "AB.swift", _SRC_INLINE)
-        arm("a @Test declared mid-line must be counted, display name and all",
+        arm("a @Test declared mid-line must be counted, by its function name",
             sorted(n for _, _, n in declared_tests(tmp))
-            == ["an inline named case", "inlinePlain"])
+            == ["inlineNamed", "inlinePlain"])
 
         # 12f. A RAW STRING MAY CARRY AN UNESCAPED QUOTE -- THAT IS WHAT IT IS
         #      FOR -- AND THE PLAIN-STRING BRANCH CLOSES ON IT. Without the raw
@@ -634,18 +729,17 @@ def self_test() -> int:
         arm("a raw string's interior quote must not end the literal",
             [n for _, _, n in declared_tests(tmp)] == ["afterRaw"])
 
-        # 12g. A NAME THE RUN REPORTS AND THE SOURCE DOES NOT DECLARE. The
-        #      mirror of NOT REPORTED, and the direction that catches a stale
-        #      log handed to a fresh tree.
+        # 12g. A NAME THE RECORD HOLDS AND THE SOURCE DOES NOT DECLARE. The
+        #      mirror of NOT RECORDED, and the direction that catches a stale
+        #      record handed to a fresh tree.
         _write(tmp, "AB.swift", _SRC_OK)
         decl = declared_tests(tmp)
-        stranger = _LOG_OK.replace(
-            "\u2501 Test run with 4 tests in 2 suites",
-            "\u2714 Test ghost() passed after 0.1 seconds.\n"
-            "\u2501 Test run with 5 tests in 2 suites")
-        arm("a reported name the source does not declare must be caught",
+        stranger = _XU_OK.replace(
+            _XU_TAIL,
+            '    <testcase classname="Mod.B" name="ghost()" time="0.1" />\n' + _XU_TAIL)
+        arm("a recorded name the source does not declare must be caught",
             any(f.startswith("UNDECLARED:") and "ghost" in f
-                for f in check(stranger, decl, [])))
+                for f in check(_LOG_OK, record(stranger), decl, [])))
 
         # 12h. THE XCTEST CENSUS IS GUARDED BY THE IMPORT, and that guard is the
         #      whole census. `func testFoo` in a swift-testing file is reached by
@@ -659,8 +753,9 @@ def self_test() -> int:
             [n for _, _, n in declared_xctest(tmp)] == ["testReal"])
 
         # 12i. COLOURED OUTPUT MUST READ THE SAME AS PLAIN. Every byte of the
-        #      clean log wrapped in SGR codes, including inside the glyph, the
-        #      name and the verdict.
+        #      clean log wrapped in SGR codes, including inside the XCTest line
+        #      -- the one line this reader still takes from the console, and
+        #      whose pattern a colour code would break.
         coloured = "".join(
             "\x1b[32m" + c + "\x1b[0m" if c not in "\n" else c for c in _LOG_OK)
         arm("the ANSI fixture must actually carry escape codes", "\x1b[" in coloured)
@@ -672,7 +767,7 @@ def self_test() -> int:
         lit = tmp / "coloured.log"
         lit.write_text(coloured, encoding="utf-8", newline="\n")
         arm("a colourised log must read exactly as the plain one",
-            check(read_log(lit), decl, []) == check(_LOG_OK, decl, []) == [])
+            check(read_log(lit), ok, decl, []) == check(_LOG_OK, ok, decl, []) == [])
 
         # 13. AN EMPTY TREE REFUSES. A census over no files returns a
         #     well-formed zero, which is a number indistinguishable from a
@@ -690,8 +785,8 @@ def self_test() -> int:
     try:
         live = declared_tests(TESTS)
         arm("the live tree must declare at least two @Test cases", len(live) >= 2)
-        arm("every live declaration must resolve to a name",
-            all(n for _, _, n in live))
+        arm("every live declaration must resolve to a function name",
+            all(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", n) for _, _, n in live))
         live_xc = declared_xctest(TESTS)
         arm("the live XCTest census must not crash", isinstance(live_xc, list))
     except Refusal as e:
@@ -704,39 +799,46 @@ def self_test() -> int:
     if failures:
         return 1
     print("check_swift_suite_ran SELF-TEST: OK (clean pairing proven first; "
-          "multiset collision, vanished suite, zero-test run, hung test and "
-          "XCTest drift all caught; missing/double summary, missing XCTest "
-          "line, parameterized, #if, unresolvable @Test and an empty tree all "
-          "REFUSED; parser driven against the live tree)")
+          "multiset collision, vanished suite, zero-test run, a short record "
+          "behind agreeing header totals and XCTest drift all caught; "
+          "three console variants, a spliced ghost among them, move nothing; "
+          "a cut-off, bare, renamed, two-suite, display-named, argument-listed "
+          "or missing "
+          "record, a missing XCTest line, parameterized, #if, unresolvable "
+          "@Test and an empty tree all REFUSED; parser driven against the "
+          "live tree)")
     return 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Prove `swift test` ran the suite "
                                              "the sources declare.")
-    ap.add_argument("--log", help="the captured `swift test` output")
+    ap.add_argument("--log", help="the captured `swift test` console output "
+                                  "(read for the XCTest line alone)")
+    ap.add_argument("--xunit", help="the xUnit record swift-testing wrote "
+                                    "(`<base>-swift-testing.xml`)")
     ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
-    if not args.log:
-        print("FAIL: --log is required (or --self-test).")
+    if not args.log or not args.xunit:
+        print("FAIL: --log and --xunit are both required (or --self-test).")
         return 2
 
     path = pathlib.Path(args.log)
     if not path.is_file():
-        print(f"FAIL: no such log: {path}. A missing log is not an empty one.")
+        print(f"FAIL: no such log: {_ascii(path.as_posix())}. A missing log is "
+              "not an empty one.")
         return 2
 
     try:
         decl = declared_tests(TESTS)
         xc = declared_xctest(TESTS)
-        # ONE read, ONE strip, and everything below judges the same bytes. Two
-        # reads of the same file is two chances to disagree, which is the shape
-        # the wasm-canvas step above records removing.
+        recorded = read_xunit(pathlib.Path(args.xunit))
+        # ONE read, ONE strip, and everything below judges the same bytes.
         text = read_log(path)
-        bad = check(text, decl, xc)
+        bad = check(text, recorded, decl, xc)
     except Refusal as e:
         print(f"REFUSED: {e}")
         return 2
@@ -747,13 +849,13 @@ def main() -> int:
             print(f"  - {b}")
         return 1
 
-    total, suites = run_summary(text)
     print(f"check_swift_suite_ran: OK ({len(decl)} @Test cases declared by the "
-          f"sources, {total} reported by the run across {suites} suites, every "
-          f"name matched by multiplicity; XCTest {len(xc)} declared / "
-          f"{xctest_total(text)} executed). "
-          "A test DELETED from the source moves both sides together and reads "
-          "as agreement: this is not a claim that the suite is as large as it was.")
+          f"sources, {len(recorded)} in the xUnit record, every name matched by "
+          f"multiplicity; XCTest {len(xc)} declared / {xctest_total(text)} "
+          "executed). The console's per-test lines are NOT read -- its relay "
+          "drops bytes. A test DELETED from the source moves both sides "
+          "together and reads as agreement: this is not a claim that the suite "
+          "is as large as it was.")
     return 0
 
 
