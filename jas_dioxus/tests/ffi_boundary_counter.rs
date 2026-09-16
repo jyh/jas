@@ -32,7 +32,7 @@
 
 use jas_dioxus::ffi::{
     jas_bind_values, jas_dispatch_event, jas_engine_free, jas_engine_new, jas_free,
-    jas_instr_counters_json, jas_instr_reset, jas_version, jas_widget_tree, JasBytes, JasStatus,
+    jas_instr_counters_json, jas_panel_plan, jas_instr_reset, jas_version, jas_widget_tree, JasBytes, JasStatus,
 };
 use jas_dioxus::ffi_instr::{self, Crossing};
 use std::sync::Mutex;
@@ -353,5 +353,30 @@ fn an_unknown_panel_is_empty_not_a_crash() {
     let id = "no_such_panel";
     let out = take(unsafe { jas_bind_values(e, id.as_ptr(), id.len()) });
     assert!(out == "[]" || out.is_empty(), "unknown panel must be empty, got: {out}");
+    unsafe { jas_engine_free(e) };
+}
+
+// ---------------------------------------------------------------------------
+// jas_panel_plan -- wave 2, A5: rects and resolved values in ONE crossing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn panel_plan_counts_as_one_crossing_both_directions() {
+    let _g = SERIAL.lock().unwrap();
+    let e = jas_engine_new();
+    ffi_instr::reset();
+    let id = "align_panel_content";
+    let b = unsafe { jas_panel_plan(e, id.as_ptr(), id.len(), 228, 0) };
+    let produced = b.len;
+    let text = take(b);
+
+    let (calls, bytes_in, bytes_out) = ffi_instr::read(Crossing::PanelPlan);
+    assert_eq!(calls, 1, "the crossing itself must increment the counter");
+    assert_eq!(bytes_in, id.len() as u64, "the panel id is what crossed inward");
+    assert_eq!(bytes_out, produced as u64, "bytes_out must be the span actually returned");
+    assert!(produced > 0 && text.contains("\"leaves\""), "sanity: a real plan came back: {text}");
+    // The negative control: the plan does not also count as the call it
+    // subsumes. A shell that reads the plan has made ONE crossing, not two.
+    assert_eq!(ffi_instr::read(Crossing::BindValues), (0, 0, 0), "the plan is not a bind_values call");
     unsafe { jas_engine_free(e) };
 }

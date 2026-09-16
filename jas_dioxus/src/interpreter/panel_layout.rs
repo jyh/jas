@@ -27,9 +27,9 @@ pub const CHAR_WIDTH: i64 = 10;
 const CONTAINER_TYPES: [&str; 4] = ["container", "row", "col", "panel"];
 
 struct MItem {
-    // Read only by `layout_panel` (the byte-gate projection); the web render
-    // swap uses `render_plan`, which projects node+ctx+rect, not path.
-    #[allow(dead_code)]
+    // Read by both projections: `layout_panel` (the byte-gate) and
+    // `render_plan`, whose leaves carry it so a consumer can join the plan to
+    // `bind_values` rows without re-walking the tree.
     path: Vec<i64>,
     x: i64,
     y: i64,
@@ -47,7 +47,15 @@ struct MItem {
 /// A renderable leaf from `render_plan`: where to draw (`rect` as `(x,y,w,h)`),
 /// what to draw (`node`), and the scope to evaluate it with (`ctx` — the child
 /// scope, so a foreach-expanded leaf carries its per-row data).
+///
+/// `path` is the SAME path `layout_panel` emits for this item (root = `[]`, the
+/// i-th declared child = `[i]`, a foreach's i-th expansion = `[..., i]`). It is
+/// what lets a consumer join a leaf to its `bind_values` rows by path; a join
+/// on `id` would be wrong, because a foreach template repeats its ids.
 pub struct RenderLeaf {
+    // Read only by the ffi panel plan; the web binary's renderer places by rect.
+    #[allow(dead_code)]
+    pub path: Vec<i64>,
     pub x: i64,
     pub y: i64,
     pub w: i64,
@@ -111,19 +119,40 @@ pub fn layout_panel(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value)
 /// col / grid / panel / disclosure) go to `chrome` if they have chrome, else are
 /// omitted; everything else goes to `leaves`.
 pub fn render_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> RenderPlan {
+    render_plan_with_omitted(panel_node, avail_w, avail_h, ctx).0
+}
+
+/// [`render_plan`], plus the layout-only containers it OMITS (no chrome), in
+/// pre-order, from the same traversal.
+///
+/// Rust-only, and `render_plan`'s own output is unchanged by it (it still
+/// matches `panel_layout.py` and `PanelLayout.swift`). It exists for the
+/// engine's panel plan: an omitted container draws nothing, but it can still
+/// carry a bound value the shell must apply — a dynamic `visible` that hides
+/// its subtree, or a disclosure's header label and collapsed state. Measured
+/// on the compiled workspace, those are the only bind rows a `render_plan`
+/// item cannot carry.
+pub fn render_plan_with_omitted(
+    panel_node: &Value,
+    avail_w: i64,
+    avail_h: i64,
+    ctx: &Value,
+) -> (RenderPlan, Vec<RenderLeaf>) {
     let root = match panel_node.get("content") {
         Some(r) if r.is_object() => r,
-        _ => return RenderPlan { height: 0, chrome: vec![], leaves: vec![] },
+        _ => return (RenderPlan { height: 0, chrome: vec![], leaves: vec![] }, vec![]),
     };
     let (_w, _h, items) = measure(root, &[], avail_w, avail_h, ctx);
     let height = items.first().map_or(0, |it| it.h);
     let mut chrome = vec![];
     let mut leaves = vec![];
+    let mut omitted = vec![];
     for it in items {
         if !it.node.is_object() {
             continue;
         }
         let leaf = RenderLeaf {
+            path: it.path,
             x: it.x,
             y: it.y,
             w: it.w,
@@ -136,12 +165,14 @@ pub fn render_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) 
             // carries a border/background; otherwise it produces no widget.
             if has_chrome(&leaf.node) {
                 chrome.push(leaf);
+            } else {
+                omitted.push(leaf);
             }
         } else {
             leaves.push(leaf);
         }
     }
-    RenderPlan { height, chrome, leaves }
+    (RenderPlan { height, chrome, leaves }, omitted)
 }
 
 /// A layout-only container still worth drawing — it carries a border /

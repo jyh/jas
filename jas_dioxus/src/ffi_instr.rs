@@ -93,6 +93,12 @@ pub enum Crossing {
     /// with opens is a shell re-reading the half that never moves, and this row
     /// is the only place that would show.
     MenuStructure = 13,
+    /// Wave 2 / A5: a panel's PLAN — its rects joined in the engine with its
+    /// resolved values. Counted separately from `BindValues` because a shell
+    /// that reads the plan has no reason to read the values too, and a reading
+    /// where both rows move on one open is a shell paying for the same values
+    /// twice.
+    PanelPlan = 14,
 }
 
 impl Crossing {
@@ -113,6 +119,7 @@ impl Crossing {
         "jas_document_svg",
         "jas_menu_state",
         "jas_menu_structure",
+        "jas_panel_plan",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -122,7 +129,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 14;
+    pub(crate) const COUNT: usize = 15;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -144,6 +151,7 @@ impl Crossing {
         Crossing::DocumentSvg,
         Crossing::MenuState,
         Crossing::MenuStructure,
+        Crossing::PanelPlan,
     ];
 
     pub fn name(self) -> &'static str {
