@@ -1758,6 +1758,10 @@ mod tests {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0, 1]));
+        // A second open panel whose rows read its OWN `panel.*` defaults
+        // (`magic_wand`'s tolerances): resolved in Align's scope instead,
+        // they would all look moved.
+        let _ = plan_of(e, "magic_wand_panel_content", 228, 0);
         let before = doc_json(e);
         // Values are canonical strings (`bind_values`' row shape): "true" / "false".
         assert_eq!(leaf(e, ALIGN, "align_to_artboard_button")["values"]["bind.checked"], "false");
@@ -1949,6 +1953,10 @@ mod tests {
         let second = bind_rows(e, id);
         assert_ne!(second, first, "fixture: the tick must move the colour rows");
         assert_eq!(second, slice_rows(e));
+        // The slice WINS over the store's copy. A behavior that wrote the copy
+        // directly must not change what the colour panel shows.
+        engine_of(e).store.borrow_mut().set("fill_color", serde_json::json!("#000000"));
+        assert_eq!(bind_rows(e, id), slice_rows(e), "the store's copy leaked into the colour rows");
         unsafe { jas_engine_free(e) };
     }
 
@@ -2074,6 +2082,30 @@ mod tests {
             panel_ctx(engine, &ws, "magic_wand_panel_content")
         };
         assert_eq!(scope["state"]["magic_wand_opacity"], want);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Rows can move with nothing else moving: the plan was served before an
+    /// op changed the selection (no tick runs after `jas_dispatch_event`).
+    /// The click that carries those rows is not `Unchanged`.
+    #[test]
+    fn panel_behavior_that_only_moves_rows_is_not_unchanged() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[]));
+        assert_eq!(leaf(e, ALIGN, "align_left_button")["values"]["bind.disabled"], "true");
+        engine_of(e).with_model_mut(|m| *m = misaligned(&[0, 1]));
+        // Selection mode is already selected, so this toggle writes the values
+        // the store already holds.
+        let (reply, err) = behave(e, ALIGN,
+                                  r#"{"widget":"align_to_selection_button","event":"click"}"#);
+        let reply: serde_json::Value = serde_json::from_str(&reply)
+            .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
+        assert_eq!(reply["doc_changed"], false);
+        assert!(reply["changed"].as_array().unwrap().iter()
+                    .any(|r| r["id"] == "align_left_button" && r["value"] == "false"),
+                "fixture: the stale disabled row must move: {reply}");
+        assert_eq!(err, "", "rows moved, so this is not Unchanged");
         unsafe { jas_engine_free(e) };
     }
 }

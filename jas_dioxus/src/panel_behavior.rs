@@ -492,6 +492,15 @@ mod tests {
             {"id": "clicks_only", "type": "icon_button", "behavior": [
                 {"event": "click", "effects": [{"zz_mark": true}]},
             ]},
+            {"id": "acts_with_params", "type": "icon_button", "behavior": [
+                {"event": "click", "action": "zz_take", "params": {"target": "artboard"}},
+            ]},
+        ]}})
+    }
+
+    fn synthetic_actions() -> Value {
+        json!({"zz_take": {"effects": [
+            {"set_panel_state": {"key": "got", "value": "param.target"}},
         ]}})
     }
 
@@ -514,11 +523,10 @@ mod tests {
     fn run_synthetic(widget: &str, event: &str, model: &mut Model, store: &mut StateStore,
                      host: &mut MarkHost) -> Result<Ran, Refusal> {
         let ev = parse_event(&json!({"widget": widget, "event": event})).unwrap();
-        let empty = json!({});
         let scope = json!({"state": {}, "panel": {},
                            "active_document": {"selection_count": model.document().selection.len()}});
         run_widget_behavior("zz_panel", &synthetic_panel(), &ev, &scope, store, model,
-                            &empty, &empty, host)
+                            &synthetic_actions(), &json!({}), host)
     }
 
     /// Q5 where it is hardest: the batch EDITS the document before the effect
@@ -574,6 +582,20 @@ mod tests {
         let r = run_synthetic("clicks_only", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: false }));
         assert_eq!(host.marks, 2);
+    }
+
+    /// A behavior's `action` runs with its `params`, and a bare identifier
+    /// among them is its own name. No real panel reaches this path by id
+    /// today (the one that does sits under a `foreach`), so it is driven here.
+    #[test]
+    fn a_behavior_action_runs_with_its_params() {
+        let mut model = misaligned(&[0, 1]);
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", Default::default());
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let r = run_synthetic("acts_with_params", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: true }));
+        assert_eq!(store.get_panel("zz_panel", "got"), &json!("artboard"));
     }
 
     /// A declared behavior with no body (`layers.yaml`'s tree drag, whose work
