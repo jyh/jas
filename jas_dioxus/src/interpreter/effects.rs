@@ -110,7 +110,7 @@ fn run_effects_into(
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
     action_name: Option<&str>,
-    _report: &mut EffectsReport,
+    report: &mut EffectsReport,
 ) {
     // OP_LOG.md Increment 1, sub-step 5: a YAML action opens its undo
     // transaction via the `doc.snapshot` effect (and self-contained doc.*
@@ -121,8 +121,19 @@ fn run_effects_into(
     // into a single undo step. commit_txn is a no-op if nothing opened one.
     let owns_txn = model.as_deref().map_or(false, |m| !m.in_txn());
     for effect in effects {
-        if let serde_json::Value::Object(map) = effect {
-            run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs);
+        match effect {
+            serde_json::Value::Object(map) => {
+                run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs,
+                        report);
+            }
+            // `- snapshot` (every align and boolean action's first effect) is
+            // a string. The web renderer runs it; this runner does not.
+            serde_json::Value::String(s) => {
+                report.unhandled.push(Unhandled::BareString(s.clone()));
+            }
+            other => {
+                report.unhandled.push(Unhandled::NotAnEffect(other.to_string()));
+            }
         }
     }
     // Dialog on_change post-run hook. Fires the action declared on the
@@ -139,7 +150,7 @@ fn run_effects_into(
             });
             if let serde_json::Value::Object(map) = &dispatch_effect {
                 run_one(map, ctx, store, model.as_deref_mut(),
-                        actions, dialogs);
+                        actions, dialogs, report);
             }
             store.set_firing_on_change(false);
         }
@@ -205,6 +216,7 @@ fn run_one(
     mut model: Option<&mut Model>,
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
+    report: &mut EffectsReport,
 ) {
     // ── Document mutations (doc.*) — dispatched before generic effects
     // so a stray `doc.` key in an effect object doesn't silently fall
@@ -213,8 +225,9 @@ fn run_one(
         .iter()
         .find(|(k, _)| k.starts_with("doc."))
     {
-        if let Some(m) = model.as_deref_mut() {
-            run_doc_effect(name, spec, ctx, store, m);
+        match model.as_deref_mut() {
+            Some(m) => run_doc_effect(name, spec, ctx, store, m, report),
+            None => report.unhandled.push(Unhandled::NoModel(name.clone())),
         }
         return;
     }
@@ -300,7 +313,7 @@ fn run_one(
         if let Some(serde_json::Value::Array(in_effects)) = effect.get("in") {
             // Nested run_effects (let/in) — `owns_txn` is false here, so the
             // outer batch keeps ownership and naming; pass None (OP_LOG.md §9).
-            run_effects(
+            run_effects_into(
                 in_effects,
                 &extended_ctx,
                 store,
@@ -308,6 +321,7 @@ fn run_one(
                 actions,
                 dialogs,
                 None,
+                report,
             );
         }
         return;
@@ -337,9 +351,9 @@ fn run_one(
                     m.insert(var_name.to_string(), item.clone());
                     m.insert("_index".to_string(), serde_json::json!(i));
                 }
-                run_effects(
+                run_effects_into(
                     body, &iter_ctx, store,
-                    model.as_deref_mut(), actions, dialogs, None);
+                    model.as_deref_mut(), actions, dialogs, None, report);
             }
         }
         return;
@@ -400,13 +414,13 @@ fn run_one(
         };
         let result = eval_expr(&condition_expr, store, ctx);
         if result.to_bool() {
-            run_effects(
+            run_effects_into(
                 &then_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs, None);
+                model.as_deref_mut(), actions, dialogs, None, report);
         } else {
-            run_effects(
+            run_effects_into(
                 &else_effects, ctx, store,
-                model.as_deref_mut(), actions, dialogs, None);
+                model.as_deref_mut(), actions, dialogs, None, report);
         }
         return;
     }
@@ -452,35 +466,46 @@ fn run_one(
             }
             _ => return,
         };
-        if let Some(actions_map) = actions {
-            if let Some(action_def) = actions_map.get(action_name) {
-                if let Some(serde_json::Value::Array(action_effects)) = action_def.get("effects") {
-                    let mut dispatch_ctx = ctx.clone();
-                    if let serde_json::Value::Object(p) = &params {
-                        if let serde_json::Value::Object(c) = &mut dispatch_ctx {
-                            let mut resolved = serde_json::Map::new();
-                            for (k, v) in p {
-                                if let Some(expr) = v.as_str() {
-                                    let val = eval_expr(expr, store, &serde_json::Value::Object(c.clone()));
-                                    resolved.insert(k.clone(), value_to_json(&val));
-                                } else {
-                                    resolved.insert(k.clone(), v.clone());
-                                }
-                            }
-                            c.insert("param".to_string(), serde_json::Value::Object(resolved));
-                        }
-                    }
-                    // OP_LOG.md §9: name the transaction with the dispatched
-                    // actions.yaml verb. If this dispatch is the owner (no outer
-                    // transaction open), `name_txn` stamps the verb; if it is
-                    // nested under an owner, `name_txn` is skipped (the inner
-                    // run_effects sees `owns_txn == false`).
-                    run_effects(
-                        action_effects, &dispatch_ctx, store,
-                        model.as_deref_mut(), actions, dialogs,
-                        Some(action_name));
+        let Some(action_def) = actions.and_then(|a| a.get(action_name)) else {
+            report.unhandled.push(Unhandled::UnknownAction(action_name.to_string()));
+            return;
+        };
+        match action_def.get("effects") {
+            Some(serde_json::Value::Array(action_effects)) => {
+                // An empty list still runs: an empty batch can fire the
+                // open dialog's on_change hook, and that must not move.
+                if action_effects.is_empty() {
+                    report.unhandled.push(
+                        Unhandled::EmptyAction(action_name.to_string()));
                 }
+                let mut dispatch_ctx = ctx.clone();
+                if let serde_json::Value::Object(p) = &params {
+                    if let serde_json::Value::Object(c) = &mut dispatch_ctx {
+                        let mut resolved = serde_json::Map::new();
+                        for (k, v) in p {
+                            if let Some(expr) = v.as_str() {
+                                let val = eval_expr(expr, store, &serde_json::Value::Object(c.clone()));
+                                resolved.insert(k.clone(), value_to_json(&val));
+                            } else {
+                                resolved.insert(k.clone(), v.clone());
+                            }
+                        }
+                        c.insert("param".to_string(), serde_json::Value::Object(resolved));
+                    }
+                }
+                // OP_LOG.md §9: name the transaction with the dispatched
+                // actions.yaml verb. If this dispatch is the owner (no outer
+                // transaction open), `name_txn` stamps the verb; if it is
+                // nested under an owner, `name_txn` is skipped (the inner
+                // run_effects sees `owns_txn == false`).
+                run_effects_into(
+                    action_effects, &dispatch_ctx, store,
+                    model.as_deref_mut(), actions, dialogs,
+                    Some(action_name), report);
             }
+            // A declared placeholder (`set_fill_type_gradient`) has no
+            // effects list, and nothing runs.
+            _ => report.unhandled.push(Unhandled::EmptyAction(action_name.to_string())),
         }
         return;
     }
@@ -496,7 +521,10 @@ fn run_one(
             .and_then(|d| d.get(dlg_id));
         let dlg_def = match dlg_def {
             Some(d) => d,
-            None => return,
+            None => {
+                report.unhandled.push(Unhandled::UnknownDialog(dlg_id.to_string()));
+                return;
+            }
         };
         // Extract state defaults
         let mut defaults = std::collections::HashMap::new();
@@ -678,10 +706,21 @@ fn run_one(
         return;
     }
 
-    // log: message (debug only)
-    if effect.contains_key("log") {
+    // log: message. It does nothing, and every `log` in actions.yaml marks
+    // work a platform supplies, so it is reported as not done.
+    if let Some(message) = effect.get("log") {
+        let message = match message {
+            serde_json::Value::String(m) => m.clone(),
+            other => other.to_string(),
+        };
+        report.unhandled.push(Unhandled::Logged(message));
         return;
     }
+
+    // No arm handled this object: every platform effect ends here.
+    let mut keys: Vec<&str> = effect.keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    report.unhandled.push(Unhandled::UnknownEffect(keys.join(",")));
 }
 
 /// Route a `set:` target to the right scope in the StateStore.
@@ -753,6 +792,7 @@ fn run_doc_effect(
     ctx: &serde_json::Value,
     store: &mut StateStore,
     model: &mut Model,
+    report: &mut EffectsReport,
 ) {
     match name {
         "doc.snapshot" => {
@@ -2162,9 +2202,10 @@ fn run_doc_effect(
             }
         }
         _ => {
-            // Effects not implemented in this phase fall through silently.
-            // doc.delete_selection, doc.add_element, doc.set_attr land in
-            // later phases alongside the tools that need them.
+            // Effects not implemented in this phase change nothing, and are
+            // reported. doc.delete_selection, doc.add_element, doc.set_attr
+            // land in later phases alongside the tools that need them.
+            report.unhandled.push(Unhandled::UnknownDocEffect(name.to_string()));
         }
     }
 }
@@ -12279,6 +12320,41 @@ mod tests {
                      serde_json::json!({"set": {"dialog.v": "1"}})],
                 None, None, Some(&dialogs)),
             vec![Unhandled::UnknownAction("zz_on_change_undefined".into())]);
+    }
+
+    /// Reporting an empty action must not stop it RUNNING. An empty inner
+    /// batch still ends with the dialog `on_change` hook, so the hook fires
+    /// at the dispatch, and an effect after the dispatch sees it. Skipping the
+    /// empty batch would move the hook to the end of the outer batch.
+    #[test]
+    fn an_empty_action_still_runs_its_empty_batch() {
+        let mut store = StateStore::new();
+        store.set("count", serde_json::json!(0));
+        let actions = serde_json::json!({
+            "count_it": {"effects": [{"set": {"count": "state.count + 1"}}]},
+            "declared_empty_list": {"effects": []},
+        });
+        let dialogs = serde_json::json!({
+            "live": {
+                "summary": "Live",
+                "state": {"v": {"type": "number", "default": 0}},
+                "on_change": "count_it",
+                "content": {"type": "container"},
+            }
+        });
+        let report = run_effects(
+            &[
+                serde_json::json!({"open_dialog": {"id": "live"}}),
+                serde_json::json!({"set": {"dialog.v": "1"}}),
+                serde_json::json!({"dispatch": "declared_empty_list"}),
+                serde_json::json!({"set": {"seen": "state.count"}}),
+            ],
+            &serde_json::json!({}), &mut store, None, Some(&actions), Some(&dialogs), None);
+        assert_eq!(report.unhandled,
+                   vec![Unhandled::EmptyAction("declared_empty_list".into())]);
+        assert_eq!(store.get("seen"), &serde_json::json!(1),
+                   "the hook fired at the empty dispatch, before the next effect");
+        assert_eq!(store.get("count"), &serde_json::json!(1), "and only once");
     }
 
     #[test]
