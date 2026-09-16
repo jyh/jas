@@ -572,6 +572,18 @@ def _subject_arms() -> list[str]:
     if not set(_LANE_EXCLUDED) <= sib:
         failures.append("every excluded word must still be in the sibling's lists")
 
+    # The tokenizer, by known answer: digits belong to a word, case does not,
+    # every separator splits. (Mutation: a letters-only tokenizer SURVIVED
+    # every arm below, because both sides of each comparison used it -- and it
+    # would have matched a word whose digit differs.)
+    if _pieces("Ab1-c2_D.e/3 f") != ["ab1", "c2", "d", "e", "3", "f"]:
+        failures.append("_pieces must split on every separator and keep digits in a word")
+    try:
+        _shapes(["--"])
+        failures.append("a vocabulary entry with no word pieces must be refused, not kept")
+    except ValueError:
+        pass
+
     # ARM 7 -- every lane word is caught in a SUBJECT and in a BODY, as the lane
     # class alone; whole words only; any separator, any case.
     for i, w in enumerate(lane):
