@@ -226,6 +226,38 @@ internal sealed class QuitCmd : Cmd
 {
 }
 
+/// <summary>Open a panel: read its plan and publish it for the UI thread (W2-5).</summary>
+internal sealed class PanelOpenCmd : Cmd
+{
+    internal string PanelId = "";
+    internal long AvailW;
+}
+
+/// <summary>
+/// A person clicked a panel control. The shell reports WHICH control and the
+/// modifier keys; the engine runs what the panel spec declares (BL1, A6).
+/// </summary>
+internal sealed class PanelClickCmd : Cmd
+{
+    internal string PanelId = "";
+    internal string Widget = "";
+    internal bool Alt;
+    internal bool Shift;
+    internal bool Ctrl;
+    internal bool Meta;
+}
+
+/// <summary>
+/// One published reading of an open panel: the plan bytes as the core wrote
+/// them, and the sequence number that dates them.
+///
+/// ⛔ IMMUTABLE, FOR THE SAME REASON AS <see cref="MenuSnapshot"/>: the render
+/// thread builds one and swaps the reference, and the UI thread reads whatever
+/// is there, so it can never see a half-written plan. `Seq` lets the drawn row
+/// say how many publications it skipped.
+/// </summary>
+internal sealed record PanelSnapshot(string PanelId, string PlanJson, long Seq, string Cause);
+
 /// <summary>
 /// One published reading of the menu: the STATIC half, the DYNAMIC half, and
 /// the sequence number that dates it.
@@ -975,6 +1007,9 @@ internal sealed unsafe class Canvas : IDisposable
                     ApplyPointer(p);
                     dirty = true;
                     cause = "pointer";
+                    // A release is where a gesture lands on the document (a
+                    // selection, a move), so an open panel's plan is re-read.
+                    if (p.Kind == JasCore.PointerRelease) { _panelStale = true; }
                     break;
 
                 case PointerReportCmd pr:
@@ -987,6 +1022,7 @@ internal sealed unsafe class Canvas : IDisposable
                         : $"RUSTFAIL {LastStatus} {Tids()}");
                     dirty = true;
                     cause = "load";
+                    _panelStale = true;
                     break;
 
                 case SceneCmd s:
@@ -1020,7 +1056,7 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
 
                 case OpenCmd op:
-                    if (ApplyOpen(op.Path)) { dirty = true; cause = "open"; }
+                    if (ApplyOpen(op.Path)) { dirty = true; cause = "open"; _panelStale = true; }
                     break;
 
                 case OpCmd oc:
@@ -1031,8 +1067,25 @@ internal sealed unsafe class Canvas : IDisposable
                     // visible to a person; it is cheap, so it is done here
                     // rather than waited for.
                     ApplyMenuRefresh("mutation");
+                    _panelStale = true;
+                    break;
+
+                case PanelOpenCmd po:
+                    ApplyPanelOpen(po);
+                    break;
+
+                case PanelClickCmd pc:
+                    if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
                     break;
             }
+        }
+
+        // ONE plan re-read per drain, however many commands in it could have
+        // moved the document -- the same collapse a repaint gets.
+        if (_panelStale)
+        {
+            _panelStale = false;
+            ApplyPanelRefresh(cause);
         }
 
         if (dirty && _swapChain is not null)
@@ -3775,5 +3828,297 @@ internal sealed unsafe class Canvas : IDisposable
         var dh = (uint)Math.Round(_height / _scaleY);
         return $"{_width}x{_height} physical @scale {_scaleX:0.##}x{_scaleY:0.##} "
              + $"(client {dw}x{dh} DIP)";
+    }
+
+    // =======================================================================
+    // WAVE 2a — THE PANEL HALF OF THE RETAINED CANVAS (W2-5)
+    //
+    // Everything here runs on the render thread, because every call it makes is a
+    // call for this engine (BL2). The UI thread asks with `OpenPanel`
+    // and `PanelClick`, and draws from `Panel`.
+    //
+    // ⛔ THE SHELL EVALUATES NOTHING HERE EITHER. The plan arrives with every value
+    // resolved (`values`) or literal (`static`); a click is a widget id; what the
+    // click does, whether it is allowed, and what it changed are the core's
+    // answers (`jas_panel_behavior`), read and reported, never decided.
+    //
+    // ⛔ AND THE PLAN IS RE-READ AFTER EVERY DOCUMENT MUTATION, NOT PATCHED. The
+    // core pushes no row delta after a pointer gesture, an undo or an open, and a
+    // selection change moves every Align button's `disabled`. So each drain that
+    // could have moved the document marks the panel stale, and the drain re-reads
+    // the plan ONCE at its end. A click's reply rows are not applied: they are
+    // CHECKED against that re-read, so a delta the core got wrong is a named red
+    // rather than a value this shell quietly trusted.
+    // =======================================================================
+
+    /// <summary>The panel the UI thread should draw, published by the render thread.</summary>
+    internal volatile PanelSnapshot? Panel;
+
+    /// <summary>A new <see cref="Panel"/> has been published. Raised on the UI thread.</summary>
+    internal Action? PanelChanged { get; set; }
+
+    /// <summary>The open panel's id, or null. Render thread only.</summary>
+    private string? _panelId;
+
+    /// <summary>The width the open panel is laid out at, in canonical panel units.</summary>
+    private long _panelAvailW;
+
+    private long _panelSeq;
+
+    /// <summary>Something in this drain may have moved the document. Render thread only.</summary>
+    private bool _panelStale;
+
+    internal void OpenPanel(string panelId, long availW) =>
+        _queue.Add(new PanelOpenCmd { PanelId = panelId, AvailW = availW });
+
+    internal void PanelClick(PanelClickCmd click) => _queue.Add(click);
+
+    /// <summary>
+    /// Read the plan and publish it. Returns the plan bytes, or null on a refusal
+    /// (which is reported here, by name).
+    ///
+    /// ⛔ AN EMPTY SPAN IS A REFUSAL THE CORE MAKES BY NAME (a null handle, bad
+    /// UTF-8, an unknown panel), never "a panel with nothing in it".
+    /// </summary>
+    private string? ApplyPanelRefresh(string cause)
+    {
+        if (_engine == IntPtr.Zero || _panelId is null) { return null; }
+        var id = System.Text.Encoding.UTF8.GetBytes(_panelId);
+        var plan = JasCore.TakeString(
+            JasCore.jas_panel_plan(_engine, id, (nuint)id.Length, _panelAvailW, 0));
+        if (plan.Length == 0)
+        {
+            _report($"RUSTFAIL PANEL REFUSED panel={_panelId} cause={cause} -- jas_panel_plan "
+                  + $"returned the empty span {Tids()}");
+            return null;
+        }
+        _panelSeq++;
+        Panel = new PanelSnapshot(_panelId, plan, _panelSeq, cause);
+        // Published FIRST, announced second, exactly as the menu is.
+        PostToUi(() => PanelChanged?.Invoke());
+        return plan;
+    }
+
+    /// <summary>
+    /// Open a panel. The receipt row carries what the plan holds and what the
+    /// open cost at the boundary.
+    ///
+    /// `crossings` is the core's own count across the open, read from the
+    /// counter dump on either side. The dump itself is not a counted crossing,
+    /// but releasing its span IS (`jas_free`), so the first dump's release is
+    /// subtracted: what remains is the plan call and its release, which is 2 on
+    /// a healthy open. `bytes` is `jas_panel_plan`'s own outbound total.
+    /// </summary>
+    private void ApplyPanelOpen(PanelOpenCmd open)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            // NAMED: an open queued before the engine exists would otherwise
+            // leave an empty pane over a healthy status line.
+            _report($"RUSTFAIL PANEL REFUSED panel={open.PanelId} cause=open -- no engine {Tids()}");
+            return;
+        }
+        _panelId = open.PanelId;
+        _panelAvailW = open.AvailW;
+        var before = BoundaryTotals();
+        var plan = ApplyPanelRefresh("open");
+        var after = BoundaryTotals();
+        if (plan is null) { return; }
+
+        var crossings = before.Crossings < 0 || after.Crossings < 0
+            ? "UNREADABLE"
+            : (after.Crossings - before.Crossings - 1).ToString();
+        var bytes = before.PlanBytesOut < 0 || after.PlanBytesOut < 0
+            ? "UNREADABLE"
+            : (after.PlanBytesOut - before.PlanBytesOut).ToString();
+        _report($"PANEL OPEN panel={open.PanelId} avail-w={open.AvailW} {PlanReading(plan)} "
+              + $"crossings={crossings} bytes={bytes} plan-bytes={System.Text.Encoding.UTF8.GetByteCount(plan)} "
+              + $"seq={_panelSeq} {Tids()}");
+    }
+
+    /// <summary>
+    /// `leaves=… chrome=… containers=… unjoined=… withheld=… icons=… icons-missing=… height=…`
+    /// from a plan, or `plan=UNPARSEABLE`. Counted, never assumed: a plan that
+    /// crossed with an empty list must read as zero, not as absent.
+    /// </summary>
+    private static string PlanReading(string plan)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(plan);
+            var root = doc.RootElement;
+            int Count(string list) =>
+                root.TryGetProperty(list, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Array
+                    ? v.GetArrayLength()
+                    : -1;
+            var icons = root.TryGetProperty("icons", out var ic)
+                        && ic.ValueKind == System.Text.Json.JsonValueKind.Object
+                ? ic.EnumerateObject().Count()
+                : -1;
+            var height = root.TryGetProperty("height", out var h)
+                         && h.ValueKind == System.Text.Json.JsonValueKind.Number
+                ? h.GetInt64().ToString()
+                : "?";
+            return $"leaves={Count("leaves")} chrome={Count("chrome")} containers={Count("containers")} "
+                 + $"unjoined={Count("unjoined")} withheld={Count("withheld")} icons={icons} "
+                 + $"icons-missing={Count("icons_missing")} height={height}";
+        }
+        catch (Exception ex)
+        {
+            return $"plan=UNPARSEABLE({ex.GetType().Name})";
+        }
+    }
+
+    /// <summary>`(crossings, jas_panel_plan bytes_out)` from the counter dump, or -1s.</summary>
+    private static (long Crossings, long PlanBytesOut) BoundaryTotals()
+    {
+        try
+        {
+            var json = JasCore.TakeString(JasCore.jas_instr_counters_json());
+            if (json.Length == 0) { return (-1, -1); }
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var crossings = doc.RootElement.GetProperty("crossings").GetInt64();
+            long planOut = -1;
+            foreach (var row in doc.RootElement.GetProperty("per_fn").EnumerateArray())
+            {
+                if (row.GetProperty("fn").GetString() == "jas_panel_plan")
+                {
+                    planOut = row.GetProperty("bytes_out").GetInt64();
+                }
+            }
+            return (crossings, planOut);
+        }
+        catch (Exception)
+        {
+            return (-1, -1);
+        }
+    }
+
+    /// <summary>
+    /// Run one click through the engine and report what the CORE said.
+    ///
+    /// Four outcomes, each its own row:
+    ///   * a REFUSAL -- the empty span, with the class and detail from
+    ///     `jas_last_error_json` (`Disabled`, `PlatformEffect`, ...). Nothing ran.
+    ///   * `Unchanged` -- a normal reply AND the class in the error channel.
+    ///   * a CHANGE -- a normal reply and a clear channel.
+    ///   * ⛔ SILENCE -- the empty span and an empty channel. The core promises
+    ///     never to do this, so it is a RUSTFAIL, never read as any of the above.
+    ///
+    /// Returns true when the document moved.
+    /// </summary>
+    private bool ApplyPanelClick(PanelClickCmd click)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        var id = System.Text.Encoding.UTF8.GetBytes(click.PanelId);
+        var ev = PanelEventJson(click);
+        var reply = JasCore.TakeString(
+            JasCore.jas_panel_behavior(_engine, id, (nuint)id.Length, ev, (nuint)ev.Length));
+        var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+
+        if (reply.Length == 0)
+        {
+            if (channel.Length == 0)
+            {
+                _report($"RUSTFAIL PANEL CLICK SILENT panel={click.PanelId} widget={click.Widget} -- "
+                      + $"an empty reply and an empty error channel {Tids()}");
+                return false;
+            }
+            _report($"PANEL CLICK REFUSED panel={click.PanelId} widget={click.Widget} "
+                  + $"channel={channel} {Tids()}");
+            return false;
+        }
+
+        bool docChanged;
+        int changedRows;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
+            changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE panel={click.PanelId} widget={click.Widget} "
+                  + $"{ex.GetType().Name} {Tids()}");
+            return false;
+        }
+
+        if (docChanged) { SetDirty(true); }
+        ApplyMenuRefresh("panel");
+        // The plan is re-read NOW, not at the end of the drain, because the
+        // reply's rows are checked against it and a later command in the same
+        // drain could move the values first.
+        var plan = ApplyPanelRefresh("click");
+        _panelStale = false;
+        var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
+        var outcome = channel.Length == 0 ? "changed" : "unchanged";
+        var row = $"PANEL CLICK panel={click.PanelId} widget={click.Widget} outcome={outcome} "
+                + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
+                + $"delta-mismatch={mismatch} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
+        _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
+        return docChanged;
+    }
+
+    /// <summary>
+    /// The click's event JSON, written by a serializer. `widget` is an id the
+    /// PLAN supplied; the modifiers reach the behavior's `condition` as
+    /// `event.*`, which the core evaluates.
+    /// </summary>
+    private static byte[] PanelEventJson(PanelClickCmd click) =>
+        System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object>
+        {
+            ["widget"] = click.Widget,
+            ["event"] = "click",
+            ["alt"] = click.Alt,
+            ["shift"] = click.Shift,
+            ["ctrl"] = click.Ctrl,
+            ["meta"] = click.Meta,
+        });
+
+    /// <summary>
+    /// How many of the reply's rows for THIS panel disagree with the plan read
+    /// after the click, as text ("0" when all agree). A row whose value the plan
+    /// withheld (a template) must be named in `withheld` instead.
+    /// </summary>
+    private static string DeltaMismatches(string reply, string plan, string panelId)
+    {
+        try
+        {
+            using var answer = System.Text.Json.JsonDocument.Parse(reply);
+            using var doc = System.Text.Json.JsonDocument.Parse(plan);
+            var values = new Dictionary<string, string>();
+            foreach (var list in new[] { "chrome", "leaves", "containers" })
+            {
+                foreach (var e in doc.RootElement.GetProperty(list).EnumerateArray())
+                {
+                    var path = e.GetProperty("path").GetRawText();
+                    foreach (var kv in e.GetProperty("values").EnumerateObject())
+                    {
+                        values[path + "|" + kv.Name] = kv.Value.GetString() ?? "";
+                    }
+                }
+            }
+            var withheld = new HashSet<string>();
+            foreach (var w in doc.RootElement.GetProperty("withheld").EnumerateArray())
+            {
+                withheld.Add(w.GetProperty("path").GetRawText() + "|" + w.GetProperty("key").GetString());
+            }
+
+            var bad = 0;
+            foreach (var row in answer.RootElement.GetProperty("changed").EnumerateArray())
+            {
+                if (row.GetProperty("panel").GetString() != panelId) { continue; }
+                var k = row.GetProperty("path").GetRawText() + "|" + row.GetProperty("key").GetString();
+                var v = row.GetProperty("value").GetString() ?? "";
+                var agrees = values.TryGetValue(k, out var inPlan) ? inPlan == v : withheld.Contains(k);
+                if (!agrees) { bad++; }
+            }
+            return bad.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"UNREADABLE({ex.GetType().Name})";
+        }
     }
 }

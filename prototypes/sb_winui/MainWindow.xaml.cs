@@ -215,6 +215,24 @@ public sealed partial class MainWindow : Window
         _canvas.MenuChanged = OnMenuChanged;
         _canvas.DocumentDirtyChanged = OnDocumentDirtyChanged;
         _canvas.HashTaken = OnHashTaken;
+        _canvas.PanelChanged = OnPanelChanged;
+
+        // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
+        // (W2-5, stop 5). Shown here, its column is already taken when the
+        // panel's first `SizeChanged` arrives, so the surface is born at its
+        // final size and opening the pane costs no resize at all. Every
+        // measurement scene leaves it collapsed and keeps the surface it
+        // always had. The plan itself is read after the scene has run -- see
+        // `StartFirstLayout` -- because the engine does not exist yet.
+        // The SAME comparison the scene dispatch makes (no trim), so the pane
+        // is shown exactly when the `app` scene is the one that will run.
+        if (string.Equals(Environment.GetEnvironmentVariable("SB_SCENE"), "app",
+                          StringComparison.OrdinalIgnoreCase))
+        {
+            _paneWanted = true;
+            PaneHost.Width = PaneAvailW + 2 * PanePad + PaneHost.BorderThickness.Left;
+            PaneHost.Visibility = Visibility.Visible;
+        }
 
         // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
         // needs a run at the display's full resolution and not at whatever size
@@ -860,6 +878,11 @@ public sealed partial class MainWindow : Window
             _hashEveryStep = string.Equals(scene, "retained", StringComparison.OrdinalIgnoreCase);
 
             _canvas.Scene(scene);
+
+            // AFTER the scene, so the app's own preload has landed and the plan
+            // is read against the document a person will actually see. The
+            // queue is ordered, so this is a sequence, not a race.
+            if (_paneWanted) { _canvas.OpenPanel(PanePanelId, PaneAvailW); }
         }
         catch (Exception ex)
         {
@@ -1654,4 +1677,440 @@ public sealed partial class MainWindow : Window
             _ui.TryEnqueue(() => Title = title);
         }
     }
+
+    // =======================================================================
+    // W2-5 — THE ALIGN PANE, MATERIALIZED
+    //
+    // ⛔ NOT ONE PANEL CONTROL IS AUTHORED HERE, exactly as no menu item is.
+    // Where each control goes, what it shows, whether it is enabled and what
+    // its tooltip and icon are all come from `jas_panel_plan`; a click goes
+    // back as a widget id. This class still calls no core function: it reads
+    // the plan `Canvas` published and turns it into WinUI controls.
+    //
+    // ⛔ AND IT PLACES EACH CONTROL AT THE CORE'S RECT. No StackPanel, no Grid
+    // sizing: auto-layout is the per-framework divergence the shared layout
+    // pass exists to end (wave-2 block §1).
+    // =======================================================================
+
+    /// <summary>The panel the pane shows, by its CONTENT id.</summary>
+    private const string PanePanelId = "align_panel_content";
+
+    /// <summary>
+    /// The width the plan is laid out at, in canonical panel units, which this
+    /// shell draws 1:1 in DIPs. One number, used for the plan AND the pane.
+    /// </summary>
+    private const long PaneAvailW = 228;
+
+    /// <summary>Space between the pane's edge and the plan's origin, in DIPs.</summary>
+    private const double PanePad = 4;
+
+    /// <summary>
+    /// The ink an icon's `currentColor` is drawn in. A PRESENTATION choice of
+    /// this shell, as the Swift port's tint is of that one; the pane is light.
+    /// </summary>
+    private const string PaneInk = "#1A1A1A";
+
+    /// <summary>The app asked for the pane (set once, in the constructor).</summary>
+    private bool _paneWanted;
+
+    /// <summary>The `Seq` of the plan currently drawn (see `_menuDrawnSeq`).</summary>
+    private long _paneDrawnSeq;
+
+    /// <summary>
+    /// What the drawn controls were BUILT from: every leaf's path, type, id,
+    /// rect, static strings and icon. A new plan with the same signature only
+    /// moves values, so the controls are kept and updated in place; a
+    /// different one is rebuilt.
+    /// </summary>
+    private string? _paneSignature;
+
+    /// <summary>The drawn controls, by plan path.</summary>
+    private readonly Dictionary<string, FrameworkElement> _paneControls = new();
+
+    /// <summary>Icon loads still outstanding for the build numbered `_paneBuild`.</summary>
+    private int _paneIconsPending;
+    private int _paneIconsSvg;
+    private int _paneIconsText;
+    private int _paneIconsFailed;
+    private int _paneBuild;
+
+    /// <summary>One plan leaf, as this shell reads it. Values and static strings are the core's.</summary>
+    private sealed record PaneLeaf(
+        string Path, string Type, string Id, double X, double Y, double W, double H,
+        Dictionary<string, string> Values, Dictionary<string, string> Static)
+    {
+        internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
+        internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
+
+        /// <summary>A resolved `bind.icon` wins over the literal, as in every port.</summary>
+        internal string? IconName => Value("bind.icon") ?? Literal("icon");
+    }
+
+    // INSTANCE fields, not static: a brush is a XAML object, and an instance
+    // initializer runs on the UI thread that builds this window, where a type
+    // initializer runs wherever the type is first touched.
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneInkBrush =
+        new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x1A, 0x1A, 0x1A));
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneMutedBrush =
+        new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x80, 0x80, 0x80));
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneCheckedFill =
+        new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xCD, 0xE3, 0xF7));
+    private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneCheckedEdge =
+        new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x2F, 0x6F, 0xB0));
+
+    /// <summary>A new plan was published. Draw it, on the UI thread.</summary>
+    private void OnPanelChanged()
+    {
+        var snap = _canvas.Panel;
+        if (snap is null) { return; }
+        try
+        {
+            DrawPane(snap);
+        }
+        catch (Exception ex)
+        {
+            // A pane that failed to draw must SAY so: an empty pane over a
+            // healthy status line is the ambiguous failure this shell refuses.
+            Report($"RUSTFAIL PANEL DRAW threw {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void DrawPane(PanelSnapshot snap)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(snap.PlanJson);
+        var root = doc.RootElement;
+        var leaves = new List<PaneLeaf>();
+        foreach (var e in root.GetProperty("leaves").EnumerateArray())
+        {
+            var rect = e.GetProperty("rect");
+            leaves.Add(new PaneLeaf(
+                e.GetProperty("path").GetRawText(),
+                e.GetProperty("type").GetString() ?? "",
+                e.GetProperty("id").GetString() ?? "",
+                rect.GetProperty("x").GetInt64(),
+                rect.GetProperty("y").GetInt64(),
+                rect.GetProperty("w").GetInt64(),
+                rect.GetProperty("h").GetInt64(),
+                Strings(e.GetProperty("values")),
+                Strings(e.GetProperty("static"))));
+        }
+        var icons = new Dictionary<string, (string Viewbox, string Svg)>();
+        foreach (var ic in root.GetProperty("icons").EnumerateObject())
+        {
+            icons[ic.Name] = (ic.Value.GetProperty("viewbox").GetString() ?? "",
+                              ic.Value.GetProperty("svg").GetString() ?? "");
+        }
+        var height = root.GetProperty("height").GetInt64();
+
+        var signature = string.Join("\n", leaves.Select(l =>
+            $"{l.Path}|{l.Type}|{l.Id}|{l.X},{l.Y},{l.W},{l.H}|{l.IconName}|"
+            + string.Join(";", l.Static.OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                                       .Select(kv => $"{kv.Key}={kv.Value}"))));
+        var rebuilt = signature != _paneSignature;
+        if (rebuilt) { BuildPane(leaves, icons, height); }
+        _paneSignature = signature;
+
+        var (disabled, @checked, hidden) = (0, 0, 0);
+        foreach (var leaf in leaves)
+        {
+            if (!_paneControls.TryGetValue(leaf.Path, out var el)) { continue; }
+            var (d, c, h) = ApplyLeafValues(el, leaf);
+            disabled += d;
+            @checked += c;
+            hidden += h;
+        }
+
+        var missed = snap.Seq - _paneDrawnSeq - 1;
+        _paneDrawnSeq = snap.Seq;
+        Report($"PANEL DRAWN panel={snap.PanelId} seq={snap.Seq} cause={snap.Cause} "
+             + $"missed={(missed > 0 ? missed : 0)} rebuilt={(rebuilt ? "true" : "false")} "
+             + $"controls={_paneControls.Count} disabled={disabled} checked={@checked} hidden={hidden} "
+             + $"pane-dips={PaneHost.ActualWidth:0}x{PaneHost.ActualHeight:0} "
+             + $"canvas-dips={this.Canvas.ActualWidth:0}x{this.Canvas.ActualHeight:0}");
+    }
+
+    private static Dictionary<string, string> Strings(System.Text.Json.JsonElement map)
+    {
+        var d = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var kv in map.EnumerateObject())
+        {
+            d[kv.Name] = kv.Value.ValueKind == System.Text.Json.JsonValueKind.String
+                ? kv.Value.GetString() ?? ""
+                : kv.Value.GetRawText();
+        }
+        return d;
+    }
+
+    /// <summary>
+    /// Build every control, each at its canonical rect, and report what was
+    /// built. A leaf type this shell has no control for is drawn as a muted
+    /// `[type]` placeholder and COUNTED, never dropped.
+    /// </summary>
+    private void BuildPane(List<PaneLeaf> leaves, Dictionary<string, (string Viewbox, string Svg)> icons, long height)
+    {
+        _paneBuild++;
+        _paneControls.Clear();
+        _paneIconsPending = 0;
+        _paneIconsSvg = 0;
+        _paneIconsText = 0;
+        _paneIconsFailed = 0;
+
+        var host = new Microsoft.UI.Xaml.Controls.Canvas
+        {
+            Width = PaneAvailW,
+            Height = height,
+            Margin = new Thickness(PanePad),
+        };
+        var (texts, buttons, inputs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0);
+        foreach (var leaf in leaves)
+        {
+            FrameworkElement el;
+            switch (leaf.Type)
+            {
+                case "text":
+                    texts++;
+                    el = new TextBlock
+                    {
+                        FontSize = 12,
+                        Foreground = _paneInkBrush,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                        TextWrapping = TextWrapping.NoWrap,
+                        VerticalAlignment = VerticalAlignment.Center,
+                    };
+                    break;
+
+                case "icon_button":
+                    buttons++;
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    el = BuildIconButton(leaf, icons);
+                    break;
+
+                case "number_input":
+                    inputs++;
+                    // ⚠️ DISPLAY ONLY IN 2a, AND THE CORE IS WHY: align's one
+                    // input is enabled only with a designated key object, which
+                    // the engine has no way to designate, so it is always
+                    // disabled by the core's own verdict. Its commit path is
+                    // unbuilt and named rather than faked.
+                    el = new TextBox
+                    {
+                        IsReadOnly = true,
+                        FontSize = 12,
+                        MinWidth = 0,
+                        MinHeight = 0,
+                        Padding = new Thickness(4, 0, 4, 0),
+                    };
+                    break;
+
+                default:
+                    unmaterialized++;
+                    el = new TextBlock
+                    {
+                        Text = $"[{leaf.Type}]",
+                        FontSize = 10,
+                        Foreground = _paneMutedBrush,
+                    };
+                    break;
+            }
+            el.Width = leaf.W;
+            el.Height = leaf.H;
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(el, leaf.X);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(el, leaf.Y);
+            host.Children.Add(el);
+            _paneControls[leaf.Path] = el;
+        }
+        PaneScroll.Content = host;
+
+        Report($"PANEL BUILT panel={PanePanelId} build={_paneBuild} leaves={leaves.Count} texts={texts} "
+             + $"buttons={buttons} inputs={inputs} unmaterialized={unmaterialized} "
+             + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText}");
+        if (_paneIconsPending == 0) { ReportPaneIcons(); }
+    }
+
+    /// <summary>
+    /// An `icon_button`: its tooltip is the core's `summary`, its click is the
+    /// widget id, and its face is the named icon -- or, stop 4's fallback, the
+    /// button's own label or summary text, COUNTED as `icon-text`. Never blank:
+    /// the text face is shown first and replaced only by an icon that loaded.
+    /// </summary>
+    private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
+    {
+        var label = leaf.Literal("label") ?? leaf.Literal("summary") ?? leaf.Id;
+        var btn = new Button
+        {
+            Padding = new Thickness(0),
+            MinWidth = 0,
+            MinHeight = 0,
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Content = new TextBlock
+            {
+                Text = label,
+                FontSize = 8,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            },
+        };
+        var summary = leaf.Literal("summary");
+        if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(btn, summary); }
+
+        var id = leaf.Id;
+        btn.Click += (_, _) => OnPaneClick(id);
+
+        var name = leaf.IconName;
+        if (name is not null && icons.TryGetValue(name, out var def))
+        {
+            _paneIconsPending++;
+            LoadIcon(btn, def.Viewbox, def.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild);
+        }
+        else
+        {
+            // No icon named, or one the workspace does not define
+            // (`icons_missing`): the text face stays, by design.
+            _paneIconsText++;
+        }
+        return btn;
+    }
+
+    /// <summary>
+    /// Draw a workspace icon through the platform's SVG reader.
+    ///
+    /// The document is the workspace's own `viewbox` and `svg`, wrapped, with
+    /// `currentColor` given the pane's ink both ways -- as the root's `color`
+    /// and by substitution, the Swift port's approach -- because whether this
+    /// reader honours `currentColor` is read, not measured. A load that does
+    /// not SUCCEED leaves the text face and is counted as failed.
+    /// </summary>
+    private async void LoadIcon(Button btn, string viewbox, string svg, double box, int build)
+    {
+        var ok = false;
+        try
+        {
+            var markup = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"" + viewbox
+                       + "\" color=\"" + PaneInk + "\">" + svg.Replace("currentColor", PaneInk)
+                       + "</svg>";
+            var bytes = System.Text.Encoding.UTF8.GetBytes(markup);
+            using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+            using (var writer = new Windows.Storage.Streams.DataWriter(stream))
+            {
+                writer.WriteBytes(bytes);
+                await writer.StoreAsync();
+                writer.DetachStream();
+            }
+            stream.Seek(0);
+            var source = new Microsoft.UI.Xaml.Media.Imaging.SvgImageSource();
+            var status = await source.SetSourceAsync(stream);
+            ok = status == Microsoft.UI.Xaml.Media.Imaging.SvgImageSourceLoadStatus.Success;
+            if (ok && build == _paneBuild)
+            {
+                // The button's own padding is zero, so the icon is inset by
+                // 2 DIPs a side from the core's rect: a presentation choice of
+                // this shell, like the Swift port's icon size is of that one.
+                var side = box - 4;
+                if (side < 1) { side = box; }
+                btn.Content = new Image
+                {
+                    Source = source,
+                    Width = side,
+                    Height = side,
+                    Stretch = Microsoft.UI.Xaml.Media.Stretch.Uniform,
+                };
+            }
+            else if (!ok)
+            {
+                Report($"PANEL ICON FAILED status={status} -- the text face stays");
+            }
+        }
+        catch (Exception ex)
+        {
+            Report($"PANEL ICON FAILED {ex.GetType().Name}: {ex.Message} -- the text face stays");
+        }
+        finally
+        {
+            // A load finishing for a build that has since been replaced says
+            // nothing about the pane on screen, so it is not counted.
+            if (build == _paneBuild)
+            {
+                if (ok) { _paneIconsSvg++; } else { _paneIconsFailed++; }
+                _paneIconsPending--;
+                if (_paneIconsPending == 0) { ReportPaneIcons(); }
+            }
+        }
+    }
+
+    /// <summary>Stop 4's receipt: how each icon_button's face was drawn, once every load settled.</summary>
+    private void ReportPaneIcons() =>
+        Report($"PANEL ICONS panel={PanePanelId} build={_paneBuild} svg={_paneIconsSvg} "
+             + $"text={_paneIconsText} failed={_paneIconsFailed} "
+             + $"icon={(_paneIconsSvg > 0 && _paneIconsText + _paneIconsFailed == 0 ? "SVG" : "TEXT")}");
+
+    /// <summary>
+    /// Show what the core says about one control. Returns `(disabled, checked,
+    /// hidden)` as 0/1 for the row.
+    ///
+    /// ⛔ THESE ARE READINGS, NOT EVALUATIONS. Each value is the canonical
+    /// string the core resolved; `"true"` is the only true. An unaddressable
+    /// button (no id) is never enabled, since a click could not name it.
+    /// </summary>
+    private (int Disabled, int Checked, int Hidden) ApplyLeafValues(FrameworkElement el, PaneLeaf leaf)
+    {
+        var shown = (leaf.Value("bind.visible") ?? leaf.Value("visible")) != "false";
+        el.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        var off = leaf.Value("bind.disabled") == "true";
+        var on = leaf.Value("bind.checked") == "true";
+
+        switch (el)
+        {
+            case TextBlock tb when leaf.Type == "text":
+                tb.Text = leaf.Value("content") ?? leaf.Literal("content") ?? "";
+                break;
+
+            case Button btn:
+                off = off || leaf.Id.Length == 0;
+                btn.IsEnabled = !off;
+                if (on)
+                {
+                    btn.Background = _paneCheckedFill;
+                    btn.BorderBrush = _paneCheckedEdge;
+                    btn.BorderThickness = new Thickness(1);
+                }
+                else
+                {
+                    btn.ClearValue(Control.BackgroundProperty);
+                    btn.ClearValue(Control.BorderBrushProperty);
+                    btn.ClearValue(Control.BorderThicknessProperty);
+                }
+                break;
+
+            case TextBox box:
+                var unit = leaf.Literal("unit") ?? leaf.Literal("suffix");
+                var value = leaf.Value("bind.value") ?? "";
+                box.Text = unit is null ? value : $"{value} {unit}";
+                box.IsEnabled = !off;
+                break;
+        }
+        return (off ? 1 : 0, on ? 1 : 0, shown ? 0 : 1);
+    }
+
+    /// <summary>
+    /// A pane control was clicked: send its widget id and the modifier keys.
+    /// What the click does is the core's (`jas_panel_behavior`); the row it
+    /// writes is the receipt.
+    /// </summary>
+    private void OnPaneClick(string widget)
+    {
+        _canvas.PanelClick(new PanelClickCmd
+        {
+            PanelId = PanePanelId,
+            Widget = widget,
+            Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
+            Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
+            Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
+            Meta = IsKeyDown(Windows.System.VirtualKey.LeftWindows)
+                   || IsKeyDown(Windows.System.VirtualKey.RightWindows),
+        });
+    }
+
+    private static bool IsKeyDown(Windows.System.VirtualKey key) =>
+        (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key)
+         & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down;
 }

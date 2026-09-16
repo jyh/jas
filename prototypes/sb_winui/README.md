@@ -122,12 +122,53 @@ value is refused by name on the render thread (`Canvas.cs:1711-1758`).
 | `stall` | a deliberate sleep inside ONE repaint on the render thread, or on the XAML thread, or both — the residency and liveness controls | a stall length |
 | `pointer` | load, dump the document, and wait for a REAL gesture; a timeout is `NOT RUN`, never a synthetic receipt wearing `REAL` | a document |
 | `stay` | paint once and do not complete and do not exit; the row carries the PID | optional document |
+| `abi` | wave 1's bindings driven once each against the held engine; one `ABI` row | — |
+| `app` | the application: an optional preload (`SB_OPEN_PATH`, else `SB_SVG`), the materialized menubar, and the Align pane (below). It does not complete and does not exit | optional document |
 | `selection-marquee` | the synthesised marquee as it stood at checkpoint 3, renamed and kept as a CONTROL. It moves nothing and selects N; it proves nothing about the pointer seam. The old spelling `selection` is REFUSED by name pointing here, so no invocation written before the rename can silently run the wrong arm | a document |
 
 Every scene's row ends with the tid tail, and every row is appended to
 `sb-runs.log` under one lock and mirrored into the window title — the title is
 how a measurement reaches a session-1 observer, the file is how it reaches
 session 0.
+
+## The Align pane (wave 2a, W2-5)
+
+Under `app` only, a fixed right-hand pane shows the Align panel. It is a
+MATERIALIZER like the menubar: `jas_panel_plan("align_panel_content", 228, 0)`
+supplies every control's canonical rect, its resolved `values`, its literal
+`static` display strings and the workspace definition of every icon it names;
+each control is a native WinUI control placed at its rect on a `Canvas`. A
+click sends `{"widget", "event": "click", modifiers}` through
+`jas_panel_behavior`, and the core decides what it does. The shell evaluates
+nothing (`check_shell_no_interpreter.py`, clause (c) included).
+
+The pane is made visible BEFORE the first layout, so the surface is born at its
+final size and opening the pane costs no resize (stop 5). Every measurement
+scene leaves it collapsed and keeps the surface it always had.
+
+| row | written | carries |
+|---|---|---|
+| `PANEL OPEN` | render thread, once | the plan's list counts, `crossings` (the core's own count across the open, 2 when healthy) and `bytes` |
+| `PANEL BUILT` | UI thread, per rebuild | controls by kind; `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a button with no id, never enabled) |
+| `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
+| `PANEL DRAWN` | UI thread, per published plan | `seq`, `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, pane and canvas sizes |
+| `PANEL CLICK` | render thread, per click | `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
+| `PANEL CLICK REFUSED` | render thread | the core's refusal class and detail; nothing ran |
+
+`RUSTFAIL` is written for a plan refusal, a draw that threw, a click answered
+by an empty reply AND an empty channel (`SILENT`), and a click whose reply rows
+disagree with the plan read after it (`delta-mismatch` other than `0`). The plan
+is re-read after every drain that could have moved the document (a pointer
+release, an op, an open) and after every click; the click's rows are CHECKED
+against it rather than applied.
+
+**Not built in 2a, stated as negatives:** the spacing input is display-only
+(the core keeps it disabled: the engine cannot designate a key object);
+`chrome` and `containers` entries are counted and not drawn (align has none); a
+`bind.icon` that a tick moves outside the plan's `icons` map shows its text
+face; whether WinUI's SVG reader honours `currentColor` is read, not measured,
+which is why the pane is light and the ink is substituted; the harness row and
+the route are W2-6.
 
 ## Knobs
 

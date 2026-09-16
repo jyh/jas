@@ -696,11 +696,16 @@ pub unsafe extern "C" fn jas_panel_event(
 /// It is `render_plan`'s rects joined IN THE ENGINE, by path, with the rows
 /// [`jas_bind_values`] serves, in the same engine-assembled scope. The shape is
 /// documented in `crate::panel_plan`. A shell places a native control at each
-/// leaf's `rect` and shows its `values`.
+/// leaf's `rect`, shows its `values` and its `static` literal display strings
+/// (a label's text, a button's tooltip and icon name), and draws each named
+/// icon from the plan's `icons` map (W2-5a).
 ///
 /// ⛔ **NOTHING INTERPRETABLE CROSSES.** No node, no `{{ }}` expression, no
-/// `behavior`, no binding map, no scope. The shell evaluates nothing, and the
-/// arms beside this function check every panel the workspace carries.
+/// `behavior`, no binding map, no scope. A templated id, display string or
+/// resolved value is named in `withheld` instead of being sent raw, and an
+/// icon the workspace does not define is named in `icons_missing`. The shell
+/// evaluates nothing, and the arms beside this function check every panel the
+/// workspace carries.
 ///
 /// `avail_w` / `avail_h` are the layout pass's own inputs, in canonical panel
 /// units (`avail_h == 0` is content height, no vertical flex).
@@ -737,7 +742,7 @@ pub unsafe extern "C" fn jas_panel_plan(
         return JasBytes::empty();
     };
     let ctx = panel_ctx(engine, &ws, id);
-    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx);
+    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx, ws.icons());
     engine.registry.borrow_mut().record(id, &rows);
     let out = JasBytes::from_string(serde_json::to_string(&plan).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelPlan, out.len);
@@ -1659,6 +1664,23 @@ mod tests {
         assert!(b.ptr.is_null() && b.len == 0, "bad UTF-8");
         // The control: the same engine answers a real panel.
         assert!(plan_of(e, id, 228, 0).contains("\"leaves\""));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2-5a through the ABI.** The export hands the plan the workspace's own
+    /// icon definitions, so the align plan names `align_left` and carries its
+    /// definition; the pure arms in `panel_plan` cover the rest.
+    #[test]
+    fn panel_plan_carries_display_text_and_icons_through_the_abi() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "align_panel_content", 228, 0)).expect("plan JSON");
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        assert_eq!(plan["leaves"][1]["id"], "align_left_button", "{plan}");
+        assert_eq!(plan["leaves"][1]["static"]["icon"], "align_left", "{plan}");
+        assert_eq!(plan["icons"]["align_left"]["svg"], ws.icons()["align_left"]["svg"]);
+        assert_eq!(plan["icons_missing"], serde_json::json!([]), "{plan}");
         unsafe { jas_engine_free(e) };
     }
 
