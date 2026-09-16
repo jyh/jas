@@ -27,9 +27,9 @@ pub const CHAR_WIDTH: i64 = 10;
 const CONTAINER_TYPES: [&str; 4] = ["container", "row", "col", "panel"];
 
 struct MItem {
-    // Read only by `layout_panel` (the byte-gate projection); the web render
-    // swap uses `render_plan`, which projects node+ctx+rect, not path.
-    #[allow(dead_code)]
+    // Read by both projections: `layout_panel` (the byte-gate) and
+    // `render_plan`, whose leaves carry it so a consumer can join the plan to
+    // `bind_values` rows without re-walking the tree.
     path: Vec<i64>,
     x: i64,
     y: i64,
@@ -47,7 +47,13 @@ struct MItem {
 /// A renderable leaf from `render_plan`: where to draw (`rect` as `(x,y,w,h)`),
 /// what to draw (`node`), and the scope to evaluate it with (`ctx` — the child
 /// scope, so a foreach-expanded leaf carries its per-row data).
+///
+/// `path` is the SAME path `layout_panel` emits for this item (root = `[]`, the
+/// i-th declared child = `[i]`, a foreach's i-th expansion = `[..., i]`). It is
+/// what lets a consumer join a leaf to its `bind_values` rows by path; a join
+/// on `id` would be wrong, because a foreach template repeats its ids.
 pub struct RenderLeaf {
+    pub path: Vec<i64>,
     pub x: i64,
     pub y: i64,
     pub w: i64,
@@ -124,6 +130,7 @@ pub fn render_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) 
             continue;
         }
         let leaf = RenderLeaf {
+            path: it.path,
             x: it.x,
             y: it.y,
             w: it.w,

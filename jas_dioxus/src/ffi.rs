@@ -668,6 +668,21 @@ pub unsafe extern "C" fn jas_panel_event(
     out
 }
 
+/// RED-FIRST STUB for the wave-2 panel plan: records nothing, returns nothing.
+///
+/// # Safety
+/// `panel_id` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_panel_plan(
+    _e: *mut JasEngine,
+    _panel_id: *const u8,
+    _len: usize,
+    _avail_w: i64,
+    _avail_h: i64,
+) -> JasBytes {
+    JasBytes::empty()
+}
+
 /// The panel-event channel's diagnostic, in the same shape
 /// [`jas_last_error_json`] already serves.
 ///
@@ -1330,5 +1345,157 @@ mod tests {
 
     fn undo_enabled(rows: &serde_json::Value) -> Option<bool> {
         action_enabled(rows, "undo")
+    }
+
+    // -----------------------------------------------------------------------
+    // W2-2 — THE PANEL PLAN (wave-2 design, A5; observables Q1-Q3)
+    //
+    // ⛔ RED FIRST: written before `jas_panel_plan` existed, and seen to fail to
+    // compile on the unresolved symbol, then to fail at runtime on a stub.
+    // -----------------------------------------------------------------------
+
+    fn plan_of(e: *mut JasEngine, panel: &str, w: i64, h: i64) -> String {
+        take(unsafe { jas_panel_plan(e, panel.as_ptr(), panel.len(), w, h) })
+    }
+
+    const PLAN_SIZES: [(i64, i64); 3] = [(228, 0), (228, 600), (0, 0)];
+
+    /// **Q1 through the ABI.** For EVERY panel the compiled workspace carries
+    /// (derived, never pinned), at three sizes, every `(path, rect)` the plan
+    /// carries is `layout_panel`'s at that path, byte for byte, in the scope the
+    /// engine assembles; and every `render_plan` leaf appears.
+    #[test]
+    fn panel_plan_rects_equal_layout_panel_on_every_panel() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let engine = unsafe { e.as_ref() }.unwrap();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let panels: Vec<String> = ws.panels().as_object().unwrap().keys().cloned().collect();
+        let (mut compared, mut leaves) = (0usize, 0usize);
+        for pid in &panels {
+            let spec = ws.panel(pid).unwrap();
+            for (w, h) in PLAN_SIZES {
+                let got = plan_of(e, pid, w, h);
+                let plan: serde_json::Value = serde_json::from_str(&got)
+                    .unwrap_or_else(|_| panic!("{pid} {w}x{h}: not JSON: {got:?}"));
+                let ctx = panel_ctx(engine);
+                let layout = crate::interpreter::panel_layout::layout_panel(spec, w, h, &ctx);
+                let rp = crate::interpreter::panel_layout::render_plan(spec, w, h, &ctx);
+                compared += crate::panel_plan::checks::plan_matches_layout(&plan, &layout, &rp)
+                    .unwrap_or_else(|err| panic!("{pid} {w}x{h}: {err}"));
+                leaves += rp.leaves.len();
+            }
+        }
+        assert!(!panels.is_empty() && leaves > 0 && compared >= leaves,
+            "vacuous: panels={} leaves={leaves} compared={compared}", panels.len());
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **Q2 through the ABI.** No plan, for any panel, carries `{{`, a `node`, a
+    /// `behavior`, a `bind` map or a `ctx`. The shell evaluates nothing.
+    #[test]
+    fn panel_plan_carries_nothing_interpretable_on_every_panel() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let panels: Vec<String> = ws.panels().as_object().unwrap().keys().cloned().collect();
+        let mut bytes = 0usize;
+        for pid in &panels {
+            for (w, h) in PLAN_SIZES {
+                let got = plan_of(e, pid, w, h);
+                assert!(got.contains("\"leaves\""), "{pid} {w}x{h}: not a plan: {got:?}");
+                crate::panel_plan::checks::nothing_interpretable(&got)
+                    .unwrap_or_else(|err| panic!("{pid} {w}x{h}: {err}"));
+                bytes += got.len();
+            }
+        }
+        assert!(!panels.is_empty() && bytes > 0, "vacuous");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **Q3 through the ABI.** The engine's own colour is the S-C seed, so the
+    /// plan's values equal `jas_bind_values`' rows there. After a tick to
+    /// `664141` they are equal again, and the set of values that moved in the
+    /// plan is the set of rows that moved in `jas_bind_values`, `cp_hex` among
+    /// them. (Through the engine the eleven channels are DERIVED from the colour,
+    /// so more than one row moves; the exactly-one claim is made on the pin's own
+    /// scope in `panel_plan::tests`.)
+    #[test]
+    fn panel_plan_values_equal_bind_values_through_the_abi() {
+        use crate::panel_plan::checks::{plan_values, row_values};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let id = "color_panel_content";
+        let read = |e| {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, id, 228, 600)).expect("plan JSON");
+            let rows: serde_json::Value = serde_json::from_str(&take(unsafe {
+                jas_bind_values(e, id.as_ptr(), id.len())
+            }))
+            .expect("rows JSON");
+            let (values, n) = plan_values(&plan);
+            let want = row_values(&rows);
+            assert!(n > 0, "vacuous: nothing joined");
+            assert_eq!(n, want.len(), "every row joined exactly once");
+            assert_eq!(values, want, "plan values != jas_bind_values rows");
+            values
+        };
+
+        let a = read(e);
+        let hex_key = a
+            .iter()
+            .find(|(k, v)| k.ends_with("|bind.value") && v.as_str() == "664040")
+            .map(|(k, _)| k.clone())
+            .expect("the engine's seed displays 664040");
+
+        let ev = r#"{"widget":"cp_hex","value":"664141"}"#;
+        let _ = take(unsafe { jas_panel_event(e, id.as_ptr(), id.len(), ev.as_ptr(), ev.len()) });
+        let b = read(e);
+        assert_eq!(b.get(&hex_key).map(String::as_str), Some("664141"), "cp_hex moved");
+
+        let moved: std::collections::BTreeSet<&String> =
+            a.keys().filter(|k| a.get(*k) != b.get(*k)).collect();
+        assert!(moved.contains(&hex_key), "{moved:?}");
+        assert!(moved.len() < a.len(), "a tick moved every value: {moved:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Reading a panel's PLAN enrols it, exactly as reading its values does:
+    /// a shell that opens a panel through the plan alone must still be sent the
+    /// rows a tick moves. The control is an engine that opened nothing.
+    #[test]
+    fn panel_plan_enrols_the_panel_for_ticks() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = "color_panel_content";
+        let ev = r#"{"widget":"cp_hex","value":"664141"}"#;
+        let tick = |e| take(unsafe {
+            jas_panel_event(e, id.as_ptr(), id.len(), ev.as_ptr(), ev.len())
+        });
+
+        let control = jas_engine_new();
+        assert_eq!(tick(control), "[]", "control: nothing open, nothing sent");
+        unsafe { jas_engine_free(control) };
+
+        let e = jas_engine_new();
+        let _ = plan_of(e, id, 228, 0);
+        let delta = tick(e);
+        assert!(delta.contains("\"cp_hex\""), "a plan-opened panel must receive the tick: {delta}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn panel_plan_refuses_as_the_empty_span() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = "color_panel_content";
+        let b = unsafe { jas_panel_plan(std::ptr::null_mut(), id.as_ptr(), id.len(), 228, 0) };
+        assert!(b.ptr.is_null() && b.len == 0, "null handle");
+        let e = jas_engine_new();
+        assert_eq!(plan_of(e, "no_such_panel", 228, 0), "", "unknown panel");
+        let bad = [0xff_u8, 0xfe];
+        let b = unsafe { jas_panel_plan(e, bad.as_ptr(), bad.len(), 228, 0) };
+        assert!(b.ptr.is_null() && b.len == 0, "bad UTF-8");
+        // The control: the same engine answers a real panel.
+        assert!(plan_of(e, id, 228, 0).contains("\"leaves\""));
+        unsafe { jas_engine_free(e) };
     }
 }

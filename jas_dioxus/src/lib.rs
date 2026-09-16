@@ -33,6 +33,10 @@ pub mod ffi_instr;
 // BL1 forbids the shell from assembling either.
 #[cfg(feature = "ffi")]
 pub mod panel_scope;
+// The panel PLAN a shell materializes: layout rects joined with resolved bind
+// values, in the engine (wave 2, A5). Same gate as the boundary it serves.
+#[cfg(feature = "ffi")]
+pub mod panel_plan;
 
 // S-B SPIKE SEAM, not ratified ABI. Needs BOTH features: the paint entry
 // point is meaningless without the Direct2D backend, and it is kept out of
