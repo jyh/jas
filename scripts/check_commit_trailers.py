@@ -452,9 +452,12 @@ def _scratch_repo(where: pathlib.Path, files: dict[str, bytes], message: str) ->
 def _verdict_arm() -> tuple[list[str], int]:
     """Arm 7: (findings, how many verdict sites the census found).
 
-    Every driven output must match EXACTLY ONE census site and name the gate
-    on its first line, every site must be reached, and the exit code must be
-    the one the verdict implies.
+    Every driven output must match EXACTLY ONE census site, name the gate on
+    its first line, and say OK or FAIL as the outcome was a pass or a failure;
+    every site must be reached; and a table row must exit with its code.
+    (The word check was added after a mutant that made the failing summary
+    say OK survived: matching a site says WHICH verdict printed, not whether
+    it told the truth.)
     ⛔ THE EXPECTED ID IS COMPUTED HERE, NEVER READ FROM self_id(): a
     self_id() returning any constant 16-hex would otherwise agree with itself
     on every line and the arm could not fail.
@@ -465,7 +468,7 @@ def _verdict_arm() -> tuple[list[str], int]:
     findings: list[str] = []
     reached: set[tuple[int, int]] = set()
 
-    def check(name: str, said: str) -> None:
+    def check(name: str, said: str, passed: bool) -> None:
         first = said.splitlines()[0] if said else ""
         hits = [s for s, pat in sites.items() if pat.match(said)]
         if len(hits) != 1:
@@ -475,6 +478,11 @@ def _verdict_arm() -> tuple[list[str], int]:
         if f"[gate {want}]" not in first:
             findings.append(f"arm 7, {name}: the verdict does not name the gate "
                             f"{want}: {first!r}")
+        says = (re.search(r"\]: OK\b", first) is not None,
+                re.search(r"\bFAIL\b", first) is not None)
+        if says != (passed, not passed):
+            findings.append(f"arm 7, {name}: the verdict word disagrees with a "
+                            f"{'pass' if passed else 'failure'}: {first!r}")
 
     # Planted shapes ASSEMBLED, as arm 2 does: this file scans file contents.
     url = "https://" + _HOST.replace(chr(92), "") + "/code/session_abc"
@@ -501,11 +509,13 @@ def _verdict_arm() -> tuple[list[str], int]:
             rc, said = _drive(repo, argv)
             if rc != code:
                 findings.append(f"arm 7, {name}: exit {rc}, want {code}")
-            check(name, said)
+            check(name, said, code == 0)
     # The self-test's own summary cannot be driven by running the self-test
-    # inside itself, so its formatter is driven directly, both ways.
-    check("the self-test passing", _self_test_verdict([], len(sites)))
-    check("the self-test failing", _self_test_verdict(["x"], len(sites)))
+    # inside itself, so its formatter is driven directly, both ways. What that
+    # leaves unwitnessed, and is recorded rather than faked: self_test() not
+    # PRINTING the line at all. Its exit code still carries the verdict.
+    check("the self-test passing", _self_test_verdict([], len(sites)), True)
+    check("the self-test failing", _self_test_verdict(["x"], len(sites)), False)
 
     for line, col in sorted(set(sites) - reached):
         findings.append(f"arm 7: the verdict string at line {line} was never driven; "
