@@ -1043,6 +1043,48 @@ mod tests {
             .expect("nothing interpretable crossed");
     }
 
+    /// Four shapes the real workspace does not carry today, each found by a
+    /// surviving mutant (W2-5a round 2):
+    /// * a value whose template is MID-string (M17: a `starts_with` test passed
+    ///   every real row, because concepts' value begins with the braces);
+    /// * a layout-only container whose ONLY bound row is withheld (M18: its
+    ///   entry must stay listed, or the shell never learns the visibility it
+    ///   cannot know);
+    /// * a chrome entry that names an icon (M21: icons were collected from
+    ///   leaves alone, and nothing noticed);
+    /// * an empty icon name (M22: it would be listed as a missing icon named "").
+    #[test]
+    fn withheld_and_icons_hold_for_shapes_the_workspace_lacks_today() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "text", "id": "mid", "content": "x", "bind": {"value": "panel.mid"}},
+            {"type": "container", "id": "veiled", "bind": {"visible": "panel.veil"},
+             "children": [{"type": "text", "content": "inside"}]},
+            {"type": "container", "id": "framed", "style": {"border": "1px"}, "icon": "zz_chrome",
+             "children": [{"type": "text", "content": "framed"}]},
+            {"type": "icon_button", "id": "blank", "icon": "", "summary": "s"},
+        ]}});
+        let icons = json!({"zz_chrome": {"viewbox": "0 0 1 1", "svg": "<c/>"}});
+        let ctx = json!({"panel": {"mid": "pre {{theme.x}}", "veil": "{{theme.y}}"}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        assert_eq!(plan["leaves"][0]["values"], json!({}), "{plan}");
+        let containers = plan["containers"].as_array().expect("containers");
+        assert!(
+            containers.iter().any(|c| c["path"] == json!([1]) && c["values"] == json!({})),
+            "the veiled container must stay listed with its value withheld: {plan}"
+        );
+        let held: BTreeSet<String> = plan["withheld"].as_array().unwrap().iter()
+            .map(|w| format!("{}|{}", w["path"], w["key"].as_str().unwrap()))
+            .collect();
+        assert!(held.contains("[0]|bind.value"), "mid-string template not withheld: {plan}");
+        assert!(held.contains("[1]|bind.visible"), "container value not withheld: {plan}");
+        assert_eq!(plan["chrome"][0]["static"], json!({"icon": "zz_chrome"}), "{plan}");
+        assert_eq!(plan["icons"], json!({"zz_chrome": {"viewbox": "0 0 1 1", "svg": "<c/>"}}), "{plan}");
+        // An EMPTY icon name names nothing (M22): not an icon, not a missing one.
+        assert_eq!(plan["icons_missing"], json!([]), "{plan}");
+        checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
+            .expect("nothing interpretable crossed");
+    }
+
     /// An icon the workspace does not define is NAMED, never dropped; a bound
     /// icon is resolved from the row that names it; `name` is an icon only on
     /// an `icon` node.
@@ -1050,6 +1092,7 @@ mod tests {
     fn an_undefined_icon_is_named_missing_and_a_bound_icon_is_resolved() {
         let panel = json!({"content": {"type": "col", "children": [
             {"type": "icon_button", "id": "gone", "icon": "zz_nowhere", "summary": "s"},
+            {"type": "icon_button", "id": "gone_again", "icon": "zz_nowhere", "summary": "s"},
             {"type": "icon_button", "id": "bound", "icon": "zz_static", "summary": "s",
              "bind": {"icon": "panel.which"}},
             {"type": "text_input", "id": "n", "name": "zz_not_an_icon", "placeholder": "p"},
@@ -1059,6 +1102,8 @@ mod tests {
                            "zz_not_an_icon": def("0 0 3 3")});
         let ctx = json!({"panel": {"which": "zz_bound"}});
         let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        // Named by two buttons, listed ONCE (mutation M11 survived without the
+        // second button).
         assert_eq!(plan["icons_missing"], json!(["zz_nowhere"]), "{plan}");
         assert_eq!(
             plan["icons"],
@@ -1066,7 +1111,7 @@ mod tests {
             "{plan}"
         );
         // The control: the bound row is what named `zz_bound`.
-        assert_eq!(plan["leaves"][1]["values"]["bind.icon"], json!("zz_bound"), "{plan}");
+        assert_eq!(plan["leaves"][2]["values"]["bind.icon"], json!("zz_bound"), "{plan}");
     }
 
     /// ⭐ ON EVERY PANEL, IN EVERY SCOPE, AT EVERY SIZE: every static entry is
