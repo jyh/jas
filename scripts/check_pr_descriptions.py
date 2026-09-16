@@ -702,7 +702,7 @@ def _subject_arms() -> list[str]:
 
         def bl(name, text):
             p = os.path.join(d, name)
-            with open(p, "w", encoding="utf-8") as fh:
+            with open(p, "w", encoding="utf-8", newline="") as fh:
                 fh.write(text)
             return p
 
@@ -812,7 +812,8 @@ def _subject_arms() -> list[str]:
         ]
         for label, argv, want_rc in clis:
             r = subprocess.run([sys.executable, me] + argv, cwd=d, capture_output=True,
-                               text=True, encoding="utf-8", errors="replace")
+                               text=True, encoding="utf-8", errors="replace",
+                               env=dict(os.environ, PYTHONIOENCODING="utf-8"))
             if r.returncode != want_rc:
                 failures.append(f"CLI case '{label}' must exit {want_rc}, got {r.returncode}")
             if "Traceback" in r.stdout + r.stderr:

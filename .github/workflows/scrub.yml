@@ -288,6 +288,45 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/check_pr_descriptions.py --open
 
+  commit-subjects:
+    name: no NEW commit subject carries a lane name or a family reference
+    runs-on: ubuntu-latest
+    # Desk QA (2026-09-16). The owner accepted eleven public commit subjects as
+    # declared debt instead of rewriting history, and commissioned this so the
+    # recurrence closes. Every one of the nine lane-name subjects was written by
+    # a commit that was ADDING that name to the private-paths gate, whose source
+    # never spells it: the artifact was hardened and the metadata that
+    # delivered it was not.
+    #
+    # --range reads what the push added (subjects, and bodies for lane names),
+    # FORWARD ONLY: the commit bodies already public are history this job does
+    # not rule on. ⛔ The picker's tip-only fallback can name an OLD commit (a
+    # branch or tag created at an existing sha); there the baseline excuses the
+    # subject and never the body -- a stated limit, not a surprise.
+    # --history reads every SUBJECT against scripts/subject_debt_baseline.tsv
+    # and reds in both directions: new debt, and a row it can no longer find.
+    # A subject cannot be edited once pushed, so this job reports what the
+    # pre-push hook exists to prevent.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The gate proves it can fail before it is allowed to pass.
+      - run: python scripts/check_pr_descriptions.py --self-test
+      - run: sh scripts/pick_scan_range.sh --self-test
+      - name: subjects and bodies of the pushed delta
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          RANGE="$(scripts/pick_scan_range.sh)" || exit 1
+          echo "scanning $RANGE"
+          python scripts/check_pr_descriptions.py --range "$RANGE"
+      - name: every subject against the accepted-debt baseline (full depth)
+        run: python scripts/check_pr_descriptions.py --history
+
   pre-push-proof:
     name: the pre-push hook refuses what the jobs above can only report
     runs-on: ubuntu-latest
