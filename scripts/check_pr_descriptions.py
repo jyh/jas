@@ -432,6 +432,10 @@ def msg_file_mode(path: str) -> int:
     return 0
 
 
+def ref_mode(name: str) -> int:
+    return 0
+
+
 def ref_vs_run(head_sha: str, run_sha, run_green, behind_by) -> str:
     """One line saying WHICH OBJECT the PR's verdict is about. Pure, so the
     self-test drives every branch without a forge.
@@ -749,6 +753,10 @@ def _subject_arms() -> list[str]:
             ("msg-file, a family-reference subject", msg_file_mode, (m_kin,), 1),
             ("msg-file, a clean message", msg_file_mode, (m_clean,), 0),
             ("msg-file, unreadable", msg_file_mode, (b_none,), 1),
+            ("ref, a lane word joined into a branch name", ref_mode, (ref,), 1),
+            ("ref, a family word", ref_mode, ("refs/heads/tidy-" + k0,), 1),
+            ("ref, clean", ref_mode, ("refs/heads/jas/tidy-branch",), 0),
+            ("ref, EMPTY", ref_mode, ("",), 1),
         ]
         for label, fn, args, want_rc in modes:
             rc, out = _quiet(fn, *args)
@@ -809,6 +817,9 @@ def _subject_arms() -> list[str]:
             ("--msg-file <clean>", ["--msg-file", m_clean], 0),
             ("--baseline beside --open", ["--open", "--baseline", b_debt], 2),
             ("two modes at once", ["--history", "--msg-file", m_clean], 2),
+            ("--ref <clean>", ["--ref", "refs/heads/main"], 0),
+            ("--ref <family word>", ["--ref", "tidy-" + k0], 1),
+            ("--ref <empty>", ["--ref", ""], 1),
         ]
         for label, argv, want_rc in clis:
             r = subprocess.run([sys.executable, me] + argv, cwd=d, capture_output=True,
