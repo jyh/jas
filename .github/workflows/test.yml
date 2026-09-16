@@ -1069,9 +1069,9 @@ jobs:
       # toolchain on this runner and no log to read, so only the self-test runs
       # -- which is the whole gate minus its subject, and is what
       # check_lane_coverage.py asks for: a gate that cannot fail on a platform
-      # is not watching that platform. Its comment stripper and its two log
-      # spellings are pure text handling, and text is exactly what differs
-      # between these two runners.
+      # is not watching that platform. Its comment stripper and its record
+      # reader are pure text handling, and text is exactly what differs between
+      # these two runners.
       - name: The Swift execution gate's reader, on the second platform family
         if: ${{ !cancelled() }}
         run: python scripts/check_swift_suite_ran.py --self-test
@@ -1640,13 +1640,27 @@ jobs:
       # The suite is over three thousand tests; it could silently become twelve
       # and this lane would still be green.
       #
-      # `tee` under `pipefail` keeps the real exit status of the single run, so
-      # the suite is not run twice for the count -- the mistake the wasm-canvas
-      # step above records making and undoing.
+      # The suite is run ONCE and its exit status kept, so it is not run twice
+      # for the count -- the mistake the wasm-canvas step above records making
+      # and undoing.
+      #
+      # ⛔ AND THE CASES ARE READ FROM THE xUNIT RECORD, NOT THE CONSOLE, AND THE
+      # CONSOLE GOES TO A FILE, NOT A PIPE. Until 2026-09-16 this step was
+      # `swift test 2>&1 | tee` and the gate read verdict lines off the console.
+      # On `main` (run 34882025346) the console lost ~160 of 3040 verdict lines
+      # IN CHUNKS -- one surviving line spliced two test names into a third --
+      # while swift-testing's own summary said all 3040 passed, and the gate
+      # went red on a healthy suite; the same tree was green on its PR run and
+      # on the next push. The console reaches us through SwiftPM's relay of the
+      # test helper's output, and that relay dropped bytes. `--xunit-output` is
+      # written by the test process itself, to a file. The console is now read
+      # for XCTest's one line only, and a regular file gives the relay no
+      # back-pressure to drop under. The price is no live stream: the log is
+      # printed when the run ends.
       #
       # ⛔ AND THE COUNT IS JUDGED AGAINST THE SOURCE, NOT A FLOOR.
       # check_swift_suite_ran.py derives BOTH sides on every run: every `@Test`
-      # the Swift sources declare, against every case the run reports, matched
+      # the Swift sources declare, against every case the record holds, matched
       # by NAME and by MULTIPLICITY so a name shared across suites cannot
       # collapse three executions into one. There is no constant to bump and
       # nothing to go stale -- the rule this workflow already adopted in
@@ -1661,10 +1675,14 @@ jobs:
       - name: The Swift suite, and every case it declares read back by name
         shell: bash
         run: |
-          set -o pipefail
           python3 scripts/check_swift_suite_ran.py --self-test
-          (cd JasSwift && swift test) 2>&1 | tee swift-test.log
-          python3 scripts/check_swift_suite_ran.py --log swift-test.log
+          record="$PWD/swift-xunit.xml"
+          rc=0
+          (cd JasSwift && swift test --xunit-output "$record") > swift-test.log 2>&1 || rc=$?
+          cat swift-test.log
+          if [ "$rc" -ne 0 ]; then echo "swift test exited $rc"; exit "$rc"; fi
+          # SwiftPM derives the swift-testing record's name from the one given.
+          python3 scripts/check_swift_suite_ran.py --log swift-test.log --xunit swift-xunit-swift-testing.xml
 
   # Flask is a non-gating reference renderer (TESTING_STRATEGY.md §6), so this
   # job does not block the merge (continue-on-error) — but it keeps the flask
