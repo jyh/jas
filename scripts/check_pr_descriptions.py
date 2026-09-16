@@ -386,9 +386,8 @@ def history_mode(cwd=None, baseline_path=None) -> int:
     except (OSError, ValueError, RuntimeError) as e:
         print(f"FAIL {tag}: --history could not run: {e}")
         return 1
-    if n == 0:
-        print(f"FAIL {tag}: --history read NO commit subject.")
-        return 1
+    # No `n == 0` guard: a HEAD that resolves has at least one commit, and a
+    # repository with none fails in `git log` above (the self-test drives it).
     if new:
         print(f"FAIL {tag}: {len(new)} commit subject(s) carry a refused word "
               "and are NOT in the accepted-debt baseline:\n")
@@ -635,13 +634,15 @@ def _subject_arms() -> list[str]:
          [("PR #4 BODY", LANE)]),
         ({"number": 4, "title": "the " + k0, "head": {"ref": "x"}, "body": ""},
          [("PR #4 TITLE", KIN)]),
+        ({"number": 4, "title": "clean", "head": {"ref": "tidy-" + k0}, "body": ""},
+         [("PR #4 HEAD REF", KIN)]),
         ({"number": 4, "title": None, "head": None, "body": None}, []),
     ]
     for i, (pr, want) in enumerate(cases):
         if subject_scan(pr_rows(pr)) != want:
             failures.append(f"PR surface case {i} must yield exactly its planted findings")
     mcases = [
-        ("clean subject\n\nclean body\n# the " + k0 + " in a comment\n", []),
+        ("clean subject\n\nclean body\n# the " + k0 + " and " + w0 + " in a comment\n", []),
         ("clean\n\nbody\n" + _SCISSORS + "\ndiff --git " + w0 + "\n", []),
         ("# a comment\n\ntidy " + w0 + "\n\nbody\n", [("the message SUBJECT", LANE)]),
         ("first line\nsecond line, the " + k0 + "\n\nbody\n", [("the message SUBJECT", KIN)]),
@@ -651,18 +652,32 @@ def _subject_arms() -> list[str]:
         if subject_scan(message_rows(text)) != want:
             failures.append(f"message case {i} must yield exactly its planted findings")
 
+    # The digest is pinned to the published standard, not to itself: a
+    # known-answer test is the one arm a self-consistent wrong hash cannot pass.
+    if subject_key("0" * 40, "abc") != ("0" * 40, "ba7816bf8f01cfea"):
+        failures.append("subject_key must be the first 16 hex of SHA-256 over the subject")
+    a = "a" * 40
+    rows = commit_rows([(a, "tidy " + w0, "see " + w0)], {subject_key(a, "tidy " + w0)})
+    if subject_scan(rows) != [(f"commit {a[:12]} BODY", LANE)]:
+        failures.append("a baselined SUBJECT must be skipped and must NOT excuse its BODY")
+
     # ARM 10 -- rec (4), end to end in a real repository: a lane word in a
     # SUBJECT ONLY (clean body) is caught; a family reference in a body only is
-    # not; a lane word in a body only is. Then the MODES, not the predicates:
+    # not; a lane word in a body only is. Then the MODES, not the predicates --
     # the range, the empty range, the baseline in both directions, the shallow
-    # clone, and the commit-message file.
+    # clone, the message file -- then --open through a fake forge, and main()
+    # itself as a subprocess, because a flag that reaches the wrong mode is
+    # invisible to every arm that calls the mode directly.
     d = e = s = None
+    real_gh = _gh
     try:
+        subj = {1: "tidy " + w0 + " notes", 4: "ratified: the " + k0 + "'s read"}
         d, shas = _scratch_repo([
             ("base: clean", ""),
-            ("tidy " + w0 + " notes", "a clean body"),
+            (subj[1], "a clean body"),
             ("clean subject", "the " + k0 + " agreed"),
             ("clean subject two", "see " + w0),
+            (subj[4], ""),
         ])
         got = subject_scan(commit_rows(commits(shas[0] + ".." + shas[3], d)))
         want = [(f"commit {shas[1][:12]} SUBJECT", LANE),
@@ -670,7 +685,7 @@ def _subject_arms() -> list[str]:
         if sorted(got) != sorted(want):
             failures.append("rec (4): the range must find the subject-only and body-only "
                             "lane plants and NOT the body-only family reference")
-        k1 = subject_key(shas[1], "tidy " + w0 + " notes")
+        k1, k4 = subject_key(shas[1], subj[1]), subject_key(shas[4], subj[4])
         fake = ("f" * 40, "0" * 16)
 
         def bl(name, text):
@@ -678,38 +693,50 @@ def _subject_arms() -> list[str]:
             with open(p, "w", encoding="utf-8") as fh:
                 fh.write(text)
             return p
-        b_empty = bl("empty.tsv", "# accepted: none\n")
-        b_k1 = bl("k1.tsv", "# one\n" + "\t".join(k1) + "\n")
-        b_stale = bl("stale.tsv", "\t".join(k1) + "\n" + "\t".join(fake) + "\n")
-        b_bad = bl("bad.tsv", "\t".join(k1) + "\nnot a key\n")
-        b_none = os.path.join(d, "absent.tsv")
 
-        new, stale, refound, n = history_verdict(set(), d)
-        if (new, stale, refound, n) != ([k1], [], [], 4):
-            failures.append("history over an empty baseline must report the one planted subject as NEW")
-        new, stale, refound, n = history_verdict({k1}, d)
-        if (new, stale, refound) != ([], [], [k1]):
-            failures.append("history must RE-FIND a baselined subject and call nothing new")
-        new, stale, refound, n = history_verdict({k1, fake}, d)
-        if stale != [fake]:
+        def rowtext(*keys):
+            return "".join("\t".join(k) + "\n" for k in keys)
+        b_empty = bl("empty.tsv", "# accepted: none\n")
+        b_debt = bl("debt.tsv", "# two\n" + rowtext(k1, k4))
+        b_k4 = bl("k4.tsv", rowtext(k4))
+        b_stale = bl("stale.tsv", rowtext(k1, k4, fake))
+        b_bad = bl("bad.tsv", rowtext(k1, k4) + "not a key\n")
+        b_none = os.path.join(d, "absent.tsv")
+        m_lane = bl("msg-lane.txt", "tidy " + w0 + "\n")
+        m_kin = bl("msg-kin.txt", "the " + k0 + " agreed\n\nbody\n")
+        m_clean = bl("msg-clean.txt", "clean\n\nbody\n")
+
+        if history_verdict(set(), d) != (sorted([k1, k4]), [], [], 5):
+            failures.append("history over an empty baseline must report both planted subjects as NEW")
+        if history_verdict({k1, k4}, d)[:3] != ([], [], sorted([k1, k4])):
+            failures.append("history must RE-FIND baselined subjects and call nothing new")
+        if history_verdict({k1, k4, fake}, d)[1] != [fake]:
             failures.append("a baseline entry history no longer carries must be STALE")
 
         r0 = shas[0] + ".." + shas[3]
+        r_kin = shas[3] + ".." + shas[4]
         modes = [
             ("range with a lane plant", range_mode, (r0, d, b_empty), 1),
             ("range with only a body family reference", range_mode,
              (shas[1] + ".." + shas[2], d, b_empty), 0),
             ("an EMPTY range", range_mode, (shas[3] + ".." + shas[3], d, b_empty), 1),
             ("range whose only subject hit is baselined", range_mode,
-             (shas[0] + ".." + shas[2], d, b_k1), 0),
-            ("range: the baseline never covers a BODY", range_mode, (r0, d, b_k1), 1),
+             (shas[0] + ".." + shas[2], d, b_debt), 0),
+            ("range: the baseline never covers a BODY", range_mode, (r0, d, b_debt), 1),
+            ("range with a family-reference subject", range_mode, (r_kin, d, b_empty), 1),
+            ("range with that subject baselined", range_mode, (r_kin, d, b_debt), 0),
             ("range with no baseline file", range_mode, (r0, d, b_none), 1),
             ("an unreadable range", range_mode, ("no-such-rev..HEAD", d, b_empty), 1),
-            ("history, debt baselined", history_mode, (d, b_k1), 0),
-            ("history, debt NOT baselined", history_mode, (d, b_empty), 1),
+            ("history, all debt baselined", history_mode, (d, b_debt), 0),
+            ("history, no debt baselined", history_mode, (d, b_empty), 1),
+            ("history, half the debt baselined", history_mode, (d, b_k4), 1),
             ("history, a stale entry", history_mode, (d, b_stale), 1),
             ("history, a malformed baseline line", history_mode, (d, b_bad), 1),
             ("history, no baseline file", history_mode, (d, b_none), 1),
+            ("msg-file, a lane subject", msg_file_mode, (m_lane,), 1),
+            ("msg-file, a family-reference subject", msg_file_mode, (m_kin,), 1),
+            ("msg-file, a clean message", msg_file_mode, (m_clean,), 0),
+            ("msg-file, unreadable", msg_file_mode, (b_none,), 1),
         ]
         for label, fn, args, want_rc in modes:
             rc, out = _quiet(fn, *args)
@@ -723,26 +750,65 @@ def _subject_arms() -> list[str]:
 
         e = tempfile.mkdtemp(prefix="pr-gate-selftest-empty-")
         _git(["init", "-q"], e)
-        rc, _ = _quiet(history_mode, e, b_empty)
-        if rc != 1:
+        if _quiet(history_mode, e, b_empty)[0] != 1:
             failures.append("history of a repository with NO commits must fail, not pass empty")
+        # The shallow clone sees ONLY the last commit, and b_k4 accepts exactly
+        # it: without the shallow refusal this would read OK.
         s = tempfile.mkdtemp(prefix="pr-gate-selftest-shallow-")
         _git(["clone", "-q", "--depth", "1", pathlib.Path(d).as_uri(), s])
-        rc, _ = _quiet(history_mode, s, b_k1)
-        if rc != 1:
+        if _quiet(history_mode, s, b_k4)[0] != 1:
             failures.append("history of a SHALLOW clone must refuse")
 
-        for label, text, want_rc in [("a lane subject", "tidy " + w0 + "\n", 1),
-                                     ("a clean message", "clean\n\nbody\n", 0)]:
-            rc, out = _quiet(msg_file_mode, bl("msg.txt", text))
+        def forge(prs):
+            def fake_gh(args):
+                if "/pulls?" in args[0]:
+                    return prs
+                if "/check-runs" in args[0]:
+                    return {"check_runs": []}
+                if "/compare/" in args[0]:
+                    return {"ahead_by": 0}
+                raise RuntimeError("unexpected forge call")
+            return fake_gh
+        clean_pr = {"number": 4, "title": "clean", "body": "clean",
+                    "head": {"ref": "tidy-branch", "sha": a}, "base": {"ref": "main"}}
+        for label, prs, want_rc in [
+                ("a lane word in a head ref", [dict(clean_pr, head={"ref": ref, "sha": a})], 1),
+                ("a clean PR", [clean_pr], 0)]:
+            globals()["_gh"] = forge(prs)
+            try:
+                rc, out = _quiet(open_mode, "owner/repo")
+            finally:
+                globals()["_gh"] = real_gh
             if rc != want_rc:
-                failures.append(f"msg-file case '{label}' must exit {want_rc}, got {rc}")
-        rc, _ = _quiet(msg_file_mode, b_none)
-        if rc != 1:
-            failures.append("an unreadable message file must refuse")
+                failures.append(f"--open case '{label}' must exit {want_rc}, got {rc}")
+            if want_rc and "PR #4 HEAD REF" not in out:
+                failures.append(f"--open case '{label}' must name the PR and the surface")
+            if subject_scan([("o", l, "subject") for l in out.splitlines()]):
+                failures.append(f"--open case '{label}' echoed a vocabulary word")
+
+        me = os.path.abspath(__file__)
+        r_subj = shas[0] + ".." + shas[1]
+        clis = [
+            ("--history --baseline <all debt>", ["--history", "--baseline", b_debt], 0),
+            ("--history --baseline <none accepted>", ["--history", "--baseline", b_empty], 1),
+            ("--range --baseline <all debt>", ["--range", r_subj, "--baseline", b_debt], 0),
+            ("--range --baseline <none accepted>", ["--range", r_subj, "--baseline", b_empty], 1),
+            ("--msg-file <lane subject>", ["--msg-file", m_lane], 1),
+            ("--msg-file <clean>", ["--msg-file", m_clean], 0),
+            ("--baseline beside --open", ["--open", "--baseline", b_debt], 2),
+            ("two modes at once", ["--history", "--msg-file", m_clean], 2),
+        ]
+        for label, argv, want_rc in clis:
+            r = subprocess.run([sys.executable, me] + argv, cwd=d, capture_output=True,
+                               text=True, encoding="utf-8", errors="replace")
+            if r.returncode != want_rc:
+                failures.append(f"CLI case '{label}' must exit {want_rc}, got {r.returncode}")
+            if "Traceback" in r.stdout + r.stderr:
+                failures.append(f"CLI case '{label}' crashed instead of answering")
     except (OSError, RuntimeError) as err:
         failures.append(f"the scratch-repository arms could not run: {err}")
     finally:
+        globals()["_gh"] = real_gh
         for p in (d, e, s):
             if p:
                 shutil.rmtree(p, ignore_errors=True)
@@ -832,7 +898,8 @@ def self_test() -> int:
           f"ref_vs_run all five branches; sibling vocabulary reached via import; "
           f"subject arm: {_vocab_id()}, every word planted in its surfaces, "
           f"rec (4) subject-only plant in a scratch repository, range/history/"
-          f"msg-file modes in both directions, cp1252)")
+          f"msg-file modes in both directions, --open through a fake forge, "
+          f"main() as a subprocess, digest known-answer, cp1252)")
     print(_NOT_COVERED)
     return 0
 
