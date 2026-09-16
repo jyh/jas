@@ -1531,21 +1531,7 @@ fn set_app_state_field(
 /// `null` for an absent path, and passes through arrays for
 /// plain-list paths.
 fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document::ElementPath> {
-    if val.is_null() {
-        return None;
-    }
-    let arr = if let Some(obj) = val.as_object() {
-        obj.get("__path__")?.as_array()?
-    } else if let Some(a) = val.as_array() {
-        a
-    } else {
-        return None;
-    };
-    let path: Vec<usize> = arr
-        .iter()
-        .filter_map(|v| v.as_u64().map(|n| n as usize))
-        .collect();
-    Some(path)
+    super::align_host::path_value(val)
 }
 
 /// As `apply_set_panel_state` but threads the action's eval ctx so
@@ -11666,6 +11652,28 @@ mod tests {
     // slot in this port, so a global write must land on the panel field the
     // apply reads — like every other `stroke_*` key. It used to move only
     // the default strokes, leaving the committed weight stale.
+    // The Align panel's key-object path reaches AppState through the shared
+    // path reader, in both of its routes: the global mirror key and the
+    // panel key. Null clears it.
+    #[test]
+    fn align_key_object_path_writes_parse_the_path() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        set_app_state_field("align_key_object_path",
+                            &serde_json::json!({"__path__": [0, 2]}), &mut st);
+        assert_eq!(st.align_panel.key_object_path, Some(vec![0, 2]));
+        set_app_state_field("align_key_object_path", &serde_json::Value::Null, &mut st);
+        assert_eq!(st.align_panel.key_object_path, None);
+
+        // The panel route: a non-string value passes through unevaluated;
+        // a string is an expression, and align.yaml clears with "null".
+        let set = serde_json::json!({"key": "key_object_path", "value": {"__path__": [1, 3]}});
+        apply_set_panel_state_with_ctx(set.as_object().unwrap(), &mut st, None);
+        assert_eq!(st.align_panel.key_object_path, Some(vec![1, 3]));
+        let clear = serde_json::json!({"key": "key_object_path", "value": "null"});
+        apply_set_panel_state_with_ctx(clear.as_object().unwrap(), &mut st, None);
+        assert_eq!(st.align_panel.key_object_path, None);
+    }
+
     #[test]
     fn global_stroke_width_write_lands_on_the_panel_weight() {
         let mut st = make_state_with_colors("ffffff", "000000");
