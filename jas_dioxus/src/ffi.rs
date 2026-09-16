@@ -668,19 +668,58 @@ pub unsafe extern "C" fn jas_panel_event(
     out
 }
 
-/// RED-FIRST STUB for the wave-2 panel plan: records nothing, returns nothing.
+/// **The panel plan**: where each widget goes and what it displays, in one
+/// crossing (wave 2, A5).
+///
+/// It is `render_plan`'s rects joined IN THE ENGINE, by path, with the rows
+/// [`jas_bind_values`] serves, in the same engine-assembled scope. The shape is
+/// documented in `crate::panel_plan`. A shell places a native control at each
+/// leaf's `rect` and shows its `values`.
+///
+/// ⛔ **NOTHING INTERPRETABLE CROSSES.** No node, no `{{ }}` expression, no
+/// `behavior`, no binding map, no scope. The shell evaluates nothing, and the
+/// arms beside this function check every panel the workspace carries.
+///
+/// `avail_w` / `avail_h` are the layout pass's own inputs, in canonical panel
+/// units (`avail_h == 0` is content height, no vertical flex).
+///
+/// **It ENROLS the panel**, exactly as [`jas_bind_values`] does: the plan
+/// carries the panel's values, so reading it tells the engine the panel is
+/// open, and a later tick must send it the rows that move. A shell that opens
+/// a panel through the plan alone would otherwise never be told.
+///
+/// Refusals (NULL handle, bad UTF-8, unknown panel) are the empty span.
+/// **BL4**: copy the span, then release with [`jas_free`].
 ///
 /// # Safety
-/// `panel_id` must be NULL or valid for `len` bytes.
+/// `e` must be NULL or live; `panel_id` must be NULL or valid for `len` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_panel_plan(
-    _e: *mut JasEngine,
-    _panel_id: *const u8,
-    _len: usize,
-    _avail_w: i64,
-    _avail_h: i64,
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    len: usize,
+    avail_w: i64,
+    avail_h: i64,
 ) -> JasBytes {
-    JasBytes::empty()
+    ffi_instr::record(Crossing::PanelPlan, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(id) = (unsafe { utf8(panel_id, len) }) else {
+        return JasBytes::empty();
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(spec) = ws.panel(id) else {
+        return JasBytes::empty();
+    };
+    let ctx = panel_ctx(engine);
+    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx);
+    engine.registry.borrow_mut().record(id, &rows);
+    let out = JasBytes::from_string(serde_json::to_string(&plan).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelPlan, out.len);
+    out
 }
 
 /// The panel-event channel's diagnostic, in the same shape

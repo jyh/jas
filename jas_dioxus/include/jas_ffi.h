@@ -584,6 +584,39 @@ struct JasBytes jas_panel_event(struct JasEngine *e,
                                 uintptr_t event_len);
 
 /**
+ * **The panel plan**: where each widget goes and what it displays, in one
+ * crossing (wave 2, A5).
+ *
+ * It is `render_plan`'s rects joined IN THE ENGINE, by path, with the rows
+ * [`jas_bind_values`] serves, in the same engine-assembled scope. The shape is
+ * documented in `crate::panel_plan`. A shell places a native control at each
+ * leaf's `rect` and shows its `values`.
+ *
+ * ⛔ **NOTHING INTERPRETABLE CROSSES.** No node, no `{{ }}` expression, no
+ * `behavior`, no binding map, no scope. The shell evaluates nothing, and the
+ * arms beside this function check every panel the workspace carries.
+ *
+ * `avail_w` / `avail_h` are the layout pass's own inputs, in canonical panel
+ * units (`avail_h == 0` is content height, no vertical flex).
+ *
+ * **It ENROLS the panel**, exactly as [`jas_bind_values`] does: the plan
+ * carries the panel's values, so reading it tells the engine the panel is
+ * open, and a later tick must send it the rows that move. A shell that opens
+ * a panel through the plan alone would otherwise never be told.
+ *
+ * Refusals (NULL handle, bad UTF-8, unknown panel) are the empty span.
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; `panel_id` must be NULL or valid for `len` bytes.
+ */
+struct JasBytes jas_panel_plan(struct JasEngine *e,
+                               const uint8_t *panel_id,
+                               uintptr_t len,
+                               int64_t avail_w,
+                               int64_t avail_h);
+
+/**
  * Zero every boundary counter. Call at the START of a named interaction so the
  * dump that follows describes that interaction alone.
  */

@@ -1,11 +1,115 @@
 //! The panel PLAN a native shell materializes: the layout pass's rects joined,
 //! in the engine, with the bind pass's resolved values (wave 2, A5).
+//!
+//! # Why the join is here and not in the shell
+//!
+//! The shell evaluates nothing (the wave-1 law). It needs, per widget, WHERE to
+//! put a native control and WHAT that control displays. The first comes from
+//! `panel_layout::render_plan`, the second from `bind_values`. Joining them
+//! across the boundary would make the shell hold two walks' worth of rows and a
+//! join rule. Here it is one call, and nothing interpretable leaves the engine:
+//! no node, no expression, no behavior, no scope.
+//!
+//! # The join key is the PATH, never the id
+//!
+//! A foreach template repeats its ids by construction, so an id names a
+//! template, not a widget. The two walks share one path scheme (root `[]`,
+//! declared child `[i]`, foreach expansion `[..., i]`), and that agreement was
+//! MEASURED on the whole compiled workspace before this join was written (the
+//! stop-2 test below).
+//!
+//! # Output
+//!
+//! ```text
+//! {"height": h,
+//!  "chrome":     [entry...],  layout-only containers with a border/background
+//!  "leaves":     [entry...],  one per renderable widget, render_plan's order
+//!  "containers": [entry...],  layout-only containers render_plan omits, that
+//!                             carry at least one bound value
+//!  "unjoined":   [{"path": [...], "key": "..."}...]}
+//! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
+//!          "values": {"<bind_values key>": "<resolved value>", ...}}
+//! ```
+//!
+//! `containers` exists because the measurement found bound rows on nodes that
+//! draw nothing: a container's dynamic `visible` and a disclosure's header.
+//! Dropping them would show a hidden group, or a header with no label, and
+//! report success. `unjoined` names any bound row whose node the layout pass
+//! never placed (a static `visible: false`, today). It is empty on every panel
+//! in the workspace. It is reported rather than dropped, so a new panel that
+//! breaks the join says so.
+//!
+//! A value is the row's canonical STRING. The row's value `type` is not carried.
 
-use serde_json::{json, Value};
+use std::collections::HashMap;
 
-/// RED-FIRST STUB: a plan with nothing in it, joined from nothing.
-pub fn panel_plan(_panel_node: &Value, _avail_w: i64, _avail_h: i64, _ctx: &Value) -> (Value, Value) {
-    (json!({}), json!([]))
+use serde_json::{json, Map, Value};
+
+use crate::interpreter::bind_values::bind_values;
+use crate::interpreter::panel_layout::{render_plan_with_omitted, RenderLeaf};
+
+fn path_of(v: &Value) -> Vec<i64> {
+    v.as_array()
+        .map(|a| a.iter().filter_map(Value::as_i64).collect())
+        .unwrap_or_default()
+}
+
+fn entry(item: &RenderLeaf, values: Map<String, Value>) -> Value {
+    json!({
+        "path": item.path,
+        "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
+        "type": item.node.get("type").and_then(Value::as_str).unwrap_or(""),
+        "id": item.node.get("id").and_then(Value::as_str).unwrap_or(""),
+        "values": values,
+    })
+}
+
+/// Build a panel's plan in `ctx` (see the module docs for the shape).
+///
+/// Returns `(plan, rows)`: `rows` is the `bind_values` output the plan was
+/// joined from, handed back so a caller that must also record it (the
+/// engine's panel registry) does not walk the panel a second time.
+pub fn panel_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> (Value, Value) {
+    let rows = bind_values(panel_node, ctx);
+    let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
+
+    let mut by_path: HashMap<Vec<i64>, Map<String, Value>> = HashMap::new();
+    for r in rows.as_array().into_iter().flatten() {
+        let key = r["key"].as_str().unwrap_or("").to_string();
+        by_path.entry(path_of(&r["path"])).or_default().insert(key, r["value"].clone());
+    }
+
+    let chrome: Vec<Value> = plan
+        .chrome
+        .iter()
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default()))
+        .collect();
+    let leaves: Vec<Value> = plan
+        .leaves
+        .iter()
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default()))
+        .collect();
+    let containers: Vec<Value> = omitted
+        .iter()
+        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v)))
+        .collect();
+    // Whatever is left joined nothing. Reported in row order.
+    let unjoined: Vec<Value> = rows
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|r| by_path.contains_key(&path_of(&r["path"])))
+        .map(|r| json!({"path": r["path"], "key": r["key"]}))
+        .collect();
+
+    let out = json!({
+        "height": plan.height,
+        "chrome": chrome,
+        "leaves": leaves,
+        "containers": containers,
+        "unjoined": unjoined,
+    });
+    (out, rows)
 }
 
 
