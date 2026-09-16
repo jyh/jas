@@ -696,11 +696,16 @@ pub unsafe extern "C" fn jas_panel_event(
 /// It is `render_plan`'s rects joined IN THE ENGINE, by path, with the rows
 /// [`jas_bind_values`] serves, in the same engine-assembled scope. The shape is
 /// documented in `crate::panel_plan`. A shell places a native control at each
-/// leaf's `rect` and shows its `values`.
+/// leaf's `rect`, shows its `values` and its `static` literal display strings
+/// (a label's text, a button's tooltip and icon name), and draws each named
+/// icon from the plan's `icons` map (W2-5a).
 ///
 /// ⛔ **NOTHING INTERPRETABLE CROSSES.** No node, no `{{ }}` expression, no
-/// `behavior`, no binding map, no scope. The shell evaluates nothing, and the
-/// arms beside this function check every panel the workspace carries.
+/// `behavior`, no binding map, no scope. A templated id, display string or
+/// resolved value is named in `withheld` instead of being sent raw, and an
+/// icon the workspace does not define is named in `icons_missing`. The shell
+/// evaluates nothing, and the arms beside this function check every panel the
+/// workspace carries.
 ///
 /// `avail_w` / `avail_h` are the layout pass's own inputs, in canonical panel
 /// units (`avail_h == 0` is content height, no vertical flex).
