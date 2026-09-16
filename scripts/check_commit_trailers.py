@@ -486,13 +486,20 @@ def _verdict_arm() -> tuple[list[str], int]:
                             f"{'pass' if passed else 'failure'}: {first!r}")
 
     # Planted shapes ASSEMBLED, as arm 2 does: this file scans file contents.
-    url = "https://" + _HOST.replace(chr(92), "") + "/code/session_abc"
+    # `secret` is the planted TEXT of each finding. It must never reach the
+    # output: a CI log on this repository is public (desk PX), and the line
+    # above a finding already names its site.
+    secret = "zz_withheld_" + "payload"
+    url = "https://" + _HOST.replace(chr(92), "") + "/code/" + secret
     text = {"a.txt": b"clean text\n"}
     table = [  # (name, files, message, argv, exit code, what to do after the commit)
         ("a shallow clone", text, "clean", [], 1, "shallow"),
         ("an unreadable range", text, "clean", ["--range", "no-such-ref"], 1, None),
         ("an empty range", text, "clean", ["--range", "HEAD..HEAD"], 1, None),
-        ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: x\n", [], 1, None),
+        # The trailer carries a URL, as the harness writes it. The trailer
+        # pattern's own echo is only its key (its `^\s*` swallows the line
+        # break), so it is the URL finding beside it that would print the text.
+        ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: {url}\n", [], 1, None),
         ("no readable text file", {"a.bin": b"\xff\xfe\x00"}, "clean", [], 1, None),
         ("a URL in a file", {"a.txt": url.encode("ascii")}, "clean", [], 1, None),
         ("a tracked file missing", text, "clean", [], 1, "unlink"),
@@ -511,6 +518,15 @@ def _verdict_arm() -> tuple[list[str], int]:
             if rc != code:
                 findings.append(f"arm 7, {name}: exit {rc}, want {code}")
             check(name, said, code == 0)
+            # 8. A FINDING NAMES ITS SITE AND WITHHOLDS ITS TEXT (desk PX). The
+            #    site is the sha or the path; the text is what matched.
+            if secret in said:
+                findings.append(f"arm 8, {name}: the matched text reached the output")
+            head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
+                                  text=True, encoding="utf-8", check=True).stdout.strip()
+            site = {"a trailer in a message": head[:12], "a URL in a file": "a.txt"}.get(name)
+            if site is not None and f"  {site}  " not in said:
+                findings.append(f"arm 8, {name}: the finding does not name its site {site}")
     # The self-test's own summary cannot be driven by running the self-test
     # inside itself, so its formatter is driven directly, both ways. What that
     # leaves unwitnessed, and is recorded rather than faked: self_test() not
