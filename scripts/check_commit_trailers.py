@@ -86,6 +86,23 @@ PRESERVED = "Co-Authored-By"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+def self_id() -> str:
+    """This file's own content hash, printed in every verdict (desk ML).
+
+    Its two siblings, `check_private_paths.py` and `check_pr_descriptions.py`,
+    already name the bytes that printed each verdict; this gate printed a bare
+    `FAIL:`, so a CI log could not say WHICH copy of it ran. It is the same
+    form as salt's copy -- sha256 of the file, first 16 hex -- so one reader
+    can compare the ids across repos. Arm 7 recomputes it rather than trusting
+    it.
+    """
+    try:
+        return hashlib.sha256(
+            pathlib.Path(__file__).read_bytes()).hexdigest()[:16]
+    except OSError:
+        return "unreadable"
+
+
 def commit_messages(rev_range: str) -> list[tuple[str, str]]:
     """(sha, message) for every commit in `rev_range`, newest first."""
     # Sentinels are passed through git's own %x-escapes rather than as literal
@@ -145,7 +162,7 @@ def tracked_files() -> list[tuple[str, str]]:
             continue
         rows.append((rel, text))
     if missing:
-        print(f"FAIL: {len(missing)} tracked file(s) listed by git but absent under "
+        print(f"FAIL [gate {self_id()}]: {len(missing)} tracked file(s) listed by git but absent under "
               f"{ROOT}: {missing[:3]}{' ...' if len(missing) > 3 else ''}. The file list "
               "and the tree being scanned are not the same repository.")
         raise SystemExit(1)
@@ -356,9 +373,9 @@ def self_test() -> int:
 def _self_test_verdict(failures: list[str], sites: int) -> str:
     """The self-test's summary line, as a function so arm 7 can drive it."""
     if failures:
-        return (f"check_commit_trailers SELF-TEST: FAIL "
+        return (f"check_commit_trailers SELF-TEST [gate {self_id()}]: FAIL "
                 f"({len(failures)} finding(s) above)")
-    return ("check_commit_trailers SELF-TEST: OK "
+    return (f"check_commit_trailers SELF-TEST [gate {self_id()}]: OK "
             "(empty scan fatal proven FIRST, both forbidden shapes caught, "
             f"{PRESERVED} preserved, self-describing message safe, cwd-independent, "
             f"absent tracked file refused, all {sites} verdict sites driven and naming the gate)")
@@ -528,7 +545,7 @@ def main(argv: list[str] | None = None) -> int:
         return self_test()
 
     if is_shallow():
-        print("FAIL: this is a SHALLOW clone, so history is not all here and a "
+        print(f"FAIL [gate {self_id()}]: this is a SHALLOW clone, so history is not all here and a "
               "clean result would be meaningless.\n"
               "      A history gate on a one-commit checkout scans one commit "
               "and reports success.\n"
@@ -544,7 +561,7 @@ def main(argv: list[str] | None = None) -> int:
         # handing it that checkout's shas lands exactly here -- and without the
         # path the message reads as "git is broken" rather than "you pointed me
         # at the wrong tree." Measured: it cost one CI red to diagnose.
-        print(f"FAIL: could not read history for '{args.range}' in "
+        print(f"FAIL [gate {self_id()}]: could not read history for '{args.range}' in "
               f"{ROOT.as_posix()} -- that is the repository this gate reads, "
               f"whatever directory it was run from. If the range belongs to a "
               f"different checkout, run THAT checkout's copy of this gate.\n"
@@ -553,13 +570,13 @@ def main(argv: list[str] | None = None) -> int:
 
     # FAIL CLOSED: nothing scanned is not the same as nothing wrong.
     if _is_empty_scan_fatal(rows):
-        print(f"FAIL: scanned ZERO commits for '{args.range}'. An empty scan is "
+        print(f"FAIL [gate {self_id()}]: scanned ZERO commits for '{args.range}'. An empty scan is "
               f"not a clean scan — this gate refuses to report success on it.")
         return 1
 
     bad = scan(rows)
     if bad:
-        print(f"FAIL: {len(bad)} commit message(s) carry a forbidden trailer.\n")
+        print(f"FAIL [gate {self_id()}]: {len(bad)} commit message(s) carry a forbidden trailer.\n")
         print("This repository's public history was rewritten on 2026-07-22 to")
         print("remove exactly this. A commit that reaches a published branch")
         print("cannot be edited without breaking every clone, so this must be")
@@ -580,12 +597,12 @@ def main(argv: list[str] | None = None) -> int:
     # test data, and caught it BY EYE.
     files = tracked_files()
     if not files:
-        print("FAIL: scanned ZERO tracked files. An empty scan is a failure, "
+        print(f"FAIL [gate {self_id()}]: scanned ZERO tracked files. An empty scan is a failure, "
               "not a pass — the ls-files call or the decode filter has drifted.")
         return 1
     bad_files = scan(files)
     if bad_files:
-        print(f"FAIL: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
+        print(f"FAIL [gate {self_id()}]: {len(bad_files)} tracked file(s) carry a forbidden string.\n")
         print("Unlike a commit message this is trivially fixable — edit the file")
         print("— but only BEFORE it is pushed. This repository is public.\n")
         for path, what, line in bad_files:
@@ -593,7 +610,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"      {line[:100]}")
         return 1
 
-    print(f"check_commit_trailers: OK ({len(rows)} commit messages and "
+    print(f"check_commit_trailers [gate {self_id()}]: OK ({len(rows)} commit messages and "
           f"{len(files)} tracked files scanned, 0 forbidden strings; "
           f"{PRESERVED} attribution untouched)")
     return 0
