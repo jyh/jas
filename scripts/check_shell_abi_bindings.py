@@ -163,6 +163,7 @@ C_CANON = {
     "uintptr_t *": "usize-out",
     "uint32_t": "u32",
     "int32_t": "i32",
+    "int64_t": "i64",
     "JasStatus": "i32",
     "float": "f32",
     "double": "f64",
@@ -183,6 +184,7 @@ CS_CANON = {
     "out UIntPtr": "usize-out",
     "uint": "u32",
     "int": "i32",
+    "long": "i64",
     "float": "f32",
     "double": "f64",
     "void": "void",
@@ -466,6 +468,7 @@ JasStatus jas_dispatch_event(struct JasEngine *e, const uint8_t *op_json, uintpt
 struct JasBytes jas_last_error_json(struct JasEngine *e);
 uintptr_t jas_selection_len(struct JasEngine *e);
 const uint8_t *jas_tool_name(uintptr_t index, uintptr_t *out_len);
+struct JasBytes jas_panel_plan(struct JasEngine *e, const uint8_t *panel_id, uintptr_t len, int64_t avail_w, int64_t avail_h);
 """
 
 _GOOD = """
@@ -478,6 +481,7 @@ internal static unsafe class JasCore {
     [DllImport(Lib)] internal static extern JasBytes jas_last_error_json(IntPtr e);
     [DllImport(Lib)] internal static extern nuint jas_selection_len(IntPtr e);
     [DllImport(Lib)] internal static extern IntPtr jas_tool_name(nuint index, out nuint len);
+    [DllImport(Lib)] internal static extern JasBytes jas_panel_plan(IntPtr e, byte[] id, nuint len, long w, long h);
 }
 """
 
@@ -504,8 +508,10 @@ def self_test() -> int:
     # (1) THE INSTRUMENT BEFORE THE SUBJECT. The header fixture must parse into
     #     the shapes every later arm is compared against; an arm driven by an
     #     empty header would be green for the wrong reason in BOTH directions.
-    if len(header) != 8:
-        failures.append(f"1 header fixture parsed {len(header)} decls, expected 8")
+    if len(header) != 9:
+        failures.append(f"1 header fixture parsed {len(header)} decls, expected 9")
+    if header.get("jas_panel_plan", ("", []))[1][3:] != ["int64_t", "int64_t"]:
+        failures.append(f"1 int64_t params mis-parsed: {header.get('jas_panel_plan')}")
     if header.get("jas_menu_state") != ("JasBytes", ["JasEngine *", "const uint8_t *", "uintptr_t"]):
         failures.append(f"1 header fixture mis-parsed jas_menu_state: {header.get('jas_menu_state')}")
     if header.get("jas_engine_new") != ("JasEngine *", []):
@@ -611,6 +617,20 @@ def self_test() -> int:
         ALIASES.clear()
         ALIASES.update(saved)
 
+    # (16) ⭐ `int64_t`, added with W2-5's `jas_panel_plan` (canonical panel
+    #      units cross as `int64_t`). The row is `long` and nothing else: an
+    #      `int` reads the low half of the register, and a `nuint` is the right
+    #      WIDTH with the wrong SIGN, which is exactly the plausible-wrong-number
+    #      class this gate exists for. Both must red; the green control above
+    #      already carries `long` and proves the row resolves.
+    red("16a int64 bound as int", _GOOD.replace(
+        "nuint len, long w, long h)", "nuint len, int w, long h)"), "PARAMETER 3")
+    red("16b int64 bound as nuint", _GOOD.replace(
+        "nuint len, long w, long h)", "nuint len, long w, nuint h)"), "PARAMETER 4")
+    red("16c ulong is not in the table", _GOOD.replace(
+        "nuint len, long w, long h)", "nuint len, ulong w, long h)"),
+        "parameter 3 type 'ulong' is not in")
+
     # (15) THE VACUITY ARMS, driven rather than asserted. Each floor must be the
     #      thing that reds -- a floor nobody drives is arithmetic, not a gate.
     class _Tmp:
@@ -644,6 +664,7 @@ def self_test() -> int:
         "reds; an undeclared entry point reds; an unknown type REFUSES on the C# "
         "side and on the header side, in BOTH the return and the parameter position; "
         "`const uint8_t *` accepts all three spellings "
+        "and `int64_t` accepts `long` alone (`int` and `nuint` red, `ulong` refuses); "
         "while an engine handle accepts only a pointer; a wrong signature in a "
         "comment and in a string stay green; an alias resolves only for its own "
         "file and goes STALE when its type leaves; both vacuity floors are DRIVEN)")

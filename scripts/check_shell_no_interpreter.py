@@ -28,6 +28,15 @@ blanked by `scripts/csharp_source.py`, plus `MainWindow.xaml`:
 (b) THE POSITIVE -- the shell HAS a materialized menubar: a `MenuBar` element in
     `MainWindow.xaml`, and a `jas_menu_state` call in the C#.
 
+(c) NO TEMPLATE HANDLING (W2-5) -- ZERO `{{` anywhere in the shell's CODE OR
+    STRING LITERALS (comments are exempt). The panel plan hands the shell every
+    displayed string already resolved (`values`) or literal (`static`), and
+    names in `withheld` anything that would have crossed as a template. So a
+    `{{` in the shell means it is handling one. This clause reads literal
+    CONTENTS, unlike (a), because a handler is a comparison against the literal
+    `"{{"`. It also reds an interpolated string's escaped brace (`$"{{..."`),
+    which it cannot tell from an opener: build JSON with a serializer.
+
 ⛔ **(b) IS NOT DECORATION, AND WITHOUT IT (a) IS GREEN FOR THE WRONG REASON.**
 A shell with no menubar at all satisfies the ban perfectly. That is a gate over
 an empty population, which is the single most common defect shape in this
@@ -79,6 +88,9 @@ WHAT IT DOES NOT COVER
   session chrome), so a ctx JSON literal is correct and is invisible here
   anyway -- literal contents are blanked. This gate cannot tell a well-formed
   ctx from a nonsense one.
+* A TEMPLATE OPENER BUILT FROM PIECES (`"{" + "{"`, a char pair) passes
+  clause (c). The clause catches the literal a handler is naturally written
+  with; it is not a proof that no code could ever recognise a template.
 * INTERPOLATED-STRING HOLES are opaque payload to `csharp_source.py`. An
   `enabled_when` evaluated inside `$"{...}"` would be missed. That is the safe
   direction for a ban and it is named rather than hidden.
@@ -98,6 +110,7 @@ WHAT IT DOES NOT COVER
 
 from __future__ import annotations
 
+import ast
 import re
 import sys
 from pathlib import Path
@@ -209,6 +222,30 @@ def scan_ban(files: dict[str, str]) -> list[str]:
                     f"{rel}:{line}: `{form}` in CODE -- the shell is evaluating a "
                     f"workspace context. It must ask the core (`jas_menu_state`) "
                     f"and materialize the answer")
+    return findings
+
+
+def scan_template(files: dict[str, str]) -> list[str]:
+    """Clause (c): no `{{` in the shell's CODE OR STRING LITERALS (W2-5).
+
+    Reads `decommented` -- comments blanked, literal CONTENTS INTACT -- and not
+    `code`, because a template handler is a comparison against a LITERAL
+    (`label.Contains("{{")`), and `code` blanks exactly that. An escaped brace
+    in an interpolated string (`$"{{..."`) reds too: this reader cannot tell it
+    from a template opener, and narrowing the clause to exempt it would exempt a
+    handler written inside an interpolation. The remedy is to build JSON with a
+    serializer, which also makes the escaping someone else's problem.
+    """
+    findings = []
+    for rel in sorted(files):
+        lexed = csharp_source.lex(files[rel])
+        for m in re.finditer(r"\{\{", lexed.decommented):
+            findings.append(
+                f"{rel}:{lexed.line_of(m.start())}: `{{{{` in code or a string literal -- "
+                f"the shell is handling a template. Every displayed string arrives "
+                f"resolved (`values`) or literal (`static`) in the plan; a template "
+                f"that did not is named in `withheld`. If this is a JSON literal, "
+                f"build it with a serializer instead")
     return findings
 
 
@@ -377,6 +414,64 @@ def self_test() -> int:
     if not live_arm_wired(wired):
         failures.append("10e a bare invocation must count as the live arm")
 
+    # (13) ⭐ CLAUSE (c), RED FIRST AGAINST A PLANTED HANDLER (W2-5). The shell
+    #      has no `{{` handling to catch, so the arm is proven on fixtures. A
+    #      template handler compares against a LITERAL, so the literal is the
+    #      thing that must red -- which is why this clause reads string contents.
+    def tmpl(cs: str) -> list[str]:
+        return scan_template(files(cs))
+
+    handler = _CS_OK.replace(
+        "Materialize(row);",
+        'if (label.Contains("{{")) { label = Fill(label); } Materialize(row);')
+    if not any("`{{`" in f and "a.cs:" in f for f in tmpl(handler)):
+        failures.append(f"13a a planted `{{{{` handler must red, got {tmpl(handler)}")
+    if tmpl(_CS_OK):
+        failures.append(f"13b the compliant shell must be clean, got {tmpl(_CS_OK)}")
+    escaped = _CS_OK.replace(
+        "Materialize(row);", 'var ev = $"{{\\"widget\\":\\"{id}\\"}}"; Materialize(row);')
+    if not any("serializer" in f for f in tmpl(escaped)):
+        failures.append(f"13c an interpolation's escaped brace must red and name the remedy, "
+                        f"got {tmpl(escaped)}")
+    commented = _CS_OK.replace("Materialize(row);", "Materialize(row); // a {{ template }} here")
+    if tmpl(commented):
+        failures.append(f"13d `{{{{` in a comment must stay green, got {tmpl(commented)}")
+    single = _CS_OK.replace("Materialize(row);", 'var o = "{"; Materialize(row);')
+    if tmpl(single):
+        failures.append(f"13e a single brace in a string must stay green, got {tmpl(single)}")
+    # The line is DERIVED from the fixture (the first hand count was wrong by
+    # one), and the fixture is shifted so a constant line would not match.
+    shifted = handler.replace("internal sealed", "\n\ninternal sealed")
+    want = 1 + next(i for i, t in enumerate(shifted.splitlines()) if 'Contains("{{")' in t)
+    lines = tmpl(shifted)
+    if not any(f"a.cs:{want}:" in f for f in lines):
+        failures.append(f"13f the finding must carry the handler's own line ({want}), got {lines}")
+
+    # (14) ⛔ EVERY STRING THIS GATE CAN PRINT SURVIVES A cp1252 CONSOLE. It runs
+    #      in the Windows lane, whose console is cp1252, and its FAILURE path
+    #      printed a warning sign: a live red there would print its findings and
+    #      then die in UnicodeEncodeError. Docstrings are exempt (nothing prints
+    #      them). Same arm, same reason, as check_rust_suite_ran.py's.
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    docstrings = set()
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            b = n.body
+            if (b and isinstance(b[0], ast.Expr) and isinstance(b[0].value, ast.Constant)
+                    and isinstance(b[0].value.value, str)):
+                docstrings.add(id(b[0].value))
+    strings = unprintable = 0
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings:
+            strings += 1
+            try:
+                n.value.encode("cp1252")
+            except UnicodeEncodeError:
+                unprintable += 1
+                failures.append(f"14 line {n.lineno}: a printable string cp1252 cannot encode")
+    if strings < 50 or len(docstrings) < 5:
+        failures.append(f"14 vacuous: {strings} string(s), {len(docstrings)} docstring(s) parsed")
+
     # (11) THE VACUITY FLOORS, DRIVEN. A floor nobody drives is arithmetic.
     for label, patch, needle in (
         ("11a file floor", {"MIN_FILES": 10_000}, ".cs file(s) under"),
@@ -428,7 +523,11 @@ def self_test() -> int:
         "MenuBar, discharged when the live arm is wired, and FIRES on MenuBar + "
         "fixtures-only -- with the wired/unwired reader driven both ways, then "
         "applied to the real tree, where it FIRED on its first real occasion and "
-        "is now discharged: the live arm is wired (W6) and clause (b) passes)")
+        "is now discharged: the live arm is wired (W6) and clause (b) passes; "
+        "clause (c) reds a planted `{{` handler and an interpolation's escaped "
+        "brace (naming the serializer remedy) at the handler's own derived line, "
+        "and stays green on the compliant shell, a comment and a single brace; "
+        "and every printable string in this file survives a cp1252 console)")
     return 0
 
 
@@ -440,19 +539,19 @@ def main() -> int:
     except Refuse as exc:
         print(f"REFUSING: {exc}")
         return 1
-    findings = scan_ban(files) + scan_positive(files, xaml)
+    findings = scan_ban(files) + scan_positive(files, xaml) + scan_template(files)
     if findings:
         print("FAIL: the WinUI shell is not a materializer.")
         for f in findings:
             print(f"  {f}")
         print()
-        print("The shell asks the core (`jas_menu_state`) and materializes the answer.")
-        print("It never evaluates an `enabled_when`, and it never authors a menubar.")
-        print("⚠️ Clause (b) is EXPECTED to fail until W4 lands the app shell; the live")
-        print("arm is wired by W6, and until then CI runs --self-test only.")
+        print("The shell asks the core (`jas_menu_state`, `jas_panel_plan`) and")
+        print("materializes the answer. It never evaluates an `enabled_when`, never")
+        print("authors a menubar, and never handles a `{{` template.")
         return 1
     print(f"check_shell_no_interpreter: OK ({len(files)} shell file(s); no banned form "
-          f"in code; a MenuBar exists and is fed by jas_menu_state)")
+          f"in code; no `{{{{` in code or a literal; a MenuBar exists and is fed by "
+          f"jas_menu_state)")
     return 0
 
 
