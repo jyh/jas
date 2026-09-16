@@ -454,6 +454,7 @@ def _scratch_repo(where: pathlib.Path, files: dict[str, bytes], message: str) ->
     where.mkdir()
     subprocess.run(["git", "init", "-q"], cwd=where, check=True)
     for name, data in files.items():
+        (where / name).parent.mkdir(parents=True, exist_ok=True)
         (where / name).write_bytes(data)
     subprocess.run(["git", "add", "--", *files], cwd=where, check=True)
     subprocess.run(["git", "-c", "user.email=self@test", "-c", "user.name=self",
@@ -512,7 +513,9 @@ def _verdict_arm() -> tuple[list[str], int]:
         # break), so it is the URL finding beside it that would print the text.
         ("a trailer in a message", text, f"subject\n\n{_SESSION_KEY}: {url}\n", [], 1, None),
         ("no readable text file", {"a.bin": b"\xff\xfe\x00"}, "clean", [], 1, None),
-        ("a URL in a file", {"a.txt": url.encode("ascii")}, "clean", [], 1, None),
+        # Nested and longer than twelve characters, so a print that shortened
+        # the path (to the sha's width, or to its basename) is caught by arm 8.
+        ("a URL in a file", {"sub/planted-path-longer-than-twelve.txt": url.encode("ascii")}, "clean", [], 1, None),
         ("a tracked file missing", text, "clean", [], 1, "unlink"),
         ("a clean repository", text, "clean", [], 0, None),
     ]
@@ -535,7 +538,7 @@ def _verdict_arm() -> tuple[list[str], int]:
                 findings.append(f"arm 8, {name}: the matched text reached the output")
             head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True,
                                   text=True, encoding="utf-8", check=True).stdout.strip()
-            where = {"a trailer in a message": (head[:12], 3), "a URL in a file": ("a.txt", 1)}
+            where = {"a trailer in a message": (head[:12], 3), "a URL in a file": ("sub/planted-path-longer-than-twelve.txt", 1)}
             if name in where:
                 site, lineno = where[name]
                 if f"  {site}  " not in said:
