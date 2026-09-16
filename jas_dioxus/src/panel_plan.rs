@@ -521,6 +521,74 @@ mod tests {
         assert!(containers_total > 0, "vacuous: no container ever carried a value");
     }
 
+    /// ⭐ THE PARTITION, AGAINST A PREDICATE THAT DOES NOT COME FROM `render_plan`.
+    ///
+    /// Q1 takes its leaf and chrome lists FROM `render_plan`, so a defect in
+    /// `render_plan`'s own partition moves the oracle with the subject. Mutation
+    /// found exactly that: sending every chrome container to the omitted list
+    /// survived every other arm, because the oracle's chrome list emptied too.
+    /// Here the partition is re-derived from `widget_tree`'s records (type,
+    /// style keys, bind keys) over `layout_panel`'s paths: a layout-only type
+    /// with a border/background is chrome; any other type is a leaf; a
+    /// layout-only type without chrome is a container exactly when it has a
+    /// bound row.
+    #[test]
+    fn the_plan_partition_follows_an_independent_predicate() {
+        const LAYOUT_ONLY: [&str; 6] = ["container", "row", "col", "grid", "panel", "disclosure"];
+        let has = |keys: &Value, k: &str| keys.as_array().is_some_and(|a| a.iter().any(|x| x == k));
+        let ws = Workspace::load().expect("workspace");
+        let (mut chrome_total, mut leaves_total, mut containers_total) = (0usize, 0usize, 0usize);
+        for pid in &panel_ids(&ws) {
+            let spec = ws.panel(pid).unwrap();
+            for (sname, ctx) in &scopes() {
+                let wt: BTreeMap<String, Value> = widget_tree(spec, ctx)
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| (r["path"].to_string(), r.clone()))
+                    .collect();
+                let bound: BTreeSet<String> = bind_values(spec, ctx)
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| r["path"].to_string())
+                    .collect();
+                for (w, h) in SIZES {
+                    let at = format!("{pid} {sname} {w}x{h}");
+                    let (mut chrome, mut leaves, mut containers) = (vec![], vec![], vec![]);
+                    for e in layout_panel(spec, w, h, ctx).as_array().unwrap() {
+                        let p = e["path"].to_string();
+                        let rec = &wt[&p];
+                        let t = rec["type"].as_str().unwrap_or("");
+                        if !LAYOUT_ONLY.contains(&t) {
+                            leaves.push(p);
+                        } else if ["border", "background", "bg"].iter().any(|k| has(&rec["style"], k))
+                            || has(&rec["bind"], "background")
+                        {
+                            chrome.push(p);
+                        } else if bound.contains(&p) {
+                            containers.push(p);
+                        }
+                    }
+                    let (plan, _) = panel_plan(spec, w, h, ctx);
+                    let paths = |list: &str| -> Vec<String> {
+                        plan[list].as_array().unwrap().iter().map(|e| e["path"].to_string()).collect()
+                    };
+                    assert_eq!(paths("chrome"), chrome, "{at}: chrome");
+                    assert_eq!(paths("leaves"), leaves, "{at}: leaves");
+                    assert_eq!(paths("containers"), containers, "{at}: containers");
+                    chrome_total += chrome.len();
+                    leaves_total += leaves.len();
+                    containers_total += containers.len();
+                }
+            }
+        }
+        assert!(
+            chrome_total > 0 && leaves_total > 0 && containers_total > 0,
+            "vacuous partition: chrome={chrome_total} leaves={leaves_total} containers={containers_total}"
+        );
+    }
+
     /// A bound widget the layout pass never places (a static `visible: false`)
     /// is REPORTED in `unjoined` by path and key, never dropped. No panel in the
     /// workspace has one today (the stop-2 measurement), so this is synthetic.
