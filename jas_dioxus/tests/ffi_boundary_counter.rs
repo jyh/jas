@@ -32,7 +32,8 @@
 
 use jas_dioxus::ffi::{
     jas_bind_values, jas_dispatch_event, jas_engine_free, jas_engine_new, jas_free,
-    jas_instr_counters_json, jas_panel_plan, jas_instr_reset, jas_version, jas_widget_tree, JasBytes, JasStatus,
+    jas_instr_counters_json, jas_panel_behavior, jas_panel_plan, jas_instr_reset, jas_version,
+    jas_widget_tree, JasBytes, JasStatus,
 };
 use jas_dioxus::ffi_instr::{self, Crossing};
 use std::sync::Mutex;
@@ -378,5 +379,30 @@ fn panel_plan_counts_as_one_crossing_both_directions() {
     // The negative control: the plan does not also count as the call it
     // subsumes. A shell that reads the plan has made ONE crossing, not two.
     assert_eq!(ffi_instr::read(Crossing::BindValues), (0, 0, 0), "the plan is not a bind_values call");
+    unsafe { jas_engine_free(e) };
+}
+
+// ---------------------------------------------------------------------------
+// jas_panel_behavior -- wave 2, A6: one user act on a control, one crossing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn panel_behavior_counts_as_one_crossing_both_directions() {
+    let _g = SERIAL.lock().unwrap();
+    let e = jas_engine_new();
+    ffi_instr::reset();
+    let id = "align_panel_content";
+    let ev = r#"{"widget":"align_to_artboard_button","event":"click"}"#;
+    let b = unsafe { jas_panel_behavior(e, id.as_ptr(), id.len(), ev.as_ptr(), ev.len()) };
+    let produced = b.len;
+    let text = take(b);
+
+    let (calls, bytes_in, bytes_out) = ffi_instr::read(Crossing::PanelBehavior);
+    assert_eq!(calls, 1, "the crossing itself must increment the counter");
+    assert_eq!(bytes_in, (id.len() + ev.len()) as u64, "the panel id and the event crossed inward");
+    assert_eq!(bytes_out, produced as u64, "bytes_out must be the span actually returned");
+    assert!(produced > 0 && text.contains("\"doc_changed\""), "sanity: a real reply came back: {text}");
+    // The negative control: a behavior is not a value edit.
+    assert_eq!(ffi_instr::read(Crossing::PanelEvent), (0, 0, 0), "a behavior is not a panel_event call");
     unsafe { jas_engine_free(e) };
 }

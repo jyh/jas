@@ -11,6 +11,10 @@ use super::expr_types::Value;
 /// Reactive state store for global, panel-scoped, tool-scoped, and
 /// dialog-scoped state. Mirrors `jas_flask/static/js/engine/store.mjs`
 /// except for reactivity (handled by Dioxus signals at the UI layer).
+///
+/// `Clone` so a caller can run a batch on a copy first (the Windows engine's
+/// pre-flight, FB wave 2 A6). Every field is a plain value.
+#[derive(Clone)]
 pub struct StateStore {
     state: HashMap<String, serde_json::Value>,
     panels: HashMap<String, HashMap<String, serde_json::Value>>,
@@ -302,6 +306,16 @@ impl StateStore {
 
     pub fn init_panel(&mut self, panel_id: &str, defaults: HashMap<String, serde_json::Value>) {
         self.panels.insert(panel_id.to_string(), defaults);
+    }
+
+    /// A panel's whole scope, if it has one.
+    pub fn panel_scope(&self, panel_id: &str) -> Option<&HashMap<String, serde_json::Value>> {
+        self.panels.get(panel_id)
+    }
+
+    /// True once `panel_id` has a scope, even an empty one.
+    pub fn has_panel(&self, panel_id: &str) -> bool {
+        self.panels.contains_key(panel_id)
     }
 
     pub fn get_panel(&self, panel_id: &str, key: &str) -> &serde_json::Value {
