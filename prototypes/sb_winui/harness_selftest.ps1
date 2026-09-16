@@ -1078,8 +1078,13 @@ Test-Case 'Q6.4: fewer than two selected is NOT RUN -- Align has nothing to do' 
     { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS" '1') } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
 Test-Case 'Q6.4: hashes taken at two surfaces are NOT RUN, never a difference' `
     { Get-SbQ6Summary @{ h1 = (New-SbQ6Hash 'SYNTH-H1' $q6HashM '1000x600') } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
-Test-Case 'Q6.4: a hash the shell could not take is NOT RUN' `
-    { Get-SbQ6Summary @{ h1 = "RUSTFAIL SYNTH-H1 surface=2502x1350 hash=n/a engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
+# The two ways a hash row is unreadable, one arm each so neither check can be
+# dropped unseen: the shell's own RUSTFAIL over a well-formed hash, and a
+# RUSTOK row whose hash is not 64 hex digits.
+Test-Case 'Q6.4: a hash row the shell marked RUSTFAIL is NOT RUN, whatever it carries' `
+    { Get-SbQ6Summary @{ h1 = "RUSTFAIL SYNTH-H1 surface=2502x1350 hash=$q6HashM engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
+Test-Case 'Q6.4: a hash that is not 64 hex digits is NOT RUN' `
+    { Get-SbQ6Summary @{ h1 = "RUSTOK SYNTH-H1 surface=2502x1350 hash=n/a engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
 Test-Case 'Q6.5: an undo that did not restore the canvas FAILS' `
     { Get-SbQ6Summary @{ h2 = (New-SbQ6Hash 'SYNTH-H2' ('4' * 64)) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
 # ⛔ THE SECOND METHOD ON THE SAME CLAIM: identical pixels over a different
@@ -1110,6 +1115,38 @@ Test-Case 'Q6: a doc-sha with the wrong number of parts is NOT RUN on every docu
 # and a reader that ignored it would convict the replay of a person's click.
 Test-Case 'Q6: a HAND click is never read as a replay step' `
     { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=hand outcome=changed changed-rows=0 doc-changed=true delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+
+# ---- one arm per decision the cases above leave unwitnessed ----------------
+# No pwsh in the authoring seat, so no mutation pass over these readers ran.
+# In its place every decision in `Get-SbPaneVerdicts` was walked by hand and
+# given an arm that fails if that decision alone flips; these are the ones the
+# cases above did not already reach.
+Test-Case 'Q6.1: a plan with no leaves FAILS' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=0 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=0 crossings=2 bytes=40 plan-bytes=40 seq=1 $q6Tids" } } 'Q6.1=FAIL Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a pane that never built FAILS' `
+    { Get-SbQ6Summary @{ built = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6: a digest the core could not give is NOT RUN on every document claim' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/EMPTY/$q6DocS/$q6DocM/$q6DocM/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6.4: a change the core says left the document alone FAILS' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=0 doc-changed=false delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: a delta mismatch FAILS even on a row that lost its RUSTFAIL' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: a replay with no undo row FAILS' `
+    { Get-SbQ6Summary @{ undo = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: a missing after-undo hash is NOT RUN' `
+    { Get-SbQ6Summary @{ h2 = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=NOT RUN Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.C1: a refused click that moved the document FAILS' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$('f' * 16)/$q6DocS/$q6DocM/$q6DocM/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C2: a missing second click FAILS' `
+    { Get-SbQ6Summary @{ c2 = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: Unchanged over a document the core says changed FAILS' `
+    { Get-SbQ6Summary @{ c2 = "PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=true delta-mismatch=0 channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: an unchanged click with a clear channel FAILS -- the core must SAY so' `
+    { Get-SbQ6Summary @{ c2 = "PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: a second click the shell marked RUSTFAIL FAILS' `
+    { Get-SbQ6Summary @{ c2 = "RUSTFAIL PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=UNREADABLE(JsonException) channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: a second click that moved the canvas FAILS' `
+    { Get-SbQ6Summary @{ h1b = (New-SbQ6Hash 'SYNTH-H1B' ('6' * 64)) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
 
 # ⛔ EVERY CLAUSE ON EVERY PATH, EXACTLY ONCE. P4.3 vanished on one branch while
 # its three siblings said NOT RUN; this is that defect's census, run over every

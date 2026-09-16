@@ -1874,7 +1874,9 @@ function Add-SbSynthVerdicts($Out, $Rows, [string]$Synth, [bool]$Asked) {
     $c0 = Select-SbSynthClick $Rows 'synth:no-selection'
     if ($null -eq $c0) {
         $Out.Add((New-SbVerdict $n.Refused 'FAIL' 'the replay finished and no row carries via=synth:no-selection' $done))
-    } elseif ($c0 -notmatch 'PANEL CLICK REFUSED ' -or (Test-SbRowFailed $c0) -or (Get-SbChannelClass $c0) -cne 'Disabled') {
+    } elseif ($c0 -notmatch 'PANEL CLICK REFUSED ' -or (Get-SbChannelClass $c0) -cne 'Disabled') {
+        # (A RUSTFAIL click row -- SILENT, REPLY UNREADABLE -- is never a
+        # `PANEL CLICK REFUSED` row, so the shape test above already fails it.)
         $Out.Add((New-SbVerdict $n.Refused 'FAIL' "with nothing selected the core must refuse the click as Disabled; it answered channel=$(Get-SbField $c0 'channel') outcome=$(Get-SbField $c0 'outcome')" $c0))
     } elseif ($liveWhy -ne '') {
         $Out.Add((New-SbVerdict $n.Refused 'NOT RUN' $liveWhy $c0))
