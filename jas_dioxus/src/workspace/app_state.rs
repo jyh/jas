@@ -4336,10 +4336,81 @@ mod align_panel_state_tests {
         assert!(st.align_panel.key_object_path.is_none());
     }
 
+    // The web method hands the align host every field it reads. Each arm
+    // below fails if one field is dropped on the way (the host's own tests
+    // cannot see this, because they build the input themselves).
+
+    #[test]
+    fn apply_align_operation_passes_the_preview_flag() {
+        // Left edges both at 10; only the second is stroked (10 wide), so
+        // its PREVIEW left edge is 5. Geometric: nothing moves. Preview: the
+        // first rect moves to 5.
+        use crate::geometry::element::Stroke;
+        let mut stroked = make_rect(10.0, 20.0, 10.0, 10.0);
+        if let Element::Rect(ref mut r) = stroked {
+            r.stroke = Some(Stroke::new(Color::BLACK, 10.0));
+        }
+        let rects = vec![make_rect(10.0, 0.0, 10.0, 10.0), stroked];
+        let mut st = state_with_three_rects(rects, vec![vec![0, 0], vec![0, 1]]);
+        st.align_panel.use_preview_bounds = true;
+        st.apply_align_operation("align_left");
+        assert_eq!(rect_x_at(&st, vec![0, 0]), 5.0);
+        assert_eq!(rect_x_at(&st, vec![0, 1]), 10.0);
+    }
+
+    #[test]
+    fn apply_align_operation_passes_the_artboard_target_and_selection() {
+        use crate::document::artboard::Artboard;
+        let rects = vec![make_rect(50.0, 0.0, 10.0, 10.0), make_rect(70.0, 0.0, 10.0, 10.0)];
+        let mut st = state_with_three_rects(rects, vec![vec![0, 0], vec![0, 1]]);
+        let mut doc = st.tabs[st.active_tab].model.document().clone();
+        let board = |id: &str, x: f64| {
+            let mut a = Artboard::default_with_id(id.to_string());
+            a.x = x;
+            a.y = 0.0;
+            a.width = 100.0;
+            a.height = 100.0;
+            a
+        };
+        doc.artboards = vec![board("aaa", 0.0), board("bbb", 200.0)];
+        st.tabs[st.active_tab].model.set_document_for_test(doc);
+        st.align_panel.align_to = AlignTo::Artboard;
+        st.artboards_panel_selection = vec!["bbb".into()];
+        st.apply_align_operation("align_left");
+        // Selection mode would give 50; the first artboard would give 0.
+        assert_eq!(rect_x_at(&st, vec![0, 0]), 200.0);
+        assert_eq!(rect_x_at(&st, vec![0, 1]), 200.0);
+    }
+
+    #[test]
+    fn apply_align_operation_passes_the_key_object_and_the_gap() {
+        // Key = the first rect (10..20), explicit gap 5: 10, 25, 40.
+        // Without the key the gap is ignored (average mode: 10, 55, 100);
+        // without the gap the rects abut (10, 20, 30).
+        let rects = vec![
+            make_rect(10.0, 0.0, 10.0, 10.0),
+            make_rect(40.0, 0.0, 10.0, 10.0),
+            make_rect(100.0, 0.0, 10.0, 10.0),
+        ];
+        let mut st = state_with_three_rects(
+            rects, vec![vec![0, 0], vec![0, 1], vec![0, 2]]);
+        st.align_panel.align_to = AlignTo::KeyObject;
+        st.align_panel.key_object_path = Some(vec![0, 0]);
+        st.align_panel.distribute_spacing = 5.0;
+        st.apply_align_operation("distribute_horizontal_spacing");
+        assert_eq!(rect_x_at(&st, vec![0, 0]), 10.0);
+        assert_eq!(rect_x_at(&st, vec![0, 1]), 25.0);
+        assert_eq!(rect_x_at(&st, vec![0, 2]), 40.0);
+    }
+
     #[test]
     fn apply_align_operation_uses_preview_bounds_when_set() {
         // Two stroked lines at x = 0 and 100 (width 1pt stroke
         // inflates preview bounds by 0.5 on each side).
+        // ⚠️ Both strokes are equal, so geometric bounds give the SAME −100
+        // delta: this runs the preview path and cannot tell it from the
+        // geometric one. The next test is the one that fails if the flag
+        // is dropped.
         use crate::geometry::element::{LineElem, Stroke};
         let rects = vec![
             Element::Line(LineElem {
