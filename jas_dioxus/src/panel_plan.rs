@@ -54,6 +54,17 @@ fn path_of(v: &Value) -> Vec<i64> {
         .unwrap_or_default()
 }
 
+/// The node keys whose LITERAL string a shell may display (W2-5a).
+///
+/// ⛔ AN ALLOW-LIST, NEVER "every string key". A node also carries expression
+/// strings (`enabled_when`, `disabled`, a `style` value) and prose
+/// (`description`), and a shell that received those would be handed something
+/// to evaluate or would show a paragraph where a label belongs. Measured on the
+/// compiled workspace (W2-5a): these eight are the display strings panel
+/// widgets carry.
+pub const STATIC_KEYS: [&str; 8] =
+    ["content", "label", "summary", "icon", "name", "unit", "suffix", "placeholder"];
+
 fn entry(item: &RenderLeaf, values: Map<String, Value>) -> Value {
     json!({
         "path": item.path,
@@ -69,7 +80,13 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>) -> Value {
 /// Returns `(plan, rows)`: `rows` is the `bind_values` output the plan was
 /// joined from, handed back so a caller that must also record it (the
 /// engine's panel registry) does not walk the panel a second time.
-pub fn panel_plan(panel_node: &Value, avail_w: i64, avail_h: i64, ctx: &Value) -> (Value, Value) {
+pub fn panel_plan(
+    panel_node: &Value,
+    avail_w: i64,
+    avail_h: i64,
+    ctx: &Value,
+    _icon_defs: &Value,
+) -> (Value, Value) {
     let rows = bind_values(panel_node, ctx);
     let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
 
@@ -186,6 +203,24 @@ pub(crate) mod checks {
             }
         }
         if errs.is_empty() { Ok(compared) } else { Err(errs.join("; ")) }
+    }
+
+    /// The spec node a plan path names, walked from the panel's `content` by
+    /// the path scheme alone (a declared child is `children[i]`; under a
+    /// `foreach` every index names the `do` template). An independent route to
+    /// the node, so a check reading it does not agree with the plan by
+    /// construction.
+    pub(crate) fn node_at<'a>(panel: &'a Value, path: &Value) -> Option<&'a Value> {
+        let mut cur = panel.get("content")?;
+        for i in path.as_array()? {
+            let i = usize::try_from(i.as_i64()?).ok()?;
+            cur = if cur.get("foreach").is_some_and(Value::is_object) {
+                cur.get("do")?
+            } else {
+                cur.get("children")?.get(i)?
+            };
+        }
+        Some(cur)
     }
 
     /// Keys a plan must never carry: the raw node, its behavior, its binding
@@ -481,7 +516,7 @@ mod tests {
                     .map(|r| (r["path"].to_string(), r.clone()))
                     .collect();
                 for (w, h) in SIZES {
-                    let (plan, joined_from) = panel_plan(spec, w, h, ctx);
+                    let (plan, joined_from) = panel_plan(spec, w, h, ctx, ws.icons());
                     let at = format!("{pid} {sname} {w}x{h}");
                     assert_eq!(joined_from, rows, "{at}: the plan must be joined from bind_values' rows");
                     let (values, n) = checks::plan_values(&plan);
@@ -570,7 +605,7 @@ mod tests {
                             containers.push(p);
                         }
                     }
-                    let (plan, _) = panel_plan(spec, w, h, ctx);
+                    let (plan, _) = panel_plan(spec, w, h, ctx, ws.icons());
                     let paths = |list: &str| -> Vec<String> {
                         plan[list].as_array().unwrap().iter().map(|e| e["path"].to_string()).collect()
                     };
@@ -599,7 +634,7 @@ mod tests {
             {"type": "text", "id": "hidden", "visible": false, "bind": {"value": "panel.a"}},
         ]}});
         let ctx = json!({"panel": {"a": "x"}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
         assert_eq!(
             plan["unjoined"],
             json!([{"path": [1], "key": "bind.value"}]),
@@ -618,7 +653,7 @@ mod tests {
         let ws = Workspace::load().expect("workspace");
         let spec = ws.panel("align_panel_content").expect("align");
         let ctx = engine_scope();
-        let (plan, _) = panel_plan(spec, 228, 0, &ctx);
+        let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons());
         let layout = layout_panel(spec, 228, 0, &ctx);
         let rp = render_plan(spec, 228, 0, &ctx);
         let n = checks::plan_matches_layout(&plan, &layout, &rp).expect("the unmutated plan passes");
@@ -654,7 +689,7 @@ mod tests {
     fn q2_oracle_fails_on_each_planted_interpretable() {
         let ws = Workspace::load().expect("workspace");
         let spec = ws.panel("color_panel_content").expect("color");
-        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope());
+        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
         let clean = serde_json::to_string(&plan).unwrap();
         checks::nothing_interpretable(&clean).expect("the unmutated plan passes");
         assert!(plan["leaves"].as_array().is_some_and(|a| !a.is_empty()), "vacuous plan: {clean}");
@@ -689,8 +724,8 @@ mod tests {
             })
         };
         let (a, b) = (ctx_of("664040"), ctx_of("664141"));
-        let (plan_a, _) = panel_plan(spec, 228, 600, &a);
-        let (plan_b, _) = panel_plan(spec, 228, 600, &b);
+        let (plan_a, _) = panel_plan(spec, 228, 600, &a, ws.icons());
+        let (plan_b, _) = panel_plan(spec, 228, 600, &b, ws.icons());
 
         let (va, na) = checks::plan_values(&plan_a);
         let want = checks::row_values(&bind_values(spec, &a));
@@ -723,5 +758,219 @@ mod tests {
             };
             assert_eq!(rects(&plan_a), rects(&plan_b), "{list} rects moved");
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // W2-5a -- WHAT A PERSON READS. RED FIRST: written against a plan that
+    // carried no display text at all (the dump that found it: 22 align leaves,
+    // three `text` leaves with `values: {}`, no icon name and no summary on any
+    // of the 17 buttons).
+    // -----------------------------------------------------------------------
+
+    /// Every node in a spec, depth-first, with its type (an independent walk:
+    /// the counts below do not come from the plan).
+    fn count_types(node: &Value, out: &mut BTreeMap<String, usize>) {
+        if let Some(t) = node.get("type").and_then(Value::as_str) {
+            *out.entry(t.to_string()).or_default() += 1;
+        }
+        for k in ["children", "do"] {
+            match node.get(k) {
+                Some(Value::Array(a)) => a.iter().for_each(|c| count_types(c, out)),
+                Some(c @ Value::Object(_)) => count_types(c, out),
+                _ => {}
+            }
+        }
+    }
+
+    /// ⭐ THE ALIGN PLAN CARRIES WHAT A PERSON READS. Every `text` leaf carries
+    /// its literal `content`, every `icon_button` its `summary` and `icon`, and
+    /// the plan carries each named icon's workspace definition verbatim.
+    #[test]
+    fn the_align_plan_carries_its_display_text_and_its_icons() {
+        let ws = Workspace::load().expect("workspace");
+        let spec = ws.panel("align_panel_content").expect("align");
+        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
+        let leaves = plan["leaves"].as_array().expect("leaves");
+        // The artifact's own first leaf, as the dump printed it.
+        assert_eq!(leaves[0]["static"], json!({"content": "Align Objects:"}), "{}", leaves[0]);
+
+        let mut want = BTreeMap::new();
+        count_types(&spec["content"], &mut want);
+        let (mut texts, mut buttons) = (0usize, 0usize);
+        let mut named = BTreeSet::new();
+        for e in leaves {
+            let node = checks::node_at(spec, &e["path"]).expect("a plan path names a spec node");
+            match e["type"].as_str() {
+                Some("text") => {
+                    texts += 1;
+                    let c = node["content"].as_str().expect("a literal content");
+                    assert!(!c.is_empty(), "{e}");
+                    assert_eq!(e["static"], json!({"content": c}), "{e}");
+                }
+                Some("icon_button") => {
+                    buttons += 1;
+                    let name = node["icon"].as_str().expect("an icon name");
+                    assert_eq!(
+                        e["static"],
+                        json!({"icon": name, "summary": node["summary"]}),
+                        "{e}"
+                    );
+                    let def = &ws.icons()[name];
+                    assert_eq!(
+                        plan["icons"][name],
+                        json!({"viewbox": def["viewbox"], "svg": def["svg"]}),
+                        "{name}"
+                    );
+                    named.insert(name.to_string());
+                }
+                _ => {}
+            }
+        }
+        assert!(texts > 0 && buttons > 0, "vacuous: texts={texts} buttons={buttons}");
+        assert_eq!(Some(&texts), want.get("text"), "every text node is a leaf: {want:?}");
+        assert_eq!(Some(&buttons), want.get("icon_button"), "every button is a leaf: {want:?}");
+        let keys: BTreeSet<String> =
+            plan["icons"].as_object().expect("icons map").keys().cloned().collect();
+        assert_eq!(keys, named, "the map holds exactly the icons the plan names");
+        assert_eq!(plan["icons_missing"], json!([]), "{plan}");
+        assert_eq!(plan["withheld"], json!([]), "{plan}");
+    }
+
+    /// The allow-list, in both directions, on one synthetic node: every listed
+    /// literal crosses, and an expression, a prose field, a style value and a
+    /// templated string do not. A templated `summary` is WITHHELD by path and key
+    /// (bind_values resolves only `content`/`label`); a templated `content` is a
+    /// value, not static and not withheld.
+    #[test]
+    fn static_carries_only_allowlisted_literals_and_withholds_a_templated_one() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "icon_button", "id": "b", "icon": "zz_icon", "summary": "Hint {{panel.a}}",
+             "description": "prose", "enabled_when": "panel.a", "disabled": "panel.a",
+             "label": "Go", "unit": "pt", "suffix": "%", "placeholder": "type",
+             "style": {"size": 20}},
+            {"type": "text", "id": "t", "content": "{{panel.a}}"},
+            {"type": "icon", "id": "i", "name": "zz_icon"},
+        ]}});
+        let icons = json!({"zz_icon": {"viewbox": "0 0 1 1", "svg": "<rect/>", "extra": "x"}});
+        let ctx = json!({"panel": {"a": "x"}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        let l = &plan["leaves"];
+        assert_eq!(
+            l[0]["static"],
+            json!({"icon": "zz_icon", "label": "Go", "unit": "pt", "suffix": "%", "placeholder": "type"}),
+            "{plan}"
+        );
+        assert_eq!(l[1]["static"], json!({}), "{plan}");
+        assert_eq!(l[1]["values"], json!({"content": "x"}), "{plan}");
+        assert_eq!(l[2]["static"], json!({"name": "zz_icon"}), "{plan}");
+        assert_eq!(plan["withheld"], json!([{"path": [0], "key": "summary"}]), "{plan}");
+        assert_eq!(
+            plan["icons"],
+            json!({"zz_icon": {"viewbox": "0 0 1 1", "svg": "<rect/>"}}),
+            "only the two fields a shell draws from"
+        );
+        checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
+            .expect("nothing interpretable crossed");
+    }
+
+    /// An icon the workspace does not define is NAMED, never dropped; a bound
+    /// icon is resolved from the row that names it; `name` is an icon only on
+    /// an `icon` node.
+    #[test]
+    fn an_undefined_icon_is_named_missing_and_a_bound_icon_is_resolved() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "icon_button", "id": "gone", "icon": "zz_nowhere", "summary": "s"},
+            {"type": "icon_button", "id": "bound", "icon": "zz_static", "summary": "s",
+             "bind": {"icon": "panel.which"}},
+            {"type": "text_input", "id": "n", "name": "zz_not_an_icon", "placeholder": "p"},
+        ]}});
+        let def = |v: &str| json!({"viewbox": v, "svg": "<g/>"});
+        let icons = json!({"zz_static": def("0 0 1 1"), "zz_bound": def("0 0 2 2"),
+                           "zz_not_an_icon": def("0 0 3 3")});
+        let ctx = json!({"panel": {"which": "zz_bound"}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        assert_eq!(plan["icons_missing"], json!(["zz_nowhere"]), "{plan}");
+        assert_eq!(
+            plan["icons"],
+            json!({"zz_static": def("0 0 1 1"), "zz_bound": def("0 0 2 2")}),
+            "{plan}"
+        );
+        // The control: the bound row is what named `zz_bound`.
+        assert_eq!(plan["leaves"][1]["values"]["bind.icon"], json!("zz_bound"), "{plan}");
+    }
+
+    /// ⭐ ON EVERY PANEL, IN EVERY SCOPE, AT EVERY SIZE: every static entry is
+    /// an allow-listed key whose value is the spec node's own literal; every
+    /// allow-listed literal on a placed node is carried (none dropped); every
+    /// named icon is in `icons` or `icons_missing`, never both; and nothing
+    /// interpretable crossed.
+    #[test]
+    fn static_and_icons_are_complete_and_exact_on_every_panel() {
+        let ws = Workspace::load().expect("workspace");
+        let defs = ws.icons().as_object().expect("icons map");
+        let (mut carried, mut icons_seen, mut missing_seen) = (0usize, 0usize, 0usize);
+        for pid in panel_ids(&ws) {
+            let spec = ws.panel(&pid).unwrap();
+            for (sname, ctx) in scopes() {
+                for (w, h) in SIZES {
+                    let at = format!("{pid} {sname} {w}x{h}");
+                    let (plan, _) = panel_plan(spec, w, h, &ctx, ws.icons());
+                    checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
+                        .unwrap_or_else(|err| panic!("{at}: {err}"));
+                    let mut named = BTreeSet::new();
+                    for list in checks::LISTS {
+                        for e in plan[list].as_array().unwrap() {
+                            let node = checks::node_at(spec, &e["path"])
+                                .unwrap_or_else(|| panic!("{at}: {} names no node", e["path"]));
+                            let st = e["static"].as_object()
+                                .unwrap_or_else(|| panic!("{at}: no static map on {e}"));
+                            for (k, v) in st {
+                                assert!(super::STATIC_KEYS.contains(&k.as_str()), "{at}: {k} crossed");
+                                assert_eq!(Some(v), node.get(k), "{at}: {k} is not the node's own");
+                                carried += 1;
+                            }
+                            for k in super::STATIC_KEYS {
+                                if let Some(s) = node.get(k).and_then(Value::as_str) {
+                                    if !s.contains("{{") {
+                                        assert!(st.contains_key(k), "{at}: literal {k} dropped from {e}");
+                                    }
+                                }
+                            }
+                            if let Some(n) = st.get("icon").and_then(Value::as_str) {
+                                named.insert(n.to_string());
+                            }
+                            if e["type"] == "icon" {
+                                if let Some(n) = st.get("name").and_then(Value::as_str) {
+                                    named.insert(n.to_string());
+                                }
+                            }
+                            if let Some(n) = e["values"]["bind.icon"].as_str() {
+                                named.insert(n.to_string());
+                            }
+                        }
+                    }
+                    let icons = plan["icons"].as_object().unwrap();
+                    let missing: BTreeSet<String> = plan["icons_missing"].as_array().unwrap()
+                        .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+                    for n in &named {
+                        match (icons.get(n), missing.contains(n)) {
+                            (Some(d), false) => {
+                                assert_eq!(d["svg"], defs[n]["svg"], "{at}: {n}");
+                                assert_eq!(d["viewbox"], defs[n]["viewbox"], "{at}: {n}");
+                                icons_seen += 1;
+                            }
+                            (None, true) => {
+                                assert!(!defs.contains_key(n), "{at}: {n} is defined");
+                                missing_seen += 1;
+                            }
+                            other => panic!("{at}: {n} is {other:?}"),
+                        }
+                    }
+                    assert_eq!(icons.len() + missing.len(), named.len(), "{at}: an unnamed icon crossed");
+                }
+            }
+        }
+        assert!(carried > 0 && icons_seen > 0 && missing_seen > 0,
+            "vacuous: carried={carried} icons={icons_seen} missing={missing_seen}");
     }
 }
