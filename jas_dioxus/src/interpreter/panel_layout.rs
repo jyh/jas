@@ -53,6 +53,8 @@ struct MItem {
 /// what lets a consumer join a leaf to its `bind_values` rows by path; a join
 /// on `id` would be wrong, because a foreach template repeats its ids.
 pub struct RenderLeaf {
+    // Read only by the ffi panel plan; the web binary's renderer places by rect.
+    #[allow(dead_code)]
     pub path: Vec<i64>,
     pub x: i64,
     pub y: i64,
