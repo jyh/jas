@@ -1487,3 +1487,82 @@ function Read-SbReceipt {
     }
     return @{ Ok = $true; Data = $data; Reason = '' }
 }
+
+# ---------------------------------------------------------------------------
+# THE ARM SUMMARY LINE -- a PURE function over the assertion list
+# ---------------------------------------------------------------------------
+#
+# Commissioned in STATUS-flask section 72 (jas), from desk row `FB`. The summary
+# above it counts the WHOLE run; this line counts ONE ARM, so that a reader can
+# tell "the arm ran whole" from "one key is missing" -- a READING, where section
+# 66 had to leave an inference. It lives here, and not in `verify_window.ps1`,
+# for the reason every reader in this file lives here: it is pure over strings,
+# so CI can drive it on Windows with no app, no window and no session 1.
+#
+# ⛔⛔ OWNERSHIP IS BY THE **LONGEST DECLARED ARM**, NOT BY THE ANCHORED PREFIX.
+# The commission specified `^<prefix>(\.| )`, which is right for `O4.C2` and
+# WRONG for the bare `O4`. `verify_assertions.ps1`'s `:768` loop DECLARES the two
+# unselected arms as NOT RUN in every single run, so `O4.C1 gesture` and
+# `O4.C2 gesture` are always present -- and both anchor-match `^O4(\.| )`. A run
+# whose arm is `O4` would have annexed its own scoped-OUT siblings, and every key
+# hanging off them, as its own. Measured on the section-72 fixture: anchored-only
+# reads 13 where the arm owns 1.
+#
+# ⇒ That is section 66's lesson (`O4.` hides inside `O4.C2.`) firing ONE LEVEL
+#   further up than the commission spotted it -- not in the suffix, but in the
+#   ARM. The longest-match rule gives the SAME answer as the anchored rule for
+#   `O4.C2` (which is why the specified 11 is unchanged) and the CORRECT answer
+#   for `O4`. Arms A7/A7b/A7c in `harness_selftest.ps1` pin it, with the
+#   anchored-only count kept beside them as the mutation control.
+#
+# ⛔ THE LINE IS ALWAYS EMITTED, INCLUDING AT ZERO. An arm that selected nothing
+# prints `0 key(s)`; it must never be omitted, because an absent line and a zero
+# are exactly the two states this harness's three-verdict law exists to separate.
+function Get-SbArmOwner {
+    param([string]$Name, [string[]]$Arms)
+    # The longest declared arm that anchor-matches this key. '' when none does.
+    # ⛔ THE ARM IS ESCAPED: it is a NAME, not a pattern. Unescaped, `O4.C2`'s dot
+    # is "any character" and would claim `O4xC2.1`.
+    $best = ''
+    foreach ($arm in $Arms) {
+        if ([string]::IsNullOrEmpty($arm)) { continue }
+        if ($Name -match ('^' + [regex]::Escape($arm) + '(\.| )')) {
+            if ($arm.Length -gt $best.Length) { $best = $arm }
+        }
+    }
+    $best
+}
+function Format-SbArmSummary {
+    param(
+        [object[]]$Assertions,
+        [string]$Prefix,
+        [string]$Arm = '',
+        [string[]]$AllArms = @()
+    )
+    # The run's own arm is always part of the declared set, even if a caller
+    # forgot it -- otherwise the arm could not own its own keys.
+    $arms = @($AllArms | Where-Object { -not [string]::IsNullOrEmpty($_) })
+    if ($arms -notcontains $Prefix) { $arms = @($arms) + @($Prefix) }
+
+    $n = 0; $nPass = 0; $nFail = 0; $nNotRun = 0
+    foreach ($a in $Assertions) {
+        if ($null -eq $a) { continue }
+        if ((Get-SbArmOwner -Name ([string]$a.Name) -Arms $arms) -ne $Prefix) { continue }
+        $n++
+        switch ([string]$a.Verdict) {
+            'PASS' { $nPass++ }
+            'FAIL' { $nFail++ }
+            # SAME DEFAULT AS THE SUMMARY ABOVE: anything that is not PASS or
+            # FAIL is NOT RUN. The two counters must agree or the line lies.
+            default { $nNotRun++ }
+        }
+    }
+
+    # The FAMILY is the head of the prefix: `O4.C2` and `O4.C1` are both arms of `O4`.
+    $family = $Prefix.Split('.')[0]
+    $unselected = @($arms | Where-Object { $_ -ne $Prefix })
+    $unselectedText = if ($unselected.Count -gt 0) { $unselected -join ', ' } else { '(none)' }
+
+    "  --- {0} arm '{1}'{2}: {3} key(s) verdicted under it ({4} PASS, {5} FAIL, {6} NOT RUN); unselected arms declared: {7} ---" -f `
+        $family, $Prefix, $Arm, $n, $nPass, $nFail, $nNotRun, $unselectedText
+}
