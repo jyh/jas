@@ -26,10 +26,28 @@
 //!  "leaves":     [entry...],  one per renderable widget, render_plan's order
 //!  "containers": [entry...],  layout-only containers render_plan omits, that
 //!                             carry at least one bound value
-//!  "unjoined":   [{"path": [...], "key": "..."}...]}
+//!  "unjoined":   [{"path": [...], "key": "..."}...],
+//!  "withheld":   [{"path": [...], "key": "..."}...],  templated display strings
+//!  "icons":      {"<name>": {"viewbox": "...", "svg": "..."}, ...},
+//!  "icons_missing": ["<name>", ...]}
 //! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
-//!          "values": {"<bind_values key>": "<resolved value>", ...}}
+//!          "values": {"<bind_values key>": "<resolved value>", ...},
+//!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...}}
 //! ```
+//!
+//! # What a person reads (W2-5a)
+//!
+//! `values` holds only what `bind_values` resolves, and that pass emits no row
+//! for a LITERAL string. So until W2-5a a `text` leaf reached the shell with
+//! no text and an `icon_button` with no icon and no tooltip. `static` carries
+//! each entry's allow-listed literal display strings ([`STATIC_KEYS`]); a
+//! templated one other than `content`/`label` is named in `withheld`. `icons`
+//! carries, for every icon an entry names (a static `icon`, an `icon` node's
+//! `name`, a resolved `bind.icon`), the workspace's own `viewbox` and `svg`,
+//! and `icons_missing` names each one the workspace does not define. The
+//! precedent is `jas_menu_structure`, which carries the menubar's static
+//! labels. ⚠️ A `bind.icon` that a later tick moves to a name outside this map
+//! is not sent by the tick: the shell falls back to text for it.
 //!
 //! `containers` exists because the measurement found bound rows on nodes that
 //! draw nothing: a container's dynamic `visible` and a disclosure's header.
@@ -65,13 +83,55 @@ fn path_of(v: &Value) -> Vec<i64> {
 pub const STATIC_KEYS: [&str; 8] =
     ["content", "label", "summary", "icon", "name", "unit", "suffix", "placeholder"];
 
-fn entry(item: &RenderLeaf, values: Map<String, Value>) -> Value {
+/// A node's allow-listed LITERAL display strings, plus the allow-listed keys it
+/// carries as a TEMPLATE that the plan does not resolve.
+///
+/// A `{{`-bearing `content`/`label` is not withheld: `bind_values` resolves
+/// those two and the value is in the entry's `values`. Any other templated
+/// display string (a `summary`, measured on three widgets) is withheld and
+/// named, so a shell shows its fallback knowingly rather than a raw template.
+fn static_of(node: &Value) -> (Map<String, Value>, Vec<&'static str>) {
+    let mut out = Map::new();
+    let mut withheld = vec![];
+    for key in STATIC_KEYS {
+        let Some(s) = node.get(key).and_then(Value::as_str) else { continue };
+        if !s.contains("{{") {
+            out.insert(key.to_string(), Value::String(s.to_string()));
+        } else if !matches!(key, "content" | "label") {
+            withheld.push(key);
+        }
+    }
+    (out, withheld)
+}
+
+/// The icon names an entry displays: its static `icon`, an `icon` node's
+/// `name`, and the resolved `bind.icon` row.
+fn icon_names(entry: &Value, out: &mut Vec<String>) {
+    let st = &entry["static"];
+    let mut push = |v: &Value| {
+        if let Some(n) = v.as_str().filter(|n| !n.is_empty()) {
+            if !out.iter().any(|o| o == n) {
+                out.push(n.to_string());
+            }
+        }
+    };
+    push(&st["icon"]);
+    if entry["type"] == "icon" {
+        push(&st["name"]);
+    }
+    push(&entry["values"]["bind.icon"]);
+}
+
+fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value>) -> Value {
+    let (st, held) = static_of(&item.node);
+    withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
         "type": item.node.get("type").and_then(Value::as_str).unwrap_or(""),
         "id": item.node.get("id").and_then(Value::as_str).unwrap_or(""),
         "values": values,
+        "static": st,
     })
 }
 
@@ -85,7 +145,7 @@ pub fn panel_plan(
     avail_w: i64,
     avail_h: i64,
     ctx: &Value,
-    _icon_defs: &Value,
+    icon_defs: &Value,
 ) -> (Value, Value) {
     let rows = bind_values(panel_node, ctx);
     let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
@@ -96,19 +156,20 @@ pub fn panel_plan(
         by_path.entry(path_of(&r["path"])).or_default().insert(key, r["value"].clone());
     }
 
+    let mut withheld: Vec<Value> = vec![];
     let chrome: Vec<Value> = plan
         .chrome
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default()))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &mut withheld))
         .collect();
     let leaves: Vec<Value> = plan
         .leaves
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default()))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &mut withheld))
         .collect();
     let containers: Vec<Value> = omitted
         .iter()
-        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v)))
+        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &mut withheld)))
         .collect();
     // Whatever is left joined nothing. Reported in row order.
     let unjoined: Vec<Value> = rows
@@ -119,12 +180,33 @@ pub fn panel_plan(
         .map(|r| json!({"path": r["path"], "key": r["key"]}))
         .collect();
 
+    // Every icon an entry names, in entry order: its workspace definition
+    // verbatim (the two fields a shell draws from), or its name in
+    // `icons_missing` when the workspace defines no such icon.
+    let mut names: Vec<String> = vec![];
+    for e in chrome.iter().chain(&leaves).chain(&containers) {
+        icon_names(e, &mut names);
+    }
+    let mut icons = Map::new();
+    let mut icons_missing: Vec<Value> = vec![];
+    for n in names {
+        match icon_defs.get(&n) {
+            Some(def) => {
+                icons.insert(n, json!({"viewbox": def["viewbox"], "svg": def["svg"]}));
+            }
+            None => icons_missing.push(Value::String(n)),
+        }
+    }
+
     let out = json!({
         "height": plan.height,
         "chrome": chrome,
         "leaves": leaves,
         "containers": containers,
         "unjoined": unjoined,
+        "withheld": withheld,
+        "icons": icons,
+        "icons_missing": icons_missing,
     });
     (out, rows)
 }
@@ -869,6 +951,28 @@ mod tests {
             json!({"zz_icon": {"viewbox": "0 0 1 1", "svg": "<rect/>"}}),
             "only the two fields a shell draws from"
         );
+        checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
+            .expect("nothing interpretable crossed");
+    }
+
+    /// ⛔ A TEMPLATED `id` NEVER CROSSES RAW. Found by the every-scope arm below
+    /// on the real workspace: under a corpus scope, brushes' foreach tiles
+    /// (`bp_tile_{{lib.id}}_{{brush.slug}}`) put a raw template in the plan's
+    /// `id`, which the engine-scope Q2 arm could not see (the engine's foreach
+    /// sources are empty). No port resolves an id (the web renderer uses it
+    /// raw), and a foreach widget is not addressable by id (D12), so the id is
+    /// sent empty and named in `withheld`.
+    #[test]
+    fn a_templated_id_is_withheld_not_sent_raw() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "text", "id": "t_{{panel.a}}", "content": "hi"},
+            {"type": "text", "id": "plain", "content": "hi"},
+        ]}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {"a": "x"}}), &Value::Null);
+        assert_eq!(plan["leaves"][0]["id"], "", "{plan}");
+        assert_eq!(plan["withheld"], json!([{"path": [0], "key": "id"}]), "{plan}");
+        // The control: a literal id crosses as itself.
+        assert_eq!(plan["leaves"][1]["id"], "plain", "{plan}");
         checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
             .expect("nothing interpretable crossed");
     }
