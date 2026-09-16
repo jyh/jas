@@ -503,8 +503,10 @@ fn run_one(
                     model.as_deref_mut(), actions, dialogs,
                     Some(action_name), report);
             }
-            // A declared placeholder (`set_fill_type_gradient`) has no
-            // effects list, and nothing runs.
+            // No effects list at all: nothing runs. The compiled workspace
+            // gives every action a list (a declared placeholder such as
+            // `set_fill_type_gradient` gets `[]`, the arm above), so only a
+            // hand-built catalog reaches this.
             _ => report.unhandled.push(Unhandled::EmptyAction(action_name.to_string())),
         }
         return;
@@ -12406,7 +12408,9 @@ mod tests {
         // A log BESIDE a handled effect is still a stub for the real work.
         assert_eq!(report_of_real_action("close_without_saving"),
                    vec![Unhandled::Logged("close_without_saving".into())]);
-        // A declared placeholder with no effects at all.
+        // A declared placeholder. The YAML omits `effects`, and the compiled
+        // workspace writes `effects: []`, so this is the EMPTY-LIST path; the
+        // no-list path is driven by the hand-built catalog above.
         assert_eq!(report_of_real_action("set_fill_type_gradient"),
                    vec![Unhandled::EmptyAction("set_fill_type_gradient".into())]);
     }
