@@ -54,7 +54,11 @@ was not. None of the three scrub gates read a subject for a bare word.
     ran), minus the one personal-lane campaign the ruling scoped out. They
     are refused in commit subjects, PR titles, PR head refs (a merge subject
     quotes the ref), PR bodies, and -- FORWARD ONLY -- commit bodies. The
-    commit bodies already public are history this gate does not touch.
+    commit bodies already public are history this gate does not touch, and
+    FORWARD-ONLY IS A PROPERTY OF THE RANGE THE CALLER PASSES: a range that
+    lists an already-public commit whose body carries a word reds on it (the
+    baseline accepts subjects, never bodies), so a caller passes only the
+    commits a push adds. --history reads subjects alone for the same reason.
   * FAMILY REFERENCES are refused in subjects, titles and refs only: a body
     uses these words as code identifiers (a `kids(_:_:)` function) and
     `family` is a technical word here (76 public subjects use it that way).
@@ -151,27 +155,88 @@ _SCISSORS = "# ------------------------ >8 ------------------------"
 
 
 def _pieces(text) -> list[str]:
-    return []
+    """Lower-case word pieces: any run of letters and digits. Every separator
+    (`_ - / .` and space) splits, so a multi-piece name matches however it is
+    joined, and a whole-word test is a piece comparison, never a substring
+    (the employer word inside `local` is not the employer word)."""
+    return re.findall(r"[a-z0-9]+", (text or "").lower())
 
 
 def lane_words() -> list[str]:
-    return []
+    """The sibling's employer-lane and private-project lists, IMPORTED, minus
+    the scoped-out campaign. One list, one owner (ruled at desk QA, fork 1)."""
+    return [w for w in list(gate._EMPLOYER) + list(gate._PRIVATE_PROJ)
+            if w not in _LANE_EXCLUDED]
+
+
+def _shapes(words) -> set[tuple[str, ...]]:
+    """Piece tuples to look for. A multi-piece word is also looked for as its
+    pieces run together, the one joining the piece split cannot see."""
+    out = set()
+    for w in words:
+        p = tuple(_pieces(w))
+        if not p:
+            raise ValueError("a vocabulary entry with no word pieces can never match")
+        out.add(p)
+        if len(p) > 1:
+            out.add(("".join(p),))
+    return out
+
+
+def _hit(pieces: list[str], shapes) -> bool:
+    for s in shapes:
+        n = len(s)
+        if any(tuple(pieces[i:i + n]) == s for i in range(len(pieces) - n + 1)):
+            return True
+    return False
 
 
 def subject_scan(rows) -> list[tuple[str, str]]:
-    return []
+    """(where, class) for each (where, text, kind) row. kind is `subject` (both
+    classes) or `body` (lane names only). NEVER returns the text."""
+    lane, kin = _shapes(lane_words()), _shapes(_KIN)
+    bad = []
+    for where, text, kind in rows:
+        if kind not in ("subject", "body"):
+            raise ValueError(f"unknown surface kind {kind!r}")
+        p = _pieces(text)
+        if _hit(p, lane):
+            bad.append((where, LANE))
+        if kind == "subject" and _hit(p, kin):
+            bad.append((where, KIN))
+    return bad
 
 
 def subject_finding_lines(rows) -> list[str]:
-    return []
+    return [f"  {where}: {what}" for where, what in rows]
 
 
 def pr_rows(pr) -> list[tuple[str, str, str]]:
-    return []
+    """A PR's three forge-side surfaces. The head ref is subject-class: a
+    merge commit's subject quotes it."""
+    n = pr.get("number")
+    return [(f"PR #{n} TITLE", pr.get("title") or "", "subject"),
+            (f"PR #{n} HEAD REF", (pr.get("head") or {}).get("ref") or "", "subject"),
+            (f"PR #{n} BODY", pr.get("body") or "", "body")]
 
 
 def message_rows(text, where: str = "the message") -> list[tuple[str, str, str]]:
-    return []
+    """A commit-message FILE as git will store it under the default cleanup:
+    `#` lines dropped, everything below the scissors line dropped, and the
+    subject is the first paragraph joined by spaces (what `%s` prints)."""
+    lines = []
+    for line in (text or "").splitlines():
+        if line.startswith(_SCISSORS):
+            break
+        if not line.startswith("#"):
+            lines.append(line)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    subject = []
+    while lines and lines[0].strip():
+        subject.append(lines.pop(0).strip())
+    return [(f"{where} SUBJECT", " ".join(subject), "subject"),
+            (f"{where} BODY", "\n".join(lines), "body")]
 
 
 def _git(args: list[str], cwd=None) -> str:
@@ -185,34 +250,186 @@ def _git(args: list[str], cwd=None) -> str:
 
 
 def commits(rev: str, cwd=None) -> list[tuple[str, str, str]]:
-    return []
+    """(sha, subject, body) for every commit `git log <rev>` lists, merges
+    included: a merge subject quotes the branch name."""
+    raw = _git(["log", "--format=%H%x1f%s%x1f%b%x1e", rev], cwd)
+    out = []
+    for rec in raw.split("\x1e"):
+        rec = rec.strip("\n")
+        if rec:
+            sha, subject, body = (rec.split("\x1f") + ["", ""])[:3]
+            out.append((sha, subject, body))
+    return out
 
 
 def commit_rows(recs, baseline=frozenset()) -> list[tuple[str, str, str]]:
-    return []
+    """Scan rows for commits. A subject whose (sha, digest) is in the accepted
+    baseline is skipped; its BODY never is, because the ruling accepted
+    subjects and nothing else."""
+    rows = []
+    for sha, subject, body in recs:
+        if subject_key(sha, subject) not in baseline:
+            rows.append((f"commit {sha[:12]} SUBJECT", subject, "subject"))
+        rows.append((f"commit {sha[:12]} BODY", body, "body"))
+    return rows
 
 
 def subject_key(sha: str, subject: str) -> tuple[str, str]:
-    return (sha, "")
+    """The baseline's identity for one accepted subject. The subject itself is
+    never stored: a baseline that spelled it would republish it."""
+    return (sha, hashlib.sha256(subject.encode("utf-8")).hexdigest()[:16])
 
 
 def load_subject_baseline(path: str) -> set[tuple[str, str]]:
-    return set()
+    """The accepted-debt keys. A MISSING file raises FileNotFoundError and a
+    malformed line raises ValueError: a missing baseline is no statement, an
+    EMPTY one (comments only) is the statement that nothing is accepted, and a
+    line the reader cannot parse is never a line it may skip."""
+    keys = set()
+    with open(path, encoding="utf-8") as fh:
+        for n, line in enumerate(fh, 1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            f = line.rstrip("\n").split("\t")
+            if (len(f) < 2 or not re.fullmatch(r"[0-9a-f]{40}", f[0])
+                    or not re.fullmatch(r"[0-9a-f]{16}", f[1])):
+                raise ValueError(f"{os.path.basename(path)} line {n} is not "
+                                 f"<sha40><TAB><digest16>")
+            keys.add((f[0], f[1]))
+    return keys
+
+
+def _shallow(cwd=None) -> bool:
+    return _git(["rev-parse", "--is-shallow-repository"], cwd).strip() == "true"
 
 
 def history_verdict(baseline, cwd=None):
-    return [], [], [], 0
+    """(new, stale, refound, scanned) over every SUBJECT reachable from HEAD.
+    Subjects only: the owner accepted subjects, and the commit bodies already
+    public are history this gate does not rule on."""
+    recs = commits("HEAD", cwd)
+    found = set()
+    for sha, subject, _body in recs:
+        if subject_scan([("s", subject, "subject")]):
+            found.add(subject_key(sha, subject))
+    return (sorted(found - baseline), sorted(baseline - found),
+            sorted(found & baseline), len(recs))
+
+
+_NOT_COVERED = ("NOT COVERED: third-party personal names (a word list cannot "
+                "tell a citation from social context); family references in "
+                "bodies; the scoped-out personal-lane campaign; commit bodies "
+                "already public (this arm is forward-only).")
+
+
+def _vocab_id() -> str:
+    return (f"lane words {len(lane_words())} from [roots {gate.ROOTS_DIGEST}], "
+            f"family words {len(_KIN)}")
+
+
+def _debt_remedy() -> None:
+    print("\nA pushed commit subject cannot be edited without a history rewrite,")
+    print("so reword it BEFORE it is pushed: name a lane or a project by ROLE")
+    print("(an employer-lane root, a private project) and a person by ROLE,")
+    print("never by name or relation.")
 
 
 def range_mode(rev: str, cwd=None, baseline_path=None) -> int:
+    """Every commit in `git log <rev>`: subjects for both classes, bodies for
+    lane names (forward only). A baselined subject is accepted, not new."""
+    tag = f"[pr-gate {self_id()}]"
+    try:
+        baseline = load_subject_baseline(baseline_path or SUBJECT_BASELINE)
+        recs = commits(rev, cwd)
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"FAIL {tag}: --range {rev} could not run: {e}\n"
+              "      A scan that could not look is not a clean scan.")
+        return 1
+    if not recs:
+        print(f"FAIL {tag}: --range {rev} lists NO commit. A scan that read "
+              "nothing is not a clean scan; the range is wrong.")
+        return 1
+    bad = subject_scan(commit_rows(recs, baseline))
+    accepted = sum(1 for sha, subject, _ in recs
+                   if subject_key(sha, subject) in baseline)
+    if bad:
+        print(f"FAIL {tag}: {len(bad)} finding(s) in {len(recs)} commit(s) of "
+              f"{rev} (the word is withheld: this log is public).\n")
+        print("\n".join(subject_finding_lines(bad)))
+        _debt_remedy()
+        return 1
+    print(f"check_pr_descriptions --range {rev} {tag}: OK -- {len(recs)} "
+          f"commit(s), 0 findings in subjects and bodies, {accepted} accepted-debt "
+          f"subject(s) skipped by the baseline. {_vocab_id()}.")
+    print(_NOT_COVERED)
     return 0
 
 
 def history_mode(cwd=None, baseline_path=None) -> int:
+    """Every subject reachable from HEAD against the accepted-debt baseline,
+    in both directions: new debt reds, and so does an entry no longer found
+    (a vocabulary that lost a word, or a history that was rewritten)."""
+    tag = f"[pr-gate {self_id()}]"
+    path = baseline_path or SUBJECT_BASELINE
+    try:
+        if _shallow(cwd):
+            print(f"FAIL {tag}: --history on a SHALLOW clone: the commits it "
+                  "cannot see are exactly the ones it must. Fetch full depth.")
+            return 1
+        baseline = load_subject_baseline(path)
+        new, stale, refound, n = history_verdict(baseline, cwd)
+    except FileNotFoundError:
+        print(f"FAIL {tag}: no baseline at {os.path.basename(path)}. A missing "
+              "baseline is no statement; one holding only comments says that "
+              "nothing is accepted.")
+        return 1
+    except (OSError, ValueError, RuntimeError) as e:
+        print(f"FAIL {tag}: --history could not run: {e}")
+        return 1
+    if n == 0:
+        print(f"FAIL {tag}: --history read NO commit subject.")
+        return 1
+    if new:
+        print(f"FAIL {tag}: {len(new)} commit subject(s) carry a refused word "
+              "and are NOT in the accepted-debt baseline:\n")
+        for sha, digest in new:
+            print(f"  {sha}\t{digest}")
+        print("\nOnly the owner accepts debt. If accepted, the lines above are the")
+        print("baseline rows; otherwise the commit must not reach a public branch.")
+    if stale:
+        print(f"FAIL {tag}: {len(stale)} baseline row(s) are NO LONGER FOUND in "
+              "history -- the vocabulary lost a word, or history was rewritten:\n")
+        for sha, digest in stale:
+            print(f"  {sha}\t{digest}")
+    if new or stale:
+        return 1
+    control = (f"{len(refound)} accepted subject(s) re-found, which is this "
+               "repository's real-bytes control" if refound else
+               "0 accepted subjects, so this repository has NO real-bytes "
+               "control; only the self-test's planted commits witness the matcher")
+    print(f"check_pr_descriptions --history {tag}: OK -- {n} commit subject(s), "
+          f"0 new, 0 stale; {control}. {_vocab_id()}.")
+    print(_NOT_COVERED)
     return 0
 
 
 def msg_file_mode(path: str) -> int:
+    """One commit-message file, as the commit-msg hook hands it over."""
+    tag = f"[pr-gate {self_id()}]"
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as e:
+        print(f"REFUSED {tag}: cannot read the message file: {e}")
+        return 1
+    bad = subject_scan(message_rows(text))
+    if bad:
+        print(f"REFUSED {tag}: this commit message carries a refused word "
+              "(withheld).\n")
+        print("\n".join(subject_finding_lines(bad)))
+        _debt_remedy()
+        return 1
+    print(f"check_pr_descriptions --msg-file {tag}: OK -- subject and body clean.")
     return 0
 
 
@@ -254,11 +471,13 @@ def open_mode(repo: str) -> int:
         return 1
     bad = []
     sess = []
+    words = []
     notes = []
     for pr in prs:
         n = pr["number"]
         bad += scan_description(n, pr.get("title"), pr.get("body"))
         sess += scan_session(n, pr.get("title"), pr.get("body"))
+        words += subject_scan(pr_rows(pr))
         head = pr["head"]["sha"]
         base_ref = pr["base"]["ref"]
         run_sha = run_green = None
@@ -291,10 +510,19 @@ def open_mode(repo: str) -> int:
         print("\n".join(session_finding_lines(sess)))
         print("\nThe PR-opening harness appends a session URL; this repository is")
         print("public. Delete that line on the forge. No push required.")
-    if bad or sess:
+    if words:
+        print(f"FAIL [pr-gate {self_id()}]: {len(words)} refused word(s) in OPEN PR "
+              f"titles, head refs or bodies (withheld: this log is public).\n")
+        print("\n".join(subject_finding_lines(words)))
+        print("\nA title or body is EDITABLE on the forge: name the lane or the person")
+        print("by ROLE. A head ref is not: its merge subject will quote it, so push")
+        print("the branch under a neutral name and reopen.")
+    if bad or sess or words:
         return 1
     print(f"check_pr_descriptions --open [pr-gate {self_id()}]: OK — {len(prs)} open "
-          f"PR(s), 0 private-record paths and 0 session trailers/URLs in titles/bodies.")
+          f"PR(s), 0 private-record paths and 0 session trailers/URLs in titles/bodies, "
+          f"0 refused words in titles, head refs and bodies. {_vocab_id()}.")
+    print(_NOT_COVERED)
     if notes:
         print("REF-vs-RUN (which object each verdict is about; never status alone):")
         print("\n".join(notes))
@@ -601,20 +829,46 @@ def self_test() -> int:
     print(f"check_pr_descriptions SELF-TEST [pr-gate {self_id()}] over "
           f"[gate {gate.self_id()}]: OK (title+body arms both directions; "
           f"session arm both surfaces, never echoed; "
-          f"ref_vs_run all five branches; sibling vocabulary reached via import)")
+          f"ref_vs_run all five branches; sibling vocabulary reached via import; "
+          f"subject arm: {_vocab_id()}, every word planted in its surfaces, "
+          f"rec (4) subject-only plant in a scratch repository, range/history/"
+          f"msg-file modes in both directions, cp1252)")
+    print(_NOT_COVERED)
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="forge-side prose gate (row I(a))")
-    ap.add_argument("--self-test", action="store_true")
-    ap.add_argument("--open", action="store_true",
-                    help="scan every open PR's title+body via the forge API")
+    ap = argparse.ArgumentParser(
+        description="forge-side prose gate (row I(a)) and commit-subject gate (desk QA)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--self-test", action="store_true")
+    mode.add_argument("--open", action="store_true",
+                      help="scan every open PR's title, head ref and body via the forge API")
+    mode.add_argument("--range", metavar="REV",
+                      help="scan every commit `git log REV` lists: subjects, and bodies "
+                           "for lane names (forward only)")
+    mode.add_argument("--history", action="store_true",
+                      help="every subject reachable from HEAD against the accepted-debt "
+                           "baseline, both directions (needs full depth)")
+    mode.add_argument("--msg-file", metavar="PATH",
+                      help="one commit-message file (the commit-msg hook)")
+    ap.add_argument("--baseline", metavar="PATH",
+                    help="accepted-debt baseline for --range/--history "
+                         "(default: subject_debt_baseline.tsv beside this file)")
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""),
-                    help="owner/name; defaults to GITHUB_REPOSITORY")
+                    help="owner/name for --open; defaults to GITHUB_REPOSITORY")
     args = ap.parse_args()
+    if args.baseline and not (args.range or args.history):
+        # A flag accepted and ignored runs a different check than the one asked.
+        ap.error("--baseline applies only to --range and --history")
     if args.self_test:
         return self_test()
+    if args.range:
+        return range_mode(args.range, None, args.baseline)
+    if args.history:
+        return history_mode(None, args.baseline)
+    if args.msg_file:
+        return msg_file_mode(args.msg_file)
     if args.open:
         if not args.repo:
             print("FAIL: no repo — pass --repo owner/name or set GITHUB_REPOSITORY")
