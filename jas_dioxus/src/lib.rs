@@ -37,6 +37,10 @@ pub mod panel_scope;
 // values, in the engine (wave 2, A5). Same gate as the boundary it serves.
 #[cfg(feature = "ffi")]
 pub mod panel_plan;
+// A widget's BEHAVIOR run in the engine, with the pre-flight refusal (wave 2,
+// A6). Same gate as the boundary it serves.
+#[cfg(feature = "ffi")]
+pub mod panel_behavior;
 
 // S-B SPIKE SEAM, not ratified ABI. Needs BOTH features: the paint entry
 // point is meaningless without the Direct2D backend, and it is kept out of

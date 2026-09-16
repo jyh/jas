@@ -21,10 +21,16 @@
 //! second source of truth for values that already have one, and the copy is the
 //! one that drifts — the sequencer ruled this before C1 was measured.
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::document::document::Document;
+use crate::document::model::Model;
 use crate::interpreter::color_util::{color_from_panel_edit, panel_channels, parse_hex};
+use crate::interpreter::state_store::StateStore;
+
+/// The colour panel's id. Its `panel.*` state is [`PanelState`]'s, never the
+/// store's.
+pub const COLOUR_PANEL: &str = "color_panel_content";
 
 /// The minimum a materialized panel needs. **Deliberately not a general state
 /// store**: this is the spike's slice, not an app-state design.
@@ -118,14 +124,8 @@ impl PanelState {
     pub fn scope(&self, doc: &Document) -> Value {
         let (ar, ag, ab) = self.active();
         let ch = panel_channels(ar, ag, ab);
-        let st = panel_channels(self.stroke.0, self.stroke.1, self.stroke.2);
-        let fl = panel_channels(self.fill.0, self.fill.1, self.fill.2);
         json!({
-            "state": {
-                "fill_color": format!("#{}", fl.hex),
-                "stroke_color": format!("#{}", st.hex),
-                "fill_on_top": self.fill_on_top,
-            },
+            "state": self.state_keys(),
             "panel": {
                 "mode": self.mode,
                 "hex": ch.hex,
@@ -147,6 +147,19 @@ impl PanelState {
                 "artboards_panel_selection_ids": Value::Array(vec![]),
             },
         })
+    }
+
+    /// The three `state.*` keys this slice owns, as a scope carries them. The
+    /// engine's store holds a copy of exactly these, written from here
+    /// (see [`sync_colour_state`]).
+    pub fn state_keys(&self) -> Map<String, Value> {
+        let st = panel_channels(self.stroke.0, self.stroke.1, self.stroke.2);
+        let fl = panel_channels(self.fill.0, self.fill.1, self.fill.2);
+        let mut m = Map::new();
+        m.insert("fill_color".into(), Value::String(format!("#{}", fl.hex)));
+        m.insert("stroke_color".into(), Value::String(format!("#{}", st.hex)));
+        m.insert("fill_on_top".into(), Value::Bool(self.fill_on_top));
+        m
     }
 
     /// Apply one control's new value, addressed by the BINDING EXPRESSION the
@@ -215,6 +228,72 @@ impl PanelState {
 /// native control a kind happened to map to.
 fn as_number(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
+}
+
+/// The five `active_document.*` facts the ENGINE owns, as a JSON object.
+///
+/// ⛔ THE LIST IS EXHAUSTIVE ON PURPOSE AND IT IS SHORTER THAN THE NAMESPACE.
+/// `menu_state.rs:19-25` names six `active_document` fields; the engine can
+/// answer five. `has_filename` is NOT here because `jas_load_svg` takes BYTES —
+/// the engine has never seen a path and inventing `false` for it would be the
+/// shell's answer wearing the engine's authority.
+///
+/// It lives beside the panel scope because two passes read it: the menubar's
+/// state and every panel's bindings (Align's `disabled` reads
+/// `selection_count`). One definition, so the two cannot disagree.
+pub fn document_facts(model: &Model) -> Map<String, Value> {
+    let selection_count = model.document().selection.len();
+    let mut m = Map::new();
+    m.insert("has_selection".into(), (selection_count > 0).into());
+    m.insert("selection_count".into(), selection_count.into());
+    m.insert("can_undo".into(), model.can_undo().into());
+    m.insert("can_redo".into(), model.can_redo().into());
+    m.insert("is_modified".into(), model.is_modified().into());
+    m
+}
+
+/// Write the slice's three `state.*` keys into the store, so an effect that
+/// reads `state.fill_color` from the store reads the value the panels show.
+/// Called when the engine is made and after every colour edit.
+pub fn sync_colour_state(store: &mut StateStore, slice: &PanelState) {
+    for (k, v) in slice.state_keys() {
+        store.set(&k, v);
+    }
+}
+
+/// The scope panel `panel_id`'s bindings resolve against, in the engine
+/// (FB wave 2, A6). One function, so the plan the shell draws and the
+/// behavior the engine runs read the same values.
+///
+/// * `state` — the store's global state, with the slice's three keys over it.
+///   The store holds a copy of those three ([`sync_colour_state`]), so the
+///   overlay changes nothing when the copy is current.
+/// * `panel` — the slice's, with the panel's own store scope over it. The
+///   colour panel never HAS a store scope (the engine never seeds one), so
+///   its `panel.*` is the slice's alone. That is one guard, at the seeding,
+///   and an arm holds it.
+/// * `active_document` — the slice's, plus [`document_facts`].
+///
+/// Keys are inserted in sorted order, so the scope does not depend on a hash
+/// map's iteration order.
+pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel_id: &str) -> Value {
+    let mut scope = slice.scope(model.document());
+    let mut state: Map<String, Value> = sorted(store.get_all());
+    state.extend(slice.state_keys());
+    scope["state"] = Value::Object(state);
+    if let (Some(own), Some(panel)) = (store.panel_scope(panel_id), scope["panel"].as_object_mut()) {
+        panel.extend(sorted(own));
+    }
+    if let Some(doc) = scope["active_document"].as_object_mut() {
+        doc.extend(document_facts(model));
+    }
+    scope
+}
+
+fn sorted(m: &std::collections::HashMap<String, Value>) -> Map<String, Value> {
+    let mut keys: Vec<&String> = m.keys().collect();
+    keys.sort();
+    keys.into_iter().map(|k| (k.clone(), m[k].clone())).collect()
 }
 
 /// The BINDING EXPRESSION a widget declares for one of its keys — the engine's
@@ -330,13 +409,21 @@ impl PanelRegistry {
     /// contributes no rows), and moves the cost that does grow to the ENGINE,
     /// where the gate cannot see it. Hence [`Sync::rows_evaluated`], which is
     /// reported beside the crossings under gate ⑤.
-    pub fn sync(&mut self, ws: &crate::interpreter::workspace::Workspace, scope: &Value) -> Sync {
+    ///
+    /// `scope_of` gives each panel its own scope: panels hold their own
+    /// `panel.*` state, so one shared scope would resolve every panel against
+    /// one panel's values.
+    pub fn sync(
+        &mut self,
+        ws: &crate::interpreter::workspace::Workspace,
+        scope_of: &dyn Fn(&str) -> Value,
+    ) -> Sync {
         let mut changed: Vec<Value> = vec![];
         let mut evaluated = 0usize;
 
         for (panel_id, last) in self.served.iter_mut() {
             let Some(spec) = ws.panel(panel_id) else { continue };
-            let now = crate::interpreter::bind_values::bind_values(spec, scope);
+            let now = crate::interpreter::bind_values::bind_values(spec, &scope_of(panel_id));
             let now_rows = now.as_array().cloned().unwrap_or_default();
             let last_rows = last.as_array().cloned().unwrap_or_default();
             evaluated += now_rows.len();
@@ -626,12 +713,12 @@ mod tests {
         // A tick that changes nothing produces an EMPTY delta. This arm is what
         // makes the next one readable: without it, "the delta is small" and
         // "the diff never fires" are indistinguishable.
-        let quiet = reg.sync(&w, &st.scope(&doc));
+        let quiet = reg.sync(&w, &|_| st.scope(&doc));
         assert_eq!(quiet.changed.as_array().unwrap().len(), 0, "no edit, no rows");
         assert_eq!(quiet.rows_evaluated, total, "and it still evaluated everything");
 
         assert_eq!(st.apply_edit("panel.r", &json!(200)), EditOutcome::Changed);
-        let moved = reg.sync(&w, &st.scope(&doc));
+        let moved = reg.sync(&w, &|_| st.scope(&doc));
         let n = moved.changed.as_array().unwrap().len();
         assert!(n > 0, "a real edit must produce rows");
         assert!(n < total, "and fewer than all {total} of them");
@@ -660,7 +747,7 @@ mod tests {
         let mut ticks = 0;
         for v in [200, 12, 255, 7] {
             assert_eq!(st.apply_edit("panel.r", &json!(v)), EditOutcome::Changed);
-            let sync = reg.sync(&w, &st.scope(&doc));
+            let sync = reg.sync(&w, &|_| st.scope(&doc));
             for row in sync.changed.as_array().unwrap() {
                 let path = &row["path"];
                 let key = &row["key"];
@@ -701,7 +788,7 @@ mod tests {
                 reg.record(p, &rows);
             }
             assert_eq!(st.apply_edit("panel.r", &json!(200)), EditOutcome::Changed);
-            let s = reg.sync(&w, &st.scope(&doc));
+            let s = reg.sync(&w, &|_| st.scope(&doc));
             (s.changed.as_array().unwrap().len(), s.rows_evaluated)
         };
 

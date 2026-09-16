@@ -99,6 +99,11 @@ pub enum Crossing {
     /// where both rows move on one open is a shell paying for the same values
     /// twice.
     PanelPlan = 14,
+    /// Wave 2 / A6: a widget's BEHAVIOR run in the engine, one crossing per
+    /// user act on a control. Counted separately from `PanelEvent` because that
+    /// one writes a VALUE and this one runs effects, and a shell that sent a
+    /// click as a value edit would show up as the wrong row moving.
+    PanelBehavior = 15,
 }
 
 impl Crossing {
@@ -120,6 +125,7 @@ impl Crossing {
         "jas_menu_state",
         "jas_menu_structure",
         "jas_panel_plan",
+        "jas_panel_behavior",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -129,7 +135,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 15;
+    pub(crate) const COUNT: usize = 16;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -152,6 +158,7 @@ impl Crossing {
         Crossing::MenuState,
         Crossing::MenuStructure,
         Crossing::PanelPlan,
+        Crossing::PanelBehavior,
     ];
 
     pub fn name(self) -> &'static str {
