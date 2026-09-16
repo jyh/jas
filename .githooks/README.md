@@ -37,9 +37,9 @@ local by git's design, so it is covered two other ways:
 | `commit-msg` | **100755** | entry point: strips the session trailer before it can enter history |
 | `commit_msg_scrub.py` | **100644** | the module `commit-msg` invokes. Deliberately **not** executable — see below |
 | `prove_commit_msg_scrub.sh` | **100755** | the 10-phase prover: red proven before green |
-| `pre-push` | **100755** | entry point: refuses a push whose commits carry a shape either gate forbids — scanned one commit at a time, so a line added then removed inside the push still counts — and runs the private-paths gate over the net delta. The CI gates run *after* the objects are public |
+| `pre-push` | **100755** | entry point: refuses a push whose commits carry a shape either gate forbids — scanned one commit at a time, so a line added then removed inside the push still counts — and runs the private-paths gate over the net delta, and the subject gate (`scripts/check_pr_descriptions.py --range`: no lane name or family reference in a subject, no lane name in a body) over the pushed commits. The CI gates run *after* the objects are public |
 | `gate_scan.py` | **100644** | the module `pre-push` invokes. It types no pattern: it loads `FORBIDDEN` and the matching functions from `scripts/check_commit_trailers.py` and `scripts/check_private_paths.py`, and refuses (exit 2) when it cannot. Byte-identical in salt and saltworks, whose `commit-msg` also uses it |
-| `prove_pre_push.sh` | **100755** | the prover for `pre-push`: three clean pushes; nine leak shapes refused (a message path, an added-line path, the five trailer shapes, and a path and a link each added then removed); a missing scanner refused; a delete allowed; and a mutation control |
+| `prove_pre_push.sh` | **100755** | the prover for `pre-push`: three clean pushes; twelve leak shapes refused (a message path, an added-line path, the five trailer shapes, a path and a link each added then removed, a lane name or a family reference in a subject only, and a lane name in a body only); a missing scanner or subject gate refused; a delete allowed; and a mutation control |
 
 ## TWO PLATFORM RULES THAT ARE NOT STYLE
 
