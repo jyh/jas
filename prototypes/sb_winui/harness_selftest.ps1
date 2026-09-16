@@ -902,6 +902,281 @@ Test-Case 'ARM: a prefix is escaped, never used as a pattern' `
     { $f = New-SbArmFixture @('O4xC2.1|PASS'); (Format-SbArmSummary $f 'O4.C2' '' @('O4.C2')) -match '0 key\(s\)' } 'True'
 
 # ---------------------------------------------------------------------------
+# Q6 -- THE ALIGN PANE, READ OFF ITS OWN ROWS (W2-6)
+# ---------------------------------------------------------------------------
+#
+# ⛔ NO BOX HAS RUN W2-5 OR W2-6, SO THESE ROWS ARE NOT VERBATIM OFF kenai. Each
+# is the literal its C# format string composes -- `Canvas.ApplyPanelOpen`,
+# `ApplyPanelClick`, `ApplyPanelSynth`, `ApplyOp`, the hash row in
+# `RepaintOnce`; `MainWindow.BuildPane`, `ReportPaneIcons`, `DrawPane` -- filled
+# with what the real Align plan carries at 228 on this sitting's document
+# (22 leaves: 4 text, 17 icon buttons, 1 input; 17 icons; height 168; 10960
+# bytes; measured through `jas_panel_plan`). W2-7's first sitting is what
+# replaces them with the box's own lines, and a reader that disagrees with a
+# real row is this file's defect, not the app's.
+function New-SbQ6Row([string]$Status) {
+    return "15:02:11`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAMES=(default:60)`t" + $Status
+}
+$q6Tids = 'ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false'
+$q6Who = 'panel=align_panel_content widget=align_left_button'
+function New-SbQ6Channel([string]$Class) {
+    return '{"panel_event":"' + $Class + '","detail":"align_left_button"}'
+}
+function New-SbQ6Hash([string]$Label, [string]$Hex, [string]$Surface = '2502x1350') {
+    return "RUSTOK $Label surface=$Surface hash=$Hex engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids"
+}
+$q6HashA = '1' * 64
+$q6HashS = '2' * 64
+$q6HashM = '3' * 64
+$q6DocA = 'a' * 16
+$q6DocS = 'b' * 16
+$q6DocM = 'c' * 16
+function New-SbQ6Done([string]$Docs, [string]$Selected = '4') {
+    return "PANEL SYNTH DONE $q6Who selected=$Selected doc-sha=$Docs $q6Tids"
+}
+
+# The whole run, in the order the shell writes it. `$Over` replaces a step by
+# key, and a `$null` value DELETES it, so every variant below is a one-key
+# mutation of the healthy run and nothing else.
+function New-SbQ6Fixture([hashtable]$Over = @{}) {
+    $steps = [ordered]@{
+        open    = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=168 crossings=2 bytes=10960 plan-bytes=10960 seq=1 $q6Tids"
+        built   = 'PANEL BUILT panel=align_panel_content build=1 leaves=22 texts=4 buttons=17 inputs=1 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0'
+        repaint = "RUSTOK REPAINT events_total=3 distinct_sizes=1 arrivals=none frames=1 cause=hash resizes-in-drain=0 surface=2502x1350 paint=1.20ms present=0.40ms occluded=0 loads(shell)=1 $q6Tids"
+        h0      = (New-SbQ6Hash 'SYNTH-H0' $q6HashA)
+        c0      = "PANEL CLICK REFUSED $q6Who via=synth:no-selection channel=$(New-SbQ6Channel 'Disabled') $q6Tids"
+        h0b     = (New-SbQ6Hash 'SYNTH-H0B' $q6HashA)
+        select  = "RUSTOK SYNTH-SELECT-ALL applied=0 can-undo=false can-redo=false $q6Tids"
+        hs      = (New-SbQ6Hash 'SYNTH-HS' $q6HashS)
+        c1      = "PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=0 doc-changed=true delta-mismatch=0 channel=(clear) $q6Tids"
+        h1      = (New-SbQ6Hash 'SYNTH-H1' $q6HashM)
+        c2      = "PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=0 channel=$(New-SbQ6Channel 'Unchanged') $q6Tids"
+        h1b     = (New-SbQ6Hash 'SYNTH-H1B' $q6HashM)
+        undo    = "RUSTOK SYNTH-UNDO applied=1 can-undo=false can-redo=true $q6Tids"
+        h2      = (New-SbQ6Hash 'SYNTH-H2' $q6HashS)
+        done    = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS")
+        icons   = 'PANEL ICONS panel=align_panel_content build=1 svg=17 text=0 failed=0 icon=SVG'
+        drawn   = 'PANEL DRAWN panel=align_panel_content seq=1 cause=open missed=0 rebuilt=true controls=22 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'
+    }
+    foreach ($k in $Over.Keys) {
+        if (-not $steps.Contains($k)) { throw "New-SbQ6Fixture: no step '$k'" }
+        $steps[$k] = $Over[$k]
+    }
+    $out = @()
+    foreach ($k in $steps.Keys) {
+        if ($null -ne $steps[$k]) { $out += (New-SbQ6Row $steps[$k]) }
+    }
+    return $out
+}
+$q6NoSynth = @{ h0 = $null; c0 = $null; h0b = $null; select = $null; hs = $null; c1 = $null
+                h1 = $null; c2 = $null; h1b = $null; undo = $null; h2 = $null; done = $null }
+
+# `Q6.1=PASS Q6.2=PASS ...`, in the order the reader emits them.
+function Format-SbQ6($Verdicts) {
+    return (@($Verdicts) | ForEach-Object { "$(($_.Name -split ' ')[0])=$($_.Verdict)" }) -join ' '
+}
+function Get-SbQ6Summary([hashtable]$Over = @{}, [string]$Scene = 'app', [string]$Synth = 'align_left_button') {
+    return Format-SbQ6 (Get-SbPaneVerdicts (New-SbQ6Fixture $Over) $Scene $Synth)
+}
+# Does ANY of a wait's patterns select a row? The wait's own question, asked the
+# wait's own way (`Wait-SbRow` ends on the first pattern that selects).
+function Test-SbQ6WaitEnds($Wait, $Rows) {
+    foreach ($p in $Wait.Patterns) { if ($null -ne (Select-SbRow $Rows $p)) { return 'ENDS' } }
+    return 'WAITS'
+}
+$q6AllPass = 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+
+# ---- the waits: which rows a run must wait for after its completion row ----
+# `app`'s completion row is written BEFORE the pane opens, so a reader of the
+# rows snapshotted at `Done` would find no pane at all.
+Test-Case 'Q6 WAIT: a scene that opens no pane waits for nothing' `
+    { @(Get-SbPaneWaits 'retained' 'align_left_button').Count } '0'
+Test-Case 'Q6 WAIT: app without the replay waits for the drawn pane only' `
+    { (@(Get-SbPaneWaits 'app' '') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL DRAWN row'
+Test-Case 'Q6 WAIT: app with the replay waits for the replay first, then the pane' `
+    { (@(Get-SbPaneWaits 'app' 'align_left_button') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL SYNTH DONE row | the PANEL DRAWN row'
+# ⛔ THE SHELL'S PREDICATE, NOT A NEARBY ONE: whitespace is UNSET there
+# (`string.IsNullOrWhiteSpace`), so a harness waiting on a replay the shell
+# never queued would burn its whole timeout on every such run.
+Test-Case 'Q6 WAIT: a whitespace knob is unset, exactly as the shell reads it' `
+    { @(Get-SbPaneWaits 'app' '   ').Count } '1'
+Test-Case 'Q6 WAIT: the pane wait ends on the drawn row' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) (New-SbQ6Fixture $q6NoSynth) } 'ENDS'
+# ⛔ AND IT DOES NOT END ON A CLICK'S RED: a delta mismatch says nothing about
+# whether the pane has been drawn, and ending there reads a drawn pane as absent.
+Test-Case 'Q6 WAIT: the pane wait does not end on a click row''s RUSTFAIL' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) @(New-SbQ6Row "RUSTFAIL PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids") } 'WAITS'
+Test-Case 'Q6 WAIT: the pane wait ends on the plan''s own refusal' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) @(New-SbQ6Row "RUSTFAIL PANEL REFUSED panel=align_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids") } 'ENDS'
+Test-Case 'Q6 WAIT: the replay wait ends on the replay''s own refusal' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'x')[0]) @(New-SbQ6Row "RUSTFAIL PANEL SYNTH REFUSED panel=align_panel_content widget=x -- no leaf of the open plan has that id; it has 1: align_left_button $q6Tids") } 'ENDS'
+Test-Case 'Q6 WAIT: the replay wait does not end on everything before its last row' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) (New-SbQ6Fixture @{ done = $null }) } 'WAITS'
+Test-Case 'Q6 WAIT: CONTROL -- the replay wait ends on the healthy run' `
+    { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) (New-SbQ6Fixture) } 'ENDS'
+
+# ---- the verdicts -----------------------------------------------------------
+Test-Case 'Q6: the healthy run passes every clause' { Get-SbQ6Summary } $q6AllPass
+Test-Case 'Q6: a scene that opens no pane reads NOT RUN on every clause' `
+    { Get-SbQ6Summary $q6NoSynth 'retained' '' } 'Q6.1=NOT RUN Q6.2=NOT RUN Q6.3=NOT RUN Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6: app without the replay asserts the open and names the replay NOT RUN' `
+    { Get-SbQ6Summary $q6NoSynth 'app' '' } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+# ⛔ THE KNOB ON A SCENE WITH NO PANE IS A FAILURE, NEVER A QUIET NOT RUN: the
+# run was asked for a replay and the shell refused it.
+Test-Case 'Q6: the replay asked on a scene with no pane FAILS Q6.4' `
+    { Get-SbQ6Summary @{} 'retained' 'align_left_button' } 'Q6.1=NOT RUN Q6.2=NOT RUN Q6.3=NOT RUN Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+
+# The open.
+Test-Case 'Q6.1: no open row under app FAILS, and what reads it is NOT RUN' `
+    { Get-SbQ6Summary @{ open = $null } } 'Q6.1=FAIL Q6.2=NOT RUN Q6.3=NOT RUN Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.1: the plan''s own refusal FAILS and is quoted' `
+    { $v = @(Get-SbPaneVerdicts (New-SbQ6Fixture @{ open = "RUSTFAIL PANEL REFUSED panel=align_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids" }) 'app' '')
+      "$($v[0].Verdict) $($v[0].Row -match 'PANEL REFUSED')" } 'FAIL True'
+Test-Case 'Q6.1: an unparseable plan FAILS' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 plan=UNPARSEABLE(JsonException) crossings=2 bytes=10960 plan-bytes=10960 seq=1 $q6Tids" } } 'Q6.1=FAIL Q6.2=PASS Q6.3=NOT RUN Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.1: a bound row the layout never placed FAILS' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=1 withheld=0 icons=17 icons-missing=0 height=168 crossings=2 bytes=10960 plan-bytes=10960 seq=1 $q6Tids" } } 'Q6.1=FAIL Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.2: three crossings FAIL' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=168 crossings=3 bytes=10960 plan-bytes=10960 seq=1 $q6Tids" } } 'Q6.1=PASS Q6.2=FAIL Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.2: an unreadable counter dump is NOT RUN, never a count' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=168 crossings=UNREADABLE bytes=UNREADABLE plan-bytes=10960 seq=1 $q6Tids" } } 'Q6.1=PASS Q6.2=NOT RUN Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a drawn pane short of one control FAILS' `
+    { Get-SbQ6Summary @{ drawn = 'PANEL DRAWN panel=align_panel_content seq=1 cause=open missed=0 rebuilt=true controls=21 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900' } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a build short of one leaf FAILS' `
+    { Get-SbQ6Summary @{ built = 'PANEL BUILT panel=align_panel_content build=1 leaves=21 texts=4 buttons=17 inputs=0 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0' } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a pane never drawn FAILS' `
+    { Get-SbQ6Summary @{ drawn = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a draw that threw FAILS' `
+    { Get-SbQ6Summary @{ drawn = 'RUSTFAIL PANEL DRAW threw KeyNotFoundException: The given key was not present in the dictionary.' } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+
+# The replay.
+Test-Case 'Q6: a replay that never finished reads NOT RUN, never PASS' `
+    { Get-SbQ6Summary @{ done = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6: a refused replay FAILS Q6.4 and quotes the refusal' `
+    { $v = @(Get-SbPaneVerdicts (New-SbQ6Fixture @{ done = "RUSTFAIL PANEL SYNTH REFUSED $q6Who -- the open panel is '(none)' $q6Tids" }) 'app' 'align_left_button')
+      "$(Format-SbQ6 $v) $($v[3].Row -match 'SYNTH REFUSED')" } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN True'
+Test-Case 'Q6: a replay that threw FAILS Q6.4' `
+    { Get-SbQ6Summary @{ done = "RUSTFAIL PANEL SYNTH THREW $q6Who InvalidOperationException: boom $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+# ⛔ THE ANTI-VACUITY ARMS. An "unchanged" clause is an EQUALITY, and a hash
+# that returns a constant satisfies every equality there is. So each equality
+# needs its own instrument to have read at least two distinct values somewhere
+# in this run, and Q6.5 needs the click to have moved something to restore.
+Test-Case 'Q6.4: a click that did not move the canvas FAILS, and there is nothing for Q6.5 to restore' `
+    { Get-SbQ6Summary @{ h1 = (New-SbQ6Hash 'SYNTH-H1' $q6HashS); h1b = (New-SbQ6Hash 'SYNTH-H1B' $q6HashS) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6: a canvas hash that never varies makes every canvas equality NOT RUN' `
+    { Get-SbQ6Summary @{ hs = (New-SbQ6Hash 'SYNTH-HS' $q6HashA); h1 = (New-SbQ6Hash 'SYNTH-H1' $q6HashA)
+                         h1b = (New-SbQ6Hash 'SYNTH-H1B' $q6HashA); h2 = (New-SbQ6Hash 'SYNTH-H2' $q6HashA) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6: a document digest that never varies makes every document equality NOT RUN' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocA/$q6DocA/$q6DocA/$q6DocA") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6.4: a click the core says moved nothing FAILS' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=synth:click outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=0 channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: a click whose rows disagree with the plan FAILS' `
+    { Get-SbQ6Summary @{ c1 = "RUSTFAIL PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: a document the core did not re-serialize differently FAILS' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocS/$q6DocS/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=NOT RUN Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: fewer than two selected is NOT RUN -- Align has nothing to do' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS" '1') } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: hashes taken at two surfaces are NOT RUN, never a difference' `
+    { Get-SbQ6Summary @{ h1 = (New-SbQ6Hash 'SYNTH-H1' $q6HashM '1000x600') } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
+# The two ways a hash row is unreadable, one arm each so neither check can be
+# dropped unseen: the shell's own RUSTFAIL over a well-formed hash, and a
+# RUSTOK row whose hash is not 64 hex digits.
+Test-Case 'Q6.4: a hash row the shell marked RUSTFAIL is NOT RUN, whatever it carries' `
+    { Get-SbQ6Summary @{ h1 = "RUSTFAIL SYNTH-H1 surface=2502x1350 hash=$q6HashM engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
+Test-Case 'Q6.4: a hash that is not 64 hex digits is NOT RUN' `
+    { Get-SbQ6Summary @{ h1 = "RUSTOK SYNTH-H1 surface=2502x1350 hash=n/a engines-created=1 engines-freed=0 loads(shell)=1 $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=PASS Q6.C2=NOT RUN'
+Test-Case 'Q6.5: an undo that did not restore the canvas FAILS' `
+    { Get-SbQ6Summary @{ h2 = (New-SbQ6Hash 'SYNTH-H2' ('4' * 64)) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+# ⛔ THE SECOND METHOD ON THE SAME CLAIM: identical pixels over a different
+# document is a defect the pixel hash alone would pass.
+Test-Case 'Q6.5: an undo that restored the pixels and not the document FAILS' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$('d' * 16)") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: an undo the core says applied nothing FAILS' `
+    { Get-SbQ6Summary @{ undo = "RUSTOK SYNTH-UNDO applied=0 can-undo=true can-redo=false $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: an undo the core refused FAILS' `
+    { Get-SbQ6Summary @{ undo = "RUSTFAIL SYNTH-UNDO status=2 (UNKNOWN) detail= $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.C1: a no-selection click answered Unchanged instead of Disabled FAILS' `
+    { Get-SbQ6Summary @{ c0 = "PANEL CLICK REFUSED $q6Who via=synth:no-selection channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C1: a no-selection click that RAN FAILS' `
+    { Get-SbQ6Summary @{ c0 = "PANEL CLICK $q6Who via=synth:no-selection outcome=changed changed-rows=0 doc-changed=true delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C1: a refused click that still moved the canvas FAILS' `
+    { Get-SbQ6Summary @{ h0b = (New-SbQ6Hash 'SYNTH-H0B' ('5' * 64)) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C1: a missing hash row is NOT RUN, never an equality' `
+    { Get-SbQ6Summary @{ h0b = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=NOT RUN Q6.C2=PASS'
+Test-Case 'Q6.C1: a missing click row FAILS' `
+    { Get-SbQ6Summary @{ c0 = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C2: an aligned selection that moved again FAILS' `
+    { Get-SbQ6Summary @{ c2 = "PANEL CLICK $q6Who via=synth:again outcome=changed changed-rows=0 doc-changed=true delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: a second click that moved the document FAILS' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$('e' * 16)/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6: a doc-sha with the wrong number of parts is NOT RUN on every document claim' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+# ⛔ A ROW FROM A HAND IS NOT A ROW FROM THE REPLAY. Provenance is on the row,
+# and a reader that ignored it would convict the replay of a person's click.
+Test-Case 'Q6: a HAND click is never read as a replay step' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=hand outcome=changed changed-rows=0 doc-changed=true delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+
+# ---- one arm per decision the cases above leave unwitnessed ----------------
+# No pwsh in the authoring seat, so no mutation pass over these readers ran.
+# In its place every decision in `Get-SbPaneVerdicts` was walked by hand and
+# given an arm that fails if that decision alone flips; these are the ones the
+# cases above did not already reach.
+Test-Case 'Q6.1: a plan with no leaves FAILS' `
+    { Get-SbQ6Summary @{ open = "PANEL OPEN panel=align_panel_content avail-w=228 leaves=0 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=0 crossings=2 bytes=40 plan-bytes=40 seq=1 $q6Tids" } } 'Q6.1=FAIL Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.3: a pane that never built FAILS' `
+    { Get-SbQ6Summary @{ built = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6: a digest the core could not give is NOT RUN on every document claim' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/EMPTY/$q6DocS/$q6DocM/$q6DocM/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'Q6.4: a change the core says left the document alone FAILS' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=0 doc-changed=false delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.4: a delta mismatch FAILS even on a row that lost its RUSTFAIL' `
+    { Get-SbQ6Summary @{ c1 = "PANEL CLICK $q6Who via=synth:click outcome=changed changed-rows=1 doc-changed=true delta-mismatch=1 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=FAIL Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: a replay with no undo row FAILS' `
+    { Get-SbQ6Summary @{ undo = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=FAIL Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.5: a missing after-undo hash is NOT RUN' `
+    { Get-SbQ6Summary @{ h2 = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=NOT RUN Q6.C1=PASS Q6.C2=PASS'
+Test-Case 'Q6.C1: a refused click that moved the document FAILS' `
+    { Get-SbQ6Summary @{ done = (New-SbQ6Done "$q6DocA/$('f' * 16)/$q6DocS/$q6DocM/$q6DocM/$q6DocS") } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=FAIL Q6.C2=PASS'
+Test-Case 'Q6.C2: a missing second click FAILS' `
+    { Get-SbQ6Summary @{ c2 = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: Unchanged over a document the core says changed FAILS' `
+    { Get-SbQ6Summary @{ c2 = "PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=true delta-mismatch=0 channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: an unchanged click with a clear channel FAILS -- the core must SAY so' `
+    { Get-SbQ6Summary @{ c2 = "PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=0 channel=(clear) $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: a second click the shell marked RUSTFAIL FAILS' `
+    { Get-SbQ6Summary @{ c2 = "RUSTFAIL PANEL CLICK $q6Who via=synth:again outcome=unchanged changed-rows=0 doc-changed=false delta-mismatch=UNREADABLE(JsonException) channel=$(New-SbQ6Channel 'Unchanged') $q6Tids" } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+Test-Case 'Q6.C2: a second click that moved the canvas FAILS' `
+    { Get-SbQ6Summary @{ h1b = (New-SbQ6Hash 'SYNTH-H1B' ('6' * 64)) } } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=FAIL'
+
+# ⛔ EVERY CLAUSE ON EVERY PATH, EXACTLY ONCE. P4.3 vanished on one branch while
+# its three siblings said NOT RUN; this is that defect's census, run over every
+# variant above rather than over the healthy run alone.
+Test-Case 'Q6: every path names all seven clauses exactly once' {
+    $variants = @(
+        @(@{}, 'app', 'align_left_button'), @($q6NoSynth, 'retained', ''), @($q6NoSynth, 'app', ''),
+        @(@{}, 'retained', 'align_left_button'), @(@{ open = $null }, 'app', 'align_left_button'),
+        @(@{ done = $null }, 'app', 'align_left_button'),
+        @(@{ done = "RUSTFAIL PANEL SYNTH REFUSED $q6Who -- x $q6Tids" }, 'app', 'align_left_button'),
+        @(@{ h1 = (New-SbQ6Hash 'SYNTH-H1' $q6HashS) }, 'app', 'align_left_button'),
+        @(@{ done = (New-SbQ6Done 'x/y') }, 'app', 'align_left_button'))
+    $bad = @()
+    foreach ($x in $variants) {
+        $names = @(@(Get-SbPaneVerdicts (New-SbQ6Fixture $x[0]) $x[1] $x[2]) | ForEach-Object { ($_.Name -split ' ')[0] })
+        $want = 'Q6.1 Q6.2 Q6.3 Q6.4 Q6.5 Q6.C1 Q6.C2'
+        if (($names -join ' ') -ne $want) { $bad += "[$($x[1])/$($x[2])] $($names -join ' ')" }
+    }
+    if ($bad.Count -eq 0) { "all $($variants.Count)" } else { $bad -join '; ' }
+} 'all 9'
+# ⛔ AND EVERY VERDICT CARRIES A DETAIL: a verdict with no evidence cannot be
+# re-adjudicated by the person reading the sitting.
+Test-Case 'Q6: every verdict on the healthy run carries a detail' `
+    { @(@(Get-SbPaneVerdicts (New-SbQ6Fixture) 'app' 'align_left_button') | Where-Object { [string]::IsNullOrWhiteSpace($_.Detail) }).Count } '0'
+# MUTATION CONTROL on the fixture itself: its hashes really are the shapes the
+# cases above rely on, so a healthy PASS is not three identical strings.
+Test-Case 'Q6: CONTROL -- the healthy fixture''s three canvases are distinct' `
+    { @($q6HashA, $q6HashS, $q6HashM | Sort-Object -Unique).Count } '3'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

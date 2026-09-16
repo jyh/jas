@@ -883,6 +883,24 @@ public sealed partial class MainWindow : Window
             // is read against the document a person will actually see. The
             // queue is ordered, so this is a sequence, not a race.
             if (_paneWanted) { _canvas.OpenPanel(PanePanelId, PaneAvailW); }
+
+            // ⭐ Q6's SYNTHETIC ARM (W2-6), queued AFTER the open so it runs on
+            // the plan the pane is drawn from. The knob names a widget id; the
+            // render thread refuses by name one the plan does not hold.
+            // ⛔ SET ON ANY OTHER SCENE IT IS REFUSED, NEVER IGNORED: no other
+            // scene opens the pane, and a knob accepted and ignored produces a
+            // full green run of an experiment nobody asked for.
+            // The SAME predicate as the knob's other readers (whitespace is unset).
+            var synth = Environment.GetEnvironmentVariable("SB_PANEL_SYNTH");
+            if (!string.IsNullOrWhiteSpace(synth))
+            {
+                if (_paneWanted) { _canvas.PanelSynth(PanePanelId, synth); }
+                else
+                {
+                    Report($"RUSTFAIL PANEL SYNTH REFUSED widget={synth} -- SB_PANEL_SYNTH needs "
+                         + $"SB_SCENE=app, the one scene that opens the pane; this run is '{scene}'");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -2102,6 +2120,7 @@ public sealed partial class MainWindow : Window
         {
             PanelId = PanePanelId,
             Widget = widget,
+            Via = "hand",
             Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
             Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
             Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),

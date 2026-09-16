@@ -1823,6 +1823,72 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **Q6's replay, on the box's own fixture and the sitting's own widget.**
+    /// `Canvas.ApplyPanelSynth` drives exactly this sequence through the same
+    /// two exports, and the harness (`Get-SbPaneVerdicts`) asserts what the box
+    /// reads. This arm is what makes that reading predictable before any box
+    /// runs it: nothing selected is REFUSED `Disabled`; `select_all` enables
+    /// the button without an undo step; the click moves the document; the same
+    /// click again is `Unchanged`; ONE undo restores the post-select document.
+    ///
+    /// ⛔ THE WIDGET ID IS READ OUT OF `sitting.ps1`, NOT TYPED HERE. The
+    /// sitting's `SB_PANEL_SYNTH` value is what the box will click, so a rename
+    /// in `align.yaml` reds THIS arm in CI instead of a refusal on the box.
+    #[test]
+    fn panel_behavior_the_q6_replay_on_the_calibrated_fixture() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let sitting = std::fs::read_to_string(format!("{root}/prototypes/sb_winui/sitting.ps1")).unwrap();
+        let knob: Vec<&str> = sitting.match_indices("SB_PANEL_SYNTH = '")
+            .map(|(k, m)| {
+                let rest = &sitting[k + m.len()..];
+                &rest[..rest.find('\'').unwrap()]
+            })
+            .collect();
+        assert_eq!(knob.len(), 1, "sitting.ps1 must set SB_PANEL_SYNTH exactly once: {knob:?}");
+        let widget = knob[0];
+        let click = format!(r#"{{"widget":"{widget}","event":"click"}}"#);
+
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/complex_document.svg")).unwrap();
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        let selected = || unsafe { crate::ffi_pointer::jas_selection_len(e) };
+        let dispatch = |op: &str| unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) };
+
+        // SYNTH-H0 -> H0B: nothing is selected, so the core refuses by name.
+        assert_eq!(selected(), 0, "the fixture opens with nothing selected");
+        assert_eq!(leaf(e, ALIGN, widget)["values"]["bind.disabled"], "true");
+        let h0 = doc_json(e);
+        assert_eq!(behave(e, ALIGN, &click), (String::new(), refusal("Disabled", widget)));
+        assert_eq!(doc_json(e), h0, "a refused click moved the document");
+
+        // -> HS: select_all is selection-only, so it enables the button and
+        // records no undo step.
+        assert_eq!(dispatch(r#"{"op":"select_all"}"#), JasStatus::Ok);
+        assert!(selected() >= 2, "Align needs two; select_all selected {}", selected());
+        assert_eq!(leaf(e, ALIGN, widget)["values"]["bind.disabled"], "false");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "select_all recorded an undo step");
+        let hs = doc_json(e);
+
+        // -> H1: the behavior runs and moves the document.
+        let (reply, err) = behave(e, ALIGN, &click);
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"doc_changed":true}"#, ""));
+        let h1 = doc_json(e);
+        assert_ne!(h1, hs, "the click reported a change and the document did not move");
+
+        // -> H1B: the selection is aligned now, and the engine SAYS so.
+        assert_eq!(behave(e, ALIGN, &click),
+                   (r#"{"changed":[],"doc_changed":false}"#.to_string(), refusal("Unchanged", widget)));
+        assert_eq!(doc_json(e), h1);
+
+        // -> H2: ONE undo restores the post-select document, so the second
+        // click recorded no step.
+        undo(e);
+        assert_eq!(doc_json(e), hs, "one undo did not restore the pre-click document");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "more than one step was recorded");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **D5.** A disabled widget is refused by name before anything runs, and
     /// the plan the shell draws from shows the same state. Align needs two.
     #[test]

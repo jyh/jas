@@ -106,6 +106,13 @@ WHAT IT DOES NOT COVER -- AND THERE IS NOTHING MISSING FROM THIS LIST
       - WHOLE-NAME variables, excluded by clause (d) itself and PRINTED. See
         `name_vars()` for why (d)'s remedy does not fit them.
       - `verify_window.ps1` entirely, as below.
+  * CLAUSES NAMED BY A FUNCTION IN `harness_common.ps1`. Q6's seven (W2-6)
+    are built by `Get-SbPaneVerdicts` and recorded by a COLUMN-0 loop here,
+    so their names never appear in this file and the count above does not
+    include them (53 before and after they landed, measured). The property
+    this gate enforces -- every clause on every path -- is enforced for them
+    by `harness_selftest.ps1`'s census case over nine variants, which is
+    where a function's branches can be driven at all.
   * INDENTED scene guards, and `verify_window.ps1` entirely. Its four scene
     guards emit no clauses today (measured); its `Add-NotRun` sites sit under
     `if ($Hand)`, which is the axis above.

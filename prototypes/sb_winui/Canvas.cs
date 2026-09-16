@@ -245,6 +245,22 @@ internal sealed class PanelClickCmd : Cmd
     internal bool Shift;
     internal bool Ctrl;
     internal bool Meta;
+
+    /// <summary>
+    /// WHO clicked: `hand` for a person, `synth:&lt;step&gt;` for Q6's replay.
+    /// It is on every row the click writes, so a row can never claim a
+    /// provenance its caller did not give it.
+    /// </summary>
+    internal string Via = "hand";
+}
+
+/// <summary>
+/// Replay Q6's click sequence on the open panel's widget (W2-6, `SB_PANEL_SYNTH`).
+/// </summary>
+internal sealed class PanelSynthCmd : Cmd
+{
+    internal string PanelId = "";
+    internal string Widget = "";
 }
 
 /// <summary>
@@ -1060,14 +1076,7 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
 
                 case OpCmd oc:
-                    if (ApplyOp(oc)) { dirty = true; cause = oc.Label; }
-                    // The menu's enabled set follows a document mutation, so the
-                    // published state is refreshed in the SAME drain. §7 stop 3
-                    // names this as the remedy if the one-open staleness is ever
-                    // visible to a person; it is cheap, so it is done here
-                    // rather than waited for.
-                    ApplyMenuRefresh("mutation");
-                    _panelStale = true;
+                    if (ApplyOpAndRefresh(oc)) { dirty = true; cause = oc.Label; }
                     break;
 
                 case PanelOpenCmd po:
@@ -1076,6 +1085,12 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
+                    break;
+
+                case PanelSynthCmd ps:
+                    // It paints and hashes at each of its own steps, so it
+                    // asks this drain for nothing.
+                    ApplyPanelSynth(ps);
                     break;
             }
         }
@@ -3201,6 +3216,24 @@ internal sealed unsafe class Canvas : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// An op, then what a document mutation owes: the menu's enabled set is
+    /// refreshed in the SAME drain, and an open panel's plan is marked stale.
+    /// §7 stop 3 names the menu refresh as the remedy if the one-open staleness
+    /// is ever visible to a person; it is cheap, so it is done here rather than
+    /// waited for.
+    ///
+    /// ONE method for the queued op (Ctrl+Z, the menu) and for Q6's replay,
+    /// so the replay cannot drift from the path it stands in for.
+    /// </summary>
+    private bool ApplyOpAndRefresh(OpCmd cmd)
+    {
+        var ok = ApplyOp(cmd);
+        ApplyMenuRefresh("mutation");
+        _panelStale = true;
+        return ok;
+    }
+
     /// <summary>`(can_undo, can_redo)` read from the CORE's own menu evaluation.</summary>
     private (bool CanUndo, bool CanRedo) CanUndoRedo()
     {
@@ -3873,6 +3906,10 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void PanelClick(PanelClickCmd click) => _queue.Add(click);
 
+    /// <summary>Queue Q6's replay on <paramref name="widget"/> (W2-6). See <see cref="ApplyPanelSynth"/>.</summary>
+    internal void PanelSynth(string panelId, string widget) =>
+        _queue.Add(new PanelSynthCmd { PanelId = panelId, Widget = widget });
+
     /// <summary>
     /// Read the plan and publish it. Returns the plan bytes, or null on a refusal
     /// (which is reported here, by name).
@@ -4020,11 +4057,11 @@ internal sealed unsafe class Canvas : IDisposable
         {
             if (channel.Length == 0)
             {
-                _report($"RUSTFAIL PANEL CLICK SILENT panel={click.PanelId} widget={click.Widget} -- "
+                _report($"RUSTFAIL PANEL CLICK SILENT panel={click.PanelId} widget={click.Widget} via={click.Via} -- "
                       + $"an empty reply and an empty error channel {Tids()}");
                 return false;
             }
-            _report($"PANEL CLICK REFUSED panel={click.PanelId} widget={click.Widget} "
+            _report($"PANEL CLICK REFUSED panel={click.PanelId} widget={click.Widget} via={click.Via} "
                   + $"channel={channel} {Tids()}");
             return false;
         }
@@ -4039,7 +4076,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         catch (Exception ex)
         {
-            _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE panel={click.PanelId} widget={click.Widget} "
+            _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE panel={click.PanelId} widget={click.Widget} via={click.Via} "
                   + $"{ex.GetType().Name} {Tids()}");
             return false;
         }
@@ -4053,11 +4090,136 @@ internal sealed unsafe class Canvas : IDisposable
         _panelStale = false;
         var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
         var outcome = channel.Length == 0 ? "changed" : "unchanged";
-        var row = $"PANEL CLICK panel={click.PanelId} widget={click.Widget} outcome={outcome} "
+        var row = $"PANEL CLICK panel={click.PanelId} widget={click.Widget} via={click.Via} outcome={outcome} "
                 + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
                 + $"delta-mismatch={mismatch} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
         _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
         return docChanged;
+    }
+
+    /// <summary>
+    /// ⭐ Q6's SYNTHETIC ARM (W2-6): the whole click sequence, replayed here on
+    /// the render thread, with a hash of the canvas between every step.
+    ///
+    ///   SYNTH-H0   the document as opened; nothing is selected
+    ///   click      `via=synth:no-selection` -- the core refuses it (Disabled)
+    ///   SYNTH-H0B
+    ///   op         `select_all` (selection-only, never an undo step)
+    ///   SYNTH-HS
+    ///   click      `via=synth:click` -- the behavior runs
+    ///   SYNTH-H1
+    ///   click      `via=synth:again` -- the selection is already aligned
+    ///   SYNTH-H1B
+    ///   op         `undo`
+    ///   SYNTH-H2
+    ///
+    /// then ONE `PANEL SYNTH DONE` row carrying `selected=` and the core's
+    /// document digest at each hash, as `doc-sha=h0/h0b/hs/h1/h1b/h2`.
+    ///
+    /// ⛔ IT DECIDES NOTHING. Every click goes through <see cref="ApplyPanelClick"/>
+    /// and every op through <see cref="ApplyOpAndRefresh"/> -- the methods a
+    /// person's click and Ctrl+Z reach -- and each writes its own row. Whether
+    /// the hashes SHOULD move is the harness's question
+    /// (`Get-SbPaneVerdicts`), never this method's. The two op envelopes are
+    /// literals from the shell's action table, as the abi probe's are.
+    ///
+    /// ⛔ AND THE DIGEST IS A SECOND METHOD, NOT DECORATION. A pixel hash can
+    /// agree for a reason that has nothing to do with the document (a paint
+    /// that drew nothing twice); the core's own serialization cannot.
+    ///
+    /// ⚠️ WHAT IT DOES NOT DRIVE: the Ctrl+Z KEY and a real mouse. The undo
+    /// here reaches the same method the key's command does, and the key itself
+    /// is the hands row's (P5′).
+    /// </summary>
+    private void ApplyPanelSynth(PanelSynthCmd cmd)
+    {
+        var head = $"panel={cmd.PanelId} widget={cmd.Widget}";
+        string? refusal = null;
+        if (_engine == IntPtr.Zero) { refusal = "no engine"; }
+        else if (!string.Equals(_panelId, cmd.PanelId, StringComparison.Ordinal))
+        {
+            refusal = $"the open panel is '{_panelId ?? "(none)"}'";
+        }
+        else if (Panel is not { } snap) { refusal = "no plan has been published"; }
+        else
+        {
+            var ids = PlanWidgetIds(snap.PlanJson);
+            if (ids is null) { refusal = "the published plan does not parse"; }
+            else if (!ids.Contains(cmd.Widget))
+            {
+                // NAMED, with the ids that DO exist: a typo in the knob must
+                // not read as a click the core refused.
+                refusal = $"no leaf of the open plan has that id; it has {ids.Count}: "
+                        + string.Join(",", ids.OrderBy(i => i, StringComparer.Ordinal));
+            }
+        }
+        if (refusal is not null)
+        {
+            _report($"RUSTFAIL PANEL SYNTH REFUSED {head} -- {refusal} {Tids()}");
+            return;
+        }
+
+        try
+        {
+            var docs = new List<string>();
+            void Step(string label)
+            {
+                PaintAndHash(label);
+                var json = JasCore.TakeString(JasCore.jas_document_json(_engine));
+                docs.Add(json.Length == 0 ? "EMPTY" : Sha256Of(json));
+            }
+            PanelClickCmd Click(string via) =>
+                new() { PanelId = cmd.PanelId, Widget = cmd.Widget, Via = via };
+
+            Step("SYNTH-H0");
+            ApplyPanelClick(Click("synth:no-selection"));
+            Step("SYNTH-H0B");
+            ApplyOpAndRefresh(new OpCmd { OpJson = "{\"op\":\"select_all\"}", Label = "synth-select-all" });
+            var selected = JasCore.jas_selection_len(_engine);
+            // The plan a person would see now: the op marked it stale.
+            if (_panelStale) { _panelStale = false; ApplyPanelRefresh("synth"); }
+            Step("SYNTH-HS");
+            ApplyPanelClick(Click("synth:click"));
+            Step("SYNTH-H1");
+            ApplyPanelClick(Click("synth:again"));
+            Step("SYNTH-H1B");
+            ApplyOpAndRefresh(new OpCmd { OpJson = "{\"op\":\"undo\"}", Label = "synth-undo" });
+            if (_panelStale) { _panelStale = false; ApplyPanelRefresh("synth"); }
+            Step("SYNTH-H2");
+
+            _report($"PANEL SYNTH DONE {head} selected={selected} "
+                  + $"doc-sha={string.Join("/", docs)} {Tids()}");
+        }
+        catch (Exception ex)
+        {
+            // NAMED: a sequence that died half way must not leave the harness
+            // waiting on a row that is never coming.
+            _report($"RUSTFAIL PANEL SYNTH THREW {head} {ex.GetType().Name}: {ex.Message} {Tids()}");
+        }
+    }
+
+    /// <summary>Every non-empty leaf `id` in a plan, or null if it does not parse.</summary>
+    private static HashSet<string>? PlanWidgetIds(string plan)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(plan);
+            var ids = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var leaf in doc.RootElement.GetProperty("leaves").EnumerateArray())
+            {
+                if (leaf.TryGetProperty("id", out var id)
+                    && id.ValueKind == System.Text.Json.JsonValueKind.String
+                    && id.GetString() is { Length: > 0 } s)
+                {
+                    ids.Add(s);
+                }
+            }
+            return ids;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>

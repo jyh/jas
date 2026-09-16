@@ -730,6 +730,31 @@ if ($sceneTimedOut) {
     $verdicts += "ok  : scene '$Scene' completed after $($done.Waited)s -- $($spec.Label)"
 }
 
+# ---- the pane's own rows (W2-6) --------------------------------------------
+#
+# ⛔ `app` WRITES ITS COMPLETION ROW BEFORE THE PANE OPENS -- the scene reports,
+# then the render thread takes the next queued command, `OpenPanel` -- so the
+# `$rows` read above hold no pane at all, and Q6 would read a healthy pane as
+# absent. `Get-SbPaneWaits` names what to wait for (nothing, for every other
+# scene); each wait is bounded, ends on its subject's own row or its refusal,
+# and a timeout leaves Q6's clauses to judge what DID arrive.
+#
+# ⛔ ONLY AFTER A SCENE THAT COMPLETED: a refused or timed-out `app` opened no
+# pane, and waiting for one would add a minute to a verdict already made.
+# ⛔ AND NO `-Tick`: the sampler keys its samples on the elapsed time OF THE
+# WAIT IT RIDES, so a second wait would file a late reading under t=2.
+if ($sceneOutcome.Verdict -eq 'DONE') {
+    foreach ($pw in @(Get-SbPaneWaits $Scene $env:SB_PANEL_SYNTH)) {
+        $pd = Wait-SbRow -Log $log -Mark $logMark -Patterns $pw.Patterns -TimeoutSeconds $pw.Timeout
+        $rows = $pd.Rows
+        if ($null -eq $pd.Row) {
+            $verdicts += "note: timed out after $($pd.Waited)s waiting for $($pw.Label); Q6 judges what arrived"
+        } else {
+            $verdicts += "ok  : $($pw.Label) arrived after $($pd.Waited)s"
+        }
+    }
+}
+
 # ---- the session-1 liveness samples, read back ----------------------------
 #
 # ⛔ READ AFTER THE SCENE'S WAIT, AND BOUNDED AGAIN. The sampler needs ~10 s and

@@ -1525,7 +1525,14 @@ if ($menuRows.Count -eq 0) {
         $m = Get-SbMenuRowReading $r
         if ($m.Ok -and $m.Seq -gt $lastSeq) { $lastSeq = $m.Seq }
     }
-    if ($lastSeq -lt 0) {
+    if (Test-SbSynthAsked $env:SB_PANEL_SYNTH) {
+        # ⛔ NOT A PASS AND NOT A FAIL. Q6's replay clicks and runs ops, and each
+        # moves the core's menu answer (can-undo, the selection-gated items) a
+        # number of times that no knob of this run predicts -- a derivation
+        # that guessed it would be a pin wearing a derivation's clothes.
+        Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
+            "SB_PANEL_SYNTH is set: the replay's clicks and ops move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
+    } elseif ($lastSeq -lt 0) {
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
             'no MENU row carried a readable seq=' -Row $menuRows[-1]
     } elseif ($lastSeq -eq $wantRebuilds) {
@@ -1549,6 +1556,24 @@ Add-NotRun 'P3.2 two saves either side of an edit have DIFFERENT sha' `
     'no scene drives ApplySave: save is a UI-thread command and no headless run emits a RUSTOK SAVE row, so the sha field and the file write are both unexercised. P3.1 covers the same property in byte-count form through jas_document_svg, which is what the abi probe does drive'
 Add-NotRun 'P3.3 a saved document reloads into an equal document (round trip)' `
     'needs a SAVE row and a second engine; neither exists in a headless run. This is the arm that would catch a serializer whose output the reader cannot take back'
+
+# ===========================================================================
+# Q6 -- THE ALIGN PANE ON THE BOX (W2-6)
+# ===========================================================================
+#
+# ⛔ THIN ON PURPOSE. Every decision is `Get-SbPaneVerdicts` in
+# `harness_common.ps1`, because this file cannot be dot-sourced without a
+# desktop and so nothing written here has an arm; the self-test drives that
+# function on every branch. This loop only records what it returns -- all
+# seven clauses on every scene, NOT RUN by name where the scene has no pane.
+# `verify_window.ps1` has already waited for the pane's rows (`Get-SbPaneWaits`).
+foreach ($q in @(Get-SbPaneVerdicts $rows $Scene $env:SB_PANEL_SYNTH)) {
+    if ($q.Verdict -eq 'NOT RUN') {
+        Add-NotRun $q.Name $q.Detail -Row $q.Row
+    } else {
+        Add-Assert -Name $q.Name -Verdict $q.Verdict -Detail $q.Detail -Row $q.Row
+    }
+}
 
 # ===========================================================================
 # O6 -- 0xH REFUSED THROUGH THE REAL LINK, AND THE ACCEPT ARM BESIDE IT

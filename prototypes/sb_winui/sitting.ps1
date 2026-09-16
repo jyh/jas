@@ -260,13 +260,13 @@ if (-not $NoRebuild -and -not $DryRun) {
 # The document
 # ===========================================================================
 $svgAbs = $null
-# ⛔ `o6` IS IN THIS LIST THOUGH NO SCENE IS CALLED THAT. It is a PSEUDO-SCENE
-# whose two runs both drive `retained`, and this list is keyed by what the CALLER
+# ⛔ `o6` AND `q6` ARE IN THIS LIST THOUGH NO SCENE IS CALLED EITHER. Each is a PSEUDO-SCENE
+# (`o6`'s two runs drive `retained`, `q6`'s one drives `app`), and this list is keyed by what the CALLER
 # asked for, not by what the runs resolve to -- so leaving it out would have
 # resolved no document, set SB_SVG empty, and made both O6 runs refuse by name on
 # a knob the operator did set. The guard below catches the next one of these
 # instead of leaving it to be discovered on the box.
-$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'app', 'o6')
+$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'app', 'o6', 'q6')
 $needsSvg = ($Stay -and ($svgScenes -contains $Scene)) -or
             (@($Scenes | Where-Object { $svgScenes -contains $_ }).Count -gt 0)
 if ($needsSvg) {
@@ -528,6 +528,25 @@ $runPlan = @{
            Env = @{ SB_SQUEEZE = '1'; SB_POINTER_WAIT_MS = '0' }; Args = @() },
         @{ Name = 'o6 probe (the accept arm)'; Scene = 'retained';
            Env = @{ SB_SURFACE_PROBE = '1000x600' }; Args = @('-Hand', '-HandMoves', '2') }
+    )
+    # ⭐ `q6` IS ONE `app` RUN, NOT A SCENE (W2-6). `app` HOLDS, and it is still
+    # a legitimate machine route: launch, wait for its pid row, assert, tear
+    # down by pid. What makes this run Q6's is the knob -- the render thread
+    # replays the Align pane's click sequence on this widget and hashes the
+    # canvas between steps, and `verify_window.ps1` waits for that replay's own
+    # terminal row before it asserts (`Get-SbPaneWaits`).
+    #
+    # ⛔ THE WIDGET ID BELOW IS READ BY A RUST ARM
+    # (`panel_behavior_the_q6_replay_on_the_calibrated_fixture`), which drives
+    # this exact id on this sitting's default document in CI. Rename it in
+    # `align.yaml` and that arm reds; it must stay the only assignment of the
+    # knob in this file, and the arm refuses if it is not.
+    #
+    # ⛔ NOT IN THE DEFAULT LIST, so a default sitting keeps the nine runs every
+    # earlier sitting was compared on. Run it with `-Scenes q6`.
+    'q6' = @(
+        @{ Name = 'q6 (app + the Align pane''s synthetic replay)'; Scene = 'app';
+           Env = @{ SB_PANEL_SYNTH = 'align_left_button' }; Args = @() }
     )
 }
 
