@@ -27,7 +27,9 @@
 //!  "containers": [entry...],  layout-only containers render_plan omits, that
 //!                             carry at least one bound value
 //!  "unjoined":   [{"path": [...], "key": "..."}...],
-//!  "withheld":   [{"path": [...], "key": "..."}...],  templated display strings
+//!  "withheld":   [{"path": [...], "key": "..."}...],  a value that resolved to a
+//!                             template, a templated display string or id:
+//!                             named, never sent raw
 //!  "icons":      {"<name>": {"viewbox": "...", "svg": "..."}, ...},
 //!  "icons_missing": ["<name>", ...]}
 //! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
@@ -123,13 +125,20 @@ fn icon_names(entry: &Value, out: &mut Vec<String>) {
 }
 
 fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value>) -> Value {
+    // A templated id is not resolved by any port and a foreach widget is not
+    // addressable by id (D12), so it is sent empty and named, never raw.
+    let mut id = item.node.get("id").and_then(Value::as_str).unwrap_or("");
+    if id.contains("{{") {
+        id = "";
+        withheld.push(json!({"path": item.path, "key": "id"}));
+    }
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
         "type": item.node.get("type").and_then(Value::as_str).unwrap_or(""),
-        "id": item.node.get("id").and_then(Value::as_str).unwrap_or(""),
+        "id": id,
         "values": values,
         "static": st,
     })
@@ -150,13 +159,21 @@ pub fn panel_plan(
     let rows = bind_values(panel_node, ctx);
     let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
 
+    // A row whose RESOLVED value is itself a template (a binding that yields
+    // `{{theme.colors.selection}}`) is withheld by path and key. Its entry is
+    // still keyed, so the partition and the join do not move.
+    let mut withheld: Vec<Value> = vec![];
     let mut by_path: HashMap<Vec<i64>, Map<String, Value>> = HashMap::new();
     for r in rows.as_array().into_iter().flatten() {
         let key = r["key"].as_str().unwrap_or("").to_string();
-        by_path.entry(path_of(&r["path"])).or_default().insert(key, r["value"].clone());
+        let values = by_path.entry(path_of(&r["path"])).or_default();
+        if r["value"].as_str().is_some_and(|v| v.contains("{{")) {
+            withheld.push(json!({"path": r["path"], "key": key}));
+        } else {
+            values.insert(key, r["value"].clone());
+        }
     }
 
-    let mut withheld: Vec<Value> = vec![];
     let chrome: Vec<Value> = plan
         .chrome
         .iter()
@@ -587,6 +604,7 @@ mod tests {
         let ws = Workspace::load().expect("workspace");
         let panels = panel_ids(&ws);
         let (mut rows_total, mut containers_total, mut walks) = (0usize, 0usize, 0usize);
+        let mut withheld_total = 0usize;
         for pid in &panels {
             let spec = ws.panel(pid).unwrap();
             for (sname, ctx) in &scopes() {
@@ -602,8 +620,22 @@ mod tests {
                     let at = format!("{pid} {sname} {w}x{h}");
                     assert_eq!(joined_from, rows, "{at}: the plan must be joined from bind_values' rows");
                     let (values, n) = checks::plan_values(&plan);
-                    let want = checks::row_values(&rows);
-                    assert_eq!(n, want.len(), "{at}: values carried != bind rows");
+                    // A row whose value is a template is WITHHELD, not carried;
+                    // every other row is carried exactly once.
+                    let mut want = checks::row_values(&rows);
+                    let before = want.len();
+                    want.retain(|_, v| !v.contains("{{"));
+                    let held: BTreeSet<String> = plan["withheld"].as_array().unwrap().iter()
+                        .map(|w| format!("{}|{}", w["path"], w["key"].as_str().unwrap_or("")))
+                        .collect();
+                    for r in rows.as_array().unwrap() {
+                        if r["value"].as_str().is_some_and(|v| v.contains("{{")) {
+                            let k = format!("{}|{}", r["path"], r["key"].as_str().unwrap_or(""));
+                            assert!(held.contains(&k), "{at}: templated row {k} is not withheld");
+                            withheld_total += 1;
+                        }
+                    }
+                    assert_eq!(n, want.len(), "{at}: values carried != bind rows ({before} rows)");
                     assert_eq!(values, want, "{at}: joined values differ from bind_values");
                     assert_eq!(plan["unjoined"], json!([]), "{at}: a bound row joined nothing");
                     let rp = render_plan(spec, w, h, ctx);
@@ -618,13 +650,20 @@ mod tests {
                             let p = e["path"].to_string();
                             let rec = &wt[&p];
                             assert_eq!(e["type"], rec["type"], "{at}: {list} {p} type");
-                            assert_eq!(e["id"], rec["id"], "{at}: {list} {p} id");
+                            if rec["id"].as_str().is_some_and(|i| i.contains("{{")) {
+                                assert_eq!(e["id"], "", "{at}: {list} {p} templated id crossed");
+                                assert!(held.contains(&format!("{p}|id")), "{at}: {p} id not withheld");
+                                withheld_total += 1;
+                            } else {
+                                assert_eq!(e["id"], rec["id"], "{at}: {list} {p} id");
+                            }
                             if list == "containers" {
                                 containers_total += 1;
                                 assert!(!rp_paths.contains(&p), "{at}: container {p} is also a render_plan item");
                                 assert!(
-                                    !e["values"].as_object().unwrap().is_empty(),
-                                    "{at}: container {p} carries no value"
+                                    !e["values"].as_object().unwrap().is_empty()
+                                        || held.iter().any(|h| h.starts_with(&format!("{p}|"))),
+                                    "{at}: container {p} carries no value and withholds none"
                                 );
                             }
                         }
@@ -636,6 +675,9 @@ mod tests {
         }
         assert!(walks > 0 && rows_total > 0, "vacuous: walks={walks} rows={rows_total}");
         assert!(containers_total > 0, "vacuous: no container ever carried a value");
+        // The real workspace carries both withheld shapes (brushes' templated
+        // tile id, concepts' templated background), so the branches above ran.
+        assert!(withheld_total > 0, "vacuous: nothing was withheld on the real workspace");
     }
 
     /// ⭐ THE PARTITION, AGAINST A PREDICATE THAT DOES NOT COME FROM `render_plan`.
@@ -973,6 +1015,30 @@ mod tests {
         assert_eq!(plan["withheld"], json!([{"path": [0], "key": "id"}]), "{plan}");
         // The control: a literal id crosses as itself.
         assert_eq!(plan["leaves"][1]["id"], "plain", "{plan}");
+        checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
+            .expect("nothing interpretable crossed");
+    }
+
+    /// ⛔ A VALUE THAT RESOLVES TO A TEMPLATE NEVER CROSSES RAW EITHER. Found
+    /// the same way: concepts' rows carry `bind.background` =
+    /// `{{theme.colors.selection}}` under a corpus scope, a binding whose
+    /// RESULT is a template the web renderer interpolates a second time. The
+    /// plan withholds the value by path and key, and keeps the entry.
+    #[test]
+    fn a_value_that_resolves_to_a_template_is_withheld() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "container", "style": {"border": "1px"}, "bind": {"background": "panel.bg"},
+             "children": [{"type": "text", "content": "x"}]},
+            {"type": "text", "id": "v", "content": "x", "bind": {"value": "panel.plain"}},
+        ]}});
+        let ctx = json!({"panel": {"bg": "{{theme.colors.selection}}", "plain": "ok"}});
+        let (plan, rows) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        assert!(rows.to_string().contains("{{theme"), "the fixture must reproduce the row: {rows}");
+        assert_eq!(plan["chrome"][0]["path"], json!([0]), "{plan}");
+        assert_eq!(plan["chrome"][0]["values"], json!({}), "{plan}");
+        assert_eq!(plan["withheld"], json!([{"path": [0], "key": "bind.background"}]), "{plan}");
+        // The control: a plain value on a sibling crosses.
+        assert_eq!(plan["leaves"][1]["values"], json!({"bind.value": "ok"}), "{plan}");
         checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
             .expect("nothing interpretable crossed");
     }
