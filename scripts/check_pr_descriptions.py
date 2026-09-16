@@ -40,17 +40,49 @@ public too.
 SHAPES: imported from the sibling gate, never re-typed. A fixture is a
 snapshot of a vocabulary; a copied pattern list is a stale fixture the day
 the sibling moves. One list, one owner, two readers.
+
+THE SUBJECT ARM (desk QA, 2026-09-16): the owner ruled eleven public commit
+SUBJECTS -- nine carrying an employer-lane or private project name, two
+carrying a family reference -- ACCEPTED AS DECLARED DEBT rather than
+rewritten, and commissioned a gate so that no NEW subject or PR title carries
+either class. Every one of the nine was written by a commit that was adding
+that very name to the sibling gate, whose source is assembled from parts so it
+never spells it: the artifact was hardened and the metadata that delivered it
+was not. None of the three scrub gates read a subject for a bare word.
+  * LANE NAMES are the sibling's own lists, IMPORTED (its ROOTS_DIGEST is
+    printed on every PASS line, so each repo's CI log shows which list it
+    ran), minus the one personal-lane campaign the ruling scoped out. They
+    are refused in commit subjects, PR titles, PR head refs (a merge subject
+    quotes the ref), PR bodies, and -- FORWARD ONLY -- commit bodies. The
+    commit bodies already public are history this gate does not touch.
+  * FAMILY REFERENCES are refused in subjects, titles and refs only: a body
+    uses these words as code identifiers (a `kids(_:_:)` function) and
+    `family` is a technical word here (76 public subjects use it that way).
+  * NOT COVERED, by construction: third-party personal names. A word list
+    cannot tell a citation of published work from social context, and the
+    same people appear in both, so it would refuse a citation. Every PASS
+    line says so.
+A finding names the commit or PR, the surface and the CLASS -- never the word.
+(Measured 2026-09-16 over 10,613 default-branch commits in six public repos:
+76 subjects use `family` technically, and the nine lane subjects found by word
+pieces agree with an independent census that used literal needles.)
 """
 
 from __future__ import annotations
 
 import argparse
+import ast
+import contextlib
 import hashlib
+import io
 import json
 import os
 import pathlib
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_private_paths as gate  # noqa: E402  (the pattern owner)
@@ -84,6 +116,104 @@ def session_finding_lines(rows) -> list[str]:
     """Name the PR, the surface and the shape, NEVER the matched text: echoing
     a session URL into a public CI log would republish it."""
     return [f"  {where}: {what}" for where, what, _line in rows]
+
+
+# ---------------------------------------------------------------------------
+# THE SUBJECT ARM (desk QA) -- see the module docstring for the ruling.
+# ---------------------------------------------------------------------------
+
+# Relations that name a family member. Plain words: they are generic, and no
+# gate scans a tree for them, so spelling them discloses nothing.
+# ⛔ DELIBERATELY ABSENT, each measured as a technical word in these repos:
+# family/families (76 public subjects), parent(s)/child(ren) (the document
+# tree), kid(s) (a Swift function), baby. A word that refuses real engineering
+# subjects trains its readers to reword past the gate.
+_KIN = ("wife", "wives", "husband", "husbands", "spouse", "spouses",
+        "daughter", "daughters", "son", "sons", "mom", "moms", "mum", "dad",
+        "dads", "mother", "mothers", "father", "fathers", "sister", "sisters",
+        "brother", "brothers", "grandmother", "grandfather", "grandma",
+        "grandpa", "grandson", "granddaughter", "nephew", "niece", "uncle",
+        "aunt", "cousin", "fiance", "fiancee", "girlfriend", "boyfriend",
+        "stepson", "stepdaughter")
+
+# The personal-lane campaign the ruling scoped OUT of the lane class (its
+# public mentions were left untouched on purpose). Assembled from parts, as the
+# sibling assembles it.
+_LANE_EXCLUDED = ("ver" + "so",)
+
+LANE = "an employer-lane or private project name"
+KIN = "a family reference"
+
+SUBJECT_BASELINE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "subject_debt_baseline.tsv")
+
+_SCISSORS = "# ------------------------ >8 ------------------------"
+
+
+def _pieces(text) -> list[str]:
+    return []
+
+
+def lane_words() -> list[str]:
+    return []
+
+
+def subject_scan(rows) -> list[tuple[str, str]]:
+    return []
+
+
+def subject_finding_lines(rows) -> list[str]:
+    return []
+
+
+def pr_rows(pr) -> list[tuple[str, str, str]]:
+    return []
+
+
+def message_rows(text, where: str = "the message") -> list[tuple[str, str, str]]:
+    return []
+
+
+def _git(args: list[str], cwd=None) -> str:
+    out = subprocess.run(["git"] + (["-C", cwd] if cwd else []) + args,
+                         capture_output=True, text=True, encoding="utf-8",
+                         errors="replace")
+    if out.returncode != 0:
+        raise RuntimeError(f"git {args[0]} exit {out.returncode}: "
+                           f"{out.stderr.strip()[:200]}")
+    return out.stdout
+
+
+def commits(rev: str, cwd=None) -> list[tuple[str, str, str]]:
+    return []
+
+
+def commit_rows(recs, baseline=frozenset()) -> list[tuple[str, str, str]]:
+    return []
+
+
+def subject_key(sha: str, subject: str) -> tuple[str, str]:
+    return (sha, "")
+
+
+def load_subject_baseline(path: str) -> set[tuple[str, str]]:
+    return set()
+
+
+def history_verdict(baseline, cwd=None):
+    return [], [], [], 0
+
+
+def range_mode(rev: str, cwd=None, baseline_path=None) -> int:
+    return 0
+
+
+def history_mode(cwd=None, baseline_path=None) -> int:
+    return 0
+
+
+def msg_file_mode(path: str) -> int:
+    return 0
 
 
 def ref_vs_run(head_sha: str, run_sha, run_green, behind_by) -> str:
@@ -171,6 +301,244 @@ def open_mode(repo: str) -> int:
     return 0
 
 
+def _scratch_repo(spec):
+    """A throwaway repository with one empty commit per (subject, body).
+    Returns (dir, [sha, ...]). Hooks are pointed at an empty directory so a
+    developer's own hooks cannot rewrite the planted messages."""
+    d = tempfile.mkdtemp(prefix="pr-gate-selftest-")
+    hooks = os.path.join(d, "no-hooks")
+    os.mkdir(hooks)
+    cfg = ["-c", "user.name=selftest", "-c", "user.email=selftest@example.invalid",
+           "-c", "commit.gpgsign=false", "-c", "core.hooksPath=" + hooks]
+    _git(["init", "-q"], d)
+    shas = []
+    for subject, body in spec:
+        msg = subject + ("\n\n" + body if body else "")
+        _git(cfg + ["commit", "-q", "--allow-empty", "--cleanup=verbatim",
+                    "-m", msg], d)
+        shas.append(_git(["rev-parse", "HEAD"], d).strip())
+    return d, shas
+
+
+def _quiet(fn, *args):
+    """(return code, printed text) -- a mode's output is itself under test."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = fn(*args)
+    return rc, buf.getvalue()
+
+
+def _subject_arms() -> list[str]:
+    """ARMS 6-11 (desk QA). A failure message names a vocabulary entry by its
+    INDEX, never by its text: this output lands in a public CI log."""
+    failures = []
+    lane = lane_words()
+
+    # ARM 6 -- the lane vocabulary is the sibling's, minus exactly the one
+    # scoped-out word, and that word really is in the sibling (an exclusion of
+    # a word the sibling no longer carries guards nothing and reads as a rule).
+    if not lane:
+        failures.append("the lane vocabulary must be non-empty (imported from the sibling)")
+    sib = set(gate._EMPLOYER) | set(gate._PRIVATE_PROJ)
+    if set(lane) != sib - set(_LANE_EXCLUDED):
+        failures.append("the lane vocabulary must be the sibling's two lists minus the exclusion")
+    if not set(_LANE_EXCLUDED) <= sib:
+        failures.append("every excluded word must still be in the sibling's lists")
+
+    # ARM 7 -- every lane word is caught in a SUBJECT and in a BODY, as the lane
+    # class alone; whole words only; any separator, any case.
+    for i, w in enumerate(lane):
+        if [c for _, c in subject_scan([("s", "wip: tidy " + w + " notes", "subject")])] != [LANE]:
+            failures.append(f"lane word #{i} must be caught in a SUBJECT, as the lane class only")
+        if [c for _, c in subject_scan([("b", "x\n\nsee " + w + ".", "body")])] != [LANE]:
+            failures.append(f"lane word #{i} must be caught in a BODY")
+        if subject_scan([("s", w.upper() + " done", "subject")]) == []:
+            failures.append(f"lane word #{i} must be caught in upper case")
+        if len(_pieces(w)) == 1 and subject_scan(
+                [("s", w + "x x" + w + " x" + w + "x", "subject")]):
+            failures.append(f"lane word #{i} must match WHOLE words only")
+    multi = [w for w in lane if len(_pieces(w)) > 1]
+    if not multi:
+        failures.append("the separator arm needs a multi-piece lane word and found none")
+    for i, w in enumerate(multi):
+        p = _pieces(w)
+        for sep in ("_", "-", " ", "/", ""):
+            if not subject_scan([("s", "add " + sep.join(p) + " root", "subject")]):
+                failures.append(f"multi-piece lane word #{i} must be caught joined by {sep!r}")
+
+    # ARM 8 -- a family reference is caught in a SUBJECT, as that class alone,
+    # and NOT in a body; the measured technical words are not refused.
+    for i, w in enumerate(_KIN):
+        if [c for _, c in subject_scan([("s", "ratified (the " + w + " agreed)", "subject")])] != [KIN]:
+            failures.append(f"kin word #{i} must be caught in a SUBJECT, as the kin class only")
+        if subject_scan([("b", "x\n\nthe " + w + " agreed", "body")]):
+            failures.append(f"kin word #{i} must NOT be refused in a BODY (code uses)")
+    if not subject_scan([("s", "the " + _KIN[0] + "'s read pending", "subject")]):
+        failures.append("a possessive family reference must be caught")
+    for i, w in enumerate(("family", "families", "parent", "parents", "child",
+                           "children", "kid", "kids", "baby") + _LANE_EXCLUDED):
+        if subject_scan([("s", "the " + w + " arm", "subject"),
+                         ("b", "the " + w + " arm", "body")]):
+            failures.append(f"technical/excluded word #{i} must not be refused")
+    try:
+        subject_scan([("s", "x", "subjekt")])
+        failures.append("an unknown surface kind must raise, never scan as nothing")
+    except ValueError:
+        pass
+
+    # ARM 9 -- the surfaces: a finding keeps its location, the rendered lines
+    # never trip the vocabulary (the word is never echoed), and each PR and
+    # message surface carries the classes the ruling gives it.
+    w0, k0 = (lane or ["x"])[0], _KIN[0]
+    got = subject_scan([("PR #9 TITLE", "x " + w0, "subject"),
+                        ("PR #9 TITLE", "x " + k0, "subject")])
+    if sorted(got) != sorted([("PR #9 TITLE", LANE), ("PR #9 TITLE", KIN)]):
+        failures.append("a finding must keep its location and its class")
+    lines = subject_finding_lines(got)
+    if len(lines) != 2 or subject_scan([("l", l, "subject") for l in lines]):
+        failures.append("a rendered finding must never echo the word it found")
+    ref = "helm/tidy-" + (multi or [w0])[0]
+    cases = [
+        ({"number": 4, "title": "clean", "head": {"ref": ref}, "body": "clean"},
+         [("PR #4 HEAD REF", LANE)]),
+        ({"number": 4, "title": "clean", "head": {"ref": "x"}, "body": "the " + k0},
+         []),
+        ({"number": 4, "title": "clean", "head": {"ref": "x"}, "body": "see " + w0},
+         [("PR #4 BODY", LANE)]),
+        ({"number": 4, "title": "the " + k0, "head": {"ref": "x"}, "body": ""},
+         [("PR #4 TITLE", KIN)]),
+        ({"number": 4, "title": None, "head": None, "body": None}, []),
+    ]
+    for i, (pr, want) in enumerate(cases):
+        if subject_scan(pr_rows(pr)) != want:
+            failures.append(f"PR surface case {i} must yield exactly its planted findings")
+    mcases = [
+        ("clean subject\n\nclean body\n# the " + k0 + " in a comment\n", []),
+        ("clean\n\nbody\n" + _SCISSORS + "\ndiff --git " + w0 + "\n", []),
+        ("# a comment\n\ntidy " + w0 + "\n\nbody\n", [("the message SUBJECT", LANE)]),
+        ("first line\nsecond line, the " + k0 + "\n\nbody\n", [("the message SUBJECT", KIN)]),
+        ("clean\n\nsee " + w0 + "\n", [("the message BODY", LANE)]),
+    ]
+    for i, (text, want) in enumerate(mcases):
+        if subject_scan(message_rows(text)) != want:
+            failures.append(f"message case {i} must yield exactly its planted findings")
+
+    # ARM 10 -- rec (4), end to end in a real repository: a lane word in a
+    # SUBJECT ONLY (clean body) is caught; a family reference in a body only is
+    # not; a lane word in a body only is. Then the MODES, not the predicates:
+    # the range, the empty range, the baseline in both directions, the shallow
+    # clone, and the commit-message file.
+    d = e = s = None
+    try:
+        d, shas = _scratch_repo([
+            ("base: clean", ""),
+            ("tidy " + w0 + " notes", "a clean body"),
+            ("clean subject", "the " + k0 + " agreed"),
+            ("clean subject two", "see " + w0),
+        ])
+        got = subject_scan(commit_rows(commits(shas[0] + ".." + shas[3], d)))
+        want = [(f"commit {shas[1][:12]} SUBJECT", LANE),
+                (f"commit {shas[3][:12]} BODY", LANE)]
+        if sorted(got) != sorted(want):
+            failures.append("rec (4): the range must find the subject-only and body-only "
+                            "lane plants and NOT the body-only family reference")
+        k1 = subject_key(shas[1], "tidy " + w0 + " notes")
+        fake = ("f" * 40, "0" * 16)
+
+        def bl(name, text):
+            p = os.path.join(d, name)
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            return p
+        b_empty = bl("empty.tsv", "# accepted: none\n")
+        b_k1 = bl("k1.tsv", "# one\n" + "\t".join(k1) + "\n")
+        b_stale = bl("stale.tsv", "\t".join(k1) + "\n" + "\t".join(fake) + "\n")
+        b_bad = bl("bad.tsv", "\t".join(k1) + "\nnot a key\n")
+        b_none = os.path.join(d, "absent.tsv")
+
+        new, stale, refound, n = history_verdict(set(), d)
+        if (new, stale, refound, n) != ([k1], [], [], 4):
+            failures.append("history over an empty baseline must report the one planted subject as NEW")
+        new, stale, refound, n = history_verdict({k1}, d)
+        if (new, stale, refound) != ([], [], [k1]):
+            failures.append("history must RE-FIND a baselined subject and call nothing new")
+        new, stale, refound, n = history_verdict({k1, fake}, d)
+        if stale != [fake]:
+            failures.append("a baseline entry history no longer carries must be STALE")
+
+        r0 = shas[0] + ".." + shas[3]
+        modes = [
+            ("range with a lane plant", range_mode, (r0, d, b_empty), 1),
+            ("range with only a body family reference", range_mode,
+             (shas[1] + ".." + shas[2], d, b_empty), 0),
+            ("an EMPTY range", range_mode, (shas[3] + ".." + shas[3], d, b_empty), 1),
+            ("range whose only subject hit is baselined", range_mode,
+             (shas[0] + ".." + shas[2], d, b_k1), 0),
+            ("range: the baseline never covers a BODY", range_mode, (r0, d, b_k1), 1),
+            ("range with no baseline file", range_mode, (r0, d, b_none), 1),
+            ("an unreadable range", range_mode, ("no-such-rev..HEAD", d, b_empty), 1),
+            ("history, debt baselined", history_mode, (d, b_k1), 0),
+            ("history, debt NOT baselined", history_mode, (d, b_empty), 1),
+            ("history, a stale entry", history_mode, (d, b_stale), 1),
+            ("history, a malformed baseline line", history_mode, (d, b_bad), 1),
+            ("history, no baseline file", history_mode, (d, b_none), 1),
+        ]
+        for label, fn, args, want_rc in modes:
+            rc, out = _quiet(fn, *args)
+            if rc != want_rc:
+                failures.append(f"mode case '{label}' must exit {want_rc}, got {rc}")
+            if subject_scan([("o", l, "subject") for l in out.splitlines()]):
+                failures.append(f"mode case '{label}' echoed a vocabulary word")
+        rc, out = _quiet(range_mode, r0, d, b_empty)
+        if shas[1][:12] not in out or shas[3][:12] not in out:
+            failures.append("a range finding must name the commit it is in")
+
+        e = tempfile.mkdtemp(prefix="pr-gate-selftest-empty-")
+        _git(["init", "-q"], e)
+        rc, _ = _quiet(history_mode, e, b_empty)
+        if rc != 1:
+            failures.append("history of a repository with NO commits must fail, not pass empty")
+        s = tempfile.mkdtemp(prefix="pr-gate-selftest-shallow-")
+        _git(["clone", "-q", "--depth", "1", pathlib.Path(d).as_uri(), s])
+        rc, _ = _quiet(history_mode, s, b_k1)
+        if rc != 1:
+            failures.append("history of a SHALLOW clone must refuse")
+
+        for label, text, want_rc in [("a lane subject", "tidy " + w0 + "\n", 1),
+                                     ("a clean message", "clean\n\nbody\n", 0)]:
+            rc, out = _quiet(msg_file_mode, bl("msg.txt", text))
+            if rc != want_rc:
+                failures.append(f"msg-file case '{label}' must exit {want_rc}, got {rc}")
+        rc, _ = _quiet(msg_file_mode, b_none)
+        if rc != 1:
+            failures.append("an unreadable message file must refuse")
+    except (OSError, RuntimeError) as err:
+        failures.append(f"the scratch-repository arms could not run: {err}")
+    finally:
+        for p in (d, e, s):
+            if p:
+                shutil.rmtree(p, ignore_errors=True)
+
+    # ARM 11 -- every string this file can print survives the Windows console
+    # (cp1252). Docstrings are exempt: they are never printed.
+    tree = ast.parse(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)):
+            body = getattr(node, "body", [])
+            if body and isinstance(body[0], ast.Expr) and isinstance(
+                    getattr(body[0], "value", None), ast.Constant):
+                docs.add(id(body[0].value))
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and id(node) not in docs):
+            try:
+                node.value.encode("cp1252")
+            except UnicodeEncodeError:
+                failures.append(f"line {node.lineno}: a printable string cp1252 cannot encode")
+    return failures
+
+
 def self_test() -> int:
     failures = []
     S = "se" + "at"
@@ -225,6 +593,7 @@ def self_test() -> int:
             "[Claude Code](https://" + "claude" + ".com/claude-code)")
     if scan_session(6, "", kept) or scan_session(6, None, None):
         failures.append("Co-Authored-By, the product link and a null body must pass")
+    failures += _subject_arms()
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
     if failures:
