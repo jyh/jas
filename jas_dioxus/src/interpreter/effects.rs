@@ -21,13 +21,88 @@ use crate::geometry::element::{
 };
 use crate::geometry::regular_shapes::{regular_polygon_points, star_points};
 
-/// Execute a list of effects.
+/// One thing a `run_effects` batch was handed and did NOT do.
+///
+/// The runner's behavior is unchanged by this report: every case below was a
+/// silent no-op before it existed and still is. What changed is that the
+/// no-op is now visible to the caller. A host that must not answer "done" for
+/// a click that did nothing (the Windows engine's panel behaviors) reads it.
+/// The web renderer handles its platform effects before it delegates here, so
+/// it has nothing to read.
+///
+/// What this does NOT report, deliberately: an effect whose key IS handled
+/// but whose arguments are malformed or inapplicable (a `swap` without two
+/// keys, a `list_push` with no active panel, a `foreach` whose source is not
+/// a list, a `doc.*` arm whose spec is not the shape it reads). Those are
+/// authoring errors for the schema to refuse, not gaps in what this runner
+/// hosts. An extra unknown key beside a handled one is not reported either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unhandled {
+    /// An effect object that no arm of `run_one` handles. Every platform
+    /// effect lands here (`align_left`, `boolean_union`, …). Carries the
+    /// object's keys, sorted and comma-joined.
+    UnknownEffect(String),
+    /// A `doc.*` key that `run_doc_effect` has no arm for.
+    UnknownDocEffect(String),
+    /// A `doc.*` effect in a batch run without a `Model`.
+    NoModel(String),
+    /// A bare-string effect such as `- snapshot`. This runner runs objects
+    /// only.
+    BareString(String),
+    /// An effect that is neither an object nor a string. Carries its JSON
+    /// text.
+    NotAnEffect(String),
+    /// A `log` effect. It changes nothing, and in `actions.yaml` every one
+    /// marks work a platform has to supply, so it counts as not done. Carries
+    /// the message as written.
+    Logged(String),
+    /// A `dispatch` naming an action the catalog does not hold, or a
+    /// dispatch run with no catalog.
+    UnknownAction(String),
+    /// A `dispatch` naming an action that declares no effects.
+    EmptyAction(String),
+    /// An `open_dialog` naming a dialog the catalog does not hold, or run
+    /// with no catalog.
+    UnknownDialog(String),
+}
+
+/// What a `run_effects` batch did not do, in the order the runner met it,
+/// nested batches (`dispatch`, `if`, `let`, `foreach`, a dialog's
+/// `on_change`) included.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectsReport {
+    pub unhandled: Vec<Unhandled>,
+}
+
+impl EffectsReport {
+    /// True when every effect the batch was handed was done.
+    pub fn all_handled(&self) -> bool {
+        self.unhandled.is_empty()
+    }
+}
+
+/// Execute a list of effects, and report what was not done.
 ///
 /// `model` is optional. When supplied, `doc.*` effects dispatch to
-/// `Controller`. When `None`, `doc.*` effects are silently skipped —
-/// callers that don't touch the document (e.g. panel behavior actions)
-/// pass `None`.
+/// `Controller`. When `None`, `doc.*` effects are skipped and reported as
+/// `Unhandled::NoModel`. Callers that don't touch the document (e.g. panel
+/// behavior actions) pass `None`.
 pub fn run_effects(
+    effects: &[serde_json::Value],
+    ctx: &serde_json::Value,
+    store: &mut StateStore,
+    model: Option<&mut Model>,
+    actions: Option<&serde_json::Value>,
+    dialogs: Option<&serde_json::Value>,
+    action_name: Option<&str>,
+) -> EffectsReport {
+    let mut report = EffectsReport::default();
+    run_effects_into(effects, ctx, store, model, actions, dialogs, action_name,
+                     &mut report);
+    report
+}
+
+fn run_effects_into(
     effects: &[serde_json::Value],
     ctx: &serde_json::Value,
     store: &mut StateStore,
@@ -35,6 +110,7 @@ pub fn run_effects(
     actions: Option<&serde_json::Value>,
     dialogs: Option<&serde_json::Value>,
     action_name: Option<&str>,
+    _report: &mut EffectsReport,
 ) {
     // OP_LOG.md Increment 1, sub-step 5: a YAML action opens its undo
     // transaction via the `doc.snapshot` effect (and self-contained doc.*
@@ -12005,5 +12081,257 @@ mod tests {
             "a locked DIRECT path gains nothing");
         assert_eq!(path_at(&s7_insert_anchor(&locked, 15.0, 107.5), &[0, 1, 0]).d.len(), 3,
             "a locked NESTED path gains nothing");
+    }
+
+    // -----------------------------------------------------------------------
+    // The report: what a batch did NOT do (FB wave 2, A7)
+    // -----------------------------------------------------------------------
+    //
+    // Every case here was a silent no-op before the report existed, and the
+    // runner still does exactly what it did. Each arm plants one no-op and
+    // requires it to be NAMED. The handled-effect arms are the negative
+    // control: a report that names everything passes the planted arms and
+    // fails those.
+
+    fn report_of(
+        effects: Vec<serde_json::Value>,
+        model: Option<&mut Model>,
+        actions: Option<&serde_json::Value>,
+        dialogs: Option<&serde_json::Value>,
+    ) -> Vec<Unhandled> {
+        let mut store = StateStore::new();
+        run_effects(&effects, &serde_json::json!({}), &mut store, model, actions,
+                    dialogs, None).unhandled
+    }
+
+    #[test]
+    fn report_names_an_unknown_effect_key() {
+        assert_eq!(
+            report_of(vec![serde_json::json!({"zz_planted": true})], None, None, None),
+            vec![Unhandled::UnknownEffect("zz_planted".into())]);
+        // Several keys and no handled one: all of them, sorted, so the name
+        // does not depend on the map's order.
+        assert_eq!(
+            report_of(vec![serde_json::json!({"zz_b": 1, "zz_a": 2})], None, None, None),
+            vec![Unhandled::UnknownEffect("zz_a,zz_b".into())]);
+    }
+
+    #[test]
+    fn report_is_empty_for_handled_effects_and_they_still_run() {
+        let mut store = StateStore::new();
+        store.set("flag", serde_json::json!(false));
+        let mut model = Model::default();
+        let report = run_effects(
+            &[
+                serde_json::json!({"set": {"x": "5"}}),
+                serde_json::json!({"toggle": "flag"}),
+                serde_json::json!({"doc.snapshot": null}),
+            ],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        assert!(report.all_handled(), "handled effects were reported: {report:?}");
+        assert_eq!(store.get("x"), &serde_json::json!(5));
+        assert_eq!(store.get("flag"), &serde_json::json!(true));
+        // An empty batch did everything it was handed.
+        assert!(run_effects(&[], &serde_json::json!({}), &mut store, None, None, None, None)
+            .all_handled());
+    }
+
+    #[test]
+    fn report_names_a_doc_key_the_doc_dispatcher_does_not_handle() {
+        let mut model = Model::default();
+        assert_eq!(
+            report_of(
+                vec![serde_json::json!({"doc.snapshot": null}),
+                     serde_json::json!({"doc.zz_planted": {}})],
+                Some(&mut model), None, None),
+            vec![Unhandled::UnknownDocEffect("doc.zz_planted".into())]);
+    }
+
+    #[test]
+    fn report_names_a_doc_effect_run_without_a_model() {
+        assert_eq!(
+            report_of(vec![serde_json::json!({"doc.snapshot": null})], None, None, None),
+            vec![Unhandled::NoModel("doc.snapshot".into())]);
+    }
+
+    #[test]
+    fn report_names_a_bare_string_effect() {
+        // `- snapshot` is how every align and boolean action opens (the
+        // web renderer runs it; this runner never has).
+        assert_eq!(
+            report_of(vec![serde_json::json!("snapshot"), serde_json::json!("zz_bare")],
+                      None, None, None),
+            vec![Unhandled::BareString("snapshot".into()),
+                 Unhandled::BareString("zz_bare".into())]);
+    }
+
+    #[test]
+    fn report_names_an_effect_that_is_not_an_object() {
+        assert_eq!(
+            report_of(vec![serde_json::json!(3), serde_json::Value::Null,
+                           serde_json::json!(["set"])],
+                      None, None, None),
+            vec![Unhandled::NotAnEffect("3".into()),
+                 Unhandled::NotAnEffect("null".into()),
+                 Unhandled::NotAnEffect("[\"set\"]".into())]);
+    }
+
+    #[test]
+    fn report_counts_a_log_effect_as_not_done() {
+        assert_eq!(
+            report_of(vec![serde_json::json!({"log": "new_symbol"})], None, None, None),
+            vec![Unhandled::Logged("new_symbol".into())]);
+    }
+
+    #[test]
+    fn report_names_a_dispatch_that_resolves_to_nothing() {
+        let actions = serde_json::json!({
+            "declared_empty": {"description": "no effects key"},
+            "declared_empty_list": {"effects": []},
+            "real": {"effects": [{"set": {"x": "1"}}]},
+        });
+        assert_eq!(
+            report_of(
+                vec![serde_json::json!({"dispatch": "zz_undefined"}),
+                     serde_json::json!({"dispatch": {"action": "zz_undefined_obj"}}),
+                     serde_json::json!({"dispatch": "declared_empty"}),
+                     serde_json::json!({"dispatch": "declared_empty_list"}),
+                     serde_json::json!({"dispatch": "real"})],
+                None, Some(&actions), None),
+            vec![Unhandled::UnknownAction("zz_undefined".into()),
+                 Unhandled::UnknownAction("zz_undefined_obj".into()),
+                 Unhandled::EmptyAction("declared_empty".into()),
+                 Unhandled::EmptyAction("declared_empty_list".into())]);
+        // No catalog at all: the name still resolves to nothing.
+        assert_eq!(
+            report_of(vec![serde_json::json!({"dispatch": "real"})], None, None, None),
+            vec![Unhandled::UnknownAction("real".into())]);
+    }
+
+    #[test]
+    fn report_names_a_dialog_that_resolves_to_nothing() {
+        let dialogs = serde_json::json!({
+            "simple": {"summary": "Simple", "content": {"type": "container"}},
+        });
+        assert_eq!(
+            report_of(
+                vec![serde_json::json!({"open_dialog": {"id": "zz_missing"}}),
+                     serde_json::json!({"open_dialog": "zz_missing_str"}),
+                     serde_json::json!({"open_dialog": {"id": "simple"}})],
+                None, None, Some(&dialogs)),
+            vec![Unhandled::UnknownDialog("zz_missing".into()),
+                 Unhandled::UnknownDialog("zz_missing_str".into())]);
+        assert_eq!(
+            report_of(vec![serde_json::json!({"open_dialog": {"id": "simple"}})],
+                      None, None, None),
+            vec![Unhandled::UnknownDialog("simple".into())]);
+    }
+
+    #[test]
+    fn report_carries_nested_batches_in_the_order_they_ran() {
+        let actions = serde_json::json!({
+            "inner": {"effects": [{"zz_in_dispatch": null}, {"log": "inner"}]},
+        });
+        let mut model = Model::default();
+        let got = report_of(
+            vec![
+                serde_json::json!({"zz_first": null}),
+                serde_json::json!({"if": "true", "then": [{"zz_in_then": null}],
+                                   "else": [{"zz_in_else": null}]}),
+                serde_json::json!({"if": {"condition": "false",
+                                          "then": [{"zz_in_nested_then": null}],
+                                          "else": [{"doc.zz_in_else": null}]}}),
+                serde_json::json!({"let": {"n": "1"}, "in": ["zz_in_let"]}),
+                serde_json::json!({"foreach": {"source": "[1, 2]", "as": "i"},
+                                   "do": [{"zz_in_foreach": null}]}),
+                serde_json::json!({"dispatch": "inner"}),
+                serde_json::json!({"zz_last": null}),
+            ],
+            Some(&mut model), Some(&actions), None);
+        assert_eq!(got, vec![
+            Unhandled::UnknownEffect("zz_first".into()),
+            Unhandled::UnknownEffect("zz_in_then".into()),
+            Unhandled::UnknownDocEffect("doc.zz_in_else".into()),
+            Unhandled::BareString("zz_in_let".into()),
+            Unhandled::UnknownEffect("zz_in_foreach".into()),
+            Unhandled::UnknownEffect("zz_in_foreach".into()),
+            Unhandled::UnknownEffect("zz_in_dispatch".into()),
+            Unhandled::Logged("inner".into()),
+            Unhandled::UnknownEffect("zz_last".into()),
+        ]);
+    }
+
+    #[test]
+    fn report_carries_a_dialog_on_change_dispatch() {
+        // The post-batch hook dispatches the open dialog's on_change action.
+        // It runs outside the effect loop, so it needs its own arm.
+        let dialogs = serde_json::json!({
+            "live": {
+                "summary": "Live",
+                "state": {"v": {"type": "number", "default": 0}},
+                "on_change": "zz_on_change_undefined",
+                "content": {"type": "container"},
+            }
+        });
+        assert_eq!(
+            report_of(
+                vec![serde_json::json!({"open_dialog": {"id": "live"}}),
+                     serde_json::json!({"set": {"dialog.v": "1"}})],
+                None, None, Some(&dialogs)),
+            vec![Unhandled::UnknownAction("zz_on_change_undefined".into())]);
+    }
+
+    #[test]
+    fn an_unhandled_effect_does_not_stop_the_batch() {
+        let mut store = StateStore::new();
+        let report = run_effects(
+            &[
+                serde_json::json!({"set": {"a": "1"}}),
+                serde_json::json!({"zz_planted": null}),
+                serde_json::json!("snapshot"),
+                serde_json::json!({"log": "x"}),
+                serde_json::json!({"set": {"b": "2"}}),
+            ],
+            &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled.len(), 3, "{report:?}");
+        assert_eq!(store.get("a"), &serde_json::json!(1));
+        assert_eq!(store.get("b"), &serde_json::json!(2));
+    }
+
+    // ── The real workspace ────────────────────────────────────────────────
+    //
+    // The arms above plant their own no-ops. These run REAL actions from
+    // `actions.yaml`, so the report is shown to see the surfaces the wave-2
+    // census found (FB wave-2 block v1.1 §2.2). ⚠️ They pin TODAY's hosting:
+    // when the core learns to host `align_left` (W2-3) or `- snapshot`
+    // (W2-4's transaction), the first arm changes ON PURPOSE, and the edit
+    // belongs in that node's PR.
+
+    fn report_of_real_action(name: &str) -> Vec<Unhandled> {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let mut model = Model::default();
+        report_of(vec![serde_json::json!({"dispatch": name})], Some(&mut model),
+                  Some(ws.actions()), Some(ws.dialogs()))
+    }
+
+    #[test]
+    fn the_real_align_left_action_reports_its_snapshot_and_its_platform_effect() {
+        assert_eq!(report_of_real_action("align_left"), vec![
+            Unhandled::BareString("snapshot".into()),
+            Unhandled::UnknownEffect("align_left".into()),
+        ]);
+    }
+
+    #[test]
+    fn real_stub_actions_report_as_not_done() {
+        // A log-only body: the purest successful no-op.
+        assert_eq!(report_of_real_action("new_symbol"),
+                   vec![Unhandled::Logged("new_symbol".into())]);
+        // A log BESIDE a handled effect is still a stub for the real work.
+        assert_eq!(report_of_real_action("close_without_saving"),
+                   vec![Unhandled::Logged("close_without_saving".into())]);
+        // A declared placeholder with no effects at all.
+        assert_eq!(report_of_real_action("set_fill_type_gradient"),
+                   vec![Unhandled::EmptyAction("set_fill_type_gradient".into())]);
     }
 }
