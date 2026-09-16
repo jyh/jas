@@ -418,6 +418,23 @@ subject_arm 14 "a lane name in a BODY only         " "docs: a clean subject
 see the $LANE_WORD notes"
 expect_out red-subject-arm-14 "BODY: an employer-lane or private project name"
 
+# ── ARM 16 ── a refused word in the pushed BRANCH NAME, with clean commits. The
+#              family word, never a lane word: the push output prints the name.
+note "ARM 16 a family reference in the pushed BRANCH NAME          expect 1"
+git -C "$W" checkout -q -b "tidy-$KIN_WORD"
+commit_file s16.txt "nothing wrong with this line" "docs: a clean subject"
+run_push 1 red-ref-name origin "tidy-$KIN_WORD"
+expect_out red-ref-name "the pushed ref name carries a refused word"
+expect_out red-ref-name "the ref name: a family reference"
+expect_no_out red-ref-name "Traceback"
+if [ -z "$(remote_tip "tidy-$KIN_WORD")" ]; then
+  printf '       +   red-ref-name: the branch did NOT reach the remote\n'
+else
+  bad "red-ref-name: THE BRANCH REACHED THE REMOTE"
+fi
+git -C "$W" checkout -q main
+git -C "$W" branch -q -D "tidy-$KIN_WORD"
+
 # ── ARM 15 ── FAIL CLOSED again: with the subject gate absent, a clean push is
 #              refused rather than waved through on two of three arms.
 note "ARM 15 the subject gate is missing: a clean push is refused   expect 1"
@@ -434,7 +451,8 @@ if [ "$fail" -eq 0 ]; then
   note "  naming the range; 12 leak shapes (message path, added-line path, the 5"
   note "  trailer shapes, a path and a URL each added then removed inside one"
   note "  push, and a lane name or family reference in a subject or a lane name in"
-  note "  a body) are each REFUSED with the remote ref unmoved; a missing scanner"
+  note "  a body) are each REFUSED with the remote ref unmoved, and so is a branch"
+  note "  whose name carries a refused word; a missing scanner"
   note "  or subject gate refuses a clean push; a delete is allowed; and the"
   note "  mutation control lands the same commit with the hook bypassed, so the"
   note "  refusals are the hook's."

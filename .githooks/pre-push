@@ -30,7 +30,9 @@
 #      reference in a commit SUBJECT, and no lane name in a commit body (desk
 #      QA). A pushed subject cannot be edited without a history rewrite, so
 #      this is the last moment the reword is free. The pushed delta only: the
-#      bodies already public are history this arm does not rule on.
+#      bodies already public are history this arm does not rule on. The
+#      pushed REF NAME too: a merge subject will quote it, and the forge
+#      writes that subject where no hook runs.
 #
 # ⛔ NO PATTERN IS TYPED IN THIS FILE. Until 2026-09-13 arm 1 was a grep for two
 #   literal shapes, and it was narrower than the gate: a lowercase key, a space
@@ -206,6 +208,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     echo "  The findings above name the commit and the surface, never the word." >&2
     echo "  Reword the commit now (amend or rebase): a pushed subject stays in" >&2
     echo "  history for as long as the repository does." >&2
+    bad=1
+  fi
+  if ! ( cd "$ROOT" && "$PY" "$SUBJECT_GATE" --ref "${remote_ref:-}" ) < /dev/null; then
+    echo "pre-push REFUSED: the pushed ref name carries a refused word. Push the" >&2
+    echo "  work under a neutral branch name: a merge subject will quote this one." >&2
     bad=1
   fi
 
