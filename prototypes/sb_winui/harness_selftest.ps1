@@ -1403,6 +1403,14 @@ function Show-SbSplit($Split) {
     if ($null -eq $Split) { return '(null)' }
     return "$($Split.Widget)|$($Split.Text)"
 }
+# The app-with-knobs wait's answer on `$Rows`, or how many waits were declared
+# when it is not exactly one: a "does not end" arm must never pass because no
+# wait exists.
+function Test-SbVWaitOn($Rows) {
+    $w = @(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')
+    if ($w.Count -ne 1) { return "$($w.Count) WAIT(S) DECLARED" }
+    return Test-SbQ6WaitEnds $w[0] $Rows
+}
 $vAllPass = 'V1=PASS V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
 $vAllNotRun = 'V1=NOT RUN V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
 $vReplayRefused = 'V1=PASS V2=FAIL V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
@@ -1413,10 +1421,10 @@ Test-Case 'V KNOB: the commit knob splits at the first colon' { Show-SbSplit (Sp
 Test-Case 'V KNOB: a colon after the first stays in the text' { Show-SbSplit (Split-SbCommitKnob 'w:a:b') } 'w|a:b'
 Test-Case 'V KNOB: the text is kept verbatim, spaces and all' { Show-SbSplit (Split-SbCommitKnob 'w: 4 0 ') } 'w| 4 0 '
 Test-Case 'V KNOB: an empty text is a text' { Show-SbSplit (Split-SbCommitKnob 'w:') } 'w|'
-Test-Case 'V KNOB: a knob with no colon is refused' { Show-SbSplit (Split-SbCommitKnob 'mwp_fill_tolerance') } '(null)'
-Test-Case 'V KNOB: an empty widget is refused' { Show-SbSplit (Split-SbCommitKnob ':40') } '(null)'
-Test-Case 'V KNOB: a whitespace widget is refused, the knob''s own unset predicate' { Show-SbSplit (Split-SbCommitKnob '  :40') } '(null)'
-Test-Case 'V KNOB: an empty knob is refused' { Show-SbSplit (Split-SbCommitKnob '') } '(null)'
+Test-Case 'V KNOB: a knob with no colon is refused' { "$(Show-SbSplit (Split-SbCommitKnob 'w:1')) $(Show-SbSplit (Split-SbCommitKnob 'mwp_fill_tolerance'))" } 'w|1 (null)'
+Test-Case 'V KNOB: an empty widget is refused' { "$(Show-SbSplit (Split-SbCommitKnob 'w:1')) $(Show-SbSplit (Split-SbCommitKnob ':40'))" } 'w|1 (null)'
+Test-Case 'V KNOB: a whitespace widget is refused, the knob''s own unset predicate' { "$(Show-SbSplit (Split-SbCommitKnob 'w:1')) $(Show-SbSplit (Split-SbCommitKnob '  :40'))" } 'w|1 (null)'
+Test-Case 'V KNOB: an empty knob is refused' { "$(Show-SbSplit (Split-SbCommitKnob 'w:1')) $(Show-SbSplit (Split-SbCommitKnob ''))" } 'w|1 (null)'
 Test-Case 'V ASKED: either value knob alone is asked' { "$(Test-SbValueAsked 'w:1' '') $(Test-SbValueAsked '' 'p')" } 'True True'
 Test-Case 'V ASKED: whitespace knobs are unset' { "$(Test-SbValueAsked ' ' '  ')" } 'False'
 Test-Case 'P4.4 REPLAY: Q6''s knob alone runs a replay' { "$(Test-SbPaneReplayAsked 'align_left_button' '' '')" } 'True'
@@ -1444,20 +1452,20 @@ Test-Case 'V3 GRAMMAR: a trailing newline is outside the grammar' { $t = "40`n";
 Test-Case 'V3 GRAMMAR: a non-ASCII digit is outside the grammar' { $t = [string][char]0x0664 + '0'; "$(Test-SbCanonicalNumber $t)" } 'False'
 
 # ---- the waits ----------------------------------------------------------------
-Test-Case 'V WAIT: a scene that opens no pane waits for no value row' { @(Get-SbValueWaits 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count } '0'
-Test-Case 'V WAIT: app with no value knob waits for no value row' { @(Get-SbValueWaits 'app' '' '').Count } '0'
-Test-Case 'V WAIT: whitespace knobs are unset, exactly as the shell reads them' { @(Get-SbValueWaits 'app' '  ' ' ').Count } '0'
+Test-Case 'V WAIT: a scene that opens no pane waits for no value row' { "$(@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count) $(@(Get-SbValueWaits 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count)" } '1 0'
+Test-Case 'V WAIT: app with no value knob waits for no value row' { "$(@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count) $(@(Get-SbValueWaits 'app' '' '').Count)" } '1 0'
+Test-Case 'V WAIT: whitespace knobs are unset, exactly as the shell reads them' { "$(@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count) $(@(Get-SbValueWaits 'app' '  ' ' ').Count)" } '1 0'
 Test-Case 'V WAIT: app with the value knobs waits for the done row' { (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL VALUE SYNTH DONE row'
 Test-Case 'V WAIT: the done wait ends on the healthy run' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) (New-SbMwFixture) } 'ENDS'
-Test-Case 'V WAIT: the done wait does not end on the rows before the done row' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) (New-SbMwFixture @{ done = $null; drawn2 = $null }) } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on the rows before the done row' { Test-SbVWaitOn (New-SbMwFixture @{ done = $null; drawn2 = $null }) } 'WAITS'
 Test-Case 'V WAIT: one knob alone still waits, and ends on the shell''s refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' '' 'mwp_fill_color')[0]) @(New-SbMwRow $mwKnobRefusal) } 'ENDS'
 Test-Case 'V WAIT: the done wait ends on the render thread''s refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_colour')[0]) @(New-SbMwRow $mwRefusedDone) } 'ENDS'
 Test-Case 'V WAIT: the done wait ends on the replay''s throw' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow $mwThrewDone) } 'ENDS'
 # ⛔ AND ON NOTHING ELSE: a plan refusal or a click's red can arrive mid-replay,
 # and a wait that ended there would snapshot the rows before the done row.
-Test-Case 'V WAIT: the done wait does not end on a click row''s RUSTFAIL' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1' 'changed' '1')) } 'WAITS'
-Test-Case 'V WAIT: the done wait does not end on a plan refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow "RUSTFAIL PANEL REFUSED panel=$mwPanel cause=synth -- jas_panel_plan returned the empty span $mwTids") } 'WAITS'
-Test-Case 'V WAIT: the done wait does not end on Q6''s done row' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbQ6Row (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS")) } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on a click row''s RUSTFAIL' { Test-SbVWaitOn @(New-SbMwRow (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1' 'changed' '1')) } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on a plan refusal' { Test-SbVWaitOn @(New-SbMwRow "RUSTFAIL PANEL REFUSED panel=$mwPanel cause=synth -- jas_panel_plan returned the empty span $mwTids") } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on Q6''s done row' { Test-SbVWaitOn @(New-SbQ6Row (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS")) } 'WAITS'
 # CONTROLS the other way: Q6's wait is not ended by the value replay's rows.
 Test-Case 'V WAIT: CONTROL -- Q6''s replay wait does not end on the value done row' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) @(New-SbMwRow (New-SbMwDone)) } 'WAITS'
 Test-Case 'V WAIT: CONTROL -- Q6''s replay wait does not end on the value refusal' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) @(New-SbMwRow $mwRefusedDone) } 'WAITS'
@@ -1600,17 +1608,23 @@ Test-Case 'V: every path names all six clauses exactly once' {
     if ($bad.Count -eq 0) { "all $($variants.Count)" } else { $bad -join '; ' }
 } 'all 11'
 # ⛔ AND EVERY VERDICT CARRIES A DETAIL, IN ASCII: the Windows console is cp1252.
+# ⛔ THE ARM COUNTS WHAT IT EXAMINED. Its first cut returned only the bad count,
+# and on the red-first stubs (3f217295) it PASSED: no verdicts, so none bad.
+# Six runs of six clauses is 36; a reader that returns nothing reads 0 of 0.
 Test-Case 'V: every verdict on every census path carries an ASCII detail' {
     $bad = 0
+    $seen = 0
     foreach ($r in @((Get-SbVRun), (Get-SbVRun $mwNoReplay 'retained' '' '' ''), (Get-SbVRun @{ open = $null }),
                      (Get-SbVRun @{ done = $null }), (Get-SbVRun @{} 'app' 'mwp_fill_tolerance:forty'),
                      (Get-SbVRun $mwNoReplay 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' 'magic_wand_panel_content'))) {
         foreach ($v in @($r)) {
+            if ($null -eq $v) { continue }
+            $seen++
             if ([string]::IsNullOrWhiteSpace($v.Detail) -or ("$($v.Name)$($v.Detail)" -match '[^\x20-\x7E]')) { $bad++ }
         }
     }
-    $bad
-} '0'
+    "$bad bad of $seen"
+} '0 bad of 36'
 Test-Case 'V: the clause names are V1 to V6, in order' { (@($SbValueNames.Values) | ForEach-Object { ($_ -split ' ')[0] }) -join ' ' } 'V1 V2 V3 V4 V5 V6'
 # MUTATION CONTROL on the fixture itself: each instrument in the healthy done
 # row really reads two values, so the healthy PASS is not an equality of constants.
