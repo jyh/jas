@@ -78,6 +78,7 @@ use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
     self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, PRESS_EVENTS,
@@ -157,6 +158,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * A write to a Stroke render key applies the Stroke panel to the selection
 ///   through `stroke_host` (A11), the one implementation the web app calls
 ///   too.
+/// * A write to one of the Properties panel's eight fields applies it to the
+///   selection through `properties_host` (W2b-5), as the reference's
+///   `subscribe_properties_panel` does.
 ///
 /// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
@@ -199,6 +203,25 @@ impl EffectHost for EngineHost {
         }
         let panel = StrokePanelState::from_store(store);
         stroke_host::apply_stroke_panel_to_selection(model, &panel, key, None);
+    }
+
+    /// W2b-5: a write to a Properties field applies the value the store now
+    /// holds, with the panel's constrain lock, to the selection. The panel's
+    /// fields are derived for display (`panel_scope::engine_scope`), so the
+    /// written value is read once, here, and never shown. The transaction is
+    /// opened as `global_written` opens it.
+    fn panel_written(&mut self, panel_id: &str, key: &str, store: &mut StateStore,
+                     model: Option<&mut Model>) {
+        let Some(model) = model else { return };
+        if panel_id != PROPERTIES_PANEL || !properties_host::is_field_key(key) {
+            return;
+        }
+        if !model.in_txn() {
+            model.begin_txn();
+        }
+        let value = store.get_panel(panel_id, key).clone();
+        let constrain = store.get_panel(panel_id, "prop_constrain").as_bool().unwrap_or(false);
+        properties_host::apply_field(model, key, &value, constrain);
     }
 }
 

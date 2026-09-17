@@ -25,6 +25,7 @@ pub mod bind_values;
 pub mod widget_commit;
 pub mod align_host;
 pub mod stroke_host;
+pub mod properties_host;
 pub mod menu_state;
 
 #[cfg(feature = "web")]
