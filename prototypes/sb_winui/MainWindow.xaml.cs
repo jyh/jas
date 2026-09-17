@@ -879,14 +879,36 @@ public sealed partial class MainWindow : Window
 
             _canvas.Scene(scene);
 
+            // ⭐ THE PANE'S FIRST PANEL (W2b-3): `SB_PANEL` names it by content
+            // id, and unset means Align. The id is not checked here: an id the
+            // core does not hold is the core's refusal (`RUSTFAIL PANEL
+            // REFUSED`, from the empty plan), never a guess made in C#.
+            // ⛔ SET ON ANY OTHER SCENE IT IS REFUSED, NEVER IGNORED, for Q6's
+            // reason below. The SAME predicate as `SB_PANEL_SYNTH` (whitespace
+            // is unset).
+            var firstPanel = PaneFirstPanelId;
+            var panelKnob = Environment.GetEnvironmentVariable("SB_PANEL");
+            if (!string.IsNullOrWhiteSpace(panelKnob))
+            {
+                if (_paneWanted) { firstPanel = panelKnob; }
+                else
+                {
+                    Report($"RUSTFAIL PANEL FIRST REFUSED panel={PanelWire.RowValue(panelKnob)} -- SB_PANEL "
+                         + $"needs SB_SCENE=app, the one scene that opens the pane; this run is '{scene}'");
+                }
+            }
+            _paneFirstPanel = firstPanel;
+            _paneDrawnPanel = firstPanel;
+
             // AFTER the scene, so the app's own preload has landed and the plan
             // is read against the document a person will actually see. The
             // queue is ordered, so this is a sequence, not a race.
-            if (_paneWanted) { _canvas.OpenPanel(PaneFirstPanelId, PaneAvailW, "app"); }
+            if (_paneWanted) { _canvas.OpenPanel(firstPanel, PaneAvailW, "app"); }
 
             // ⭐ Q6's SYNTHETIC ARM (W2-6), queued AFTER the open so it runs on
-            // the plan the pane is drawn from. The knob names a widget id; the
-            // render thread refuses by name one the plan does not hold.
+            // the plan the pane is drawn from -- whichever panel is first. The
+            // knob names a widget id; the render thread refuses by name one the
+            // plan does not hold.
             // ⛔ SET ON ANY OTHER SCENE IT IS REFUSED, NEVER IGNORED: no other
             // scene opens the pane, and a knob accepted and ignored produces a
             // full green run of an experiment nobody asked for.
@@ -894,13 +916,15 @@ public sealed partial class MainWindow : Window
             var synth = Environment.GetEnvironmentVariable("SB_PANEL_SYNTH");
             if (!string.IsNullOrWhiteSpace(synth))
             {
-                if (_paneWanted) { _canvas.PanelSynth(PaneFirstPanelId, synth); }
+                if (_paneWanted) { _canvas.PanelSynth(firstPanel, synth); }
                 else
                 {
                     Report($"RUSTFAIL PANEL SYNTH REFUSED widget={synth} -- SB_PANEL_SYNTH needs "
                          + $"SB_SCENE=app, the one scene that opens the pane; this run is '{scene}'");
                 }
             }
+
+            QueueValueSynth(firstPanel, scene);
         }
         catch (Exception ex)
         {
@@ -1736,11 +1760,18 @@ public sealed partial class MainWindow : Window
     // =======================================================================
 
     /// <summary>
-    /// The panel the pane opens with, by its CONTENT id. Q6's replay
-    /// (`SB_PANEL_SYNTH`) runs on this one, so it stays Align: W2b-2's selector
-    /// changes what a PERSON can open, never what a sitting reads.
+    /// The panel the pane opens with when `SB_PANEL` is unset, by its CONTENT
+    /// id. Q6's sitting (`SB_PANEL_SYNTH`) sets no `SB_PANEL`, so it stays
+    /// Align: W2b-2's selector changes what a PERSON can open, and only a knob
+    /// changes what a sitting reads (W2b-3).
     /// </summary>
     private const string PaneFirstPanelId = "align_panel_content";
+
+    /// <summary>
+    /// The panel the pane actually opens with: `SB_PANEL`, or
+    /// <see cref="PaneFirstPanelId"/>. Resolved once, in `StartFirstLayout`.
+    /// </summary>
+    private string _paneFirstPanel = PaneFirstPanelId;
 
     /// <summary>
     /// The panel whose plan the drawn controls were built from. A control
@@ -2313,7 +2344,7 @@ public sealed partial class MainWindow : Window
         PanePicker.SelectionChanged += OnPickerChanged;
         PanePicker.IsEnabled = list.Rows.Count > 0;
         Report($"PANEL LIST panels={list.Rows.Count} skipped={list.Skipped} bytes={json.Length} "
-             + $"first={(list.Rows.Any(r => r.Id == PaneFirstPanelId) ? PaneFirstPanelId : "ABSENT")}");
+             + $"first={(list.Rows.Any(r => r.Id == _paneFirstPanel) ? _paneFirstPanel : "ABSENT")}");
     }
 
     /// <summary>Show the open panel in the selector, without reading that as a choice.</summary>
@@ -2339,6 +2370,60 @@ public sealed partial class MainWindow : Window
         if (id == _paneDrawnPanel) { return; }
         Report($"PANEL SWITCH REQUESTED from={_paneDrawnPanel} to={id} via=hand");
         _canvas.OpenPanel(id, PaneAvailW, "hand");
+    }
+
+    // =======================================================================
+    // W2b-3 — THE VALUE REPLAY'S KNOBS
+    //
+    // `SB_PANEL_COMMIT=<widget>:<text>` and `SB_PANEL_PRESS=<widget>` together
+    // queue `Canvas.ApplyPanelValueSynth` on the first panel, after the open
+    // (and after Q6's replay when both are set). The render thread replays and
+    // reports; the harness decides (`Get-SbValueVerdicts`).
+    // =======================================================================
+
+    /// <summary>
+    /// Queue the value replay, or refuse its knobs BY NAME. Never half-run:
+    /// one knob without the other, a commit knob that does not split
+    /// (<see cref="PanelWire.SplitCommitKnob"/>), or either knob on a scene
+    /// that opens no pane writes `RUSTFAIL PANEL VALUE SYNTH REFUSED` and
+    /// queues nothing. Whitespace is unset, the predicate every pane knob uses.
+    /// </summary>
+    private void QueueValueSynth(string firstPanel, string scene)
+    {
+        var commitKnob = Environment.GetEnvironmentVariable("SB_PANEL_COMMIT");
+        var pressKnob = Environment.GetEnvironmentVariable("SB_PANEL_PRESS");
+        var commitAsked = !string.IsNullOrWhiteSpace(commitKnob);
+        var pressAsked = !string.IsNullOrWhiteSpace(pressKnob);
+        if (!commitAsked && !pressAsked) { return; }
+
+        var split = commitAsked ? PanelWire.SplitCommitKnob(commitKnob!) : null;
+        string? refusal = null;
+        if (!_paneWanted)
+        {
+            refusal = "the value replay needs SB_SCENE=app, the one scene that opens the pane; "
+                    + $"this run is '{scene}'";
+        }
+        else if (!commitAsked)
+        {
+            refusal = "SB_PANEL_PRESS is set and SB_PANEL_COMMIT is not; the replay needs both";
+        }
+        else if (!pressAsked)
+        {
+            refusal = "SB_PANEL_COMMIT is set and SB_PANEL_PRESS is not; the replay needs both";
+        }
+        else if (split is null)
+        {
+            refusal = "SB_PANEL_COMMIT is not <widget>:<text> (no ':', or no widget before it)";
+        }
+
+        if (refusal is not null || split is not { } s)
+        {
+            Report($"RUSTFAIL PANEL VALUE SYNTH REFUSED panel={firstPanel} "
+                 + $"commit-knob={PanelWire.RowValue(commitKnob)} press-knob={PanelWire.RowValue(pressKnob)} "
+                 + $"-- {refusal ?? "SB_PANEL_COMMIT did not split"}");
+            return;
+        }
+        _canvas.PanelValueSynth(firstPanel, s.Widget, s.Text, pressKnob!);
     }
 
     private static bool IsKeyDown(Windows.System.VirtualKey key) =>
