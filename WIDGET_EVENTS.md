@@ -222,25 +222,35 @@ has two consumers besides the reference:
   (`JasSwift/Sources/Interpreter/WidgetEvent.swift`), held to it by
   `JasSwift/Tests/Interpreter/WidgetEventCorpusTests.swift`.
 
-Neither is a port's panel VIEW. Swift's `YamlPanelBodyView` does not call
-`WidgetEvent` yet, and the Rust web app does not call the door, so the
-lines below still describe what each view does. Until a view routes
-through its tested module, none of these is a measured failure.
+**Swift's panel view is routed.** `YamlPanelBodyView` sends every commit
+and press of the eight kinds through `PanelWidgetEvents`
+(`JasSwift/Sources/Interpreter/PanelWidgetEvents.swift`). That drives
+`WidgetEvent` with the app's host, and
+`JasSwift/Tests/Interpreter/PanelWidgetEventsTests.swift` drives it over
+the shipped widgets. The host adds three things the contract leaves to a
+port:
 
-- **Swift, `number_input`: a commit runs only `change` behaviors**
-  (`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:1585`, which
-  calls a handler that filters on `"change"` at `:2295`). Magic Wand's
-  four `commit` behaviors do not run there.
-- **Swift, `toggle`/`checkbox`: a press writes the bound field and runs no
-  behavior** (`YamlPanelBodyView.swift:3245-3255`). Magic Wand's five
-  `change` flips and Stroke's `stk_dashed` `click` flip do not run there.
-- **Swift, `combo_box`:**
-  - the widget is a menu of the declared options, with no free entry, so
-    only a declared option's value can be committed;
-  - that value is parsed with `Double(_:)`, which accepts `inf`, `nan` and
-    exponents, and it is not clamped;
-  - only `commit` behaviors run (`:3374-3389`);
-  - a dialog combo writes the raw string and runs nothing (`:3390-3393`).
+- **The render scope.** The disabled check and a press's current value
+  read the scope the view rendered, which is what the person saw. A Swift
+  panel scope overlays live selection values the store does not hold
+  (Character, Paragraph). The scope's own names (a `foreach` item) reach
+  the behaviors; its store namespaces do not.
+- **The store the app has.** Swift never runs a panel's `init:`, and its
+  store holds no bundle `state` defaults. So before an event, a two-way
+  bound global that is absent is seeded from its field, and the two start
+  as the one value this contract says they are.
+- **The write and the dispatch.** The bind write goes through the
+  panel-write host, and an action goes through the view's dispatcher,
+  whose native intercepts (`set_concept_param`) the catalog does not have.
+
+A Swift `combo_box` is still a menu of its declared options with no free
+entry, so only a declared option's value can be committed. A combo whose
+options are computed offers none.
+
+**The Rust web app does not call the door yet**, so the Rust lines below
+still describe what its view does. Until it routes through its tested
+module, none of them is a measured failure.
+
 - **Rust, `number_input`: no declared behavior runs.** The panel write is
   a per-panel match whose fallthrough is `_ => {}`
   (`jas_dioxus/src/interpreter/renderer.rs:6341`), so a Magic Wand
@@ -263,8 +273,8 @@ through its tested module, none of these is a measured failure.
 - **Resolved: `SCHEMA.md` §behavior used to say that an entry's `action`
   runs before its `effects`.** Both active ports run the effects first, in
   their value handlers (`renderer.rs:3175-3186`,
-  `YamlPanelBodyView.swift:2296-2312`) and in their click handlers
-  (`renderer.rs:4700-4711`, `YamlPanelBodyView.swift:1245-1256`).
+  `WidgetEvent.swift:317-321`) and in their click handlers
+  (`renderer.rs:4700-4711`, `YamlPanelBodyView.swift:1175-1186`).
   `SCHEMA.md` now says so for every kind. None of the four shipped `click`
   entries that carry both depends on the order.
 

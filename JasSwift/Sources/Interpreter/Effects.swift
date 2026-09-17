@@ -202,70 +202,6 @@ func runEffects(
                model: model, actionName: actionName, diagnostics: &diags)
 }
 
-/// Run an input/combo widget's `event: commit` behaviors after the native
-/// two-way write. The Swift port of Rust `renderer.rs`
-/// `run_input_commit_behavior`: it patches the just-committed value into
-/// `panel.<field>` and `event.value` in the eval ctx — so effects reading
-/// `panel.<field>` see the fresh value rather than the stale render-time
-/// snapshot the panel scope was built from — then runs each commit
-/// behavior's `effects` through the shared `runEffects` engine (no parallel
-/// dispatcher). Scoped to the `commit` event, so `change`-event combos
-/// (gradient angle / aspect) are untouched, exactly like Rust. No-op when
-/// the widget declares no `commit` behavior. The caller owns the active
-/// panel (`set_panel_state` targets it) — the combo hook sets it before
-/// calling, and tests set it explicitly.
-func runInputCommitBehavior(
-    element: [String: Any],
-    field: String,
-    committed: Any?,
-    context: [String: Any],
-    store: StateStore,
-    model: Model
-) {
-    guard let behavior = element["behavior"] as? [[String: Any]] else { return }
-    let commitBehaviors = behavior.filter {
-        ($0["event"] as? String) == "commit"
-    }
-    if commitBehaviors.isEmpty { return }
-    var ctx = context
-    if var panelScope = ctx["panel"] as? [String: Any] {
-        panelScope[field] = committed
-        ctx["panel"] = panelScope
-    }
-    ctx["event"] = ["value": committed as Any] as [String: Any]
-    // Commit behaviors that write stroke render keys (the linked
-    // arrowhead-scale mirror's `set` / `set_panel_state`) must re-apply the
-    // panel to the selection — exactly as the panel's own commitPanelWrite
-    // path does via notifyPanelStateChanged, and as Rust's
-    // apply_set_panel_state_with_ctx unconditionally re-applies for the
-    // arrowhead-scale keys (renderer.rs ~2042-2048). alignPlatformEffects
-    // registers no such hook, so without it the mirror updated the panel /
-    // global scopes but the sibling scale never reached the element (it
-    // stayed at its stale value while only the edited field applied).
-    // Generic: any stroke render-key write through set / set_panel_state
-    // re-applies, not a scale-combo special case.
-    var platformEffects = alignPlatformEffects(model: model)
-    platformEffects["notify_panel_state_changed"] = { arg, _, store in
-        if let (panelId, wroteField) = parseNotifyPayload(arg) {
-            // Scope the apply to the field the write NAMES, falling back to
-            // the field being committed. The linked-scale mirror writes the
-            // SIBLING scale, which applies through that field's OWN group
-            // (each scale is its own group); attributing it to the committed
-            // field applied the wrong group and left the sibling stale.
-            notifyPanelStateChanged(panelId, store: store, model: model,
-                                    edited: wroteField ?? field)
-        }
-        return nil
-    }
-    for entry in commitBehaviors {
-        let effects = (entry["effects"] as? [Any]) ?? []
-        if !effects.isEmpty {
-            runEffects(effects, ctx: ctx, store: store,
-                       platformEffects: platformEffects)
-        }
-    }
-}
-
 // MARK: - Internal
 
 /// Route a `set:` target to the right scope in the StateStore.
@@ -1009,6 +945,19 @@ public func isGradientRenderKey(_ key: String) -> Bool {
 
 // MARK: - Gradient panel writeback (Phase 5)
 
+/// A gradient render key as a Double. A `set:` stores a whole number as an
+/// Int, which `as? Double` does not match: an angle of 45 applied as 0, from
+/// a widget commit and from a library tile alike. Same reading as
+/// ``strokePanelNumber``.
+private func gradientNumber(_ store: StateStore, _ key: String) -> Double? {
+    switch store.get(key) {
+    case let n as NSNumber: return n.doubleValue
+    case let d as Double: return d
+    case let i as Int: return Double(i)
+    default: return nil
+    }
+}
+
 /// Apply the current gradient panel state to the selected element(s).
 /// Builds a Gradient from store keys and writes it via the controller.
 /// Mirrors jas_dioxus::AppState::apply_gradient_panel_to_selection.
@@ -1037,8 +986,8 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     }
     let g = Gradient(
         type: gType,
-        angle: (store.get("gradient_angle") as? Double) ?? 0,
-        aspectRatio: (store.get("gradient_aspect_ratio") as? Double) ?? 100,
+        angle: gradientNumber(store, "gradient_angle") ?? 0,
+        aspectRatio: gradientNumber(store, "gradient_aspect_ratio") ?? 100,
         method: gMethod,
         dither: (store.get("gradient_dither") as? Bool) ?? false,
         strokeSubMode: gSub
@@ -2818,7 +2767,8 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     // `set_panel_state` fires this hook so the host can push the written
     // attribute onto the selection, and its own comment warns it is a "silent
     // no-op if the host hasn't registered the effect". It was registered in
-    // exactly ONE place — `runInputCommitBehavior` — so typing a stroke weight
+    // exactly ONE place — the input-commit route, since retired for
+    // `PanelWidgetEvents`, which builds its map here — so typing a stroke weight
     // applied to the selected element and CLICKING A CAP BUTTON DID NOTHING.
     // Every route that runs a YAML action without going through an input
     // commit (`runYamlActionByName`, which is how the cap/join radios and the
@@ -2833,7 +2783,6 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     // "field being committed" to fall back TO. A write that names its key
     // applies; one that does not is not this hook's business, and inventing a
     // guess is what applied the wrong group in the linked-scale case.
-    // `runInputCommitBehavior` still overrides this with its richer version.
     effects["notify_panel_state_changed"] = { arg, _, store in
         if let (panelId, wroteField) = parseNotifyPayload(arg), let edited = wroteField {
             notifyPanelStateChanged(panelId, store: store, model: model, edited: edited)

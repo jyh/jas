@@ -64,4 +64,22 @@ struct GradientHookRegistrationTests {
         #expect(gradients == 2,
                 "both members carry the gradient; got \(gradients) of 2")
     }
+
+    /// A `set:` effect stores a whole number as an Int, and the apply used to
+    /// read the angle and ratio `as? Double`, which an Int never matches: a
+    /// 45-degree edit applied as 0. The arm above seeds `45.0`, a Double,
+    /// which is why it never saw this.
+    @Test func aWholeNumberAngleAndRatioWrittenAsIntApply() {
+        let model = Model(document: Document(
+            layers: [Layer(name: "L", children: [rect(0)])],
+            selection: [ElementSelection.all([0, 0])]))
+        let store = StateStore()
+        store.set("gradient_angle", 45)
+        store.set("gradient_aspect_ratio", 150)
+        #expect(store.get("gradient_angle") is Int, "the arm needs an Int in the store")
+        applyGradientPanelToSelection(store: store, controller: Controller(model: model))
+        let g = model.document.getElement([0, 0]).fillGradient
+        #expect(g?.angle == 45, "applied: \(String(describing: g))")
+        #expect(g?.aspectRatio == 150)
+    }
 }
