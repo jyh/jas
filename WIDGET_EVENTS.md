@@ -87,7 +87,8 @@ Enter or focus loss, or the picked option's value for `select`,
    - the kind's parse refuses the text (`BadValue`, see §Parsing).
    A refused commit writes nothing and runs no behavior.
 2. **Write the parsed value to the bound target**, when the target is
-   writable (see §The bound target).
+   writable, together with the global it is two-way bound to (see §The
+   bound target).
 3. **Then run every behavior whose `event` is `commit` or `change`**, in
    declaration order.
    - `event.value` is the parsed value, typed: a number for
@@ -119,7 +120,8 @@ expression's current truth value, and an unbound widget reads as false.
      A skipped behavior still owns the press, so the field is not written
      behind it. The result is then `inert`.
 3. **Otherwise, write the new boolean to the bound target** when it is
-   writable (`committed`). If it is not writable, the press is `inert`.
+   writable, with its two-way bound global (`committed`). If it is not
+   writable, the press is `inert`.
 
 ## Parsing, kind by kind
 
@@ -155,14 +157,30 @@ expression's current truth value, and an unbound widget reads as false.
   layer**, where `<ident>` is ASCII letters, digits and `_`. A `panel.` path
   writes the widget's own panel, which the reference models as the
   active panel. A `dialog.` path writes the open dialog.
+- **The two-way bind.** A panel's `init:` hydrates each field from an
+  expression when the panel opens. When that expression is a bare
+  `state.<ident>` (`weight: "state.stroke_width"`), the field and that
+  global are one value, shown twice. A write to `panel.<field>` then
+  writes `state.<ident>` too, in the same step and before any behavior.
+  - The shipped YAML depends on this. Stroke's scale combos say "the native
+    two-way bind already committed panel.start_arrowhead_scale", and the
+    global is what "drives apply-to-selection". Magic Wand says "commits
+    write back to both panel.<key> and state.magic_wand_<key>".
+  - An `init:` expression that is anything else (`0`, `state.a + 1`,
+    `hsb_h(…)`) is a one-way hydration, and nothing is mirrored.
+  - The procedures take the widget's panel spec (`panel=`), and it is a
+    required argument. Forgetting it silently drops the mirror.
+  - *(This clause was missing from the contract's first version, #169. The
+    corpus (#170) and the engine's door (#171) were built without it, and
+    all three are corrected together.)*
 - **Every other bind is read, never written, by this layer.** That
   covers a `state.` path, a `foreach` item's field (`ab.name`), an
   indexed path (`panel.stops[…].opacity`), an expression, and a name a
   port routes to native code (Opacity's `selection_mask_clip`). A widget
   with such a bind does its work through its declared behaviors, or
   through its port's native code, which this document does not rule.
-- **The write is a store write**, and a store write notifies the store's
-  subscribers. That notification is how the reference applies a panel to
+- **The write is a store write** (both halves), and a store write notifies
+  the store's subscribers. That notification is how the reference applies a panel to
   the selection (`effects.subscribe_stroke_panel`,
   `effects.subscribe_properties_panel`). A port's panel-write host is
   that subscriber's counterpart. It is not a second step of this

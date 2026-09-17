@@ -19,7 +19,9 @@ opening the panel the way the reference does (its `state:` defaults, then each
 The expected values:
   * `result` is the EventResult, field for field;
   * `panel` is the panel scope afterwards, whole;
-  * `state_changed` holds exactly the global keys whose value changed.
+  * `state_changed` holds exactly the global keys whose value changed,
+    including the global a panel field is two-way bound to through the
+    panel's `init:` (WIDGET_EVENTS.md, "The bound target").
 Numbers compare as numbers, not as JSON text. A value a behavior writes has
 passed through the expression evaluator, so it can serialize as `40` where
 the bind write of the same value serialized as `40.0`.
@@ -88,7 +90,8 @@ SEED = [
     ("stroke_weight_clamped_to_max", STROKE, "stk_weight", {}, {"commit": "2000"}),
     ("stroke_weight_unknown_unit", STROKE, "stk_weight", {}, {"commit": "5 dpi"}),
     ("stroke_dash_2_cleared", STROKE, "stk_dash_2",
-     {"panel": {"dashed": True, "dash_2": 6}}, {"commit": "  "}),
+     {"panel": {"dashed": True, "dash_2": 6},
+      "state": {"stroke_dashed": True, "stroke_dash_2": 6}}, {"commit": "  "}),
     ("stroke_dash_1_blank_refused", STROKE, "stk_dash_1",
      {"panel": {"dashed": True}}, {"commit": ""}),
     ("stroke_dash_2_disabled_while_solid", STROKE, "stk_dash_2",
@@ -115,16 +118,17 @@ def _store(bundle, panel_id, setup):
 
 
 def _case(bundle, name, panel_id, widget_id, setup, event):
-    widget = find_element_by_id(bundle["panels"][panel_id], widget_id)
+    panel = bundle["panels"][panel_id]
+    widget = find_element_by_id(panel, widget_id)
     if widget is None:
         raise SystemExit(f"{name}: no widget {widget_id!r} in {panel_id}")
     store = _store(bundle, panel_id, setup)
     before_state = store.get_all()
     before_panel = store.get_panel_state(panel_id)
     if "press" in event:
-        result = we.press(widget, store)
+        result = we.press(widget, store, panel=panel)
     else:
-        result = we.commit(widget, event["commit"], store)
+        result = we.commit(widget, event["commit"], store, panel=panel)
     after_state = store.get_all()
     return {
         "name": name,

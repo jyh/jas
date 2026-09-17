@@ -33,6 +33,25 @@
 //!    undo step. The host runs `snapshot` as `begin_txn`, as the web renderer
 //!    does, so the step is named by the action that opened it.
 //!
+//! # The value events (WIDGET_EVENTS.md, W2b-1b)
+//!
+//! A `commit`/`change` on an input kind and a `click`/`change` on a boolean
+//! kind take the contract's procedures (`commit_value`, `press`) after step
+//! 2. They share steps 4 and 5 (`run_batch`).
+//! * **A commit** refuses `MissingValue` (no `value`) and `BadValue` (text the
+//!   kind refuses, via `widget_commit::parse_commit`). Its batch is the bind
+//!   write (`set_panel_state` of `event.value` into the widget's own panel,
+//!   plus a `set` of the global the panel's `init:` two-way binds it to),
+//!   then every `commit`/`change` behavior, in declaration order.
+//! * **A press** negates the bound expression. A declared `click`/`change`
+//!   behavior replaces the bind write.
+//! * **Conditions:** a behavior's `condition` becomes an `if` inside the
+//!   batch, so it reads the store after the bind write, as the reference does.
+//! * **Inert:** a value widget with nothing to write and nothing declared is
+//!   `EmptyBehavior`.
+//! * **Oracle:** `test_fixtures/widget_events/corpus.json`, driven through the
+//!   export in `ffi.rs`.
+//!
 //! # What this does NOT do, stated as negatives
 //!
 //! * `init:` is not evaluated when a panel's store scope is seeded (the web
@@ -46,6 +65,11 @@
 //!   aligns to the FIRST artboard (`EngineHost::artboard_selection` is `[]`).
 //! * A behavior that WRITES one of the colour slice's three `state.*` keys
 //!   writes the store's copy only. No align behavior does.
+//! * A value widget bound to `dialog.<ident>` is not written: the engine hosts
+//!   no dialog, and no panel carries such a bind.
+//! * The door does not report how many behaviors ran, or whether the bind was
+//!   written. The corpus's `behaviors_run` and `bind_written` are the
+//!   reference's.
 
 use serde_json::{json, Map, Value};
 
@@ -54,6 +78,9 @@ use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+use crate::interpreter::widget_commit::{
+    self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, PRESS_EVENTS,
+};
 pub use crate::panel_scope::COLOUR_PANEL;
 
 /// The Align panel's id. Its store scope is where [`EngineHost`] reads the
@@ -93,6 +120,10 @@ pub struct UserEvent {
     /// `event.alt` / `event.shift` / `event.meta` / `event.ctrl`, the names the
     /// web click handler gives a behavior's `condition`.
     pub modifiers: Value,
+    /// The text a person committed into an input widget (WIDGET_EVENTS.md),
+    /// exactly as the shell sent it: `None` when absent. The engine parses it;
+    /// the shell never does.
+    pub value: Option<Value>,
 }
 
 /// Read the shell's event JSON. `event` defaults to `click`, as a behavior's
@@ -112,6 +143,7 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
         event: event.to_string(),
         modifiers: json!({"alt": flag("alt"), "shift": flag("shift"),
                           "meta": flag("meta"), "ctrl": flag("ctrl")}),
+        value: obj.get("value").cloned(),
     })
 }
 
@@ -224,6 +256,18 @@ pub fn run_widget_behavior(
         }
     }
 
+    // The value events (WIDGET_EVENTS.md). A commit on an input kind and a
+    // press on a boolean kind follow the contract; every other event on every
+    // other kind keeps the click path below.
+    let kind = node.get("type").and_then(Value::as_str).unwrap_or("");
+    if INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()) {
+        return commit_value(panel_id, spec, node, ev, scope, store, model, actions, dialogs,
+                            host);
+    }
+    if BOOLEAN_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()) {
+        return press(panel_id, spec, node, ev, scope, store, model, actions, dialogs, host);
+    }
+
     let mut cond_scope = scope.clone();
     if let Some(m) = cond_scope.as_object_mut() {
         m.insert("event".into(), ev.modifiers.clone());
@@ -258,13 +302,30 @@ pub fn run_widget_behavior(
     if chosen == 0 {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
+    run_batch(panel_id, &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
+              host)
+}
 
+/// Pre-flight `batch` on copies, then run it for real (module doc, steps 4
+/// and 5). `event` is what the batch reads as `event.*`.
+#[allow(clippy::too_many_arguments)]
+fn run_batch(
+    panel_id: &str,
+    batch: &[Value],
+    event: Value,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
     // The runner reads `state` and `panel` from the STORE, live, so a `set`
     // early in the batch is seen by an expression later in it. The context
     // carries only what the store does not hold.
     let ctx = json!({
         "active_document": scope.get("active_document").cloned().unwrap_or(Value::Null),
-        "event": ev.modifiers.clone(),
+        "event": event,
     });
     // `set_panel_state` writes the ACTIVE panel. It is set on the copy for the
     // pre-flight and on the live store only once the pre-flight passes: a
@@ -272,7 +333,7 @@ pub fn run_widget_behavior(
     let mut dry_store = store.clone();
     dry_store.set_active_panel(Some(panel_id));
     let mut dry_model = model.clone();
-    let preflight = run_effects_hosted(&batch, &ctx, &mut dry_store, Some(&mut dry_model),
+    let preflight = run_effects_hosted(batch, &ctx, &mut dry_store, Some(&mut dry_model),
                                        Some(actions), Some(dialogs), None, &mut *host);
     if let Some(first) = preflight.unhandled.first() {
         return Err(Refusal::new("PlatformEffect", unhandled_detail(first)));
@@ -281,7 +342,7 @@ pub fn run_widget_behavior(
     store.set_active_panel(Some(panel_id));
     let state_before = store.eval_context();
     let generation = model.generation();
-    let report = run_effects_hosted(&batch, &ctx, store, Some(&mut *model), Some(actions),
+    let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
                                     Some(dialogs), None, host);
     debug_assert!(report.all_handled(),
                   "the pre-flight passed and the real run did not: {report:?}");
@@ -289,6 +350,136 @@ pub fn run_widget_behavior(
         doc_changed: model.generation() != generation,
         state_changed: store.eval_context() != state_before,
     })
+}
+
+/// A value event's behaviors, in declaration order: each one's effects and
+/// then its action, as ONE entry. A `condition` becomes an `if` around its
+/// behavior, so it is evaluated when that behavior's turn comes, after the
+/// bind write and the behaviors before it, as the reference evaluates it.
+/// Returns the batch and how many behaviors the widget DECLARES for `events`.
+fn value_behaviors(node: &Value, events: &[&str], widget: &str)
+                   -> Result<(Vec<Value>, usize), Refusal> {
+    let mut batch = vec![];
+    let mut declared = 0;
+    for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
+        let Some(event) = b.get("event").and_then(Value::as_str) else { continue };
+        if !events.contains(&event) {
+            continue;
+        }
+        declared += 1;
+        let mut body: Vec<Value> = b.get("effects").and_then(Value::as_array)
+            .cloned().unwrap_or_default();
+        if let Some(action) = b.get("action").and_then(Value::as_str) {
+            let mut d = Map::new();
+            d.insert("action".into(), Value::String(action.to_string()));
+            if let Some(params) = b.get("params") {
+                d.insert("params".into(), params.clone());
+            }
+            body.push(json!({"dispatch": Value::Object(d)}));
+        }
+        if body.is_empty() {
+            return Err(Refusal::new("EmptyBehavior", widget.to_string()));
+        }
+        match b.get("condition").and_then(Value::as_str) {
+            Some(cond) => batch.push(json!({"if": {"condition": cond, "then": body}})),
+            None => batch.extend(body),
+        }
+    }
+    Ok((batch, declared))
+}
+
+/// The bind write as effects: the evaluated `event.value` into the widget's
+/// own panel, then into the global the panel's `init:` two-way binds that
+/// field to. Empty when the widget binds nothing this layer writes. A
+/// `dialog.<ident>` bind is writable by the contract, and no panel the engine
+/// hosts carries one, so the engine writes panel binds only.
+fn bind_write(node: &Value, spec: &Value, panel_id: &str) -> Vec<Value> {
+    let Some(target) = widget_commit::bound_target(node) else { return vec![] };
+    let Some(("panel", key)) = widget_commit::writable_target(target) else { return vec![] };
+    let mut out = vec![json!({"set_panel_state": {
+        "key": key, "value": "event.value", "panel": panel_id}})];
+    if let Some(global) = widget_commit::mirrored_global(spec, key) {
+        out.push(json!({"set": {format!("state.{global}"): "event.value"}}));
+    }
+    out
+}
+
+/// `event.*` for a value event: the modifiers, plus `value`.
+fn value_event(ev: &UserEvent, value: Value) -> Value {
+    let mut event = ev.modifiers.clone();
+    if let Some(m) = event.as_object_mut() {
+        m.insert("value".into(), value);
+    }
+    event
+}
+
+/// A commit on an input kind (WIDGET_EVENTS.md, "Committing a value"). The
+/// disabled refusal has already run. `MissingValue` for no text (or JSON
+/// null), `BadValue` for text the kind refuses or a value that is not text.
+/// Then ONE batch: the bind write, then every `commit`/`change` behavior.
+/// A widget with neither is refused as `EmptyBehavior` (the contract's
+/// `inert`).
+#[allow(clippy::too_many_arguments)]
+fn commit_value(
+    panel_id: &str,
+    spec: &Value,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    let text = match &ev.value {
+        None | Some(Value::Null) => return Err(Refusal::new("MissingValue", ev.widget.clone())),
+        Some(Value::String(t)) => t,
+        Some(_) => return Err(Refusal::new("BadValue", ev.widget.clone())),
+    };
+    let Some(value) = widget_commit::parse_commit(node, text) else {
+        return Err(Refusal::new("BadValue", ev.widget.clone()));
+    };
+    let mut batch: Vec<Value> = bind_write(node, spec, panel_id);
+    let (behaviors, _) = value_behaviors(node, &COMMIT_EVENTS, &ev.widget)?;
+    batch.extend(behaviors);
+    if batch.is_empty() {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+              host)
+}
+
+/// A press on a boolean kind (WIDGET_EVENTS.md, "Pressing a boolean"). The
+/// new value is the negation of the bound expression in the engine's scope.
+/// A declared `click`/`change` behavior IS the press, and the bind is not
+/// written; otherwise the new value is written. Neither is `EmptyBehavior`.
+#[allow(clippy::too_many_arguments)]
+fn press(
+    panel_id: &str,
+    spec: &Value,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    let current = widget_commit::bound_target(node).is_some_and(|e| eval(e, scope).to_bool());
+    let value = Value::Bool(!current);
+    let (behaviors, declared) = value_behaviors(node, &PRESS_EVENTS, &ev.widget)?;
+    let batch = if declared > 0 {
+        behaviors
+    } else {
+        bind_write(node, spec, panel_id)
+    };
+    if batch.is_empty() {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+              host)
 }
 
 /// Document fixtures shared by this module's arms and the ABI's.
@@ -683,5 +874,163 @@ mod tests {
         assert!(seen.len() > 10, "the walk followed only {} dispatches", seen.len());
         assert_eq!(found, Vec::<String>::new(),
                    "a panel behavior reaches a thread-local effect; the dry run is unsound");
+    }
+
+    // ── The value door (W2b-1b, WIDGET_EVENTS.md), on hand-built widgets ──
+    // The corpus drives shipped widgets through the FFI; these pin the
+    // clauses no shipped widget exercises.
+
+    const PROBE: &str = "probe_panel_content";
+
+    /// Run `event` on `node`, alone in a probe panel whose scope is `panel`.
+    fn door(node: Value, event: Value, panel: Value) -> (Result<Ran, Refusal>, StateStore) {
+        door_in(json!({}), node, event, panel)
+    }
+
+    /// `door` in a panel whose `init:` is `init`.
+    fn door_in(init: Value, node: Value, event: Value, panel: Value)
+               -> (Result<Ran, Refusal>, StateStore) {
+        let spec = json!({"init": init,
+                          "content": {"type": "container", "children": [node]}});
+        let mut store = StateStore::new();
+        let scope_map = panel.as_object().unwrap().iter()
+            .map(|(k, v)| (k.clone(), v.clone())).collect();
+        store.init_panel(PROBE, scope_map);
+        let ev = parse_event(&event).expect("event parses");
+        let scope = json!({"state": {}, "panel": panel, "active_document": {}});
+        let mut model = Model::default();
+        let r = run_widget_behavior(PROBE, &spec, &ev, &scope, &mut store, &mut model,
+                                    &json!({}), &json!({}),
+                                    &mut EngineHost { artboard_selection: vec![] });
+        (r, store)
+    }
+
+    #[test]
+    fn change_is_a_commit_and_its_behavior_reads_the_new_value() {
+        let node = json!({"type": "number_input", "id": "w", "bind": {"value": "panel.n"},
+            "behavior": [{"event": "change", "effects": [
+                {"set_panel_state": {"key": "seen", "value": "panel.n"}}]}]});
+        let (r, store) = door(node, json!({"widget": "w", "event": "change", "value": "7"}),
+                              json!({"n": 1, "seen": null}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "n").as_f64(), Some(7.0));
+        assert_eq!(store.get_panel(PROBE, "seen").as_f64(), Some(7.0));
+    }
+
+    #[test]
+    fn a_condition_is_read_after_the_bind_write() {
+        let node = json!({"type": "number_input", "id": "w", "bind": {"value": "panel.n"},
+            "behavior": [{"event": "commit", "condition": "panel.n > 10", "effects": [
+                {"set_panel_state": {"key": "big", "value": "true"}}]}]});
+        let ev = |t: &str| json!({"widget": "w", "event": "commit", "value": t});
+        let (_, store) = door(node.clone(), ev("50"), json!({"n": 1, "big": false}));
+        assert_eq!(store.get_panel(PROBE, "big"), &json!(true));
+        let (r, store) = door(node, ev("5"), json!({"n": 1, "big": false}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "big"), &json!(false));
+    }
+
+    #[test]
+    fn a_value_that_is_not_text_is_refused_and_moves_nothing() {
+        let node = json!({"type": "number_input", "id": "w", "bind": {"value": "panel.n"}});
+        for value in [json!(40), json!(true), json!(["40"])] {
+            let (r, store) = door(node.clone(),
+                                  json!({"widget": "w", "event": "commit", "value": value}),
+                                  json!({"n": 1}));
+            assert_eq!(r, Err(Refusal::new("BadValue", "w")), "{value}");
+            assert_eq!(store.get_panel(PROBE, "n"), &json!(1));
+        }
+        let (r, _) = door(node, json!({"widget": "w", "event": "commit"}), json!({"n": 1}));
+        assert_eq!(r, Err(Refusal::new("MissingValue", "w")));
+    }
+
+    #[test]
+    fn an_undeclared_boolean_writes_its_negation() {
+        for (kind, key) in [("toggle", "checked"), ("checkbox", "value")] {
+            let node = json!({"type": kind, "id": "b", "bind": {key: "panel.on"}});
+            let (r, store) = door(node, json!({"widget": "b"}), json!({"on": true}));
+            assert!(r.is_ok_and(|ran| ran.state_changed), "{kind}");
+            assert_eq!(store.get_panel(PROBE, "on"), &json!(false), "{kind}");
+        }
+    }
+
+    #[test]
+    fn a_declared_press_sees_the_new_boolean_and_the_field_is_not_written() {
+        let node = json!({"type": "checkbox", "id": "b", "bind": {"checked": "panel.on"},
+            "behavior": [{"event": "click", "effects": [
+                {"set_panel_state": {"key": "seen", "value": "event.value"}}]}]});
+        let (r, store) = door(node, json!({"widget": "b", "event": "change"}),
+                              json!({"on": true, "seen": null}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "seen"), &json!(false));
+        assert_eq!(store.get_panel(PROBE, "on"), &json!(true));
+    }
+
+    #[test]
+    fn a_press_whose_only_behavior_is_skipped_writes_nothing() {
+        let node = json!({"type": "toggle", "id": "b", "bind": {"checked": "panel.on"},
+            "behavior": [{"event": "click", "condition": "panel.armed", "effects": [
+                {"set_panel_state": {"key": "on", "value": "false"}}]}]});
+        let (r, store) = door(node, json!({"widget": "b"}), json!({"on": true, "armed": false}));
+        assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: false }));
+        assert_eq!(store.get_panel(PROBE, "on"), &json!(true));
+    }
+
+    #[test]
+    fn an_inert_value_widget_is_refused_as_empty() {
+        let (r, _) = door(json!({"type": "number_input", "id": "w"}),
+                          json!({"widget": "w", "event": "commit", "value": "5"}), json!({}));
+        assert_eq!(r, Err(Refusal::new("EmptyBehavior", "w")));
+        let (r, _) = door(json!({"type": "toggle", "id": "b", "bind": {"checked": "state.x"}}),
+                          json!({"widget": "b"}), json!({}));
+        assert_eq!(r, Err(Refusal::new("EmptyBehavior", "b")));
+    }
+
+    #[test]
+    fn the_two_way_bind_writes_the_mapped_global_before_the_behaviors() {
+        let init = json!({"n": "state.gn", "b": "state.gb", "e": "state.a + 1"});
+        let node = json!({"type": "number_input", "id": "w", "bind": {"value": "panel.n"},
+            "behavior": [{"event": "commit", "effects": [
+                {"set_panel_state": {"key": "seen", "value": "state.gn"}}]}]});
+        let (r, store) = door_in(init.clone(), node,
+                                 json!({"widget": "w", "event": "commit", "value": "7"}),
+                                 json!({"n": 1, "seen": null}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get("gn").as_f64(), Some(7.0));
+        assert_eq!(store.get_panel(PROBE, "seen").as_f64(), Some(7.0));
+        // An expression mapping is not a two-way bind.
+        let node = json!({"type": "number_input", "id": "w", "bind": {"value": "panel.e"}});
+        let (_, store) = door_in(init.clone(), node,
+                                 json!({"widget": "w", "event": "commit", "value": "7"}),
+                                 json!({"e": 1}));
+        assert_eq!(store.get("a"), &Value::Null);
+        assert_eq!(store.get_panel(PROBE, "e").as_f64(), Some(7.0));
+        // An undeclared press writes both; a declared one writes neither.
+        let node = json!({"type": "toggle", "id": "t", "bind": {"checked": "panel.b"}});
+        let (_, store) = door_in(init.clone(), node, json!({"widget": "t"}), json!({"b": true}));
+        assert_eq!((store.get_panel(PROBE, "b"), store.get("gb")), (&json!(false), &json!(false)));
+        let node = json!({"type": "toggle", "id": "t", "bind": {"checked": "panel.b"},
+            "behavior": [{"event": "click", "effects": [
+                {"set_panel_state": {"key": "x", "value": "1"}}]}]});
+        let (_, store) = door_in(init, node, json!({"widget": "t"}), json!({"b": true}));
+        assert_eq!((store.get_panel(PROBE, "b"), store.get("gb")), (&json!(true), &Value::Null));
+    }
+
+    #[test]
+    fn text_entry_events_are_not_commits() {
+        let node = json!({"type": "text_input", "id": "t", "bind": {"value": "panel.q"},
+            "behavior": [{"event": "input", "effects": [
+                {"set_panel_state": {"key": "typed", "value": "true"}}]}]});
+        // `input` keeps the click path: its own behavior runs, nothing is parsed.
+        let (r, store) = door(node.clone(), json!({"widget": "t", "event": "input"}),
+                              json!({"q": "", "typed": false}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "typed"), &json!(true));
+        // A commit writes the bind and does not run the `input` behavior.
+        let (r, store) = door(node, json!({"widget": "t", "event": "commit", "value": "abc"}),
+                              json!({"q": "", "typed": false}));
+        assert!(r.is_ok(), "{r:?}");
+        assert_eq!(store.get_panel(PROBE, "q"), &json!("abc"));
+        assert_eq!(store.get_panel(PROBE, "typed"), &json!(false));
     }
 }
