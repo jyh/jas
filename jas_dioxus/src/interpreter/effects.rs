@@ -64,6 +64,9 @@ pub enum Unhandled {
     /// An `open_dialog` naming a dialog the catalog does not hold, or run
     /// with no catalog.
     UnknownDialog(String),
+    /// An `open_dialog` that a host refuses because it has no way to show a
+    /// dialog (the engine, FB wave 2b A12). Carries the dialog's id.
+    Dialog(String),
 }
 
 /// What a `run_effects` batch did not do, in the order the runner met it,
@@ -122,6 +125,14 @@ pub trait EffectHost {
         model: Option<&mut Model>,
     ) -> bool;
 
+    /// Refuse the effect `key` by name (FB wave 2b, A12). The runner asks
+    /// this before [`EffectHost::run`] and before any built-in arm. A refused
+    /// key is reported as the returned item, and nothing runs for it. The
+    /// default refuses nothing.
+    fn refuse(&mut self, _key: &str, _arg: &serde_json::Value) -> Option<Unhandled> {
+        None
+    }
+
     /// A global `state.*` key was written (FB wave 2b, A11). The reference
     /// fires its store subscriptions from `StateStore.set`; this is that hook,
     /// for a host with a subscription of its own (the engine's Stroke apply).
@@ -170,6 +181,15 @@ pub fn run_effects_hosted(
     run_effects_into(effects, ctx, store, model, actions, dialogs, action_name,
                      Some(host), &mut report);
     report
+}
+
+/// The dialog an `open_dialog` argument names: `{id: <id>, …}` or a bare
+/// `<id>`. Anything else names no dialog, and reads as `""`.
+pub fn dialog_id(arg: &serde_json::Value) -> &str {
+    match arg.as_object() {
+        Some(obj) => obj.get("id").and_then(|v| v.as_str()).unwrap_or(""),
+        None => arg.as_str().unwrap_or(""),
+    }
 }
 
 /// A dispatch parameter's value. A bare identifier that evaluates to null is
@@ -343,7 +363,14 @@ fn run_one<'h>(
     // return binding, never an effect.
     if let Some(h) = host.as_deref_mut() {
         for (key, arg) in effect {
-            if key != "as" && h.run(key, arg, store, model.as_deref_mut()) {
+            if key == "as" {
+                continue;
+            }
+            if let Some(refused) = h.refuse(key, arg) {
+                report.unhandled.push(refused);
+                return;
+            }
+            if h.run(key, arg, store, model.as_deref_mut()) {
                 return;
             }
         }
@@ -645,11 +672,7 @@ fn run_one<'h>(
 
     // open_dialog: { id, params }
     if let Some(od) = effect.get("open_dialog") {
-        let dlg_id = if let Some(obj) = od.as_object() {
-            obj.get("id").and_then(|v| v.as_str()).unwrap_or("")
-        } else {
-            od.as_str().unwrap_or("")
-        };
+        let dlg_id = dialog_id(od);
         let dlg_def = dialogs
             .and_then(|d| d.get(dlg_id));
         let dlg_def = match dlg_def {
@@ -12621,6 +12644,50 @@ mod tests {
         assert_eq!(
             report_of(vec![serde_json::json!({"dispatch": "real"})], None, None, None),
             vec![Unhandled::UnknownAction("real".into())]);
+    }
+
+    /// A12: a key the host refuses is reported as the host's item, and neither
+    /// the host's `run` nor the built-in arm runs it. Here the built-in arm
+    /// would open a dialog the catalog holds. The refusal reaches a nested
+    /// batch too, and a key the host does not refuse still runs.
+    #[test]
+    fn a_host_refusal_is_reported_and_nothing_runs_for_it() {
+        struct NoDialogs {
+            ran: Vec<String>,
+        }
+        impl EffectHost for NoDialogs {
+            fn run(&mut self, key: &str, _: &serde_json::Value, _: &mut StateStore,
+                   _: Option<&mut Model>) -> bool {
+                self.ran.push(key.to_string());
+                false
+            }
+            fn refuse(&mut self, key: &str, arg: &serde_json::Value) -> Option<Unhandled> {
+                (key == "open_dialog").then(|| Unhandled::Dialog(dialog_id(arg).to_string()))
+            }
+        }
+        let dialogs = serde_json::json!({
+            "simple": {"summary": "Simple", "state": {"name": {"default": "x"}},
+                       "content": {"type": "container"}},
+        });
+        let actions = serde_json::json!({
+            "opens": {"effects": [{"open_dialog": "simple"}]},
+        });
+        let mut store = StateStore::new();
+        store.set("marker", serde_json::json!(false));
+        let mut host = NoDialogs { ran: vec![] };
+        let report = run_effects_hosted(
+            &[serde_json::json!({"open_dialog": {"id": "simple"}}),
+              serde_json::json!({"dispatch": "opens"}),
+              serde_json::json!({"set": {"marker": "true"}})],
+            &serde_json::json!({}), &mut store, None, Some(&actions), Some(&dialogs), None,
+            &mut host);
+        assert_eq!(report.unhandled,
+                   vec![Unhandled::Dialog("simple".into()), Unhandled::Dialog("simple".into())]);
+        assert_eq!(store.dialog_id(), None, "a refused open_dialog opened the dialog");
+        assert!(!host.ran.iter().any(|k| k == "open_dialog"),
+                "the host was asked to run a key it refused: {:?}", host.ran);
+        assert_eq!(store.get("marker"), &serde_json::json!(true),
+                   "a key the host does not refuse did not run");
     }
 
     #[test]

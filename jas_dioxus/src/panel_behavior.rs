@@ -75,7 +75,7 @@ use serde_json::{json, Map, Value};
 
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
-use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
+use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
@@ -161,6 +161,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * A write to one of the Properties panel's eight fields applies it to the
 ///   selection through `properties_host` (W2b-5), as the reference's
 ///   `subscribe_properties_panel` does.
+/// * `open_dialog` is REFUSED by the dialog's name (A12). The engine has no
+///   dialog door, and the runner's own arm would open the dialog in a store no
+///   shell can show, then report success.
 ///
 /// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
@@ -187,6 +190,10 @@ impl EffectHost for EngineHost {
             return true;
         }
         false
+    }
+
+    fn refuse(&mut self, key: &str, arg: &Value) -> Option<Unhandled> {
+        (key == "open_dialog").then(|| Unhandled::Dialog(dialog_id(arg).to_string()))
     }
 
     /// A11: a write to a Stroke render key applies that field of the Stroke
@@ -237,6 +244,7 @@ fn unhandled_detail(u: &Unhandled) -> String {
         Unhandled::UnknownAction(s) => ("UnknownAction", s),
         Unhandled::EmptyAction(s) => ("EmptyAction", s),
         Unhandled::UnknownDialog(s) => ("UnknownDialog", s),
+        Unhandled::Dialog(s) => ("Dialog", s),
     };
     format!("{kind}:{payload}")
 }
@@ -679,6 +687,23 @@ mod tests {
         for declined in ["boolean_union", "set", "doc.snapshot", "zz_planted"] {
             assert!(!host.run(declined, &Value::Null, &mut store, Some(&mut model)),
                     "the engine host claimed {declined}");
+            assert_eq!(host.refuse(declined, &Value::Null), None,
+                       "the engine host refused {declined}");
+        }
+    }
+
+    /// A12: `open_dialog` is refused by the dialog's id, in both of the
+    /// argument's spellings, and never run.
+    #[test]
+    fn the_engine_host_refuses_a_dialog_by_its_id() {
+        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut store = StateStore::new();
+        let mut model = misaligned(&[0]);
+        for (arg, id) in [(json!({"id": "brush_options", "params": {}}), "brush_options"),
+                          (json!("artboard_options"), "artboard_options"),
+                          (json!(7), "")] {
+            assert_eq!(host.refuse("open_dialog", &arg), Some(Unhandled::Dialog(id.into())));
+            assert!(!host.run("open_dialog", &arg, &mut store, Some(&mut model)));
         }
     }
 
@@ -696,6 +721,7 @@ mod tests {
             Unhandled::UnknownAction("k".into()),
             Unhandled::EmptyAction("k".into()),
             Unhandled::UnknownDialog("k".into()),
+            Unhandled::Dialog("k".into()),
         ];
         let mut names = vec![];
         for u in &all {
@@ -704,6 +730,8 @@ mod tests {
             assert_eq!(unhandled_detail(u), format!("{kind}:k"));
             names.push(kind.to_string());
         }
+        // `dedup` removes only ADJACENT repeats, so sort first.
+        names.sort();
         names.dedup();
         assert_eq!(names.len(), all.len(), "two kinds share a name");
     }
