@@ -986,9 +986,17 @@ behavior:
 ```
 
 An entry may specify `action` (dispatches a named action from the catalog),
-`effects` (inline list executed directly), or both (action runs first, then
-inline effects). If `condition` is present, the handler only fires when the
-expression is true.
+`effects` (inline list executed directly), or both. With both, the inline
+effects run first and the action is dispatched after them, in the same batch.
+If `condition` is present, the handler only fires when the expression is true.
+
+*(Until 2026-09-16 this paragraph said the action runs first. Both active
+ports have always run the effects first, in their click handlers and their
+value handlers, and `WIDGET_EVENTS.md` made that order the contract for the
+value kinds. The four shipped entries that carry both (`cp_eyedropper`,
+`bp_remove_brush_stroke_btn`, a brushes tile and a swatches tile) dispatch
+actions that read their own `params`, not what the effects wrote, so no
+shipped behavior changes.)*
 
 ### Event Types
 

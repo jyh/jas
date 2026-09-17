@@ -208,15 +208,13 @@ these is a measured failure.
 - **Both ports clamp `length_input`, and `UNIT_INPUTS.md` said "reject".**
   The ports were right, and that document is amended in the same change
   as this one.
-- **`SCHEMA.md` §behavior says that when an entry has both `action` and
-  `effects`, the action runs first. Both active ports run the effects
-  first,** in their value handlers (`renderer.rs:3175-3186`,
+- **Resolved: `SCHEMA.md` §behavior used to say that an entry's `action`
+  runs before its `effects`.** Both active ports run the effects first, in
+  their value handlers (`renderer.rs:3175-3186`,
   `YamlPanelBodyView.swift:2296-2312`) and in their click handlers
-  (`renderer.rs:4700-4711`, `YamlPanelBodyView.swift:1245-1256`). This
-  contract follows the ports for the eight value kinds, where no shipped
-  entry carries both today. `SCHEMA.md`'s general sentence also governs
-  other kinds, where four shipped `click` entries carry both. It is
-  flagged for a ruling, and it is not changed here.
+  (`renderer.rs:4700-4711`, `YamlPanelBodyView.swift:1245-1256`).
+  `SCHEMA.md` now says so for every kind. None of the four shipped `click`
+  entries that carry both depends on the order.
 
 ## What this document does not cover
 
