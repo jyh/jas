@@ -245,14 +245,19 @@ rows (`Get-SbValueVerdicts`):
 | clause | passes when |
 |---|---|
 | V1 open | the `PANEL OPEN via=app` row names `SB_PANEL` (any panel when it is unset), with `leaves > 0` and `unjoined=0` |
-| V2 bad | the `synth:bad` row is `PANEL CLICK REFUSED` with class `BadValue`, and `vb == v0`, `db == d0` |
-| V3 commit | the `synth:commit` row is `outcome=changed`, `delta-mismatch=0`, and `v1` is the knob's text byte for byte. NOT RUN when `v0` already equals the text, or when the text is outside the number grammar or not in canonical form (a leading zero, a trailing `.0`) |
-| V4 press | the `synth:press` row is `outcome=changed`; `c2 != c1`, `d2 != d1`, `v2 == v1` |
-| V5 restore | the `synth:press-again` row is `outcome=changed`; `c3 == c1`, `d3 == d1`, `v3 == v1` |
-| V6 done | exactly one done row, naming the knobs' widgets and the opened panel, with five readings per field and none `ABSENT` or `UNREADABLE` |
+| V2 bad | the `synth:bad` row, on the commit widget, is `PANEL CLICK REFUSED` with class `BadValue`, and `vb == v0`, `db == d0`, `cb == c0` |
+| V3 commit | the `synth:commit` row, on the commit widget, is `outcome=changed` with `delta-mismatch=0` and no `RUSTFAIL`, and `v1` is the knob's text byte for byte. NOT RUN when `v0` already equals the text, or when the text is not a canonical number (outside the grammar, a leading zero, a trailing zero after the point, `-0`) |
+| V4 press | the `synth:press` row, on the press widget, is a clean change; `c2 != c1`, `d2 != d1`, `v2 == v1` |
+| V5 restore | the `synth:press-again` row is a clean change; `c3 == c1`, `d3 == d1`, `v3 == v1` |
+| V6 done | exactly one done row, naming the knobs' widgets and `SB_PANEL` (or, unset, the panel the app opened), with five readings per field and none `ABSENT` or `UNREADABLE` |
 
 The knobs set on any scene but `app` are FAIL, never a quiet NOT RUN; unset,
-every clause is NOT RUN by name. `sitting.ps1 -Scenes mw` is the route
+every clause is NOT RUN by name. A pair the shell must refuse (one knob alone,
+no `:`) is a V2 FAIL even beside a done row. **An equality needs its
+instrument to have read two different values in the run**: a reading that
+never varied leaves V2 and V5, and V4's value half, NOT RUN, since a constant
+satisfies every equality. `Get-SbValueWaits` is the wait, and it ends only on
+the done row or on the replay's own refusal or throw. `sitting.ps1 -Scenes mw` is the route
 (`magic_wand_panel_content`, `mwp_fill_tolerance:40`, `mwp_fill_color`), and
 the Rust arm `panel_behavior_the_value_replay_on_the_sittings_panel` reads
 those three values out of `sitting.ps1` and drives the same sequence through
@@ -264,7 +269,10 @@ menu, so P4.4 reads NOT RUN on such a run, as it does under Q6.
 loss) and a real mouse on the check box; `abc` is the only refused text; a
 value whose text holds whitespace or `/` cannot ride the slash field, and the
 harness refuses such a field by its part count rather than reading it; V3 does
-not know the widget's `min`/`max`, so a text the core clamps reads FAIL.
+not know the widget's `min`/`max`, so a text the core clamps reads FAIL. The
+clauses assume what the route satisfies: V2 that the commit widget refuses
+`abc` (a text input would accept it), and V4/V5 that the pressed toggle governs
+the commit widget's `disabled`.
 
 ## Knobs
 
@@ -736,6 +744,7 @@ powershell -File prototypes\sb_winui\sitting.ps1 -DryRun        # resolve every 
 powershell -File prototypes\sb_winui\sitting.ps1                # benchmark x2, document, retained, stall, pointer x3, goldens
 powershell -File prototypes\sb_winui\sitting.ps1 -Scenes o6    # the two O6 runs: the squeeze, then the probe
 powershell -File prototypes\sb_winui\sitting.ps1 -Scenes q6    # one app run with the Align pane's synthetic replay (Q6)
+powershell -File prototypes\sb_winui\sitting.ps1 -Scenes mw    # one app run with the Magic Wand pane's value replay (V1-V6)
 ```
 
 `-DryRun` (alias `-WhatIf`) exists on both entry points: it prints the resolved
