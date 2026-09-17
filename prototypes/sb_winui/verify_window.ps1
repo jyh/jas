@@ -755,6 +755,28 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
     }
 }
 
+# ---- the menubar's newest delivery (P4.2) ----------------------------------
+#
+# ⛔ THE RENDER THREAD WRITES `MENU PUBLISHED` BEFORE THE UI THREAD CAN DRAW IT,
+# so rows read the moment the waits above end can hold the newest publication
+# undelivered -- and P4.2 would call a LATE notification a stale menubar. This
+# polls `Test-SbMenuSettled` (true at once when nothing was published, which is
+# every scene but `app`), bounded; a timeout is NOT a verdict here, it leaves
+# P4.2 to judge what arrived, which by then is a real loss.
+# ⛔ ONLY AFTER A SCENE THAT COMPLETED, for the reason the pane waits give.
+if ($sceneOutcome.Verdict -eq 'DONE') {
+    $mw = [System.Diagnostics.Stopwatch]::StartNew()
+    $menuSettled = Test-SbMenuSettled $rows
+    while (-not $menuSettled -and $mw.Elapsed.TotalSeconds -lt 10) {
+        Start-Sleep -Milliseconds 250
+        $rows = Read-SbRows $log $logMark
+        $menuSettled = Test-SbMenuSettled $rows
+    }
+    if (-not $menuSettled) {
+        $verdicts += "note: the newest menu publication was not delivered within $([math]::Round($mw.Elapsed.TotalSeconds, 1))s; P4.2 judges what arrived"
+    }
+}
+
 # ---- the session-1 liveness samples, read back ----------------------------
 #
 # ⛔ READ AFTER THE SCENE'S WAIT, AND BOUNDED AGAIN. The sampler needs ~10 s and

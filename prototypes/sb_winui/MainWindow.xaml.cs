@@ -1334,14 +1334,33 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// The `Seq` of the snapshot currently drawn.
     ///
-    /// ⭐ IT IS NOT A SOUVENIR — IT DETECTS A LOST NOTIFICATION. `Canvas.PostToUi`
-    /// drops `TryEnqueue`'s bool and returns silently when the queue is null, so
-    /// a menu announcement CAN vanish. The failure mode is a stale menubar with
-    /// no diagnostic at all — an item enabled that should not be, which §7 stop 3
-    /// is written about. A jump in `Seq` is the only evidence that would ever
-    /// exist, so the row carries `missed=`.
+    /// `Canvas.PostToUi` drops `TryEnqueue`'s bool and returns silently when the
+    /// queue is null, so a menu announcement CAN vanish, and the failure mode is
+    /// a stale menubar with no diagnostic at all — an item enabled that should
+    /// not be, which §7 stop 3 is written about.
+    ///
+    /// ⛔ BUT A JUMP IN `Seq` IS NOT THAT EVIDENCE, AND IT WAS READ AS IF IT WERE.
+    /// This handler reads whichever `Menu` is CURRENT, so a burst of publications
+    /// is drawn once at its newest seq — a jump — and the notifications behind
+    /// it re-read that seq. kenai 2026-09-16 (W2-7's q6 replay): seq 1, 2, 6, 6,
+    /// 6, 6, six deliveries of six publications, and P4.2 red on `missed=3`.
+    /// `missed=` stays on the row as a reading; the loss is decided by
+    /// <see cref="_menuDelivered"/> against the render thread's `MENU PUBLISHED`.
     /// </summary>
     private long _menuDrawnSeq = 0;
+
+    /// <summary>
+    /// Menu notifications this thread has handled, counting the current one,
+    /// and how many of them found their snapshot already drawn (P4.2).
+    ///
+    /// ⭐ THE CONSUMER'S HALF OF P4.2. Every publication posts exactly one
+    /// notification (`Canvas.ApplyMenuRefresh`), so `delivered` equal to the
+    /// newest `MENU PUBLISHED` seq means none was lost — including the LAST one,
+    /// which no UI-side reading alone can see. `coalesced` is the benign half of
+    /// a `Seq` jump: latest-wins, by design, and never a loss.
+    /// </summary>
+    private long _menuDelivered = 0;
+    private long _menuCoalesced = 0;
 
     /// <summary>
     /// Shortcut specs this rebuild could not turn into an accelerator.
@@ -1369,8 +1388,12 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnMenuChanged()
     {
+        // Counted BEFORE anything can return: a notification that arrived was
+        // delivered, whether or not it could be drawn.
+        _menuDelivered++;
         var snap = _canvas.Menu;
         if (snap is null) { return; }
+        if (snap.Seq == _menuDrawnSeq) { _menuCoalesced++; }
         try
         {
             var (items, enabled) = BuildMenu(snap);
@@ -1386,13 +1409,15 @@ public sealed partial class MainWindow : Window
             // one. The field stays on the row rather than being dropped: a
             // reader comparing runs across the change needs to see that the
             // number went to zero, not that the column vanished.
-            // A gap means a publication was announced and never arrived. Zero
-            // is the expected reading and it is on every row, so the field can
-            // be seen to be working rather than merely absent.
+            // A gap means the snapshot drawn is newer than the last one drawn:
+            // a COALESCE or a LOSS, and this row cannot tell which. A
+            // re-read of the same seq computes -1 and prints 0, and is counted
+            // in `coalesced=` instead. P4.2 decides loss from `delivered=`.
             var missed = snap.Seq - _menuDrawnSeq - 1;
             Report($"MENU rebuilds={snap.Seq} items={items} enabled={enabled} "
                  + $"disabled={items - enabled} seq={snap.Seq} state-age=0 "
                  + $"missed={(missed > 0 ? missed : 0)} "
+                 + $"delivered={_menuDelivered} coalesced={_menuCoalesced} "
                  + $"shortcuts-unparsed={_shortcutsUnparsed}");
             _menuDrawnSeq = snap.Seq;
         }
@@ -1838,6 +1863,9 @@ public sealed partial class MainWindow : Window
             hidden += h;
         }
 
+        // ⚠️ THE MENU ROW's ARITHMETIC, AND ITS LIMIT: this handler also reads the
+        // CURRENT snapshot, so a gap is a coalesce OR a loss. Nothing asserts on
+        // it; see `_menuDelivered` for the form that can tell them apart.
         var missed = snap.Seq - _paneDrawnSeq - 1;
         _paneDrawnSeq = snap.Seq;
         Report($"PANEL DRAWN panel={snap.PanelId} seq={snap.Seq} cause={snap.Cause} "

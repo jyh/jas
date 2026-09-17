@@ -1439,12 +1439,28 @@ if ($null -eq $abiRow) {
 # format strings -- which is the entire argument for having waited for them.
 # `Get-SbRowPattern` makes the prefix optional and keeps the tab as the anchor.
 $menuRows = @(Select-SbRows $rows (Get-SbRowPattern 'MENU' ' rebuilds='))
+
+# ⭐ P4.2 -- DECIDED IN `Get-SbMenuDeliveryVerdict`, ONCE, ON EVERY PATH, AND
+# DELIBERATELY OUTSIDE THE BRANCH BELOW. It asserted `missed=0` on every MENU
+# row until W2-7 reddened it on a run that lost nothing: `missed=` cannot tell a
+# coalesce from a loss (the function's header has the rows). It now compares the
+# render thread's `MENU PUBLISHED` rows with the UI thread's `delivered=` --
+# and once the producer speaks, NO MENU row is a FAIL rather than a NOT RUN,
+# which is why the clause cannot live inside `if ($menuRows.Count -eq 0)`.
+# `verify_window.ps1` has already waited for the newest delivery.
+$p42 = Get-SbMenuDeliveryVerdict $rows
+if ($p42.Verdict -eq 'NOT RUN') {
+    Add-NotRun $p42.Name $p42.Detail -Row $p42.Row
+} else {
+    Add-Assert -Name $p42.Name -Verdict $p42.Verdict -Detail $p42.Detail -Row $p42.Row
+}
+
 if ($menuRows.Count -eq 0) {
     Add-NotRun 'P4.1 every MENU row closes (items == enabled + disabled)' `
         "this run is scene '$Scene' and wrote no MENU row; only a scene that materializes the menubar does"
-    Add-NotRun 'P4.2 no menu publication was lost (missed=0 on every row)' "no MENU row in this run"
     # ⛔ P4.3 WAS THE ONE THAT VANISHED, AND ITS THREE SIBLINGS ARE WHY NOBODY
-    # SAW IT. This branch declared P4.1, P4.2 and P4.4; P4.3's own absent-guard
+    # SAW IT. This branch declared P4.1, P4.2 and P4.4 (P4.2 is decided above
+    # now); P4.3's own absent-guard
     # sits inside the `else` below, reachable only when MENU rows EXIST. So on
     # a scene with no menubar three of the four P4-MENU clauses said so and the
     # fourth disappeared -- measured on kenai 2026-09-09, `abi` 26 assertions
@@ -1455,13 +1471,11 @@ if ($menuRows.Count -eq 0) {
         "this run is scene '$Scene' and wrote no MENU row; a count of unattached accelerators needs a rebuild to have happened"
     Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' "no MENU row in this run"
 } else {
-    $badClose = @(); $badMissed = @(); $badAge = @(); $unreadable = @()
+    $badClose = @(); $unreadable = @()
     foreach ($r in $menuRows) {
         $m = Get-SbMenuRowReading $r
         if (-not $m.Ok) { $unreadable += $r; continue }
         if ($m.Items -ne ($m.Enabled + $m.Disabled)) { $badClose += $r }
-        if ($m.Missed -ne 0) { $badMissed += $r }
-        if ($m.StateAge -ne 0) { $badAge += $r }
     }
     $scope = "$($menuRows.Count) MENU row(s) in this run, $($unreadable.Count) unreadable"
     if ($unreadable.Count -eq $menuRows.Count) {
@@ -1473,16 +1487,6 @@ if ($menuRows.Count -eq 0) {
     } else {
         Add-Assert -Name 'P4.1 every MENU row closes (items == enabled + disabled)' -Verdict 'FAIL' `
             -Detail "$($badClose.Count) of $scope do not close" -Row $badClose[0]
-    }
-
-    if ($unreadable.Count -eq $menuRows.Count) {
-        Add-NotRun 'P4.2 no menu publication was lost (missed=0 on every row)' "every MENU row is unreadable" -Row $menuRows[-1]
-    } elseif ($badMissed.Count -eq 0) {
-        Add-Assert -Name 'P4.2 no menu publication was lost (missed=0 on every row)' -Verdict 'PASS' `
-            -Detail "$scope, all missed=0 and state-age=0 ($($badAge.Count) row(s) with a non-zero age). PostToUi drops TryEnqueue's bool and returns silently on a null queue, so a menu announcement CAN vanish; a jump in seq is the only evidence that would ever exist" -Row $menuRows[-1]
-    } else {
-        Add-Assert -Name 'P4.2 no menu publication was lost (missed=0 on every row)' -Verdict 'FAIL' `
-            -Detail "$($badMissed.Count) of $scope report a lost publication. The failure mode is a STALE MENUBAR WITH NO OTHER DIAGNOSTIC -- an item enabled that should not be" -Row $badMissed[0]
     }
 
     # ⭐ P4.3 -- THE REFUSAL THAT HAD NO READER. Two menubar shortcut specs
@@ -1573,6 +1577,17 @@ foreach ($q in @(Get-SbPaneVerdicts $rows $Scene $env:SB_PANEL_SYNTH)) {
     } else {
         Add-Assert -Name $q.Name -Verdict $q.Verdict -Detail $q.Detail -Row $q.Row
     }
+}
+
+# ⭐ Q6.S5 -- THE WAVE-2 FREEZE's STOP 5, RE-AIMED (v1.7). One clause on every
+# scene, decided in `Get-SbPaneResizeVerdict` for the same reason as the seven
+# above. It asks for ZERO resizes: the pane is in the first layout, and the stop
+# as first written (one expected) could not go red.
+$s5 = Get-SbPaneResizeVerdict $rows $Scene $env:SB_PANEL_SYNTH
+if ($s5.Verdict -eq 'NOT RUN') {
+    Add-NotRun $s5.Name $s5.Detail -Row $s5.Row
+} else {
+    Add-Assert -Name $s5.Name -Verdict $s5.Verdict -Detail $s5.Detail -Row $s5.Row
 }
 
 # ===========================================================================

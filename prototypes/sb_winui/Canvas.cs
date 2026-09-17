@@ -3088,6 +3088,12 @@ internal sealed unsafe class Canvas : IDisposable
 
         _menuRebuilds++;
         Menu = new MenuSnapshot(_menuStructure, menuState, _menuRebuilds);
+        // ⭐ THE PRODUCER'S HALF OF P4.2. The UI thread's `delivered=` is
+        // compared with these rows, and they are the ONLY evidence that a
+        // publication happened: a LAST notification that never arrives leaves
+        // the menubar stale and writes nothing on the UI side at all. Written
+        // here, on the render thread, before the post can be lost.
+        _report($"MENU PUBLISHED seq={_menuRebuilds} cause={cause} {Tids()}");
         // Published FIRST, announced second. The UI thread reads `Menu`, so the
         // reference must already be the new one when the notification lands.
         PostToUi(() => MenuChanged?.Invoke());

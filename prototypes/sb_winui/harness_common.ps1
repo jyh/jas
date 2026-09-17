@@ -490,7 +490,8 @@ function Get-SbStableCount([string]$Row, [string]$Name) {
 function Get-SbMenuRowReading([string]$Row) {
     $out = @{ Ok = $false; Items = -1; Enabled = -1; Disabled = -1; Seq = -1
               Missed = -1; StateAge = -1; ShortcutsUnparsed = -1
-              ShortcutsApply = $false; Reason = '' }
+              ShortcutsApply = $false; Delivered = -1; Coalesced = -1
+              DeliveryApplies = $false; Reason = '' }
     foreach ($name in @('items', 'enabled', 'disabled', 'seq', 'missed')) {
         $v = Get-SbField $Row $name
         if ($null -eq $v -or -not ($v -match '^[0-9]+$')) {
@@ -522,8 +523,133 @@ function Get-SbMenuRowReading([string]$Row) {
         $out.ShortcutsUnparsed = -1
         $out.ShortcutsApply = $false
     }
+    # ⚠️ `delivered=` AND `coalesced=` ARE OPTIONAL BY THE SAME RULE, AND THEY
+    # APPLY ONLY AS A PAIR. P4.2 compares `delivered` with the render thread's
+    # publications; half a pair would hand it a count beside a default.
+    $dv = Get-SbField $Row 'delivered'
+    $co = Get-SbField $Row 'coalesced'
+    if ($null -ne $dv -and ($dv -match '^[0-9]+$') -and $null -ne $co -and ($co -match '^[0-9]+$')) {
+        $out.Delivered = [int]$dv
+        $out.Coalesced = [int]$co
+        $out.DeliveryApplies = $true
+    }
     $out.Ok = $true
     return $out
+}
+
+# ===========================================================================
+# P4.2 -- A LOST MENU NOTIFICATION, READ FROM BOTH ENDS
+# ===========================================================================
+#
+# ⛔ `missed=` ALONE CANNOT TELL A LOSS FROM A COALESCE, AND W2-7 SHOWED IT.
+# `Canvas.ApplyMenuRefresh` publishes by REPLACING the `Menu` reference and
+# posts a notification that carries nothing. `MainWindow.OnMenuChanged` reads
+# whichever reference is current when it runs. So a burst of four publications
+# reads as ONE row with `missed=3` and THREE rows re-reading the same seq --
+# every notification delivered, and the old clause red (kenai 2026-09-16, the
+# q6 replay: seq 1, 2, 6, 6, 6, 6).
+#
+# ⛔ AND THE LOSS P4.2 EXISTS FOR IS INVISIBLE FROM THE UI SIDE. A LAST
+# notification that never arrives leaves the menubar stale, and no later row
+# would ever read the newer seq. Only the party that PUBLISHED can say a
+# publication happened.
+#
+# ⇒ THE RENDER THREAD WRITES `MENU PUBLISHED seq=<n>` FOR EVERY PUBLICATION.
+# The MENU row carries `delivered=` (notifications handled, this one included)
+# and `coalesced=` (notifications whose snapshot an earlier one had already
+# drawn). P4.2 compares the two ends; `missed=` is reported, never asserted.
+
+$SbMenuDeliveryName = 'P4.2 every menu publication was delivered, and the menubar shows the newest'
+
+# Every `MENU PUBLISHED` row's seq, in log order. A seq that is not a whole
+# number is COUNTED as unreadable, never skipped: a skipped publication reads
+# as one that never happened.
+function Get-SbMenuPublished($Rows) {
+    $seqs = New-Object System.Collections.Generic.List[int]
+    $unreadable = 0
+    foreach ($r in @(Select-SbRows $Rows (Get-SbRowPattern 'MENU PUBLISHED' ' seq='))) {
+        $v = Get-SbField $r 'seq'
+        if ($null -ne $v -and ($v -match '^[0-9]+$')) { $seqs.Add([int]$v) } else { $unreadable++ }
+    }
+    return @{ Seqs = @($seqs); Unreadable = $unreadable }
+}
+
+# P4.2 as ONE `New-SbVerdict`, on every path. `$Rows` is the run's slice.
+#
+# ⛔ THE SLICE MUST HOLD ONE WHOLE PROCESS: `seq` counts from 1 for the life of
+# the app, so the publications read 1..N in order or the comparison is refused
+# by name -- a stray process writing into the same log (flask 2026-09-16) makes
+# `1,2,1,2`, and a count taken over that is about two apps at once.
+function Get-SbMenuDeliveryVerdict($Rows) {
+    $name = $SbMenuDeliveryName
+    $pub = Get-SbMenuPublished $Rows
+    $seqs = @($pub.Seqs)
+    $n = $seqs.Count
+    $menuRows = @(Select-SbRows $Rows (Get-SbRowPattern 'MENU' ' rebuilds='))
+    if ($n -eq 0 -and $pub.Unreadable -eq 0) {
+        if ($menuRows.Count -eq 0) {
+            return New-SbVerdict $name 'NOT RUN' 'no MENU PUBLISHED row and no MENU row: this run published no menu'
+        }
+        return New-SbVerdict $name 'NOT RUN' ("this run's $($menuRows.Count) MENU row(s) have no MENU PUBLISHED row beside them: " +
+            'the build predates the producer side, and missed= alone cannot tell a lost notification from a coalesced one') $menuRows[-1]
+    }
+    $inOrder = $true
+    for ($i = 0; $i -lt $n; $i++) {
+        if ($seqs[$i] -ne ($i + 1)) { $inOrder = $false; break }
+    }
+    if ($pub.Unreadable -gt 0 -or -not $inOrder) {
+        return New-SbVerdict $name 'NOT RUN' ("the MENU PUBLISHED rows are not the series 1..N one process writes " +
+            "(read: $($seqs -join ','); $($pub.Unreadable) unreadable), so this slice does not hold one whole app and no delivery count can be compared with it")
+    }
+    if ($menuRows.Count -eq 0) {
+        return New-SbVerdict $name 'FAIL' ("$n menu publication(s) and NO MENU row: not one notification reached the UI thread, " +
+            'and the menubar was never drawn')
+    }
+    $last = Get-SbMenuRowReading $menuRows[-1]
+    if (-not $last.Ok) {
+        return New-SbVerdict $name 'NOT RUN' "the last MENU row is unreadable: $($last.Reason)" $menuRows[-1]
+    }
+    if (-not $last.DeliveryApplies) {
+        return New-SbVerdict $name 'NOT RUN' ('the last MENU row carries no readable delivered=/coalesced= pair, though this run writes ' +
+            'MENU PUBLISHED rows: the two ends of the instrument come from different builds') $menuRows[-1]
+    }
+    $missedSum = 0
+    foreach ($r in $menuRows) {
+        $m = Get-SbMenuRowReading $r
+        if ($m.Ok) { $missedSum += $m.Missed }
+    }
+    $facts = ("published=$n delivered=$($last.Delivered) drawn-seq=$($last.Seq) coalesced=$($last.Coalesced) " +
+        "missed-sum=$missedSum over $($menuRows.Count) MENU row(s)")
+    if ($last.Delivered -gt $n -or $last.Seq -gt $n) {
+        return New-SbVerdict $name 'FAIL' ("the UI thread reports more than was published ($facts): the two ends of the " +
+            "instrument disagree, so this is the instrument's own defect until shown otherwise") $menuRows[-1]
+    }
+    if ($last.Seq -lt $n) {
+        return New-SbVerdict $name 'FAIL' ("STALE MENUBAR ($facts): the newest publication is seq $n and the menubar last drew " +
+            "seq $($last.Seq). This is the failure P4.2 exists for -- an item enabled that should not be, with no other diagnostic") $menuRows[-1]
+    }
+    if ($last.Delivered -lt $n) {
+        return New-SbVerdict $name 'FAIL' ("$($n - $last.Delivered) menu notification(s) never arrived ($facts). The menubar shows " +
+            'the newest publication, so a later notification covered for the lost one: the end state is right and the post path is not') $menuRows[-1]
+    }
+    return New-SbVerdict $name 'PASS' ("every publication was delivered and the menubar shows the newest ($facts). coalesced= counts " +
+        'notifications whose snapshot an earlier one had already drawn -- latest-wins, by design, and not a loss') $menuRows[-1]
+}
+
+# ⭐ THE WAIT P4.2 OWES. The render thread writes `MENU PUBLISHED` before the UI
+# thread can draw it, so a read taken the moment a scene's own row lands can
+# find the newest publication undelivered: a stale menubar that is only LATE.
+# True when the last MENU row has delivered every publication in `$Rows`, or
+# when there is nothing to wait for. `verify_window.ps1` polls it, bounded; a
+# timeout leaves P4.2 to judge what arrived, which is then a real loss.
+function Test-SbMenuSettled($Rows) {
+    $n = @((Get-SbMenuPublished $Rows).Seqs).Count
+    if ($n -eq 0) { return $true }
+    $menuRows = @(Select-SbRows $Rows (Get-SbRowPattern 'MENU' ' rebuilds='))
+    if ($menuRows.Count -eq 0) { return $false }
+    $last = Get-SbMenuRowReading $menuRows[-1]
+    if (-not ($last.Ok -and $last.DeliveryApplies)) { return $true }
+    return ($last.Delivered -ge $n)
 }
 
 function Get-SbPoint([string]$Row, [string]$Name) {
@@ -1912,4 +2038,60 @@ function Add-SbSynthVerdicts($Out, $Rows, [string]$Synth, [bool]$Asked) {
             $Out.Add((New-SbVerdict $n.Aligned 'FAIL' "Unchanged, and yet the canvas is $px and the document is $dc across it" $c2))
         }
     }
+}
+
+# ===========================================================================
+# Q6.S5 -- OPENING THE PANE RESIZED NOTHING (wave-2 freeze v1.7, stop 5)
+# ===========================================================================
+#
+# ⛔ STOP 5 AS FIRST WRITTEN COULD NOT GO RED. It predicted ONE resize per pane
+# open. W2-5 makes the pane visible BEFORE the first layout
+# (`MainWindow`'s constructor), so the surface is born at its final size, no
+# route resizes it, and kenai read 0 against 7 live REPAINT rows (flask,
+# 2026-09-16). The stop is re-aimed at that zero.
+#
+# ⛔ IT READS `events_total`, NOT ONLY `cause=`. `Canvas.ApplyBatch` sets a
+# drain's cause LAST-WRITER-WINS: a pointer or a panel click after a resize in
+# the same drain overwrites `cause=resize`. `events_total` counts every resize
+# ARRIVAL, latched or applied, for the life of the app, and nothing overwrites
+# it -- so the LAST REPAINT row carries the whole run.
+#
+# ⚠️ SCOPED TO THE q6 REPLAY: the one `app` run no hand touches. On a plain
+# `app` run a person may resize the window, and that is not the pane.
+# ⚠️ IT CAN FAIL ON `app` BY CONSTRUCTION (`SizeChanged` enqueues a resize on
+# any scene once the first layout has run) and has not yet been SEEN failing
+# there: `SB_RESIZE` never drives `app`, which posts no `SceneCompleted`.
+
+$SbPaneResizeName = 'Q6.S5 opening the pane resized nothing (events_total=0)'
+
+function Get-SbPaneResizeVerdict($Rows, [string]$Scene, [string]$Synth) {
+    $name = $SbPaneResizeName
+    if ($Scene -ne $SbPaneScene) {
+        return New-SbVerdict $name 'NOT RUN' "this run is scene '$Scene', which opens no pane"
+    }
+    if (-not (Test-SbSynthAsked $Synth)) {
+        return New-SbVerdict $name 'NOT RUN' ('SB_PANEL_SYNTH is unset: only the q6 replay is an app run no hand touches, ' +
+            'and a person resizing the window is not the pane (sitting.ps1 -Scenes q6 drives it)')
+    }
+    $open = Select-SbRow $Rows (Get-SbRowPattern 'PANEL OPEN' ' panel=')
+    if ($null -eq $open) {
+        return New-SbVerdict $name 'NOT RUN' 'no PANEL OPEN row: the pane did not open, so no open could resize anything (Q6.1 says why)'
+    }
+    $repaints = @(Select-SbRows $Rows (Get-SbRowPattern 'REPAINT' '(?:-FAILED)? events_total='))
+    if ($repaints.Count -eq 0) {
+        return New-SbVerdict $name 'NOT RUN' 'no REPAINT row in this run: the instrument did not run, and a zero from it would not be a measurement' $open
+    }
+    $total = Get-SbField $repaints[-1] 'events_total'
+    if ($null -eq $total -or $total -notmatch '^[0-9]+$') {
+        return New-SbVerdict $name 'NOT RUN' "the last REPAINT row carries no readable events_total= (read: '$total')" $repaints[-1]
+    }
+    $resized = @($repaints | Where-Object { (Get-SbField $_ 'cause') -eq 'resize' }).Count
+    $facts = "events_total=$total on the last of $($repaints.Count) REPAINT row(s); cause=resize on $resized of them"
+    if ([int]$total -eq 0 -and $resized -eq 0) {
+        return New-SbVerdict $name 'PASS' ("$facts. The pane is in the first layout, so the canvas was never resized; " +
+            'events_total counts every resize ARRIVAL, which a later pointer or click in the same drain cannot overwrite as it overwrites cause=') $repaints[-1]
+    }
+    return New-SbVerdict $name 'FAIL' ("$facts. A resize arrived on a run no hand touched: the pane now opens into an " +
+        "already-laid-out canvas, which is W2-5's regression and not the canvas's (freeze stop 5). " +
+        'A display-scale change writes SCALE CHANGED; rule that out first') $repaints[-1]
 }
