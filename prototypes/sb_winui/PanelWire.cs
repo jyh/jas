@@ -30,18 +30,32 @@ internal static class PanelWire
     internal static byte[] EventJson(string widget, string eventName, string? value,
                                      bool alt, bool shift, bool ctrl, bool meta)
     {
-        return System.Array.Empty<byte>();
+        var ev = new Dictionary<string, object>
+        {
+            ["widget"] = widget,
+            ["event"] = eventName,
+            ["alt"] = alt,
+            ["shift"] = shift,
+            ["ctrl"] = ctrl,
+            ["meta"] = meta,
+        };
+        if (value is not null) { ev["value"] = value; }
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
     }
 
     /// <summary>
     /// A value as a row prints it: one whitespace-free token, so a reader's
     /// `key=\S+` takes all of it. The text is JSON-encoded (quoted), with a
-    /// space written as ` `; a press prints <see cref="NoValue"/>, which
+    /// space written as `\u0020`; a press prints <see cref="NoValue"/>, which
     /// no encoded string can equal because an encoded string is quoted.
     /// </summary>
     internal static string RowValue(string? value)
     {
-        return value ?? "";
+        if (value is null) { return NoValue; }
+        // The default encoder already writes every control character and every
+        // non-ASCII character as an escape, so an ASCII space is the only
+        // whitespace left to encode.
+        return System.Text.Json.JsonSerializer.Serialize(value).Replace(" ", "\\u0020");
     }
 
     /// <summary>
@@ -51,7 +65,7 @@ internal static class PanelWire
     /// </summary>
     internal static bool CommitOnBlur(string text, string shown)
     {
-        return false;
+        return !string.Equals(text, shown, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -66,7 +80,35 @@ internal static class PanelWire
     /// </summary>
     internal static PanelChoices? ReadPanelList(string json)
     {
-        return new PanelChoices(new List<(string Id, string Label)>(), 0);
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            var rows = new List<(string Id, string Label)>();
+            var skipped = 0;
+            foreach (var row in doc.RootElement.EnumerateArray())
+            {
+                if (row.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !row.TryGetProperty("id", out var id)
+                    || id.ValueKind != System.Text.Json.JsonValueKind.String
+                    || id.GetString() is not { Length: > 0 } idText)
+                {
+                    skipped++;
+                    continue;
+                }
+                var label = row.TryGetProperty("summary", out var summary)
+                            && summary.ValueKind == System.Text.Json.JsonValueKind.String
+                            && summary.GetString() is { Length: > 0 } summaryText
+                    ? summaryText
+                    : idText;
+                rows.Add((idText, label));
+            }
+            return new PanelChoices(rows, skipped);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 }
 
