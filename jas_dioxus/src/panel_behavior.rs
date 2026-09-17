@@ -810,6 +810,24 @@ mod tests {
         model
     }
 
+    /// **A Properties write named by the SHORT kind reaches the selection.**
+    /// The store keys the scope by the content id, and reports the write the
+    /// same way, so the host's content-id match sees `panel: properties` too.
+    #[test]
+    fn a_short_named_properties_write_reaches_the_selection() {
+        let mut model = model_with(vec![rect(10.0, 0.0, 5.0, 5.0)], &[0]);
+        let mut store = StateStore::new();
+        store.init_panel(PROPERTIES_PANEL, std::collections::HashMap::new());
+        let mut host = EngineHost { artboard_selection: vec![] };
+        let batch = [json!({"set_panel_state": {"panel": "properties", "key": "prop_x", "value": "40"}})];
+        let report = run_effects_hosted(&batch, &json!({}), &mut store, Some(&mut model), None,
+                                        None, None, &mut host);
+        assert!(report.unhandled.is_empty(), "{report:?}");
+        assert_eq!(store.get_panel(PROPERTIES_PANEL, "prop_x"), &json!(40));
+        let x = crate::document::evaluated_bounds::selection_evaluated_bounds(model.document()).0;
+        assert_eq!(x, 40.0, "the write landed in the store and did not reach the selection");
+    }
+
     fn caps_and_joins(model: &Model) -> Vec<String> {
         let doc = model.document();
         (0..2).map(|i| {

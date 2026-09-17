@@ -71,8 +71,21 @@ pub struct StateStore {
 pub enum StoreWrite {
     /// A global `state.*` key.
     Global(String),
-    /// A key in a panel's own scope: the panel id, then the key.
+    /// A key in a panel's own scope: the panel's CONTENT id
+    /// (`panel_content_id`), then the key.
     Panel(String, String),
+}
+
+/// The panel CONTENT id a `panel:` reference names: the short kind gains the
+/// `_panel_content` suffix, and an id that already carries it passes through.
+/// The reference's `state_store.panel_content_id` and Swift's
+/// `StateStore.panelContentId`, one rule in three ports.
+pub fn panel_content_id(raw: &str) -> String {
+    if raw.ends_with("_panel_content") {
+        raw.to_string()
+    } else {
+        format!("{raw}_panel_content")
+    }
 }
 
 impl StateStore {
@@ -345,30 +358,38 @@ impl StateStore {
         self.writes = None;
     }
 
+    /// Journal a panel write under the panel's CONTENT id, whichever spelling
+    /// the caller used, as the reference notifies its panel subscribers.
     fn journal_panel_write(&mut self, panel_id: &str, key: &str) {
         if let Some(journal) = self.writes.as_mut() {
-            journal.push(StoreWrite::Panel(panel_id.to_string(), key.to_string()));
+            journal.push(StoreWrite::Panel(panel_content_id(panel_id), key.to_string()));
         }
     }
 
     // ── Panel state ──────────────────────────────────────
+    //
+    // Every method that takes a panel id takes EITHER spelling, the short
+    // kind (`symbols`) or the content id (`symbols_panel_content`), and keys
+    // the scope by the content id (`panel_content_id`), as the reference's
+    // store and Swift's do. The YAML writes the short kind at every
+    // `set_panel_state` site; the bundle seeds every scope by content id.
 
     pub fn init_panel(&mut self, panel_id: &str, defaults: HashMap<String, serde_json::Value>) {
-        self.panels.insert(panel_id.to_string(), defaults);
+        self.panels.insert(panel_content_id(panel_id), defaults);
     }
 
     /// A panel's whole scope, if it has one.
     pub fn panel_scope(&self, panel_id: &str) -> Option<&HashMap<String, serde_json::Value>> {
-        self.panels.get(panel_id)
+        self.panels.get(&panel_content_id(panel_id))
     }
 
     /// True once `panel_id` has a scope, even an empty one.
     pub fn has_panel(&self, panel_id: &str) -> bool {
-        self.panels.contains_key(panel_id)
+        self.panels.contains_key(&panel_content_id(panel_id))
     }
 
     pub fn get_panel(&self, panel_id: &str, key: &str) -> &serde_json::Value {
-        self.panels.get(panel_id)
+        self.panels.get(&panel_content_id(panel_id))
             .and_then(|p| p.get(key))
             .unwrap_or(&serde_json::Value::Null)
     }
@@ -376,14 +397,14 @@ impl StateStore {
     /// Write a key in a panel's own scope. A panel with no scope is not
     /// written, and the write is not reported.
     pub fn set_panel(&mut self, panel_id: &str, key: &str, value: serde_json::Value) {
-        if let Some(scope) = self.panels.get_mut(panel_id) {
+        if let Some(scope) = self.panels.get_mut(&panel_content_id(panel_id)) {
             scope.insert(key.to_string(), value);
             self.journal_panel_write(panel_id, key);
         }
     }
 
     pub fn set_active_panel(&mut self, panel_id: Option<&str>) {
-        self.active_panel = panel_id.map(|s| s.to_string());
+        self.active_panel = panel_id.map(panel_content_id);
     }
 
     pub fn active_panel_id(&self) -> Option<&str> {
@@ -391,8 +412,9 @@ impl StateStore {
     }
 
     pub fn destroy_panel(&mut self, panel_id: &str) {
-        self.panels.remove(panel_id);
-        if self.active_panel.as_deref() == Some(panel_id) {
+        let panel_id = panel_content_id(panel_id);
+        self.panels.remove(&panel_id);
+        if self.active_panel.as_deref() == Some(panel_id.as_str()) {
             self.active_panel = None;
         }
     }
@@ -445,7 +467,7 @@ impl StateStore {
         &mut self, panel_id: &str, key: &str, value: serde_json::Value,
         unique: bool, max_length: Option<usize>,
     ) {
-        let scope = match self.panels.get_mut(panel_id) {
+        let scope = match self.panels.get_mut(&panel_content_id(panel_id)) {
             Some(s) => s,
             None => return,
         };

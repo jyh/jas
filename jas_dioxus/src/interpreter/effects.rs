@@ -12381,6 +12381,43 @@ mod tests {
         assert_eq!(host.seen, vec!["a", "echo", "b"]);
     }
 
+    /// **A panel named by its SHORT kind is its content scope.** The YAML
+    /// names a panel `symbols` at every `set_panel_state` site, and every
+    /// scope is seeded under `symbols_panel_content`. The reference
+    /// (`state_store.panel_content_id`) and Swift (`StateStore.panelContentId`)
+    /// normalise at the store; the web app normalises before it reaches the
+    /// store, so the engine, which runs these actions straight through this
+    /// runner, wrote nothing. Driven with the three shipped select actions,
+    /// against a store seeded from the bundle.
+    #[test]
+    fn a_short_panel_name_writes_the_panels_content_scope() {
+        use serde_json::json;
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        for (action, params, content, key, want) in [
+            ("symbols_panel_select", json!({"symbol_id": "s1"}),
+             "symbols_panel_content", "selected_symbol", json!("s1")),
+            ("concepts_panel_select", json!({"concept_id": "c1"}),
+             "concepts_panel_content", "selected_concept", json!("c1")),
+            ("artboards_panel_select", json!({"artboard_id": "ab1", "modifier": "none"}),
+             "artboards_panel_content", "artboards_panel_selection", json!(["ab1"])),
+        ] {
+            let spelled = ws.actions()[action]["effects"].to_string();
+            let short = content.trim_end_matches("_panel_content");
+            assert!(spelled.contains(&format!("\"panel\":\"{short}\"")),
+                    "{action} no longer names its panel `{short}`: {spelled}");
+            let mut store = StateStore::new();
+            store.init_panel(content, ws.panel_state_defaults(content));
+            assert_ne!(store.get_panel(content, key), &want, "{action}: the write could not be seen");
+            let effect = json!({"dispatch": {"action": action, "params": params}});
+            let report = run_effects(&[effect], &json!({}), &mut store, None,
+                                     Some(ws.actions()), Some(ws.dialogs()), None);
+            assert!(report.unhandled.is_empty(), "{action}: {report:?}");
+            assert_eq!(store.get_panel(content, key), &want, "{action}");
+            // Both spellings read the one scope.
+            assert_eq!(store.get_panel(short, key), &want, "{action}: the short read");
+        }
+    }
+
     /// The journal exists only while a hosted batch runs: an unhosted batch,
     /// and a direct `set` after a hosted one, record nothing.
     #[test]
@@ -12404,7 +12441,7 @@ mod tests {
         store.set("w", json!(4));
         store.set_panel("p", "k", json!(3));
         assert_eq!(store.take_writes(), vec![StoreWrite::Global("w".into()),
-                                             StoreWrite::Panel("p".into(), "k".into())]);
+                                             StoreWrite::Panel("p_panel_content".into(), "k".into())]);
         store.close_writes();
         store.set("v", json!(5));
         assert_eq!(store.take_writes(), Vec::<StoreWrite>::new());
@@ -12449,12 +12486,15 @@ mod tests {
             json!({"list_push": {"target": "panel.recent", "value": "\"a\""}}),
             json!({"set_panel_state": {"key": "cap", "value": "\"square\""}}),
         ], &json!({}), &mut store, None, None, None, None, &mut host);
+        // Every panel is reported by its CONTENT id, whichever spelling the
+        // effect used (the active panel, or `panel: q`), as the reference
+        // notifies its panel subscribers.
         assert_eq!(host.seen, vec![
-            ("p.cap".to_string(), json!("square")),
+            ("p_panel_content.cap".to_string(), json!("square")),
             ("x".to_string(), json!(1)),
-            ("q.cap".to_string(), json!("round")),
-            ("p.recent".to_string(), json!(["a"])),
-            ("p.cap".to_string(), json!("square")),
+            ("q_panel_content.cap".to_string(), json!("round")),
+            ("p_panel_content.recent".to_string(), json!(["a"])),
+            ("p_panel_content.cap".to_string(), json!("square")),
         ]);
     }
 
