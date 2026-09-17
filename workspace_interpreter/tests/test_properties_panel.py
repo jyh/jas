@@ -134,3 +134,83 @@ def test_x_on_a_rotated_element_lands_where_it_was_typed():
     store = _wired(model)
     store.set_panel(PID, "prop_x", 100.0)
     assert selection_evaluated_bounds(model.document)[0] == pytest.approx(100.0, abs=1e-9)
+
+
+def _model_in_layer(layer_transform, **rect):
+    """A single Rect inside a Layer that carries its own transform. The X/Y
+    oracle is computed against the EVALUATED bbox, which walks the element's
+    transform AND every ancestor's (`_element_evaluated_bbox`), so an ancestor
+    transform is part of the same law — and a fix that consults only
+    `elem.transform` passes the two arms above and fails this one."""
+    from document.document import Document, ElementSelection
+    from document.model import Model
+    from geometry.element import Layer, Rect
+    layer = Layer(children=(Rect(**rect),), transform=layer_transform)
+    sel = frozenset({ElementSelection.all((0, 0))})
+    return Model(document=Document(layers=(layer,), selection=sel))
+
+
+def test_y_on_a_rotated_element_lands_where_it_was_typed():
+    """S-3, the Y arm. Same cause as the X arm: `move_selection` hands a
+    document-space delta to a LOCAL-space mover, so under a rotation the
+    bbox travels along the rotated axis and Y lands short."""
+    from geometry.element import Transform
+    model = _model(x=10.0, y=20.0, width=30.0, height=40.0,
+                   transform=Transform.rotate(30.0))
+    store = _wired(model)
+    store.set_panel(PID, "prop_y", 50.0)
+    assert selection_evaluated_bounds(model.document)[1] == pytest.approx(50.0, abs=1e-9)
+
+
+def test_x_on_a_scaled_element_lands_where_it_was_typed():
+    """S-3, the SCALE mechanism, isolated from rotation: a non-unit scale
+    changes the delta's MAGNITUDE rather than its direction, so a fix that
+    only rotates the delta passes the two rotation arms and fails here."""
+    from geometry.element import Transform
+    model = _model(x=10.0, y=20.0, width=30.0, height=40.0,
+                   transform=Transform.scale(2.0, 3.0))
+    store = _wired(model)
+    store.set_panel(PID, "prop_x", 100.0)
+    assert selection_evaluated_bounds(model.document)[0] == pytest.approx(100.0, abs=1e-9)
+
+
+def test_x_under_an_ancestor_transform_lands_where_it_was_typed():
+    """S-3, the CHAIN mechanism: the ELEMENT is untransformed and its LAYER
+    is rotated. A fix reading only `elem.transform` sees an identity here and
+    leaves the delta unconverted."""
+    from geometry.element import Transform
+    model = _model_in_layer(Transform.rotate(30.0),
+                            x=10.0, y=20.0, width=30.0, height=40.0)
+    store = _wired(model)
+    store.set_panel(PID, "prop_x", 100.0)
+    assert selection_evaluated_bounds(model.document)[0] == pytest.approx(100.0, abs=1e-9)
+
+
+def test_an_x_edit_moves_the_selection_and_changes_nothing_else():
+    """A translate is a translate: the edit may move the bbox and must not
+    resize it or touch the element's transform. Without this, a 'fix' that
+    reached the right X by scaling or rotating the element would pass every
+    arm above."""
+    from geometry.element import Transform
+    model = _model(x=10.0, y=20.0, width=30.0, height=40.0,
+                   transform=Transform.rotate(30.0))
+    store = _wired(model)
+    before_t = model.document.get_element((0, 0)).transform
+    before_w, before_h = selection_evaluated_bounds(model.document)[2:]
+    store.set_panel(PID, "prop_x", 100.0)
+    after = selection_evaluated_bounds(model.document)
+    assert model.document.get_element((0, 0)).transform == before_t
+    assert after[2] == pytest.approx(before_w, abs=1e-9)
+    assert after[3] == pytest.approx(before_h, abs=1e-9)
+
+
+def test_x_on_an_identity_transform_lands_where_it_was_typed():
+    """CONTROL, green before and after the S-3 repair: an explicit identity
+    transform is the boundary between the transformed and untransformed
+    paths, and the conversion must be a no-op on it."""
+    from geometry.element import Transform
+    model = _model(x=10.0, y=20.0, width=30.0, height=40.0,
+                   transform=Transform())
+    store = _wired(model)
+    store.set_panel(PID, "prop_x", 100.0)
+    assert selection_evaluated_bounds(model.document)[0] == pytest.approx(100.0, abs=1e-9)
