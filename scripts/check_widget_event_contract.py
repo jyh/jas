@@ -64,7 +64,7 @@ import tempfile
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, ROOT.as_posix())
 from workspace_interpreter.widget_event import ALLOWED_EVENTS  # noqa: E402
 
 DOCUMENT = ROOT / "WIDGET_EVENTS.md"
@@ -84,7 +84,7 @@ def tracked_yaml(root: pathlib.Path) -> set:
     A second oracle for the filesystem walk: a walk that silently lost files
     would otherwise report a clean, smaller tree."""
     out = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--", "workspace"],
+        ["git", "-C", root, "ls-files", "--", "workspace"],
         capture_output=True, text=True, encoding="utf-8", check=False)
     if out.returncode != 0:
         raise Refusal("git ls-files failed: " + out.stderr.strip())
