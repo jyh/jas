@@ -117,6 +117,16 @@ def test_arm_d_the_order_arm(cases):
         unlinked["before"]["panel"]["end_arrowhead_scale"]
 
 
+def test_the_two_way_bind_reaches_the_global_init_reads(cases):
+    weight = cases["stroke_weight_in_inches"]
+    assert weight["expected"]["panel"]["weight"] == 216
+    assert weight["expected"]["state_changed"] == {"stroke_width": 216}
+    unlinked = cases["stroke_start_scale_unlinked"]
+    assert unlinked["expected"]["state_changed"] == {"stroke_start_arrowhead_scale": 200}
+    cleared = cases["stroke_dash_2_cleared"]
+    assert cleared["expected"]["state_changed"] == {"stroke_dash_2": None}
+
+
 def test_arm_e_a_toggle_press_flips_panel_and_tool_once(cases):
     for name, key in (("magic_wand_fill_color_press", "fill_color"),
                       ("magic_wand_blending_mode_press", "blending_mode")):

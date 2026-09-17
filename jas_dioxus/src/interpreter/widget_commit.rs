@@ -192,10 +192,32 @@ pub fn writable_target(expr: &str) -> Option<(&'static str, &str)> {
     None
 }
 
+/// The global a panel field is two-way bound to: the `<ident>` of a bare
+/// `state.<ident>` in the panel's `init:` for `key`. The bind write writes it
+/// with the field (WIDGET_EVENTS.md, "The bound target").
+pub fn mirrored_global<'a>(panel: &'a serde_json::Value, key: &str) -> Option<&'a str> {
+    let expr = panel.get("init")?.get(key)?.as_str()?.trim();
+    let ident = expr.strip_prefix("state.")?;
+    (!ident.is_empty() && ident.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_'))
+        .then_some(ident)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::{json, Value};
+
+    #[test]
+    fn only_a_bare_state_init_is_a_two_way_bind() {
+        let panel = json!({"init": {"n": "state.gn", "s": " state.gs ", "e": "state.a + 1",
+                                    "z": "0", "f": "hsb_h(state.c)", "x": "state."}});
+        assert_eq!(mirrored_global(&panel, "n"), Some("gn"));
+        assert_eq!(mirrored_global(&panel, "s"), Some("gs"));
+        for k in ["e", "z", "f", "x", "absent"] {
+            assert_eq!(mirrored_global(&panel, k), None, "{k}");
+        }
+        assert_eq!(mirrored_global(&json!({}), "n"), None);
+    }
 
     fn parse(w: Value, text: &str) -> Option<Value> {
         parse_commit(&w, text)

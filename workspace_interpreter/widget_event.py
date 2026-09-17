@@ -9,23 +9,31 @@ event table below and the document's copy of it.
 
 Two procedures, one per family of kinds:
 
-``commit(widget, text, store)`` — the INPUT kinds.
+``commit(widget, text, store, panel=...)`` — the INPUT kinds.
     1. Refuse a disabled widget, a missing value, and text the kind's parse
        refuses. A refusal writes nothing and runs nothing.
     2. Write the parsed value to the bound target, when the target is a
-       ``panel.<ident>`` or ``dialog.<ident>`` path.
+       ``panel.<ident>`` or ``dialog.<ident>`` path. A ``panel.<ident>``
+       write also writes the global the panel's ``init:`` hydrates that
+       field from, when that mapping is a bare ``state.<ident>``: the
+       two-way bind.
     3. Then run every behavior whose event is ``commit`` or ``change``
        (synonyms for these kinds), in declaration order, with
        ``event.value`` set to the parsed value. The store already holds
        the new value, so a behavior that reads its own field reads the
        new one.
 
-``press(widget, store)`` — the BOOLEAN kinds.
+``press(widget, store, panel=...)`` — the BOOLEAN kinds.
     The new value is the negation of the bound value. If the widget
     declares a ``click`` or ``change`` behavior, those behaviors ARE the
     press: they run with ``event.value`` set to the new value, and the
     bind write is skipped (the shipped YAML flips its own field, and a
-    prior write would flip it back). Otherwise the new value is written.
+    prior write would flip it back). Otherwise the new value is written,
+    with the same two-way bind.
+
+``panel`` is the spec of the panel the widget belongs to, or ``None`` for a
+widget with no panel (a dialog). It is required, because forgetting it
+silently drops the two-way bind.
 
 The bind write is a plain store write. A store write notifies the store's
 subscribers, which is how the reference applies a panel to the selection
@@ -177,6 +185,7 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
 # ── Targets ────────────────────────────────────────────────────
 
 _WRITABLE_RE = re.compile(r"(panel|dialog)\.([A-Za-z0-9_]+)", re.ASCII)
+_GLOBAL_RE = re.compile(r"state\.([A-Za-z0-9_]+)", re.ASCII)
 
 
 def bound_target(widget: dict) -> str | None:
@@ -204,6 +213,24 @@ def writable_target(expr) -> tuple[str, str] | None:
         return None
     m = _WRITABLE_RE.fullmatch(expr.strip())
     return (m.group(1), m.group(2)) if m else None
+
+
+def mirrored_global(panel: dict | None, key: str) -> str | None:
+    """The global a panel field is two-way bound to: the ``<ident>`` of a
+    bare ``state.<ident>`` in the panel's ``init:`` for ``key``, else None."""
+    init = panel.get("init") if isinstance(panel, dict) else None
+    expr = init.get(key) if isinstance(init, dict) else None
+    m = _GLOBAL_RE.fullmatch(expr.strip()) if isinstance(expr, str) else None
+    return m.group(1) if m else None
+
+
+def _write_bind(target: tuple[str, str], value, store: StateStore, panel) -> None:
+    scope, key = target
+    _set_by_scoped_target(store, f"{scope}.{key}", value)
+    if scope == "panel":
+        global_key = mirrored_global(panel, key)
+        if global_key is not None:
+            store.set(global_key, value)
 
 
 def evaluate_in(store: StateStore, expr: str, ctx: dict | None = None):
@@ -253,8 +280,8 @@ def _run_behaviors(behaviors: list[dict], value, store, run_kwargs: dict) -> int
 # ── The two procedures ─────────────────────────────────────────
 
 
-def commit(widget: dict, text: str | None, store: StateStore,
-           **run_kwargs) -> EventResult:
+def commit(widget: dict, text: str | None, store: StateStore, *,
+           panel: dict | None, **run_kwargs) -> EventResult:
     """Commit ``text`` into an input widget. ``run_kwargs`` go to
     ``run_effects`` (``actions``, ``dialogs``, ``platform_effects``, …)."""
     if widget.get("type") not in INPUT_KINDS:
@@ -269,7 +296,7 @@ def commit(widget: dict, text: str | None, store: StateStore,
 
     target = writable_target(bound_target(widget))
     if target is not None:
-        _set_by_scoped_target(store, f"{target[0]}.{target[1]}", value)
+        _write_bind(target, value, store, panel)
     ran = _run_behaviors(_declared(widget, COMMIT_EVENTS), value, store,
                          run_kwargs)
     outcome = "committed" if target is not None or ran else "inert"
@@ -277,7 +304,8 @@ def commit(widget: dict, text: str | None, store: StateStore,
                        bind_written=target is not None, behaviors_run=ran)
 
 
-def press(widget: dict, store: StateStore, **run_kwargs) -> EventResult:
+def press(widget: dict, store: StateStore, *, panel: dict | None,
+          **run_kwargs) -> EventResult:
     """Press a boolean widget."""
     if widget.get("type") not in BOOLEAN_KINDS:
         return EventResult("refused", reason=WRONG_KIND)
@@ -299,5 +327,5 @@ def press(widget: dict, store: StateStore, **run_kwargs) -> EventResult:
     target = writable_target(expr)
     if target is None:
         return EventResult("inert", value=value)
-    _set_by_scoped_target(store, f"{target[0]}.{target[1]}", value)
+    _write_bind(target, value, store, panel)
     return EventResult("committed", value=value, bind_written=True)

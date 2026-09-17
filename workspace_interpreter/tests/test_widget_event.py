@@ -222,7 +222,7 @@ class TestCommitSynthetic:
         w = {"type": "number_input", "bind": {"value": "panel.n"},
              "behavior": [{"event": "commit", "effects": [
                  {"set": {"seen": "panel.n"}}]}]}
-        r = we.commit(w, "7", store)
+        r = we.commit(w, "7", store, panel=None)
         assert r == we.EventResult("committed", value=7.0,
                                    bind_written=True, behaviors_run=1)
         # The behavior read the NEW value from the store, not a patched scope.
@@ -234,7 +234,7 @@ class TestCommitSynthetic:
         w = {"type": "length_input", "unit": "in", "bind": {"value": "panel.n"},
              "behavior": [{"event": "commit", "effects": [
                  {"set": {"echo": "event.value"}}]}]}
-        we.commit(w, "1", store)
+        we.commit(w, "1", store, panel=None)
         assert store.get("echo") == 72.0
 
     def test_commit_and_change_both_run_in_declaration_order(self):
@@ -247,7 +247,7 @@ class TestCommitSynthetic:
                  {"event": "input", "effects": [{"set": {"never": "1"}}]},
                  {"event": "commit", "effects": [{"set": {"second": "2"}}]},
              ]}
-        r = we.commit(w, "a", store)
+        r = we.commit(w, "a", store, panel=None)
         assert r.behaviors_run == 2
         assert [e[1] for e in log] == ["n", "first", "second"]
         assert store.get("never") is None
@@ -257,7 +257,7 @@ class TestCommitSynthetic:
         w = {"type": "text_input", "bind": {"value": "panel.n"},
              "behavior": [{"event": e, "effects": [{"set": {e: "1"}}]}
                           for e in ("input", "blur", "keydown")]}
-        r = we.commit(w, "x", store)
+        r = we.commit(w, "x", store, panel=None)
         assert r == we.EventResult("committed", value="x",
                                    bind_written=True, behaviors_run=0)
         assert [store.get(e) for e in ("input", "blur", "keydown")] == [None] * 3
@@ -267,7 +267,7 @@ class TestCommitSynthetic:
         log = _recorder(store, self.PID)
         w = {"type": "number_input", "bind": {"value": "panel.n"},
              "behavior": [{"event": "commit", "effects": [{"set": {"ran": "true"}}]}]}
-        assert we.commit(w, "abc", store) == we.EventResult(
+        assert we.commit(w, "abc", store, panel=None) == we.EventResult(
             "refused", reason=we.BAD_VALUE)
         assert log == []
         assert store.get_panel(self.PID, "n") == 1
@@ -276,7 +276,7 @@ class TestCommitSynthetic:
         store = self._store()
         log = _recorder(store, self.PID)
         w = {"type": "number_input", "bind": {"value": "panel.n"}}
-        assert we.commit(w, None, store) == we.EventResult(
+        assert we.commit(w, None, store, panel=None) == we.EventResult(
             "refused", reason=we.MISSING_VALUE)
         assert log == []
 
@@ -286,7 +286,7 @@ class TestCommitSynthetic:
         w = {"type": "number_input",
              "bind": {"value": "panel.n", "disabled": "not panel.on"},
              "behavior": [{"event": "commit", "effects": [{"set": {"ran": "true"}}]}]}
-        assert we.commit(w, "5", store) == we.EventResult(
+        assert we.commit(w, "5", store, panel=None) == we.EventResult(
             "refused", reason=we.DISABLED)
         assert log == []
 
@@ -294,7 +294,7 @@ class TestCommitSynthetic:
         store = self._store(on=True)
         w = {"type": "number_input",
              "bind": {"value": "panel.n", "disabled": "not panel.on"}}
-        assert we.commit(w, "5", store).outcome == "committed"
+        assert we.commit(w, "5", store, panel=None).outcome == "committed"
         assert store.get_panel(self.PID, "n") == 5.0
 
     def test_a_non_writable_bind_still_runs_the_behavior(self):
@@ -303,7 +303,7 @@ class TestCommitSynthetic:
         w = {"type": "text_input", "bind": {"value": "ab.name"},
              "behavior": [{"event": "commit", "effects": [
                  {"set": {"renamed": "event.value"}}]}]}
-        r = we.commit(w, "Board 2", store)
+        r = we.commit(w, "Board 2", store, panel=None)
         assert r == we.EventResult("committed", value="Board 2",
                                    bind_written=False, behaviors_run=1)
         assert log == [("state", "renamed", "Board 2")]
@@ -311,7 +311,7 @@ class TestCommitSynthetic:
     def test_nothing_bound_and_nothing_declared_is_inert(self):
         store = self._store()
         log = _recorder(store, self.PID)
-        r = we.commit({"type": "number_input"}, "5", store)
+        r = we.commit({"type": "number_input"}, "5", store, panel=None)
         assert r == we.EventResult("inert", value=5.0)
         assert log == []
 
@@ -323,9 +323,9 @@ class TestCommitSynthetic:
                   "effects": [{"set": {"big": "true"}}]},
                  {"event": "commit", "effects": [{"set": {"any": "true"}}]},
              ]}
-        assert we.commit(w, "5", store).behaviors_run == 1
+        assert we.commit(w, "5", store, panel=None).behaviors_run == 1
         assert store.get("big") is None and store.get("any") is True
-        assert we.commit(w, "50", store).behaviors_run == 2
+        assert we.commit(w, "50", store, panel=None).behaviors_run == 2
         assert store.get("big") is True
 
     def test_an_action_behavior_dispatches_with_params_read_after_the_write(self):
@@ -336,7 +336,7 @@ class TestCommitSynthetic:
         w = {"type": "number_input", "bind": {"value": "panel.n"},
              "behavior": [{"event": "change", "action": "remember",
                            "params": {"v": "panel.n"}}]}
-        r = we.commit(w, "9", store, actions=actions)
+        r = we.commit(w, "9", store, actions=actions, panel=None)
         assert r.behaviors_run == 1
         assert store.get("got") == 9.0
 
@@ -346,24 +346,24 @@ class TestCommitSynthetic:
         w = {"type": "number_input", "bind": {"value": "panel.n"},
              "behavior": [{"event": "commit", "action": "copy",
                            "effects": [{"set": {"before": "panel.n"}}]}]}
-        we.commit(w, "4", store, actions=actions)
+        we.commit(w, "4", store, actions=actions, panel=None)
         assert store.get("after") == 4.0
 
     def test_a_dialog_bind_writes_the_open_dialog(self):
         store = StateStore()
         store.init_dialog("d", {"x": 1})
         w = {"type": "number_input", "bind": "dialog.x"}
-        assert we.commit(w, "3", store).bind_written
+        assert we.commit(w, "3", store, panel=None).bind_written
         assert store.get_dialog("x") == 3.0
 
     def test_a_boolean_kind_is_refused_by_commit(self):
         store = self._store()
-        r = we.commit({"type": "toggle", "bind": {"checked": "panel.n"}}, "x", store)
+        r = we.commit({"type": "toggle", "bind": {"checked": "panel.n"}}, "x", store, panel=None)
         assert r == we.EventResult("refused", reason=we.WRONG_KIND)
 
     def test_an_unknown_kind_is_refused_by_commit(self):
         store = self._store()
-        r = we.commit({"type": "slider", "bind": {"value": "panel.n"}}, "3", store)
+        r = we.commit({"type": "slider", "bind": {"value": "panel.n"}}, "3", store, panel=None)
         assert r == we.EventResult("refused", reason=we.WRONG_KIND)
         assert store.get_panel(self.PID, "n") == 1
 
@@ -376,11 +376,11 @@ class TestPressSynthetic:
 
     def test_no_behavior_writes_the_negation(self):
         store = _panel_store(self.PID, {"on": True})
-        r = we.press({"type": "toggle", "bind": {"checked": "panel.on"}}, store)
+        r = we.press({"type": "toggle", "bind": {"checked": "panel.on"}}, store, panel=None)
         assert r == we.EventResult("committed", value=False,
                                    bind_written=True, behaviors_run=0)
         assert store.get_panel(self.PID, "on") is False
-        we.press({"type": "checkbox", "bind": {"value": "panel.on"}}, store)
+        we.press({"type": "checkbox", "bind": {"value": "panel.on"}}, store, panel=None)
         assert store.get_panel(self.PID, "on") is True
 
     def test_a_declared_behavior_replaces_the_bind_write(self):
@@ -390,7 +390,7 @@ class TestPressSynthetic:
              "behavior": [{"event": "click", "effects": [
                  {"set": {"seen": "event.value"}},
                  {"set": {"panel_was": "panel.on"}}]}]}
-        r = we.press(w, store)
+        r = we.press(w, store, panel=None)
         assert r == we.EventResult("committed", value=False,
                                    bind_written=False, behaviors_run=1)
         # event.value carries the new boolean; the field was not written.
@@ -404,7 +404,7 @@ class TestPressSynthetic:
                  {"event": "commit", "effects": [{"set": {"never": "1"}}]},
                  {"event": "click", "effects": [{"set": {"b": "event.value"}}]},
              ]}
-        assert we.press(w, store).behaviors_run == 2
+        assert we.press(w, store, panel=None).behaviors_run == 2
         assert (store.get("a"), store.get("b"), store.get("never")) == (True, True, None)
 
     def test_a_declared_behavior_owns_the_press_even_when_its_condition_is_false(self):
@@ -412,36 +412,118 @@ class TestPressSynthetic:
         w = {"type": "toggle", "bind": {"checked": "panel.on"},
              "behavior": [{"event": "click", "condition": "panel.armed",
                            "effects": [{"set": {"ran": "true"}}]}]}
-        assert we.press(w, store) == we.EventResult("inert", value=False)
+        assert we.press(w, store, panel=None) == we.EventResult("inert", value=False)
         assert store.get_panel(self.PID, "on") is True
         assert store.get("ran") is None
 
     def test_a_non_boolean_bound_value_reads_by_truthiness(self):
         store = _panel_store(self.PID, {"mode": "on"})
         assert we.press({"type": "toggle", "bind": {"checked": "panel.mode"}},
-                        store).value is False
+                        store, panel=None).value is False
 
     def test_an_expression_bind_is_read_but_not_written(self):
         store = _panel_store(self.PID, {"mode": "a"})
         w = {"type": "toggle", "bind": {"checked": "panel.mode == 'a'"}}
-        assert we.press(w, store) == we.EventResult("inert", value=False)
+        assert we.press(w, store, panel=None) == we.EventResult("inert", value=False)
         assert store.get_panel(self.PID, "mode") == "a"
 
     def test_unbound_and_undeclared_is_inert(self):
         store = StateStore()
-        assert we.press({"type": "toggle"}, store) == we.EventResult("inert", value=True)
+        assert we.press({"type": "toggle"}, store, panel=None) == we.EventResult("inert", value=True)
 
     def test_a_disabled_boolean_moves_nothing(self):
         store = _panel_store(self.PID, {"on": True, "lock": True})
         w = {"type": "toggle",
              "bind": {"checked": "panel.on", "disabled": "panel.lock"}}
-        assert we.press(w, store) == we.EventResult("refused", reason=we.DISABLED)
+        assert we.press(w, store, panel=None) == we.EventResult("refused", reason=we.DISABLED)
         assert store.get_panel(self.PID, "on") is True
 
     def test_an_input_kind_is_refused_by_press(self):
         store = _panel_store(self.PID, {"n": 1})
-        r = we.press({"type": "number_input", "bind": {"value": "panel.n"}}, store)
+        r = we.press({"type": "number_input", "bind": {"value": "panel.n"}}, store, panel=None)
         assert r == we.EventResult("refused", reason=we.WRONG_KIND)
+
+
+# ── The two-way bind: a panel field and the global its `init:` reads ──
+
+
+class TestTwoWayBind:
+    """A panel's `init:` maps a field to the global it hydrates from. When
+    that mapping is a bare `state.<ident>`, the bind write writes the global
+    too, in the same step, before any behavior. The shipped YAML says so:
+    stroke.yaml's scale combos rely on "the native two-way bind" to have
+    written the global that "drives apply-to-selection"."""
+    PID = "probe_panel_content"
+    PANEL = {"init": {"n": "state.gn", "e": "state.a + 1", "z": "0",
+                      "f": "hsb_h(state.c)", "b": "state.gb"}}
+
+    def _store(self, **panel):
+        return _panel_store(self.PID, {"n": 1, "e": 1, "z": 0, "f": 0, "b": True, **panel},
+                            {"gn": 1, "a": 0, "gb": True})
+
+    def test_the_mapped_global_is_written_with_the_field_and_before_behaviors(self):
+        store = self._store()
+        log = _recorder(store, self.PID)
+        w = {"type": "number_input", "bind": {"value": "panel.n"},
+             "behavior": [{"event": "commit", "effects": [{"set": {"seen": "state.gn"}}]}]}
+        r = we.commit(w, "7", store, panel=self.PANEL)
+        assert r.bind_written
+        assert log == [("panel", "n", 7.0), ("state", "gn", 7.0), ("state", "seen", 7.0)]
+
+    def test_only_a_bare_state_mapping_is_mirrored(self):
+        for key in ("e", "z", "f"):
+            store = self._store()
+            before = store.get_all()
+            we.commit({"type": "number_input", "bind": {"value": f"panel.{key}"}},
+                      "5", store, panel=self.PANEL)
+            assert store.get_panel(self.PID, key) == 5.0, key
+            assert store.get_all() == before, key
+
+    def test_an_unmapped_field_and_no_panel_write_the_field_only(self):
+        store = self._store(u=0)
+        before = store.get_all()
+        we.commit({"type": "number_input", "bind": {"value": "panel.u"}}, "5", store,
+                  panel=self.PANEL)
+        we.commit({"type": "number_input", "bind": {"value": "panel.n"}}, "6", store,
+                  panel=None)
+        assert store.get_all() == before
+        assert store.get_panel(self.PID, "n") == 6.0
+
+    def test_a_panel_without_init_mirrors_nothing(self):
+        store = self._store()
+        before = store.get_all()
+        we.commit({"type": "number_input", "bind": {"value": "panel.n"}}, "6", store,
+                  panel={"id": "p"})
+        assert store.get_all() == before
+
+    def test_an_undeclared_press_writes_both(self):
+        store = self._store()
+        r = we.press({"type": "toggle", "bind": {"checked": "panel.b"}}, store,
+                     panel=self.PANEL)
+        assert r.bind_written
+        assert store.get_panel(self.PID, "b") is False
+        assert store.get("gb") is False
+
+    def test_a_declared_press_writes_neither(self):
+        store = self._store()
+        w = {"type": "toggle", "bind": {"checked": "panel.b"},
+             "behavior": [{"event": "click", "effects": [{"set": {"x": "1"}}]}]}
+        we.press(w, store, panel=self.PANEL)
+        assert store.get_panel(self.PID, "b") is True
+        assert store.get("gb") is True
+
+    def test_a_refusal_writes_neither(self):
+        store = self._store()
+        before = (store.get_panel_state(self.PID), store.get_all())
+        we.commit({"type": "number_input", "bind": {"value": "panel.n"}}, "x", store,
+                  panel=self.PANEL)
+        assert (store.get_panel_state(self.PID), store.get_all()) == before
+
+    def test_the_panel_keyword_is_required(self):
+        with pytest.raises(TypeError):
+            we.commit({"type": "number_input"}, "1", StateStore())
+        with pytest.raises(TypeError):
+            we.press({"type": "toggle"}, StateStore())
 
 
 # ── The shipped widgets ────────────────────────────────────────
@@ -473,7 +555,7 @@ class TestShippedMagicWand(_Shipped):
     def test_arm_a_a_tolerance_commit_reaches_panel_and_tool(self, workspace_path):
         panel, store = self._setup(workspace_path)
         w = find_element_by_id(panel, "mwp_fill_tolerance")
-        r = we.commit(w, "40", store)
+        r = we.commit(w, "40", store, panel=panel)
         assert r == we.EventResult("committed", value=40.0,
                                    bind_written=True, behaviors_run=1)
         assert store.get_panel(self.PANEL, "fill_tolerance") == 40.0
@@ -482,22 +564,22 @@ class TestShippedMagicWand(_Shipped):
     def test_arm_a_the_declared_bound_clamps(self, workspace_path):
         panel, store = self._setup(workspace_path)
         w = find_element_by_id(panel, "mwp_fill_tolerance")
-        assert we.commit(w, "900", store).value == 255.0
+        assert we.commit(w, "900", store, panel=panel).value == 255.0
         assert store.get("magic_wand_fill_tolerance") == 255.0
 
     def test_arms_b_and_c_refusals_move_nothing(self, workspace_path):
         panel, store = self._setup(workspace_path)
         before = (store.get_panel_state(self.PANEL), store.get_all())
         w = find_element_by_id(panel, "mwp_fill_tolerance")
-        assert we.commit(w, None, store).reason == we.MISSING_VALUE
-        assert we.commit(w, "abc", store).reason == we.BAD_VALUE
+        assert we.commit(w, None, store, panel=panel).reason == we.MISSING_VALUE
+        assert we.commit(w, "abc", store, panel=panel).reason == we.BAD_VALUE
         assert (store.get_panel_state(self.PANEL), store.get_all()) == before
 
     def test_a_disabled_tolerance_refuses(self, workspace_path):
         panel, store = self._setup(workspace_path)
-        we.press(find_element_by_id(panel, "mwp_fill_color"), store)
+        we.press(find_element_by_id(panel, "mwp_fill_color"), store, panel=panel)
         w = find_element_by_id(panel, "mwp_fill_tolerance")
-        assert we.commit(w, "40", store).reason == we.DISABLED
+        assert we.commit(w, "40", store, panel=panel).reason == we.DISABLED
         assert store.get("magic_wand_fill_tolerance") != 40.0
 
     def test_arm_e_a_toggle_press_flips_panel_and_tool_once(self, workspace_path):
@@ -513,7 +595,7 @@ class TestShippedMagicWand(_Shipped):
             w = find_element_by_id(panel, wid)
             key = w["bind"]["checked"].split(".", 1)[1]
             before = store.get_panel(self.PANEL, key)
-            r = we.press(w, store)
+            r = we.press(w, store, panel=panel)
             assert r == we.EventResult("committed", value=not before,
                                        bind_written=False, behaviors_run=1), wid
             assert store.get_panel(self.PANEL, key) is (not before), wid
@@ -536,7 +618,7 @@ class TestShippedStroke(_Shipped):
         start = store.get_panel(self.PANEL, "start_arrowhead_scale")
         assert start != 200, "the arm needs a start value that is not the edit"
         w = find_element_by_id(panel, "stk_start_arrowhead_scale")
-        r = we.commit(w, "200", store)
+        r = we.commit(w, "200", store, panel=panel)
         assert r == we.EventResult("committed", value=200.0,
                                    bind_written=True, behaviors_run=1)
         assert store.get_panel(self.PANEL, "end_arrowhead_scale") == 200.0
@@ -547,15 +629,30 @@ class TestShippedStroke(_Shipped):
         self._link(store, False)
         end = store.get_panel(self.PANEL, "end_arrowhead_scale")
         w = find_element_by_id(panel, "stk_start_arrowhead_scale")
-        we.commit(w, "200", store)
+        we.commit(w, "200", store, panel=panel)
         assert store.get_panel(self.PANEL, "start_arrowhead_scale") == 200.0
         assert store.get_panel(self.PANEL, "end_arrowhead_scale") == end
+
+    def test_the_edited_scale_reaches_its_global(self, workspace_path):
+        panel, store = self._setup(workspace_path)
+        self._link(store, False)
+        w = find_element_by_id(panel, "stk_start_arrowhead_scale")
+        we.commit(w, "200", store, panel=panel)
+        assert store.get("stroke_start_arrowhead_scale") == 200.0
+
+    def test_a_weight_commit_reaches_the_global_that_drives_the_apply(self, workspace_path):
+        panel, store = self._setup(workspace_path)
+        w = find_element_by_id(panel, "stk_weight")
+        assert panel["init"]["weight"] == "state.stroke_width"
+        we.commit(w, "3 in", store, panel=panel)
+        assert store.get_panel(self.PANEL, "weight") == 216.0
+        assert store.get("stroke_width") == 216.0
 
     def test_the_dashed_checkbox_flips_once(self, workspace_path):
         panel, store = self._setup(workspace_path)
         w = find_element_by_id(panel, "stk_dashed")
         assert w["type"] == "checkbox"
         before = store.get_panel(self.PANEL, "dashed")
-        r = we.press(w, store)
+        r = we.press(w, store, panel=panel)
         assert r.bind_written is False and r.behaviors_run == 1
         assert store.get_panel(self.PANEL, "dashed") is (not before)

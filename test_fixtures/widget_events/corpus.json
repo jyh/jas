@@ -20,7 +20,9 @@
     "The expected values:",
     "  * `result` is the EventResult, field for field;",
     "  * `panel` is the panel scope afterwards, whole;",
-    "  * `state_changed` holds exactly the global keys whose value changed.",
+    "  * `state_changed` holds exactly the global keys whose value changed,",
+    "    including the global a panel field is two-way bound to through the",
+    "    panel's `init:` (WIDGET_EVENTS.md, \"The bound target\").",
     "Numbers compare as numbers, not as JSON text. A value a behavior writes has",
     "passed through the expression evaluator, so it can serialize as `40` where",
     "the bind write of the same value serialized as `40.0`.",
@@ -74,7 +76,7 @@
           "value": 40.0
         },
         "state_changed": {
-          "magic_wand_fill_tolerance": 40
+          "magic_wand_fill_tolerance": 40.0
         }
       },
       "name": "magic_wand_tolerance_commit",
@@ -119,7 +121,7 @@
           "value": 255.0
         },
         "state_changed": {
-          "magic_wand_fill_tolerance": 255
+          "magic_wand_fill_tolerance": 255.0
         }
       },
       "name": "magic_wand_tolerance_clamped",
@@ -497,7 +499,8 @@
           "value": 200.0
         },
         "state_changed": {
-          "stroke_end_arrowhead_scale": 200
+          "stroke_end_arrowhead_scale": 200,
+          "stroke_start_arrowhead_scale": 200.0
         }
       },
       "name": "stroke_start_scale_linked",
@@ -565,7 +568,9 @@
           "reason": null,
           "value": 200.0
         },
-        "state_changed": {}
+        "state_changed": {
+          "stroke_start_arrowhead_scale": 200.0
+        }
       },
       "name": "stroke_start_scale_unlinked",
       "panel": "stroke_panel_content",
@@ -633,7 +638,8 @@
           "value": 1.0
         },
         "state_changed": {
-          "stroke_end_arrowhead_scale": 1
+          "stroke_end_arrowhead_scale": 1,
+          "stroke_start_arrowhead_scale": 1.0
         }
       },
       "name": "stroke_start_scale_clamped_to_min",
@@ -770,7 +776,9 @@
           "reason": null,
           "value": 216.0
         },
-        "state_changed": {}
+        "state_changed": {
+          "stroke_width": 216.0
+        }
       },
       "name": "stroke_weight_in_inches",
       "panel": "stroke_panel_content",
@@ -837,7 +845,9 @@
           "reason": null,
           "value": 1000.0
         },
-        "state_changed": {}
+        "state_changed": {
+          "stroke_width": 1000.0
+        }
       },
       "name": "stroke_weight_clamped_to_max",
       "panel": "stroke_panel_content",
@@ -935,7 +945,10 @@
           "start_arrowhead_scale": 100,
           "weight": 1
         },
-        "state": {}
+        "state": {
+          "stroke_dash_2": 6,
+          "stroke_dashed": true
+        }
       },
       "event": {
         "commit": "  "
@@ -971,7 +984,9 @@
           "reason": null,
           "value": null
         },
-        "state_changed": {}
+        "state_changed": {
+          "stroke_dash_2": null
+        }
       },
       "name": "stroke_dash_2_cleared",
       "panel": "stroke_panel_content",
@@ -1172,7 +1187,9 @@
           "reason": null,
           "value": "taper_end"
         },
-        "state_changed": {}
+        "state_changed": {
+          "stroke_profile": "taper_end"
+        }
       },
       "name": "stroke_profile_option",
       "panel": "stroke_panel_content",
