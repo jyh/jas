@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 from document.document import (
     Document, ElementPath, ElementSelection, Selection,
     SelectionKind, _SelectionAll, _SelectionPartial,
-    selection_all, selection_partial,
+    selection_all, selection_kind_is_all, selection_partial,
 )
 from geometry.element import (
     ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
@@ -127,6 +127,108 @@ def selection_to_ids(doc: Document) -> list[str]:
         if eid is not None:
             out.append(eid)
     return out
+
+
+def _accumulated_transform(doc, path, include_own: bool = True
+                          ) -> Transform | None:
+    """The combined transform mapping ``path``'s LOCAL space to DOCUMENT
+    space: the element's own transform with every ancestor (group / layer)
+    transform applied outward, layer last.
+
+    ``include_own=False`` stops at the element's PARENT — the space a move
+    that rides on the element's own ``transform`` is already expressed in
+    (see :func:`_moves_in_parent_space`).
+
+    Mirrors the chain ``canvas.selection_handle_rects`` and the reference
+    interpreter's ``_element_evaluated_bbox`` walk, so a delta converted
+    here and a bbox measured there agree about what document space is.
+    Returns ``None`` when nothing on the path carries a transform (the
+    common case) or when ``path`` does not resolve. Duck-typed: a
+    container exposes ``children``.
+    """
+    if not path:
+        return None
+    layers = getattr(doc, "layers", None)
+    if layers is None:
+        return None
+    try:
+        node = layers[path[0]]
+    except (IndexError, TypeError):
+        return None
+    ancestors = []  # outermost (layer) first
+    if len(path) > 1:
+        ancestors.append(getattr(node, "transform", None))
+        for idx in path[1:-1]:
+            children = getattr(node, "children", None)
+            if children is None:
+                return None
+            try:
+                node = children[idx]
+            except (IndexError, TypeError):
+                return None
+            ancestors.append(getattr(node, "transform", None))
+        children = getattr(node, "children", None)
+        if children is None:
+            return None
+        try:
+            node = children[path[-1]]
+        except (IndexError, TypeError):
+            return None
+    # Innermost first, then each ancestor outward — the painter's CTM.
+    own = getattr(node, "transform", None) if include_own else None
+    chain = [own] + list(reversed(ancestors))
+    combined: Transform | None = None
+    for t in chain:
+        if t is None:
+            continue
+        combined = t if combined is None else t.multiply(combined)
+    return combined
+
+
+def _moves_in_parent_space(elem, kind) -> bool:
+    """True when :func:`move_control_points` implements this move by
+    translating the element's OWN ``transform`` rather than its local
+    control points.
+
+    A ``ReferenceElem`` has no geometry of its own, so a whole-element move
+    adds the delta to its transform's ``e``/``f``. That lands the element in
+    its PARENT's space already, so the element's own transform must be left
+    OUT of the conversion — while every ancestor's is still applied.
+    Converting a reference by the full chain moves it along its own rotated
+    axes: the exact defect this repair exists to remove, reintroduced one
+    level down. A partial (control-point) selection on a reference is a
+    no-op in the mover, so only the whole-element case is named here.
+    """
+    from geometry.element import ReferenceElem
+    return isinstance(elem, ReferenceElem) and selection_kind_is_all(kind, 0)
+
+
+def _document_delta_to_local(doc, path, dx: float, dy: float,
+                             elem=None, kind=None) -> tuple[float, float]:
+    """Map a DOCUMENT-space delta to ``path``'s LOCAL space.
+
+    With ``M`` the linear part of the accumulated transform, a local move
+    of ``v`` displaces the rendered element by ``M @ v``; so to displace
+    it by ``(dx, dy)`` the local move is ``M^-1 @ (dx, dy)``. Only the
+    LINEAR part participates — a translation component moves points, not
+    the vectors between them, so it must not be added to a delta.
+
+    Returns the delta unchanged when there is no transform (so the
+    untransformed path is bit-for-bit what it always was) and when the
+    matrix is SINGULAR: a degenerate transform collapses the element onto
+    a line or a point, where no local delta can produce an arbitrary
+    document-space displacement. Leaving the delta alone there preserves
+    the long-standing behaviour rather than inventing one, and is stated
+    here because it is a choice, not an oversight.
+    """
+    combined = _accumulated_transform(
+        doc, path, include_own=not _moves_in_parent_space(elem, kind))
+    if combined is None:
+        return (dx, dy)
+    inv = combined.inverse()
+    if inv is None:
+        return (dx, dy)
+    return (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy)
 
 
 class Controller:
@@ -804,12 +906,31 @@ class Controller:
         ))
 
     def move_selection(self, dx: float, dy: float) -> None:
-        """Move all selected control points by (dx, dy)."""
+        """Move all selected control points by the DOCUMENT-space delta
+        (dx, dy).
+
+        The delta is expressed in document (page) space — the space the
+        Properties panel's X/Y fields, the canvas drag and a journaled
+        ``move_selection`` op all speak. Control points live in the
+        element's LOCAL space, so each element's delta is mapped through
+        the inverse of its accumulated transform chain before it reaches
+        :func:`move_control_points` (which is local-space by contract and
+        is not the site of this correction).
+
+        Without that mapping the page delta is added straight to local
+        geometry, so a transformed element travels along its own rotated /
+        scaled axes: typing x=100 on a 30-degree rect landed it at 83.74.
+        That was the S-3 transform-blind class
+        (``transcripts/EDIT_SEMANTICS_FREEZE.md``); this method is the
+        cause all of its move symptoms shared.
+        """
         doc = self._model.document
         new_doc = doc
         for es in doc.selection:
             elem = doc.get_element(es.path)
-            new_elem = move_control_points(elem, es.kind, dx, dy)
+            ldx, ldy = _document_delta_to_local(
+                doc, es.path, dx, dy, elem, es.kind)
+            new_elem = move_control_points(elem, es.kind, ldx, ldy)
             new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
 

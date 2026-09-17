@@ -121,13 +121,16 @@ def test_an_edit_after_a_sync_moves_the_selection():
     assert selection_evaluated_bounds(model.document)[0] == pytest.approx(100.0, abs=1e-9)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "S-3 transform-blind class (transcripts/EDIT_SEMANTICS_FREEZE.md): "
-    "move_selection adds the document-space delta to the element's LOCAL "
-    "geometry, so under a rotation the bbox moves along the rotated axis. "
-    "The Rust and Swift moves read the same way. When this passes, the move "
-    "is transform-aware: drop the mark and update the class's member list."))
 def test_x_on_a_rotated_element_lands_where_it_was_typed():
+    """S-3's founding arm, carried here as a strict xfail until 2026-09-17.
+
+    It named the defect exactly — `move_selection` adding the document-space
+    delta to LOCAL geometry, so a 30-degree rect typed to x=100 landed at
+    83.74 — and instructed its reader to drop the mark once the move became
+    transform-aware. `Controller.move_selection` now maps the delta through
+    the inverse of the accumulated transform, and the mark is dropped.
+    The Rust and Swift moves still read the old way (S-3 step 3).
+    """
     from geometry.element import Transform
     model = _model(x=10.0, y=20.0, width=30.0, height=40.0,
                    transform=Transform.rotate(30.0))
