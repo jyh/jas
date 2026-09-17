@@ -458,9 +458,19 @@ Per-app entry points (see the corresponding files for details —
 the names and locations mirror the Character panel wiring):
 
 - **Rust** (`jas_dioxus`): `apply_stroke_panel_to_selection` in
-  `src/workspace/app_state.rs`; widget dispatch via the generic
+  `src/interpreter/stroke_host.rs`, the one Rust implementation. The web
+  app reaches it through `AppState::apply_stroke_panel_to_selection`
+  (`src/workspace/app_state.rs`), with widget dispatch via the generic
   `render_*` helpers in `src/interpreter/renderer.rs` keyed on the
-  enclosing `panel_kind`.
+  enclosing `panel_kind`. The native engine reaches it the reference's
+  way: its effect host is told of every global write
+  (`EffectHost::global_written`), and a write to one of
+  `STROKE_RENDER_KEYS` applies that field, with the panel read out of the
+  store by `StrokePanelState::from_store` (panel scope, then the flat
+  global, then the declared default). The engine applies on EVERY such
+  write, including one that leaves the stored value unchanged. That is
+  Swift's rule and the web app's; the reference store skips a write of an
+  equal value, so it does not re-apply a click after an undo.
 - **Swift** (`JasSwift`): `applyStrokePanelToSelection` in
   `Sources/Interpreter/Effects.swift`, subscribed through the
   notify-panel-state-changed dispatcher.

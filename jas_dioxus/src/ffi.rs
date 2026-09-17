@@ -1900,6 +1900,196 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    // -----------------------------------------------------------------------
+    // W2b-4 -- the Stroke panel's writes reach the selection (A10's stroke
+    // family through A11). W2b-0 (d) measured 13 stroke clicks reading
+    // `doc_changed=false` with four elements selected.
+    // -----------------------------------------------------------------------
+
+    const STROKE: &str = crate::interpreter::stroke_host::STROKE_PANEL;
+
+    /// The calibrated fixture with everything selected, as the W2b-0 census
+    /// drove it.
+    fn stroked_engine() -> *mut JasEngine {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/complex_document.svg")).unwrap();
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        let op = r#"{"op":"select_all"}"#;
+        assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+        assert!(unsafe { crate::ffi_pointer::jas_selection_len(e) } >= 2);
+        e
+    }
+
+    /// The selected elements' strokes, in selection order.
+    fn selected_strokes(e: *mut JasEngine) -> Vec<Option<crate::geometry::element::Stroke>> {
+        engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter()
+                .map(|es| doc.get_element(&es.path).and_then(|el| el.stroke().cloned()))
+                .collect()
+        })
+    }
+
+    fn reply_json(reply: &str, err: &str) -> serde_json::Value {
+        serde_json::from_str(reply)
+            .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"))
+    }
+
+    /// The shared host run on a copy of the engine's model, with the panel
+    /// the engine's store holds NOW, for each render key in `keys`.
+    fn stroke_oracle(e: *mut JasEngine, pre: &Model, keys: &[&str]) -> String {
+        use crate::interpreter::stroke_host::{apply_stroke_panel_to_selection, StrokePanelState};
+        let sp = StrokePanelState::from_store(&engine_of(e).store.borrow());
+        let mut copy = pre.clone();
+        for k in keys {
+            apply_stroke_panel_to_selection(&mut copy, &sp, k, None);
+        }
+        crate::geometry::test_json::document_to_test_json(copy.document())
+    }
+
+    /// **W2b-4's oracle.** A Cap click on the selection writes what the shared
+    /// host writes, in ONE undo step.
+    #[test]
+    fn stroke_cap_click_writes_the_selection_as_the_shared_host_does() {
+        use crate::geometry::element::LineCap;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = stroked_engine();
+        let pre = engine_of(e).with_model(|m| m.clone());
+        let before = doc_json(e);
+        assert!(selected_strokes(e).iter().flatten().any(|s| s.linecap != LineCap::Round),
+                "stop 2: the fixture must hold a stroke a Round cap changes");
+
+        let (reply, err) = behave(e, STROKE, r#"{"widget":"stk_cap_round","event":"click"}"#);
+        assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply}");
+        assert_eq!(err, "");
+        let after = doc_json(e);
+        assert_ne!(after, before);
+        assert_eq!(after, stroke_oracle(e, &pre, &["stroke_cap"]));
+        // A second reading, not through the oracle: every selected element
+        // that carries a stroke (a group carries none) is round.
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.linecap == LineCap::Round),
+                "{strokes:?}");
+
+        undo(e);
+        assert_eq!(doc_json(e), before, "ONE undo must restore the pre-click document");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "the click took more than one step");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The RISK the W2b-1 bank carried: a Weight commit moved `panel.weight`
+    /// and not the selection. It moves the selection now, through the bind
+    /// write's global (`state.stroke_width`).
+    #[test]
+    fn stroke_weight_commit_writes_the_selection_width() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = stroked_engine();
+        let pre = engine_of(e).with_model(|m| m.clone());
+        let (reply, err) = behave(e, STROKE,
+                                  r#"{"widget":"stk_weight","event":"commit","value":"7"}"#);
+        assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply}");
+        assert_eq!(doc_json(e), stroke_oracle(e, &pre, &["stroke_width"]));
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.width == 7.0), "{strokes:?}");
+        assert_eq!(engine_of(e).store.borrow().get("stroke_width").as_f64(), Some(7.0));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **The trigger is the WRITE, not a change of the stored value.** After an
+    /// undo the artwork is Butt again while the store still says Round; the
+    /// same click must put Round back. (The reference's store skips an equal
+    /// write, and Swift and the web app do not; this is theirs.)
+    #[test]
+    fn stroke_click_after_an_undo_writes_the_selection_again() {
+        use crate::geometry::element::LineCap;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = stroked_engine();
+        let click = r#"{"widget":"stk_cap_round","event":"click"}"#;
+        let (reply, err) = behave(e, STROKE, click);
+        assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply}");
+        undo(e);
+        assert_eq!(engine_of(e).store.borrow().get("stroke_cap"), &serde_json::json!("round"),
+                   "the premise: undo does not move the store");
+        let (reply, err) = behave(e, STROKE, click);
+        assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply} {err}");
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.linecap == LineCap::Round),
+                "{strokes:?}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The control: a Stroke click whose global is not a render key (the
+    /// link-scales chain) moves the panel and not the artwork.
+    #[test]
+    fn stroke_link_scales_click_writes_no_element() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = stroked_engine();
+        let before = doc_json(e);
+        let (reply, err) = behave(e, STROKE,
+                                  r#"{"widget":"stk_link_arrowhead_scale","event":"click"}"#);
+        assert_eq!(reply_json(&reply, &err)["doc_changed"], false, "{reply}");
+        assert_eq!(err, "", "the store moved, so this is not Unchanged");
+        assert_eq!(doc_json(e), before);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2b-0 (d) re-driven, by census.** Every Stroke click whose behavior
+    /// writes a render key, on a fresh engine over the calibrated fixture with
+    /// everything selected, leaves the document the shared host leaves. The
+    /// widgets and their keys are READ from the spec. At least one of them
+    /// must change the document: (d) was every one of them reading `false`.
+    #[test]
+    fn every_stroke_click_that_writes_a_render_key_is_the_shared_host() {
+        use crate::interpreter::stroke_host::is_render_key;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().unwrap();
+        let mut clicks: Vec<(String, Vec<String>)> = vec![];
+        fn walk(node: &serde_json::Value, out: &mut Vec<(String, Vec<String>)>) {
+            if let (Some(id), Some(behaviors)) = (node["id"].as_str(), node["behavior"].as_array()) {
+                for b in behaviors {
+                    if b["event"].as_str().unwrap_or("click") != "click" {
+                        continue;
+                    }
+                    let keys: Vec<String> = b["effects"].as_array().into_iter().flatten()
+                        .filter_map(|eff| eff["set"].as_object())
+                        .flat_map(|m| m.keys().cloned())
+                        .filter(|k| is_render_key(k))
+                        .collect();
+                    let refused = b["effects"].as_array().into_iter().flatten()
+                        .any(|eff| eff.get("swap_panel_state").is_some());
+                    if !keys.is_empty() && !refused {
+                        out.push((id.to_string(), keys));
+                    }
+                }
+            }
+            for k in ["children", "do"] {
+                if let Some(items) = node[k].as_array() {
+                    items.iter().for_each(|c| walk(c, out));
+                }
+            }
+        }
+        walk(&ws.panel(STROKE).unwrap()["content"], &mut clicks);
+        assert!(clicks.len() >= 10, "the census read {} clicks: {clicks:?}", clicks.len());
+        let mut changed = 0;
+        for (widget, keys) in &clicks {
+            let e = stroked_engine();
+            let pre = engine_of(e).with_model(|m| m.clone());
+            let before = doc_json(e);
+            let click = format!(r#"{{"widget":"{widget}","event":"click"}}"#);
+            let (reply, err) = behave(e, STROKE, &click);
+            let reply = reply_json(&reply, &err);
+            let keys: Vec<&str> = keys.iter().map(String::as_str).collect();
+            let after = doc_json(e);
+            assert_eq!(after, stroke_oracle(e, &pre, &keys), "{widget}");
+            assert_eq!(reply["doc_changed"] == true, after != before, "{widget}: {reply}");
+            changed += usize::from(after != before);
+            unsafe { jas_engine_free(e) };
+        }
+        assert!(changed > 0, "no stroke click changed the document: W2b-0 (d) still stands");
+    }
+
+
     /// **D5.** A disabled widget is refused by name before anything runs, and
     /// the plan the shell draws from shows the same state. Align needs two.
     #[test]

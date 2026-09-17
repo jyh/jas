@@ -78,6 +78,7 @@ use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
     self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, PRESS_EVENTS,
 };
@@ -153,6 +154,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * `snapshot` opens the transaction (`renderer.rs`, both spellings).
 /// * The fourteen Align operations run through `align_host`, the one
 ///   implementation the web app calls too.
+/// * A write to a Stroke render key applies the Stroke panel to the selection
+///   through `stroke_host` (A11), the one implementation the web app calls
+///   too.
 ///
 /// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
@@ -179,6 +183,22 @@ impl EffectHost for EngineHost {
             return true;
         }
         false
+    }
+
+    /// A11: a write to a Stroke render key applies that field of the Stroke
+    /// panel, as the store holds it, to the selection. It opens the batch's
+    /// transaction as `snapshot` does, so a batch that writes several keys is
+    /// ONE undo step, and the runner's owner commits it.
+    fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
+        let Some(model) = model else { return };
+        if !stroke_host::is_render_key(key) {
+            return;
+        }
+        if !model.in_txn() {
+            model.begin_txn();
+        }
+        let panel = StrokePanelState::from_store(store);
+        stroke_host::apply_stroke_panel_to_selection(model, &panel, key, None);
     }
 }
 
@@ -524,7 +544,7 @@ pub(crate) mod test_fixture {
 
 #[cfg(test)]
 mod tests {
-    use super::test_fixture::misaligned;
+    use super::test_fixture::{misaligned, model_with, rect};
     use super::*;
     use crate::interpreter::workspace::Workspace;
     use serde_json::json;
@@ -686,6 +706,14 @@ mod tests {
             {"id": "acts_with_params", "type": "icon_button", "behavior": [
                 {"event": "click", "action": "zz_take", "params": {"target": "artboard"}},
             ]},
+            {"id": "strokes_twice", "type": "icon_button", "behavior": [{"event": "click", "effects": [
+                {"set": {"stroke_cap": "\"round\""}},
+                {"set": {"stroke_join": "\"bevel\""}},
+            ]}]},
+            {"id": "strokes_then_refused", "type": "icon_button", "behavior": [{"event": "click", "effects": [
+                {"set": {"stroke_cap": "\"round\""}},
+                {"zz_first": true},
+            ]}]},
         ]}})
     }
 
@@ -708,6 +736,9 @@ mod tests {
                 return true;
             }
             self.engine.run(key, arg, store, model)
+        }
+        fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
+            self.engine.global_written(key, store, model)
         }
     }
 
@@ -734,6 +765,93 @@ mod tests {
         assert_eq!(model.document().selection.len(), 2, "the dry run's edit reached the model");
         assert_eq!(model.generation(), generation);
         assert!(!model.in_txn());
+    }
+
+    /// A stroked selection: `misaligned`'s rects, each given a 2pt butt/miter
+    /// stroke, and that stroke as the default to build on.
+    fn stroked(selected: &[usize]) -> Model {
+        use crate::geometry::element::{Color, Element, Stroke};
+        let stroke = Stroke::new(Color::BLACK, 2.0);
+        let rects = [rect(10.0, 0.0, 5.0, 5.0), rect(40.0, 20.0, 5.0, 5.0)]
+            .into_iter()
+            .map(|el| match el {
+                Element::Rect(mut r) => {
+                    r.stroke = Some(stroke);
+                    Element::Rect(r)
+                }
+                other => other,
+            })
+            .collect();
+        let mut model = model_with(rects, selected);
+        model.default_stroke = Some(stroke);
+        model
+    }
+
+    fn caps_and_joins(model: &Model) -> Vec<String> {
+        let doc = model.document();
+        (0..2).map(|i| {
+            let s = doc.get_element(&vec![0usize, i]).unwrap().stroke().cloned().unwrap();
+            format!("{:?}/{:?}", s.linecap, s.linejoin)
+        }).collect()
+    }
+
+    /// **A11 in the engine host.** A render-key write reaches the SELECTION
+    /// only, in ONE undo step however many keys the batch writes; the
+    /// unselected element is untouched.
+    #[test]
+    fn a_stroke_render_key_write_reaches_the_selection_in_one_step() {
+        let mut model = stroked(&[0]);
+        let mut store = StateStore::new();
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let r = run_synthetic("strokes_twice", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: true, state_changed: true }));
+        assert_eq!(caps_and_joins(&model), vec!["Round/Bevel", "Butt/Miter"]);
+        assert!(!model.in_txn(), "the batch left its transaction open");
+        model.undo();
+        assert_eq!(caps_and_joins(&model), vec!["Butt/Miter", "Butt/Miter"]);
+        assert!(!model.can_undo(), "two render keys took two undo steps");
+    }
+
+    /// The pre-flight covers the stroke write: the dry run applies the cap to
+    /// the COPY, the batch is refused, and the live selection keeps its cap.
+    #[test]
+    fn a_refused_batch_that_strokes_first_leaves_the_selection_untouched() {
+        let mut model = stroked(&[0, 1]);
+        let mut store = StateStore::new();
+        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let generation = model.generation();
+        let r = run_synthetic("strokes_then_refused", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Err(Refusal::new("PlatformEffect", "UnknownEffect:zz_first")));
+        assert_eq!(model.generation(), generation);
+        assert_eq!(caps_and_joins(&model), vec!["Butt/Miter", "Butt/Miter"]);
+        assert!(!model.in_txn());
+        // The control: the same cap write, unrefused, reaches the live model.
+        let r = run_synthetic("strokes_twice", "click", &mut model, &mut store, &mut host);
+        assert_eq!(r, Ok(Ran { doc_changed: true, state_changed: true }));
+        assert_eq!(caps_and_joins(&model), vec!["Round/Bevel", "Round/Bevel"]);
+    }
+
+    /// The engine host's A11 arm, called directly: a render key applies the
+    /// store's panel to the selection and opens the transaction as
+    /// `snapshot` does; any other global, and a call with no model, does
+    /// nothing.
+    #[test]
+    fn the_engine_host_applies_a_render_key_and_ignores_other_globals() {
+        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut model = stroked(&[0, 1]);
+        let mut store = StateStore::new();
+        store.set("stroke_cap", json!("square"));
+        for other in ["stroke_link_arrowhead_scale", "fill_color", "cap"] {
+            host.global_written(other, &mut store, Some(&mut model));
+            assert!(!model.in_txn(), "{other} opened a transaction");
+        }
+        host.global_written("stroke_cap", &mut store, None);
+        assert_eq!(caps_and_joins(&model), vec!["Butt/Miter", "Butt/Miter"]);
+        host.global_written("stroke_cap", &mut store, Some(&mut model));
+        assert!(model.in_txn(), "the apply opened the batch's transaction");
+        model.commit_txn();
+        assert!(model.can_undo());
+        assert_eq!(caps_and_joins(&model), vec!["Square/Miter", "Square/Miter"]);
     }
 
     /// The runner reads `panel.*` from the store LIVE, so a `set_panel_state`

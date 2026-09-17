@@ -6609,9 +6609,8 @@ mod tests {
     #[test]
     fn stroke_apply_panel_edit_corpus() {
         use crate::geometry::element::{Color, Stroke};
-        use crate::workspace::app_state::{
-            recolor_stroke, stroke_with_group, StrokeEditGroup,
-        };
+        use crate::interpreter::stroke_host::{stroke_with_group, StrokeEditGroup};
+        use crate::workspace::app_state::recolor_stroke;
         let raw = read_fixture("stroke_apply/panel_edit.json");
         let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let plain = Stroke::new(Color::from_hex("#000000").unwrap(), 1.0);
@@ -6682,6 +6681,110 @@ mod tests {
             ran += 1;
         }
         assert!(ran >= 25, "stroke_apply corpus ran only {} vectors", ran);
+    }
+
+    /// **W2b-4: the same corpus through the STORE and the shared host**, the
+    /// way the engine takes a Stroke panel edit. A vector's panel map is
+    /// seeded into the store the way its `scope` says: the panel scope, or
+    /// ONLY the flat globals (each field under the global the panel's `init:`
+    /// two-way binds it to, read from the bundle). `StrokePanelState::
+    /// from_store` then resolves it, and `apply_stroke_panel_to_selection`
+    /// writes one selected Line. So a global vector pins the reference's
+    /// panel-then-global fallback here too, and not only the group table.
+    #[test]
+    fn stroke_apply_corpus_through_the_store_and_the_host() {
+        use crate::document::document::{Document, ElementSelection};
+        use crate::document::model::Model;
+        use crate::geometry::element::{Color, CommonProps, Element, LayerElem, LineElem, Stroke};
+        use crate::interpreter::stroke_host::{
+            apply_stroke_panel_to_selection, StrokePanelState, STROKE_PANEL,
+        };
+        use crate::interpreter::state_store::StateStore;
+        use crate::interpreter::widget_commit::mirrored_global;
+
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let spec = ws.panel(STROKE_PANEL).unwrap();
+        let raw = read_fixture("stroke_apply/panel_edit.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let plain = Stroke::new(Color::from_hex("#000000").unwrap(), 1.0);
+        let line_with = |stroke: Option<Stroke>| {
+            let layer = Element::Layer(LayerElem {
+                children: vec![std::rc::Rc::new(Element::Line(LineElem {
+                    x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0, stroke,
+                    width_points: Vec::new(),
+                    common: CommonProps::default(),
+                    stroke_gradient: None,
+                }))],
+                isolated_blending: false,
+                knockout_group: false,
+                common: CommonProps { name: Some("L".into()), ..Default::default() },
+            });
+            let mut model = Model::default();
+            model.set_document_for_test(Document {
+                layers: vec![layer], selected_layer: 0,
+                selection: vec![ElementSelection::all(vec![0, 0])],
+                ..Document::default()
+            });
+            model
+        };
+        let (mut ran, mut global_ran) = (0usize, 0usize);
+        for vec in corpus["vectors"].as_array().unwrap() {
+            if vec["op"] != "panel_edit" {
+                continue;
+            }
+            let name = vec["name"].as_str().unwrap();
+            let edited = vec["edited"].as_str().unwrap();
+            let base_attrs = match &vec["base"] {
+                serde_json::Value::String(n) => corpus[n.as_str()].clone(),
+                other => other.clone(),
+            };
+            let base = (!base_attrs.is_null()).then(|| stroke_from_attrs(&plain, &base_attrs));
+            let fallback = (!vec["fallback"].is_null())
+                .then(|| stroke_from_attrs(&plain, &vec["fallback"]));
+
+            let fields = merged(&corpus["panel_defaults"], &vec["panel"]);
+            let fields: Vec<(String, serde_json::Value)> = fields.as_object().unwrap().iter()
+                .filter(|(k, _)| !k.starts_with('_'))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            let mut store = StateStore::new();
+            if vec["scope"] == "global" {
+                for (field, value) in &fields {
+                    let global = mirrored_global(spec, field)
+                        .unwrap_or_else(|| panic!("{name}: {field} has no two-way global"));
+                    if !value.is_null() {
+                        store.set(global, value.clone());
+                    }
+                }
+                global_ran += 1;
+            } else {
+                store.init_panel(STROKE_PANEL, fields.into_iter().collect());
+            }
+            let sp = StrokePanelState::from_store(&store);
+
+            let mut model = line_with(base);
+            model.default_stroke = fallback;
+            let before = crate::geometry::test_json::document_to_test_json(model.document());
+            let wrote = apply_stroke_panel_to_selection(&mut model, &sp, edited, None);
+            if vec["expected"].is_null() {
+                assert_eq!(wrote, None, "stroke_apply '{name}': '{edited}' must write nothing");
+                assert_eq!(crate::geometry::test_json::document_to_test_json(model.document()),
+                           before, "stroke_apply '{name}'");
+                assert!(!model.can_undo(), "stroke_apply '{name}' recorded a step");
+                ran += 1;
+                continue;
+            }
+            let effective = if base_attrs.is_null() { vec["fallback"].clone() } else { base_attrs };
+            let effective_base = base.or(fallback).expect("a vector that writes has a base");
+            let want = stroke_from_attrs(&effective_base, &merged(&effective, &vec["expected"]));
+            let got = model.document().get_element(&vec![0usize, 0]).unwrap()
+                .stroke().cloned();
+            assert_eq!(got, Some(want), "stroke_apply through the store '{name}'");
+            assert!(wrote.is_some(), "stroke_apply '{name}': the default was not written");
+            ran += 1;
+        }
+        assert!(ran >= 22, "the store arm ran only {ran} panel_edit vectors");
+        assert!(global_ran >= 3, "the store arm ran only {global_ran} global vectors");
     }
 
     // ── CHARPANEL: the field-scoped Character-panel apply law ──────
