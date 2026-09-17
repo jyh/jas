@@ -71,7 +71,8 @@ pub struct StateStore {
 pub enum StoreWrite {
     /// A global `state.*` key.
     Global(String),
-    /// A key in a panel's own scope: the panel id, then the key.
+    /// A key in a panel's own scope: the panel's CONTENT id
+    /// (`panel_content_id`), then the key.
     Panel(String, String),
 }
 
@@ -357,9 +358,11 @@ impl StateStore {
         self.writes = None;
     }
 
+    /// Journal a panel write under the panel's CONTENT id, whichever spelling
+    /// the caller used, as the reference notifies its panel subscribers.
     fn journal_panel_write(&mut self, panel_id: &str, key: &str) {
         if let Some(journal) = self.writes.as_mut() {
-            journal.push(StoreWrite::Panel(panel_id.to_string(), key.to_string()));
+            journal.push(StoreWrite::Panel(panel_content_id(panel_id), key.to_string()));
         }
     }
 

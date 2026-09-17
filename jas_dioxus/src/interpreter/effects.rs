@@ -12441,7 +12441,7 @@ mod tests {
         store.set("w", json!(4));
         store.set_panel("p", "k", json!(3));
         assert_eq!(store.take_writes(), vec![StoreWrite::Global("w".into()),
-                                             StoreWrite::Panel("p".into(), "k".into())]);
+                                             StoreWrite::Panel("p_panel_content".into(), "k".into())]);
         store.close_writes();
         store.set("v", json!(5));
         assert_eq!(store.take_writes(), Vec::<StoreWrite>::new());
