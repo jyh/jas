@@ -1597,13 +1597,6 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
     doc = model.document
     x, y, w, h = selection_evaluated_bounds(doc)
     pid = "properties_panel_content"
-    # Keys are prop_-prefixed to avoid colliding with another panel's short
-    # leaf keys in renderers that feed live values through one shared override
-    # map (the Color panel uses y / h). See properties.yaml.
-    store.set_panel(pid, "prop_x", round(float(x), 2))
-    store.set_panel(pid, "prop_y", round(float(y), 2))
-    store.set_panel(pid, "prop_w", round(float(w), 2))
-    store.set_panel(pid, "prop_h", round(float(h), 2))
     # Per-element attrs (rotation / opacity / blend) reflect the FIRST
     # selected element, like the Stroke panel weight (Part B.3). Defaults
     # when nothing is selected: 0 degrees, 100%, normal.
@@ -1623,12 +1616,21 @@ def sync_properties_panel_from_selection(store: StateStore, model) -> None:
             bm = getattr(elem, "blend_mode", None)
             if bm is not None:
                 blend = getattr(bm, "value", "normal")
-    # Guard the panel writes so subscribe_properties_panel does NOT treat
-    # these sync pushes as user edits (Part B.2). Only genuine widget edits
-    # (made while _PROPS_SYNCING is False) apply back to the selection.
+    # Guard ALL EIGHT panel writes so subscribe_properties_panel does NOT
+    # treat these sync pushes as user edits (Part B.2). Only genuine widget
+    # edits (made while _PROPS_SYNCING is False) apply back to the selection.
+    # The x / y / w / h pushes once sat outside the guard, so a sync moved the
+    # selection to its own 2-decimal display value.
+    # Keys are prop_-prefixed to avoid colliding with another panel's short
+    # leaf keys in renderers that feed live values through one shared override
+    # map (the Color panel uses y / h). See properties.yaml.
     global _PROPS_SYNCING
     _PROPS_SYNCING = True
     try:
+        store.set_panel(pid, "prop_x", round(float(x), 2))
+        store.set_panel(pid, "prop_y", round(float(y), 2))
+        store.set_panel(pid, "prop_w", round(float(w), 2))
+        store.set_panel(pid, "prop_h", round(float(h), 2))
         store.set_panel(pid, "prop_rotation", round(float(rotation), 2))
         store.set_panel(pid, "prop_opacity", round(float(opacity), 2))
         store.set_panel(pid, "prop_blend", blend)
