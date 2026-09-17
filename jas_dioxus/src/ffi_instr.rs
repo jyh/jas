@@ -20,10 +20,13 @@
 //!
 //! # Population, stated rather than implied
 //!
-//! [`Crossing`] enumerates the **10 functions of the materializer surface**: the
-//! 8 that stood on `main` at `22e5e30e`, plus `jas_bind_values` (S-C.1, because
-//! `widget_tree` is value-blind by design) and `jas_panel_event` (S-C.2, the
-//! write path a tick needs) — all in `ffi.rs`. It deliberately does NOT
+//! [`Crossing`] enumerates the **functions of the materializer surface**, all in
+//! `ffi.rs`: the 8 that stood on `main` at `22e5e30e`, `jas_bind_values` (S-C.1,
+//! because `widget_tree` is value-blind by design), `jas_panel_event` (S-C.2,
+//! the write path a tick needs), and each export a later wave added, which its
+//! variant's doc comment names. [`Crossing::COUNT`] is the number, and this
+//! paragraph does not repeat it: it read "10" here through six additions. It
+//! deliberately does NOT
 //! include the two S-B paint probes, which exist only on the S-B branch and are
 //! not part of a panel's surface — a distinction that cost a round of correction
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
