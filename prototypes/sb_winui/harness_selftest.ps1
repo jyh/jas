@@ -707,6 +707,72 @@ Test-Case 'P4: CONTROL -- a MENU row missing a field REFUSES rather than reading
 Test-Case 'P4: ...and names the field it could not read' { if ((Get-SbMenuRowReading ($menuRow -replace ' missed=0', '')).Reason -match 'missed') { 'named' } else { 'not named' } } 'named'
 
 # ---------------------------------------------------------------------------
+# P4.2 -- A LOST MENU NOTIFICATION, READ FROM BOTH ENDS
+# ---------------------------------------------------------------------------
+#
+# ⛔ W2-7 REDDENED P4.2 ON A RUN THAT LOST NOTHING. kenai 2026-09-16, the q6 replay:
+# MENU rows `seq 1 . 2 . 6 (missed=3) . 6 . 6 . 6`. `OnMenuChanged` reads the
+# NEWEST `Menu`, so one notification drew seq 6 and reported the gap, and the
+# three after it re-read seq 6 -- six rows for six publications, and nothing
+# lost. The old clause asserted `missed=0` on every row and could not tell that
+# from a loss. And the loss it exists for, a LAST notification that never
+# arrives (a stale menubar), leaves no UI-side row at all.
+#
+# ⛔ THESE ROWS ARE WHAT THE NEW C# FORMAT STRINGS COMPOSE, NOT VERBATIM OFF THE
+# BOX: no box has run this build. The first sitting on it replaces them, and a
+# reader that disagrees with a real row is this file's defect.
+$p42Tids = 'ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false'
+function New-SbP42Pub([int]$Seq, [string]$Cause) {
+    return "15:02:11`tMENU PUBLISHED seq=$Seq cause=$Cause $p42Tids"
+}
+function New-SbP42Menu([int]$Seq, [int]$Missed, [int]$Delivered, [int]$Coalesced) {
+    return ("15:02:11`tMENU rebuilds=$Seq items=55 enabled=50 disabled=5 seq=$Seq state-age=0 " +
+        "missed=$Missed delivered=$Delivered coalesced=$Coalesced shortcuts-unparsed=2")
+}
+# W2-7's run as this build writes it: the open and startup publications, the
+# replay's four (select_all, click, again, undo), and six deliveries -- the
+# first of the last four drawing seq 6, the other three finding it drawn.
+$p42W27 = @(
+    (New-SbP42Pub 1 'open'), (New-SbP42Pub 2 'startup'),
+    (New-SbP42Menu 1 0 1 0), (New-SbP42Menu 2 0 2 0),
+    (New-SbP42Pub 3 'mutation'), (New-SbP42Pub 4 'panel'), (New-SbP42Pub 5 'panel'), (New-SbP42Pub 6 'mutation'),
+    (New-SbP42Menu 6 3 3 0), (New-SbP42Menu 6 0 4 1), (New-SbP42Menu 6 0 5 2), (New-SbP42Menu 6 0 6 3))
+# Notification 4 dropped: five deliveries, and the menubar still reaches seq 6.
+$p42LostMid = @($p42W27[0..8]) + (New-SbP42Menu 6 0 4 1) + (New-SbP42Menu 6 0 5 2)
+# Notification 6 dropped after 3-5 were drawn: the menubar stops at seq 5.
+$p42Stale = @($p42W27[0..3]) + (New-SbP42Pub 3 'mutation') + (New-SbP42Pub 4 'panel') + (New-SbP42Pub 5 'panel') +
+    (New-SbP42Menu 5 2 3 0) + (New-SbP42Menu 5 0 4 1) + (New-SbP42Menu 5 0 5 2) + (New-SbP42Pub 6 'mutation')
+
+Test-Case 'P4.2: CONTROL -- the MENU row pattern does not match a MENU PUBLISHED row' { if ((New-SbP42Pub 1 'open') -match (Get-SbRowPattern 'MENU' ' rebuilds=')) { 'matched' } else { 'MISSED' } } 'MISSED'
+Test-Case 'P4.2: the publications are read, in order' { (Get-SbMenuPublished $p42W27).Seqs -join ',' } '1,2,3,4,5,6'
+Test-Case 'P4.2: CONTROL -- a MENU row is not read as a publication' { (Get-SbMenuPublished @((New-SbP42Menu 1 0 1 0))).Seqs.Count } '0'
+Test-Case 'P4.2: a publication with an unreadable seq is COUNTED unreadable, never skipped' { (Get-SbMenuPublished @("15:02:11`tMENU PUBLISHED seq=x cause=open $p42Tids")).Unreadable } '1'
+Test-Case 'P4.2: delivered= is read' { (Get-SbMenuRowReading (New-SbP42Menu 6 0 5 2)).Delivered } '5'
+Test-Case 'P4.2: coalesced= is read' { (Get-SbMenuRowReading (New-SbP42Menu 6 0 5 2)).Coalesced } '2'
+Test-Case 'P4.2: ...and the pair applies' { (Get-SbMenuRowReading (New-SbP42Menu 6 0 5 2)).DeliveryApplies } 'True'
+Test-Case 'P4.2: CONTROL -- kenai''s real row PREDATES the pair, reads, and declines it' { $r = Get-SbMenuRowReading $menuRow; "$($r.Ok):$($r.DeliveryApplies):$($r.Delivered)" } 'True:False:-1'
+Test-Case 'P4.2: CONTROL -- half a pair declines' { (Get-SbMenuRowReading ((New-SbP42Menu 6 0 5 2) -replace ' coalesced=2', '')).DeliveryApplies } 'False'
+Test-Case 'P4.2: W2-7''s coalesce -- six deliveries of six publications -- PASSES' { (Get-SbMenuDeliveryVerdict $p42W27).Verdict } 'PASS'
+Test-Case 'P4.2: CONTROL -- those same rows carry missed=3, which the OLD clause read as a loss' { $s = 0; foreach ($r in $p42W27) { $m = Get-SbMenuRowReading $r; if ($m.Ok) { $s += $m.Missed } }; $s } '3'
+Test-Case 'P4.2: a notification lost MID-BURST FAILS' { (Get-SbMenuDeliveryVerdict $p42LostMid).Verdict } 'FAIL'
+Test-Case 'P4.2: ...naming the count that never arrived, not a stale menubar' { $d = (Get-SbMenuDeliveryVerdict $p42LostMid).Detail; if ($d -match '^1 menu notification\(s\) never arrived' -and $d -notmatch 'STALE') { 'named' } else { $d } } 'named'
+Test-Case 'P4.2: the LAST notification lost -- a STALE MENUBAR -- FAILS' { (Get-SbMenuDeliveryVerdict $p42Stale).Verdict } 'FAIL'
+Test-Case 'P4.2: ...and says STALE, naming both seqs' { $d = (Get-SbMenuDeliveryVerdict $p42Stale).Detail; if ($d -match '^STALE MENUBAR' -and $d -match 'seq 6' -and $d -match 'seq 5') { 'named' } else { $d } } 'named'
+Test-Case 'P4.2: CONTROL -- the stale run''s last row delivered all it saw, so only the published seq catches it' { $r = Get-SbMenuRowReading $p42Stale[-2]; "$($r.Seq):$($r.Delivered)" } '5:5'
+Test-Case 'P4.2: publications and NO MENU row FAIL -- once the producer speaks, absent is not zero' { (Get-SbMenuDeliveryVerdict @($p42W27[0], $p42W27[1])).Verdict } 'FAIL'
+Test-Case 'P4.2: CONTROL -- kenai''s pre-producer row alone is NOT RUN, and says why' { $v = Get-SbMenuDeliveryVerdict @($menuRow); if ($v.Verdict -eq 'NOT RUN' -and $v.Detail -match 'predates') { 'declined' } else { "$($v.Verdict): $($v.Detail)" } } 'declined'
+Test-Case 'P4.2: a run with no menu at all is NOT RUN' { (Get-SbMenuDeliveryVerdict @($abiRow)).Verdict } 'NOT RUN'
+Test-Case 'P4.2: publications beside an older build''s MENU rows are NOT RUN, never compared with a default' { (Get-SbMenuDeliveryVerdict @($p42W27[0], $p42W27[1], $menuRow)).Verdict } 'NOT RUN'
+Test-Case 'P4.2: two processes in one slice (seq 1,2,1,2) are NOT RUN, never compared' { $v = Get-SbMenuDeliveryVerdict (@($p42W27[0..3]) + @($p42W27[0..3])); if ($v.Verdict -eq 'NOT RUN' -and $v.Detail -match '1,2,1,2') { 'declined' } else { "$($v.Verdict): $($v.Detail)" } } 'declined'
+Test-Case 'P4.2: more deliveries than publications FAIL as the instrument''s own defect' { $v = Get-SbMenuDeliveryVerdict (@($p42W27) + (New-SbP42Menu 6 0 7 4)); if ($v.Verdict -eq 'FAIL' -and $v.Detail -match 'instrument') { 'named' } else { "$($v.Verdict): $($v.Detail)" } } 'named'
+Test-Case 'P4.2: every verdict above carries a detail and the P4.2 key' { $bad = 0; foreach ($x in @($p42W27, $p42LostMid, $p42Stale, @($menuRow), @($abiRow))) { $v = Get-SbMenuDeliveryVerdict $x; if ([string]::IsNullOrWhiteSpace($v.Detail) -or ($v.Name -split ' ')[0] -ne 'P4.2') { $bad++ } }; $bad } '0'
+Test-Case 'P4.2 wait: the delivered W2-7 run is settled' { Test-SbMenuSettled $p42W27 } 'True'
+Test-Case 'P4.2 wait: the same run read BEFORE its last delivery is not' { Test-SbMenuSettled $p42W27[0..10] } 'False'
+Test-Case 'P4.2 wait: publications with no MENU row yet are not settled' { Test-SbMenuSettled @($p42W27[0], $p42W27[1]) } 'False'
+Test-Case 'P4.2 wait: a run that published nothing owes no wait' { Test-SbMenuSettled @($abiRow) } 'True'
+Test-Case 'P4.2 wait: CONTROL -- an early read of W2-7 judges it STALE, which is why the wait exists' { (Get-SbMenuDeliveryVerdict $p42W27[0..7]).Detail -match '^STALE' } 'True'
+
+# ---------------------------------------------------------------------------
 # `Get-SbSceneRefusals` -- THE READER TWO WAITS INSIDE A RUN NOW DEPEND ON
 # ---------------------------------------------------------------------------
 #
@@ -1175,6 +1241,46 @@ Test-Case 'Q6: every verdict on the healthy run carries a detail' `
 # cases above rely on, so a healthy PASS is not three identical strings.
 Test-Case 'Q6: CONTROL -- the healthy fixture''s three canvases are distinct' `
     { @($q6HashA, $q6HashS, $q6HashM | Sort-Object -Unique).Count } '3'
+
+# ---------------------------------------------------------------------------
+# Q6.S5 -- FREEZE STOP 5, RE-AIMED (v1.7): OPENING THE PANE RESIZED NOTHING
+# ---------------------------------------------------------------------------
+#
+# ⛔ STOP 5 AS FIRST WRITTEN COULD NOT GO RED. It predicted one resize per pane
+# open. W2-5 puts the pane in the FIRST layout, so no route resizes the canvas,
+# and kenai read 0 against 7 live REPAINT rows (flask). The stop is re-aimed at
+# that zero, and it reads `events_total` because `cause=` is last-writer-wins
+# inside a drain: a pointer or a click after a resize overwrites it, while
+# `events_total` counts the ARRIVAL.
+function New-SbS5Repaint([string]$Total, [string]$Cause, [string]$Head = 'RUSTOK REPAINT') {
+    return ("$Head events_total=$Total distinct_sizes=1 arrivals=none frames=1 cause=$Cause resizes-in-drain=0 " +
+        "surface=2502x1350 paint=1.20ms present=0.40ms occluded=0 loads(shell)=1 $q6Tids")
+}
+$s5Calm = @{ repaint = (New-SbS5Repaint '0' 'hash') }
+function Get-SbS5([hashtable]$Over, [string]$Scene = 'app', [string]$Synth = 'align_left_button') {
+    $o = @{}
+    foreach ($k in $s5Calm.Keys) { $o[$k] = $s5Calm[$k] }
+    foreach ($k in $Over.Keys) { $o[$k] = $Over[$k] }
+    return (Get-SbPaneResizeVerdict (New-SbQ6Fixture $o) $Scene $Synth)
+}
+
+Test-Case 'Q6.S5: the q6 run with no resize PASSES' { (Get-SbS5 @{}).Verdict } 'PASS'
+Test-Case 'Q6.S5: a resize that ARRIVED, its cause overwritten by a later command, FAILS' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'pointer') }).Verdict } 'FAIL'
+Test-Case 'Q6.S5: CONTROL -- that row carries no cause=resize, so a cause-only reading would pass it' { if ((New-SbS5Repaint '1' 'pointer') -match 'cause=resize') { 'resize' } else { 'no resize cause' } } 'no resize cause'
+Test-Case 'Q6.S5: a resize that repainted as cause=resize FAILS' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'resize') }).Verdict } 'FAIL'
+Test-Case 'Q6.S5: ...and the detail names both readings' { $d = (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'resize') }).Detail; if ($d -match 'events_total=1 ' -and $d -match 'cause=resize on 1 ') { 'named' } else { $d } } 'named'
+Test-Case 'Q6.S5: a cause=resize row beside events_total=0 FAILS rather than trusting either' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '0' 'resize') }).Verdict } 'FAIL'
+Test-Case 'Q6.S5: events_total=3 FAILS -- the W2-6 fixture composed that value, and the box has not read it' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '3' 'hash') }).Verdict } 'FAIL'
+Test-Case 'Q6.S5: the LAST REPAINT row is the one read -- events_total is a running total' { $rows = @(New-SbQ6Fixture $s5Calm) + (New-SbQ6Row (New-SbS5Repaint '1' 'pointer')); (Get-SbPaneResizeVerdict $rows 'app' 'align_left_button').Verdict } 'FAIL'
+Test-Case 'Q6.S5: a REPAINT-FAILED row is still read' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'hash' 'RUSTFAIL REPAINT-FAILED') }).Verdict } 'FAIL'
+Test-Case 'Q6.S5: CONTROL -- ...and a calm one PASSES, so the FAIL above is the total' { (Get-SbS5 @{ repaint = (New-SbS5Repaint '0' 'hash' 'RUSTFAIL REPAINT-FAILED') }).Verdict } 'PASS'
+Test-Case 'Q6.S5: NOT RUN on a scene with no pane' { (Get-SbS5 @{} 'retained').Verdict } 'NOT RUN'
+Test-Case 'Q6.S5: NOT RUN on an app run with no replay -- a hand may resize that window' { (Get-SbS5 @{} 'app' '').Verdict } 'NOT RUN'
+Test-Case 'Q6.S5: CONTROL -- a whitespace knob is unset, as the shell reads it' { (Get-SbS5 @{} 'app' '  ').Verdict } 'NOT RUN'
+Test-Case 'Q6.S5: NOT RUN when the pane never opened' { (Get-SbS5 @{ open = $null }).Verdict } 'NOT RUN'
+Test-Case 'Q6.S5: NOT RUN with no REPAINT row -- a zero from an instrument that never ran is not a measurement' { $v = Get-SbS5 @{ repaint = $null }; if ($v.Verdict -eq 'NOT RUN' -and $v.Detail -match 'did not run') { 'declined' } else { "$($v.Verdict): $($v.Detail)" } } 'declined'
+Test-Case 'Q6.S5: NOT RUN on an unreadable total' { (Get-SbS5 @{ repaint = (New-SbS5Repaint 'x' 'hash') }).Verdict } 'NOT RUN'
+Test-Case 'Q6.S5: every path carries the Q6.S5 key and a detail' { $bad = 0; foreach ($v in @((Get-SbS5 @{}), (Get-SbS5 @{} 'retained'), (Get-SbS5 @{ open = $null }), (Get-SbS5 @{ repaint = $null }), (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'resize') }))) { if ([string]::IsNullOrWhiteSpace($v.Detail) -or ($v.Name -split ' ')[0] -ne 'Q6.S5') { $bad++ } }; $bad } '0'
 
 # ---------------------------------------------------------------------------
 Write-Host ""
