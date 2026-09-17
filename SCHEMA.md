@@ -1010,6 +1010,7 @@ expression is true.
 | `key_down` | Keyboard key pressed |
 | `key_up` | Keyboard key released |
 | `change` | Value changed (inputs, toggles, selects) |
+| `commit` | A value was committed into an input widget (a synonym of `change` there) |
 | `tab_click` | Tab header selected (within `tabs`) |
 | `tab_close` | Tab close button clicked |
 | `resize` | Element resized |
@@ -1018,6 +1019,12 @@ expression is true.
 
 The event list is extensible — unknown event names are preserved in the spec
 and displayed in wireframe inspection mode.
+
+For the eight value widget kinds (`number_input`, `length_input`,
+`text_input`, `select`, `icon_select`, `combo_box`, `toggle`, `checkbox`) the
+list is NOT extensible: `WIDGET_EVENTS.md` names the only events each kind may
+declare, what `event.value` holds, and whether the bound field is written
+before the behaviors run. `scripts/check_widget_event_contract.py` enforces it.
 
 ### Interaction Protocols
 
