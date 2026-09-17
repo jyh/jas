@@ -1,0 +1,1249 @@
+{
+  "_doc": [
+    "Generate the widget event corpus: test_fixtures/widget_events/corpus.json.",
+    "",
+    "Each case names a shipped widget in the compiled bundle, a starting store, and",
+    "one event: a commit (the text a person entered, or null for a commit that",
+    "carried none) or a press. The expected result is what the reference",
+    "(workspace_interpreter/widget_event.py, WIDGET_EVENTS.md) does. The expected",
+    "values are PRODUCED by running the reference, never typed.",
+    "",
+    "The starting store, which is how every consumer rebuilds it:",
+    "  * global state = the bundle's `state` defaults, then `before.state` on top;",
+    "  * the widget's panel scope = `before.panel`, whole;",
+    "  * that panel is the active panel.",
+    "`before.panel` is written out whole, so a consumer never has to evaluate the",
+    "panel's `init:` expressions to reproduce it. The generator derives it by",
+    "opening the panel the way the reference does (its `state:` defaults, then each",
+    "`init:` expression, then the case's own panel setup).",
+    "",
+    "The expected values:",
+    "  * `result` is the EventResult, field for field;",
+    "  * `panel` is the panel scope afterwards, whole;",
+    "  * `state_changed` holds exactly the global keys whose value changed.",
+    "Numbers compare as numbers, not as JSON text. A value a behavior writes has",
+    "passed through the expression evaluator, so it can serialize as `40` where",
+    "the bind write of the same value serialized as `40.0`.",
+    "",
+    "Every case's behaviors write only to the store. What a port's panel-write",
+    "host then does to the document is outside this corpus.",
+    "",
+    "Regenerate after changing widget_event.py, the seed list, or the bundle:",
+    "",
+    "    python -m workspace_interpreter.compile workspace/ workspace/workspace.json",
+    "    python scripts/gen_widget_event_corpus.py",
+    "",
+    "workspace_interpreter/tests/test_widget_event_corpus.py fails on a stale file."
+  ],
+  "cases": [
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "40"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 40.0,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 40.0
+        },
+        "state_changed": {
+          "magic_wand_fill_tolerance": 40
+        }
+      },
+      "name": "magic_wand_tolerance_commit",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "900"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 255.0,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 255.0
+        },
+        "state_changed": {
+          "magic_wand_fill_tolerance": 255
+        }
+      },
+      "name": "magic_wand_tolerance_clamped",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "2.5"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 2.5
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 2.5
+        },
+        "state_changed": {
+          "magic_wand_stroke_weight_tolerance": 2.5
+        }
+      },
+      "name": "magic_wand_weight_tolerance_decimal",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_stroke_weight_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": null
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "MissingValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "magic_wand_tolerance_missing_value",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "abc"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "magic_wand_tolerance_bad_value",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "1e3"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "magic_wand_tolerance_exponent_refused",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": false,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {
+          "magic_wand_fill_color": false
+        }
+      },
+      "event": {
+        "commit": "40"
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": false,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "magic_wand_tolerance_disabled",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_tolerance"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "press": true
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": false,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": false
+        },
+        "state_changed": {
+          "magic_wand_fill_color": false
+        }
+      },
+      "name": "magic_wand_fill_color_press",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_fill_color"
+    },
+    {
+      "before": {
+        "panel": {
+          "blending_mode": false,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "state": {}
+      },
+      "event": {
+        "press": true
+      },
+      "expected": {
+        "panel": {
+          "blending_mode": true,
+          "fill_color": true,
+          "fill_tolerance": 32,
+          "opacity": true,
+          "opacity_tolerance": 5,
+          "stroke_color": true,
+          "stroke_tolerance": 32,
+          "stroke_weight": true,
+          "stroke_weight_tolerance": 5.0
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": true
+        },
+        "state_changed": {
+          "magic_wand_blending_mode": true
+        }
+      },
+      "name": "magic_wand_blending_mode_press",
+      "panel": "magic_wand_panel_content",
+      "widget": "mwp_blending_mode"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": true,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "200"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 200,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": true,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 200.0,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 200.0
+        },
+        "state_changed": {
+          "stroke_end_arrowhead_scale": 200
+        }
+      },
+      "name": "stroke_start_scale_linked",
+      "panel": "stroke_panel_content",
+      "widget": "stk_start_arrowhead_scale"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "200"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 200.0,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 200.0
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_start_scale_unlinked",
+      "panel": "stroke_panel_content",
+      "widget": "stk_start_arrowhead_scale"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": true,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "0"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 1,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": true,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 1.0,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 1.0
+        },
+        "state_changed": {
+          "stroke_end_arrowhead_scale": 1
+        }
+      },
+      "name": "stroke_start_scale_clamped_to_min",
+      "panel": "stroke_panel_content",
+      "widget": "stk_start_arrowhead_scale"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "press": true
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": true,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": true
+        },
+        "state_changed": {
+          "stroke_dashed": true
+        }
+      },
+      "name": "stroke_dashed_press",
+      "panel": "stroke_panel_content",
+      "widget": "stk_dashed"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "3 in"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 216.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 216.0
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_weight_in_inches",
+      "panel": "stroke_panel_content",
+      "widget": "stk_weight"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "2000"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1000.0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 1000.0
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_weight_clamped_to_max",
+      "panel": "stroke_panel_content",
+      "widget": "stk_weight"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "5 dpi"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_weight_unknown_unit",
+      "panel": "stroke_panel_content",
+      "widget": "stk_weight"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": 6,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": true,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "  "
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": true,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_dash_2_cleared",
+      "panel": "stroke_panel_content",
+      "widget": "stk_dash_2"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": true,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": ""
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": true,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_dash_1_blank_refused",
+      "panel": "stroke_panel_content",
+      "widget": "stk_dash_1"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "4"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_dash_2_disabled_while_solid",
+      "panel": "stroke_panel_content",
+      "widget": "stk_dash_2"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "taper_end"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "taper_end",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": "taper_end"
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_profile_option",
+      "panel": "stroke_panel_content",
+      "widget": "stk_profile"
+    },
+    {
+      "before": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "Taper End"
+      },
+      "expected": {
+        "panel": {
+          "align_stroke": "center",
+          "arrow_align": "tip_at_end",
+          "cap": "butt",
+          "dash_1": 12,
+          "dash_2": null,
+          "dash_3": null,
+          "dash_align_anchors": false,
+          "dashed": false,
+          "end_arrowhead": "none",
+          "end_arrowhead_scale": 100,
+          "gap_1": 12,
+          "gap_2": null,
+          "gap_3": null,
+          "join": "miter",
+          "link_arrowhead_scale": false,
+          "miter_limit": 10,
+          "profile": "uniform",
+          "profile_flipped": false,
+          "start_arrowhead": "none",
+          "start_arrowhead_scale": 100,
+          "weight": 1
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "stroke_profile_by_label_refused",
+      "panel": "stroke_panel_content",
+      "widget": "stk_profile"
+    }
+  ]
+}
