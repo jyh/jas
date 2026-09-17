@@ -36,11 +36,19 @@ A new widget type `length_input` that:
   declared unit.
 - Converts the parsed value to pt before commit, so the state field
   remains canonical and SVG output is unchanged.
-- Validates against the field's `min:` / `max:` (interpreted in pt) and
-  rejects out-of-range entries by reverting to the prior value.
-- Honors the bound state field's nullability: an empty / whitespace-
-  only entry on a nullable field commits `null`; on a non-nullable
-  field it reverts.
+- Clamps an entry to the widget's declared `min:` / `max:` (interpreted
+  in pt). An undeclared bound does not clamp.
+- Honors the widget's `nullable:` flag: an empty / whitespace-only entry
+  commits `null` when the widget declares `nullable: true`, and reverts
+  otherwise.
+
+*(Until 2026-09-16 the two bullets above said that an out-of-range entry is
+REJECTED and that nullability is read from the bound STATE FIELD. Both
+active ports clamp to the widget's bounds and read the widget's own
+`nullable:` flag, the same clamp rule `number_input` follows. The
+document was corrected to match them when `WIDGET_EVENTS.md` made the
+commit procedure a contract. That document owns everything around this
+parse: the write order, the behaviors, and the refusals.)*
 
 Out of scope for v1:
 
@@ -67,13 +75,14 @@ Opacity, Artboard dialogs, …) migrate in a follow-up.
     disabled: <expr>                      # optional
   min: <number>                           # optional, in pt
   max: <number>                           # optional, in pt
+  nullable: <bool>                        # optional; blank entry commits null
   precision: <integer>                    # optional, default 2
   placeholder: <string>                   # optional, e.g. "0 pt"
   style: { width: <number> }              # optional
 ```
 
-The state field bound by `value` must be of `type: number` (with
-`nullable: true` when an empty entry should write `null`). The display
+The state field bound by `value` must be of `type: number`. When the
+widget declares `nullable: true`, the field must accept `null` too. The display
 unit declared on the widget is independent of the bound field's type.
 
 ## Parser
@@ -90,10 +99,10 @@ Behavior:
 - **Match.** Unit recognised ⇒ convert value to pt via the table below.
 - **Unknown unit.** Any letter sequence not in the supported set ⇒
   reject (revert).
-- **Empty / whitespace.** Nullable field ⇒ commit `null`. Non-nullable
-  ⇒ reject.
+- **Empty / whitespace.** Widget declares `nullable: true` ⇒ commit
+  `null`. Otherwise ⇒ reject.
 - **Out of range.** `min` / `max` violated after conversion to pt ⇒
-  reject.
+  clamp to the violated bound, and commit.
 - **Reject behavior.** Restore the displayed value from the bound
   state; do not commit.
 
@@ -141,10 +150,10 @@ Examples (precision = 2):
 | `"12 pt"`    | pt          | 12 pt            | space optional             |
 | `"12pt"`     | pt          | 12 pt            | no space                   |
 | `"12 PT"`    | pt          | 12 pt            | case-insensitive           |
-| `"-3 pt"`    | pt          | -3 pt or reject  | depends on `min:`          |
+| `"-3 pt"`    | pt          | -3 pt, or `min:` | clamped when `min:` > -3   |
 | `".5 mm"`    | pt          | 1.4173… pt       | leading-dot decimal        |
 | `"5."`       | pt          | 5 pt             | trailing-dot decimal       |
-| `""`         | pt          | null or revert   | nullability                |
+| `""`         | pt          | null or revert   | widget `nullable:`         |
 | `"   "`      | pt          | null or revert   | whitespace = empty         |
 | `"5 mm pt"`  | pt          | revert           | extra tokens               |
 | `"pt"`       | pt          | revert           | no number                  |
