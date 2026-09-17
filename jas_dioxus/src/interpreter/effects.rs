@@ -121,6 +121,15 @@ pub trait EffectHost {
         store: &mut StateStore,
         model: Option<&mut Model>,
     ) -> bool;
+
+    /// A global `state.*` key was written. STUB.
+    fn global_written(
+        &mut self,
+        _key: &str,
+        _store: &mut StateStore,
+        _model: Option<&mut Model>,
+    ) {
+    }
 }
 
 /// [`run_effects`] with a platform host asked before every built-in arm, in
@@ -12198,6 +12207,120 @@ mod tests {
             "a locked DIRECT path gains nothing");
         assert_eq!(path_at(&s7_insert_anchor(&locked, 15.0, 107.5), &[0, 1, 0]).d.len(), 3,
             "a locked NESTED path gains nothing");
+    }
+
+    // -----------------------------------------------------------------------
+    // A global write reaches the host (FB wave 2b, A11)
+    // -----------------------------------------------------------------------
+    //
+    // The reference fires its subscriptions from `StateStore.set`, so every
+    // arm that writes a global (`set`, `toggle`, `swap`, `increment`, ...) is
+    // seen. These arms record what the host was told and what the store held
+    // for that key when it was told.
+
+    #[derive(Default)]
+    struct WriteLog {
+        seen: Vec<(String, serde_json::Value)>,
+    }
+
+    impl EffectHost for WriteLog {
+        fn run(&mut self, _: &str, _: &serde_json::Value, _: &mut StateStore,
+               _: Option<&mut Model>) -> bool {
+            false
+        }
+        fn global_written(&mut self, key: &str, store: &mut StateStore, _: Option<&mut Model>) {
+            self.seen.push((key.to_string(), store.get(key).clone()));
+        }
+    }
+
+    fn writes_of(effects: Vec<serde_json::Value>, store: &mut StateStore,
+                 actions: Option<&serde_json::Value>) -> Vec<(String, serde_json::Value)> {
+        let mut log = WriteLog::default();
+        run_effects_hosted(&effects, &serde_json::json!({}), store, None, actions, None, None,
+                           &mut log);
+        log.seen
+    }
+
+    fn seen(pairs: &[(&str, serde_json::Value)]) -> Vec<(String, serde_json::Value)> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+
+    #[test]
+    fn a_global_write_is_reported_to_the_host_after_each_effect() {
+        use serde_json::json;
+        let mut store = StateStore::new();
+        store.set("flag", json!(false));
+        store.set("a", json!("x"));
+        store.set("b", json!("y"));
+        store.set("n", json!(1.0));
+        store.init_panel("p", std::collections::HashMap::new());
+        store.set_active_panel(Some("p"));
+        let got = writes_of(vec![
+            // The scoped spelling is reported bare, as the store keys it.
+            json!({"set": {"state.stroke_cap": "\"round\""}}),
+            // A panel write is not a global write.
+            json!({"set_panel_state": {"key": "cap", "value": "\"square\""}}),
+            // Reported before the NEXT effect runs, so each report reads its
+            // own value, not the batch's last.
+            json!({"set": {"stroke_cap": "\"square\""}}),
+            json!({"toggle": "flag"}),
+            json!({"swap": ["a", "b"]}),
+            json!({"increment": {"key": "n", "by": 2}}),
+        ], &mut store, None);
+        assert_eq!(got, seen(&[
+            ("stroke_cap", json!("round")),
+            ("stroke_cap", json!("square")),
+            ("flag", json!(true)),
+            ("a", json!("y")),
+            ("b", json!("x")),
+            ("n", json!(3.0)),
+        ]));
+    }
+
+    /// Swift's and the web app's rule, not the reference store's: a write of
+    /// the value the store already holds is still a write. A person who
+    /// clicks Round after an undo put the artwork back to Butt means Round.
+    #[test]
+    fn a_write_that_changes_no_value_is_still_reported() {
+        use serde_json::json;
+        let mut store = StateStore::new();
+        store.set("stroke_cap", json!("butt"));
+        let got = writes_of(vec![json!({"set": {"stroke_cap": "\"butt\""}})], &mut store, None);
+        assert_eq!(got, seen(&[("stroke_cap", json!("butt"))]));
+    }
+
+    /// A nested batch reports its own writes, and each write is reported
+    /// exactly once.
+    #[test]
+    fn a_dispatched_actions_writes_are_reported_once_each() {
+        use serde_json::json;
+        let actions = json!({"act": {"effects": [{"set": {"x": "1"}}]}});
+        let mut store = StateStore::new();
+        let got = writes_of(vec![json!({"dispatch": "act"}), json!({"set": {"y": "2"}})],
+                            &mut store, Some(&actions));
+        assert_eq!(got, seen(&[("x", json!(1)), ("y", json!(2))]));
+    }
+
+    /// The journal exists only while a hosted batch runs: an unhosted batch,
+    /// and a direct `set` after a hosted one, record nothing.
+    #[test]
+    fn nothing_is_journaled_outside_a_hosted_batch() {
+        use serde_json::json;
+        let mut store = StateStore::new();
+        run_effects(&[json!({"set": {"x": "1"}})], &json!({}), &mut store, None, None, None, None);
+        assert_eq!(store.take_global_writes(), Vec::<String>::new());
+        let got = writes_of(vec![json!({"set": {"y": "2"}})], &mut store, None);
+        assert_eq!(got.len(), 1, "the control: a hosted batch IS journaled");
+        store.set("z", json!(3));
+        assert_eq!(store.take_global_writes(), Vec::<String>::new());
+        // And the journal opens and closes: its owner is the outermost batch.
+        assert!(store.open_global_writes(), "a closed journal opens");
+        assert!(!store.open_global_writes(), "an open journal is not reopened");
+        store.set("w", json!(4));
+        assert_eq!(store.take_global_writes(), vec!["w".to_string()]);
+        store.close_global_writes();
+        store.set("v", json!(5));
+        assert_eq!(store.take_global_writes(), Vec::<String>::new());
     }
 
     // -----------------------------------------------------------------------

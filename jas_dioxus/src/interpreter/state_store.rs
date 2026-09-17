@@ -302,6 +302,19 @@ impl StateStore {
         &self.state
     }
 
+    /// Start recording global writes. STUB.
+    pub fn open_global_writes(&mut self) -> bool {
+        false
+    }
+
+    /// The global keys written since the last take. STUB.
+    pub fn take_global_writes(&mut self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// Stop recording global writes. STUB.
+    pub fn close_global_writes(&mut self) {}
+
     // ── Panel state ──────────────────────────────────────
 
     pub fn init_panel(&mut self, panel_id: &str, defaults: HashMap<String, serde_json::Value>) {

@@ -15,9 +15,21 @@
 use crate::document::controller::Controller;
 use crate::document::model::Model;
 use crate::geometry::element::{ArrowAlign, Arrowhead, LineCap, LineJoin, Stroke, StrokeAlign};
+use crate::interpreter::state_store::StateStore;
+
+/// The Stroke panel's id: the store scope its fields live in.
+pub const STROKE_PANEL: &str = "stroke_panel_content";
+
+/// The global `state.*` keys whose write reaches the selection (A11). STUB.
+pub const STROKE_RENDER_KEYS: &[&str] = &[];
+
+/// True when a write to the global `key` applies to the selection. STUB.
+pub fn is_render_key(_key: &str) -> bool {
+    false
+}
 
 /// Stroke panel state fields that sync with global state and the selection.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct StrokePanelState {
     /// The Weight input's committed value, in points. THE source of the
     /// width a weight edit applies (`StrokeEditGroup::Width`).
@@ -52,6 +64,14 @@ pub struct StrokePanelState {
 }
 
 impl StrokePanelState {
+    /// The panel's fields, as the workspace declares them. STUB.
+    pub const FIELDS: [&'static str; 0] = [];
+
+    /// The panel as the store holds it. STUB.
+    pub fn from_store(_store: &StateStore) -> Self {
+        Self::default()
+    }
+
     /// Write ONE panel field from a YAML-interpreted value. Keys are the
     /// panel-scope names (`cap`, `weight`, ...). A value of the wrong type,
     /// and an unknown key, write nothing. The three optional dash pairs take
@@ -348,4 +368,142 @@ pub fn apply_stroke_panel_to_selection(
         default_stroke.unwrap_or(fallback), sp, group, committed_width);
     model.default_stroke = Some(new_default);
     Some(new_default)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interpreter::workspace::Workspace;
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn root() -> &'static str {
+        concat!(env!("CARGO_MANIFEST_DIR"), "/..")
+    }
+
+    /// The bracketed list literal that follows `head` in the reference's
+    /// `effects.py`, as its quoted strings. Refuses anything that is not a
+    /// quoted string, so a reshaped literal reds here instead of reading short.
+    fn reference_list(head: &str) -> Vec<String> {
+        let src = std::fs::read_to_string(format!("{}/workspace_interpreter/effects.py", root()))
+            .expect("effects.py is readable");
+        assert_eq!(src.matches(head).count(), 1, "effects.py must define `{head}` once");
+        let start = src.find(head).unwrap() + head.len();
+        let body = &src[start..start + src[start..].find(']').unwrap()];
+        let items: Vec<String> = body
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                assert!(s.len() > 2 && s.starts_with('"') && s.ends_with('"'),
+                        "not a quoted string in `{head}`: {s:?}");
+                s[1..s.len() - 1].to_string()
+            })
+            .collect();
+        assert!(items.len() > 10, "`{head}` read {} items: {items:?}", items.len());
+        items
+    }
+
+    /// **A11's key list is the reference's**, element for element and in its
+    /// order. It is read here, never re-typed from a port.
+    #[test]
+    fn the_render_keys_are_the_references() {
+        let want = reference_list("STROKE_RENDER_KEYS: list[str] = [");
+        let got: Vec<String> = STROKE_RENDER_KEYS.iter().map(|k| k.to_string()).collect();
+        assert_eq!(got, want);
+        for k in &want {
+            assert!(is_render_key(k), "{k} is a render key");
+            assert!(StrokeEditGroup::from_field(k).is_some(), "{k} must own a group");
+        }
+        // The trigger is the GLOBAL write: a panel key, and a UI-only global,
+        // are not render keys.
+        for k in ["cap", "weight", "stroke_link_arrowhead_scale", "stroke_brush", ""] {
+            assert!(!is_render_key(k), "{k:?} is not a render key");
+        }
+    }
+
+    fn declared() -> HashMap<String, Value> {
+        Workspace::load().expect("workspace loads").panel_state_defaults(STROKE_PANEL)
+    }
+
+    /// **The field list is the workspace's.** `from_store` reads every field
+    /// the panel declares, and nothing else.
+    #[test]
+    fn the_fields_are_the_declared_panel_state() {
+        let mut want: Vec<String> = declared().into_keys().collect();
+        want.sort();
+        let mut got: Vec<String> = StrokePanelState::FIELDS.iter().map(|k| k.to_string()).collect();
+        got.sort();
+        assert!(want.len() > 10, "the declared state was read: {want:?}");
+        assert_eq!(got, want);
+    }
+
+    /// A value of `declared`'s type that differs from it.
+    fn probe(declared: &Value) -> Value {
+        match declared {
+            Value::Bool(b) => json!(!b),
+            Value::String(_) => json!("zz_probe"),
+            Value::Number(_) | Value::Null => json!(777.0),
+            other => panic!("no probe for {other}"),
+        }
+    }
+
+    /// **The defaults are the declared ones, and every field is writable.**
+    /// Writing a field's declared default into the default panel changes
+    /// nothing; writing any other value changes it.
+    #[test]
+    fn the_default_panel_is_the_declared_one_and_set_field_knows_every_field() {
+        let base = StrokePanelState::default();
+        for (field, value) in declared() {
+            let mut sp = base.clone();
+            sp.set_field(&field, &value);
+            assert_eq!(sp, base, "{field}: the declared default {value} is not the default");
+            let mut sp = base.clone();
+            sp.set_field(&field, &probe(&value));
+            assert_ne!(sp, base, "{field}: set_field does not write it");
+        }
+    }
+
+    fn store_with_panel(fields: &[(&str, Value)]) -> StateStore {
+        let mut store = StateStore::new();
+        store.init_panel(STROKE_PANEL,
+                         fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect());
+        store
+    }
+
+    /// **The reference's order: the panel scope, then the flat global, then
+    /// the declared default** (`effects.py`, `stroke_panel_state`). A null
+    /// counts as absent at each step.
+    #[test]
+    fn from_store_reads_the_panel_then_the_global_then_the_default() {
+        let empty = StateStore::new();
+        assert_eq!(StrokePanelState::from_store(&empty), StrokePanelState::default());
+
+        let mut store = StateStore::new();
+        store.set("stroke_cap", json!("round"));
+        assert_eq!(StrokePanelState::from_store(&store).cap, "round", "the global is read");
+        let mut store = store_with_panel(&[("cap", json!("square"))]);
+        store.set("stroke_cap", json!("round"));
+        assert_eq!(StrokePanelState::from_store(&store).cap, "square", "the panel wins");
+        store.set_panel(STROKE_PANEL, "cap", Value::Null);
+        assert_eq!(StrokePanelState::from_store(&store).cap, "round", "a null panel value is absent");
+
+        // The asymmetric spellings: weight's global is `stroke_width`, and
+        // `align_stroke` reads `stroke_align_stroke`, then `stroke_align`.
+        let mut store = StateStore::new();
+        store.set("stroke_width", json!(3.5));
+        store.set("stroke_weight", json!(9.0));
+        store.set("stroke_align", json!("inside"));
+        let sp = StrokePanelState::from_store(&store);
+        assert_eq!((sp.weight, sp.align.as_str()), (3.5, "inside"));
+        store.set("stroke_align_stroke", json!("outside"));
+        assert_eq!(StrokePanelState::from_store(&store).align, "outside");
+
+        // An optional dash pair: a null global leaves it unused, a number sets it.
+        let mut store = store_with_panel(&[("dash_2", Value::Null)]);
+        store.set("stroke_dash_2", Value::Null);
+        assert_eq!(StrokePanelState::from_store(&store).dash_2, None);
+        store.set("stroke_dash_2", json!(4.0));
+        assert_eq!(StrokePanelState::from_store(&store).dash_2, Some(4.0));
+    }
 }
