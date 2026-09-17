@@ -56,6 +56,7 @@ OUT = ROOT / "test_fixtures" / "widget_events" / "corpus.json"
 
 MW = "magic_wand_panel_content"
 STROKE = "stroke_panel_content"
+GRADIENT = "gradient_panel_content"
 
 # (name, panel, widget, setup {"panel": {...}, "state": {...}}, event)
 # A setup writes the panel scope and global state before the event, as an
@@ -100,6 +101,19 @@ SEED = [
     ("stroke_profile_option", STROKE, "stk_profile", {}, {"commit": "taper_end"}),
     ("stroke_profile_by_label_refused", STROKE, "stk_profile", {},
      {"commit": "Taper End"}),
+    # Gradient: `change` behaviors copy the new value into the render keys,
+    # and Dither's owns its press. Each render key must hold the edit.
+    ("gradient_angle_commit", GRADIENT, "grad_angle_combo", {}, {"commit": "45"}),
+    ("gradient_angle_clamped", GRADIENT, "grad_angle_combo", {}, {"commit": "500"}),
+    ("gradient_aspect_commit", GRADIENT, "grad_aspect_combo", {}, {"commit": "150"}),
+    ("gradient_method_option", GRADIENT, "grad_method_dropdown", {},
+     {"commit": "smooth"}),
+    ("gradient_method_by_label_refused", GRADIENT, "grad_method_dropdown", {},
+     {"commit": "Smooth"}),
+    ("gradient_dither_press", GRADIENT, "grad_dither_checkbox", {}, {"press": True}),
+    ("gradient_dither_press_when_checked", GRADIENT, "grad_dither_checkbox",
+     {"panel": {"dither": True}, "state": {"gradient_dither": True}},
+     {"press": True}),
 ]
 
 
