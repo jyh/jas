@@ -319,8 +319,12 @@ content:
                   options: [-135, -90, -45, 0, 45, 90, 135, 180]
                   behavior:
                     - event: change
+                      description: >-
+                        The commit has already written panel.angle; this copies the
+                        committed angle into gradient_angle, which applies the panel's
+                        gradient to the selection.
                       effects:
-                        - set: { gradient_angle: "value" }
+                        - set: { gradient_angle: "event.value" }
 
             # Aspect ratio
             - type: row
@@ -336,8 +340,12 @@ content:
                   options: [25, 50, 75, 100, 150, 200, 400]
                   behavior:
                     - event: change
+                      description: >-
+                        The commit has already written panel.aspect_ratio; this copies the
+                        committed ratio into gradient_aspect_ratio, which applies the
+                        panel's gradient to the selection.
                       effects:
-                        - set: { gradient_aspect_ratio: "value" }
+                        - set: { gradient_aspect_ratio: "event.value" }
 
             # Method
             - type: row
@@ -354,8 +362,12 @@ content:
                     - { value: lines,   label: "Lines (freeform)" }
                   behavior:
                     - event: change
+                      description: >-
+                        The commit has already written panel.method; this copies the
+                        picked method into gradient_method, which applies the panel's
+                        gradient to the selection.
                       effects:
-                        - set: { gradient_method: "value" }
+                        - set: { gradient_method: "event.value" }
 
             # Dither
             - type: row
@@ -368,8 +380,14 @@ content:
                   bind: { checked: "panel.dither" }
                   behavior:
                     - event: change
+                      description: >-
+                        This behavior owns the press, so it flips the box itself:
+                        event.value is the new checked state. It writes panel.dither and
+                        gradient_dither, which applies the panel's gradient to the
+                        selection.
                       effects:
-                        - set: { gradient_dither: "checked" }
+                        - set_panel_state: { key: dither, value: "event.value" }
+                        - set: { gradient_dither: "event.value" }
 
     # ── Row 5: Stops editor ──
     - type: row

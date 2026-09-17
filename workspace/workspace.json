@@ -15561,10 +15561,11 @@
                         "behavior": [
                           {
                             "event": "change",
+                            "description": "The commit has already written panel.angle; this copies the committed angle into gradient_angle, which applies the panel's gradient to the selection.",
                             "effects": [
                               {
                                 "set": {
-                                  "gradient_angle": "value"
+                                  "gradient_angle": "event.value"
                                 }
                               }
                             ]
@@ -15603,10 +15604,11 @@
                         "behavior": [
                           {
                             "event": "change",
+                            "description": "The commit has already written panel.aspect_ratio; this copies the committed ratio into gradient_aspect_ratio, which applies the panel's gradient to the selection.",
                             "effects": [
                               {
                                 "set": {
-                                  "gradient_aspect_ratio": "value"
+                                  "gradient_aspect_ratio": "event.value"
                                 }
                               }
                             ]
@@ -15651,10 +15653,11 @@
                         "behavior": [
                           {
                             "event": "change",
+                            "description": "The commit has already written panel.method; this copies the picked method into gradient_method, which applies the panel's gradient to the selection.",
                             "effects": [
                               {
                                 "set": {
-                                  "gradient_method": "value"
+                                  "gradient_method": "event.value"
                                 }
                               }
                             ]
@@ -15682,10 +15685,17 @@
                         "behavior": [
                           {
                             "event": "change",
+                            "description": "This behavior owns the press, so it flips the box itself: event.value is the new checked state. It writes panel.dither and gradient_dither, which applies the panel's gradient to the selection.",
                             "effects": [
                               {
+                                "set_panel_state": {
+                                  "key": "dither",
+                                  "value": "event.value"
+                                }
+                              },
+                              {
                                 "set": {
-                                  "gradient_dither": "checked"
+                                  "gradient_dither": "event.value"
                                 }
                               }
                             ]

@@ -1261,6 +1261,545 @@
       "name": "stroke_profile_by_label_refused",
       "panel": "stroke_panel_content",
       "widget": "stk_profile"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "45"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 45.0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 45.0
+        },
+        "state_changed": {
+          "gradient_angle": 45
+        }
+      },
+      "name": "gradient_angle_commit",
+      "panel": "gradient_panel_content",
+      "widget": "grad_angle_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "500"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 180.0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 180.0
+        },
+        "state_changed": {
+          "gradient_angle": 180
+        }
+      },
+      "name": "gradient_angle_clamped",
+      "panel": "gradient_panel_content",
+      "widget": "grad_angle_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "150"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 150.0,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 150.0
+        },
+        "state_changed": {
+          "gradient_aspect_ratio": 150
+        }
+      },
+      "name": "gradient_aspect_commit",
+      "panel": "gradient_panel_content",
+      "widget": "grad_aspect_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "smooth"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "smooth",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": "smooth"
+        },
+        "state_changed": {
+          "gradient_method": "smooth"
+        }
+      },
+      "name": "gradient_method_option",
+      "panel": "gradient_panel_content",
+      "widget": "grad_method_dropdown"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "Smooth"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "gradient_method_by_label_refused",
+      "panel": "gradient_panel_content",
+      "widget": "grad_method_dropdown"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "press": true
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": true,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": true
+        },
+        "state_changed": {
+          "gradient_dither": true
+        }
+      },
+      "name": "gradient_dither_press",
+      "panel": "gradient_panel_content",
+      "widget": "grad_dither_checkbox"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": true,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {
+          "gradient_dither": true
+        }
+      },
+      "event": {
+        "press": true
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": false
+        },
+        "state_changed": {
+          "gradient_dither": false
+        }
+      },
+      "name": "gradient_dither_press_when_checked",
+      "panel": "gradient_panel_content",
+      "widget": "grad_dither_checkbox"
     }
   ]
 }

@@ -18,8 +18,8 @@ its tests are in `workspace_interpreter/tests/test_widget_event.py`.
 generate the golden corpus `test_fixtures/widget_events/corpus.json`,
 which is what the engine's value door and the active ports are held to.
 `scripts/check_widget_event_contract.py` holds every workspace YAML file
-to the event table below, and holds this document's table to the
-module's.
+to the event table below and to §What a behavior can read, and holds this
+document's table to the module's.
 
 ## Why this exists
 
@@ -37,7 +37,15 @@ executor of the panel YAML guessed, and the guesses differ (see
   NEW value only if the bind write has already happened.
 
 Those two cases are why the rule differs by kind. The rule codifies what
-the YAML's authors already wrote, so no YAML changes.
+the YAML's authors already wrote for Magic Wand and Stroke.
+
+**The Gradient panel's four value widgets were the exception, and their
+YAML was repaired.** Their behaviors read the bare names `value` and
+`checked`, which no event binds (§What a behavior can read), so each wrote
+null into a `gradient_*` render key. Dither's checkbox could never be
+checked, because its `change` behavior owns the press and did not write
+the field. They now write `event.value`, and Dither's behavior also writes
+`panel.dither`.
 
 ## The event table
 
@@ -122,6 +130,23 @@ expression's current truth value, and an unbound widget reads as false.
 3. **Otherwise, write the new boolean to the bound target** when it is
    writable, with its two-way bound global (`committed`). If it is not
    writable, the press is `inert`.
+
+## What a behavior can read
+
+Every expression a behavior evaluates starts from one of these names.
+That covers its `condition`, its `params`, and the expressions in its
+effects.
+
+- the roots the event binds: `event`, `state`, `panel`, `tool`, `dialog`,
+  `param` and `active_document` (`EVENT_ROOTS` in the module, derived from
+  the store's evaluation context by its tests);
+- the item name of an enclosing `foreach` (`as:`, else `item`), which the
+  port's view supplies;
+- a name bound by a `fun` or a `let`.
+
+Any other name evaluates to null, and nothing reports it. The new value is
+`event.value`; there is no bare `value` or `checked`. The lint refuses an
+expression that reads another root, or that does not parse.
 
 ## Parsing, kind by kind
 

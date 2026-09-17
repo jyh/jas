@@ -74,6 +74,14 @@ ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: PRESS_EVENTS for kind in BOOLEAN_KINDS},
 }
 
+# The names a behavior's expressions can start from: the store's evaluation
+# context (with a dialog and its params open) plus `event`. Any other root
+# evaluates to null, silently. A widget inside a `foreach` also has its item
+# name, which the port's view supplies. The lint holds the YAML to this set.
+EVENT_ROOTS = frozenset({
+    "event", "state", "panel", "tool", "dialog", "param", "active_document",
+})
+
 # ── Refusals ───────────────────────────────────────────────────
 
 BAD_VALUE = "BadValue"          # the kind's parse refused the text
