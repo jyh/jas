@@ -1312,7 +1312,7 @@ $mwTids = 'ui-tid=2 render-tid=5 paint-tid=5 present-tid=5 render-has-dispatcher
 $mwPanel = 'magic_wand_panel_content'
 $mwCommit = 'mwp_fill_tolerance'
 $mwPress = 'mwp_fill_color'
-$mwIds ='mwp_blending_mode,mwp_fill_color,mwp_fill_tolerance,mwp_opacity,mwp_opacity_tolerance,mwp_stroke_color,mwp_stroke_tolerance,mwp_stroke_weight,mwp_stroke_weight_tolerance'
+$mwIds = 'mwp_blending_mode,mwp_fill_color,mwp_fill_tolerance,mwp_opacity,mwp_opacity_tolerance,mwp_stroke_color,mwp_stroke_tolerance,mwp_stroke_weight,mwp_stroke_weight_tolerance'
 
 # `ClickHead`: panel= widget= via= event= value= (value is `PanelWire.RowValue`).
 function New-SbMwHead([string]$Widget, [string]$Via, [string]$EventName, [string]$Value) {
