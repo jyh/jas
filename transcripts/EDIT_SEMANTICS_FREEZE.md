@@ -379,6 +379,28 @@ Decisions this clause makes beyond the landed code:
   (`element_to_polygon_set_with`: zero `transform` occurrences in the
   function body, gauntlet-counted), and the eraser's placement (§3.2) —
   and the post-S-3 sweep covers all three together.
+  **A FOURTH MEMBER, added 2026-09-17 by ruling: the MOVE itself** —
+  `move_selection`, reached by the Properties panel's X/Y fields, by a
+  journaled `move_selection` op, and by the canvas drag. It handed a
+  DOCUMENT-space delta straight to `move_control_points`, which is
+  LOCAL-space by contract, so a transformed element travelled along its
+  own rotated or scaled axes: x=100 typed on a 30-degree rect landed at
+  83.74. It was missing from this list because the other three members
+  were found by reading the geometry pipeline, and the move is not in
+  it — the defect sits at a CALLER, one layer above the walks this class
+  was censused from. ⇒ **A CLASS CENSUSED BY READING ONE PIPELINE HAS
+  THE SHAPE OF THAT PIPELINE**, and the members it misses are the ones
+  that reach the same wrong answer from outside it.
+  **Status: the REFERENCE is repaired** (`Controller.move_selection`
+  maps the delta through the inverse of the accumulated transform;
+  arms in `workspace_interpreter/tests/test_move_selection_transform.py`).
+  **The Rust and Swift moves and the canvas drag still read the old way**,
+  and `copy_selection`'s paste offset shares the shape and is untouched.
+  ⛔ **TWO MOVE SPACES, learned by writing the regression and catching it:**
+  a `ReferenceElem` has no geometry of its own, so a whole-element move
+  translates its OWN transform — which already lands in its PARENT's
+  space. Converting a reference by the full chain re-creates this very
+  defect one level down. The ports owe the same distinction.
 - **Unanimity ranges over every non-spoken-to field**, not the five that
   can differ in today's blob population. The implementation may exploit
   invariants (blob sources are fill-only by construction); the fixture
@@ -1130,6 +1152,15 @@ class (§3.2, §3.3); S-4 (leading-Z no-op); S-2 (linear gradient stop
 remap — §3.9's geometry-relative class). The `transform` rejoin remains
 CONDITIONAL on S-3. Nothing in this freeze blocks on them; two clauses
 schedule work behind them.
+
+**AMENDED 2026-09-17.** S-3 gained a FOURTH member (§3.3): the MOVE.
+The reference's half is repaired; the Rust and Swift moves and the
+canvas drag are not, so **S-3 is no longer a single-port item** and the
+`transform` rejoin's condition is unchanged by the repair — it waits on
+the class, not on the reference alone. ⚠️ **This section is dated for a
+reason: it is a photograph, and the member added today was in flight for
+as long as the other three while appearing in no census, because it is
+reached from outside the pipeline they were read from.**
 
 ---
 
