@@ -53,6 +53,13 @@ class TestContractTable:
         assert len(we.INPUT_KINDS) == 6 and len(we.BOOLEAN_KINDS) == 2
         assert not (we.INPUT_KINDS & we.BOOLEAN_KINDS)
 
+    def test_event_roots_are_the_store_context_plus_event(self):
+        # Derived from the store, so a namespace added to eval_context
+        # reaches the lint's allowed roots only through this failing.
+        store = StateStore()
+        store.init_dialog("d", {"k": 1}, params={"p": 1})
+        assert set(store.eval_context({"event": {}})) == we.EVENT_ROOTS
+
     def test_input_kinds_commit_on_commit_or_change(self):
         for kind in we.INPUT_KINDS - {"text_input"}:
             assert we.ALLOWED_EVENTS[kind] == ("commit", "change"), kind
@@ -656,3 +663,43 @@ class TestShippedStroke(_Shipped):
         r = we.press(w, store, panel=panel)
         assert r.bind_written is False and r.behaviors_run == 1
         assert store.get_panel(self.PANEL, "dashed") is (not before)
+
+
+class TestShippedGradient(_Shipped):
+    # The four value widgets write `gradient_*`, the render keys the apply
+    # builds a gradient from. A render key written null is read back as its
+    # default, so each arm asserts the key holds the edit, not merely that a
+    # behavior ran.
+    PANEL = "gradient_panel_content"
+
+    @pytest.mark.parametrize("wid, text, key, expected", [
+        ("grad_angle_combo", "45", "angle", 45.0),
+        ("grad_aspect_combo", "150", "aspect_ratio", 150.0),
+        ("grad_method_dropdown", "smooth", "method", "smooth"),
+    ])
+    def test_a_commit_reaches_the_panel_and_its_render_key(
+            self, workspace_path, wid, text, key, expected):
+        panel, store = self._setup(workspace_path)
+        assert store.get_panel(self.PANEL, key) != expected, \
+            "the arm needs a starting value that is not the edit"
+        w = find_element_by_id(panel, wid)
+        r = we.commit(w, text, store, panel=panel)
+        assert r == we.EventResult("committed", value=expected,
+                                   bind_written=True, behaviors_run=1)
+        assert store.get_panel(self.PANEL, key) == expected
+        assert store.get("gradient_" + key) == expected
+
+    def test_the_dither_checkbox_flips_its_field_and_its_render_key(
+            self, workspace_path):
+        # A declared `change` owns the press, so the behavior is the only
+        # thing that can flip the field.
+        panel, store = self._setup(workspace_path)
+        w = find_element_by_id(panel, "grad_dither_checkbox")
+        before = store.get_panel(self.PANEL, "dither")
+        assert before is False
+        for expected in (True, False):
+            r = we.press(w, store, panel=panel)
+            assert r == we.EventResult("committed", value=expected,
+                                       bind_written=False, behaviors_run=1)
+            assert store.get_panel(self.PANEL, "dither") is expected
+            assert store.get("gradient_dither") is expected

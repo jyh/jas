@@ -17,6 +17,12 @@ two other copies of it to that one:
   2. THE DOCUMENT. WIDGET_EVENTS.md carries the table between its
      `widget-event-table` markers, for readers. It must say exactly what the
      module says, kind for kind and event for event, in order.
+  3. THE ROOTS. Every expression such a behavior evaluates starts from a
+     name the event binds: the module's EVENT_ROOTS, an enclosing
+     `foreach` item, or a `fun`/`let` name. Any other root evaluates to null
+     and says nothing. The Gradient panel's four behaviors read `value` and
+     `checked` this way, and wrote null into the render keys the apply
+     builds a gradient from; nothing noticed, because no executor ran them.
 
 WHAT IT ASSERTS
 ---------------
@@ -26,8 +32,13 @@ WHAT IT ASSERTS
   A malformed entry is a FINDING, never a skip: a shape the gate cannot read
   is exactly where an unrun behavior hides.
 * The document's table equals ALLOWED_EVENTS.
-* The conforming entry count is DERIVED from the walk and printed. It is
-  never compared to a typed number.
+* Each expression in a behavior's `condition`, its `params`, and its effects'
+  `set` values, `set_panel_state` value, `if` condition, `let` values and
+  `dispatch` params (walking `then`, `else` and `in`) parses, and reads only
+  allowed roots. An expression that does not parse is a FINDING.
+* The conforming entry count and the expression count are DERIVED from the
+  walk and printed. Neither is compared to a typed number. The effect kinds
+  the root walk does not read are printed beside the verdict, with counts.
 
 WHAT IT DOES NOT COVER, and why
 -------------------------------
@@ -37,8 +48,12 @@ WHAT IT DOES NOT COVER, and why
   kind to this gate. None exists today.
 * Every other widget kind is outside the contract (WIDGET_EVENTS.md says why),
   and its events are not checked here.
-* It checks the VOCABULARY. What an event does is the module's, and
-  `workspace_interpreter/tests/test_widget_event.py` is what tests that.
+* It checks the VOCABULARY and the ROOTS. What an event does is the
+  module's, and `workspace_interpreter/tests/test_widget_event.py` is what
+  tests that. A root that exists can still name a key that does not;
+  `check_state_reads.py` owns that.
+* A `fun` or `let` name counts as bound anywhere in its own expression, not
+  only inside its body.
 
 WHY --self-test EXISTS
 ----------------------
@@ -56,6 +71,8 @@ gate can still go red.
 
 import argparse
 import ast
+import collections
+import dataclasses
 import pathlib
 import subprocess
 import sys
@@ -65,7 +82,16 @@ import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, ROOT.as_posix())
-from workspace_interpreter.widget_event import ALLOWED_EVENTS  # noqa: E402
+from workspace_interpreter.expr_parser import (  # noqa: E402
+    Lambda, Let, ParseError, parse,
+)
+from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
+from workspace_interpreter.widget_event import (  # noqa: E402
+    ALLOWED_EVENTS, EVENT_ROOTS,
+)
+
+# A `foreach` without `as:` names its item this (every renderer agrees).
+FOREACH_DEFAULT_NAME = "item"
 
 DOCUMENT = ROOT / "WIDGET_EVENTS.md"
 TABLE_BEGIN = "<!-- widget-event-table:begin -->"
@@ -108,32 +134,157 @@ def load(root: pathlib.Path, files: list) -> list:
     return docs
 
 
+# -- the roots --------------------------------------------------------------
+
+def expression_roots(text: str):
+    """(roots, error) for one expression: the first segment of every path it
+    reads, minus the names a `fun` or `let` inside it binds. `error` is the
+    parse failure's message, or None."""
+    try:
+        tree = parse(text)
+    except ParseError as e:
+        return set(), str(e) or "parse error"
+    roots, bound = set(), set()
+
+    def visit(node):
+        # Generic over dataclass fields, so a node type added to the grammar
+        # is walked on the day it lands.
+        if isinstance(node, ExprPath):
+            if node.segments:
+                roots.add(node.segments[0])
+            return
+        if isinstance(node, Lambda):
+            bound.update(node.params)
+        elif isinstance(node, Let):
+            bound.add(node.name)
+        if dataclasses.is_dataclass(node):
+            for f in dataclasses.fields(node):
+                visit(getattr(node, f.name))
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                visit(item)
+
+    visit(tree)
+    return roots - bound, None
+
+
+def behavior_expressions(entry: dict):
+    """(expressions, unread) for one behavior entry.
+
+    `expressions` is [(where, text, names)]: each expression string the
+    reference evaluates for this entry, with the `let` names it may also
+    read. `unread` lists the kind of every effect this walk does not read
+    for expressions (a `log`, a `snapshot`)."""
+    out, unread = [], []
+
+    def add(where, value, names):
+        if isinstance(value, str):
+            out.append((where, value, frozenset(names)))
+
+    def add_params(where, params, names):
+        if isinstance(params, dict):
+            for k, v in params.items():
+                add(f"{where}.{k}", v, names)
+
+    def effects(effs, where, names):
+        if not isinstance(effs, list):
+            return
+        names = set(names)
+        for i, eff in enumerate(effs):
+            at = f"{where}[{i}]"
+            if isinstance(eff, str):
+                unread.append(eff)
+            elif not isinstance(eff, dict) or not eff:
+                unread.append("<" + type(eff).__name__ + ">")
+            elif isinstance(eff.get("let"), dict):
+                scoped = set(names)
+                for k, v in eff["let"].items():
+                    add(f"{at}.let.{k}", v, scoped)
+                    scoped.add(k)
+                if isinstance(eff.get("in"), list):
+                    effects(eff["in"], f"{at}.in", scoped)
+                else:
+                    names = scoped  # a sibling-threading let
+            elif "if" in eff:
+                cond = eff["if"]
+                if isinstance(cond, dict):
+                    add(f"{at}.if.condition", cond.get("condition"), names)
+                    effects(cond.get("then"), f"{at}.if.then", names)
+                    effects(cond.get("else"), f"{at}.if.else", names)
+                else:
+                    add(f"{at}.if", cond, names)
+                    effects(eff.get("then"), f"{at}.then", names)
+                    effects(eff.get("else"), f"{at}.else", names)
+            elif isinstance(eff.get("set"), dict):
+                for k, v in eff["set"].items():
+                    add(f"{at}.set.{k}", v, names)
+            elif isinstance(eff.get("set_panel_state"), dict):
+                add(f"{at}.set_panel_state.value",
+                    eff["set_panel_state"].get("value"), names)
+            elif isinstance(eff.get("dispatch"), dict):
+                add_params(f"{at}.dispatch.params",
+                           eff["dispatch"].get("params"), names)
+            else:
+                unread.append(next(iter(eff)))
+
+    add("condition", entry.get("condition"), ())
+    add_params("params", entry.get("params"), ())
+    effects(entry.get("effects"), "effects", ())
+    return out, unread
+
+
 # -- the census -------------------------------------------------------------
 
-def census(docs: list, table: dict):
-    """Walk every document. Returns (findings, conforming, widgets_per_kind).
+def census(docs: list, table: dict, roots: frozenset = EVENT_ROOTS):
+    """Walk every document.
 
+    Returns (findings, conforming, widgets_per_kind, expressions, unread).
     `conforming` counts behavior entries whose event the table allows;
     `widgets_per_kind` counts every widget of each value kind, with or
-    without behaviors, so a kind that vanished from the tree is visible."""
+    without behaviors, so a kind that vanished from the tree is visible.
+    `expressions` counts the expressions the root walk read, and `unread`
+    counts the effect kinds it did not read, by kind."""
     findings = []
     conforming = {kind: 0 for kind in table}
     widgets = {kind: 0 for kind in table}
+    expressions = 0
+    unread = collections.Counter()
 
-    def visit(node, rel):
+    def visit(node, rel, items):
         if isinstance(node, dict):
             kind = node.get("type")
             if isinstance(kind, str) and kind in table:
                 widgets[kind] += 1
                 if "behavior" in node:
-                    check(node, kind, rel)
-            for value in node.values():
-                visit(value, rel)
+                    check(node, kind, rel, items)
+            spec = node.get("foreach")
+            item = None
+            if isinstance(spec, dict) and "do" in node:
+                name = spec.get("as", FOREACH_DEFAULT_NAME)
+                item = name if isinstance(name, str) else None
+            for key, value in node.items():
+                inner = items | {item} if key == "do" and item else items
+                visit(value, rel, inner)
         elif isinstance(node, list):
             for value in node:
-                visit(value, rel)
+                visit(value, rel, items)
 
-    def check(node, kind, rel):
+    def check_roots(entry, i, wid, kind, rel, items):
+        nonlocal expressions
+        exprs, skipped = behavior_expressions(entry)
+        unread.update(skipped)
+        for where, text, names in exprs:
+            expressions += 1
+            found, error = expression_roots(text)
+            if error is not None:
+                findings.append((rel, wid, kind, f"behavior[{i}] {where} "
+                                 f"does not parse ({error}): {text!r}"))
+                continue
+            for root in sorted(found - roots - items - names):
+                findings.append((rel, wid, kind, f"behavior[{i}] {where} reads "
+                                 f"'{root}', which no widget event binds: {text!r}"))
+
+    def check(node, kind, rel, items):
         wid = node.get("id") if isinstance(node.get("id"), str) else "<no id>"
         behaviors = node["behavior"]
         if not isinstance(behaviors, list):
@@ -151,10 +302,11 @@ def census(docs: list, table: dict):
                                  f"event '{event}' is not one of {', '.join(table[kind])}"))
             else:
                 conforming[kind] += 1
+            check_roots(entry, i, wid, kind, rel, items)
 
     for rel, doc in docs:
-        visit(doc, rel)
-    return findings, conforming, widgets
+        visit(doc, rel, frozenset())
+    return findings, conforming, widgets, expressions, unread
 
 
 # -- the document -----------------------------------------------------------
@@ -197,7 +349,8 @@ def table_differences(doc: dict, module: dict) -> list:
 
 # -- the gate ---------------------------------------------------------------
 
-def run(root: pathlib.Path, table: dict, doc_text: str, tracked: set):
+def run(root: pathlib.Path, table: dict, doc_text: str, tracked: set,
+        roots: frozenset = EVENT_ROOTS):
     """Returns (findings, report). Raises Refusal when it cannot judge."""
     files = walk_files(root)
     if not files:
@@ -206,17 +359,31 @@ def run(root: pathlib.Path, table: dict, doc_text: str, tracked: set):
     if missing:
         raise Refusal(f"{len(missing)} tracked YAML file(s) not found by the "
                       f"walk, first {missing[0]}")
-    findings, conforming, widgets = census(load(root, files), table)
+    findings, conforming, widgets, expressions, unread = census(
+        load(root, files), table, roots)
     absent = sorted(k for k, n in widgets.items() if n == 0)
     if absent:
         raise Refusal("no widget of kind " + ", ".join(absent) + " anywhere; a "
                       "renamed kind would exempt itself silently")
     if sum(conforming.values()) == 0 and not findings:
         raise Refusal("no behavior on any value kind; the census read nothing")
+    if expressions == 0:
+        raise Refusal("no expression in any value-kind behavior; the root "
+                      "walk read nothing")
     findings = findings + [("WIDGET_EVENTS.md", "-", "-", d) for d in
                            table_differences(document_table(doc_text), table)]
     return findings, {"files": len(files), "conforming": conforming,
-                      "widgets": widgets}
+                      "widgets": widgets, "expressions": expressions,
+                      "unread": unread}
+
+
+def finding_line(finding) -> str:
+    """One finding, printable on any console. A finding quotes YAML text,
+    which can carry characters the Windows lane's cp1252 console cannot
+    encode; they are escaped rather than allowed to crash the report."""
+    rel, wid, kind, why = finding
+    line = f"  {rel}  {wid} ({kind}): {why}"
+    return line.encode("ascii", "backslashreplace").decode("ascii")
 
 
 def main_live() -> int:
@@ -229,22 +396,27 @@ def main_live() -> int:
         return 2
     if findings:
         print(f"check_widget_event_contract: FAIL: {len(findings)} finding(s)")
-        for rel, wid, kind, why in findings:
-            print(f"  {rel}  {wid} ({kind}): {why}")
-        print("  The table is workspace_interpreter/widget_event.py ALLOWED_EVENTS; "
+        for finding in findings:
+            print(finding_line(finding))
+        print("  The table is workspace_interpreter/widget_event.py ALLOWED_EVENTS "
+              "and the roots are its EVENT_ROOTS (a new value is event.value); "
               "WIDGET_EVENTS.md says what each event means.")
         return 1
     total = sum(report["conforming"].values())
     per_kind = ", ".join(f"{k} {report['conforming'][k]}"
                          for k in sorted(report["conforming"]))
+    unread = ", ".join(f"{k} x{n}" for k, n in sorted(report["unread"].items()))
     print(f"check_widget_event_contract: PASS: {total} behavior entries on "
           f"{len(report['widgets'])} value kinds conform, across "
-          f"{report['files']} workspace YAML files ({per_kind}); the "
-          "WIDGET_EVENTS.md table equals the module's.")
-    print("  LIMITS: checks event NAMES only, not what they do (that is "
-          "test_widget_event.py); reads loaded dicts, so a duplicated "
-          "behavior: key is check_workspace_ids.py's; other widget kinds are "
-          "outside the contract.")
+          f"{report['files']} workspace YAML files ({per_kind}); "
+          f"{report['expressions']} behavior expressions read only bound "
+          "roots; the WIDGET_EVENTS.md table equals the module's.")
+    print("  LIMITS: checks event names and expression ROOTS, not what an "
+          "event does (that is test_widget_event.py) nor whether a key under "
+          "a root exists (check_state_reads.py); effect kinds whose fields "
+          f"were not read for expressions: {unread or 'none'}; reads loaded "
+          "dicts, so a duplicated behavior: key is check_workspace_ids.py's; "
+          "other widget kinds are outside the contract.")
     return 0
 
 
@@ -281,8 +453,10 @@ def self_test() -> int:
 
     table = {k: tuple(v) for k, v in ALLOWED_EVENTS.items()}
     arm("the module table is not empty", len(table) == 8)
-    # One widget per (kind, event): the count this fixture is BUILT to have.
-    clean = [{"type": k, "id": f"{k}_{e}", "behavior": [{"event": e, "effects": []}]}
+    # One widget per (kind, event), each with one expression: the counts this
+    # fixture is BUILT to have.
+    clean = [{"type": k, "id": f"{k}_{e}", "behavior": [
+                 {"event": e, "effects": [{"set": {"x": "event.value"}}]}]}
              for k, events in table.items() for e in events]
     built = len(clean)
     arm("the clean fixture has a behavior for every table cell",
@@ -290,7 +464,7 @@ def self_test() -> int:
     outside = {"type": "icon_button", "id": "ib",
                "behavior": [{"event": "mouse_down"}, {"event": "anything"}]}
 
-    def attempt(widgets, doc=None, extra=None, tracked=None):
+    def attempt(widgets, doc=None, extra=None, tracked=None, roots=EVENT_ROOTS):
         """("judged", findings, report) or ("refused", message)."""
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
@@ -302,7 +476,8 @@ def self_test() -> int:
             rels = set(files) if tracked is None else tracked
             try:
                 return ("judged",) + run(
-                    root, table, _doc_for(table) if doc is None else doc, rels)
+                    root, table, _doc_for(table) if doc is None else doc, rels,
+                    roots)
             except Refusal as e:
                 return ("refused", str(e))
 
@@ -338,6 +513,10 @@ def self_test() -> int:
                 widgets=[w for w in clean if w["type"] != "toggle"]))
     arm("a tree with no behavior on any value kind REFUSES",
         refuses("census read nothing", widgets=[{"type": k} for k in table]))
+    arm("behaviors with no expression anywhere REFUSE",
+        refuses("root walk read nothing",
+                widgets=[{"type": k, "behavior": [{"event": v[0]}]}
+                         for k, v in table.items()]))
     arm("a document with no table REFUSES",
         refuses("exactly one table", widgets=clean, doc="# t\n"))
     arm("a document with two tables REFUSES",
@@ -359,6 +538,8 @@ def self_test() -> int:
     arm("the clean fixture's count is the count it was built to have",
         sum(report["conforming"].values()) == built)
     arm("every kind was seen", all(n >= 1 for n in report["widgets"].values()))
+    arm("the clean fixture's expression count is the count it was built to have",
+        report.get("expressions") == built)
 
     # Red, one planted violation at a time.
     for kind in table:
@@ -386,6 +567,106 @@ def self_test() -> int:
     arm("one bad entry among good ones is exactly one finding, and the good "
         "ones still count",
         len(f) == 1 and sum(rep["conforming"].values()) == built + 2)
+
+    # The roots. One behavior entry on one widget, `r`, at a time.
+    def with_entry(entry, wid="r"):
+        return clean + [{"type": "number_input", "id": wid, "behavior": [entry]}]
+
+    def commit_with(effects):
+        return {"event": "commit", "effects": effects}
+
+    def sets(expr):
+        return [{"set": {"k": expr}}]
+
+    for where, entry in (
+            ("condition", {"event": "commit", "condition": "value > 1"}),
+            ("params.p", {"event": "commit", "action": "a",
+                          "params": {"p": "value"}}),
+            ("effects[0].set.k", commit_with(sets("value"))),
+            ("effects[0].set_panel_state.value", commit_with(
+                [{"set_panel_state": {"key": "k", "value": "value"}}])),
+            ("effects[0].if.condition", commit_with(
+                [{"if": {"condition": "value", "then": []}}])),
+            ("effects[0].if.then[0].set.k", commit_with(
+                [{"if": {"condition": "true", "then": sets("value")}}])),
+            ("effects[0].if.else[0].set.k", commit_with(
+                [{"if": {"condition": "true", "else": sets("value")}}])),
+            ("effects[0].if", commit_with([{"if": "value", "then": []}])),
+            ("effects[0].then[0].set.k", commit_with(
+                [{"if": "true", "then": sets("value")}])),
+            ("effects[0].else[0].set.k", commit_with(
+                [{"if": "true", "else": sets("value")}])),
+            ("effects[0].let.a", commit_with([{"let": {"a": "value"}, "in": []}])),
+            ("effects[0].in[0].set.k", commit_with(
+                [{"let": {"a": "1"}, "in": sets("value")}])),
+            ("effects[0].dispatch.params.p", commit_with(
+                [{"dispatch": {"action": "a", "params": {"p": "value"}}}])),
+            ("effects[1].set.k", commit_with([{"log": "x"}] + sets("value")))):
+        f, _ = gate(with_entry(entry))
+        arm(f"a bare root in {where} is RED",
+            len(f) == 1 and f[0][1] == "r"
+            and f"behavior[0] {where} reads 'value'" in f[0][3])
+
+    for label, entry in (
+            ("a let-in name, in its body", commit_with(
+                [{"let": {"a": "event.value"}, "in": sets("a + 1")}])),
+            ("an earlier let name, in a later binding", commit_with(
+                [{"let": {"a": "event.value", "b": "a"}, "in": []}])),
+            ("a sibling-threading let name, in a later sibling", commit_with(
+                [{"let": {"a": "event.value"}}] + sets("a"))),
+            ("a fun parameter", commit_with(sets("fun x -> x.y"))),
+            ("a let-expression name", commit_with(sets("let q = 1 in q"))),
+            ("every event root", commit_with(
+                [{"set": {r: f"{r}.x" for r in sorted(EVENT_ROOTS)}}]))):
+        f, rep = gate(with_entry(entry))
+        arm(f"{label} is GREEN (and was read)",
+            f == [] and rep.get("expressions", 0) > built)
+
+    f, _ = gate(with_entry(commit_with(
+        [{"let": {"a": "1"}, "in": []}] + sets("a"))))
+    arm("a let-in name read after its body is RED",
+        len(f) == 1 and "reads 'a'" in f[0][3])
+    for r in sorted(EVENT_ROOTS):
+        f, _ = gate(with_entry(commit_with(sets(f"{r}.x"))),
+                    roots=EVENT_ROOTS - {r})
+        # The clean fixture reads `event`, so only `r`'s findings count.
+        mine = [x for x in f if x[1] == "r"]
+        arm(f"a gate without the root '{r}' reds on it, so the set is what "
+            "is consulted",
+            len(mine) == 1 and f"reads '{r}'" in mine[0][3])
+
+    def looped(spec, reader, wid="row_reader"):
+        return clean + [{"type": "container", "children": [
+            {"type": "container", "foreach": spec, "do": {
+                "type": "number_input", "id": wid,
+                "behavior": [commit_with(sets(reader))]}}]}]
+
+    f, _ = gate(looped({"source": "s", "as": "row"}, "row.v"))
+    arm("a foreach item, inside its do, is GREEN", f == [])
+    f, _ = gate(looped({"source": "s"}, "item.v"))
+    arm("a foreach with no as binds 'item'", f == [])
+    f, _ = gate(looped({"source": "s", "as": "row"}, "item.v"))
+    arm("a foreach with an as does not bind 'item'",
+        len(f) == 1 and "reads 'item'" in f[0][3])
+    f, _ = gate(clean + [{"type": "container", "children": [
+        {"type": "container", "foreach": {"as": "row"}, "do": {"type": "text"}},
+        {"type": "number_input", "id": "outside",
+         "behavior": [commit_with(sets("row.v"))]}]}])
+    arm("a foreach item, outside its do, is RED",
+        [(x[1], "reads 'row'" in x[3]) for x in f] == [("outside", True)])
+
+    f, _ = gate(with_entry(commit_with(sets("a +"))))
+    arm("an unparseable expression is RED, not skipped",
+        len(f) == 1 and "does not parse" in f[0][3])
+    arm("that parse failure came from the parser, not the walk",
+        expression_roots("a +")[1] is not None
+        and expression_roots("a + 1") == ({"a"}, None))
+    f, rep = gate(with_entry(commit_with(
+        [{"log": "x"}, "snapshot", {"set": {"k": 5}}] + sets("event.value"))))
+    arm("unread effect kinds are counted, a literal is not an expression, and "
+        "the entry's one expression was read",
+        f == [] and dict(rep.get("unread", {})) == {"log": 1, "snapshot": 1}
+        and rep.get("expressions") == built + 1)
 
     # The document must equal the module, in order.
     for label, doc in (
@@ -431,6 +712,22 @@ def self_test() -> int:
             bad.append(n.lineno)
     arm("every printed string survives a cp1252 console", not bad)
     arm("that console arm read this file's strings", len(strings) > 50)
+    # Built at run time: a literal would itself be a string this file cannot
+    # print, and the arm above would refuse it.
+    arrow = chr(0x2192)
+    f, _ = gate(with_entry(commit_with(sets(f"value + '{arrow}'")),
+                           wid=f"w{arrow}"))
+    line = finding_line(f[0]) if len(f) == 1 else ""
+    try:
+        line.encode("cp1252")
+        encodes = True
+    except UnicodeEncodeError:
+        encodes = False
+    arm("the planted finding carries its non-cp1252 character",
+        len(f) == 1 and arrow in f[0][3] and arrow in f[0][1])
+    arm("its printed line encodes as cp1252 and still names the widget and "
+        "the root",
+        encodes and "w\\u2192" in line and "reads 'value'" in line)
 
     if failures:
         print(f"check_widget_event_contract SELF-TEST: FAILED {len(failures)} "
