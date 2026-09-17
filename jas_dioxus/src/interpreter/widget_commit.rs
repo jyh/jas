@@ -78,3 +78,230 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
     }
     v
 }
+
+// ── The widget event contract (WIDGET_EVENTS.md) ─────────────────────────
+//
+// The native half of `workspace_interpreter/widget_event.py`: the event
+// table, and the parse a committed value goes through before anything is
+// written. The engine's panel door (`panel_behavior`) runs the rest of the
+// procedure. `workspace_interpreter/tests/test_widget_event.py` is the
+// executable meaning; `test_fixtures/widget_events/corpus.json` is what this
+// port is held to.
+
+/// The input kinds: a committed value is parsed, written, then its
+/// `commit`/`change` behaviors run.
+pub const INPUT_KINDS: [&str; 6] = [
+    "number_input", "length_input", "text_input", "select", "icon_select", "combo_box",
+];
+/// The boolean kinds: a declared `click`/`change` behavior IS the press.
+pub const BOOLEAN_KINDS: [&str; 2] = ["toggle", "checkbox"];
+/// Synonyms on an input kind: "a value was committed".
+pub const COMMIT_EVENTS: [&str; 2] = ["commit", "change"];
+/// Synonyms on a boolean kind: "the widget was pressed".
+pub const PRESS_EVENTS: [&str; 2] = ["click", "change"];
+/// Declared on `text_input`, and never a commit.
+pub const TEXT_ENTRY_EVENTS: [&str; 3] = ["input", "blur", "keydown"];
+
+/// The events `kind` may declare, in the contract's order; empty for a kind
+/// outside the contract.
+pub fn allowed_events(kind: &str) -> Vec<&'static str> {
+    if kind == "text_input" {
+        COMMIT_EVENTS.iter().chain(TEXT_ENTRY_EVENTS.iter()).copied().collect()
+    } else if INPUT_KINDS.contains(&kind) {
+        COMMIT_EVENTS.to_vec()
+    } else if BOOLEAN_KINDS.contains(&kind) {
+        PRESS_EVENTS.to_vec()
+    } else {
+        vec![]
+    }
+}
+
+/// A declared bound, or `None`. A bool is not a number here (serde agrees).
+fn declared_bound(widget: &serde_json::Value, key: &str) -> Option<f64> {
+    widget.get(key).and_then(serde_json::Value::as_f64)
+}
+
+/// An option's declared value, written as the reference's `str()` writes it,
+/// so the committed text can be matched against it.
+fn option_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Bool(b) => Some(if *b { "True" } else { "False" }.to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// The text a person committed, parsed by the widget's kind. `None` is a
+/// refusal (`BadValue`); `Some(Value::Null)` is a cleared nullable length.
+pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json::Value> {
+    use serde_json::{json, Value};
+    let (lo, hi) = (declared_bound(widget, "min"), declared_bound(widget, "max"));
+    match widget.get("type").and_then(Value::as_str).unwrap_or("") {
+        "number_input" => number_input_commit(text, lo, hi).map(|v| json!(v)),
+        "length_input" => {
+            if text.trim().is_empty() {
+                return (widget.get("nullable") == Some(&Value::Bool(true))).then_some(Value::Null);
+            }
+            let unit = widget.get("unit").and_then(Value::as_str).unwrap_or("pt");
+            crate::interpreter::length::parse(text, unit)
+                .map(|v| json!(clamp_to_declared(v, lo, hi)))
+        }
+        "text_input" => Some(json!(text)),
+        "select" | "icon_select" => match widget.get("options") {
+            Some(Value::Array(options)) => options.iter().find_map(|o| {
+                let value = if o.is_object() { o.get("value").unwrap_or(&Value::Null) } else { o };
+                (option_text(value).as_deref() == Some(text)).then(|| value.clone())
+            }),
+            // Computed options: the shell offered what the expression produced.
+            _ => Some(json!(text)),
+        },
+        "combo_box" => {
+            if text.trim().is_empty() {
+                return None;
+            }
+            Some(match parse_numeric_string(text) {
+                Some(v) => json!(clamp_to_declared(v, lo, hi)),
+                None => json!(text),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The widget's bound expression: `bind.value`, else `bind.checked`, else a
+/// bare-string `bind`.
+pub fn bound_target(widget: &serde_json::Value) -> Option<&str> {
+    match widget.get("bind")? {
+        serde_json::Value::String(s) => Some(s),
+        bind => ["value", "checked"].iter().find_map(|k| bind.get(*k)?.as_str()),
+    }
+}
+
+/// `(scope, key)` when the event layer may write `expr`: only
+/// `panel.<ident>` and `dialog.<ident>`, with an ASCII identifier.
+pub fn writable_target(expr: &str) -> Option<(&'static str, &str)> {
+    let expr = expr.trim();
+    for scope in ["panel", "dialog"] {
+        if let Some(key) = expr.strip_prefix(scope).and_then(|r| r.strip_prefix('.')) {
+            let ident = !key.is_empty()
+                && key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
+            return ident.then_some((scope, key));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    fn parse(w: Value, text: &str) -> Option<Value> {
+        parse_commit(&w, text)
+    }
+
+    /// The table, READ from WIDGET_EVENTS.md, where the lint holds the
+    /// reference's copy to the same block. A third copy that nobody compares
+    /// is how the three executors diverged in the first place.
+    #[test]
+    fn the_event_table_matches_the_document() {
+        let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../WIDGET_EVENTS.md"))
+            .expect("WIDGET_EVENTS.md is readable");
+        let begin = "<!-- widget-event-table:begin -->";
+        let end = "<!-- widget-event-table:end -->";
+        assert_eq!(doc.matches(begin).count(), 1);
+        let body = doc.split(begin).nth(1).unwrap().split(end).next().unwrap();
+        let mut seen = 0;
+        for line in body.lines().map(str::trim) {
+            if line.is_empty() || line.starts_with("```") {
+                continue;
+            }
+            let (kind, events) = line.split_once(':').expect("kind: events");
+            let events: Vec<&str> = events.split(',').map(str::trim).collect();
+            assert_eq!(allowed_events(kind.trim()), events, "{kind}");
+            seen += 1;
+        }
+        assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len());
+        assert!(allowed_events("slider").is_empty());
+    }
+
+    #[test]
+    fn number_input_takes_the_number_rule_and_its_bounds() {
+        let w = json!({"type": "number_input", "min": 0, "max": 255});
+        assert_eq!(parse(w.clone(), "300"), Some(json!(255.0)));
+        assert_eq!(parse(w.clone(), "12.5"), Some(json!(12.5)));
+        for t in ["abc", "1e3", " 12", "12\n", "\u{661}\u{662}", ""] {
+            assert_eq!(parse(w.clone(), t), None, "{t:?}");
+        }
+        // A bool is not a bound.
+        assert_eq!(parse(json!({"type": "number_input", "min": true}), "-5"), Some(json!(-5.0)));
+    }
+
+    #[test]
+    fn length_input_converts_clamps_and_reads_its_own_nullability() {
+        let w = json!({"type": "length_input", "unit": "pt", "min": 0, "max": 1000});
+        assert_eq!(parse(w.clone(), "3 in"), Some(json!(216.0)));
+        assert_eq!(parse(w.clone(), "2000"), Some(json!(1000.0)));
+        assert_eq!(parse(w.clone(), "-3"), Some(json!(0.0)));
+        assert_eq!(parse(w.clone(), "5 dpi"), None);
+        assert_eq!(parse(w.clone(), "  "), None);
+        assert_eq!(parse(json!({"type": "length_input", "unit": "in"}), "2"), Some(json!(144.0)));
+        assert_eq!(parse(json!({"type": "length_input"}), "3"), Some(json!(3.0)));
+        assert_eq!(parse(json!({"type": "length_input", "nullable": true}), " "), Some(Value::Null));
+        assert_eq!(parse(json!({"type": "length_input", "nullable": false}), ""), None);
+    }
+
+    #[test]
+    fn text_input_is_verbatim() {
+        for t in ["", "  padded  ", "12", "Layer 1"] {
+            assert_eq!(parse(json!({"type": "text_input"}), t), Some(json!(t)));
+        }
+    }
+
+    #[test]
+    fn select_takes_the_matching_options_declared_value() {
+        let w = json!({"type": "select", "options": [
+            {"label": "Letter", "value": "letter"}, {"label": "Two", "value": 2}]});
+        assert_eq!(parse(w.clone(), "letter"), Some(json!("letter")));
+        assert_eq!(parse(w.clone(), "2"), Some(json!(2)));
+        assert_eq!(parse(w.clone(), "Letter"), None);
+        let icons = json!({"type": "icon_select", "options": [{"value": "", "label": "None"}]});
+        assert_eq!(parse(icons.clone(), ""), Some(json!("")));
+        assert_eq!(parse(icons, "x"), None);
+        let computed = json!({"type": "select", "options": "state.font_families"});
+        assert_eq!(parse(computed, "Helvetica"), Some(json!("Helvetica")));
+    }
+
+    #[test]
+    fn combo_box_is_a_clamped_number_or_its_text_and_never_blank() {
+        let w = json!({"type": "combo_box", "min": 1, "options": [50, 100]});
+        assert_eq!(parse(w.clone(), "150"), Some(json!(150.0)));
+        assert_eq!(parse(w.clone(), "0"), Some(json!(1.0)));
+        assert_eq!(parse(w.clone(), "Auto"), Some(json!("Auto")));
+        assert_eq!(parse(w.clone(), "1e3"), Some(json!("1e3")));
+        assert_eq!(parse(w.clone(), "inf"), Some(json!("inf")));
+        assert_eq!(parse(w.clone(), ""), None);
+        assert_eq!(parse(w, "  "), None);
+    }
+
+    #[test]
+    fn a_boolean_or_unknown_kind_has_no_text_parse() {
+        assert_eq!(parse(json!({"type": "toggle"}), "true"), None);
+        assert_eq!(parse(json!({"type": "slider"}), "3"), None);
+    }
+
+    #[test]
+    fn the_bound_target_and_what_is_writable() {
+        assert_eq!(bound_target(&json!({"bind": {"value": "panel.a", "checked": "panel.b"}})), Some("panel.a"));
+        assert_eq!(bound_target(&json!({"bind": {"checked": "panel.b"}})), Some("panel.b"));
+        assert_eq!(bound_target(&json!({"bind": "dialog.c"})), Some("dialog.c"));
+        assert_eq!(bound_target(&json!({"bind": {"disabled": "x"}})), None);
+        assert_eq!(writable_target("panel.fill_tolerance"), Some(("panel", "fill_tolerance")));
+        assert_eq!(writable_target(" dialog.web_only "), Some(("dialog", "web_only")));
+        for e in ["state.x", "selection_mask_clip", "ab.name", "not panel.x",
+                  "panel.stops[panel.i].opacity", "panel.", "panel.caf\u{e9}"] {
+            assert_eq!(writable_target(e), None, "{e}");
+        }
+    }
+}
