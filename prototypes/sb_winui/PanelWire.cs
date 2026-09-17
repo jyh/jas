@@ -110,6 +110,31 @@ internal static class PanelWire
             return null;
         }
     }
+
+    /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
+    internal const string Absent = "ABSENT";
+
+    /// <summary>A reading from bytes that are not a plan, or of a value that is not a string.</summary>
+    internal const string Unreadable = "UNREADABLE";
+
+    /// <summary>
+    /// W2b-3: one resolved value of one plan leaf, as the plan carries it.
+    /// RED-FIRST STUB: the cases in `sb_winui_tests` are written against the
+    /// contract below and must fail on this body.
+    /// </summary>
+    internal static string LeafValue(string planJson, string widgetId, string key)
+    {
+        return "STUB";
+    }
+
+    /// <summary>
+    /// W2b-3: `SB_PANEL_COMMIT=&lt;widget&gt;:&lt;text&gt;`, split at the FIRST
+    /// `:`. RED-FIRST STUB, as <see cref="LeafValue"/>.
+    /// </summary>
+    internal static (string Widget, string Text)? SplitCommitKnob(string knob)
+    {
+        return ("STUB", "STUB");
+    }
 }
 
 /// <summary>The panels the pane can show, in the core's order, and how many rows could not be offered.</summary>
