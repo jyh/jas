@@ -78,13 +78,26 @@ def _reference_controller(transform=None, layer_transform=None):
     ("sheared", "shear", None),
     ("under a rotated layer", None, "rotate30"),
     ("rotated under a rotated layer", "rotate30", "rotate30"),
+    # ⛔ TRANSLATION-BEARING, and they are here because a mutation pass
+    # found the arms above BLIND to it: every transform in that list has
+    # e = f = 0, so applying the inverse as a POINT and applying only its
+    # LINEAR part give the same answer, and a mutant that translated the
+    # delta survived them all. A translation moves points, not the vectors
+    # between them, so it must never reach a delta — and only a transform
+    # that HAS one can witness that.
+    ("translated", "translate", None),
+    ("rotated and translated", "rot_trans", None),
+    ("under a translated layer", None, "translate"),
 ])
 def test_a_rect_moves_by_the_document_delta(name, transform, layer_transform):
     from document.controller import Controller
     from geometry.element import Transform
     mk = {"rotate30": Transform.rotate(30.0),
           "scale": Transform.scale(2.0, 3.0),
-          "shear": Transform.shear(0.25, 0.0)}
+          "shear": Transform.shear(0.25, 0.0),
+          "translate": Transform.translate(50.0, 60.0),
+          "rot_trans": Transform.translate(50.0, 60.0).multiply(
+              Transform.rotate(30.0))}
     model = _rect_model(mk.get(transform), mk.get(layer_transform))
     before = _origin(model.document, (0, 0))
     Controller(model).move_selection(12.0, -7.0)
@@ -101,11 +114,14 @@ def test_a_rect_moves_by_the_document_delta(name, transform, layer_transform):
     ("scaled", "scale", None),
     ("under a rotated layer", None, "rotate30"),
     ("rotated under a rotated layer", "rotate30", "rotate30"),
+    ("translated", "translate", None),
+    ("under a translated layer", None, "translate"),
 ])
 def test_a_reference_moves_by_the_document_delta(name, transform, layer_transform):
     from geometry.element import Transform
     mk = {"rotate30": Transform.rotate(30.0),
-          "scale": Transform.scale(2.0, 3.0)}
+          "scale": Transform.scale(2.0, 3.0),
+          "translate": Transform.translate(50.0, 60.0)}
     ctrl = _reference_controller(mk.get(transform), mk.get(layer_transform))
     before = _origin(ctrl.document, (0, 0))
     ctrl.move_selection(12.0, -7.0)
