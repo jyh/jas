@@ -16,11 +16,15 @@ import Testing
 // whole result, so ALL of `expected.result` is compared too: outcome,
 // reason, value, bind_written and behaviors_run.
 
+/// Fixture-relative, the shape `scripts/check_corpus_manifest.py` reads as
+/// Swift's claim on the family (the engine's arm uses the same form).
+private let widgetEventCorpus = "widget_events/corpus.json"
+
 private func corpusCases() -> [[String: Any]] {
     let testsDir = ((#filePath as NSString).deletingLastPathComponent as NSString)
         .deletingLastPathComponent
-    let path = ((testsDir as NSString)
-        .appendingPathComponent("../../test_fixtures/widget_events/corpus.json") as NSString)
+    let fixtures = (testsDir as NSString).appendingPathComponent("../../test_fixtures")
+    let path = ((fixtures as NSString).appendingPathComponent(widgetEventCorpus) as NSString)
         .standardizingPath
     guard let data = FileManager.default.contents(atPath: path),
           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -162,4 +166,110 @@ private func show(_ v: Any?) -> String {
     let found = WidgetEvent.findWidget(in: content, id: "mwp_fill_tolerance")
     #expect(found?["type"] as? String == "number_input")
     #expect(WidgetEvent.findWidget(in: content, id: "absent") == nil)
+}
+
+// ── The reference's synthetic arms, for what no shipped widget exercises ──
+//
+// ⛔ WHY THESE EXIST. The corpus is generated over SHIPPED widgets, and a
+// mutation pass over this module (16 mutants) left six alive, every one a
+// behaviour no shipped value widget has: a behavior `condition` (measured:
+// the only conditions on these kinds are `text_input` `keydown`s, which are
+// not commits), a whole-float select option, a `state.` or expression bind,
+// and a widget that binds and declares nothing. The reference pins each with
+// a synthetic widget (`workspace_interpreter/tests/test_widget_event.py`),
+// and these are those tests, ported, with the reference test named on each.
+
+private let probePanel = "probe_panel_content"
+
+private func probeStore(_ panel: [String: Any]) -> StateStore {
+    let store = StateStore()
+    store.initPanel(probePanel, defaults: panel)
+    store.setActivePanel(probePanel)
+    return store
+}
+
+private func isTrue(_ v: Any?) -> Bool { Value.fromJson(v) == .bool(true) }
+
+/// test_a_false_condition_skips_that_behavior_only
+@Test func widgetEventAFalseConditionSkipsThatBehaviorOnly() {
+    let store = probeStore(["n": 1])
+    let w: [String: Any] = [
+        "type": "number_input", "bind": ["value": "panel.n"],
+        "behavior": [
+            ["event": "commit", "condition": "panel.n > 10",
+             "effects": [["set": ["big": "true"]]]],
+            ["event": "commit", "effects": [["set": ["any": "true"]]]],
+        ],
+    ]
+    #expect(WidgetEvent.commit(widget: w, text: "5", store: store, panel: nil).behaviorsRun == 1)
+    #expect(store.get("big") == nil && isTrue(store.get("any")))
+    #expect(WidgetEvent.commit(widget: w, text: "50", store: store, panel: nil).behaviorsRun == 2)
+    #expect(isTrue(store.get("big")))
+}
+
+/// test_a_declared_behavior_owns_the_press_even_when_its_condition_is_false
+@Test func widgetEventADeclaredBehaviorOwnsThePressEvenWhenItsConditionIsFalse() {
+    let store = probeStore(["on": true, "armed": false])
+    let w: [String: Any] = [
+        "type": "toggle", "bind": ["checked": "panel.on"],
+        "behavior": [["event": "click", "condition": "panel.armed",
+                      "effects": [["set": ["ran": "true"]]]]],
+    ]
+    let r = WidgetEvent.press(widget: w, store: store, panel: nil)
+    #expect(r.outcome == "inert" && r.behaviorsRun == 0 && !r.bindWritten)
+    #expect(Value.fromJson(r.value) == .bool(false))
+    #expect(isTrue(store.getPanel(probePanel, "on")))
+    #expect(store.get("ran") == nil)
+}
+
+/// test_writable_is_panel_or_dialog_identifier_only
+@Test func widgetEventWritableIsPanelOrDialogIdentifierOnly() {
+    #expect(WidgetEvent.writableTarget("panel.fill_tolerance").map { "\($0.scope).\($0.key)" }
+            == "panel.fill_tolerance")
+    #expect(WidgetEvent.writableTarget(" dialog.web_only ").map { "\($0.scope).\($0.key)" }
+            == "dialog.web_only")
+    for expr in ["state.magic_wand_fill_color", "selection_mask_clip", "ab.name",
+                 "not panel.x", "panel.stops[panel.i].opacity", "panel.", "${bind}"] {
+        #expect(WidgetEvent.writableTarget(expr) == nil, "\(expr)")
+    }
+    #expect(WidgetEvent.writableTarget(nil) == nil)
+}
+
+/// test_an_expression_bind_is_read_but_not_written
+@Test func widgetEventAnExpressionBindIsReadButNotWritten() {
+    let store = probeStore(["mode": "a"])
+    let w: [String: Any] = ["type": "toggle", "bind": ["checked": "panel.mode == 'a'"]]
+    let r = WidgetEvent.press(widget: w, store: store, panel: nil)
+    #expect(r.outcome == "inert" && !r.bindWritten)
+    #expect(Value.fromJson(r.value) == .bool(false))
+    #expect(store.getPanel(probePanel, "mode") as? String == "a")
+}
+
+/// test_nothing_bound_and_nothing_declared_is_inert
+@Test func widgetEventNothingBoundAndNothingDeclaredIsInert() {
+    let store = probeStore(["n": 1])
+    let r = WidgetEvent.commit(widget: ["type": "number_input"], text: "5", store: store,
+                               panel: nil)
+    #expect(r.outcome == "inert" && r.reason == nil && !r.bindWritten && r.behaviorsRun == 0)
+    #expect(Value.fromJson(r.value) == .number(5))
+    // The control: the same text into a bound box commits.
+    let bound = WidgetEvent.commit(widget: ["type": "number_input", "bind": ["value": "panel.n"]],
+                                   text: "5", store: store, panel: nil)
+    #expect(bound.outcome == "committed" && bound.bindWritten)
+}
+
+/// test_select_takes_the_matching_options_declared_value, with the
+/// reference's `str()` of a whole FLOAT added: `str(3.0)` is `3.0`, not `3`.
+@Test func widgetEventSelectTakesTheMatchingOptionsDeclaredValue() {
+    let w: [String: Any] = ["type": "select", "options": [
+        ["label": "Letter", "value": "letter"],
+        ["label": "Two", "value": 2],
+        ["label": "Three", "value": 3.0],
+    ]]
+    #expect(WidgetEvent.parseCommit(widget: w, text: "letter").value as? String == "letter")
+    #expect(Value.fromJson(WidgetEvent.parseCommit(widget: w, text: "2").value) == .number(2))
+    #expect(WidgetEvent.parseCommit(widget: w, text: "3.0").accepted)
+    #expect(!WidgetEvent.parseCommit(widget: w, text: "3").accepted)
+    #expect(!WidgetEvent.parseCommit(widget: w, text: "Letter").accepted)
+    #expect(!WidgetEvent.parseCommit(widget: w, text: "legal").accepted)
 }
