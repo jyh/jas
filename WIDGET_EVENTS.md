@@ -190,8 +190,17 @@ expression's current truth value, and an unbound widget reads as false.
 
 Each line below was read at the cited `file:line` and has not been
 executed. The golden corpus (`test_fixtures/widget_events/corpus.json`)
-exists, but no port consumes it yet. Until a port's arm runs it, none of
-these is a measured failure.
+has two consumers besides the reference:
+
+- the engine's panel door (`jas_panel_behavior`, `jas_dioxus/src/ffi.rs`);
+- Swift's headless `WidgetEvent`
+  (`JasSwift/Sources/Interpreter/WidgetEvent.swift`), held to it by
+  `JasSwift/Tests/Interpreter/WidgetEventCorpusTests.swift`.
+
+Neither is a port's panel VIEW. Swift's `YamlPanelBodyView` does not call
+`WidgetEvent` yet, and the Rust web app does not call the door, so the
+lines below still describe what each view does. Until a view routes
+through its tested module, none of these is a measured failure.
 
 - **Swift, `number_input`: a commit runs only `change` behaviors**
   (`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:1585`, which
