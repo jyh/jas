@@ -1967,9 +1967,9 @@ mod tests {
         assert_ne!(after, before);
         assert_eq!(after, stroke_oracle(e, &pre, &["stroke_cap"]));
         // A second reading, not through the oracle: every selected element
-        // now has a stroke, and it is round.
-        let strokes = selected_strokes(e);
-        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.is_some_and(|s| s.linecap == LineCap::Round)),
+        // that carries a stroke (a group carries none) is round.
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.linecap == LineCap::Round),
                 "{strokes:?}");
 
         undo(e);
@@ -1990,10 +1990,9 @@ mod tests {
                                   r#"{"widget":"stk_weight","event":"commit","value":"7"}"#);
         assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply}");
         assert_eq!(doc_json(e), stroke_oracle(e, &pre, &["stroke_width"]));
-        let strokes = selected_strokes(e);
-        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.is_some_and(|s| s.width == 7.0)),
-                "{strokes:?}");
-        assert_eq!(engine_of(e).store.borrow().get("stroke_width"), &serde_json::json!(7.0));
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.width == 7.0), "{strokes:?}");
+        assert_eq!(engine_of(e).store.borrow().get("stroke_width").as_f64(), Some(7.0));
         unsafe { jas_engine_free(e) };
     }
 
@@ -2014,7 +2013,9 @@ mod tests {
                    "the premise: undo does not move the store");
         let (reply, err) = behave(e, STROKE, click);
         assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply} {err}");
-        assert!(selected_strokes(e).iter().all(|s| s.is_some_and(|s| s.linecap == LineCap::Round)));
+        let strokes: Vec<_> = selected_strokes(e).into_iter().flatten().collect();
+        assert!(strokes.len() >= 2 && strokes.iter().all(|s| s.linecap == LineCap::Round),
+                "{strokes:?}");
         unsafe { jas_engine_free(e) };
     }
 

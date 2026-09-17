@@ -122,7 +122,15 @@ pub trait EffectHost {
         model: Option<&mut Model>,
     ) -> bool;
 
-    /// A global `state.*` key was written. STUB.
+    /// A global `state.*` key was written (FB wave 2b, A11). The reference
+    /// fires its store subscriptions from `StateStore.set`; this is that hook,
+    /// for a host with a subscription of its own (the engine's Stroke apply).
+    /// The runner calls it after each effect, once per key that effect wrote,
+    /// in write order, and with the store already holding the new value. A
+    /// write of the value the store already held is still reported, as Swift's
+    /// `set` and the web app's panel intercept both apply it. Writes the hook
+    /// makes itself are reported after the NEXT effect. The default does
+    /// nothing.
     fn global_written(
         &mut self,
         _key: &str,
@@ -184,6 +192,9 @@ fn run_effects_into<'h>(
     // The owner commits once at the end, spanning every effect in this batch
     // into a single undo step. commit_txn is a no-op if nothing opened one.
     let owns_txn = model.as_deref().map_or(false, |m| !m.in_txn());
+    // A11: a hosted batch journals its global writes and reports them to the
+    // host after each effect. The outermost batch owns the journal.
+    let owns_journal = host.is_some() && store.open_global_writes();
     for effect in effects {
         match effect {
             serde_json::Value::Object(map) => {
@@ -206,6 +217,7 @@ fn run_effects_into<'h>(
                 report.unhandled.push(Unhandled::NotAnEffect(other.to_string()));
             }
         }
+        report_global_writes(store, model.as_deref_mut(), host.as_deref_mut());
     }
     // Dialog on_change post-run hook. Fires the action declared on the
     // currently-open dialog's on_change field whenever this batch
@@ -226,6 +238,10 @@ fn run_effects_into<'h>(
             store.set_firing_on_change(false);
         }
     }
+    report_global_writes(store, model.as_deref_mut(), host.as_deref_mut());
+    if owns_journal {
+        store.close_global_writes();
+    }
     // Commit the transaction this batch opened (if any), making the whole
     // action one undo step. No-op when nothing opened one or when nested.
     if owns_txn {
@@ -243,6 +259,19 @@ fn run_effects_into<'h>(
             }
             m.commit_txn();
         }
+    }
+}
+
+/// Tell the host about every global the journal holds, in write order, and
+/// empty it. Nothing without a host.
+fn report_global_writes<'h>(
+    store: &mut StateStore,
+    mut model: Option<&mut Model>,
+    host: Option<&mut (dyn EffectHost + 'h)>,
+) {
+    let Some(host) = host else { return };
+    for key in store.take_global_writes() {
+        host.global_written(&key, store, model.as_deref_mut());
     }
 }
 

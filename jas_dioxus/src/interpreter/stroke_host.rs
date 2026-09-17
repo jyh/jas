@@ -20,12 +20,28 @@ use crate::interpreter::state_store::StateStore;
 /// The Stroke panel's id: the store scope its fields live in.
 pub const STROKE_PANEL: &str = "stroke_panel_content";
 
-/// The global `state.*` keys whose write reaches the selection (A11). STUB.
-pub const STROKE_RENDER_KEYS: &[&str] = &[];
+/// The global `state.*` keys whose write reaches the selection (A11): the
+/// reference's `STROKE_RENDER_KEYS` (`workspace_interpreter/effects.py`), in
+/// its order. Swift keeps the same list. A test reads the reference's literal
+/// and requires this one to equal it, so the copy cannot drift.
+///
+/// The trigger is the GLOBAL write. A stroke behavior writes both
+/// `set_panel_state cap` and `set stroke_cap`, the panel's `init:` two-way
+/// binds every field to its global, and `set_stroke_cap` says in its own
+/// description that the global write "propagates to the selection".
+pub const STROKE_RENDER_KEYS: &[&str] = &[
+    "stroke_cap", "stroke_join", "stroke_width", "stroke_miter_limit",
+    "stroke_dashed", "stroke_dash_1", "stroke_gap_1",
+    "stroke_dash_2", "stroke_gap_2", "stroke_dash_3", "stroke_gap_3",
+    "stroke_dash_align_anchors",
+    "stroke_align", "stroke_start_arrowhead", "stroke_end_arrowhead",
+    "stroke_start_arrowhead_scale", "stroke_end_arrowhead_scale",
+    "stroke_arrow_align", "stroke_profile", "stroke_profile_flipped",
+];
 
-/// True when a write to the global `key` applies to the selection. STUB.
-pub fn is_render_key(_key: &str) -> bool {
-    false
+/// True when a write to the global `key` applies to the selection.
+pub fn is_render_key(key: &str) -> bool {
+    STROKE_RENDER_KEYS.contains(&key)
 }
 
 /// Stroke panel state fields that sync with global state and the selection.
@@ -64,12 +80,47 @@ pub struct StrokePanelState {
 }
 
 impl StrokePanelState {
-    /// The panel's fields, as the workspace declares them. STUB.
-    pub const FIELDS: [&'static str; 0] = [];
+    /// The panel's fields, as `stroke.yaml` declares them under `state:`. A
+    /// test requires this to be the declared list.
+    pub const FIELDS: [&'static str; 21] = [
+        "weight", "cap", "join", "miter_limit", "align_stroke", "dashed",
+        "dash_1", "gap_1", "dash_2", "gap_2", "dash_3", "gap_3",
+        "dash_align_anchors", "start_arrowhead", "end_arrowhead",
+        "start_arrowhead_scale", "end_arrowhead_scale", "link_arrowhead_scale",
+        "arrow_align", "profile", "profile_flipped",
+    ];
 
-    /// The panel as the store holds it. STUB.
-    pub fn from_store(_store: &StateStore) -> Self {
-        Self::default()
+    /// The panel as the store holds it, in the reference's order
+    /// (`effects.py`, `stroke_panel_state`): the panel scope first, because
+    /// every in-panel write lands there; then the flat global, for writers
+    /// outside the panel; then the declared default. A null is absent at each
+    /// step. Two globals are not `stroke_<field>`: weight's is `stroke_width`,
+    /// and `align_stroke` reads `stroke_align_stroke` and then `stroke_align`.
+    ///
+    /// ⚠️ One difference from the reference, stated: its weight has no
+    /// default (a missing weight builds on the default stroke's width), and
+    /// here it is 1, as in the web app's struct. The engine seeds the panel
+    /// scope from its declared state, which holds a weight, so the case does
+    /// not arise there.
+    pub fn from_store(store: &StateStore) -> Self {
+        let mut sp = Self::default();
+        for field in Self::FIELDS {
+            let globals: &[&str] = match field {
+                "weight" => &["stroke_width"],
+                "align_stroke" => &["stroke_align_stroke", "stroke_align"],
+                _ => &[],
+            };
+            let flat = format!("stroke_{field}");
+            let globals = if globals.is_empty() { vec![flat.as_str()] } else { globals.to_vec() };
+            let panel = store.get_panel(STROKE_PANEL, field);
+            let value = std::iter::once(panel)
+                .chain(globals.into_iter().map(|g| store.get(g)))
+                .find(|v| !v.is_null());
+            if let Some(v) = value {
+                sp.set_field(field, v);
+            }
+        }
+        sp
     }
 
     /// Write ONE panel field from a YAML-interpreted value. Keys are the
@@ -348,18 +399,25 @@ pub fn apply_stroke_panel_to_selection(
         } else {
             sel_stroke.map(|s| s.width).unwrap_or(committed_width)
         };
-        model.with_txn(|m| {
-            Controller::map_selection_stroke(m, |el_stroke| {
-                let base = el_stroke.unwrap_or(fallback);
-                Some(stroke_with_group(base, sp, group, committed_width))
-            });
-            if profile_edit {
-                let width_pts = crate::geometry::element::profile_to_width_points(
-                    &sp.profile, profile_width, sp.profile_flipped,
-                );
-                Controller::set_selection_width_profile(m, width_pts);
-            }
+        // Join a transaction the caller already opened (the engine's batch),
+        // or bracket this edit as its own undo step. Not `with_txn`: it
+        // commits unconditionally, so inside an open transaction it would
+        // close the CALLER's, and the rest of the batch would land outside it.
+        let opened = !model.in_txn();
+        model.begin_txn();
+        Controller::map_selection_stroke(model, |el_stroke| {
+            let base = el_stroke.unwrap_or(fallback);
+            Some(stroke_with_group(base, sp, group, committed_width))
         });
+        if profile_edit {
+            let width_pts = crate::geometry::element::profile_to_width_points(
+                &sp.profile, profile_width, sp.profile_flipped,
+            );
+            Controller::set_selection_width_profile(model, width_pts);
+        }
+        if opened {
+            model.commit_txn();
+        }
     }
     // The new-element default takes the SAME field-scoped edit, built on the
     // default stroke — never on the selected element, whose width / colour

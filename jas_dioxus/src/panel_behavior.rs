@@ -78,6 +78,7 @@ use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
     self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, PRESS_EVENTS,
 };
@@ -153,6 +154,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * `snapshot` opens the transaction (`renderer.rs`, both spellings).
 /// * The fourteen Align operations run through `align_host`, the one
 ///   implementation the web app calls too.
+/// * A write to a Stroke render key applies the Stroke panel to the selection
+///   through `stroke_host` (A11), the one implementation the web app calls
+///   too.
 ///
 /// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
@@ -179,6 +183,22 @@ impl EffectHost for EngineHost {
             return true;
         }
         false
+    }
+
+    /// A11: a write to a Stroke render key applies that field of the Stroke
+    /// panel, as the store holds it, to the selection. It opens the batch's
+    /// transaction as `snapshot` does, so a batch that writes several keys is
+    /// ONE undo step, and the runner's owner commits it.
+    fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
+        let Some(model) = model else { return };
+        if !stroke_host::is_render_key(key) {
+            return;
+        }
+        if !model.in_txn() {
+            model.begin_txn();
+        }
+        let panel = StrokePanelState::from_store(store);
+        stroke_host::apply_stroke_panel_to_selection(model, &panel, key, None);
     }
 }
 
