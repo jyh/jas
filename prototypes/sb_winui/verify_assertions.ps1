@@ -1529,13 +1529,15 @@ if ($menuRows.Count -eq 0) {
         $m = Get-SbMenuRowReading $r
         if ($m.Ok -and $m.Seq -gt $lastSeq) { $lastSeq = $m.Seq }
     }
-    if (Test-SbSynthAsked $env:SB_PANEL_SYNTH) {
+    if (Test-SbPaneReplayAsked $env:SB_PANEL_SYNTH $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS) {
         # ⛔ NOT A PASS AND NOT A FAIL. Q6's replay clicks and runs ops, and each
         # moves the core's menu answer (can-undo, the selection-gated items) a
         # number of times that no knob of this run predicts -- a derivation
         # that guessed it would be a pin wearing a derivation's clothes.
+        # W2b-3's value replay is the same case: every click the core answers
+        # republishes the menu (`Canvas.ApplyPanelClick`).
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
-            "SB_PANEL_SYNTH is set: the replay's clicks and ops move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
+            "a pane replay is set (SB_PANEL_SYNTH, or SB_PANEL_COMMIT with SB_PANEL_PRESS): its clicks move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
     } elseif ($lastSeq -lt 0) {
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
             'no MENU row carried a readable seq=' -Row $menuRows[-1]
@@ -1576,6 +1578,24 @@ foreach ($q in @(Get-SbPaneVerdicts $rows $Scene $env:SB_PANEL_SYNTH)) {
         Add-NotRun $q.Name $q.Detail -Row $q.Row
     } else {
         Add-Assert -Name $q.Name -Verdict $q.Verdict -Detail $q.Detail -Row $q.Row
+    }
+}
+
+# ===========================================================================
+# V1-V6 -- THE MAGIC WAND VALUE REPLAY ON THE BOX (W2b-3)
+# ===========================================================================
+#
+# ⛔ THIN, FOR Q6's REASON. Every decision is `Get-SbValueVerdicts` in
+# `harness_common.ps1`, which the self-test drives on every branch; this loop
+# only records what it returns -- all six clauses on every scene, NOT RUN by
+# name where no knob asked for them, FAIL where a knob was set on a scene that
+# opens no pane. `verify_window.ps1` has already waited for the replay's done
+# row (`Get-SbValueWaits`).
+foreach ($vq in @(Get-SbValueVerdicts $rows $Scene $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS $env:SB_PANEL)) {
+    if ($vq.Verdict -eq 'NOT RUN') {
+        Add-NotRun $vq.Name $vq.Detail -Row $vq.Row
+    } else {
+        Add-Assert -Name $vq.Name -Verdict $vq.Verdict -Detail $vq.Detail -Row $vq.Row
     }
 }
 

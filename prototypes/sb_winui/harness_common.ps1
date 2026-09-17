@@ -2095,3 +2095,372 @@ function Get-SbPaneResizeVerdict($Rows, [string]$Scene, [string]$Synth) {
         "already-laid-out canvas, which is W2-5's regression and not the canvas's (freeze stop 5). " +
         'A display-scale change writes SCALE CHANGED; rule that out first') $repaints[-1]
 }
+
+# ===========================================================================
+# V1-V6 -- THE VALUE REPLAY, READ OFF ITS OWN ROWS (W2b-3)
+# ===========================================================================
+#
+# ⛔ PURE FUNCTIONS OVER ROWS, FOR Q6's REASON: `verify_assertions.ps1` cannot
+# be dot-sourced without a desktop, so a decision made there has no arm.
+# `harness_selftest.ps1` drives every branch below with no app and no session.
+#
+# ⛔ AND THE SHELL DECIDES NONE OF IT. `Canvas.ApplyPanelValueSynth` commits,
+# presses, and reads the plan after each step. Whether `abc` should be refused,
+# whether the value should read the text and whether the press should flip
+# anything are asked only here -- and every expectation is DERIVED from the
+# knobs and the rows. None is typed.
+#
+# ⚠️ WHAT THE CLAUSES ASSUME ABOUT THE WIDGETS, stated because the knobs can
+# name any: V2 assumes the commit widget refuses `abc` (a number or length
+# input does; a text input does not), and V4/V5 assume the pressed toggle
+# governs the commit widget's `disabled` (as `mwp_fill_color` governs
+# `mwp_fill_tolerance`). The route (`sitting.ps1 -Scenes mw`) satisfies both,
+# and the Rust arm `panel_behavior_the_value_replay_on_the_sittings_panel`
+# proves it on every CI run. V3 does not know the widget's `min`/`max`, so a
+# text the core clamps reads FAIL.
+
+# ⛔ THE SHELL'S SPLIT, NOT A NEARBY ONE (`PanelWire.SplitCommitKnob`): the
+# FIRST ':', ordinal; no ':' or a whitespace widget is $null; the text is kept
+# verbatim. A harness that split at the LAST ':' would expect a text the shell
+# never sent.
+function Split-SbCommitKnob([string]$Knob) {
+    if ([string]::IsNullOrEmpty($Knob)) { return $null }
+    $colon = $Knob.IndexOf([char]':')
+    if ($colon -lt 0) { return $null }
+    $widget = $Knob.Substring(0, $colon)
+    if ([string]::IsNullOrWhiteSpace($widget)) { return $null }
+    return @{ Widget = $widget; Text = $Knob.Substring($colon + 1) }
+}
+
+# Either value knob set. Whitespace is unset: the shell's predicate.
+function Test-SbValueAsked([string]$Commit, [string]$Press) {
+    return (-not [string]::IsNullOrWhiteSpace($Commit)) -or (-not [string]::IsNullOrWhiteSpace($Press))
+}
+
+# Why these knobs cannot drive the replay, or '' when they can --
+# `MainWindow.QueueValueSynth`'s rules, in its order (the scene is asked
+# separately, by the caller).
+function Get-SbValueKnobRefusal([string]$Commit, [string]$Press) {
+    $commitAsked = -not [string]::IsNullOrWhiteSpace($Commit)
+    $pressAsked = -not [string]::IsNullOrWhiteSpace($Press)
+    if (-not $commitAsked -and -not $pressAsked) { return 'neither SB_PANEL_COMMIT nor SB_PANEL_PRESS is set' }
+    if (-not $commitAsked) { return 'SB_PANEL_PRESS is set and SB_PANEL_COMMIT is not; the replay needs both' }
+    if (-not $pressAsked) { return 'SB_PANEL_COMMIT is set and SB_PANEL_PRESS is not; the replay needs both' }
+    if ($null -eq (Split-SbCommitKnob $Commit)) {
+        return "SB_PANEL_COMMIT='$Commit' is not <widget>:<text> (no ':', or no widget before it)"
+    }
+    return ''
+}
+
+# ⭐ DOES A PANE REPLAY RUN ON THIS RUN, AND SO MOVE THE CORE'S MENU ANSWER?
+# Q6's knob, or BOTH value knobs (one alone is refused, and nothing runs). Every
+# replayed click that the core answers republishes the menu, so P4.4's rebuild
+# count has no derivation on such a run and reads NOT RUN.
+function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press) {
+    if (Test-SbSynthAsked $Synth) { return $true }
+    return (-not [string]::IsNullOrWhiteSpace($Commit)) -and (-not [string]::IsNullOrWhiteSpace($Press))
+}
+
+# ⛔ WHICH TEXTS V3 CAN COMPARE BYTE FOR BYTE. The core parses a number input's
+# text by the number grammar (WIDGET_EVENTS.md: `-?[0-9]+(\.[0-9]+)?`, the whole
+# string, ASCII digits) and shows the NUMBER back in canonical form -- measured:
+# the panel's `5.0` default reads `5`. So `040`, `5.0`, `1.50` and `-0` cannot
+# read back as typed, and comparing them would test the harness, not the core.
+# `\z`, never `$`: .NET's `$` also matches before a final newline.
+function Test-SbCanonicalNumber([string]$Text) {
+    $m = [regex]::Match($Text, '^(-?)([0-9]+)(?:\.([0-9]+))?\z')
+    if (-not $m.Success) { return $false }
+    $whole = $m.Groups[2].Value
+    if ($whole.Length -gt 1 -and $whole[0] -eq [char]'0') { return $false }
+    if ($m.Groups[3].Success) {
+        $frac = $m.Groups[3].Value
+        if ($frac[$frac.Length - 1] -eq [char]'0') { return $false }
+    } elseif ($m.Groups[1].Value -eq '-' -and $whole -eq '0') {
+        return $false
+    }
+    return $true
+}
+
+# How many DIFFERENT readings, ordinally. (`Sort-Object -Unique` ignores case.)
+function Get-SbDistinctCount($Parts) {
+    $set = New-Object 'System.Collections.Generic.HashSet[string]' ([System.StringComparer]::Ordinal)
+    foreach ($p in @($Parts)) { [void]$set.Add([string]$p) }
+    return $set.Count
+}
+
+# '' when a replay step's click row is a clean change on `$Widget`, else why not.
+# A row the shell marked RUSTFAIL, a refusal (no outcome=), an Unchanged, and a
+# delta that is not `0` are each not clean.
+function Get-SbCleanChangeWhy([string]$Row, [string]$Widget) {
+    $w = Get-SbField $Row 'widget'
+    $facts = "widget=$w outcome=$(Get-SbField $Row 'outcome') delta-mismatch=$(Get-SbField $Row 'delta-mismatch') channel=$(Get-SbField $Row 'channel')"
+    if ($w -cne $Widget) { return "$facts; the step was sent to '$Widget'" }
+    if ((Test-SbRowFailed $Row) -or (Get-SbField $Row 'outcome') -cne 'changed' -or (Get-SbField $Row 'delta-mismatch') -cne '0') {
+        return "$facts; a clean change is outcome=changed with delta-mismatch=0 on a row the shell did not mark RUSTFAIL"
+    }
+    return ''
+}
+
+# ⭐ THE WAIT A VALUE RUN OWES AFTER ITS COMPLETION ROW, for Q6's reason: the
+# replay runs after the pane opens, which is after `app` reports.
+# ⛔ IT ENDS ON THE DONE ROW OR ON THE REPLAY'S OWN REFUSAL OR THROW, AND ON
+# NOTHING ELSE. A plan refusal or a click's red can arrive mid-replay, and a
+# wait that ended there would snapshot the rows before the done row.
+function Get-SbValueWaits([string]$Scene, [string]$Commit, [string]$Press) {
+    $waits = @()
+    if ($Scene -ne $SbPaneScene) { return $waits }
+    if (-not (Test-SbValueAsked $Commit $Press)) { return $waits }
+    $waits += @{
+        Label    = 'the PANEL VALUE SYNTH DONE row'
+        Patterns = @((Get-SbRowPattern 'PANEL VALUE SYNTH DONE' ' panel='), 'RUSTFAIL PANEL VALUE SYNTH ')
+        Timeout  = 60
+    }
+    return $waits
+}
+
+# ⛔ SIX CLAUSES, AND EVERY PATH NAMES ALL SIX EXACTLY ONCE (the self-test's
+# census). No key is `Count`: that would shadow the dictionary's own.
+$SbValueNames = [ordered]@{
+    Open    = 'V1 the pane opened on the panel SB_PANEL names, with every bound row placed'
+    Bad     = 'V2 a commit of abc is refused BadValue and moves no reading'
+    Commit  = 'V3 a commit of the knob''s text is a clean change and the value reads that text'
+    Press   = 'V4 a press flips checked and the disabled it governs, and holds the value'
+    Restore = 'V5 the same press again restores checked and disabled, and still holds the value'
+    Done    = 'V6 the replay wrote one done row, naming its widgets, with every reading a value'
+}
+
+# V1-V6 as `New-SbVerdict` objects, in the order of `$SbValueNames`. `$Scene`
+# is the run's scene; `$Commit`, `$Press` and `$Panel` are the knobs
+# SB_PANEL_COMMIT, SB_PANEL_PRESS and SB_PANEL.
+function Get-SbValueVerdicts($Rows, [string]$Scene, [string]$Commit, [string]$Press, [string]$Panel = '') {
+    $n = $SbValueNames
+    $out = New-Object System.Collections.Generic.List[object]
+    $panelAsked = -not [string]::IsNullOrWhiteSpace($Panel)
+    $valueAsked = Test-SbValueAsked $Commit $Press
+    $rest = @('Commit', 'Press', 'Restore', 'Done')
+
+    if ($Scene -ne $SbPaneScene) {
+        $why = "this run is scene '$Scene'; only '$SbPaneScene' opens the pane"
+        if ($panelAsked) {
+            # ⛔ A FAILURE, NEVER A QUIET NOT RUN: the run chose a panel that
+            # its scene cannot open.
+            $ref = Select-SbRow $Rows 'RUSTFAIL PANEL FIRST REFUSED '
+            $tail = if ($null -eq $ref) { 'and the shell wrote NO refusal saying so' } else { 'and the shell refused it by name' }
+            $out.Add((New-SbVerdict $n.Open 'FAIL' "SB_PANEL='$Panel' was set on scene '$Scene', which opens no pane -- $tail" $ref))
+        } else {
+            $out.Add((New-SbVerdict $n.Open 'NOT RUN' $why))
+        }
+        if ($valueAsked) {
+            $ref = Select-SbRow $Rows 'RUSTFAIL PANEL VALUE SYNTH '
+            $tail = if ($null -eq $ref) { 'and the shell wrote NO refusal saying so' } else { 'and the shell refused it by name' }
+            $out.Add((New-SbVerdict $n.Bad 'FAIL' "SB_PANEL_COMMIT='$Commit' SB_PANEL_PRESS='$Press' were set on scene '$Scene', which opens no pane, so no replay could run -- $tail" $ref))
+            foreach ($k in $rest) { $out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'no replay can run on this scene; V2 quotes why' $ref)) }
+        } else {
+            $out.Add((New-SbVerdict $n.Bad 'NOT RUN' $why))
+            foreach ($k in $rest) { $out.Add((New-SbVerdict $n[$k] 'NOT RUN' $why)) }
+        }
+        return $out.ToArray()
+    }
+
+    # ---- V1: the open ------------------------------------------------------
+    # ⛔ THE APP'S OPEN, BY `via=`: a person's choice in the selector is not it.
+    $open = Select-SbRow $Rows ((Get-SbRowPattern 'PANEL OPEN' ' panel=') + '\S+ via=app(?:\s|$)')
+    $openPanel = $null
+    if ($null -ne $open) { $openPanel = Get-SbField $open 'panel' }
+    if (-not $panelAsked -and -not $valueAsked) {
+        $out.Add((New-SbVerdict $n.Open 'NOT RUN' 'SB_PANEL, SB_PANEL_COMMIT and SB_PANEL_PRESS are unset: this run chose no panel and replayed no value (sitting.ps1 -Scenes mw does)' $open))
+    } elseif ($null -eq $open) {
+        $planRefusal = Select-SbRow $Rows 'RUSTFAIL PANEL REFUSED '
+        $why = 'no PANEL OPEN via=app row: the pane never opened'
+        if ($null -ne $planRefusal) { $why = "the core refused the plan for panel=$(Get-SbField $planRefusal 'panel'), so no pane opened" }
+        $out.Add((New-SbVerdict $n.Open 'FAIL' $why $planRefusal))
+    } else {
+        $lv = Get-SbField $open 'leaves'
+        $uj = Get-SbField $open 'unjoined'
+        $reading = "panel=$openPanel via=app leaves=$lv unjoined=$uj plan=$(Get-SbField $open 'plan')"
+        $want = "SB_PANEL='$Panel'"
+        if (-not $panelAsked) { $want = 'SB_PANEL is unset, so the panel the shell opens by default' }
+        if ($panelAsked -and $openPanel -cne $Panel) {
+            $out.Add((New-SbVerdict $n.Open 'FAIL' "$reading; the app opened another panel than $want (ids compare ordinally)" $open))
+        } elseif ($lv -notmatch '^[0-9]+\z' -or [long]$lv -lt 1 -or $uj -cne '0') {
+            $out.Add((New-SbVerdict $n.Open 'FAIL' "$reading; a healthy open carries at least one leaf and unjoined=0 (a bound row the layout never placed is a core defect)" $open))
+        } else {
+            $out.Add((New-SbVerdict $n.Open 'PASS' "$reading; $want" $open))
+        }
+    }
+
+    # ---- the replay --------------------------------------------------------
+    if (-not $valueAsked) {
+        $why = 'SB_PANEL_COMMIT and SB_PANEL_PRESS are unset: this run replayed no value (sitting.ps1 -Scenes mw does)'
+        $out.Add((New-SbVerdict $n.Bad 'NOT RUN' $why))
+        foreach ($k in $rest) { $out.Add((New-SbVerdict $n[$k] 'NOT RUN' $why)) }
+        return $out.ToArray()
+    }
+    Add-SbValueReplayVerdicts $out $Rows $Commit $Press $Panel $panelAsked $openPanel
+    return $out.ToArray()
+}
+
+# V2-V6, appended to `$Out` (always five).
+function Add-SbValueReplayVerdicts($Out, $Rows, [string]$Commit, [string]$Press, [string]$Panel,
+                                   [bool]$PanelAsked, $OpenPanel) {
+    $n = $SbValueNames
+    $rest = @('Commit', 'Press', 'Restore', 'Done')
+
+    # ⛔ THE KNOBS ARE JUDGED BY THE SHELL'S RULES, NOT BY WHAT THE SHELL WROTE:
+    # a pair it must refuse is a FAIL even beside a done row.
+    $knobWhy = Get-SbValueKnobRefusal $Commit $Press
+    $refused = Select-SbRow $Rows 'RUSTFAIL PANEL VALUE SYNTH '
+    if ($knobWhy -ne '') {
+        $tail = if ($null -eq $refused) { 'and the shell wrote NO refusal saying so' } else { 'and the shell refused it by name' }
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' "the value knobs cannot drive a replay ($knobWhy) -- $tail" $refused))
+        foreach ($k in $rest) { $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'the replay could not run; V2 quotes why' $refused)) }
+        return
+    }
+    if ($null -ne $refused) {
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' "the shell refused or abandoned the replay it was asked for (SB_PANEL_COMMIT='$Commit' SB_PANEL_PRESS='$Press')" $refused))
+        foreach ($k in $rest) { $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'the replay did not finish; V2 quotes why' $refused)) }
+        return
+    }
+    $split = Split-SbCommitKnob $Commit
+    $commitWidget = $split.Widget
+    $text = $split.Text
+    $four = @('Bad', 'Commit', 'Press', 'Restore')
+
+    # ---- V6 first, because V2-V5 read what it certifies --------------------
+    $doneRows = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL VALUE SYNTH DONE' ' panel='))
+    if ($doneRows.Count -ne 1) {
+        $why = "$($doneRows.Count) PANEL VALUE SYNTH DONE rows; one replay writes one, so its readings cannot be told apart"
+        $last = $null
+        if ($doneRows.Count -eq 0) {
+            $why = "no PANEL VALUE SYNTH DONE row: the replay of SB_PANEL_COMMIT='$Commit' SB_PANEL_PRESS='$Press' did not finish inside the wait"
+        } else {
+            $last = $doneRows[$doneRows.Count - 1]
+        }
+        foreach ($k in $four) { $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'there is no single done row to read; V6 quotes why' $last)) }
+        $Out.Add((New-SbVerdict $n.Done 'FAIL' $why $last))
+        return
+    }
+    $done = $doneRows[0]
+    $fields = [ordered]@{}
+    foreach ($name in @('value', 'disabled', 'checked')) { $fields[$name] = Get-SbSlashField $done $name 5 }
+    $problems = @()
+    foreach ($name in $fields.Keys) {
+        $f = $fields[$name]
+        if (-not $f.Ok) { $problems += $f.Reason; continue }
+        $sentinels = @($f.Parts | Where-Object { $_ -ceq 'ABSENT' -or $_ -ceq 'UNREADABLE' })
+        if ($sentinels.Count -gt 0) { $problems += "$name=$($f.Raw) holds $($sentinels.Count) reading(s) that are not values" }
+    }
+    $doneCommit = Get-SbField $done 'commit'
+    $donePress = Get-SbField $done 'press'
+    $donePanel = Get-SbField $done 'panel'
+    if ($doneCommit -cne $commitWidget) { $problems += "commit=$doneCommit, and SB_PANEL_COMMIT names '$commitWidget'" }
+    if ($donePress -cne $Press) { $problems += "press=$donePress, and SB_PANEL_PRESS is '$Press'" }
+    # The panel: SB_PANEL when it is set, else the one the app opened.
+    $wantPanel = $null
+    $wantWhat = ''
+    if ($PanelAsked) {
+        $wantPanel = $Panel
+        $wantWhat = 'SB_PANEL is'
+    } elseif ($null -ne $OpenPanel) {
+        $wantPanel = $OpenPanel
+        $wantWhat = 'the app opened'
+    }
+    if ($null -ne $wantPanel -and $donePanel -cne $wantPanel) { $problems += "panel=$donePanel, and $wantWhat '$wantPanel'" }
+    if ($problems.Count -gt 0) {
+        foreach ($k in $four) { $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' 'the done row cannot be read as this replay''s readings; V6 quotes why' $done)) }
+        $Out.Add((New-SbVerdict $n.Done 'FAIL' ($problems -join '; ') $done))
+        return
+    }
+
+    # r[0..4] = the readings at open, after abc, after the commit, after the
+    # press, after the press again.
+    $v = @($fields['value'].Parts)
+    $d = @($fields['disabled'].Parts)
+    $c = @($fields['checked'].Parts)
+    $values = "value=$($fields['value'].Raw) disabled=$($fields['disabled'].Raw) checked=$($fields['checked'].Raw)"
+
+    # ⛔ THE ANTI-VACUITY READINGS. An "unchanged" clause is an EQUALITY, and an
+    # instrument that returns a constant satisfies every equality there is, so
+    # each instrument must have read two distinct values somewhere in the run.
+    $dead = @()
+    foreach ($name in $fields.Keys) {
+        $count = Get-SbDistinctCount $fields[$name].Parts
+        if ($count -lt 2) { $dead += "$name read $count distinct value(s) across the five readings" }
+    }
+    $liveWhy = ''
+    if ($dead.Count -gt 0) { $liveWhy = ($dead -join '; ') + ', so an equality over it proves nothing' }
+
+    # ---- V2: abc is refused, and nothing moves ------------------------------
+    $bad = Select-SbSynthClick $Rows 'synth:bad'
+    if ($null -eq $bad) {
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' 'the replay finished and no row carries via=synth:bad' $done))
+    } elseif ((Get-SbField $bad 'widget') -cne $commitWidget) {
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' "the synth:bad row names widget=$(Get-SbField $bad 'widget'), and the commit was sent to '$commitWidget'" $bad))
+    } elseif ($bad -notmatch 'PANEL CLICK REFUSED ' -or (Get-SbChannelClass $bad) -cne 'BadValue') {
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' "abc is outside the number grammar, so the core must refuse it as BadValue; it answered outcome=$(Get-SbField $bad 'outcome') channel=$(Get-SbField $bad 'channel')" $bad))
+    } elseif ($liveWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Bad 'NOT RUN' $liveWhy $bad))
+    } elseif ($v[1] -ceq $v[0] -and $d[1] -ceq $d[0] -and $c[1] -ceq $c[0]) {
+        $Out.Add((New-SbVerdict $n.Bad 'PASS' "refused BadValue, and value=$($v[0])/$($v[1]) disabled=$($d[0])/$($d[1]) checked=$($c[0])/$($c[1]) are unchanged across it" $bad))
+    } else {
+        $Out.Add((New-SbVerdict $n.Bad 'FAIL' "refused BadValue, and yet value=$($v[0])/$($v[1]) disabled=$($d[0])/$($d[1]) checked=$($c[0])/$($c[1]) moved across it" $bad))
+    }
+
+    # ---- V3: the commit reads back as the text ------------------------------
+    $cm = Select-SbSynthClick $Rows 'synth:commit'
+    $cmWhy = ''
+    if ($null -ne $cm) { $cmWhy = Get-SbCleanChangeWhy $cm $commitWidget }
+    if ($v[0] -ceq $text) {
+        $Out.Add((New-SbVerdict $n.Commit 'NOT RUN' "value=$($v[0]) at open already equals the knob's text '$text', so the commit could not be seen" $cm))
+    } elseif (-not (Test-SbCanonicalNumber $text)) {
+        $Out.Add((New-SbVerdict $n.Commit 'NOT RUN' "the knob's text '$text' is not a canonical number (the grammar -?[0-9]+(.[0-9]+)? with no leading zero, no trailing zero after the point, and not -0), so the core cannot read it back byte for byte" $cm))
+    } elseif ($null -eq $cm) {
+        $Out.Add((New-SbVerdict $n.Commit 'FAIL' 'the replay finished and no row carries via=synth:commit' $done))
+    } elseif ($cmWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Commit 'FAIL' "the commit was not a clean change: $cmWhy" $cm))
+    } elseif ($v[2] -ceq $text) {
+        $Out.Add((New-SbVerdict $n.Commit 'PASS' "value=$($v[0]) -> $($v[2]), the knob's text byte for byte; a clean change with delta-mismatch=0" $cm))
+    } else {
+        $Out.Add((New-SbVerdict $n.Commit 'FAIL' "value=$($v[0]) -> $($v[2]), and the knob's text is '$text'" $cm))
+    }
+
+    # ---- V4: the press flips checked and disabled, and holds the value -----
+    $pr = Select-SbSynthClick $Rows 'synth:press'
+    $prWhy = ''
+    if ($null -ne $pr) { $prWhy = Get-SbCleanChangeWhy $pr $Press }
+    if ($null -eq $pr) {
+        $Out.Add((New-SbVerdict $n.Press 'FAIL' 'the replay finished and no row carries via=synth:press' $done))
+    } elseif ($prWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Press 'FAIL' "the press was not a clean change: $prWhy" $pr))
+    } elseif ($c[3] -ceq $c[2]) {
+        $Out.Add((New-SbVerdict $n.Press 'FAIL' "checked=$($c[2]) -> $($c[3]): the press did not flip the toggle" $pr))
+    } elseif ($d[3] -ceq $d[2]) {
+        $Out.Add((New-SbVerdict $n.Press 'FAIL' "checked=$($c[2]) -> $($c[3]) and disabled=$($d[2]) -> $($d[3]): the press flipped the toggle and not the disabled it governs" $pr))
+    } elseif ($liveWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Press 'NOT RUN' "checked and disabled flipped; the value half is an equality, and $liveWhy" $pr))
+    } elseif ($v[3] -cne $v[2]) {
+        $Out.Add((New-SbVerdict $n.Press 'FAIL' "checked=$($c[2]) -> $($c[3]) disabled=$($d[2]) -> $($d[3]), and value=$($v[2]) -> $($v[3]): the press moved the value" $pr))
+    } else {
+        $Out.Add((New-SbVerdict $n.Press 'PASS' "checked=$($c[2]) -> $($c[3]) and disabled=$($d[2]) -> $($d[3]) flipped, and value held at $($v[3])" $pr))
+    }
+
+    # ---- V5: the second press restores both, and still holds the value -----
+    $pa = Select-SbSynthClick $Rows 'synth:press-again'
+    $paWhy = ''
+    if ($null -ne $pa) { $paWhy = Get-SbCleanChangeWhy $pa $Press }
+    $three = "checked=$($c[2])/$($c[3])/$($c[4]) disabled=$($d[2])/$($d[3])/$($d[4]) value=$($v[2])/$($v[3])/$($v[4])"
+    if ($null -eq $pa) {
+        $Out.Add((New-SbVerdict $n.Restore 'FAIL' 'the replay finished and no row carries via=synth:press-again' $done))
+    } elseif ($paWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Restore 'FAIL' "the second press was not a clean change: $paWhy" $pa))
+    } elseif ($liveWhy -ne '') {
+        $Out.Add((New-SbVerdict $n.Restore 'NOT RUN' $liveWhy $pa))
+    } elseif ($c[4] -ceq $c[2] -and $d[4] -ceq $d[2] -and $v[4] -ceq $v[2]) {
+        $Out.Add((New-SbVerdict $n.Restore 'PASS' "$three (after the commit / the press / the press again): checked and disabled are back and the value held" $pa))
+    } else {
+        $Out.Add((New-SbVerdict $n.Restore 'FAIL' "$three (after the commit / the press / the press again): the second press must restore checked and disabled and hold the value" $pa))
+    }
+
+    # ---- V6 ------------------------------------------------------------------
+    $Out.Add((New-SbVerdict $n.Done 'PASS' "one done row for commit=$doneCommit press=$donePress panel=$donePanel; $values, every reading a value" $done))
+}

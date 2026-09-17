@@ -84,6 +84,10 @@ static class Program
         catch (System.Text.Json.JsonException) { return $"(not a JSON string: {token})"; }
     }
 
+    // W2b-3: a split knob as one comparable string; a refusal is `(null)`.
+    static string ShowSplit((string Widget, string Text)? split) =>
+        split is { } s ? $"{s.Widget}|{s.Text}" : "(null)";
+
     // Fold a whole run's rows, which is what `Report` does one call at a time.
     static TitleVerdict Run(params string[] rows)
     {
@@ -344,6 +348,78 @@ static class Program
         Check("W2b-2: CONTROL: an empty array is an empty list, not a refusal",
             none is not null && none.Rows.Count == 0 && none.Skipped == 0,
             none is null ? "(null)" : $"rows={none.Rows.Count} skipped={none.Skipped}");
+
+        // ===================================================================
+        // W2b-3 — THE VALUE REPLAY'S READINGS AND ITS KNOB
+        // ===================================================================
+        //
+        // ⛔ THE SHELL JUDGES NOTHING, SO WHAT IT WRITES MUST BE EXACTLY WHAT THE
+        // PLAN SAID. `LeafValue` is the one reading the replay's row carries per
+        // step, and the harness compares those readings with no tolerance: a
+        // reader that returned a stale value, or an id-less text leaf's value, or
+        // an empty string for a missing key, would hand the harness a wrong
+        // number wearing the shape of a right one. The plan below has the real
+        // Magic Wand leaves' shape (`jas_panel_plan`, 228) plus the leaves each
+        // refusal needs.
+        const string MwPlan =
+            "{\"leaves\":["
+            + "{\"path\":[0,0,0],\"type\":\"toggle\",\"id\":\"mwp_fill_color\",\"values\":{\"bind.checked\":\"true\"}},"
+            + "{\"path\":[0,1,0],\"type\":\"text\",\"id\":\"\",\"values\":{\"bind.value\":\"9\"}},"
+            + "{\"path\":[0,1,1],\"type\":\"number_input\",\"id\":\"mwp_fill_tolerance\","
+            + "\"values\":{\"bind.disabled\":\"false\",\"bind.value\":\"32\"}},"
+            + "{\"path\":[1,0,0],\"type\":\"text_input\",\"id\":\"blank_box\",\"values\":{\"bind.value\":\"\"}},"
+            + "{\"path\":[2,0,0],\"type\":\"number_input\",\"id\":\"odd_box\",\"values\":{\"bind.value\":7}},"
+            + "{\"path\":[3,0,0],\"type\":\"number_input\",\"id\":\"twice\",\"values\":{\"bind.value\":\"1\"}},"
+            + "{\"path\":[3,0,1],\"type\":\"number_input\",\"id\":\"twice\",\"values\":{\"bind.value\":\"2\"}}"
+            + "],\"chrome\":[],\"containers\":[],\"withheld\":[],\"unjoined\":[],\"icons\":{},\"height\":164}";
+
+        Eq("W2b-3: a number leaf's value reads as the plan's own string",
+            "32", PanelWire.LeafValue(MwPlan, "mwp_fill_tolerance", "bind.value"));
+        Eq("W2b-3: a second key of the same leaf reads its own value",
+            "false", PanelWire.LeafValue(MwPlan, "mwp_fill_tolerance", "bind.disabled"));
+        Eq("W2b-3: a toggle's checked reads as the plan's canonical text",
+            "true", PanelWire.LeafValue(MwPlan, "mwp_fill_color", "bind.checked"));
+        Eq("W2b-3: a widget the plan does not hold is ABSENT",
+            "ABSENT", PanelWire.LeafValue(MwPlan, "mwp_no_such_widget", "bind.value"));
+        Eq("W2b-3: a key the leaf does not carry is ABSENT",
+            "ABSENT", PanelWire.LeafValue(MwPlan, "mwp_fill_color", "bind.value"));
+        Eq("W2b-3: an empty widget id is ABSENT, never an id-less text leaf's value",
+            "ABSENT", PanelWire.LeafValue(MwPlan, "", "bind.value"));
+        Eq("W2b-3: an empty string value is a value, not ABSENT",
+            "", PanelWire.LeafValue(MwPlan, "blank_box", "bind.value"));
+        Eq("W2b-3: a value that is not a string is UNREADABLE",
+            "UNREADABLE", PanelWire.LeafValue(MwPlan, "odd_box", "bind.value"));
+        Eq("W2b-3: a widget id the plan holds twice reads the first leaf",
+            "1", PanelWire.LeafValue(MwPlan, "twice", "bind.value"));
+        Eq("W2b-3: bytes that do not parse are UNREADABLE",
+            "UNREADABLE", PanelWire.LeafValue("not json", "mwp_fill_tolerance", "bind.value"));
+        Eq("W2b-3: the empty span a refused plan leaves is UNREADABLE",
+            "UNREADABLE", PanelWire.LeafValue("", "mwp_fill_tolerance", "bind.value"));
+        Eq("W2b-3: JSON with no leaves list is UNREADABLE, not ABSENT",
+            "UNREADABLE", PanelWire.LeafValue("{\"height\":164}", "mwp_fill_tolerance", "bind.value"));
+        Eq("W2b-3: a JSON array is UNREADABLE",
+            "UNREADABLE", PanelWire.LeafValue("[]", "mwp_fill_tolerance", "bind.value"));
+        Check("W2b-3: CONTROL: the two sentinels are distinct and neither is empty",
+            PanelWire.Absent != PanelWire.Unreadable
+            && PanelWire.Absent.Length > 0 && PanelWire.Unreadable.Length > 0,
+            $"'{PanelWire.Absent}' '{PanelWire.Unreadable}'");
+
+        Eq("W2b-3: the commit knob splits at the first colon",
+            "mwp_fill_tolerance|40", ShowSplit(PanelWire.SplitCommitKnob("mwp_fill_tolerance:40")));
+        Eq("W2b-3: a colon after the first stays in the text",
+            "w|a:b", ShowSplit(PanelWire.SplitCommitKnob("w:a:b")));
+        Eq("W2b-3: the text is kept verbatim, spaces and all",
+            "w| 4 0 ", ShowSplit(PanelWire.SplitCommitKnob("w: 4 0 ")));
+        Eq("W2b-3: an empty text is a text, and the core decides",
+            "w|", ShowSplit(PanelWire.SplitCommitKnob("w:")));
+        Eq("W2b-3: a knob with no colon is refused",
+            "(null)", ShowSplit(PanelWire.SplitCommitKnob("mwp_fill_tolerance")));
+        Eq("W2b-3: an empty widget is refused",
+            "(null)", ShowSplit(PanelWire.SplitCommitKnob(":40")));
+        Eq("W2b-3: a whitespace widget is refused, the knob's own unset predicate",
+            "(null)", ShowSplit(PanelWire.SplitCommitKnob("  :40")));
+        Eq("W2b-3: an empty knob is refused",
+            "(null)", ShowSplit(PanelWire.SplitCommitKnob("")));
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

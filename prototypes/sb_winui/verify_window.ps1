@@ -744,11 +744,15 @@ if ($sceneTimedOut) {
 # ⛔ AND NO `-Tick`: the sampler keys its samples on the elapsed time OF THE
 # WAIT IT RIDES, so a second wait would file a late reading under t=2.
 if ($sceneOutcome.Verdict -eq 'DONE') {
-    foreach ($pw in @(Get-SbPaneWaits $Scene $env:SB_PANEL_SYNTH)) {
+    # W2b-3's value replay runs after Q6's and finishes last, so its wait goes
+    # first, as Q6's replay wait goes before the pane's.
+    $valueWaits = @(Get-SbValueWaits $Scene $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS)
+    $paneWaits = $valueWaits + @(Get-SbPaneWaits $Scene $env:SB_PANEL_SYNTH)
+    foreach ($pw in $paneWaits) {
         $pd = Wait-SbRow -Log $log -Mark $logMark -Patterns $pw.Patterns -TimeoutSeconds $pw.Timeout
         $rows = $pd.Rows
         if ($null -eq $pd.Row) {
-            $verdicts += "note: timed out after $($pd.Waited)s waiting for $($pw.Label); Q6 judges what arrived"
+            $verdicts += "note: timed out after $($pd.Waited)s waiting for $($pw.Label); Q6 and V1-V6 judge what arrived"
         } else {
             $verdicts += "ok  : $($pw.Label) arrived after $($pd.Waited)s"
         }

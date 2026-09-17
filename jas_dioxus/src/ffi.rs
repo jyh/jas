@@ -2023,6 +2023,158 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The single value `sitting.ps1` assigns to `knob` (`KNOB = '<value>'`),
+    /// or a panic naming how many it found. `SB_PANEL = '` cannot match inside
+    /// `SB_PANEL_COMMIT = '`: the character after the name differs.
+    fn sitting_knob(sitting: &str, knob: &str) -> String {
+        let needle = format!("{knob} = '");
+        let found: Vec<&str> = sitting.match_indices(needle.as_str())
+            .map(|(k, m)| {
+                let rest = &sitting[k + m.len()..];
+                &rest[..rest.find('\'').unwrap()]
+            })
+            .collect();
+        assert_eq!(found.len(), 1, "sitting.ps1 must set {knob} exactly once: {found:?}");
+        found[0].to_string()
+    }
+
+    /// How many of `reply`'s rows for `panel` disagree with `plan`, keyed by
+    /// (path, key) exactly as the shell's `DeltaMismatches` keys them. A row
+    /// the plan withheld must be named in `withheld`.
+    fn delta_mismatches(reply: &serde_json::Value, plan: &serde_json::Value, panel: &str) -> usize {
+        let mut values = std::collections::HashMap::new();
+        for list in ["chrome", "leaves", "containers"] {
+            for e in plan[list].as_array().unwrap() {
+                for (k, v) in e["values"].as_object().unwrap() {
+                    values.insert((e["path"].to_string(), k.clone()), v.clone());
+                }
+            }
+        }
+        let withheld: std::collections::HashSet<(String, String)> = plan["withheld"]
+            .as_array().unwrap().iter()
+            .map(|w| (w["path"].to_string(), w["key"].as_str().unwrap().to_string()))
+            .collect();
+        reply["changed"].as_array().unwrap().iter()
+            .filter(|r| r["panel"] == panel)
+            .filter(|r| {
+                let k = (r["path"].to_string(), r["key"].as_str().unwrap().to_string());
+                match values.get(&k) {
+                    Some(v) => *v != r["value"],
+                    None => !withheld.contains(&k),
+                }
+            })
+            .count()
+    }
+
+    /// **W2b-3's replay, on the sitting's own panel, widgets and text.**
+    /// `Canvas.ApplyPanelValueSynth` drives exactly this sequence through the
+    /// same two exports, re-reading the plan after every step, and the harness
+    /// (`Get-SbValueVerdicts`, V1-V6) asserts what the box reads. This arm is
+    /// what makes that reading predictable before any box runs it:
+    ///
+    ///   read     v0 d0 c0     the tolerance's value and disabled, the toggle's checked
+    ///   commit   `abc`        REFUSED BadValue; nothing moves
+    ///   commit   the text     a clean change; the value reads the text
+    ///   press    the toggle   a clean change; checked AND disabled flip; the value holds
+    ///   press    again        a clean change; both come back; the value still holds
+    ///
+    /// ⛔ THE PANEL, THE WIDGETS AND THE TEXT ARE READ OUT OF `sitting.ps1`, NOT
+    /// TYPED HERE, with the shell's split rule (the FIRST `:`). A rename in
+    /// `magic_wand.yaml` or an edit to the route reds THIS arm in CI instead of
+    /// a refusal on the box.
+    #[test]
+    fn panel_behavior_the_value_replay_on_the_sittings_panel() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let sitting = std::fs::read_to_string(format!("{root}/prototypes/sb_winui/sitting.ps1")).unwrap();
+        let panel = sitting_knob(&sitting, "SB_PANEL");
+        let commit_knob = sitting_knob(&sitting, "SB_PANEL_COMMIT");
+        let press = sitting_knob(&sitting, "SB_PANEL_PRESS");
+        let (commit, text) = commit_knob.split_once(':')
+            .unwrap_or_else(|| panic!("SB_PANEL_COMMIT='{commit_knob}' has no ':'"));
+        assert!(!commit.is_empty(), "SB_PANEL_COMMIT='{commit_knob}' names no widget");
+
+        // The box's own start: the sitting's document, then the plan.
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/complex_document.svg")).unwrap();
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        let plan = || -> serde_json::Value {
+            let raw = plan_of(e, &panel, 228, 0);
+            serde_json::from_str(&raw).unwrap_or_else(|_| panic!("{panel}: no plan: {raw:?}"))
+        };
+        let read = |p: &serde_json::Value, id: &str, key: &str| -> String {
+            let leaf = p["leaves"].as_array().unwrap().iter()
+                .find(|l| l["id"] == id)
+                .unwrap_or_else(|| panic!("no leaf {id} in the {panel} plan"));
+            leaf["values"][key].as_str()
+                .unwrap_or_else(|| panic!("{id} carries no string {key}: {leaf}"))
+                .to_string()
+        };
+        let readings = |p: &serde_json::Value| -> (String, String, String) {
+            (read(p, commit, "bind.value"), read(p, commit, "bind.disabled"),
+             read(p, press.as_str(), "bind.checked"))
+        };
+        let send = |ev: serde_json::Value| behave(e, &panel, &ev.to_string());
+        let class = |err: &str| -> String {
+            serde_json::from_str::<serde_json::Value>(err).ok()
+                .and_then(|v| v["panel_event"].as_str().map(str::to_string))
+                .unwrap_or_default()
+        };
+        let before = doc_json(e);
+
+        // v0 d0 c0.
+        let (v0, d0, c0) = readings(&plan());
+        assert_eq!(d0, "false", "{commit} must start enabled: v0={v0} d0={d0} c0={c0}");
+        assert_ne!(v0, text, "the commit could not be seen: v0={v0} text={text}");
+
+        // `abc`: refused BadValue, nothing moved.
+        let (reply, err) = send(serde_json::json!({"widget": commit, "event": "commit", "value": "abc"}));
+        let pb = plan();
+        let (vb, db, cb) = readings(&pb);
+        assert_eq!((reply.as_str(), class(&err).as_str()), ("", "BadValue"),
+                   "abc must be refused BadValue: reply={reply:?} err={err}");
+        assert_eq!((&vb, &db, &cb), (&v0, &d0, &c0),
+                   "a refused commit moved a reading: v={v0}->{vb} d={d0}->{db} c={c0}->{cb}");
+
+        // The text: a clean change, and the value reads the text.
+        let (reply, err) = send(serde_json::json!({"widget": commit, "event": "commit", "value": text}));
+        let p1 = plan();
+        let (v1, d1, c1) = readings(&p1);
+        let r1 = reply_json(&reply, &err);
+        assert_eq!(err, "", "the commit must clear the channel: reply={reply} v1={v1}");
+        assert_eq!(delta_mismatches(&r1, &p1, &panel), 0, "the commit's rows disagree with the plan: {reply}");
+        assert_eq!(v1, text, "the value must read the committed text: v0={v0} v1={v1}");
+        assert_eq!((&d1, &c1), (&d0, &c0), "the commit moved another reading: d1={d1} c1={c1}");
+
+        // The press: checked and disabled flip, the value holds.
+        let (reply, err) = send(serde_json::json!({"widget": press, "event": "click"}));
+        let p2 = plan();
+        let (v2, d2, c2) = readings(&p2);
+        let r2 = reply_json(&reply, &err);
+        assert_eq!(err, "", "the press must clear the channel: reply={reply} c2={c2} d2={d2}");
+        assert_eq!(delta_mismatches(&r2, &p2, &panel), 0, "the press's rows disagree with the plan: {reply}");
+        assert_ne!(c2, c1, "the press did not flip checked: c1={c1} c2={c2}");
+        assert_ne!(d2, d1, "the press did not flip disabled: d1={d1} d2={d2}");
+        assert_eq!(v2, v1, "the press moved the value: v1={v1} v2={v2}");
+
+        // Again: both come back, the value still holds.
+        let (reply, err) = send(serde_json::json!({"widget": press, "event": "click"}));
+        let p3 = plan();
+        let (v3, d3, c3) = readings(&p3);
+        let r3 = reply_json(&reply, &err);
+        assert_eq!(err, "", "the second press must clear the channel: reply={reply} c3={c3} d3={d3}");
+        assert_eq!(delta_mismatches(&r3, &p3, &panel), 0, "the second press's rows disagree with the plan: {reply}");
+        assert_eq!((&c3, &d3), (&c0, &d0), "the second press did not restore: c={c0}->{c2}->{c3} d={d0}->{d2}->{d3}");
+        assert_eq!(v3, text, "the value did not hold: v={v0}/{vb}/{v1}/{v2}/{v3}");
+
+        // A panel's values are not the document.
+        assert_eq!(doc_json(e), before, "the replay moved the document");
+        eprintln!("W2b-3 value replay on {panel}: commit={commit} text={text} press={press} \
+                   value={v0}/{vb}/{v1}/{v2}/{v3} disabled={d0}/{db}/{d1}/{d2}/{d3} \
+                   checked={c0}/{cb}/{c1}/{c2}/{c3}");
+        unsafe { jas_engine_free(e) };
+    }
+
     // -----------------------------------------------------------------------
     // W2b-4 -- the Stroke panel's writes reach the selection (A10's stroke
     // family through A11). W2b-0 (d) measured 13 stroke clicks reading

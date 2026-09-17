@@ -282,6 +282,19 @@ internal sealed class PanelSynthCmd : Cmd
 }
 
 /// <summary>
+/// Replay W2b-3's value sequence on the open panel (`SB_PANEL_COMMIT`,
+/// `SB_PANEL_PRESS`): two commits into <see cref="Commit"/>, two presses of
+/// <see cref="Press"/>.
+/// </summary>
+internal sealed class PanelValueSynthCmd : Cmd
+{
+    internal string PanelId = "";
+    internal string Commit = "";
+    internal string Text = "";
+    internal string Press = "";
+}
+
+/// <summary>
 /// One published reading of an open panel: the plan bytes as the core wrote
 /// them, and the sequence number that dates them.
 ///
@@ -1109,6 +1122,12 @@ internal sealed unsafe class Canvas : IDisposable
                     // It paints and hashes at each of its own steps, so it
                     // asks this drain for nothing.
                     ApplyPanelSynth(ps);
+                    break;
+
+                case PanelValueSynthCmd pv:
+                    // It hashes nothing, so a step that moved the document
+                    // asks this drain for a frame, as a person's click does.
+                    if (ApplyPanelValueSynth(pv)) { dirty = true; cause = "panel"; }
                     break;
             }
         }
@@ -3941,6 +3960,10 @@ internal sealed unsafe class Canvas : IDisposable
     internal void PanelSynth(string panelId, string widget) =>
         _queue.Add(new PanelSynthCmd { PanelId = panelId, Widget = widget });
 
+    /// <summary>Queue W2b-3's value replay. See <see cref="ApplyPanelValueSynth"/>.</summary>
+    internal void PanelValueSynth(string panelId, string commit, string text, string press) =>
+        _queue.Add(new PanelValueSynthCmd { PanelId = panelId, Commit = commit, Text = text, Press = press });
+
     /// <summary>
     /// Read the plan and publish it. Returns the plan bytes, or null on a refusal
     /// (which is reported here, by name).
@@ -4190,25 +4213,7 @@ internal sealed unsafe class Canvas : IDisposable
     private void ApplyPanelSynth(PanelSynthCmd cmd)
     {
         var head = $"panel={cmd.PanelId} widget={cmd.Widget}";
-        string? refusal = null;
-        if (_engine == IntPtr.Zero) { refusal = "no engine"; }
-        else if (!string.Equals(_panelId, cmd.PanelId, StringComparison.Ordinal))
-        {
-            refusal = $"the open panel is '{_panelId ?? "(none)"}'";
-        }
-        else if (Panel is not { } snap) { refusal = "no plan has been published"; }
-        else
-        {
-            var ids = PlanWidgetIds(snap.PlanJson);
-            if (ids is null) { refusal = "the published plan does not parse"; }
-            else if (!ids.Contains(cmd.Widget))
-            {
-                // NAMED, with the ids that DO exist: a typo in the knob must
-                // not read as a click the core refused.
-                refusal = $"no leaf of the open plan has that id; it has {ids.Count}: "
-                        + string.Join(",", ids.OrderBy(i => i, StringComparer.Ordinal));
-            }
-        }
+        var refusal = SynthRefusal(cmd.PanelId, cmd.Widget);
         if (refusal is not null)
         {
             _report($"RUSTFAIL PANEL SYNTH REFUSED {head} -- {refusal} {Tids()}");
@@ -4252,6 +4257,129 @@ internal sealed unsafe class Canvas : IDisposable
             // waiting on a row that is never coming.
             _report($"RUSTFAIL PANEL SYNTH THREW {head} {ex.GetType().Name}: {ex.Message} {Tids()}");
         }
+    }
+
+    /// <summary>
+    /// Why a replay cannot run on <paramref name="panelId"/> with these widget
+    /// ids, or null when it can. Shared by Q6's replay and W2b-3's, so both
+    /// refuse the same things in the same words.
+    ///
+    /// ⛔ AN ID THE OPEN PLAN DOES NOT HOLD IS NAMED, WITH THE IDS IT DOES
+    /// HOLD: a typo in a knob must not read as a click the core refused. With
+    /// more than one widget, the refusal says which one.
+    /// </summary>
+    private string? SynthRefusal(string panelId, params string[] widgets)
+    {
+        if (_engine == IntPtr.Zero) { return "no engine"; }
+        if (!string.Equals(_panelId, panelId, StringComparison.Ordinal))
+        {
+            return $"the open panel is '{_panelId ?? "(none)"}'";
+        }
+        if (Panel is not { } snap) { return "no plan has been published"; }
+        var ids = PlanWidgetIds(snap.PlanJson);
+        if (ids is null) { return "the published plan does not parse"; }
+        foreach (var widget in widgets)
+        {
+            if (ids.Contains(widget)) { continue; }
+            var which = widgets.Length > 1 ? $"'{widget}': " : "";
+            return $"{which}no leaf of the open plan has that id; it has {ids.Count}: "
+                 + string.Join(",", ids.OrderBy(i => i, StringComparer.Ordinal));
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// ⭐ W2b-3's VALUE REPLAY: two commits and two presses on the open panel,
+    /// replayed here on the render thread through <see cref="ApplyPanelClick"/>
+    /// -- the method a person's commit and press reach -- with the plan read
+    /// after every step.
+    ///
+    ///   read     v0 d0 c0
+    ///   commit   `abc` into Commit     `via=synth:bad`
+    ///   read     vb db cb
+    ///   commit   Text into Commit      `via=synth:commit`
+    ///   read     v1 d1 c1
+    ///   press    Press                 `via=synth:press`
+    ///   read     v2 d2 c2
+    ///   press    Press again           `via=synth:press-again`
+    ///   read     v3 d3 c3
+    ///
+    /// then ONE `PANEL VALUE SYNTH DONE` row. `value=` is Commit's
+    /// `bind.value`, `disabled=` its `bind.disabled` and `checked=` Press's
+    /// `bind.checked`, each as `r0/rb/r1/r2/r3`, read by
+    /// <see cref="PanelWire.LeafValue"/>: a leaf or key the plan does not
+    /// carry is `ABSENT`, a plan that did not parse is `UNREADABLE`.
+    ///
+    /// ⛔ EACH READING IS THE PLAN PUBLISHED AFTER ITS STEP. A step that ran
+    /// published one (the click re-reads the plan to check its rows); a step
+    /// that was refused, dropped or silent published nothing, so the plan is
+    /// read again here. The reading before it is never copied forward: that
+    /// would make "a refusal moved nothing" true by construction.
+    ///
+    /// ⛔ IT DECIDES NOTHING. Whether `abc` is refused, whether the value
+    /// reads the text, whether the press flips anything: all of it is the
+    /// harness's (`Get-SbValueVerdicts`, V1-V6). `abc` is a literal because
+    /// the sequence is fixed, and the harness reads only its refusal's class.
+    ///
+    /// Returns true when a step moved the document, so the drain paints.
+    /// </summary>
+    private bool ApplyPanelValueSynth(PanelValueSynthCmd cmd)
+    {
+        var head = $"panel={cmd.PanelId} commit={cmd.Commit} text={PanelWire.RowValue(cmd.Text)} "
+                 + $"press={cmd.Press}";
+        var refusal = SynthRefusal(cmd.PanelId, cmd.Commit, cmd.Press);
+        if (refusal is not null)
+        {
+            _report($"RUSTFAIL PANEL VALUE SYNTH REFUSED {head} -- {refusal} {Tids()}");
+            return false;
+        }
+
+        var moved = false;
+        try
+        {
+            var value = new List<string>();
+            var disabled = new List<string>();
+            var pressed = new List<string>();
+            void Read(string plan)
+            {
+                value.Add(PanelWire.LeafValue(plan, cmd.Commit, "bind.value"));
+                disabled.Add(PanelWire.LeafValue(plan, cmd.Commit, "bind.disabled"));
+                pressed.Add(PanelWire.LeafValue(plan, cmd.Press, "bind.checked"));
+            }
+            void Step(string widget, string eventName, string? text, string via)
+            {
+                var seq = _panelSeq;
+                var click = new PanelClickCmd
+                {
+                    PanelId = cmd.PanelId,
+                    Widget = widget,
+                    Event = eventName,
+                    Value = text,
+                    Via = via,
+                };
+                if (ApplyPanelClick(click)) { moved = true; }
+                var plan = _panelSeq != seq && Panel is { } published
+                    ? published.PlanJson
+                    : ApplyPanelRefresh("synth") ?? "";
+                Read(plan);
+            }
+
+            Read(Panel?.PlanJson ?? "");
+            Step(cmd.Commit, "commit", "abc", "synth:bad");
+            Step(cmd.Commit, "commit", cmd.Text, "synth:commit");
+            Step(cmd.Press, "click", null, "synth:press");
+            Step(cmd.Press, "click", null, "synth:press-again");
+
+            _report($"PANEL VALUE SYNTH DONE {head} value={string.Join("/", value)} "
+                  + $"disabled={string.Join("/", disabled)} checked={string.Join("/", pressed)} {Tids()}");
+        }
+        catch (Exception ex)
+        {
+            // NAMED: a sequence that died half way must not leave the harness
+            // waiting on a row that is never coming.
+            _report($"RUSTFAIL PANEL VALUE SYNTH THREW {head} {ex.GetType().Name}: {ex.Message} {Tids()}");
+        }
+        return moved;
     }
 
     /// <summary>Every non-empty leaf `id` in a plan, or null if it does not parse.</summary>

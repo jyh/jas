@@ -154,10 +154,11 @@ scene leaves it collapsed and keeps the surface it always had.
 | `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs`, `toggles`); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled) |
 | `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
 | `PANEL DRAWN` | UI thread, per published plan | `seq`, `cause` (`open`, `click`, `commit`, ...), `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, `editing` (a focused number box holding an uncommitted edit, whose text was left alone), pane and canvas sizes |
-| `PANEL CLICK` | render thread, per press or commit | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH`), `event` (`click` or `commit`), `value` (a commit's text as one JSON-string token with each space written `\u0020`, or `-` for a press), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
+| `PANEL CLICK` | render thread, per press or commit | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH` or the value replay), `event` (`click` or `commit`), `value` (a commit's text as one JSON-string token with each space written `\u0020`, or `-` for a press), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
 | `PANEL CLICK REFUSED` | render thread | `via`, `event`, `value`, and the core's refusal class and detail (`Disabled`, `BadValue`, `MissingValue`, ...); nothing ran |
 | `PANEL CLICK DROPPED` | render thread | a press or commit on the pane a person was looking at, which reached the render thread after the selector opened another panel. It is not sent: the panel it names is no longer shown |
 | `PANEL SYNTH DONE` | render thread, once, under `SB_PANEL_SYNTH` | `selected` (after the replay's `select_all`) and `doc-sha=h0/h0b/hs/h1/h1b/h2`, the core's document digest at each of the six `SYNTH-*` hash rows |
+| `PANEL VALUE SYNTH DONE` | render thread, once, under `SB_PANEL_COMMIT` + `SB_PANEL_PRESS` | `panel`, `commit`, `text` (the knob's text as one JSON-string token, as `PANEL CLICK`'s `value`), `press`, and three readings at each of five points, as `r0/rb/r1/r2/r3`: `value` (the commit widget's `bind.value`), `disabled` (its `bind.disabled`), `checked` (the press widget's `bind.checked`). A reading is the plan's own string, `ABSENT`, or `UNREADABLE` |
 
 `RUSTFAIL` is written for a plan refusal, a draw that threw, a click answered
 by an empty reply AND an empty channel (`SILENT`), and a click whose reply rows
@@ -218,6 +219,61 @@ the knob on any scene but `app` is refused the same way, never ignored.
 `sitting.ps1 -Scenes q6` is the route. **What it does not drive:** the Ctrl+Z
 key and a real mouse — those are the hands row's.
 
+### The magic_wand value replay (W2b-3)
+
+`SB_PANEL=<content id>` chooses the pane's first panel, and
+`SB_PANEL_COMMIT=<widget>:<text>` with `SB_PANEL_PRESS=<widget>` replays one
+VALUE sequence on it, on the render thread, once the pane is open. Each step
+goes through the method a person's commit or press reaches, and the plan is
+read after each step (re-read when the step was refused, since a refused step
+publishes nothing):
+
+| step | sends | `via=` |
+|---|---|---|
+| read `v0 d0 c0` | — | — |
+| commit `abc` | `{"widget":<commit>,"event":"commit","value":"abc"}` | `synth:bad` |
+| commit the text | `{"widget":<commit>,"event":"commit","value":<text>}` | `synth:commit` |
+| press | `{"widget":<press>,"event":"click"}` | `synth:press` |
+| press again | the same | `synth:press-again` |
+
+Then ONE `PANEL VALUE SYNTH DONE` row carries `value=` (the commit widget's
+`bind.value`), `disabled=` (its `bind.disabled`) and `checked=` (the press
+widget's `bind.checked`), each as five readings `r0/rb/r1/r2/r3`
+(`PanelWire.LeafValue`). The shell judges none of it: the harness reads the
+rows (`Get-SbValueVerdicts`):
+
+| clause | passes when |
+|---|---|
+| V1 open | the `PANEL OPEN via=app` row names `SB_PANEL` (any panel when it is unset), with `leaves > 0` and `unjoined=0` |
+| V2 bad | the `synth:bad` row, on the commit widget, is `PANEL CLICK REFUSED` with class `BadValue`, and `vb == v0`, `db == d0`, `cb == c0` |
+| V3 commit | the `synth:commit` row, on the commit widget, is `outcome=changed` with `delta-mismatch=0` and no `RUSTFAIL`, and `v1` is the knob's text byte for byte. NOT RUN when `v0` already equals the text, or when the text is not a canonical number (outside the grammar, a leading zero, a trailing zero after the point, `-0`) |
+| V4 press | the `synth:press` row, on the press widget, is a clean change; `c2 != c1`, `d2 != d1`, `v2 == v1` |
+| V5 restore | the `synth:press-again` row is a clean change; `c3 == c1`, `d3 == d1`, `v3 == v1` |
+| V6 done | exactly one done row, naming the knobs' widgets and `SB_PANEL` (or, unset, the panel the app opened), with five readings per field and none `ABSENT` or `UNREADABLE` |
+
+The knobs set on any scene but `app` are FAIL, never a quiet NOT RUN; unset,
+every clause is NOT RUN by name. A pair the shell must refuse (one knob alone,
+no `:`) is a V2 FAIL even beside a done row. **An equality needs its
+instrument to have read two different values in the run**: a reading that
+never varied leaves V2 and V5, and V4's value half, NOT RUN, since a constant
+satisfies every equality. `Get-SbValueWaits` is the wait, and it ends only on
+the done row or on the replay's own refusal or throw. `sitting.ps1 -Scenes mw` is the route
+(`magic_wand_panel_content`, `mwp_fill_tolerance:40`, `mwp_fill_color`), and
+the Rust arm `panel_behavior_the_value_replay_on_the_sittings_panel` reads
+those three values out of `sitting.ps1` and drives the same sequence through
+the same exports: `value=32/32/40/40/40 disabled=false/false/false/true/false
+checked=true/true/true/false/true`. The replay's accepted steps republish the
+menu, so P4.4 reads NOT RUN on such a run, as it does under Q6.
+
+**What it does not drive, stated as negatives:** a real keyboard (Enter, focus
+loss) and a real mouse on the check box; `abc` is the only refused text; a
+value whose text holds whitespace or `/` cannot ride the slash field, and the
+harness refuses such a field by its part count rather than reading it; V3 does
+not know the widget's `min`/`max`, so a text the core clamps reads FAIL. The
+clauses assume what the route satisfies: V2 that the commit widget refuses
+`abc` (a text input would accept it), and V4/V5 that the pressed toggle governs
+the commit widget's `disabled`.
+
 ## Knobs
 
 Every environment variable this shell reads, and nothing else. F-1 was closed as
@@ -248,7 +304,10 @@ different question from either.
 | `SB_HIT` | which element carries the pointer handlers: `panel` (the `SwapChainPanel` itself) or `sibling` (a transparent `Border` in the same grid cell, made visible only on this arm); any other value is REFUSED by name rather than falling back, because a run asked for the sibling that quietly used the panel would report the wrong arm in the one field the branch exists to answer (`MainWindow.xaml.cs:182-201`). The receipt says `hit=PANEL` or `hit=SIBLING`. **DECIDED on kenai 2026-09-03, one box: both arms fired and reported identical coordinates, so the answer is `panel`.** The `sibling` arm is KEPT as a switch because the docs do not settle hit-testability of a `Background`-less `SwapChainPanel`, and one box is one box | `panel` | all | interaction |
 | `SB_MODE` | `direct` lets the core paint the back buffer; anything else uses an offscreen target plus one full-surface GPU copy (`Canvas.cs:484`). **It changes what `Benchmark()` measures and nothing else** (`Canvas.cs:1562`): the offscreen target is created on every attach and every resize whatever the scene (`Canvas.cs:1050`, `:1196`), but `Repaint()` always paints the back buffer directly through `jas_paint_frame`, so a `retained`, `pointer` or `stall` row is a DIRECT-route row however this is set | *(unset: offscreen)* | `benchmark` | benchmark |
 | `SB_PAINT_ON_UI` | `1` marshals the paint AND the present through the `DispatcherQueue`, so `paint-tid == present-tid == ui-tid` on every row. O3's DESIGN-RED control: it exists to make the residency assertion fail by construction, so a green one is known to have been capable of red. Read ONCE into a static (`Canvas.cs:279`) — a run cannot change its answer half way through — and it switches the thread INSIDE the one paint step rather than forking a second paint path, because two paths would drift and the control would then measure the drift | *(unset: paint and present on the render thread)* | all | interaction |
-| `SB_PANEL_SYNTH` | a widget id of the open Align plan (Q6 uses `align_left_button`). Under `app`, after the pane opens, the render thread replays Q6's click sequence on that widget with a canvas hash between steps and writes `PANEL SYNTH DONE` (`Canvas.ApplyPanelSynth`; the steps are in "Q6's synthetic arm" above). An id the plan does not hold is refused BY NAME with the ids it does hold, and the knob set on any other scene is refused rather than ignored (`MainWindow.StartFirstLayout`). Whitespace is unset. The clicks and ops move the menubar's answer, so P4.4 reads NOT RUN on such a run | *(unset: no replay)* | `app` | interaction |
+| `SB_PANEL` | the content id of the panel the pane opens with (`sitting.ps1 -Scenes mw` uses `magic_wand_panel_content`), read once in `MainWindow.StartFirstLayout`. The shell does not check the id: one the core does not hold is the core's refusal, `RUSTFAIL PANEL REFUSED` from the empty plan. Set on any scene but `app` it is refused BY NAME (`RUSTFAIL PANEL FIRST REFUSED`), never ignored. Whitespace is unset. `SB_PANEL_SYNTH` and the value replay both run on this panel, and `PANEL LIST`'s `first=` names it | *(unset: `align_panel_content`)* | `app` | interaction |
+| `SB_PANEL_COMMIT` | `<widget>:<text>`, split at the FIRST `:` (`PanelWire.SplitCommitKnob`; the text is kept verbatim). With `SB_PANEL_PRESS`, under `app`, after the pane opens, the render thread replays W2b-3's value sequence on the first panel and writes `PANEL VALUE SYNTH DONE` (`Canvas.ApplyPanelValueSynth`; the steps are in "The magic_wand value replay" above). REFUSED BY NAME, never half-run (`RUSTFAIL PANEL VALUE SYNTH REFUSED`): without `SB_PANEL_PRESS`, with no `:` or an empty widget, on any scene but `app` (`MainWindow.QueueValueSynth`), and for a widget the open plan does not hold, naming the ids it does hold (the render thread). Whitespace is unset | *(unset: no value replay)* | `app` | interaction |
+| `SB_PANEL_PRESS` | the widget id of a toggle or checkbox on the first panel; the value replay presses it twice. Refused exactly as `SB_PANEL_COMMIT` is, and without it | *(unset: no value replay)* | `app` | interaction |
+| `SB_PANEL_SYNTH` | a widget id of the pane's first panel's plan (Align unless `SB_PANEL` says otherwise; Q6 uses `align_left_button`). Under `app`, after the pane opens, the render thread replays Q6's click sequence on that widget with a canvas hash between steps and writes `PANEL SYNTH DONE` (`Canvas.ApplyPanelSynth`; the steps are in "Q6's synthetic arm" above). An id the plan does not hold is refused BY NAME with the ids it does hold, and the knob set on any other scene is refused rather than ignored (`MainWindow.StartFirstLayout`). Whitespace is unset. The clicks and ops move the menubar's answer, so P4.4 reads NOT RUN on such a run | *(unset: no replay)* | `app` | interaction |
 | `SB_POINTER_WAIT_MS` | how long a scene waits for a REAL gesture before writing `NOT RUN: hand refused`; a timeout is never a synthetic receipt wearing `REAL`. The wait is a deadline, not a sleep — the thread that would sleep is the one that drains the gesture's own events (`ArmHandWait`). **`0` DECLINES the wait, and that is a different answer from unset** (`TryHandWaitMs` reads the raw value, because `ParseMs` cannot tell the two apart): the scene goes straight to its no-gesture path instead of paying a refusal it already knew was coming. On `retained` that path is NOT the end of the scene — the mutation clause is `NOT RUN: no gesture (…)` on its own row, `A-MUT` is hashed anyway carrying `mutation=NONE` because it equals `A` by construction, and the `SB_RESIZE` round trip still writes `H1` and `A'`. A non-numeric value is refused by name | `30000` | `pointer`, `retained` | interaction |
 | `SB_RENDER_STALL_MS` | milliseconds the RENDER thread sleeps inside ONE repaint (`Canvas.cs:2251`, applied at `Canvas.cs:1421-1428`). The sleep is latched to that single repaint — the field is zeroed before it starts — so a stalled scene does not stall every later frame. A resize posted during the sleep appears as exactly one row after it, at the latest size; `Responding` stays `True`, because the thread that sleeps is not the one that pumps. Unset it and `SB_UI_STALL_MS` together and the `stall` scene REFUSES: a stall that stalls for zero measures nothing | *(unset: no render-thread stall)* | `stall` | interaction |
 | `SB_RESIZE` | a comma-separated LIST of window sizes to drive after the scene, e.g. `1000x600,original`; `original` is the `AppWindow` size recorded at first layout, and it is a sentinel because this knob sets a WINDOW size while a hash is of the SURFACE, so a window size fed back returns a smaller surface. Each step is posted when the previous one has LANDED on the render thread, never after a sleep; a malformed token refuses by name rather than falling back to no resize (`MainWindow.xaml.cs:625-656`) | *(unset: no driven resize)* | all | interaction |
@@ -685,6 +744,7 @@ powershell -File prototypes\sb_winui\sitting.ps1 -DryRun        # resolve every 
 powershell -File prototypes\sb_winui\sitting.ps1                # benchmark x2, document, retained, stall, pointer x3, goldens
 powershell -File prototypes\sb_winui\sitting.ps1 -Scenes o6    # the two O6 runs: the squeeze, then the probe
 powershell -File prototypes\sb_winui\sitting.ps1 -Scenes q6    # one app run with the Align pane's synthetic replay (Q6)
+powershell -File prototypes\sb_winui\sitting.ps1 -Scenes mw    # one app run with the Magic Wand pane's value replay (V1-V6)
 ```
 
 `-DryRun` (alias `-WhatIf`) exists on both entry points: it prints the resolved
