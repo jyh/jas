@@ -20,6 +20,9 @@ The expected values:
   * `result` is the EventResult, field for field;
   * `panel` is the panel scope afterwards, whole;
   * `state_changed` holds exactly the global keys whose value changed.
+Numbers compare as numbers, not as JSON text. A value a behavior writes has
+passed through the expression evaluator, so it can serialize as `40` where
+the bind write of the same value serialized as `40.0`.
 
 Every case's behaviors write only to the store. What a port's panel-write
 host then does to the document is outside this corpus.

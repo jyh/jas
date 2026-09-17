@@ -14,6 +14,9 @@ panel or dialog widget, or presses a boolean one:
 
 The executable meaning is `workspace_interpreter/widget_event.py`, and
 its tests are in `workspace_interpreter/tests/test_widget_event.py`.
+`scripts/gen_widget_event_corpus.py` runs it over shipped widgets to
+generate the golden corpus `test_fixtures/widget_events/corpus.json`,
+which is what the engine's value door and the active ports are held to.
 `scripts/check_widget_event_contract.py` holds every workspace YAML file
 to the event table below, and holds this document's table to the
 module's.
@@ -168,8 +171,9 @@ expression's current truth value, and an unbound widget reads as false.
 ## Known port differences — read, not driven
 
 Each line below was read at the cited `file:line` and has not been
-executed. A golden corpus driven by the reference is the next step (node
-W2b-1b). Until it lands, none of these is a measured failure.
+executed. The golden corpus (`test_fixtures/widget_events/corpus.json`)
+exists, but no port consumes it yet. Until a port's arm runs it, none of
+these is a measured failure.
 
 - **Swift, `number_input`: a commit runs only `change` behaviors**
   (`JasSwift/Sources/Interpreter/YamlPanelBodyView.swift:1585`, which
