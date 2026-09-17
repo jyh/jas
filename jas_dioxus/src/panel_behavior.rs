@@ -33,6 +33,24 @@
 //!    undo step. The host runs `snapshot` as `begin_txn`, as the web renderer
 //!    does, so the step is named by the action that opened it.
 //!
+//! # The value events (WIDGET_EVENTS.md, W2b-1b)
+//!
+//! A `commit`/`change` on an input kind and a `click`/`change` on a boolean
+//! kind take the contract's procedures (`commit_value`, `press`) after step
+//! 2. They share steps 4 and 5 (`run_batch`).
+//! * **A commit** refuses `MissingValue` (no `value`) and `BadValue` (text the
+//!   kind refuses, via `widget_commit::parse_commit`). Its batch is the bind
+//!   write (`set_panel_state` of `event.value` into the widget's own panel),
+//!   then every `commit`/`change` behavior, in declaration order.
+//! * **A press** negates the bound expression. A declared `click`/`change`
+//!   behavior replaces the bind write.
+//! * **Conditions:** a behavior's `condition` becomes an `if` inside the
+//!   batch, so it reads the store after the bind write, as the reference does.
+//! * **Inert:** a value widget with nothing to write and nothing declared is
+//!   `EmptyBehavior`.
+//! * **Oracle:** `test_fixtures/widget_events/corpus.json`, driven through the
+//!   export in `ffi.rs`.
+//!
 //! # What this does NOT do, stated as negatives
 //!
 //! * `init:` is not evaluated when a panel's store scope is seeded (the web
@@ -46,6 +64,11 @@
 //!   aligns to the FIRST artboard (`EngineHost::artboard_selection` is `[]`).
 //! * A behavior that WRITES one of the colour slice's three `state.*` keys
 //!   writes the store's copy only. No align behavior does.
+//! * A value widget bound to `dialog.<ident>` is not written: the engine hosts
+//!   no dialog, and no panel carries such a bind.
+//! * The door does not report how many behaviors ran, or whether the bind was
+//!   written. The corpus's `behaviors_run` and `bind_written` are the
+//!   reference's.
 
 use serde_json::{json, Map, Value};
 

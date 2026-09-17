@@ -757,6 +757,17 @@ pub unsafe extern "C" fn jas_panel_plan(
 /// `meta` / `ctrl` default to `false` and reach a behavior's `condition` as
 /// `event.*`. The steps and their refusals are `crate::panel_behavior`'s.
 ///
+/// # A value widget (WIDGET_EVENTS.md)
+///
+/// A committed value is `{"widget":"mwp_fill_tolerance","event":"commit",
+/// "value":"40"}`: `value` is the TEXT the person entered (or the picked
+/// option's value), sent as a JSON string. The engine parses it by the
+/// widget's kind, writes the bound field, then runs the `commit`/`change`
+/// behaviors with `event.value`. A toggle or checkbox is pressed with
+/// `"event":"click"` and no value. The value refusals are `MissingValue` (no
+/// `value`, or JSON null) and `BadValue` (text the kind refuses, or a `value`
+/// that is not a string); a refused commit changes nothing.
+///
 /// # The reply
 ///
 /// `{"changed": [<row>...], "doc_changed": <bool>}`. Each row is a
