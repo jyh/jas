@@ -2252,32 +2252,7 @@ fn set_character_field(
 }
 
 fn set_stroke_field(sp: &mut crate::workspace::app_state::StrokePanelState, key: &str, val: &serde_json::Value) {
-    match key {
-        "cap" => { if let Some(s) = val.as_str() { sp.cap = s.into(); } }
-        "join" => { if let Some(s) = val.as_str() { sp.join = s.into(); } }
-        "miter_limit" => { if let Some(n) = val.as_f64() { sp.miter_limit = n; } }
-        "align_stroke" => { if let Some(s) = val.as_str() { sp.align = s.into(); } }
-        "dashed" => { if let Some(b) = val.as_bool() { sp.dashed = b; } }
-        "dash_1" => { if let Some(n) = val.as_f64() { sp.dash_1 = n; } }
-        "gap_1" => { if let Some(n) = val.as_f64() { sp.gap_1 = n; } }
-        "dash_2" => { sp.dash_2 = val.as_f64(); }
-        "gap_2" => { sp.gap_2 = val.as_f64(); }
-        "dash_3" => { sp.dash_3 = val.as_f64(); }
-        "gap_3" => { sp.gap_3 = val.as_f64(); }
-        "dash_align_anchors" => { if let Some(b) = val.as_bool() { sp.dash_align_anchors = b; } }
-        "start_arrowhead" => { if let Some(s) = val.as_str() { sp.start_arrowhead = s.into(); } }
-        "end_arrowhead" => { if let Some(s) = val.as_str() { sp.end_arrowhead = s.into(); } }
-        "start_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.start_arrowhead_scale = n; } }
-        "end_arrowhead_scale" => { if let Some(n) = val.as_f64() { sp.end_arrowhead_scale = n; } }
-        "link_arrowhead_scale" => { if let Some(b) = val.as_bool() { sp.link_arrowhead_scale = b; } }
-        "arrow_align" => { if let Some(s) = val.as_str() { sp.arrow_align = s.into(); } }
-        "profile" => { if let Some(s) = val.as_str() { sp.profile = s.into(); } }
-        "profile_flipped" => { if let Some(b) = val.as_bool() { sp.profile_flipped = b; } }
-        // The committed weight lives on the panel state like every other
-        // field; `apply_stroke_panel_to_selection` reads it from there.
-        "weight" => { if let Some(n) = val.as_f64() { sp.weight = n; } }
-        _ => {}
-    }
+    sp.set_field(key, val);
 }
 
 /// Write a single Opacity-panel field from a YAML-interpreted value. Keys

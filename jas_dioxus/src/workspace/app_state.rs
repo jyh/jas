@@ -12,11 +12,16 @@ use wasm_bindgen::JsCast;
 use crate::canvas::render;
 use crate::document::controller::Controller;
 use crate::document::model::Model;
-use crate::geometry::element::{Color, Fill, Stroke, LineCap, LineJoin, StrokeAlign, Arrowhead, ArrowAlign};
+use crate::geometry::element::{Color, Fill, Stroke};
 use crate::tools::type_tool::TypeTool;
 use crate::tools::type_on_path_tool::TypeOnPathTool;
 use crate::tools::tool::{CanvasTool, ToolKind};
 use crate::tools::yaml_tool::YamlTool;
+// The Stroke panel law moved to `interpreter::stroke_host` (FB wave 2b, W2b-4),
+// where the engine calls it too. Re-exported so the web paths are unchanged.
+pub(crate) use crate::interpreter::stroke_host::StrokePanelState;
+#[cfg(test)]
+use crate::interpreter::stroke_host::StrokeEditGroup;
 
 /// Build a YAML-driven canvas tool from the embedded workspace's
 /// `tools.<id>` spec. Shared by every migrated tool — each one is a
@@ -316,153 +321,6 @@ pub(crate) struct LayerSoloState {
     pub(crate) saved: std::collections::HashMap<Vec<usize>, crate::geometry::element::Visibility>,
 }
 
-/// Stroke panel state fields that sync with global state and the selection.
-#[derive(Debug, Clone)]
-pub(crate) struct StrokePanelState {
-    /// The Weight input's committed value, in points. THE source of the
-    /// width a weight edit applies (`StrokeEditGroup::Width`).
-    ///
-    /// This used to have no slot at all: the weight commit wrote straight
-    /// into `app_default_stroke.width` / the tab default and the apply read
-    /// it back from there, so with no default stroke (after picking the None
-    /// stroke swatch) the commit was DROPPED and typing a weight was a
-    /// silent no-op — while Swift, which reads its panel-scope `weight`
-    /// first, applied it. Both ports now read the panel-committed value.
-    pub weight: f64,
-    pub cap: String,
-    pub join: String,
-    pub miter_limit: f64,
-    pub align: String,
-    pub dashed: bool,
-    pub dash_1: f64,
-    pub gap_1: f64,
-    pub dash_2: Option<f64>,
-    pub gap_2: Option<f64>,
-    pub dash_3: Option<f64>,
-    pub gap_3: Option<f64>,
-    pub dash_align_anchors: bool,
-    pub start_arrowhead: String,
-    pub end_arrowhead: String,
-    pub start_arrowhead_scale: f64,
-    pub end_arrowhead_scale: f64,
-    pub link_arrowhead_scale: bool,
-    pub arrow_align: String,
-    pub profile: String,
-    pub profile_flipped: bool,
-}
-
-impl Default for StrokePanelState {
-    fn default() -> Self {
-        Self {
-            weight: 1.0,
-            cap: "butt".into(),
-            join: "miter".into(),
-            miter_limit: 10.0,
-            align: "center".into(),
-            dashed: false,
-            dash_1: 12.0,
-            gap_1: 12.0,
-            dash_2: None,
-            gap_2: None,
-            dash_3: None,
-            gap_3: None,
-            dash_align_anchors: false,
-            start_arrowhead: "none".into(),
-            end_arrowhead: "none".into(),
-            start_arrowhead_scale: 100.0,
-            end_arrowhead_scale: 100.0,
-            link_arrowhead_scale: false,
-            arrow_align: "tip_at_end".into(),
-            profile: "uniform".into(),
-            profile_flipped: false,
-        }
-    }
-}
-
-/// The stroke attributes ONE Stroke-panel field owns.
-///
-/// A panel edit must write only the group it touched and preserve every
-/// other attribute from the element (see
-/// `AppState::apply_stroke_panel_to_selection`). Fields that move
-/// together stay in one group, and only where that is forced: the dash
-/// inputs and the dashed toggle are one pattern because a dash array
-/// cannot be written a slot at a time.
-///
-/// The two arrowhead scales are NOT one group. They used to be, on the
-/// reasoning that the link-scales button moves them together — but the
-/// chain mirrors by COMMITTING the sibling field (`stroke.yaml` arrow-scale
-/// on_change), which applies through that field's own group. The wide group
-/// bought nothing and cost an UNLINKED scale edit stamping the panel's
-/// sibling scale over the element's own.
-///
-/// Mirrors the reference `STROKE_EDIT_GROUPS`
-/// (`workspace_interpreter/stroke_law.py`), which states the table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StrokeEditGroup {
-    Width,
-    Cap,
-    Join,
-    MiterLimit,
-    Align,
-    Dash,
-    StartArrow,
-    EndArrow,
-    StartArrowScale,
-    EndArrowScale,
-    ArrowAlign,
-    /// Width profile only — the Stroke struct itself is untouched.
-    Profile,
-}
-
-/// A Stroke-panel field key normalized to its panel-scope name.
-///
-/// The flat GLOBAL keys a YAML `set:` effect writes carry a `stroke_`
-/// prefix (`stroke_cap`); the panel scope does not (`cap`). The weight
-/// input is the one asymmetric pair: its global is `stroke_width` while its
-/// panel field is `weight`.
-///
-/// This normalization belongs in production, not in a test harness. The
-/// corpus's `*_global_key` vectors assert that the flat form reaches the
-/// same group, and the Rust arm used to do the stripping itself — so those
-/// vectors passed VACUOUSLY here while genuinely pinning the reference and
-/// Swift, both of which normalize in production (`stroke_field_name` /
-/// `strokeFieldName`). Mirrors them.
-pub(crate) fn stroke_field_name(key: &str) -> &str {
-    let name = key.strip_prefix("stroke_").unwrap_or(key);
-    if name == "width" { "weight" } else { name }
-}
-
-impl StrokeEditGroup {
-    /// Map a Stroke-panel field key to the group it owns. Accepts both the
-    /// PANEL key (`"cap"` — what `renderer::set_stroke_field` writes) and
-    /// the flat GLOBAL key (`"stroke_cap"` — what a YAML `set:` effect
-    /// writes). `None` means the key owns no element attribute, so editing
-    /// it writes nothing to the selection.
-    pub(crate) fn from_field(key: &str) -> Option<Self> {
-        Some(match stroke_field_name(key) {
-            "weight" => Self::Width,
-            "cap" => Self::Cap,
-            "join" => Self::Join,
-            "miter_limit" => Self::MiterLimit,
-            "align_stroke" | "align" => Self::Align,
-            "dashed" | "dash_1" | "gap_1" | "dash_2" | "gap_2" | "dash_3"
-            | "gap_3" | "dash_align_anchors" => Self::Dash,
-            "start_arrowhead" => Self::StartArrow,
-            "end_arrowhead" => Self::EndArrow,
-            "start_arrowhead_scale" => Self::StartArrowScale,
-            "end_arrowhead_scale" => Self::EndArrowScale,
-            // `link_arrowhead_scale` is a UI-only flag: the chain button
-            // mirrors one scale onto the other by committing the SIBLING
-            // scale field, which applies through that field's own group.
-            // Toggling the chain itself must not touch the document (it
-            // would push an undo step that changes nothing).
-            "arrow_align" => Self::ArrowAlign,
-            "profile" | "profile_flipped" => Self::Profile,
-            _ => return None,
-        })
-    }
-}
-
 /// A stroke with `color` replaced and every other attribute preserved.
 /// `None` (nothing to recolour) becomes a plain 1pt stroke in that colour.
 pub(crate) fn recolor_stroke(base: Option<Stroke>, color: Color) -> Stroke {
@@ -478,79 +336,6 @@ pub(crate) fn recolor_fill(base: Option<Fill>, color: Color) -> Fill {
         Some(mut f) => { f.color = color; f }
         None => Fill::new(color),
     }
-}
-
-/// Overwrite `base`'s `group` attributes from the Stroke panel state,
-/// leaving every other attribute of `base` untouched. `committed_width`
-/// is the weight input's committed value and is read only for
-/// [`StrokeEditGroup::Width`].
-pub(crate) fn stroke_with_group(
-    base: Stroke, sp: &StrokePanelState, group: StrokeEditGroup, committed_width: f64,
-) -> Stroke {
-    let mut s = base;
-    match group {
-        StrokeEditGroup::Width => s.width = committed_width,
-        StrokeEditGroup::Cap => {
-            s.linecap = match sp.cap.as_str() {
-                "round" => LineCap::Round,
-                "square" => LineCap::Square,
-                _ => LineCap::Butt,
-            };
-        }
-        StrokeEditGroup::Join => {
-            s.linejoin = match sp.join.as_str() {
-                "round" => LineJoin::Round,
-                "bevel" => LineJoin::Bevel,
-                _ => LineJoin::Miter,
-            };
-        }
-        StrokeEditGroup::MiterLimit => s.miter_limit = sp.miter_limit,
-        StrokeEditGroup::Align => {
-            s.align = match sp.align.as_str() {
-                "inside" => StrokeAlign::Inside,
-                "outside" => StrokeAlign::Outside,
-                _ => StrokeAlign::Center,
-            };
-        }
-        StrokeEditGroup::Dash => {
-            let mut dash_pattern = [0.0f64; 6];
-            let mut dash_len: u8 = 0;
-            if sp.dashed {
-                dash_pattern[0] = sp.dash_1;
-                dash_pattern[1] = sp.gap_1;
-                dash_len = 2;
-                if let (Some(d), Some(g)) = (sp.dash_2, sp.gap_2) {
-                    dash_pattern[2] = d;
-                    dash_pattern[3] = g;
-                    dash_len = 4;
-                }
-                if let (Some(d), Some(g)) = (sp.dash_3, sp.gap_3) {
-                    dash_pattern[4] = d;
-                    dash_pattern[5] = g;
-                    dash_len = 6;
-                }
-            }
-            s.dash_pattern = dash_pattern;
-            s.dash_len = dash_len;
-            s.dash_align_anchors = sp.dash_align_anchors;
-        }
-        StrokeEditGroup::StartArrow => s.start_arrow = Arrowhead::from_str(&sp.start_arrowhead),
-        StrokeEditGroup::EndArrow => s.end_arrow = Arrowhead::from_str(&sp.end_arrowhead),
-        // Each scale is its own group: an unlinked edit of one must not
-        // stamp the panel's sibling scale onto the element.
-        StrokeEditGroup::StartArrowScale => s.start_arrow_scale = sp.start_arrowhead_scale,
-        StrokeEditGroup::EndArrowScale => s.end_arrow_scale = sp.end_arrowhead_scale,
-        StrokeEditGroup::ArrowAlign => {
-            s.arrow_align = if sp.arrow_align == "center_at_end" {
-                ArrowAlign::CenterAtEnd
-            } else {
-                ArrowAlign::TipAtEnd
-            };
-        }
-        // The profile lives in the element's width points, not the Stroke.
-        StrokeEditGroup::Profile => {}
-    }
-    s
 }
 
 /// Gradient panel state fields — mirror the panel-local state declared
@@ -1835,80 +1620,19 @@ impl AppState {
         }
     }
 
-    /// Apply ONE Stroke-panel edit to the selected element(s).
-    ///
-    /// `edited` is the panel field key the user just committed (`"cap"`,
-    /// `"end_arrowhead"`, `"weight"`, … — the same keys
-    /// `renderer::set_stroke_field` writes). Only that field's
-    /// [`StrokeEditGroup`] is taken from panel state; every other stroke
-    /// attribute is preserved from the element being edited, per element.
-    ///
-    /// Why field-scoped: this used to rebuild the whole Stroke from panel
-    /// state on every edit and read `width` from the app / tab DEFAULT
-    /// stroke ("the selected element's width may not have been updated
-    /// yet" — the weight input commits its value into `default_stroke`
-    /// and then calls this). That made the weight input work at the cost
-    /// of resetting a selected 5pt line to 1pt whenever ANY other control
-    /// was touched (JYH, 2026-07-24). Gating the width write to the
-    /// weight edit itself removes the ordering problem entirely: nothing
-    /// else reads the default width, so nothing else can clobber it.
-    /// Cap / join were the same shape (the panel DISPLAYS them from the
-    /// element via `dock_panel::build_live_panel_overrides`, so re-imposing
-    /// panel state on an unrelated edit contradicted what the user saw),
-    /// and the dash / arrowhead / profile groups were re-stamped from
-    /// stale panel state on every edit.
-    ///
-    /// Unknown keys write nothing (the panel has fields that own no
-    /// element attribute).
+    /// Apply ONE Stroke-panel edit to the active tab's selected element(s)
+    /// and to both defaults. `edited` is the panel field key the person just
+    /// committed (the keys `renderer::set_stroke_field` writes). The work is
+    /// `interpreter::stroke_host`'s, which the engine calls too; this passes it
+    /// the panel struct and the app-wide default, and stores the new default
+    /// back.
     pub(crate) fn apply_stroke_panel_to_selection(&mut self, edited: &str) {
-        let Some(group) = StrokeEditGroup::from_field(edited) else { return };
-        let sp = &self.stroke_panel;
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
-        let sel_stroke = {
-            let doc = tab.model.document();
-            doc.selection.first()
-                .and_then(|es| doc.get_element(&es.path))
-                .and_then(|e| e.stroke().cloned())
-        };
-        let default_stroke = tab.model.default_stroke.or(self.app_default_stroke);
-        // Nothing to build on: no selected stroke and no default.
-        let Some(fallback) = sel_stroke.or(default_stroke) else { return };
-        // The weight input's committed value, read ONLY for a weight edit.
-        // It comes from the PANEL field, not from the default stroke: the
-        // default can be absent (the None stroke swatch), which used to
-        // drop the commit and make a weight edit a silent no-op.
-        let committed_width = sp.weight;
-        // Width profiles are re-derived only when the edit can change
-        // them: the profile shape / flip, or the weight they scale with.
-        let profile_edit = matches!(group, StrokeEditGroup::Width | StrokeEditGroup::Profile);
-        // Owned copy: the write closures below borrow it across the txn.
-        let sp = sp.clone();
-        if !tab.model.document().selection.is_empty() {
-            let profile_width = if group == StrokeEditGroup::Width {
-                committed_width
-            } else {
-                sel_stroke.map(|s| s.width).unwrap_or(committed_width)
-            };
-            tab.model.with_txn(|m| {
-                Controller::map_selection_stroke(m, |el_stroke| {
-                    let base = el_stroke.unwrap_or(fallback);
-                    Some(stroke_with_group(base, &sp, group, committed_width))
-                });
-                if profile_edit {
-                    let width_pts = crate::geometry::element::profile_to_width_points(
-                        &sp.profile, profile_width, sp.profile_flipped,
-                    );
-                    Controller::set_selection_width_profile(m, width_pts);
-                }
-            });
+        if let Some(d) = crate::interpreter::stroke_host::apply_stroke_panel_to_selection(
+            &mut tab.model, &self.stroke_panel, edited, self.app_default_stroke)
+        {
+            self.app_default_stroke = Some(d);
         }
-        // The new-element defaults take the SAME field-scoped edit, built
-        // on the default stroke — never on the selected element, whose
-        // width / colour must not leak into what the next element gets.
-        let new_default = stroke_with_group(
-            default_stroke.unwrap_or(fallback), &sp, group, committed_width);
-        tab.model.default_stroke = Some(new_default);
-        self.app_default_stroke = Some(new_default);
     }
 
     // NOTE: the Stroke panel reflects the selection (incl. the Weight

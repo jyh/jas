@@ -6609,9 +6609,8 @@ mod tests {
     #[test]
     fn stroke_apply_panel_edit_corpus() {
         use crate::geometry::element::{Color, Stroke};
-        use crate::workspace::app_state::{
-            recolor_stroke, stroke_with_group, StrokeEditGroup,
-        };
+        use crate::interpreter::stroke_host::{stroke_with_group, StrokeEditGroup};
+        use crate::workspace::app_state::recolor_stroke;
         let raw = read_fixture("stroke_apply/panel_edit.json");
         let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let plain = Stroke::new(Color::from_hex("#000000").unwrap(), 1.0);
