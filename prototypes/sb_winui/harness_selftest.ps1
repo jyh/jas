@@ -1283,6 +1283,346 @@ Test-Case 'Q6.S5: NOT RUN on an unreadable total' { (Get-SbS5 @{ repaint = (New-
 Test-Case 'Q6.S5: every path carries the Q6.S5 key and a detail' { $bad = 0; foreach ($v in @((Get-SbS5 @{}), (Get-SbS5 @{} 'retained'), (Get-SbS5 @{ open = $null }), (Get-SbS5 @{ repaint = $null }), (Get-SbS5 @{ repaint = (New-SbS5Repaint '1' 'resize') }))) { if ([string]::IsNullOrWhiteSpace($v.Detail) -or ($v.Name -split ' ')[0] -ne 'Q6.S5') { $bad++ } }; $bad } '0'
 
 # ---------------------------------------------------------------------------
+# V1-V6 -- THE MAGIC WAND VALUE REPLAY, READ OFF ITS OWN ROWS (W2b-3)
+# ---------------------------------------------------------------------------
+#
+# ⛔ NO BOX HAS RUN W2b-3, SO THESE ROWS ARE NOT VERBATIM OFF kenai. Each is the
+# literal its C# format string composes, copied from the C# and not from the Q6
+# fixture above: `MainWindow.Report`'s log line, `Canvas.Tids()`,
+# `Canvas.ApplyPanelOpen` (with `PlanReading`), `ClickHead` and the REFUSED /
+# SILENT / ran forms of `ApplyPanelClick`, `ApplyMenuRefresh`,
+# `ApplyPanelValueSynth` (DONE, REFUSED, THREW), `MainWindow.QueueValueSynth`,
+# the SB_PANEL refusal in `StartFirstLayout`, `BuildPane` and `DrawPane`. The
+# values are what the engine answers on the sitting's route
+# (`panel_behavior_the_value_replay_on_the_sittings_panel`, and a probe of
+# `jas_panel_plan` at 228: 13 leaves -- 5 toggles, 4 inputs, 4 texts -- 0 chrome,
+# 0 containers, 0 unjoined, 0 withheld, 0 icons, height 164, 2102 bytes; the
+# commit's reply carries one changed row and each press's two; the refusal's
+# channel is `{"panel_event":"BadValue","detail":"mwp_fill_tolerance"}`). The
+# menu `seq` and the tids are fill. A reader that disagrees with a real row is
+# this file's defect, not the app's.
+#
+# ⚠️ WRITTEN RED-FIRST AGAINST STUBS THAT RETURN NOTHING (W2-6's shape). An arm
+# whose expected answer IS "nothing" (`0`, `(null)`, `WAITS`, `[]`) passes on the
+# stub; every other arm is red until the readers land.
+function New-SbMwRow([string]$Status) {
+    return "09:14:03`tSB_MODE=(default:offscreen)`tSB_SIZE=(window)`tSB_FRAMES=(default:60)`t" + $Status
+}
+$mwTids = 'ui-tid=2 render-tid=5 paint-tid=5 present-tid=5 render-has-dispatcher=false'
+$mwPanel = 'magic_wand_panel_content'
+$mwCommit = 'mwp_fill_tolerance'
+$mwPress = 'mwp_fill_color'
+$mwIds ='mwp_blending_mode,mwp_fill_color,mwp_fill_tolerance,mwp_opacity,mwp_opacity_tolerance,mwp_stroke_color,mwp_stroke_tolerance,mwp_stroke_weight,mwp_stroke_weight_tolerance'
+
+# `ClickHead`: panel= widget= via= event= value= (value is `PanelWire.RowValue`).
+function New-SbMwHead([string]$Widget, [string]$Via, [string]$EventName, [string]$Value) {
+    return "panel=$mwPanel widget=$Widget via=$Via event=$EventName value=$Value"
+}
+function New-SbMwChannel([string]$Class, [string]$Detail) {
+    return '{"panel_event":"' + $Class + '","detail":"' + $Detail + '"}'
+}
+# A click that ran: `PANEL CLICK {head} outcome= changed-rows= doc-changed=
+# delta-mismatch= channel= {tids}`, with `RUSTFAIL ` in front when the
+# mismatch is not `0` -- the shell's own rule.
+function New-SbMwRan([string]$Widget, [string]$Via, [string]$EventName, [string]$Value, [string]$Changed,
+                     [string]$Outcome = 'changed', [string]$Mismatch = '0', [string]$Channel = '(clear)') {
+    $head = New-SbMwHead $Widget $Via $EventName $Value
+    $row = "PANEL CLICK $head outcome=$Outcome changed-rows=$Changed doc-changed=false delta-mismatch=$Mismatch channel=$Channel $mwTids"
+    if ($Mismatch -ne '0') { return "RUSTFAIL $row" }
+    return $row
+}
+function New-SbMwRefused([string]$Widget, [string]$Via, [string]$EventName, [string]$Value, [string]$Class) {
+    $head = New-SbMwHead $Widget $Via $EventName $Value
+    $channel = New-SbMwChannel $Class $Widget
+    return "PANEL CLICK REFUSED $head channel=$channel $mwTids"
+}
+function New-SbMwDone([string]$Value = '32/32/40/40/40', [string]$Disabled = 'false/false/false/true/false',
+                      [string]$Checked = 'true/true/true/false/true', [string]$Commit = 'mwp_fill_tolerance',
+                      [string]$Press = 'mwp_fill_color', [string]$Panel = 'magic_wand_panel_content') {
+    return "PANEL VALUE SYNTH DONE panel=$Panel commit=$Commit text=`"40`" press=$Press value=$Value disabled=$Disabled checked=$Checked $mwTids"
+}
+function New-SbMwOpen([string]$Panel = 'magic_wand_panel_content', [string]$Via = 'app', [string]$Reading = 'leaves=13 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=164') {
+    return "PANEL OPEN panel=$Panel via=$Via avail-w=228 $Reading crossings=2 bytes=2102 plan-bytes=2102 seq=1 $mwTids"
+}
+$mwRefusedDone = "RUSTFAIL PANEL VALUE SYNTH REFUSED panel=$mwPanel commit=$mwCommit text=`"40`" press=mwp_fill_colour -- 'mwp_fill_colour': no leaf of the open plan has that id; it has 9: $mwIds $mwTids"
+$mwThrewDone = "RUSTFAIL PANEL VALUE SYNTH THREW panel=$mwPanel commit=$mwCommit text=`"40`" press=$mwPress InvalidOperationException: boom $mwTids"
+$mwKnobRefusal = "RUSTFAIL PANEL VALUE SYNTH REFUSED panel=$mwPanel commit-knob=- press-knob=`"mwp_fill_color`" -- SB_PANEL_PRESS is set and SB_PANEL_COMMIT is not; the replay needs both"
+$mwSceneRefusal = "RUSTFAIL PANEL VALUE SYNTH REFUSED panel=align_panel_content commit-knob=`"mwp_fill_tolerance:40`" press-knob=`"mwp_fill_color`" -- the value replay needs SB_SCENE=app, the one scene that opens the pane; this run is 'retained'"
+$mwFirstRefusal = "RUSTFAIL PANEL FIRST REFUSED panel=`"magic_wand_panel_content`" -- SB_PANEL needs SB_SCENE=app, the one scene that opens the pane; this run is 'retained'"
+# Heads and rows the arms below splice into a longer row, built here so no arm
+# nests a quoted argument inside a string's subexpression.
+$mwBadHead = New-SbMwHead 'mwp_fill_tolerance' 'synth:bad' 'commit' '"abc"'
+$mwCommitHead = New-SbMwHead 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"'
+$mwCleanCommit = New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1'
+
+# The whole run, in the order the shell writes it. `$Over` replaces a step by
+# key and a `$null` value DELETES it, as Q6's fixture does, so each variant
+# below is a named mutation of the healthy run.
+function New-SbMwFixture([hashtable]$Over = @{}) {
+    $steps = [ordered]@{
+        open    = (New-SbMwOpen)
+        built   = 'PANEL BUILT panel=magic_wand_panel_content build=1 leaves=13 texts=4 buttons=0 inputs=4 toggles=5 unmaterialized=0 unaddressable=0 icon-loads=0 icon-text=0'
+        drawn   = 'PANEL DRAWN panel=magic_wand_panel_content seq=1 cause=open missed=0 rebuilt=true controls=13 disabled=0 checked=4 hidden=0 editing=0 pane-dips=237x1350 canvas-dips=1668x900'
+        bad     = (New-SbMwRefused 'mwp_fill_tolerance' 'synth:bad' 'commit' '"abc"' 'BadValue')
+        menu1   = "MENU PUBLISHED seq=3 cause=panel $mwTids"
+        commit  = (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1')
+        menu2   = "MENU PUBLISHED seq=4 cause=panel $mwTids"
+        press   = (New-SbMwRan 'mwp_fill_color' 'synth:press' 'click' '-' '2')
+        menu3   = "MENU PUBLISHED seq=5 cause=panel $mwTids"
+        again   = (New-SbMwRan 'mwp_fill_color' 'synth:press-again' 'click' '-' '2')
+        done    = (New-SbMwDone)
+        done2   = $null
+        drawn2  = 'PANEL DRAWN panel=magic_wand_panel_content seq=6 cause=synth missed=4 rebuilt=false controls=13 disabled=0 checked=4 hidden=0 editing=0 pane-dips=237x1350 canvas-dips=1668x900'
+    }
+    foreach ($k in $Over.Keys) {
+        if (-not $steps.Contains($k)) { throw "New-SbMwFixture: no step '$k'" }
+        $steps[$k] = $Over[$k]
+    }
+    $out = @()
+    foreach ($k in $steps.Keys) {
+        if ($null -ne $steps[$k]) { $out += (New-SbMwRow $steps[$k]) }
+    }
+    return $out
+}
+$mwNoReplay = @{ bad = $null; menu1 = $null; commit = $null; menu2 = $null; press = $null; menu3 = $null
+                 again = $null; done = $null; drawn2 = $null }
+
+# `V1=PASS V2=PASS ...`, in the order the reader emits them.
+function Format-SbV($Verdicts) {
+    return (@($Verdicts) | ForEach-Object { "$(($_.Name -split ' ')[0])=$($_.Verdict)" }) -join ' '
+}
+function Get-SbVRun([hashtable]$Over = @{}, [string]$Scene = 'app', [string]$Commit = 'mwp_fill_tolerance:40',
+                    [string]$Press = 'mwp_fill_color', [string]$Panel = 'magic_wand_panel_content') {
+    return @(Get-SbValueVerdicts (New-SbMwFixture $Over) $Scene $Commit $Press $Panel)
+}
+function Get-SbVSummary([hashtable]$Over = @{}, [string]$Scene = 'app', [string]$Commit = 'mwp_fill_tolerance:40',
+                        [string]$Press = 'mwp_fill_color', [string]$Panel = 'magic_wand_panel_content') {
+    return Format-SbV (Get-SbVRun $Over $Scene $Commit $Press $Panel)
+}
+function Show-SbSplit($Split) {
+    if ($null -eq $Split) { return '(null)' }
+    return "$($Split.Widget)|$($Split.Text)"
+}
+$vAllPass = 'V1=PASS V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+$vAllNotRun = 'V1=NOT RUN V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+$vReplayRefused = 'V1=PASS V2=FAIL V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+$vNoReadings = 'V1=PASS V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=FAIL'
+
+# ---- the knob, split by the shell's rule (PanelWire.SplitCommitKnob) --------
+Test-Case 'V KNOB: the commit knob splits at the first colon' { Show-SbSplit (Split-SbCommitKnob 'mwp_fill_tolerance:40') } 'mwp_fill_tolerance|40'
+Test-Case 'V KNOB: a colon after the first stays in the text' { Show-SbSplit (Split-SbCommitKnob 'w:a:b') } 'w|a:b'
+Test-Case 'V KNOB: the text is kept verbatim, spaces and all' { Show-SbSplit (Split-SbCommitKnob 'w: 4 0 ') } 'w| 4 0 '
+Test-Case 'V KNOB: an empty text is a text' { Show-SbSplit (Split-SbCommitKnob 'w:') } 'w|'
+Test-Case 'V KNOB: a knob with no colon is refused' { Show-SbSplit (Split-SbCommitKnob 'mwp_fill_tolerance') } '(null)'
+Test-Case 'V KNOB: an empty widget is refused' { Show-SbSplit (Split-SbCommitKnob ':40') } '(null)'
+Test-Case 'V KNOB: a whitespace widget is refused, the knob''s own unset predicate' { Show-SbSplit (Split-SbCommitKnob '  :40') } '(null)'
+Test-Case 'V KNOB: an empty knob is refused' { Show-SbSplit (Split-SbCommitKnob '') } '(null)'
+Test-Case 'V ASKED: either value knob alone is asked' { "$(Test-SbValueAsked 'w:1' '') $(Test-SbValueAsked '' 'p')" } 'True True'
+Test-Case 'V ASKED: whitespace knobs are unset' { "$(Test-SbValueAsked ' ' '  ')" } 'False'
+Test-Case 'P4.4 REPLAY: Q6''s knob alone runs a replay' { "$(Test-SbPaneReplayAsked 'align_left_button' '' '')" } 'True'
+Test-Case 'P4.4 REPLAY: both value knobs run a replay' { "$(Test-SbPaneReplayAsked '' 'w:1' 'p')" } 'True'
+Test-Case 'P4.4 REPLAY: one value knob alone runs none -- the shell refuses it' { "$(Test-SbPaneReplayAsked '' 'w:1' '') $(Test-SbPaneReplayAsked '' '' 'p')" } 'False False'
+Test-Case 'P4.4 REPLAY: no knob runs none, and whitespace is unset' { "$(Test-SbPaneReplayAsked ' ' ' ' ' ')" } 'False'
+
+# ---- V3's grammar: which texts the core writes back byte for byte -----------
+Test-Case 'V3 GRAMMAR: an integer is canonical' { "$(Test-SbCanonicalNumber '40')" } 'True'
+Test-Case 'V3 GRAMMAR: zero is canonical' { "$(Test-SbCanonicalNumber '0')" } 'True'
+Test-Case 'V3 GRAMMAR: a negative decimal is canonical' { "$(Test-SbCanonicalNumber '-2.5')" } 'True'
+Test-Case 'V3 GRAMMAR: a zero before the point is not a leading zero' { "$(Test-SbCanonicalNumber '0.5')" } 'True'
+Test-Case 'V3 GRAMMAR: a leading zero is not canonical' { "$(Test-SbCanonicalNumber '040')" } 'False'
+Test-Case 'V3 GRAMMAR: a trailing .0 is not canonical' { "$(Test-SbCanonicalNumber '5.0')" } 'False'
+Test-Case 'V3 GRAMMAR: a trailing zero after the point is not canonical' { "$(Test-SbCanonicalNumber '1.50')" } 'False'
+Test-Case 'V3 GRAMMAR: minus zero is not canonical' { "$(Test-SbCanonicalNumber '-0')" } 'False'
+Test-Case 'V3 GRAMMAR: letters are outside the grammar' { "$(Test-SbCanonicalNumber 'abc')" } 'False'
+Test-Case 'V3 GRAMMAR: the empty text is outside the grammar' { "$(Test-SbCanonicalNumber '')" } 'False'
+Test-Case 'V3 GRAMMAR: a leading plus is outside the grammar' { "$(Test-SbCanonicalNumber '+40')" } 'False'
+Test-Case 'V3 GRAMMAR: surrounding spaces are outside the grammar' { "$(Test-SbCanonicalNumber ' 40')" } 'False'
+Test-Case 'V3 GRAMMAR: a bare trailing point is outside the grammar' { "$(Test-SbCanonicalNumber '40.')" } 'False'
+# ⛔ .NET's `$` ALSO MATCHES BEFORE A FINAL NEWLINE, so a `^...$` grammar would
+# take "40`n" as 40. The reader anchors with `\z`.
+Test-Case 'V3 GRAMMAR: a trailing newline is outside the grammar' { $t = "40`n"; "$(Test-SbCanonicalNumber $t)" } 'False'
+Test-Case 'V3 GRAMMAR: a non-ASCII digit is outside the grammar' { $t = [string][char]0x0664 + '0'; "$(Test-SbCanonicalNumber $t)" } 'False'
+
+# ---- the waits ----------------------------------------------------------------
+Test-Case 'V WAIT: a scene that opens no pane waits for no value row' { @(Get-SbValueWaits 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color').Count } '0'
+Test-Case 'V WAIT: app with no value knob waits for no value row' { @(Get-SbValueWaits 'app' '' '').Count } '0'
+Test-Case 'V WAIT: whitespace knobs are unset, exactly as the shell reads them' { @(Get-SbValueWaits 'app' '  ' ' ').Count } '0'
+Test-Case 'V WAIT: app with the value knobs waits for the done row' { (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL VALUE SYNTH DONE row'
+Test-Case 'V WAIT: the done wait ends on the healthy run' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) (New-SbMwFixture) } 'ENDS'
+Test-Case 'V WAIT: the done wait does not end on the rows before the done row' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) (New-SbMwFixture @{ done = $null; drawn2 = $null }) } 'WAITS'
+Test-Case 'V WAIT: one knob alone still waits, and ends on the shell''s refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' '' 'mwp_fill_color')[0]) @(New-SbMwRow $mwKnobRefusal) } 'ENDS'
+Test-Case 'V WAIT: the done wait ends on the render thread''s refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_colour')[0]) @(New-SbMwRow $mwRefusedDone) } 'ENDS'
+Test-Case 'V WAIT: the done wait ends on the replay''s throw' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow $mwThrewDone) } 'ENDS'
+# ⛔ AND ON NOTHING ELSE: a plan refusal or a click's red can arrive mid-replay,
+# and a wait that ended there would snapshot the rows before the done row.
+Test-Case 'V WAIT: the done wait does not end on a click row''s RUSTFAIL' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1' 'changed' '1')) } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on a plan refusal' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbMwRow "RUSTFAIL PANEL REFUSED panel=$mwPanel cause=synth -- jas_panel_plan returned the empty span $mwTids") } 'WAITS'
+Test-Case 'V WAIT: the done wait does not end on Q6''s done row' { Test-SbQ6WaitEnds (@(Get-SbValueWaits 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color')[0]) @(New-SbQ6Row (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS")) } 'WAITS'
+# CONTROLS the other way: Q6's wait is not ended by the value replay's rows.
+Test-Case 'V WAIT: CONTROL -- Q6''s replay wait does not end on the value done row' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) @(New-SbMwRow (New-SbMwDone)) } 'WAITS'
+Test-Case 'V WAIT: CONTROL -- Q6''s replay wait does not end on the value refusal' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' 'align_left_button')[0]) @(New-SbMwRow $mwRefusedDone) } 'WAITS'
+Test-Case 'V WAIT: CONTROL -- the pane wait does not end on the SB_PANEL refusal' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '')[0]) @(New-SbMwRow $mwFirstRefusal) } 'WAITS'
+
+# ---- the verdicts: which knobs ask for what -----------------------------------
+Test-Case 'V: the healthy replay passes every clause' { Get-SbVSummary } $vAllPass
+Test-Case 'V: a scene with no pane and no knob reads NOT RUN on every clause' { Get-SbVSummary $mwNoReplay 'retained' '' '' '' } $vAllNotRun
+Test-Case 'V: app with no knob reads NOT RUN on every clause' { Get-SbVSummary $mwNoReplay 'app' '' '' '' } $vAllNotRun
+Test-Case 'V: whitespace knobs are unset, exactly as the shell reads them' { Get-SbVSummary $mwNoReplay 'app' ' ' '  ' ' ' } $vAllNotRun
+Test-Case 'V: app with SB_PANEL alone asserts the open and names the replay NOT RUN' { Get-SbVSummary $mwNoReplay 'app' '' '' 'magic_wand_panel_content' } 'V1=PASS V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+# ⛔ A KNOB ON A SCENE WITH NO PANE IS A FAILURE, NEVER A QUIET NOT RUN (Q6's rule).
+Test-Case 'V: SB_PANEL on a scene with no pane FAILS V1' { Get-SbVSummary @{ open = $mwFirstRefusal } 'retained' '' '' 'magic_wand_panel_content' } 'V1=FAIL V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+Test-Case 'V: ...and V1 quotes the shell''s refusal' { $v = Get-SbVRun @{ open = $mwFirstRefusal } 'retained' '' '' 'magic_wand_panel_content'; "$($v[0].Verdict) $($v[0].Row -match 'PANEL FIRST REFUSED')" } 'FAIL True'
+Test-Case 'V: ...and says so when the shell wrote no refusal' { $v = Get-SbVRun $mwNoReplay 'retained' '' '' 'magic_wand_panel_content'; if ($v[0].Verdict -eq 'FAIL' -and $v[0].Detail -match 'wrote NO refusal') { 'named' } else { "$($v[0].Verdict): $($v[0].Detail)" } } 'named'
+Test-Case 'V: the value knobs on a scene with no pane FAIL V2' { Get-SbVSummary @{ done = $mwSceneRefusal } 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' '' } 'V1=NOT RUN V2=FAIL V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+Test-Case 'V: ...and V2 quotes the shell''s refusal' { $v = Get-SbVRun @{ done = $mwSceneRefusal } 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' ''; "$($v[1].Verdict) $($v[1].Row -match 'VALUE SYNTH REFUSED')" } 'FAIL True'
+Test-Case 'V: ...and says so when the shell wrote no refusal' { $v = Get-SbVRun $mwNoReplay 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' ''; if ($v[1].Verdict -eq 'FAIL' -and $v[1].Detail -match 'wrote NO refusal') { 'named' } else { "$($v[1].Verdict): $($v[1].Detail)" } } 'named'
+Test-Case 'V: both kinds of knob on a scene with no pane FAIL V1 and V2' { Get-SbVSummary $mwNoReplay 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' 'magic_wand_panel_content' } 'V1=FAIL V2=FAIL V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=NOT RUN'
+
+# ---- V1: the open -----------------------------------------------------------------
+Test-Case 'V1: no open row FAILS' { Get-SbVSummary @{ open = $null } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: the core''s refusal of the plan FAILS and is quoted' { $v = Get-SbVRun @{ open = "RUSTFAIL PANEL REFUSED panel=$mwPanel cause=open -- jas_panel_plan returned the empty span $mwTids" }; "$(Format-SbV $v) $($v[0].Row -match 'PANEL REFUSED')" } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS True'
+Test-Case 'V1: an open of another panel than SB_PANEL FAILS' { Get-SbVSummary @{ open = (New-SbMwOpen 'align_panel_content') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: the panel id compares ordinally, so a case change is another panel' { Get-SbVSummary @{ open = (New-SbMwOpen 'Magic_Wand_Panel_Content') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: a hand''s open is not the app''s open' { Get-SbVSummary @{ open = (New-SbMwOpen 'magic_wand_panel_content' 'hand') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: an open with no leaves FAILS' { Get-SbVSummary @{ open = (New-SbMwOpen 'magic_wand_panel_content' 'app' 'leaves=0 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=0') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: an open with a bound row the layout never placed FAILS' { Get-SbVSummary @{ open = (New-SbMwOpen 'magic_wand_panel_content' 'app' 'leaves=13 chrome=0 containers=0 unjoined=1 withheld=0 icons=0 icons-missing=0 height=164') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: an open whose plan did not parse FAILS' { Get-SbVSummary @{ open = (New-SbMwOpen 'magic_wand_panel_content' 'app' 'plan=UNPARSEABLE(JsonException)') } } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V1: with SB_PANEL unset, the panel the app opened is judged' { Get-SbVSummary @{ open = (New-SbMwOpen 'align_panel_content'); done = (New-SbMwDone -Panel 'align_panel_content') } 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color' '' } $vAllPass
+Test-Case 'V1: ...and the detail says SB_PANEL is unset' { $v = Get-SbVRun @{} 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color' ''; if ($v[0].Verdict -eq 'PASS' -and $v[0].Detail -match 'SB_PANEL is unset') { 'named' } else { "$($v[0].Verdict): $($v[0].Detail)" } } 'named'
+Test-Case 'V1: ...and an unset SB_PANEL still FAILS an open with no leaves' { Get-SbVSummary @{ open = (New-SbMwOpen 'magic_wand_panel_content' 'app' 'leaves=0 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=0') } 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color' '' } 'V1=FAIL V2=PASS V3=PASS V4=PASS V5=PASS V6=PASS'
+
+# ---- V2: the refused commit ---------------------------------------------------------
+Test-Case 'V2: abc accepted FAILS' { Get-SbVSummary @{ bad = (New-SbMwRan 'mwp_fill_tolerance' 'synth:bad' 'commit' '"abc"' '1') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: abc refused with another class FAILS' { Get-SbVSummary @{ bad = (New-SbMwRefused 'mwp_fill_tolerance' 'synth:bad' 'commit' '"abc"' 'MissingValue') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: abc refused Disabled FAILS -- the class is the claim' { Get-SbVSummary @{ bad = (New-SbMwRefused 'mwp_fill_tolerance' 'synth:bad' 'commit' '"abc"' 'Disabled') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a silent bad step FAILS' { Get-SbVSummary @{ bad = "RUSTFAIL PANEL CLICK SILENT $mwBadHead -- an empty reply and an empty error channel $mwTids" } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a missing bad row FAILS' { Get-SbVSummary @{ bad = $null } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a bad row on another widget FAILS' { Get-SbVSummary @{ bad = (New-SbMwRefused 'mwp_stroke_tolerance' 'synth:bad' 'commit' '"abc"' 'BadValue') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a HAND commit is never read as the bad step' { Get-SbVSummary @{ bad = (New-SbMwRefused 'mwp_fill_tolerance' 'hand' 'commit' '"abc"' 'BadValue') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a refused commit that moved the value FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/33/40/40/40') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a refused commit that moved disabled FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Disabled 'false/true/false/true/false') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: a refused commit that moved checked FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Checked 'true/false/true/false/true') } } 'V1=PASS V2=FAIL V3=PASS V4=PASS V5=PASS V6=PASS'
+Test-Case 'V2: ...and the detail quotes both readings' { $d = (Get-SbVRun @{ done = (New-SbMwDone -Value '32/33/40/40/40') })[1].Detail; if ($d -match 'value=32/33') { 'quoted' } else { $d } } 'quoted'
+Test-Case 'V2: a replay the render thread refused FAILS V2 and quotes it' { $v = Get-SbVRun @{ done = $mwRefusedDone }; "$(Format-SbV $v) $($v[1].Row -match 'VALUE SYNTH REFUSED')" } "$vReplayRefused True"
+Test-Case 'V2: a replay that threw FAILS V2' { Get-SbVSummary @{ done = $mwThrewDone } } $vReplayRefused
+Test-Case 'V2: a press knob without a commit knob FAILS V2' { Get-SbVSummary @{ done = $mwKnobRefusal } 'app' '' 'mwp_fill_color' } $vReplayRefused
+Test-Case 'V2: a commit knob without a press knob FAILS V2' { Get-SbVSummary @{ done = $mwKnobRefusal } 'app' 'mwp_fill_tolerance:40' '' } $vReplayRefused
+Test-Case 'V2: a commit knob with no colon FAILS V2' { Get-SbVSummary @{ done = $mwKnobRefusal } 'app' 'mwp_fill_tolerance' 'mwp_fill_color' } $vReplayRefused
+Test-Case 'V2: a commit knob with an empty widget FAILS V2' { Get-SbVSummary @{ done = $mwKnobRefusal } 'app' ':40' 'mwp_fill_color' } $vReplayRefused
+# ⛔ THE KNOBS ARE JUDGED BY THE SHELL'S RULES, NOT BY WHAT THE SHELL WROTE: a
+# pair the shell must refuse is a FAIL even beside a done row.
+Test-Case 'V2: a knob pair the shell must refuse FAILS even when a done row arrived' { $v = Get-SbVRun @{} 'app' 'mwp_fill_tolerance:40' ''; if ((Format-SbV $v) -eq $vReplayRefused -and $v[1].Detail -match 'wrote NO refusal') { 'named' } else { "$(Format-SbV $v): $($v[1].Detail)" } } 'named'
+
+# ---- V3: the commit ------------------------------------------------------------------
+Test-Case 'V3: a commit that did not reach the text FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/32/41/41/41') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: ...and the detail quotes the value and the text' { $d = (Get-SbVRun @{ done = (New-SbMwDone -Value '32/32/41/41/41') })[2].Detail; if ($d -match '41' -and $d -match "'40'") { 'quoted' } else { $d } } 'quoted'
+Test-Case 'V3: a commit the core answered Unchanged FAILS' { Get-SbVSummary @{ commit = (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '0' 'unchanged' '0' (New-SbMwChannel 'Unchanged' 'mwp_fill_tolerance')) } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a commit whose rows disagree with the plan FAILS' { Get-SbVSummary @{ commit = (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1' 'changed' '1') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a delta mismatch FAILS even on a row that lost its RUSTFAIL' { Get-SbVSummary @{ commit = "PANEL CLICK $mwCommitHead outcome=changed changed-rows=1 doc-changed=false delta-mismatch=1 channel=(clear) $mwTids" } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: an unchecked delta FAILS' { Get-SbVSummary @{ commit = (New-SbMwRan 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' '1' 'changed' 'UNCHECKED') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a row the shell marked RUSTFAIL FAILS, whatever it carries' { Get-SbVSummary @{ commit = "RUSTFAIL $mwCleanCommit" } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a commit refused by the core FAILS' { Get-SbVSummary @{ commit = (New-SbMwRefused 'mwp_fill_tolerance' 'synth:commit' 'commit' '"40"' 'BadValue') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a missing commit row FAILS' { Get-SbVSummary @{ commit = $null } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a commit row on another widget FAILS' { Get-SbVSummary @{ commit = (New-SbMwRan 'mwp_stroke_tolerance' 'synth:commit' 'commit' '"40"' '1') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a HAND commit is never read as the commit step' { Get-SbVSummary @{ commit = (New-SbMwRan 'mwp_fill_tolerance' 'hand' 'commit' '"40"' '1') } } 'V1=PASS V2=PASS V3=FAIL V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a text the value already holds is NOT RUN -- the commit could not be seen' { Get-SbVSummary @{} 'app' 'mwp_fill_tolerance:32' } 'V1=PASS V2=PASS V3=NOT RUN V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a text with a leading zero is NOT RUN' { Get-SbVSummary @{} 'app' 'mwp_fill_tolerance:040' } 'V1=PASS V2=PASS V3=NOT RUN V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a text with a trailing .0 is NOT RUN' { Get-SbVSummary @{} 'app' 'mwp_fill_tolerance:40.0' } 'V1=PASS V2=PASS V3=NOT RUN V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: a text outside the grammar is NOT RUN' { Get-SbVSummary @{} 'app' 'mwp_fill_tolerance:forty' } 'V1=PASS V2=PASS V3=NOT RUN V4=PASS V5=PASS V6=PASS'
+Test-Case 'V3: ...and the detail names the text' { $d = (Get-SbVRun @{} 'app' 'mwp_fill_tolerance:forty')[2].Detail; if ($d -match "'forty'") { 'named' } else { $d } } 'named'
+Test-Case 'V3: the text is the one after the FIRST colon' { Get-SbVSummary @{} 'app' 'mwp_fill_tolerance:40:1' } 'V1=PASS V2=PASS V3=NOT RUN V4=PASS V5=PASS V6=PASS'
+
+# ---- V4: the press -------------------------------------------------------------------
+# One reading changed per arm. Where the change leaves an instrument reading a
+# single value across the run, V5's equality has nothing to prove and says so --
+# that second move is the anti-vacuity rule, and the arm names both.
+Test-Case 'V4: a press that did not flip checked FAILS, and V5 has nothing to restore' { Get-SbVSummary @{ done = (New-SbMwDone -Checked 'true/true/true/true/true') } } 'V1=PASS V2=NOT RUN V3=PASS V4=FAIL V5=NOT RUN V6=PASS'
+Test-Case 'V4: ...and alone, with checked varying elsewhere, only V4 moves' { Get-SbVSummary @{ done = (New-SbMwDone -Checked 'false/false/true/true/true') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press that flipped checked and not disabled FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Disabled 'true/true/false/false/false') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press that moved the value FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/32/40/41/40') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press the core answered Unchanged FAILS' { Get-SbVSummary @{ press = (New-SbMwRan 'mwp_fill_color' 'synth:press' 'click' '-' '0' 'unchanged' '0' (New-SbMwChannel 'Unchanged' 'mwp_fill_color')) } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press the core refused FAILS' { Get-SbVSummary @{ press = (New-SbMwRefused 'mwp_fill_color' 'synth:press' 'click' '-' 'Disabled') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press with a delta mismatch FAILS' { Get-SbVSummary @{ press = (New-SbMwRan 'mwp_fill_color' 'synth:press' 'click' '-' '2' 'changed' '1') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a press row on another widget FAILS' { Get-SbVSummary @{ press = (New-SbMwRan 'mwp_stroke_color' 'synth:press' 'click' '-' '2') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a missing press row FAILS -- it is never read off the press-again row' { Get-SbVSummary @{ press = $null } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+Test-Case 'V4: a HAND press is never read as the press step' { Get-SbVSummary @{ press = (New-SbMwRan 'mwp_fill_color' 'hand' 'click' '-' '2') } } 'V1=PASS V2=PASS V3=PASS V4=FAIL V5=PASS V6=PASS'
+# ⛔ THE ANTI-VACUITY ARM. An equality proves nothing from an instrument that
+# reads one value throughout, so a value that never moved leaves every value
+# equality NOT RUN -- the shape a stubbed or dead reader would produce.
+Test-Case 'V: a value that never varied makes every value equality NOT RUN' { Get-SbVSummary @{ done = (New-SbMwDone -Value '40/40/40/40/40') } } 'V1=PASS V2=NOT RUN V3=NOT RUN V4=NOT RUN V5=NOT RUN V6=PASS'
+Test-Case 'V: STUB readings are values to V6, and V3 and V4 catch them' { Get-SbVSummary @{ done = (New-SbMwDone -Value 'STUB/STUB/STUB/STUB/STUB' -Disabled 'STUB/STUB/STUB/STUB/STUB' -Checked 'STUB/STUB/STUB/STUB/STUB') } } 'V1=PASS V2=NOT RUN V3=FAIL V4=FAIL V5=NOT RUN V6=PASS'
+
+# ---- V5: the second press ------------------------------------------------------------
+Test-Case 'V5: a second press that did not restore checked FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Checked 'true/true/true/false/false') } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a second press that did not restore disabled FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Disabled 'false/false/false/true/true') } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a second press that moved the value FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/32/40/40/41') } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: ...and the detail quotes all three readings' { $d = (Get-SbVRun @{ done = (New-SbMwDone -Value '32/32/40/40/41') })[4].Detail; if ($d -match '41' -and $d -match 'checked=' -and $d -match 'disabled=') { 'quoted' } else { $d } } 'quoted'
+Test-Case 'V5: a second press the core answered Unchanged FAILS' { Get-SbVSummary @{ again = (New-SbMwRan 'mwp_fill_color' 'synth:press-again' 'click' '-' '0' 'unchanged' '0' (New-SbMwChannel 'Unchanged' 'mwp_fill_color')) } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a second press with a delta mismatch FAILS' { Get-SbVSummary @{ again = (New-SbMwRan 'mwp_fill_color' 'synth:press-again' 'click' '-' '2' 'changed' '1') } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a second press on another widget FAILS' { Get-SbVSummary @{ again = (New-SbMwRan 'mwp_stroke_color' 'synth:press-again' 'click' '-' '2') } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a missing second press row FAILS' { Get-SbVSummary @{ again = $null } } 'V1=PASS V2=PASS V3=PASS V4=PASS V5=FAIL V6=PASS'
+Test-Case 'V5: a disabled reading that never varied is NOT RUN, never an equality' { Get-SbVSummary @{ done = (New-SbMwDone -Disabled 'false/false/false/false/false') } } 'V1=PASS V2=NOT RUN V3=PASS V4=FAIL V5=NOT RUN V6=PASS'
+
+# ---- V6: the done row ----------------------------------------------------------------
+Test-Case 'V6: no done row FAILS, and every reading clause is NOT RUN' { Get-SbVSummary @{ done = $null } } $vNoReadings
+Test-Case 'V6: two done rows FAIL' { Get-SbVSummary @{ done2 = (New-SbMwDone) } } $vNoReadings
+Test-Case 'V6: an ABSENT reading FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/32/40/40/ABSENT') } } $vNoReadings
+Test-Case 'V6: an UNREADABLE reading FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Checked 'UNREADABLE/true/true/false/true') } } $vNoReadings
+Test-Case 'V6: ...and the detail names the field' { $d = (Get-SbVRun @{ done = (New-SbMwDone -Checked 'UNREADABLE/true/true/false/true') })[5].Detail; if ($d -match 'checked=UNREADABLE') { 'named' } else { $d } } 'named'
+Test-Case 'V6: a field with four readings FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Disabled 'false/false/true/false') } } $vNoReadings
+Test-Case 'V6: a reading broken by whitespace FAILS by its part count' { Get-SbVSummary @{ done = (New-SbMwDone -Value '32/32/4 0/40/40') } } $vNoReadings
+Test-Case 'V6: a done row with no value field FAILS' { Get-SbVSummary @{ done = "PANEL VALUE SYNTH DONE panel=$mwPanel commit=$mwCommit text=`"40`" press=$mwPress disabled=false/false/false/true/false checked=true/true/true/false/true $mwTids" } } $vNoReadings
+Test-Case 'V6: a done row naming another commit widget FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Commit 'mwp_stroke_tolerance') } } $vNoReadings
+Test-Case 'V6: a done row naming another press widget FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Press 'mwp_stroke_color') } } $vNoReadings
+Test-Case 'V6: a done row naming another panel than SB_PANEL FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Panel 'align_panel_content') } } $vNoReadings
+Test-Case 'V6: with SB_PANEL unset, a done row naming another panel than the open FAILS' { Get-SbVSummary @{ done = (New-SbMwDone -Panel 'align_panel_content') } 'app' 'mwp_fill_tolerance:40' 'mwp_fill_color' '' } $vNoReadings
+Test-Case 'V6: the done row is matched by its own label, never by Q6''s' { Get-SbVSummary @{ done = (New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS") } } $vNoReadings
+
+# ---- the census, the details, and the controls ---------------------------------------
+# ⛔ EVERY CLAUSE ON EVERY PATH, EXACTLY ONCE (Q6's census, for V).
+Test-Case 'V: every path names all six clauses exactly once' {
+    $variants = @(
+        @(@{}, 'app', 'mwp_fill_tolerance:40', 'mwp_fill_color', 'magic_wand_panel_content'),
+        @($mwNoReplay, 'retained', '', '', ''), @($mwNoReplay, 'app', '', '', ''),
+        @($mwNoReplay, 'app', '', '', 'magic_wand_panel_content'),
+        @($mwNoReplay, 'retained', 'mwp_fill_tolerance:40', 'mwp_fill_color', 'magic_wand_panel_content'),
+        @(@{ open = $null }, 'app', 'mwp_fill_tolerance:40', 'mwp_fill_color', 'magic_wand_panel_content'),
+        @(@{ done = $mwRefusedDone }, 'app', 'mwp_fill_tolerance:40', 'mwp_fill_color', 'magic_wand_panel_content'),
+        @(@{}, 'app', 'mwp_fill_tolerance:40', '', 'magic_wand_panel_content'),
+        @(@{ done = $null }, 'app', 'mwp_fill_tolerance:40', 'mwp_fill_color', 'magic_wand_panel_content'),
+        @(@{ done = (New-SbMwDone -Value '40/40/40/40/40') }, 'app', 'mwp_fill_tolerance:40', 'mwp_fill_color', ''),
+        @(@{}, 'app', 'mwp_fill_tolerance:forty', 'mwp_fill_color', 'magic_wand_panel_content'))
+    $bad = @()
+    foreach ($x in $variants) {
+        $names = @(@(Get-SbValueVerdicts (New-SbMwFixture $x[0]) $x[1] $x[2] $x[3] $x[4]) | ForEach-Object { ($_.Name -split ' ')[0] })
+        if (($names -join ' ') -ne 'V1 V2 V3 V4 V5 V6') { $bad += "[$($x[1])/$($x[2])/$($x[3])] $($names -join ' ')" }
+    }
+    if ($bad.Count -eq 0) { "all $($variants.Count)" } else { $bad -join '; ' }
+} 'all 11'
+# ⛔ AND EVERY VERDICT CARRIES A DETAIL, IN ASCII: the Windows console is cp1252.
+Test-Case 'V: every verdict on every census path carries an ASCII detail' {
+    $bad = 0
+    foreach ($r in @((Get-SbVRun), (Get-SbVRun $mwNoReplay 'retained' '' '' ''), (Get-SbVRun @{ open = $null }),
+                     (Get-SbVRun @{ done = $null }), (Get-SbVRun @{} 'app' 'mwp_fill_tolerance:forty'),
+                     (Get-SbVRun $mwNoReplay 'retained' 'mwp_fill_tolerance:40' 'mwp_fill_color' 'magic_wand_panel_content'))) {
+        foreach ($v in @($r)) {
+            if ([string]::IsNullOrWhiteSpace($v.Detail) -or ("$($v.Name)$($v.Detail)" -match '[^\x20-\x7E]')) { $bad++ }
+        }
+    }
+    $bad
+} '0'
+Test-Case 'V: the clause names are V1 to V6, in order' { (@($SbValueNames.Values) | ForEach-Object { ($_ -split ' ')[0] }) -join ' ' } 'V1 V2 V3 V4 V5 V6'
+# MUTATION CONTROL on the fixture itself: each instrument in the healthy done
+# row really reads two values, so the healthy PASS is not an equality of constants.
+Test-Case 'V: CONTROL -- the healthy done row''s readings each take two values' {
+    $done = New-SbMwDone
+    (@('value', 'disabled', 'checked') | ForEach-Object { @((Get-SbField $done $_) -split '/' | Sort-Object -Unique).Count }) -join ' '
+} '2 2 2'
+# The value run is read by Q6 too, and neither family may misread the other.
+Test-Case 'V: CONTROL -- Q6 reads the value run''s pane and names its own replay NOT RUN' { Format-SbQ6 (Get-SbPaneVerdicts (New-SbMwFixture) 'app' '') } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+Test-Case 'V: CONTROL -- the value replay''s rows are never read as Q6''s replay' { Format-SbQ6 (Get-SbPaneVerdicts (New-SbMwFixture) 'app' 'align_left_button') } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

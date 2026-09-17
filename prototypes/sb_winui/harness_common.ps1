@@ -2095,3 +2095,18 @@ function Get-SbPaneResizeVerdict($Rows, [string]$Scene, [string]$Synth) {
         "already-laid-out canvas, which is W2-5's regression and not the canvas's (freeze stop 5). " +
         'A display-scale change writes SCALE CHANGED; rule that out first') $repaints[-1]
 }
+
+# ===========================================================================
+# V1-V6 -- THE VALUE REPLAY, READ OFF ITS OWN ROWS (W2b-3)
+# ===========================================================================
+#
+# ⚠️ RED-FIRST STUBS. `harness_selftest.ps1`'s V arms are written against the
+# contract these functions will carry, and every arm whose answer is not
+# "nothing" must fail on these bodies. The readers land in the next commit.
+$SbValueNames = [ordered]@{}
+function Split-SbCommitKnob([string]$Knob) { }
+function Test-SbValueAsked([string]$Commit, [string]$Press) { }
+function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press) { }
+function Test-SbCanonicalNumber([string]$Text) { }
+function Get-SbValueWaits([string]$Scene, [string]$Commit, [string]$Press) { }
+function Get-SbValueVerdicts($Rows, [string]$Scene, [string]$Commit, [string]$Press, [string]$Panel = '') { }
