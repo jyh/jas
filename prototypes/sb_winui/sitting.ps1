@@ -260,13 +260,13 @@ if (-not $NoRebuild -and -not $DryRun) {
 # The document
 # ===========================================================================
 $svgAbs = $null
-# ⛔ `o6` AND `q6` ARE IN THIS LIST THOUGH NO SCENE IS CALLED EITHER. Each is a PSEUDO-SCENE
-# (`o6`'s two runs drive `retained`, `q6`'s one drives `app`), and this list is keyed by what the CALLER
+# ⛔ `o6`, `q6` AND `mw` ARE IN THIS LIST THOUGH NO SCENE IS CALLED ANY OF THEM. Each is a PSEUDO-SCENE
+# (`o6`'s two runs drive `retained`, `q6`'s and `mw`'s one each drive `app`), and this list is keyed by what the CALLER
 # asked for, not by what the runs resolve to -- so leaving it out would have
 # resolved no document, set SB_SVG empty, and made both O6 runs refuse by name on
 # a knob the operator did set. The guard below catches the next one of these
 # instead of leaving it to be discovered on the box.
-$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'app', 'o6', 'q6')
+$svgScenes = @('document', 'selection-marquee', 'retained', 'pointer', 'stall', 'stay', 'app', 'o6', 'q6', 'mw')
 $needsSvg = ($Stay -and ($svgScenes -contains $Scene)) -or
             (@($Scenes | Where-Object { $svgScenes -contains $_ }).Count -gt 0)
 if ($needsSvg) {
@@ -547,6 +547,27 @@ $runPlan = @{
     'q6' = @(
         @{ Name = 'q6 (app + the Align pane''s synthetic replay)'; Scene = 'app';
            Env = @{ SB_PANEL_SYNTH = 'align_left_button' }; Args = @() }
+    )
+    # ⭐ `mw` IS ONE `app` RUN TOO (W2b-3): the pane opens on Magic Wand, and
+    # the render thread replays a VALUE sequence through the path a person's
+    # commit and press reach -- a commit of `abc`, a commit of the text below,
+    # a press of the toggle, the same press again -- re-reading the plan after
+    # every step, then writes ONE `PANEL VALUE SYNTH DONE` row.
+    # `verify_window.ps1` waits for that row (`Get-SbValueWaits`) and
+    # `Get-SbValueVerdicts` (V1-V6) reads it.
+    #
+    # ⛔ ALL THREE VALUES BELOW ARE READ BY A RUST ARM
+    # (`panel_behavior_the_value_replay_on_the_sittings_panel`), which drives
+    # this exact panel, widgets and text on this sitting's default document in
+    # CI, with the shell's split rule. Each must stay the only assignment of its
+    # knob in this file; the arm refuses otherwise.
+    #
+    # ⛔ NOT IN THE DEFAULT LIST, like `q6`. Run it with `-Scenes mw`.
+    'mw' = @(
+        @{ Name = 'mw (app + the Magic Wand pane''s value replay)'; Scene = 'app';
+           Env = @{ SB_PANEL = 'magic_wand_panel_content'
+                    SB_PANEL_COMMIT = 'mwp_fill_tolerance:40'
+                    SB_PANEL_PRESS = 'mwp_fill_color' }; Args = @() }
     )
 }
 
