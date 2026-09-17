@@ -237,8 +237,21 @@ pub fn panel_plan(
 /// (the plan's rule for a templated display string: never sent raw). A shell
 /// shows its own fallback for a `null`, knowingly.
 pub fn panel_list(panels: &Value) -> Value {
-    let _ = panels;
-    json!([])
+    let Some(map) = panels.as_object() else { return json!([]) };
+    let mut ids: Vec<&String> = map.keys().collect();
+    ids.sort_unstable();
+    Value::Array(
+        ids.into_iter()
+            .map(|id| {
+                let summary = map[id]
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.contains("{{"))
+                    .map_or(Value::Null, |s| Value::String(s.to_string()));
+                json!({"id": id, "summary": summary})
+            })
+            .collect(),
+    )
 }
 
 /// The observables' oracles, shared by this module's tests and the ABI tests in

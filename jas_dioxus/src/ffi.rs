@@ -766,7 +766,13 @@ pub unsafe extern "C" fn jas_panel_plan(
 #[unsafe(no_mangle)]
 pub extern "C" fn jas_panel_list() -> JasBytes {
     ffi_instr::record(Crossing::PanelList, 0, 0);
-    JasBytes::empty()
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let list = crate::panel_plan::panel_list(ws.panels());
+    let out = JasBytes::from_string(serde_json::to_string(&list).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelList, out.len);
+    out
 }
 
 /// **A widget's behavior**, run in the engine (wave 2, A6).
