@@ -87,7 +87,10 @@ private let gradient = "gradient_panel_content"
         let start = model.stateStore.getPanel(magicWand, key) as? Bool
             ?? (WorkspaceData.load()?.panelStateDefaults(magicWand)[key] as? Bool)
         for expected in [!(start ?? false), start ?? false] {
+            let version = model.panelStateVersion
             let r = events(model, magicWand).press(widget)
+            // No bind write, so only the route's own bump re-reads the box.
+            #expect(model.panelStateVersion != version, "\(id): the version moved")
             #expect(r.outcome == "committed" && !r.bindWritten && r.behaviorsRun == 1,
                     "\(id): \(r.outcome), bind \(r.bindWritten), behaviors \(r.behaviorsRun)")
             #expect(model.stateStore.getPanel(magicWand, key) as? Bool == expected,
@@ -292,6 +295,23 @@ private let gradient = "gradient_panel_content"
     #expect(r.outcome == "committed" && r.bindWritten)
     #expect(written.count == 1 && written.first?.0 == "k" && written.first?.1 == "b",
             "writes: \(written)")
+}
+
+@Test func aBehaviorThatClosesTheDialogClosesTheOverlay() {
+    let model = Model()
+    model.stateStore.initDialog("d", defaults: ["k": "a"])
+    var closed = 0
+    let route = PanelWidgetEvents(model: model, panelId: nil, scope: [:],
+                                  onDialogWrite: { k, v in model.stateStore.setDialog(k, v) },
+                                  onDialogClosed: { closed += 1 })
+    let widget: [String: Any] = [
+        "type": "select", "bind": ["value": "dialog.k"],
+        "options": [["value": "a"], ["value": "b"]],
+        "behavior": [["event": "change", "effects": [["close_dialog": NSNull()]]]],
+    ]
+    let r = route.commit(widget, text: "b")
+    #expect(r.behaviorsRun == 1 && model.stateStore.getDialogId() == nil)
+    #expect(closed == 1, "the overlay heard the store close the dialog")
 }
 
 @Test func clearingCharacterLeadingWritesTheAutoValue() {
