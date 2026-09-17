@@ -2461,6 +2461,34 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **The constrain lock reaches the W edit.** Pressed through the door, the
+    /// lock makes a width commit scale the height by the same ratio; unpressed,
+    /// the height holds. The expected heights come from the box the engine
+    /// shows before the commit.
+    #[test]
+    fn properties_width_commit_honours_the_constrain_lock() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for locked in [false, true] {
+            let e = untransformed_engine();
+            if locked {
+                let (reply, err) = behave(e, PROPERTIES, r#"{"widget":"prop_constrain","event":"click"}"#);
+                assert_eq!(err, "", "the lock press: {reply}");
+                assert_eq!(engine_of(e).store.borrow().get_panel(PROPERTIES, "prop_constrain"),
+                           &serde_json::json!(true));
+            }
+            let (_, _, w0, h0) = selection_box(e);
+            let ev = serde_json::json!({"widget": "prop_w", "event": "commit",
+                                        "value": format!("{}", w0 * 2.0)});
+            let (reply, err) = behave(e, PROPERTIES, &ev.to_string());
+            assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply} {err}");
+            let (_, _, w1, h1) = selection_box(e);
+            assert!((w1 - w0 * 2.0).abs() < 1e-9, "locked={locked}: w {w0} -> {w1}");
+            let want_h = if locked { h0 * 2.0 } else { h0 };
+            assert!((h1 - want_h).abs() < 1e-9, "locked={locked}: h {h0} -> {h1}, wanted {want_h}");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
     /// Opacity (a `number_input`) and blend (a `select`) are set on EVERY
     /// selected element.
     #[test]
