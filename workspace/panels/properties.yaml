@@ -183,7 +183,8 @@ content:
             disabled: "active_document.selection_count == 0"
             value: "panel.prop_h"
         # Constrain-proportions lock: when on, editing W or H scales the
-        # object uniformly (the other follows). Single-selection only.
+        # object, or a multi-selection as a group, uniformly (the other
+        # follows). Disabled when nothing is selected.
         - id: prop_constrain
           type: icon_button
           summary: "Constrain proportions"
