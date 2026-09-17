@@ -20,10 +20,13 @@
 //!
 //! # Population, stated rather than implied
 //!
-//! [`Crossing`] enumerates the **10 functions of the materializer surface**: the
-//! 8 that stood on `main` at `22e5e30e`, plus `jas_bind_values` (S-C.1, because
-//! `widget_tree` is value-blind by design) and `jas_panel_event` (S-C.2, the
-//! write path a tick needs) — all in `ffi.rs`. It deliberately does NOT
+//! [`Crossing`] enumerates the **functions of the materializer surface**, all in
+//! `ffi.rs`: the 8 that stood on `main` at `22e5e30e`, `jas_bind_values` (S-C.1,
+//! because `widget_tree` is value-blind by design), `jas_panel_event` (S-C.2,
+//! the write path a tick needs), and each export a later wave added, which its
+//! variant's doc comment names. [`Crossing::COUNT`] is the number, and this
+//! paragraph does not repeat it: it read "10" here through six additions. It
+//! deliberately does NOT
 //! include the two S-B paint probes, which exist only on the S-B branch and are
 //! not part of a panel's surface — a distinction that cost a round of correction
 //! to establish, because "half-unbuilt" is a ratio whose denominator IS the tree
@@ -104,6 +107,11 @@ pub enum Crossing {
     /// one writes a VALUE and this one runs effects, and a shell that sent a
     /// click as a value edit would show up as the wrong row moving.
     PanelBehavior = 15,
+    /// W2b-2: the panels a shell can offer, by content id and summary. Counted
+    /// separately from `PanelPlan` for `MenuStructure`'s reason: the list is
+    /// read ONCE, and a count that grew with panel switches is a shell
+    /// re-reading the half that never moves.
+    PanelList = 16,
 }
 
 impl Crossing {
@@ -126,6 +134,7 @@ impl Crossing {
         "jas_menu_structure",
         "jas_panel_plan",
         "jas_panel_behavior",
+        "jas_panel_list",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -135,7 +144,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 16;
+    pub(crate) const COUNT: usize = 17;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -159,6 +168,7 @@ impl Crossing {
         Crossing::MenuStructure,
         Crossing::PanelPlan,
         Crossing::PanelBehavior,
+        Crossing::PanelList,
     ];
 
     pub fn name(self) -> &'static str {

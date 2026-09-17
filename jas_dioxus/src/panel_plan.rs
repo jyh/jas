@@ -228,6 +228,31 @@ pub fn panel_plan(
     (out, rows)
 }
 
+/// The panels a shell can offer (W2b-2): `[{"id": "<content id>", "summary":
+/// "<the panel's summary>"}...]`, one row per panel the compiled workspace
+/// carries, sorted by content id.
+///
+/// `id` is what `jas_panel_plan` takes. `summary` is the panel's display
+/// name, and it is `null` when the panel has none, or when it is a template
+/// (the plan's rule for a templated display string: never sent raw). A shell
+/// shows its own fallback for a `null`, knowingly.
+pub fn panel_list(panels: &Value) -> Value {
+    let Some(map) = panels.as_object() else { return json!([]) };
+    let mut ids: Vec<&String> = map.keys().collect();
+    ids.sort_unstable();
+    Value::Array(
+        ids.into_iter()
+            .map(|id| {
+                let summary = map[id]
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .filter(|s| !s.contains("{{"))
+                    .map_or(Value::Null, |s| Value::String(s.to_string()));
+                json!({"id": id, "summary": summary})
+            })
+            .collect(),
+    )
+}
 
 /// The observables' oracles, shared by this module's tests and the ABI tests in
 /// `ffi.rs`. Each returns `Err` naming what it found, so a negative control can
@@ -1187,5 +1212,66 @@ mod tests {
         }
         assert!(carried > 0 && icons_seen > 0 && missing_seen > 0,
             "vacuous: carried={carried} icons={icons_seen} missing={missing_seen}");
+    }
+
+    /// W2b-2: the list is sorted by content id, whatever order the map
+    /// iterates in, and each row carries exactly `id` and `summary`.
+    ///
+    /// ⚠️ A `serde_json::Map` built without `preserve_order` iterates sorted
+    /// already, so the input order below may not reach the function. The
+    /// explicit sort is what makes the order independent of that feature, and
+    /// the mutant that drops it is recorded as surviving in this build if it
+    /// does.
+    #[test]
+    fn panel_list_rows_are_sorted_by_id_with_the_literal_summary() {
+        let panels = json!({
+            "b_panel_content": {"summary": "Bee", "content": {}},
+            "a_panel_content": {"summary": "Ay"},
+            "c_panel_content": {"summary": "Sea"},
+        });
+        assert_eq!(
+            super::panel_list(&panels),
+            json!([
+                {"id": "a_panel_content", "summary": "Ay"},
+                {"id": "b_panel_content", "summary": "Bee"},
+                {"id": "c_panel_content", "summary": "Sea"},
+            ])
+        );
+    }
+
+    /// W2b-2: a summary the shell cannot show as written is `null`, never
+    /// raw: a template (the plan's rule for a templated display string), a
+    /// non-string, and an absent key. The row itself is still listed, since
+    /// the panel still opens.
+    #[test]
+    fn panel_list_sends_null_for_a_summary_it_will_not_send_raw() {
+        let panels = json!({
+            "t_panel_content": {"summary": "Hi {{panel.name}}"},
+            "n_panel_content": {"summary": 7},
+            "x_panel_content": {},
+            "ok_panel_content": {"summary": "Fine"},
+        });
+        let got = super::panel_list(&panels);
+        let by_id: BTreeMap<String, Value> = got
+            .as_array()
+            .expect("an array")
+            .iter()
+            .map(|r| (r["id"].as_str().expect("a string id").to_string(), r["summary"].clone()))
+            .collect();
+        assert_eq!(by_id.len(), 4, "every panel is listed: {got}");
+        assert_eq!(by_id["t_panel_content"], Value::Null, "{got}");
+        assert_eq!(by_id["n_panel_content"], Value::Null, "{got}");
+        assert_eq!(by_id["x_panel_content"], Value::Null, "{got}");
+        // The control: the same function sends a literal summary as written, so
+        // the three nulls above are the rule and not a function that sends none.
+        assert_eq!(by_id["ok_panel_content"], json!("Fine"), "{got}");
+        assert!(!got.to_string().contains("{{"), "a template crossed: {got}");
+    }
+
+    /// W2b-2: anything but a map of panels is an empty list, not a panic.
+    #[test]
+    fn panel_list_of_a_non_map_is_empty() {
+        assert_eq!(super::panel_list(&Value::Null), json!([]));
+        assert_eq!(super::panel_list(&json!(["a_panel_content"])), json!([]));
     }
 }

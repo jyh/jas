@@ -51,6 +51,39 @@ static class Program
     static void Eq(string name, string expected, string actual) =>
         Check(name, expected == actual, $"expected '{expected}', got '{actual}'");
 
+    // W2b-2's readers. Each returns a value that FAILS the case it feeds on
+    // bytes that do not parse, rather than throwing: a throw would end the run
+    // and hide every case after it.
+    static System.Text.Json.JsonDocument? Parse(byte[] bytes)
+    {
+        try { return System.Text.Json.JsonDocument.Parse(bytes); }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    static string? Str(System.Text.Json.JsonDocument doc, string key) =>
+        doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+        && doc.RootElement.TryGetProperty(key, out var v)
+        && v.ValueKind == System.Text.Json.JsonValueKind.String
+            ? v.GetString()
+            : null;
+
+    static bool? Bool(System.Text.Json.JsonDocument doc, string key) =>
+        doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+        && doc.RootElement.TryGetProperty(key, out var v)
+        && (v.ValueKind == System.Text.Json.JsonValueKind.True
+            || v.ValueKind == System.Text.Json.JsonValueKind.False)
+            ? v.GetBoolean()
+            : null;
+
+    static string Show(System.Text.Json.JsonDocument? doc) =>
+        doc is null ? "(unparseable)" : doc.RootElement.GetRawText();
+
+    static string Decode(string token)
+    {
+        try { return System.Text.Json.JsonSerializer.Deserialize<string>(token) ?? "(null)"; }
+        catch (System.Text.Json.JsonException) { return $"(not a JSON string: {token})"; }
+    }
+
     // Fold a whole run's rows, which is what `Report` does one call at a time.
     static TitleVerdict Run(params string[] rows)
     {
@@ -240,6 +273,77 @@ static class Program
             !pendingDirty.Contains(OracleRequires), pendingDirty);
         Check("W4: ...and has no dangling separator",
             !pendingDirty.Contains("|  "), $"'{pendingDirty}'");
+
+        // ===================================================================
+        // W2b-2 — WHAT A PANEL CONTROL SENDS, AND THE PANEL LIST
+        // ===================================================================
+        //
+        // ⛔ THE SHELL CANNOT BE COMPILED WHERE IT IS WRITTEN, AND IT RUNS ONLY ON
+        // kenai. These are the parts of a person's panel input that a desktop-less
+        // runner CAN drive: the bytes that cross, the token a row prints, and
+        // the one decision the shell makes about when a focus loss commits.
+
+        var press = Parse(PanelWire.EventJson("mwp_fill_color", "click", null, false, false, false, false));
+        Check("W2b-2: a press carries NO value key",
+            press is not null && !press.RootElement.TryGetProperty("value", out _), Show(press));
+        Check("W2b-2: a press names its widget and its event",
+            press is not null
+            && Str(press, "widget") == "mwp_fill_color" && Str(press, "event") == "click", Show(press));
+
+        var commit = Parse(PanelWire.EventJson("mwp_fill_tolerance", "commit", "40", false, false, false, false));
+        Check("W2b-2: a commit carries its text as a JSON STRING, never a number",
+            commit is not null
+            && commit.RootElement.TryGetProperty("value", out var cv)
+            && cv.ValueKind == System.Text.Json.JsonValueKind.String
+            && cv.GetString() == "40", Show(commit));
+
+        var spaced = Parse(PanelWire.EventJson("w", "commit", " 4 0 ", false, false, false, false));
+        Eq("W2b-2: a commit sends the text verbatim, spaces and all",
+            " 4 0 ", spaced is null ? "(unparseable)" : Str(spaced, "value") ?? "(absent)");
+        var blank = Parse(PanelWire.EventJson("w", "commit", "", false, false, false, false));
+        Eq("W2b-2: an empty commit sends the empty STRING, and the core decides",
+            "", blank is null ? "(unparseable)" : Str(blank, "value") ?? "(absent)");
+
+        var mods = Parse(PanelWire.EventJson("w", "click", null, true, false, true, false));
+        Check("W2b-2: the modifiers cross as booleans, each its own",
+            mods is not null
+            && Bool(mods, "alt") == true && Bool(mods, "shift") == false
+            && Bool(mods, "ctrl") == true && Bool(mods, "meta") == false, Show(mods));
+
+        var token = PanelWire.RowValue("a b\tc");
+        Check("W2b-2: a row value is one whitespace-free token",
+            token.Length > 0 && !token.Any(char.IsWhiteSpace), $"'{token}'");
+        Eq("W2b-2: ...and it decodes back to the text",
+            "a b\tc", Decode(token));
+        Eq("W2b-2: a press prints the no-value marker",
+            PanelWire.NoValue, PanelWire.RowValue(null));
+        Check("W2b-2: CONTROL: the text '-' does not print as the no-value marker",
+            PanelWire.RowValue("-") != PanelWire.NoValue, PanelWire.RowValue("-"));
+
+        Check("W2b-2: focus loss commits a changed text",
+            PanelWire.CommitOnBlur("41", "40"), "41 over 40 did not commit");
+        Check("W2b-2: CONTROL: focus loss does not commit the text the core showed",
+            !PanelWire.CommitOnBlur("40", "40"), "40 over 40 committed");
+        Check("W2b-2: the comparison is ordinal, so a case change commits",
+            PanelWire.CommitOnBlur("Abc", "abc"), "Abc over abc did not commit");
+
+        var list = PanelWire.ReadPanelList(
+            "[{\"id\":\"align_panel_content\",\"summary\":\"Align\"},"
+            + "{\"id\":\"magic_wand_panel_content\",\"summary\":null},"
+            + "{\"summary\":\"No id\"},{\"id\":7,\"summary\":\"Number id\"}]");
+        Eq("W2b-2: the panel list keeps the core's rows in the core's order",
+            "align_panel_content=Align|magic_wand_panel_content=magic_wand_panel_content",
+            list is null ? "(null)" : string.Join("|", list.Rows.Select(r => $"{r.Id}={r.Label}")));
+        Check("W2b-2: a row with no string id is counted, never shown",
+            list is not null && list.Skipped == 2, list is null ? "(null)" : $"skipped={list.Skipped}");
+        Check("W2b-2: bytes that do not parse are UNREADABLE (null), not an empty list",
+            PanelWire.ReadPanelList("not json") is null, "an unparseable list read as a list");
+        Check("W2b-2: a JSON object is UNREADABLE too",
+            PanelWire.ReadPanelList("{\"id\":\"a\"}") is null, "an object read as a list");
+        var none = PanelWire.ReadPanelList("[]");
+        Check("W2b-2: CONTROL: an empty array is an empty list, not a refusal",
+            none is not null && none.Rows.Count == 0 && none.Skipped == 0,
+            none is null ? "(null)" : $"rows={none.Rows.Count} skipped={none.Skipped}");
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

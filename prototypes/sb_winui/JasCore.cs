@@ -452,7 +452,9 @@ internal static unsafe class JasCore
     /// <summary>
     /// Run a widget's behavior IN THE ENGINE (`jas_panel_behavior`, A6).
     ///
-    /// `eventJson` is `{"widget","event","alt","shift","meta","ctrl"}`. The reply
+    /// `eventJson` is `{"widget","event","alt","shift","meta","ctrl"}`, plus
+    /// `"value"` (the control's TEXT, as a JSON string) on a commit; see
+    /// <see cref="PanelWire.EventJson"/>. The reply
     /// is `{"changed":[rows],"doc_changed":bool}`. ⛔ A REFUSAL IS THE EMPTY SPAN
     /// and runs NOTHING; its class and detail are in
     /// <see cref="jas_last_error_json"/> as `{"panel_event","detail"}`. A click
@@ -462,6 +464,16 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_panel_behavior(
         IntPtr engine, byte[] panelId, nuint panelLen, byte[] eventJson, nuint eventLen);
+
+    /// <summary>
+    /// The panels the pane can offer (`jas_panel_list`, W2b-2):
+    /// `[{"id","summary"}]`, sorted by content id, `summary` null where the
+    /// core will not send one. Takes no engine, like
+    /// <see cref="jas_menu_structure"/>, and is read once. An empty span is a
+    /// refusal (no compiled workspace).
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_panel_list();
 
     // -- events (BL1: the shell sends events, never state) -------------------
 

@@ -32,6 +32,7 @@
 
   <ItemGroup>
     <Compile Include="../sb_winui/TitleVerdict.cs" Link="TitleVerdict.cs" />
+    <Compile Include="../sb_winui/PanelWire.cs" Link="PanelWire.cs" />
   </ItemGroup>
 
 </Project>

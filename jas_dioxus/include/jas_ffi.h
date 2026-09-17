@@ -622,6 +622,24 @@ struct JasBytes jas_panel_plan(struct JasEngine *e,
                                int64_t avail_h);
 
 /**
+ * **The panels a shell can offer** (W2b-2): `[{"id":"<content id>",
+ * "summary":"<display name>"}...]`, sorted by content id.
+ *
+ * `id` is what [`jas_panel_plan`] and [`jas_panel_behavior`] take. `summary`
+ * is the panel's own display name, and it is `null` when the panel has none
+ * or has a template there, which never crosses raw. The shape is
+ * `crate::panel_plan::panel_list`'s.
+ *
+ * ⛔ TAKES NO ENGINE, for [`jas_menu_structure`]'s reason: the list is a
+ * property of the compiled bundle, not of a document session, and it
+ * evaluates nothing. A shell reads it once.
+ *
+ * A refusal (no compiled workspace) is the empty span.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ */
+struct JasBytes jas_panel_list(void);
+
+/**
  * **A widget's behavior**, run in the engine (wave 2, A6).
  *
  * `{"widget":"align_left_button","event":"click","alt":false}`: the shell

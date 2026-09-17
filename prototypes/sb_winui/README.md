@@ -123,7 +123,7 @@ value is refused by name on the render thread (`Canvas.cs:1711-1758`).
 | `pointer` | load, dump the document, and wait for a REAL gesture; a timeout is `NOT RUN`, never a synthetic receipt wearing `REAL` | a document |
 | `stay` | paint once and do not complete and do not exit; the row carries the PID | optional document |
 | `abi` | wave 1's bindings driven once each against the held engine; one `ABI` row | — |
-| `app` | the application: an optional preload (`SB_OPEN_PATH`, else `SB_SVG`), the materialized menubar, and the Align pane (below). It does not complete and does not exit | optional document |
+| `app` | the application: an optional preload (`SB_OPEN_PATH`, else `SB_SVG`), the materialized menubar, and the panel pane, which opens on Align (below). It does not complete and does not exit | optional document |
 | `selection-marquee` | the synthesised marquee as it stood at checkpoint 3, renamed and kept as a CONTROL. It moves nothing and selects N; it proves nothing about the pointer seam. The old spelling `selection` is REFUSED by name pointing here, so no invocation written before the rename can silently run the wrong arm | a document |
 
 Every scene's row ends with the tid tail, and every row is appended to
@@ -131,9 +131,9 @@ Every scene's row ends with the tid tail, and every row is appended to
 how a measurement reaches a session-1 observer, the file is how it reaches
 session 0.
 
-## The Align pane (wave 2a, W2-5)
+## The panel pane (wave 2a, W2-5; wave 2b, W2b-2)
 
-Under `app` only, a fixed right-hand pane shows the Align panel. It is a
+Under `app` only, a fixed right-hand pane shows one panel, Align first. It is a
 MATERIALIZER like the menubar: `jas_panel_plan("align_panel_content", 228, 0)`
 supplies every control's canonical rect, its resolved `values`, its literal
 `static` display strings and the workspace definition of every icon it names;
@@ -148,12 +148,15 @@ scene leaves it collapsed and keeps the surface it always had.
 
 | row | written | carries |
 |---|---|---|
-| `PANEL OPEN` | render thread, once | the plan's list counts, `crossings` (the core's own count across the open, 2 when healthy) and `bytes` |
-| `PANEL BUILT` | UI thread, per rebuild | controls by kind; `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a button with no id, never enabled) |
+| `PANEL OPEN` | render thread, per open | `via` (`app` for the first open, `hand` for the selector), the plan's list counts, `crossings` (the core's own count across the open, 2 when healthy) and `bytes` |
+| `PANEL LIST` | UI thread, once | `panels`, `skipped` (a row with no string id, never offered), `bytes`, and `first` (the first panel's id, or `ABSENT` if the list does not hold it) |
+| `PANEL SWITCH REQUESTED` | UI thread, per choice | `from` and `to`; the `PANEL OPEN via=hand` row that follows is the answer |
+| `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs`, `toggles`); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled) |
 | `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
-| `PANEL DRAWN` | UI thread, per published plan | `seq`, `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, pane and canvas sizes |
-| `PANEL CLICK` | render thread, per click | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH`), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
-| `PANEL CLICK REFUSED` | render thread | `via`, and the core's refusal class and detail; nothing ran |
+| `PANEL DRAWN` | UI thread, per published plan | `seq`, `cause` (`open`, `click`, `commit`, ...), `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, `editing` (a focused number box holding an uncommitted edit, whose text was left alone), pane and canvas sizes |
+| `PANEL CLICK` | render thread, per press or commit | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH`), `event` (`click` or `commit`), `value` (a commit's text as one JSON-string token with each space written `\u0020`, or `-` for a press), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
+| `PANEL CLICK REFUSED` | render thread | `via`, `event`, `value`, and the core's refusal class and detail (`Disabled`, `BadValue`, `MissingValue`, ...); nothing ran |
+| `PANEL CLICK DROPPED` | render thread | a press or commit on the pane a person was looking at, which reached the render thread after the selector opened another panel. It is not sent: the panel it names is no longer shown |
 | `PANEL SYNTH DONE` | render thread, once, under `SB_PANEL_SYNTH` | `selected` (after the replay's `select_all`) and `doc-sha=h0/h0b/hs/h1/h1b/h2`, the core's document digest at each of the six `SYNTH-*` hash rows |
 
 `RUSTFAIL` is written for a plan refusal, a draw that threw, a click answered
@@ -163,12 +166,41 @@ is re-read after every drain that could have moved the document (a pointer
 release, an op, an open) and after every click; the click's rows are CHECKED
 against it rather than applied.
 
-**Not built in 2a, stated as negatives:** the spacing input is display-only
-(the core keeps it disabled: the engine cannot designate a key object);
+### Choosing a panel, and changing a value (W2b-2)
+
+The selector above the plan lists `jas_panel_list`'s rows: each panel's
+`summary` (or its content id when the core sends none), in the core's order.
+It is read ONCE, on the render thread, before the first open's counter window,
+so Q6.2's `crossings=2` is unchanged. Choosing a panel queues an open; the pane
+redraws from that panel's plan, and its width does not change.
+
+- **`number_input`** is a text box showing the core's value ALONE, as both
+  active ports show it; a declared `unit`/`suffix` is its tooltip. Enter
+  commits; losing focus commits only a text that differs from the core's
+  value. A commit sends `{"widget", "event": "commit", "value": "<the text>"}`,
+  always a JSON string, and the core parses it by the widget's kind
+  (`WIDGET_EVENTS.md`). A box whose leaf has no id is read-only.
+- **`toggle`** is a check box labelled with the plan's `label`. A press sends
+  `{"widget", "event": "click"}`.
+- **Every control is put back to the core's last value as it sends.** A
+  refused commit therefore leaves the core's value on screen, and an accepted
+  one appears when the plan is re-read after the reply.
+
+The event bytes, the row token, the focus-loss rule and the list reader are
+`PanelWire.cs`, which `sb_winui_tests` drives on a desktop-less runner.
+
+**Not built, stated as negatives:** the spacing input is disabled by the core
+(the engine cannot designate a key object);
 `chrome` and `containers` entries are counted and not drawn (align has none); a
 `bind.icon` that a tick moves outside the plan's `icons` map shows its text
 face; whether WinUI's SVG reader honours `currentColor` is read, not measured,
-which is why the pane is light and the ink is substituted.
+which is why the pane is light and the ink is substituted. From W2b-2: the
+other value kinds (`length_input`, `select`, `icon_select`, `combo_box`,
+`checkbox`, `icon`) are still `[type]` placeholders (W2b-9); a panel that was
+switched away from stays ENROLLED, since the ABI has no close, so later ticks
+still evaluate it; whether a WinUI `TextBox` raises `KeyDown` for Enter, and
+whether a `CheckBox`'s `Click` arrives after its own toggle, are read, not
+measured.
 
 ### Q6's synthetic arm (W2-6)
 

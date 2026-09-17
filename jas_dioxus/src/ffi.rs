@@ -749,6 +749,32 @@ pub unsafe extern "C" fn jas_panel_plan(
     out
 }
 
+/// **The panels a shell can offer** (W2b-2): `[{"id":"<content id>",
+/// "summary":"<display name>"}...]`, sorted by content id.
+///
+/// `id` is what [`jas_panel_plan`] and [`jas_panel_behavior`] take. `summary`
+/// is the panel's own display name, and it is `null` when the panel has none
+/// or has a template there, which never crosses raw. The shape is
+/// `crate::panel_plan::panel_list`'s.
+///
+/// ⛔ TAKES NO ENGINE, for [`jas_menu_structure`]'s reason: the list is a
+/// property of the compiled bundle, not of a document session, and it
+/// evaluates nothing. A shell reads it once.
+///
+/// A refusal (no compiled workspace) is the empty span.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+#[unsafe(no_mangle)]
+pub extern "C" fn jas_panel_list() -> JasBytes {
+    ffi_instr::record(Crossing::PanelList, 0, 0);
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let list = crate::panel_plan::panel_list(ws.panels());
+    let out = JasBytes::from_string(serde_json::to_string(&list).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelList, out.len);
+    out
+}
+
 /// **A widget's behavior**, run in the engine (wave 2, A6).
 ///
 /// `{"widget":"align_left_button","event":"click","alt":false}`: the shell
@@ -1538,6 +1564,103 @@ mod tests {
     }
 
     const PLAN_SIZES: [(i64, i64); 3] = [(228, 0), (228, 600), (0, 0)];
+
+    /// The panel files' own `id:` and `summary:` lines, read from the YAML
+    /// SOURCE with a line reader: a second method beside the compiled bundle
+    /// `jas_panel_list` reads. Only column-0 keys count, so a widget's nested
+    /// `id:` is never taken for the panel's.
+    fn panel_files() -> std::collections::BTreeMap<String, Option<String>> {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../workspace/panels");
+        let mut out = std::collections::BTreeMap::new();
+        for entry in std::fs::read_dir(dir).expect("workspace/panels") {
+            let path = entry.expect("a dir entry").path();
+            if path.extension().and_then(|x| x.to_str()) != Some("yaml") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).expect("a panel file");
+            let top = |key: &str| {
+                text.lines()
+                    .find_map(|l| l.strip_prefix(key))
+                    .map(|v| v.trim().trim_matches('"').to_string())
+            };
+            let id = top("id:").unwrap_or_else(|| panic!("{} has no top-level id", path.display()));
+            assert!(out.insert(id.clone(), top("summary:")).is_none(), "{id} is declared twice");
+        }
+        out
+    }
+
+    fn panel_list_rows() -> Vec<serde_json::Value> {
+        let got = take(jas_panel_list());
+        let v: serde_json::Value =
+            serde_json::from_str(&got).unwrap_or_else(|_| panic!("not JSON: {got:?}"));
+        v.as_array().unwrap_or_else(|| panic!("not an array: {got}")).clone()
+    }
+
+    /// **W2b-2 (a).** The list names every panel FILE in the workspace, once,
+    /// with the summary that file declares, and in id order. The expectation
+    /// is read from the YAML source, not from the bundle the export reads.
+    #[test]
+    fn panel_list_names_every_panel_file_with_its_summary() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let files = panel_files();
+        let rows = panel_list_rows();
+        // ⛔ ANTI-VACUITY FIRST: two empty sides agree perfectly.
+        assert!(files.len() >= 10, "only {} panel files were read", files.len());
+        let ids: Vec<&str> = rows.iter().map(|r| r["id"].as_str().expect("a string id")).collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(ids, sorted, "the list is not sorted by id with each id once");
+        let got: std::collections::BTreeMap<String, Option<String>> = rows
+            .iter()
+            .map(|r| {
+                let keys: Vec<&String> = r.as_object().expect("a row object").keys().collect();
+                assert_eq!(keys, ["id", "summary"], "a row carries exactly id and summary: {r}");
+                (r["id"].as_str().unwrap().to_string(), r["summary"].as_str().map(str::to_string))
+            })
+            .collect();
+        assert_eq!(got, files);
+        // The one summary that is not its panel's name, so a list that sent a
+        // title-cased id would fail here and not only in the map comparison.
+        assert_eq!(got["properties_panel_content"].as_deref(), Some("Object properties"));
+    }
+
+    /// **W2b-2 (b).** Every id the list offers is one the plan export opens,
+    /// so a shell that shows the list never offers a panel it cannot draw.
+    #[test]
+    fn panel_list_ids_each_open_a_plan() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let rows = panel_list_rows();
+        assert!(rows.len() >= 10, "vacuous: {} rows", rows.len());
+        let e = jas_engine_new();
+        for r in &rows {
+            let id = r["id"].as_str().expect("a string id");
+            let plan = plan_of(e, id, 228, 0);
+            assert!(plan.contains("\"leaves\""), "{id}: the plan export refused it: {plan:?}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2b-2 (c).** No engine, one counted crossing, the reply's bytes on
+    /// the ledger, nothing interpretable, and the same bytes after an edit.
+    #[test]
+    fn panel_list_counts_one_crossing_and_needs_no_session() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let before = crate::ffi_instr::read(Crossing::PanelList);
+        let first = take(jas_panel_list());
+        let after = crate::ffi_instr::read(Crossing::PanelList);
+        assert!(!first.is_empty(), "the list refused");
+        assert_eq!(after.0 - before.0, 1, "calls");
+        assert_eq!(after.2 - before.2, first.len() as u64, "bytes_out");
+        assert!(!first.contains("{{"), "a template crossed: {first}");
+
+        let e = jas_engine_new();
+        let op = r#"{"op":"create_artboard","id":"ab_w2b2"}"#;
+        assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+        let second = take(jas_panel_list());
+        unsafe { jas_engine_free(e) };
+        assert_eq!(first, second, "the list moved with a document edit");
+    }
 
     /// **Q1 through the ABI.** For EVERY panel the compiled workspace carries
     /// (derived, never pinned), at three sizes, every `(path, rect)` the plan

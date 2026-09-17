@@ -95,10 +95,30 @@
             BorderThickness="1,0,0,0"
             RequestedTheme="Light"
             Visibility="Collapsed">
-            <ScrollViewer
-                x:Name="PaneScroll"
-                HorizontalScrollBarVisibility="Disabled"
-                VerticalScrollBarVisibility="Auto" />
+            <!--
+              W2b-2: THE PANEL SELECTOR sits above the plan. Its entries are the
+              core's own list (jas_panel_list: content ids and summaries), so
+              nothing here names a panel either; it stays disabled until that
+              list has been read. One panel is shown at a time, and the width
+              is the pane's, so choosing one resizes nothing.
+            -->
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <ComboBox
+                    x:Name="PanePicker"
+                    Grid.Row="0"
+                    Margin="4,4,4,0"
+                    HorizontalAlignment="Stretch"
+                    IsEnabled="False" />
+                <ScrollViewer
+                    x:Name="PaneScroll"
+                    Grid.Row="1"
+                    HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto" />
+            </Grid>
         </Border>
 
         <!--
