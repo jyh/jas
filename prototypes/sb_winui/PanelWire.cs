@@ -118,22 +118,76 @@ internal static class PanelWire
     internal const string Unreadable = "UNREADABLE";
 
     /// <summary>
-    /// W2b-3: one resolved value of one plan leaf, as the plan carries it.
-    /// RED-FIRST STUB: the cases in `sb_winui_tests` are written against the
-    /// contract below and must fail on this body.
+    /// W2b-3: one resolved value of one plan leaf, exactly as the plan carries
+    /// it -- the reading the value replay's row reports at each step.
+    ///
+    /// Returns the value string of `values[key]` on the FIRST leaf whose `id`
+    /// is <paramref name="widgetId"/>; <see cref="Absent"/> when no leaf has
+    /// that id (an empty id is never matched, so an id-less text leaf is never
+    /// read) or the leaf carries no such key; <see cref="Unreadable"/> when the
+    /// bytes are not a plan (no parse, not an object, no `leaves` array) or
+    /// the value is not a string.
+    ///
+    /// ⛔ AN EMPTY STRING IS A VALUE, NOT ABSENT. A reader that folded the two
+    /// would hand the harness a missing reading that looks like a real one.
     /// </summary>
     internal static string LeafValue(string planJson, string widgetId, string key)
     {
-        return "STUB";
+        if (widgetId.Length == 0) { return Absent; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(planJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("leaves", out var leaves)
+                || leaves.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return Unreadable;
+            }
+            foreach (var leaf in leaves.EnumerateArray())
+            {
+                if (leaf.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !leaf.TryGetProperty("id", out var id)
+                    || id.ValueKind != System.Text.Json.JsonValueKind.String
+                    || !string.Equals(id.GetString(), widgetId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (!leaf.TryGetProperty("values", out var values)
+                    || values.ValueKind != System.Text.Json.JsonValueKind.Object
+                    || !values.TryGetProperty(key, out var value))
+                {
+                    return Absent;
+                }
+                return value.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? value.GetString() ?? Unreadable
+                    : Unreadable;
+            }
+            return Absent;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return Unreadable;
+        }
     }
 
     /// <summary>
-    /// W2b-3: `SB_PANEL_COMMIT=&lt;widget&gt;:&lt;text&gt;`, split at the FIRST
-    /// `:`. RED-FIRST STUB, as <see cref="LeafValue"/>.
+    /// W2b-3: `SB_PANEL_COMMIT=&lt;widget&gt;:&lt;text&gt;` as (widget, text),
+    /// split at the FIRST `:`, ordinal. The text is kept verbatim -- spaces,
+    /// later colons, or nothing at all: the core decides what it means.
+    ///
+    /// Null when there is no `:`, or when the widget is empty or whitespace
+    /// (the predicate every pane knob uses for unset), so the caller refuses
+    /// the knob by name instead of replaying on a widget nobody named. The
+    /// harness splits with the same rule (`Split-SbCommitKnob`).
     /// </summary>
     internal static (string Widget, string Text)? SplitCommitKnob(string knob)
     {
-        return ("STUB", "STUB");
+        var colon = knob.IndexOf(':', StringComparison.Ordinal);
+        if (colon < 0) { return null; }
+        var widget = knob[..colon];
+        if (string.IsNullOrWhiteSpace(widget)) { return null; }
+        return (widget, knob[(colon + 1)..]);
     }
 }
 
