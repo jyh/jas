@@ -10,7 +10,7 @@
 use serde_json;
 use super::expr::eval;
 use super::expr_types::Value;
-use super::state_store::StateStore;
+use super::state_store::{StateStore, StoreWrite};
 use crate::document::controller::Controller;
 use crate::document::document::ElementPath;
 use crate::document::model::{Model, NonUndoableIntent};
@@ -138,6 +138,20 @@ pub trait EffectHost {
         _model: Option<&mut Model>,
     ) {
     }
+
+    /// A key in panel `panel_id`'s own scope was written (FB wave 2b,
+    /// W2b-5). The reference fires its panel subscriptions from
+    /// `set_panel` and `list_push` (the engine's Properties apply is one).
+    /// Reported exactly as [`EffectHost::global_written`] is, in the same
+    /// order stream. The default does nothing.
+    fn panel_written(
+        &mut self,
+        _panel_id: &str,
+        _key: &str,
+        _store: &mut StateStore,
+        _model: Option<&mut Model>,
+    ) {
+    }
 }
 
 /// [`run_effects`] with a platform host asked before every built-in arm, in
@@ -192,9 +206,9 @@ fn run_effects_into<'h>(
     // The owner commits once at the end, spanning every effect in this batch
     // into a single undo step. commit_txn is a no-op if nothing opened one.
     let owns_txn = model.as_deref().map_or(false, |m| !m.in_txn());
-    // A11: a hosted batch journals its global writes and reports them to the
+    // A11: a hosted batch journals its store writes and reports them to the
     // host after each effect. The outermost batch owns the journal.
-    let owns_journal = host.is_some() && store.open_global_writes();
+    let owns_journal = host.is_some() && store.open_writes();
     for effect in effects {
         match effect {
             serde_json::Value::Object(map) => {
@@ -217,7 +231,7 @@ fn run_effects_into<'h>(
                 report.unhandled.push(Unhandled::NotAnEffect(other.to_string()));
             }
         }
-        report_global_writes(store, model.as_deref_mut(), host.as_deref_mut());
+        report_writes(store, model.as_deref_mut(), host.as_deref_mut());
     }
     // Dialog on_change post-run hook. Fires the action declared on the
     // currently-open dialog's on_change field whenever this batch
@@ -238,9 +252,9 @@ fn run_effects_into<'h>(
             store.set_firing_on_change(false);
         }
     }
-    report_global_writes(store, model.as_deref_mut(), host.as_deref_mut());
+    report_writes(store, model.as_deref_mut(), host.as_deref_mut());
     if owns_journal {
-        store.close_global_writes();
+        store.close_writes();
     }
     // Commit the transaction this batch opened (if any), making the whole
     // action one undo step. No-op when nothing opened one or when nested.
@@ -262,16 +276,21 @@ fn run_effects_into<'h>(
     }
 }
 
-/// Tell the host about every global the journal holds, in write order, and
+/// Tell the host about every write the journal holds, in write order, and
 /// empty it. Nothing without a host.
-fn report_global_writes<'h>(
+fn report_writes<'h>(
     store: &mut StateStore,
     mut model: Option<&mut Model>,
     host: Option<&mut (dyn EffectHost + 'h)>,
 ) {
     let Some(host) = host else { return };
-    for key in store.take_global_writes() {
-        host.global_written(&key, store, model.as_deref_mut());
+    for write in store.take_writes() {
+        match write {
+            StoreWrite::Global(key) => host.global_written(&key, store, model.as_deref_mut()),
+            StoreWrite::Panel(panel, key) => {
+                host.panel_written(&panel, &key, store, model.as_deref_mut())
+            }
+        }
     }
 }
 
@@ -12405,20 +12424,75 @@ mod tests {
     fn nothing_is_journaled_outside_a_hosted_batch() {
         use serde_json::json;
         let mut store = StateStore::new();
-        run_effects(&[json!({"set": {"x": "1"}})], &json!({}), &mut store, None, None, None, None);
-        assert_eq!(store.take_global_writes(), Vec::<String>::new());
+        use crate::interpreter::state_store::StoreWrite;
+        store.init_panel("p", std::collections::HashMap::new());
+        run_effects(&[json!({"set": {"x": "1"}}),
+                      json!({"set_panel_state": {"key": "k", "value": "1", "panel": "p"}})],
+                    &json!({}), &mut store, None, None, None, None);
+        assert_eq!(store.take_writes(), Vec::<StoreWrite>::new());
         let got = writes_of(vec![json!({"set": {"y": "2"}})], &mut store, None);
         assert_eq!(got.len(), 1, "the control: a hosted batch IS journaled");
         store.set("z", json!(3));
-        assert_eq!(store.take_global_writes(), Vec::<String>::new());
+        store.set_panel("p", "k", json!(2));
+        assert_eq!(store.take_writes(), Vec::<StoreWrite>::new());
         // And the journal opens and closes: its owner is the outermost batch.
-        assert!(store.open_global_writes(), "a closed journal opens");
-        assert!(!store.open_global_writes(), "an open journal is not reopened");
+        assert!(store.open_writes(), "a closed journal opens");
+        assert!(!store.open_writes(), "an open journal is not reopened");
         store.set("w", json!(4));
-        assert_eq!(store.take_global_writes(), vec!["w".to_string()]);
-        store.close_global_writes();
+        store.set_panel("p", "k", json!(3));
+        assert_eq!(store.take_writes(), vec![StoreWrite::Global("w".into()),
+                                             StoreWrite::Panel("p".into(), "k".into())]);
+        store.close_writes();
         store.set("v", json!(5));
-        assert_eq!(store.take_global_writes(), Vec::<String>::new());
+        assert_eq!(store.take_writes(), Vec::<StoreWrite>::new());
+    }
+
+    /// **W2b-5.** A panel write is reported to the host in the same order
+    /// stream as the globals, with the store already holding it: from
+    /// `set_panel_state` (to the active panel or a named one) and from
+    /// `list_push`, the reference's two panel-notifying writes the runner
+    /// reaches. A write to a panel with no scope writes nothing and is not
+    /// reported.
+    #[test]
+    fn a_panel_write_is_reported_in_order_with_the_globals() {
+        use serde_json::json;
+        #[derive(Default)]
+        struct Both {
+            seen: Vec<(String, serde_json::Value)>,
+        }
+        impl EffectHost for Both {
+            fn run(&mut self, _: &str, _: &serde_json::Value, _: &mut StateStore,
+                   _: Option<&mut Model>) -> bool {
+                false
+            }
+            fn global_written(&mut self, key: &str, store: &mut StateStore, _: Option<&mut Model>) {
+                self.seen.push((key.to_string(), store.get(key).clone()));
+            }
+            fn panel_written(&mut self, panel: &str, key: &str, store: &mut StateStore,
+                             _: Option<&mut Model>) {
+                self.seen.push((format!("{panel}.{key}"), store.get_panel(panel, key).clone()));
+            }
+        }
+        let mut store = StateStore::new();
+        store.init_panel("p", std::collections::HashMap::new());
+        store.init_panel("q", std::collections::HashMap::new());
+        store.set_active_panel(Some("p"));
+        let mut host = Both::default();
+        run_effects_hosted(&[
+            json!({"set_panel_state": {"key": "cap", "value": "\"square\""}}),
+            json!({"set": {"x": "1"}}),
+            json!({"set_panel_state": {"key": "cap", "value": "\"round\"", "panel": "q"}}),
+            json!({"set_panel_state": {"key": "cap", "value": "\"butt\"", "panel": "none"}}),
+            json!({"list_push": {"target": "panel.recent", "value": "\"a\""}}),
+            json!({"set_panel_state": {"key": "cap", "value": "\"square\""}}),
+        ], &json!({}), &mut store, None, None, None, None, &mut host);
+        assert_eq!(host.seen, vec![
+            ("p.cap".to_string(), json!("square")),
+            ("x".to_string(), json!(1)),
+            ("q.cap".to_string(), json!("round")),
+            ("p.recent".to_string(), json!(["a"])),
+            ("p.cap".to_string(), json!("square")),
+        ]);
     }
 
     // -----------------------------------------------------------------------

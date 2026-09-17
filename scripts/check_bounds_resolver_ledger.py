@@ -90,12 +90,17 @@ def duplicate_ledger_keys(src: str) -> list[str]:
 
 
 LEDGER: dict[str, dict[str, str]] = {
-    "interpreter/renderer.rs": {
+    "interpreter/properties_host.rs": {
         "let local = e.geometric_bounds();":
-            "REACHABLE, UNCONVERTED — keyboard transform of the selection. An "
-            "instance nudged by arrow key builds its new transform from a box "
-            "at the origin. Its own stone: the transform must compose about "
-            "the RESOLVED centre, which is more than swapping the accessor.",
+            "REACHABLE, UNCONVERTED — the Properties panel's single-selection "
+            "W / H / rotation / shear edit (moved here from renderer.rs by "
+            "W2b-5; this verdict called it the keyboard transform until then, "
+            "which was a different reader). An instance edited there builds its "
+            "new transform from a box at the origin. Its own stone: the "
+            "transform must compose about the RESOLVED box, which is more than "
+            "swapping the accessor.",
+    },
+    "interpreter/renderer.rs": {
         "let (x, y, w, h) = elem.bounds();":
             "REACHABLE, UNCONVERTED — the Layers-panel thumbnail "
             "(`tree_preview_svg`). An instance yields w=h=0 and the function "

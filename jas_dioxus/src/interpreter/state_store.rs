@@ -56,10 +56,23 @@ pub struct StateStore {
     /// the artboards panel-selection on canvas click. See
     /// ARTBOARD_TOOL.md §Selection coupling.
     pending_panel_state_writes: Vec<(String, String, serde_json::Value)>,
-    /// The global keys `set` has written while a hosted effects batch runs,
-    /// or `None` when no batch is recording (FB wave 2b, A11). Only a hosted
-    /// batch opens it, so a store that is never run hosted records nothing.
-    global_writes: Option<Vec<String>>,
+    /// The writes a hosted effects batch reports to its host, in write
+    /// order, or `None` when no batch is recording (FB wave 2b, A11 and
+    /// W2b-5). Only a hosted batch opens it, so a store that is never run
+    /// hosted records nothing.
+    writes: Option<Vec<StoreWrite>>,
+}
+
+/// One store write a hosted effects batch reports (FB wave 2b). The
+/// reference fires its store subscriptions from the same writes:
+/// `StateStore.set` for a global, and `set_panel` / `list_push` for a panel
+/// key (`workspace_interpreter/state_store.py`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StoreWrite {
+    /// A global `state.*` key.
+    Global(String),
+    /// A key in a panel's own scope: the panel id, then the key.
+    Panel(String, String),
 }
 
 /// The panel CONTENT id a `panel:` reference names: the short kind gains the
@@ -90,7 +103,7 @@ impl StateStore {
             dialog_firing_on_change: false,
             data: serde_json::Value::Object(serde_json::Map::new()),
             pending_panel_state_writes: Vec::new(),
-            global_writes: None,
+            writes: None,
         }
     }
 
@@ -312,8 +325,8 @@ impl StateStore {
     }
 
     pub fn set(&mut self, key: &str, value: serde_json::Value) {
-        if let Some(journal) = self.global_writes.as_mut() {
-            journal.push(key.to_string());
+        if let Some(journal) = self.writes.as_mut() {
+            journal.push(StoreWrite::Global(key.to_string()));
         }
         self.state.insert(key.to_string(), value);
     }
@@ -322,26 +335,32 @@ impl StateStore {
         &self.state
     }
 
-    /// Start recording global writes, for a hosted effects batch to report
-    /// (FB wave 2b, A11). True when this call opened the journal; false when
-    /// it was already open, so only the outermost batch closes it.
-    pub fn open_global_writes(&mut self) -> bool {
-        if self.global_writes.is_some() {
+    /// Start recording writes, for a hosted effects batch to report (FB
+    /// wave 2b, A11). True when this call opened the journal; false when it
+    /// was already open, so only the outermost batch closes it.
+    pub fn open_writes(&mut self) -> bool {
+        if self.writes.is_some() {
             return false;
         }
-        self.global_writes = Some(Vec::new());
+        self.writes = Some(Vec::new());
         true
     }
 
-    /// The global keys written since the last take, in write order. Empty
-    /// when the journal is closed.
-    pub fn take_global_writes(&mut self) -> Vec<String> {
-        self.global_writes.as_mut().map(std::mem::take).unwrap_or_default()
+    /// The writes made since the last take, in write order. Empty when the
+    /// journal is closed.
+    pub fn take_writes(&mut self) -> Vec<StoreWrite> {
+        self.writes.as_mut().map(std::mem::take).unwrap_or_default()
     }
 
-    /// Stop recording global writes and drop anything untaken.
-    pub fn close_global_writes(&mut self) {
-        self.global_writes = None;
+    /// Stop recording writes and drop anything untaken.
+    pub fn close_writes(&mut self) {
+        self.writes = None;
+    }
+
+    fn journal_panel_write(&mut self, panel_id: &str, key: &str) {
+        if let Some(journal) = self.writes.as_mut() {
+            journal.push(StoreWrite::Panel(panel_id.to_string(), key.to_string()));
+        }
     }
 
     // ── Panel state ──────────────────────────────────────
@@ -372,9 +391,12 @@ impl StateStore {
             .unwrap_or(&serde_json::Value::Null)
     }
 
+    /// Write a key in a panel's own scope. A panel with no scope is not
+    /// written, and the write is not reported.
     pub fn set_panel(&mut self, panel_id: &str, key: &str, value: serde_json::Value) {
         if let Some(scope) = self.panels.get_mut(&panel_content_id(panel_id)) {
             scope.insert(key.to_string(), value);
+            self.journal_panel_write(panel_id, key);
         }
     }
 
@@ -456,6 +478,7 @@ impl StateStore {
             if let Some(max) = max_length {
                 arr.truncate(max);
             }
+            self.journal_panel_write(panel_id, key);
         }
     }
 

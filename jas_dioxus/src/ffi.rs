@@ -2381,6 +2381,143 @@ mod tests {
     }
 
 
+    // -----------------------------------------------------------------------
+    // W2b-5 -- the Properties panel's display and edits (A10's properties
+    // family, through the store's panel-write report). W2b-0 measured one
+    // Properties behavior (the constrain lock) and none of its eight fields:
+    // no field declares a behavior, and the plan showed the seeded zeros.
+    // -----------------------------------------------------------------------
+
+    const PROPERTIES: &str = crate::interpreter::properties_host::PROPERTIES_PANEL;
+
+    /// The calibrated fixture, all selected, after measuring the X oracle's
+    /// precondition: the document carries no transform. Properties X is in the
+    /// S-3 transform-blind class (`properties_host::apply_field`), so "X = 40
+    /// puts the box at 40" holds only on an untransformed selection.
+    fn untransformed_engine() -> *mut JasEngine {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/complex_document.svg")).unwrap();
+        assert_eq!(svg.matches("transform").count(), 0, "the fixture grew a transform");
+        assert!(svg.matches("<rect").count() + svg.matches("<path").count() > 0);
+        stroked_engine()
+    }
+
+    fn selection_box(e: *mut JasEngine) -> (f64, f64, f64, f64) {
+        engine_of(e).with_model(|m| {
+            crate::document::evaluated_bounds::selection_evaluated_bounds(m.document())
+        })
+    }
+
+    fn plan_number(e: *mut JasEngine, id: &str) -> f64 {
+        let leaf = leaf(e, PROPERTIES, id);
+        leaf["values"]["bind.value"].as_str()
+            .and_then(|t| t.parse::<f64>().ok())
+            .unwrap_or_else(|| panic!("{id} carries no number: {leaf}"))
+    }
+
+    /// **The plan shows the selection's box**, not the panel's seeded zeros.
+    /// The expectation is the box of the engine's own document, rounded as the
+    /// panel shows it, computed without the scope the plan is built from.
+    #[test]
+    fn properties_plan_shows_the_selection_box() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let (x, y, w, h) = selection_box(e);
+        assert!(w > 0.0 && h > 0.0, "the selection has no box: {w} x {h}");
+        let r2 = |v: f64| (v * 100.0).round() / 100.0;
+        for (id, want) in [("prop_x", r2(x)), ("prop_y", r2(y)), ("prop_w", r2(w)), ("prop_h", r2(h))] {
+            assert_eq!(plan_number(e, id), want, "{id}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2b-5's oracle.** X = 40 moves the selection's box left edge to 40,
+    /// writes what the shared host writes, shows 40, and is ONE undo step.
+    #[test]
+    fn properties_x_commit_moves_the_selection_as_the_shared_host_does() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let pre = engine_of(e).with_model(|m| m.clone());
+        let constrain = engine_of(e).store.borrow()
+            .get_panel(PROPERTIES, "prop_constrain").as_bool().unwrap_or(false);
+        let before = doc_json(e);
+        assert_ne!(selection_box(e).0, 40.0, "the commit could not be seen");
+
+        let (reply, err) = behave(e, PROPERTIES, r#"{"widget":"prop_x","event":"commit","value":"40"}"#);
+        let r = reply_json(&reply, &err);
+        assert_eq!(r["doc_changed"], true, "{reply} {err}");
+        assert_eq!(err, "");
+        let mut copy = pre.clone();
+        crate::interpreter::properties_host::apply_field(&mut copy, "prop_x", &serde_json::json!(40.0), constrain);
+        assert_eq!(doc_json(e), crate::geometry::test_json::document_to_test_json(copy.document()));
+        assert_eq!(selection_box(e).0, 40.0);
+        assert_eq!(plan_number(e, "prop_x"), 40.0);
+        let plan: serde_json::Value = serde_json::from_str(&plan_of(e, PROPERTIES, 228, 0)).unwrap();
+        assert_eq!(delta_mismatches(&r, &plan, PROPERTIES), 0, "the reply's rows disagree: {reply}");
+
+        undo(e);
+        assert_eq!(doc_json(e), before, "ONE undo must restore the pre-commit document");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "the commit took more than one step");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **The constrain lock reaches the W edit.** Pressed through the door, the
+    /// lock makes a width commit scale the height by the same ratio; unpressed,
+    /// the height holds. The expected heights come from the box the engine
+    /// shows before the commit.
+    #[test]
+    fn properties_width_commit_honours_the_constrain_lock() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for locked in [false, true] {
+            let e = untransformed_engine();
+            if locked {
+                let (reply, err) = behave(e, PROPERTIES, r#"{"widget":"prop_constrain","event":"click"}"#);
+                assert_eq!(err, "", "the lock press: {reply}");
+                assert_eq!(engine_of(e).store.borrow().get_panel(PROPERTIES, "prop_constrain"),
+                           &serde_json::json!(true));
+            }
+            let (_, _, w0, h0) = selection_box(e);
+            let ev = serde_json::json!({"widget": "prop_w", "event": "commit",
+                                        "value": format!("{}", w0 * 2.0)});
+            let (reply, err) = behave(e, PROPERTIES, &ev.to_string());
+            assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{reply} {err}");
+            let (_, _, w1, h1) = selection_box(e);
+            assert!((w1 - w0 * 2.0).abs() < 1e-9, "locked={locked}: w {w0} -> {w1}");
+            let want_h = if locked { h0 * 2.0 } else { h0 };
+            assert!((h1 - want_h).abs() < 1e-9, "locked={locked}: h {h0} -> {h1}, wanted {want_h}");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
+    /// Opacity (a `number_input`) and blend (a `select`) are set on EVERY
+    /// selected element.
+    #[test]
+    fn properties_opacity_and_blend_commits_write_every_selected_element() {
+        use crate::geometry::element::BlendMode;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let modes = |e| engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter()
+                .map(|es| { let el = doc.get_element(&es.path).unwrap(); (el.opacity(), el.mode()) })
+                .collect::<Vec<_>>()
+        });
+        let start = modes(e);
+        assert!(start.len() >= 2, "{start:?}");
+        assert!(start.iter().all(|(o, m)| *o != 0.4 && *m != BlendMode::Multiply), "{start:?}");
+
+        for (widget, text) in [("prop_opacity_input", "40"), ("prop_blend_select", "multiply")] {
+            let ev = serde_json::json!({"widget": widget, "event": "commit", "value": text});
+            let (reply, err) = behave(e, PROPERTIES, &ev.to_string());
+            assert_eq!(reply_json(&reply, &err)["doc_changed"], true, "{widget}: {reply} {err}");
+        }
+        let end = modes(e);
+        assert!(end.iter().all(|(o, m)| (*o - 0.4).abs() < 1e-12 && *m == BlendMode::Multiply),
+                "{end:?}");
+        assert_eq!(plan_number(e, "prop_opacity_input"), 40.0);
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **D5.** A disabled widget is refused by name before anything runs, and
     /// the plan the shell draws from shows the same state. Align needs two.
     #[test]
@@ -2403,6 +2540,53 @@ mod tests {
             }
             unsafe { jas_engine_free(e) };
         }
+    }
+
+    /// **Properties' fields are disabled with nothing selected**, in the plan
+    /// and at the door. The widgets are read from the workspace, not listed
+    /// here: every Properties widget that declares a `disabled` expression
+    /// anywhere. `properties.yaml` once carried all nine at the widget's top
+    /// level, where no reader looks, so this arm walked nine widgets that
+    /// every port drew enabled and that the door ran.
+    #[test]
+    fn properties_fields_are_refused_as_disabled_with_nothing_selected() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().unwrap();
+        let spec = ws.panel(PROPERTIES).unwrap();
+        fn declared(n: &serde_json::Value, out: &mut Vec<(String, String)>) {
+            if let (Some(id), Some(kind)) = (n.get("id").and_then(|v| v.as_str()),
+                                             n.get("type").and_then(|v| v.as_str())) {
+                let top = n.get("disabled").is_some();
+                let bound = n.get("bind").and_then(|b| b.get("disabled")).is_some();
+                if top || bound {
+                    out.push((id.to_string(), kind.to_string()));
+                }
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().for_each(|v| declared(v, out)),
+                serde_json::Value::Array(a) => a.iter().for_each(|v| declared(v, out)),
+                _ => {}
+            }
+        }
+        let mut widgets = vec![];
+        declared(spec, &mut widgets);
+        assert!(widgets.len() >= 9, "the walk found {widgets:?}");
+
+        let e = engine_with(crate::panel_behavior::test_fixture::model_with(
+            vec![crate::panel_behavior::test_fixture::rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        for (id, kind) in &widgets {
+            assert_eq!(leaf(e, PROPERTIES, id)["values"]["bind.disabled"], "true",
+                       "{id}: the plan draws it enabled");
+            let event = match kind.as_str() {
+                "icon_button" => format!(r#"{{"widget":"{id}","event":"click"}}"#),
+                _ => format!(r#"{{"widget":"{id}","event":"commit","value":"40"}}"#),
+            };
+            let before = doc_json(e);
+            assert_eq!(behave(e, PROPERTIES, &event), (String::new(), refusal("Disabled", id)),
+                       "{id} ({kind})");
+            assert_eq!(doc_json(e), before, "{id}: a refused act moved the document");
+        }
+        unsafe { jas_engine_free(e) };
     }
 
     /// **Q5.** A behavior that reaches an effect the engine cannot run is
