@@ -271,6 +271,16 @@ class TestPanelStructural:
         assert _validate_structural(
             "panel", _panel(content=_widget(type="text_input", bind="panel.mode")), "probe") == []
 
+    def test_disabled_outside_bind_is_refused(self):
+        """Every reader evaluates `bind.disabled` (WIDGET_EVENTS.md, the
+        panel views of both active ports, the engine door). A `disabled` key
+        beside `bind` is read by none of them, so the widget is drawn enabled
+        and runs. `properties.yaml` carried nine, and the first schema admitted
+        the key because it was built from the tree as it stood."""
+        errs = _validate_structural(
+            "panel", _panel(content=_widget(type="button", disabled="panel.mode == 'b'")), "probe")
+        assert any("disabled" in e for e in errs), errs
+
     def test_menu_entry_needs_a_label_and_known_keys(self):
         errs = _validate_structural("panel", _panel(menu=[{"action": "x"}]), "probe")
         assert errs
@@ -410,6 +420,8 @@ class TestMinimalFallbackKnowsTheSchemas:
         assert _validate_structural("panel", _panel(content=_widget(type="dock_view")), "probe")
         assert _validate_structural(
             "panel", _panel(content=_widget(type="button", bind={"disabled": True})), "probe")
+        assert _validate_structural(
+            "panel", _panel(content=_widget(type="button", disabled="panel.mode == 'b'")), "probe")
         assert _validate_structural("panel", _panel(menu=[{"action": "x"}]), "probe")
         assert _validate_structural("panel", _panel(state={"k": {"default": 1}}), "probe")
         action = {"description": "d", "category": "edit", "effects": ["snapshot"]}
