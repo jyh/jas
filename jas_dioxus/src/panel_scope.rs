@@ -273,6 +273,9 @@ pub fn sync_colour_state(store: &mut StateStore, slice: &PanelState) {
 ///   its `panel.*` is the slice's alone. That is one guard, at the seeding,
 ///   and an arm holds it.
 /// * `active_document` — the slice's, plus [`document_facts`].
+/// * The Properties panel's eight fields are DERIVED from the selection
+///   (`properties_host::live_values`) over its store scope, as the web app
+///   derives them. A written field is applied to the document, never shown.
 ///
 /// Keys are inserted in sorted order, so the scope does not depend on a hash
 /// map's iteration order.
@@ -283,6 +286,9 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     scope["state"] = Value::Object(state);
     if let (Some(own), Some(panel)) = (store.panel_scope(panel_id), scope["panel"].as_object_mut()) {
         panel.extend(sorted(own));
+        if panel_id == crate::interpreter::properties_host::PROPERTIES_PANEL {
+            panel.extend(crate::interpreter::properties_host::live_values(model.document()));
+        }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));

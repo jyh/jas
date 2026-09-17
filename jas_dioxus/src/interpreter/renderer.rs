@@ -5922,7 +5922,8 @@ use super::widget_commit::{clamp_to_declared, number_input_commit};
 /// host (FB wave 2b, A10), one copy for the input handlers whose per-panel
 /// writes were identical (`number_input`, `length_input`, `select`,
 /// `icon_select`, `combo_box`). Each panel family writes its own struct and
-/// applies the field to the selection; a panel with no family writes nothing.
+/// applies the field to the selection (Properties has no struct and applies
+/// only); a panel with no family writes nothing.
 /// `number_input` keeps its Color and Align arms before calling this.
 /// `text_input` and `toggle` keep their own blocks: their Stroke arms write
 /// the struct without applying it.
@@ -5954,9 +5955,12 @@ fn commit_panel_field(
             set_opacity_field(&mut st.opacity_panel, f, v);
             // Phase 1: panel-local only; selection sync deferred.
         }
-        // Artboards, Layers, Swatches, Properties: no-op until their
-        // per-panel state structs land. Drops the edit silently rather than
-        // corrupting stroke state.
+        // The fields are derived from the selection, so there is no struct to
+        // write: the edit goes to the selection (W2b-P).
+        Some(PanelKind::Properties) => apply_properties_panel_field(st, f, v),
+        // Artboards, Layers, Swatches: no-op until their per-panel state
+        // structs land. Drops the edit silently rather than corrupting stroke
+        // state.
         _ => {}
     }
 }
