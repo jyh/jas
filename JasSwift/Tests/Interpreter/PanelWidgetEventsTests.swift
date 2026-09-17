@@ -176,6 +176,17 @@ private let gradient = "gradient_panel_content"
             "the mirror never clobbers the chain flag")
 }
 
+@Test func aLinkedEndScaleCommitMirrorsOntoTheStartScale() {
+    // The symmetric partner: the end combo's own mirror, in both scopes.
+    let model = modelWithSelectedRect()
+    let open = events(model, stroke)
+    model.stateStore.setPanel(stroke, "link_arrowhead_scale", true)
+    open.commit(shipped(stroke, "stk_end_arrowhead_scale"), text: "75")
+    #expect(number(model.stateStore.getPanel(stroke, "start_arrowhead_scale")) == 75)
+    #expect(number(model.stateStore.get("stroke_start_arrowhead_scale")) == 75)
+    #expect(model.document.getElement([0, 0]).stroke?.startArrowScale == 75)
+}
+
 @Test func anUnlinkedScaleCommitLeavesTheSiblingAlone() {
     let model = modelWithSelectedRect()
     let open = events(model, stroke)
