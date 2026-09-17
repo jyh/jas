@@ -144,10 +144,6 @@
         "do": {
           "type": "object"
         },
-        "disabled": {
-          "type": "string",
-          "description": "An expression in the workspace expression language, evaluated against the surface's context (panel / state / active_document / \u2026)."
-        },
         "alternates": {
           "type": "object"
         },

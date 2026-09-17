@@ -1841,6 +1841,7 @@ mod tests {
 
     const ALIGN: &str = "align_panel_content";
     const BOOLEAN: &str = "boolean_panel_content";
+    const PROPERTIES: &str = "properties_panel_content";
     const LEFT: &str = r#"{"widget":"align_left_button","event":"click"}"#;
 
     /// An engine whose document is `model`.
@@ -2403,6 +2404,53 @@ mod tests {
             }
             unsafe { jas_engine_free(e) };
         }
+    }
+
+    /// **Properties' fields are disabled with nothing selected**, in the plan
+    /// and at the door. The widgets are read from the workspace, not listed
+    /// here: every Properties widget that declares a `disabled` expression
+    /// anywhere. `properties.yaml` once carried all nine at the widget's top
+    /// level, where no reader looks, so this arm walked nine widgets that
+    /// every port drew enabled and that the door ran.
+    #[test]
+    fn properties_fields_are_refused_as_disabled_with_nothing_selected() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = Workspace::load().unwrap();
+        let spec = ws.panel(PROPERTIES).unwrap();
+        fn declared(n: &serde_json::Value, out: &mut Vec<(String, String)>) {
+            if let (Some(id), Some(kind)) = (n.get("id").and_then(|v| v.as_str()),
+                                             n.get("type").and_then(|v| v.as_str())) {
+                let top = n.get("disabled").is_some();
+                let bound = n.get("bind").and_then(|b| b.get("disabled")).is_some();
+                if top || bound {
+                    out.push((id.to_string(), kind.to_string()));
+                }
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().for_each(|v| declared(v, out)),
+                serde_json::Value::Array(a) => a.iter().for_each(|v| declared(v, out)),
+                _ => {}
+            }
+        }
+        let mut widgets = vec![];
+        declared(spec, &mut widgets);
+        assert!(widgets.len() >= 9, "the walk found {widgets:?}");
+
+        let e = engine_with(crate::panel_behavior::test_fixture::model_with(
+            vec![crate::panel_behavior::test_fixture::rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        for (id, kind) in &widgets {
+            assert_eq!(leaf(e, PROPERTIES, id)["values"]["bind.disabled"], "true",
+                       "{id}: the plan draws it enabled");
+            let event = match kind.as_str() {
+                "icon_button" => format!(r#"{{"widget":"{id}","event":"click"}}"#),
+                _ => format!(r#"{{"widget":"{id}","event":"commit","value":"40"}}"#),
+            };
+            let before = doc_json(e);
+            assert_eq!(behave(e, PROPERTIES, &event), (String::new(), refusal("Disabled", id)),
+                       "{id} ({kind})");
+            assert_eq!(doc_json(e), before, "{id}: a refused act moved the document");
+        }
+        unsafe { jas_engine_free(e) };
     }
 
     /// **Q5.** A behavior that reaches an effect the engine cannot run is
