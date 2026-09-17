@@ -96,6 +96,9 @@ RUST_DISPATCH = [
 SWIFT_DISPATCH = [
     REPO / "JasSwift" / "Sources" / "Menu" / "JasCommands.swift",
     REPO / "JasSwift" / "Sources" / "Interpreter" / "YamlPanelBodyView.swift",
+    # The panel action dispatcher (`dispatchPanelAction`) moved here out of
+    # the view; its native arms (set_concept_param, ...) are the view's.
+    REPO / "JasSwift" / "Sources" / "Interpreter" / "PanelWidgetEvents.swift",
 ] + sorted((REPO / "JasSwift" / "Sources" / "Panels").glob("*.swift"))
 
 # THE THIRD RUST DISPATCH TABLE, and the one that made this gate report four
