@@ -12486,12 +12486,15 @@ mod tests {
             json!({"list_push": {"target": "panel.recent", "value": "\"a\""}}),
             json!({"set_panel_state": {"key": "cap", "value": "\"square\""}}),
         ], &json!({}), &mut store, None, None, None, None, &mut host);
+        // Every panel is reported by its CONTENT id, whichever spelling the
+        // effect used (the active panel, or `panel: q`), as the reference
+        // notifies its panel subscribers.
         assert_eq!(host.seen, vec![
-            ("p.cap".to_string(), json!("square")),
+            ("p_panel_content.cap".to_string(), json!("square")),
             ("x".to_string(), json!(1)),
-            ("q.cap".to_string(), json!("round")),
-            ("p.recent".to_string(), json!(["a"])),
-            ("p.cap".to_string(), json!("square")),
+            ("q_panel_content.cap".to_string(), json!("round")),
+            ("p_panel_content.recent".to_string(), json!(["a"])),
+            ("p_panel_content.cap".to_string(), json!("square")),
         ]);
     }
 
