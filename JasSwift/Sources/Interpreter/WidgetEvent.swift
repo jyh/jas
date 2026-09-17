@@ -23,6 +23,11 @@ import Foundation
 ///
 /// The caller owns the active panel: `panel.` targets and `set_panel_state`
 /// both write the store's active panel.
+///
+/// A view passes a ``Host`` (the app's is `PanelWidgetEvents`). With the
+/// default host, the store is the only scope, the bind write is a store
+/// write, and an action dispatches through the catalog: the headless module
+/// the corpus drives.
 enum WidgetEvent {
     static let commitEvents = ["commit", "change"]
     static let pressEvents = ["click", "change"]
@@ -48,16 +53,41 @@ enum WidgetEvent {
         var behaviorsRun: Int = 0
     }
 
+    /// What a view supplies in place of the headless defaults.
+    struct Host {
+        /// The scope the view rendered the widget with, or nil.
+        ///
+        /// When set, the `bind.disabled` check and a press's current value
+        /// read it, because that is what the person saw: a Swift panel scope
+        /// overlays live selection values the store does not hold. Its names
+        /// the store does not supply (a `foreach` item) reach the behaviors.
+        /// Its store namespaces (`state`, `panel`, `dialog`, …) never do: a
+        /// behavior reads the store, which already holds the bind write.
+        var scope: [String: Any]? = nil
+        /// The bind write, in place of the store write. It receives the
+        /// target, the parsed value (nil for a cleared nullable length), and
+        /// for a `panel.` field the global that field is two-way bound to.
+        /// It writes the field, then the global, before it returns.
+        var writeBind: ((_ scope: String, _ key: String, _ value: Any?,
+                         _ global: String?) -> Void)? = nil
+        /// Dispatch one behavior's action, in place of the catalog dispatch.
+        /// `params` are already evaluated; `ctx` holds `event` and the
+        /// scope's own names, never a store namespace.
+        var dispatch: ((_ action: String, _ params: [String: Any],
+                        _ ctx: [String: Any]) -> Void)? = nil
+    }
+
     static func commit(
         widget: [String: Any], text: String?, store: StateStore,
         panel: [String: Any]?,
         actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
-        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
     ) -> Result {
         guard let kind = widget["type"] as? String, inputKinds.contains(kind) else {
             return Result(outcome: "refused", reason: wrongKind)
         }
-        if isDisabled(widget, store: store) {
+        if isDisabled(widget, store: store, host: host) {
             return Result(outcome: "refused", reason: disabled)
         }
         guard let text = text else {
@@ -69,11 +99,11 @@ enum WidgetEvent {
         }
         let target = writableTarget(boundTarget(widget))
         if let target = target {
-            writeBind(target, value: parsed.value, store: store, panel: panel)
+            writeBind(target, value: parsed.value, store: store, panel: panel, host: host)
         }
         let ran = runBehaviors(declared(widget, events: commitEvents), value: parsed.value,
                                store: store, actions: actions, dialogs: dialogs,
-                               platformEffects: platformEffects, model: model)
+                               platformEffects: platformEffects, model: model, host: host)
         return Result(outcome: target != nil || ran > 0 ? "committed" : "inert",
                       value: parsed.value, bindWritten: target != nil, behaviorsRun: ran)
     }
@@ -81,16 +111,19 @@ enum WidgetEvent {
     static func press(
         widget: [String: Any], store: StateStore, panel: [String: Any]?,
         actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
-        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
     ) -> Result {
         guard let kind = widget["type"] as? String, booleanKinds.contains(kind) else {
             return Result(outcome: "refused", reason: wrongKind)
         }
-        if isDisabled(widget, store: store) {
+        if isDisabled(widget, store: store, host: host) {
             return Result(outcome: "refused", reason: disabled)
         }
         let expr = boundTarget(widget)
-        let current = expr.map { evaluate($0, context: store.evalContext()).toBool() } ?? false
+        let current = expr.map {
+            evaluate($0, context: host.scope ?? store.evalContext()).toBool()
+        } ?? false
         let value = !current
         let owners = declared(widget, events: pressEvents)
         if !owners.isEmpty {
@@ -98,14 +131,14 @@ enum WidgetEvent {
             // still owns the press, so the field is not written behind it.
             let ran = runBehaviors(owners, value: value, store: store, actions: actions,
                                    dialogs: dialogs, platformEffects: platformEffects,
-                                   model: model)
+                                   model: model, host: host)
             return Result(outcome: ran > 0 ? "committed" : "inert", value: value,
                           behaviorsRun: ran)
         }
         guard let target = writableTarget(expr) else {
             return Result(outcome: "inert", value: value)
         }
-        writeBind(target, value: value, store: store, panel: panel)
+        writeBind(target, value: value, store: store, panel: panel, host: host)
         return Result(outcome: "committed", value: value, bindWritten: true)
     }
 
@@ -141,7 +174,7 @@ enum WidgetEvent {
                 let value: Any? = option is [String: Any]
                     ? (option as? [String: Any])?["value"]
                     : option
-                if let value = value, !(value is NSNull), referenceString(value) == text {
+                if let value = value, !(value is NSNull), optionText(value) == text {
                     return (true, value)
                 }
             }
@@ -165,7 +198,9 @@ enum WidgetEvent {
 
     /// An option value as the reference's `str()` writes it: `True`/`False`
     /// for a boolean, `3` for an integer, `2.0` for a float that is whole.
-    private static func referenceString(_ v: Any) -> String {
+    /// It is the text a view commits for a picked option, so the parse
+    /// matches the option by construction.
+    static func optionText(_ v: Any) -> String {
         if let s = v as? String { return s }
         if let n = v as? NSNumber {
             switch String(cString: n.objCType) {
@@ -221,7 +256,13 @@ enum WidgetEvent {
     /// global in the same step. A `nil` value is written as a JSON null,
     /// since this store REMOVES a key assigned `nil`.
     private static func writeBind(_ target: (scope: String, key: String), value: Any?,
-                                  store: StateStore, panel: [String: Any]?) {
+                                  store: StateStore, panel: [String: Any]?, host: Host) {
+        if let write = host.writeBind {
+            let global = target.scope == "panel"
+                ? mirroredGlobal(panel: panel, key: target.key) : nil
+            write(target.scope, target.key, value, global)
+            return
+        }
         let stored: Any = value ?? NSNull()
         if target.scope == "panel" {
             if let pid = store.getActivePanelId() {
@@ -235,11 +276,19 @@ enum WidgetEvent {
         }
     }
 
-    private static func isDisabled(_ widget: [String: Any], store: StateStore) -> Bool {
+    private static func isDisabled(_ widget: [String: Any], store: StateStore,
+                                   host: Host) -> Bool {
         guard let expr = (widget["bind"] as? [String: Any])?["disabled"] as? String else {
             return false
         }
-        return evaluate(expr, context: store.evalContext()).toBool()
+        return evaluate(expr, context: host.scope ?? store.evalContext()).toBool()
+    }
+
+    /// The scope's own names: everything in it the store does not supply.
+    static func scopeLocals(_ scope: [String: Any]?, store: StateStore) -> [String: Any] {
+        guard let scope = scope else { return [:] }
+        let supplied = Set(store.evalContext().keys).union(["event"])
+        return scope.filter { !supplied.contains($0.key) }
     }
 
     // MARK: - Behaviors
@@ -254,11 +303,13 @@ enum WidgetEvent {
     private static func runBehaviors(
         _ behaviors: [[String: Any]], value: Any?, store: StateStore,
         actions: [String: Any]?, dialogs: [String: Any]?,
-        platformEffects: [String: PlatformEffect], model: Model?
+        platformEffects: [String: PlatformEffect], model: Model?, host: Host
     ) -> Int {
+        let locals = scopeLocals(host.scope, store: store)
         var ran = 0
         for b in behaviors {
-            let ctx: [String: Any] = ["event": ["value": value ?? NSNull()]]
+            var ctx = locals
+            ctx["event"] = ["value": value ?? NSNull()] as [String: Any]
             if let condition = b["condition"] as? String,
                !evaluate(condition, context: store.evalContext(extra: ctx)).toBool() {
                 continue
@@ -268,12 +319,23 @@ enum WidgetEvent {
                            dialogs: dialogs, platformEffects: platformEffects, model: model)
             }
             if let action = b["action"] as? String {
-                let dispatch: [String: Any] = [
-                    "action": action,
-                    "params": b["params"] as? [String: Any] ?? [:],
-                ]
-                runEffects([["dispatch": dispatch]], ctx: ctx, store: store, actions: actions,
-                           dialogs: dialogs, platformEffects: platformEffects, model: model)
+                let params = b["params"] as? [String: Any] ?? [:]
+                if let dispatch = host.dispatch {
+                    // Evaluated as the catalog dispatch evaluates them: after
+                    // the effects, against the store. A null stays a null.
+                    var resolved: [String: Any] = [:]
+                    for (k, v) in params {
+                        guard let expr = v as? String else { resolved[k] = v; continue }
+                        let result = evaluate(expr, context: store.evalContext(extra: ctx))
+                        resolved[k] = result.toAny() ?? NSNull()
+                    }
+                    dispatch(action, resolved, ctx)
+                } else {
+                    let dispatch: [String: Any] = ["action": action, "params": params]
+                    runEffects([["dispatch": dispatch]], ctx: ctx, store: store,
+                               actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model)
+                }
             }
             ran += 1
         }

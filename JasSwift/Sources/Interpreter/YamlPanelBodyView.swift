@@ -370,69 +370,32 @@ struct YamlElementView: View {
         return rest
     }
 
-    /// Commit a write to the panel state: store → bump version →
-    /// fire the `notify_panel_state_changed` hook. No-op when the
-    /// target key / panelId / store isn't available.
-    ///
-    /// The Character panel used to PUSH `characterPanelLiveOverrides` into
-    /// the store here, so that the apply pipeline — which rebuilt the whole
-    /// attribute set from panel state — saw the selection's values for the
-    /// fields the user had not touched. That mitigation is gone: the apply is
-    /// field-scoped and reads a multi-field group's siblings from the ELEMENT
-    /// (CHARPANEL, `characterWithGroup`). Keeping the push would have left
-    /// this port with preservation semantics the law never stated and the Rust
-    /// port never had — which is how the two ports came to disagree about what
-    /// the same click meant. The live overrides remain a PULL, merged into the
-    /// panel's render scope by `DockPanelView.buildPanelCtx`.
-    /// `terminal` marks a finished edit (slider pointer-up, Enter / blur in a
-    /// value box) as opposed to a live drag tick; it is passed straight through
-    /// to ``notifyPanelStateChanged``, whose Color branch is the only reader.
+    /// This widget's commit and press route: ``PanelWidgetEvents``, which
+    /// holds the value widgets to WIDGET_EVENTS.md. Nil without a model,
+    /// where there is nothing to commit to.
+    private var widgetEvents: PanelWidgetEvents? {
+        guard let model = model else { return nil }
+        return PanelWidgetEvents(
+            model: model, panelId: panelId, scope: context,
+            onDialogWrite: onDialogWrite,
+            // No anchor: a dialog a widget event opens is modal and centered.
+            onDialogOpened: { onStoreDialogOpened?(nil) },
+            onDialogClosed: onStoreDialogClosed)
+    }
+
+    /// Commit a write to the panel state (``commitPanelField``). No-op when
+    /// the panelId or model isn't available.
     private func commitPanelWrite(
         key: String, value: Any?, terminal: Bool = false
     ) {
         guard let model = model, let pid = panelId else { return }
-        // Paragraph panel — Phase 4. Sync the live wrapper attrs
-        // first so untouched fields hold the selection's current
-        // values, then apply mutual exclusion side effects (clear
-        // sibling alignment radios; clear bullets / numbered_list
-        // sibling) so the panel state is internally coherent before
-        // the apply pipeline writes it back to the wrappers.
-        if pid == "paragraph_panel_content" {
-            let overrides = paragraphPanelLiveOverrides(model: model)
-            for (k, v) in overrides { model.stateStore.setPanel(pid, k, v) }
-            applyParagraphPanelMutualExclusion(
-                store: model.stateStore, key: key, value: value)
-        }
-        model.stateStore.setPanel(pid, key, value)
-        // LINKSCALE: the Stroke arrowhead-scale combos bind `panel.<field>`
-        // only, but applyStrokePanelToSelection reads the scale from the
-        // GLOBAL `stroke_<field>`. Mirror the committed scale into the
-        // global (matching Rust's unified two-way write) BEFORE the
-        // notify/apply below so the fresh value reaches the selection.
-        if pid == "stroke_panel_content" {
-            mirrorStrokeScaleCommitToGlobal(
-                store: model.stateStore, key: key, value: value)
-        }
-        // Properties panel field edit → apply to the selection (Part B.2).
-        // Per-field: the key tells us which (prop_x moves, prop_w scales, …).
-        // The display is pull (propertiesPanelLiveOverrides), so the mutated
-        // selection re-renders the new value — no sync↔apply loop.
-        if pid == "properties_panel_content", key.hasPrefix("prop_") {
-            applyPropertiesField(controller: Controller(model: model),
-                                 field: String(key.dropFirst("prop_".count)),
-                                 value: value)
-        }
-        model.panelStateVersion &+= 1
-        // Name the committed field: the Stroke panel's apply is
-        // field-scoped (it writes only that field's group and preserves
-        // the rest from the element). See applyStrokePanelToSelection.
-        notifyPanelStateChanged(pid, store: model.stateStore, model: model,
-                                edited: key, terminal: terminal)
+        commitPanelField(model: model, panelId: pid, key: key, value: value,
+                         terminal: terminal)
     }
 
     /// Dispatch a widget edit to the right state container based on the
-    /// classified bind target. Panel writes go through the existing
-    /// commitPanelWrite path; dialog writes route to the YAML dialog
+    /// classified bind target. Panel writes go through
+    /// ``commitPanelWidgetValue``; dialog writes route to the YAML dialog
     /// overlay's onDialogWrite closure (which updates the SwiftUI
     /// binding so the dialog re-renders with the typed value, and
     /// pushes through to ``StateStore.setDialog`` so any setter prop
@@ -440,42 +403,9 @@ struct YamlElementView: View {
     private func commitWidgetWrite(target: WriteTarget, value: Any?) {
         switch target.scope {
         case .panel:
-            // A Color panel channel box (H / S / B / R / G / Bl / C / M / Y / K)
-            // commits on Enter / blur, which is a TERMINAL write: the store
-            // holds the typed value, and commitPanelWrite's notify hook
-            // recomputes the paint through the one overlaid reader and pushes it
-            // with `setActiveColor` (one undo step, recent strip, app tier).
-            // Mirrors Rust's `PanelKind::Color` arm in render_number_input's
-            // onchange handler, which likewise computes from the overlaid panel
-            // map and calls `set_active_color`.
-            let colorChannelKeys: Set<String> = [
-                "h", "s", "b", "r", "g", "bl", "c", "m", "y", "k",
-            ]
-            let isColorChannel = panelId == "color_panel_content"
-                && colorChannelKeys.contains(target.key)
-            commitPanelWrite(key: target.key, value: value,
-                             terminal: isColorChannel)
-            // The HEX field is not a channel: the typed string is the whole
-            // colour, and a hex edit does not ripple back into h/s/b/r/g/bl, so
-            // the channel reader would answer with the PREVIOUS colour. Parse
-            // the string instead. In Web Safe RGB mode snap each channel to the
-            // nearest multiple of 51 (0/51/102/153/204/255) first.
-            if panelId == "color_panel_content", target.key == "hex",
-               let model = model, let hexStr = value as? String,
-               var color = ColorPanel.colorFromHex(hexStr)
-            {
-                let mode = model.stateStore.getPanel(
-                    "color_panel_content", "mode") as? String
-                if mode == "web_safe_rgb" {
-                    let (r, g, b, _) = color.toRgba()
-                    func snap(_ v: Double) -> Double {
-                        let n = (v * 255.0 / 51.0).rounded() * 51.0
-                        return min(max(n, 0), 255) / 255.0
-                    }
-                    color = Color.rgb(r: snap(r), g: snap(g), b: snap(b), a: 1.0)
-                }
-                ColorPanel.setActiveColor(color, model: model)
-            }
+            guard let model = model, let pid = panelId else { return }
+            commitPanelWidgetValue(model: model, panelId: pid, key: target.key,
+                                   value: value)
         case .dialog:
             onDialogWrite?(target.key, value)
         }
@@ -1289,142 +1219,16 @@ struct YamlElementView: View {
         }
     }
 
-    /// Dispatch a YAML action by looking it up in the actions catalog
-    /// and running its effects, plus any native side-effects (e.g.
-    /// set_active_color updates ColorPanel state). Mirrors
-    /// run_yaml_effects in the Rust port.
+    /// Dispatch a YAML action (``dispatchPanelAction``), bridging a dialog it
+    /// opens to this view's overlay.
     private func dispatchYamlAction(
         _ name: String, params: [String: Any],
         actions: [String: Any]?, ctx: [String: Any],
         store: StateStore, model: Model
     ) {
-        // Native fast-path for color-panel actions — these need
-        // model-level state changes (ColorPanel.setActiveColor pushes
-        // to the recent strip and updates default fill / stroke)
-        // that the generic effects pipeline doesn't know about.
-        switch name {
-        case "set_active_color":
-            if let hexAny = params["color"],
-               let hex = hexAny as? String,
-               let color = ColorPanel.colorFromHex(hex)
-            {
-                ColorPanel.setActiveColor(color, model: model)
-                return
-            }
-        case "set_active_color_none":
-            // Mirror ColorPanel.setActiveColor: update both the
-            // tab-level default and the active selection so clicking
-            // the None swatch with a shape selected drops that shape's
-            // fill (or stroke). Without the selection write, the swatch
-            // appeared inert when the user expected the rectangle's
-            // fill to clear.
-            //
-            // The APP tier goes too, as it does in `applyActiveColorWrite` and
-            // in Rust's `fill_color` / `stroke_color` arms: it is what a
-            // no-selection read falls back to, so clearing only the document
-            // tier would answer this click with the seeded white whenever
-            // nothing is selected (see `Model.appDefaultFill`).
-            let ctrl = Controller(model: model)
-            if model.fillOnTop {
-                model.appDefaultFill = nil
-                model.defaultFill = nil
-                if !model.document.selection.isEmpty {
-                    // One undo step: withTxn opens the bracket, setSelectionFill
-                    // (editDocument) joins it.
-                    model.withTxn { ctrl.setSelectionFill(nil) }
-                }
-            } else {
-                model.appDefaultStroke = nil
-                model.defaultStroke = nil
-                if !model.document.selection.isEmpty {
-                    model.withTxn { ctrl.setSelectionStroke(nil) }
-                }
-            }
-            return
-        case "new_symbol", "place_instance", "delete_symbol_action":
-            // Symbols panel footer buttons. Native intercept: mint ids by
-            // the value-in-op rule and call the shared symbol Controller
-            // ops (the YAML actions are `log` stubs). Mirrors the Rust
-            // `dispatch_action` symbol arms; the reference-aware delete
-            // confirm is a synchronous native modal. The panel's
-            // `selected_symbol` is already pinned in the store as the
-            // active panel, so SymbolsPanel reads / writes it directly.
-            SymbolsPanel.dispatchSymbolAction(name, model: model)
-            return
-        case "place_concept_instance", "promote_to_concept":
-            // Concepts panel: native intercept (the YAML action is a `log`
-            // stub). `place_concept_instance` builds a Generated from the
-            // panel-selected concept + its default params (id minted value-in-op);
-            // `promote_to_concept` (CONCEPTS.md §10 — the fitter / promote)
-            // detects + replaces the single selected raw shape with a Generated.
-            // WITHOUT this native arm, `promote_to_concept` falls through to its
-            // YAML `log` stub and never fires — the Swift analogue of the Rust
-            // dispatch-gate bug. Mirrors the Rust dispatch arm.
-            ConceptsPanel.dispatch(name, model: model)
-            return
-        case "set_concept_param":
-            // Concepts panel Slice 2: native intercept (the YAML action is a
-            // `log` stub). The committed field value arrives as `event.value`
-            // (params.value) alongside the declared `param.name` (params.name);
-            // write it onto the single selected Generated instance so it
-            // re-generates live. Mirrors the Rust `set_concept_param` arm.
-            if let pname = params["name"] as? String {
-                let value: Double = {
-                    if let d = params["value"] as? Double { return d }
-                    if let i = params["value"] as? Int { return Double(i) }
-                    if let s = params["value"] as? String, let d = Double(s) { return d }
-                    return 0
-                }()
-                ConceptsPanel.setParam(model: model, name: pname, value: value)
-            }
-            return
-        case "apply_concept_operation":
-            // Concepts panel Slice 3 (CONCEPTS.md §9): native intercept (the YAML
-            // action is a `log` stub). The operation id arrives as `params.op_id`;
-            // resolve its `set:` expressions over the single selected Generated
-            // instance's current params and bake the result into the op.
-            // Mirrors the Rust `apply_concept_operation` arm.
-            if let opId = params["op_id"] as? String {
-                ConceptsPanel.applyOperation(model: model, opId: opId)
-            }
-            return
-        default:
-            break
-        }
-        // Fall through to the generic YAML actions catalog.
-        guard let actions = actions,
-              let actionDef = actions[name] as? [String: Any],
-              let effects = actionDef["effects"] as? [Any] else {
-            return
-        }
-        var ctxWithParams = ctx
-        // Declared param defaults under the caller's params, same law as the
-        // other two generic dispatchers (``LayersPanel/dispatchYamlAction``,
-        // ``runYamlActionByName``) and as Rust's `dispatch_action`. Stated once
-        // in ``mergeDeclaredParamDefaults``.
-        ctxWithParams["param"] = mergeDeclaredParamDefaults(
-            params, actionDef: actionDef)
-        let platformEffects = alignPlatformEffects(model: model)
-        // Thread the dialogs catalog so open_dialog effects can
-        // resolve their target id (e.g. swatch_options); without
-        // this, double-clicking a swatch fired the action but the
-        // dialog never opened.
-        let ws = WorkspaceData.load()
-        let dialogs = ws?.data["dialogs"] as? [String: Any]
-        let beforeDlg = store.getDialogId()
-        runEffects(effects, ctx: ctxWithParams, store: store,
-                   actions: actions, dialogs: dialogs,
-                   platformEffects: platformEffects)
-        // Bridge a store-level dialog transition to the SwiftUI
-        // overlay — without this, open_dialog effects from widget
-        // clicks left the dialog state in the store but nothing
-        // surfaced. Mirrors `dispatchWithDialogBridge` in
-        // DockPanelView (used for hamburger-menu dispatches).
-        if store.getDialogId() != beforeDlg {
-            // No anchor: widget-action opens (e.g. swatch options) are
-            // modal and stay centered.
-            onStoreDialogOpened?(nil)
-        }
+        dispatchPanelAction(name, params: params, actions: actions, ctx: ctx,
+                            store: store, model: model,
+                            onDialogOpened: { onStoreDialogOpened?(nil) })
     }
 
     // MARK: - Slider
@@ -1516,23 +1320,16 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderNumberInput() -> some View {
-        // Declared bounds drive clamp-on-commit. Without the clamp, typing 500
-        // into an R-channel field (max=255) committed 500 verbatim — the
-        // resulting color went past 0xff and produced a 7-character hex like
-        // "1f4ff3b" instead of clamping to 255. UNDECLARED means no clamp: an
-        // `as? Int ?? 0` min substituted 0 for an absent bound, so a typed -50
-        // committed -50 in jas_dioxus (`min_clamp` stays None there) and 0 here.
-        // Read as Double — YAML gives an integer literal as Int and a
-        // fractional one as Double, and jas_dioxus reads both as f64.
+        // The declared min is the display fallback below. (The commit's clamp
+        // to the declared bounds is WidgetEvent's; an UNDECLARED bound does
+        // not clamp.) Read as Double: YAML gives an integer literal as Int and
+        // a fractional one as Double, and jas_dioxus reads both as f64.
         let minClamp = (element["min"] as? Double)
             ?? (element["min"] as? Int).map(Double.init)
-        let maxClamp = (element["max"] as? Double)
-            ?? (element["max"] as? Int).map(Double.init)
         // Bind may be a bare string ("dialog.h") or an object form
         // ({value: "panel.x"}). Color picker fields use the bare-string
-        // form via the radio_field_row template; without the fallback
-        // bind reads to nil, writeTarget stays nil, and commits silently
-        // no-op (the field accepts typing but Enter resets to 0).
+        // form via the radio_field_row template, and WidgetEvent writes
+        // through either form.
         let valueExpr: String? = (element["bind"] as? String)
             ?? (element["bind"] as? [String: Any])?["value"] as? String
         // Kept as a Double, like jas_dioxus's `value: f64`: this used to be
@@ -1547,8 +1344,6 @@ struct YamlElementView: View {
             }
             return minClamp ?? 0
         }()
-        let writeTarget = writeBackTarget(valueExpr)
-
         // YAML style.width: "100%" → fill the parent column, so inputs
         // align with neighboring dropdowns sharing the same col cell.
         // Numeric/missing → fixed-width 45pt (legacy default for align /
@@ -1569,20 +1364,13 @@ struct YamlElementView: View {
             // f64): 12 shows as "12", 12.5 as "12.5".
             externalValue: numberToCanonicalString(currentValue),
             commit: { newVal in
-                // `Int(newVal)` here dropped EVERY non-integer entry silently —
-                // "12.5" wrote nothing at all, where jas_dioxus committed 12.5.
-                // The shared rule accepts what the reference accepts for a
-                // number-typed field, clamps to the declared bounds, and writes
-                // nothing for anything else.
-                guard let clamped = numberInputCommit(
-                    text: newVal, min: minClamp, max: maxClamp) else { return }
-                if let t = writeTarget { commitWidgetWrite(target: t, value: clamped) }
-                // Fields bound to a non-writable expression (e.g. a foreach
-                // `p.value` in the Concepts param editor) drive their effect via
-                // a `behavior: [{event: change, …}]` block instead of a
-                // write-back target. Dispatch it with the committed value as
-                // `event.value`, mirroring the Dioxus widget framework.
-                handleChangeBehavior(value: clamped)
+                // WIDGET_EVENTS.md: the number grammar and the declared bounds
+                // decide the value (anything else writes nothing), the bind
+                // write comes first, then every `commit` / `change` behavior
+                // runs (Magic Wand's tolerances). A field bound to a
+                // non-writable expression (a foreach `p.value` in the Concepts
+                // param editor) has only its behavior.
+                widgetEvents?.commit(element, text: newVal)
             }
         )
             .frame(maxWidth: fillsParent ? .infinity : 45)
@@ -1613,7 +1401,6 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeTarget = writeBackTarget(valueExpr)
 
         // Buffered text-input: a direct Binding<String> commits on
         // every keystroke, which makes the panel re-render and snap
@@ -1624,9 +1411,8 @@ struct YamlElementView: View {
         BufferedTextField(
             placeholder: placeholder,
             externalValue: currentValue,
-            commit: { newVal in
-                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
-            }
+            // The text is the value, verbatim (WIDGET_EVENTS.md).
+            commit: { newVal in widgetEvents?.commit(element, text: newVal) }
         )
             .textFieldStyle(.roundedBorder)
             // Text follows the window color scheme (see renderNumberInput):
@@ -1637,20 +1423,15 @@ struct YamlElementView: View {
     // MARK: - Length Input
 
     /// Unit-aware text input for length-valued fields. Display goes
-    /// through `Length.format`; commit goes through `Length.parse` and
-    /// honors `min` / `max` clamps and the `nullable` flag. The bound
-    /// state and committed value are pt-valued; conversion happens at
-    /// the widget edge.
+    /// through `Length.format`; a commit is WidgetEvent's (`Length.parse`,
+    /// the `min` / `max` clamps, the `nullable` flag, and Character
+    /// `leading`'s Auto in the app's write host). The bound state and
+    /// committed value are pt-valued; conversion happens at the widget edge.
     @ViewBuilder
     private func renderLengthInput() -> some View {
         let unit = element["unit"] as? String ?? "pt"
         let precision = element["precision"] as? Int ?? 2
         let placeholder = element["placeholder"] as? String ?? ""
-        let nullable = element["nullable"] as? Bool ?? false
-        let minClamp = (element["min"] as? Double)
-            ?? (element["min"] as? Int).map(Double.init)
-        let maxClamp = (element["max"] as? Double)
-            ?? (element["max"] as? Int).map(Double.init)
 
         let bind = element["bind"] as? [String: Any]
         let valueExpr = bind?["value"] as? String
@@ -1664,7 +1445,6 @@ struct YamlElementView: View {
             }
         }()
         let displayValue = Length.format(ptValue, unit: unit, precision: precision)
-        let writeTarget = writeBackTarget(valueExpr)
 
         // Identity-coupled key forces remount when the bound pt value
         // changes (clamp-on-commit, external writes), pulling the
@@ -1674,50 +1454,10 @@ struct YamlElementView: View {
 
         TextField(placeholder, text: Binding<String>(
             get: { displayValue },
-            set: { newVal in
-                guard let t = writeTarget else { return }
-                let trimmed = newVal.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty {
-                    if nullable {
-                        // Character panel ``leading`` is Auto when the
-                        // element's line_height is empty; clearing the
-                        // field re-derives the Auto-tracked value
-                        // (font_size × 1.2) explicitly so the apply
-                        // pipeline writes line_height back as the empty
-                        // element attribute and the next render reads
-                        // a concrete number into the input. Mirrors the
-                        // Rust `render_length_input` Character branch.
-                        // No other Character field is nullable yet.
-                        // Read font_size from the live selection
-                        // overrides rather than the stored panel state
-                        // so a freshly-opened panel (stored defaults
-                        // don't yet match the selection) still derives
-                        // Auto from the element's actual font size.
-                        if t.scope == .panel,
-                           panelId == "character_panel_content",
-                           t.key == "leading",
-                           let model = model {
-                            let live = characterPanelLiveOverrides(model: model)
-                            let fs = (live?["font_size"] as? Double)
-                                ?? ((model.stateStore.getPanel(
-                                    "character_panel_content", "font_size")
-                                    as? NSNumber)?.doubleValue ?? 12.0)
-                            commitWidgetWrite(target: t, value: fs * 1.2)
-                        } else {
-                            commitWidgetWrite(target: t, value: nil as Any?)
-                        }
-                    }
-                    // Non-nullable empty: drop the edit; the remount on
-                    // any subsequent write will redisplay the prior value.
-                    return
-                }
-                guard var newPt = Length.parse(newVal, defaultUnit: unit) else {
-                    return
-                }
-                if let lo = minClamp, newPt < lo { newPt = lo }
-                if let hi = maxClamp, newPt > hi { newPt = hi }
-                commitWidgetWrite(target: t, value: newPt)
-            }
+            // A blank entry clears a nullable field and is refused otherwise;
+            // a refused entry writes nothing, and the remount on the next
+            // write redisplays the prior value.
+            set: { newVal in widgetEvents?.commit(element, text: newVal) }
         ))
             .id(stableId)
             .textFieldStyle(.roundedBorder)
@@ -2263,22 +2003,10 @@ struct YamlElementView: View {
     }
 
     /// Dispatch a widget's `behavior: [{event: change, action: …, params: …}]`
-    /// on commit, injecting the committed numeric value as `event.value` (so
-    /// `params: { value: "event.value" }` resolves). Mirrors the Dioxus widget
-    /// framework, which already dispatches `change` with the committed value;
-    /// the Swift `number_input` otherwise only writes a panel/dialog target, so
-    /// a field bound to a non-writable expression (a foreach `p.value`) needs
-    /// this path. No-op when the widget has no `change` behavior.
-    private func handleChangeBehavior(value: Double) {
-        handleChangeBehavior(eventValue: value)
-    }
-
-    /// As `handleChangeBehavior(value:)` but for a STRING-valued change.
-    ///
-    /// `icon_button_group` and `reference_point_widget` dispatch `change` with a
-    /// string `event.value` (an orientation, a 3×3 anchor name), which the Double
-    /// entry point cannot express. Both funnel into one implementation so the
-    /// action / effect / params resolution stays in a single place.
+    /// with a STRING `event.value`, for the two kinds outside the widget event
+    /// contract that raise `change`: `icon_button_group` and
+    /// `reference_point_widget` (an orientation, a 3×3 anchor name). The value
+    /// widgets' events are `PanelWidgetEvents`'.
     private func handleChangeBehavior(stringValue: String) {
         handleChangeBehavior(eventValue: stringValue)
     }
@@ -3083,10 +2811,11 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeTarget = writeBackTarget(valueExpr)
 
         let entries = options.enumerated().map { i, opt -> PickerEntry in
-            let v = opt["value"].map { "\($0)" } ?? ""
+            // The reference's string form, so a pick commits text the
+            // parse matches to its option by construction.
+            let v = opt["value"].map { WidgetEvent.optionText($0) } ?? ""
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
@@ -3099,9 +2828,7 @@ struct YamlElementView: View {
         let fillsParent = (element["style"] as? [String: Any])?["width"] as? String == "100%"
         let picker = Picker("", selection: Binding<String>(
             get: { currentValue },
-            set: { newVal in
-                if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
-            }
+            set: { newVal in widgetEvents?.commit(element, text: newVal) }
         )) {
             ForEach(entries) { e in
                 SwiftUI.Text(e.displayLabel).tag(e.val)
@@ -3135,7 +2862,6 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeTarget = writeBackTarget(valueExpr)
         let isDisabled: Bool = {
             if let disExpr = bind?["disabled"] as? String {
                 return evaluate(disExpr, context: context).toBool()
@@ -3161,7 +2887,7 @@ struct YamlElementView: View {
         // Resolve the visible glyph (when no SVG icon is supplied).
         let visibleGlyph: String = {
             for opt in options {
-                let v = opt["value"].map { "\($0)" } ?? ""
+                let v = opt["value"].map { WidgetEvent.optionText($0) } ?? ""
                 if v == currentValue {
                     if let g = opt["glyph"] as? String, !g.isEmpty { return g }
                     if let l = opt["label"] as? String,
@@ -3182,10 +2908,10 @@ struct YamlElementView: View {
             visibleGlyph: visibleGlyph,
             options: options.map { opt in
                 IconSelectOption(
-                    value: opt["value"].map { "\($0)" } ?? "",
+                    value: opt["value"].map { WidgetEvent.optionText($0) } ?? "",
                     glyph: opt["glyph"] as? String ?? "",
                     label: opt["label"] as? String
-                        ?? (opt["value"].map { "\($0)" } ?? "")
+                        ?? (opt["value"].map { WidgetEvent.optionText($0) } ?? "")
                 )
             },
             width: w,
@@ -3193,9 +2919,7 @@ struct YamlElementView: View {
             theme: theme,
             summary: summary,
             isDisabled: isDisabled,
-            onPick: { v in
-                if let t = writeTarget { commitWidgetWrite(target: t, value: v) }
-            }
+            onPick: { v in widgetEvents?.commit(element, text: v) }
         )
     }
 
@@ -3221,7 +2945,6 @@ struct YamlElementView: View {
             }
             return false
         }()
-        let writeTarget = writeBackTarget(stateExpr)
         let isDisabled: Bool = {
             if let disExpr = bind?["disabled"] as? String {
                 return evaluate(disExpr, context: context).toBool()
@@ -3252,7 +2975,11 @@ struct YamlElementView: View {
                 }
                 return
             }
-            if let t = writeTarget { commitWidgetWrite(target: t, value: newVal) }
+            // WIDGET_EVENTS.md: a declared `click` / `change` behavior IS the
+            // press (Magic Wand's flips, Stroke's Dashed); otherwise the
+            // negated value is written. The value negated is the one this
+            // view shows (its scope), so the result is `newVal`.
+            widgetEvents?.press(element)
         }
 
         if !iconName.isEmpty {
@@ -3340,12 +3067,11 @@ struct YamlElementView: View {
             }
             return ""
         }()
-        let writeTarget = writeBackTarget(valueExpr)
 
         // SwiftUI doesn't have a native combo box with free entry;
         // use Picker as a dropdown with the current value displayed.
         let entries = options.enumerated().map { i, opt -> PickerEntry in
-            let v = opt["value"].map { "\($0)" } ?? ""
+            let v = opt["value"].map { WidgetEvent.optionText($0) } ?? ""
             let l = opt["label"] as? String ?? ""
             return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
         }
@@ -3364,34 +3090,12 @@ struct YamlElementView: View {
         let menu = Menu {
             ForEach(entries) { e in
                 Button(e.displayLabel) {
-                    guard let t = writeTarget else { return }
-                    switch t.scope {
-                    case .panel:
-                        // Match Rust render_combo_box's onchange Panel branch:
-                        // parse the picked value to a number when possible
-                        // (scale % presets, arrowhead selections); named
-                        // values stay strings.
-                        let committed: Any =
-                            Double(e.val).map { $0 as Any } ?? (e.val as Any)
-                        commitWidgetWrite(target: t, value: committed)
-                        // Generic input-commit hook: run the widget's
-                        // `event: commit` behaviors after the native two-way
-                        // write (e.g. the linked arrowhead-scale mirror).
-                        // Scoped to commit, so gradient `change` combos are
-                        // untouched — mirrors Rust run_input_commit_behavior,
-                        // which the Panel branch calls after the native write.
-                        if let model = model, let pid = panelId {
-                            model.stateStore.setActivePanel(pid)
-                            runInputCommitBehavior(
-                                element: element, field: t.key,
-                                committed: committed, context: context,
-                                store: model.stateStore, model: model)
-                        }
-                    case .dialog:
-                        // Rust's Dialog branch commits the raw string (no
-                        // parse, no commit behavior).
-                        commitWidgetWrite(target: t, value: e.val)
-                    }
+                    // WIDGET_EVENTS.md: a number by the number grammar,
+                    // clamped to the declared bounds, else the text; the
+                    // bind write first (panel or dialog), then every
+                    // `commit` / `change` behavior (Stroke's linked-scale
+                    // mirror, Gradient's render keys).
+                    widgetEvents?.commit(element, text: e.val)
                 }
             }
         } label: {
