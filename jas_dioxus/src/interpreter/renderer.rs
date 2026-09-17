@@ -1521,304 +1521,23 @@ fn parse_path_value(val: &serde_json::Value) -> Option<crate::document::document
     super::align_host::path_value(val)
 }
 
-/// As `apply_set_panel_state` but threads the action's eval ctx so
-/// expressions like `param.artboard_id` resolve (ARTBOARDS.md
-/// actions). When `ctx` is None, only ctx-independent expressions
-/// (panel / state rollups) can resolve.
-// ── Properties panel field editing (decision-5 Part B.2) ──────────────────
-// Pure 2x3 transform math mirroring the Python reference (effects.py).
-
-/// AABB (x, y, w, h) of `local_bbox`'s four corners mapped through `m`.
-/// One copy: `geometry::element::aabb_through` (it also carries the A6 §3.3
-/// mask-bbox contract, so a drift here would split the panel from the seam).
-fn prop_aabb_through(
-    local_bbox: (f64, f64, f64, f64),
-    m: &crate::geometry::element::Transform,
-) -> (f64, f64, f64, f64) {
-    crate::geometry::element::aabb_through(local_bbox, m)
-}
-
-/// Scale the element's LOCAL axes by (rx, ry) (post-multiply, preserving
-/// rotation) keeping the evaluated bbox top-left fixed.
-fn prop_scaled_transform(
-    mat: crate::geometry::element::Transform,
-    local_bbox: (f64, f64, f64, f64),
-    rx: f64,
-    ry: f64,
-) -> crate::geometry::element::Transform {
-    use crate::geometry::element::Transform;
-    // mat.multiply(scale) applies scale first (local), then mat — i.e. M·S.
-    let scaled = mat.multiply(&Transform { a: rx, b: 0.0, c: 0.0, d: ry, e: 0.0, f: 0.0 });
-    let old = prop_aabb_through(local_bbox, &mat);
-    let new = prop_aabb_through(local_bbox, &scaled);
-    Transform { e: scaled.e + (old.0 - new.0), f: scaled.f + (old.1 - new.1), ..scaled }
-}
-
-/// Shear angle (degrees) of a 2x3 transform, from the
-/// M = R(theta) . ShearX(k) . Scale(sx, sy) decomposition:
-/// k = (a*c + b*d) / det, shear = atan(k). Returns 0 for any shear-free
-/// matrix (agrees with the prior rotation-only behavior) and 0 when the
-/// matrix is degenerate (zero first-column length or zero determinant).
-fn prop_shear_angle_deg(mat: &crate::geometry::element::Transform) -> f64 {
-    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
-    let det = mat.a * mat.d - mat.b * mat.c;
-    if sx == 0.0 || det == 0.0 {
-        return 0.0;
-    }
-    let k = (mat.a * mat.c + mat.b * mat.d) / det;
-    k.atan().to_degrees()
-}
-
-/// Set the element's rotation to `deg`, keeping the decomposed scale AND
-/// shear (M = R . ShearX . Scale), rotated about the evaluated bbox center
-/// so the object stays in place. For a shear-free input (k = 0) this is
-/// byte-identical to the prior rotate-and-scale matrix.
-fn prop_rotated_transform(
-    mat: crate::geometry::element::Transform,
-    local_bbox: (f64, f64, f64, f64),
-    deg: f64,
-) -> crate::geometry::element::Transform {
-    use crate::geometry::element::Transform;
-    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
-    let det = mat.a * mat.d - mat.b * mat.c;
-    let sy = if sx != 0.0 { det / sx } else { 0.0 };
-    let k = if det != 0.0 { (mat.a * mat.c + mat.b * mat.d) / det } else { 0.0 };
-    let rad = deg.to_radians();
-    let (cos_a, sin_a) = (rad.cos(), rad.sin());
-    let rotated = Transform {
-        a: sx * cos_a,
-        b: sx * sin_a,
-        c: sy * (k * cos_a - sin_a),
-        d: sy * (k * sin_a + cos_a),
-        e: mat.e,
-        f: mat.f,
-    };
-    let old = prop_aabb_through(local_bbox, &mat);
-    let new = prop_aabb_through(local_bbox, &rotated);
-    let (ocx, ocy) = (old.0 + old.2 / 2.0, old.1 + old.3 / 2.0);
-    let (ncx, ncy) = (new.0 + new.2 / 2.0, new.1 + new.3 / 2.0);
-    Transform { e: rotated.e + (ocx - ncx), f: rotated.f + (ocy - ncy), ..rotated }
-}
-
-/// Set the element's shear angle to `deg`, keeping the decomposed rotation
-/// and scale (M = R . ShearX . Scale), re-anchored about the evaluated bbox
-/// center so the object stays put.
-fn prop_sheared_transform(
-    mat: crate::geometry::element::Transform,
-    local_bbox: (f64, f64, f64, f64),
-    deg: f64,
-) -> crate::geometry::element::Transform {
-    use crate::geometry::element::Transform;
-    let sx = (mat.a * mat.a + mat.b * mat.b).sqrt();
-    if sx == 0.0 {
-        return mat;
-    }
-    let theta = mat.b.atan2(mat.a);
-    let det = mat.a * mat.d - mat.b * mat.c;
-    let sy = det / sx;
-    let k = deg.to_radians().tan();
-    let (cos_t, sin_t) = (theta.cos(), theta.sin());
-    let sheared = Transform {
-        a: sx * cos_t,
-        b: sx * sin_t,
-        c: sy * (k * cos_t - sin_t),
-        d: sy * (k * sin_t + cos_t),
-        e: mat.e,
-        f: mat.f,
-    };
-    let old = prop_aabb_through(local_bbox, &mat);
-    let new = prop_aabb_through(local_bbox, &sheared);
-    let (ocx, ocy) = (old.0 + old.2 / 2.0, old.1 + old.3 / 2.0);
-    let (ncx, ncy) = (new.0 + new.2 / 2.0, new.1 + new.3 / 2.0);
-    Transform { e: sheared.e + (ocx - ncx), f: sheared.f + (ocy - ncy), ..sheared }
-}
-
-/// Document-space horizontal shear by `deg` about the pivot (px, py), as a
-/// 2x3 transform. Maps (x, y) -> (x + k*(y - py), y) with k = tan(deg). Used
-/// to shear a multi-selection as a group about its bbox center (pre-multiplied
-/// onto each element transform).
-fn prop_shear_about_pivot(deg: f64, _px: f64, py: f64) -> crate::geometry::element::Transform {
-    use crate::geometry::element::Transform;
-    let k = deg.to_radians().tan();
-    Transform { a: 1.0, b: 0.0, c: k, d: 1.0, e: -k * py, f: 0.0 }
-}
-
-/// Apply a Properties-panel field edit to the selection (decision-5 Part B.2).
-/// x/y move (any selection); w/h scale local axes (single); rotation absolute
-/// about bbox center (single); opacity/blend set on every selected element.
-/// The prop_* keys are display-only (build_live_panel_overrides reads them from
-/// the selection), so an edit mutates the selection here; the next render
-/// re-reads the new value.
+/// Apply a Properties-panel field edit to the active tab's selection, with
+/// the panel's constrain-proportions lock. The edit itself is
+/// `properties_host::apply_field`, which the engine calls too.
 pub(crate) fn apply_properties_panel_field(
     st: &mut crate::workspace::app_state::AppState,
     key: &str,
     val: &serde_json::Value,
 ) {
-    use crate::document::controller::Controller;
-    use crate::geometry::element::Transform;
-    let num = || -> Option<f64> {
-        if let Some(n) = val.as_f64() {
-            return Some(n);
-        }
-        if let Some(s) = val.as_str() {
-            return super::effects::value_to_json(&super::expr::eval(s, &serde_json::json!({})))
-                .as_f64();
-        }
-        None
-    };
     let constrain = st.properties_constrain;
     let Some(tab) = st.tabs.get_mut(st.active_tab) else { return };
-    let doc = tab.model.document().clone();
-    if doc.selection.is_empty() {
-        return;
-    }
-    let bbox = crate::canvas::render::selection_evaluated_bounds(&doc);
-    match key {
-        "prop_x" => {
-            if let Some(v) = num() {
-                Controller::move_selection(&mut tab.model, v - bbox.0, 0.0);
-            }
-        }
-        "prop_y" => {
-            if let Some(v) = num() {
-                Controller::move_selection(&mut tab.model, 0.0, v - bbox.1);
-            }
-        }
-        "prop_opacity" => {
-            if let Some(v) = num() {
-                let op = (v / 100.0).clamp(0.0, 1.0);
-                let mut nd = doc.clone();
-                for es in &doc.selection {
-                    if let Some(e) = doc.get_element(&es.path) {
-                        let mut ne = e.clone();
-                        ne.common_mut().opacity = op;
-                        nd = nd.replace_element(&es.path, ne);
-                    }
-                }
-                tab.model.edit_document(nd);
-            }
-        }
-        "prop_blend" => {
-            if let Some(s) = val.as_str() {
-                if let Ok(bm) = serde_json::from_value::<crate::geometry::element::BlendMode>(
-                    serde_json::Value::String(s.to_string()),
-                ) {
-                    let mut nd = doc.clone();
-                    for es in &doc.selection {
-                        if let Some(e) = doc.get_element(&es.path) {
-                            let mut ne = e.clone();
-                            ne.common_mut().mode = bm;
-                            nd = nd.replace_element(&es.path, ne);
-                        }
-                    }
-                    tab.model.edit_document(nd);
-                }
-            }
-        }
-        "prop_w" | "prop_h" | "prop_rotation" | "prop_shear" => {
-            if doc.selection.len() != 1 {
-                // MULTI: transform the whole selection as a group about its
-                // bbox (doc-space — no single local frame). W/H scale about
-                // the bbox top-left; rotation rotates rigidly about the bbox
-                // center by the delta from the first element's angle; shear
-                // shears horizontally about the bbox center by the same delta.
-                // Each element transform is pre-multiplied by the group.
-                if doc.selection.is_empty() {
-                    return;
-                }
-                let group = match key {
-                    "prop_w" => {
-                        let Some(v) = num() else { return };
-                        if bbox.2 <= 0.0 {
-                            return;
-                        }
-                        let r = v / bbox.2;
-                        Transform::scale(r, if constrain { r } else { 1.0 })
-                            .around_point(bbox.0, bbox.1)
-                    }
-                    "prop_h" => {
-                        let Some(v) = num() else { return };
-                        if bbox.3 <= 0.0 {
-                            return;
-                        }
-                        let r = v / bbox.3;
-                        Transform::scale(if constrain { r } else { 1.0 }, r)
-                            .around_point(bbox.0, bbox.1)
-                    }
-                    "prop_shear" => {
-                        let Some(v) = num() else { return };
-                        let cur = doc.selection.first()
-                            .and_then(|es| doc.get_element(&es.path))
-                            .and_then(|e| e.transform().copied())
-                            .map(|t| prop_shear_angle_deg(&t))
-                            .unwrap_or(0.0);
-                        let cx = bbox.0 + bbox.2 / 2.0;
-                        let cy = bbox.1 + bbox.3 / 2.0;
-                        prop_shear_about_pivot(v - cur, cx, cy)
-                    }
-                    _ => {
-                        let Some(v) = num() else { return };
-                        let cur = doc.selection.first()
-                            .and_then(|es| doc.get_element(&es.path))
-                            .and_then(|e| e.transform().copied())
-                            .map(|t| t.b.atan2(t.a).to_degrees())
-                            .unwrap_or(0.0);
-                        let cx = bbox.0 + bbox.2 / 2.0;
-                        let cy = bbox.1 + bbox.3 / 2.0;
-                        Transform::rotate(v - cur).around_point(cx, cy)
-                    }
-                };
-                let mut nd = doc.clone();
-                for es in &doc.selection {
-                    if let Some(e) = doc.get_element(&es.path) {
-                        let old = e.transform().copied().unwrap_or(Transform::IDENTITY);
-                        let mut ne = e.clone();
-                        ne.common_mut().transform = Some(group.multiply(&old));
-                        nd = nd.replace_element(&es.path, ne);
-                    }
-                }
-                tab.model.edit_document(nd);
-                return;
-            }
-            let es = &doc.selection[0];
-            let Some(e) = doc.get_element(&es.path) else { return };
-            let local = e.geometric_bounds();
-            let mat = e.transform().copied().unwrap_or(Transform::IDENTITY);
-            let new_t = match key {
-                "prop_w" => {
-                    let Some(v) = num() else { return };
-                    if bbox.2 <= 0.0 {
-                        return;
-                    }
-                    let r = v / bbox.2;
-                    prop_scaled_transform(mat, local, r, if constrain { r } else { 1.0 })
-                }
-                "prop_h" => {
-                    let Some(v) = num() else { return };
-                    if bbox.3 <= 0.0 {
-                        return;
-                    }
-                    let r = v / bbox.3;
-                    prop_scaled_transform(mat, local, if constrain { r } else { 1.0 }, r)
-                }
-                "prop_shear" => {
-                    let Some(v) = num() else { return };
-                    prop_sheared_transform(mat, local, v)
-                }
-                _ => {
-                    let Some(v) = num() else { return };
-                    prop_rotated_transform(mat, local, v)
-                }
-            };
-            let mut ne = e.clone();
-            ne.common_mut().transform = Some(new_t);
-            let nd = doc.replace_element(&es.path, ne);
-            tab.model.edit_document(nd);
-        }
-        _ => {}
-    }
+    super::properties_host::apply_field(&mut tab.model, key, val, constrain);
 }
 
+/// As `apply_set_panel_state` but threads the action's eval ctx so
+/// expressions like `param.artboard_id` resolve (ARTBOARDS.md
+/// actions). When `ctx` is None, only ctx-independent expressions
+/// (panel / state rollups) can resolve.
 pub(crate) fn apply_set_panel_state_with_ctx(
     sps: &serde_json::Map<String, serde_json::Value>,
     st: &mut crate::workspace::app_state::AppState,
@@ -6199,6 +5918,49 @@ fn compute_color_from_panel(field: &str, new_val: f64, panel: &serde_json::Value
 // (that clamp on top of the reference's numeric-string grammar).
 use super::widget_commit::{clamp_to_declared, number_input_commit};
 
+/// A committed value written to a PANEL field: the web app's panel-write
+/// host (FB wave 2b, A10), one copy for the input handlers whose per-panel
+/// writes were identical (`number_input`, `length_input`, `select`,
+/// `icon_select`, `combo_box`). Each panel family writes its own struct and
+/// applies the field to the selection; a panel with no family writes nothing.
+/// `number_input` keeps its Color and Align arms before calling this.
+/// `text_input` and `toggle` keep their own blocks: their Stroke arms write
+/// the struct without applying it.
+fn commit_panel_field(
+    st: &mut crate::workspace::app_state::AppState,
+    panel_kind: Option<PanelKind>,
+    f: &str,
+    v: &serde_json::Value,
+) {
+    match panel_kind {
+        Some(PanelKind::Character) => {
+            set_character_field(&mut st.character_panel, f, v);
+            st.character_panel_post_write(f);
+            st.apply_character_panel_to_selection(f);
+        }
+        Some(PanelKind::Paragraph) => {
+            // Sync first so untouched fields hold the selection's current
+            // values, not stale panel state, before the new field is set and
+            // the whole panel is re-applied.
+            st.sync_paragraph_panel_from_selection();
+            set_paragraph_field(&mut st.paragraph_panel, f, v);
+            st.apply_paragraph_panel_to_selection();
+        }
+        Some(PanelKind::Stroke) | None => {
+            set_stroke_field(&mut st.stroke_panel, f, v);
+            st.apply_stroke_panel_to_selection(f);
+        }
+        Some(PanelKind::Opacity) => {
+            set_opacity_field(&mut st.opacity_panel, f, v);
+            // Phase 1: panel-local only; selection sync deferred.
+        }
+        // Artboards, Layers, Swatches, Properties: no-op until their
+        // per-panel state structs land. Drops the edit silently rather than
+        // corrupting stroke state.
+        _ => {}
+    }
+}
+
 fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let min = el.get("min").and_then(|m| m.as_f64()).unwrap_or(0.0);
@@ -6260,28 +6022,6 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                 {
                     let mut st = app.borrow_mut();
                     match panel_kind {
-                        Some(PanelKind::Character) => {
-                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
-                            st.character_panel_post_write(&f);
-                            st.apply_character_panel_to_selection(&f);
-                        }
-                        Some(PanelKind::Paragraph) => {
-                            // Sync first so untouched fields hold the
-                            // selection's current values, not stale
-                            // panel state, before the new field is set
-                            // and the whole panel is re-applied.
-                            st.sync_paragraph_panel_from_selection();
-                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
-                            st.apply_paragraph_panel_to_selection();
-                        }
-                        Some(PanelKind::Stroke) | None => {
-                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            st.apply_stroke_panel_to_selection(&f);
-                        }
-                        Some(PanelKind::Opacity) => {
-                            set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
-                            // Phase 1: panel-local only; selection sync deferred.
-                        }
                         Some(PanelKind::Color) => {
                             // Slider value-box edits commit by
                             // mixing the typed channel with the
@@ -6309,11 +6049,7 @@ fn render_number_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
                                 st.align_panel.distribute_spacing = new_val;
                             }
                         }
-                        // Artboards, Layers, Swatches, Properties:
-                        // no-op for number_input writes until their per-panel state
-                        // structs land. Drops the edit silently rather than
-                        // corrupting stroke state.
-                        _ => {}
+                        _ => commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(new_val)),
                     }
                 }
                 // Bump revision after the state mutation completes so the
@@ -6510,29 +6246,10 @@ fn render_length_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &R
             spawn(async move {
                 {
                     let mut st = app.borrow_mut();
-                    match panel_kind {
-                        Some(PanelKind::Character) => {
-                            set_character_field(&mut st.character_panel, &f, &serde_json::json!(new_val));
-                            st.character_panel_post_write(&f);
-                            st.apply_character_panel_to_selection(&f);
-                        }
-                        Some(PanelKind::Paragraph) => {
-                            st.sync_paragraph_panel_from_selection();
-                            set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(new_val));
-                            st.apply_paragraph_panel_to_selection();
-                        }
-                        Some(PanelKind::Stroke) | None => {
-                            // Weight goes through set_stroke_field like
-                            // every other field; the apply propagates it
-                            // to both new-element defaults.
-                            set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(new_val));
-                            st.apply_stroke_panel_to_selection(&f);
-                        }
-                        Some(PanelKind::Opacity) => {
-                            set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(new_val));
-                        }
-                        _ => {}
-                    }
+                    // Weight goes through set_stroke_field like every other
+                    // field; the apply propagates it to both new-element
+                    // defaults.
+                    commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(new_val));
                 }
                 revision += 1;
             });
@@ -6933,29 +6650,7 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         let app = app.clone();
                         spawn(async move {
                             let mut st = app.borrow_mut();
-                            match panel_kind {
-                                Some(PanelKind::Character) => {
-                                    set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
-                                    st.character_panel_post_write(&f);
-                                    st.apply_character_panel_to_selection(&f);
-                                }
-                                Some(PanelKind::Paragraph) => {
-                                    st.sync_paragraph_panel_from_selection();
-                                    set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
-                                    st.apply_paragraph_panel_to_selection();
-                                }
-                                Some(PanelKind::Stroke) | None => {
-                                    set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                    st.apply_stroke_panel_to_selection(&f);
-                                }
-                                Some(PanelKind::Opacity) => {
-                                    set_opacity_field(&mut st.opacity_panel, &f, &serde_json::json!(v));
-                                    // Phase 1: panel-local only; selection sync deferred.
-                                }
-                                // Artboards, Layers, Color, Swatches, Properties:
-                                // no-op until their per-panel state lands.
-                                _ => {}
-                            }
+                            commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(v));
                         });
                     }
                     BindTarget::None => { return; }
@@ -7101,23 +6796,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                             let app = app.clone();
                             spawn(async move {
                                 let mut st = app.borrow_mut();
-                                match panel_kind {
-                                    Some(PanelKind::Character) => {
-                                        set_character_field(&mut st.character_panel, &f, &serde_json::json!(v));
-                                        st.character_panel_post_write(&f);
-                                        st.apply_character_panel_to_selection(&f);
-                                    }
-                                    Some(PanelKind::Paragraph) => {
-                                        st.sync_paragraph_panel_from_selection();
-                                        set_paragraph_field(&mut st.paragraph_panel, &f, &serde_json::json!(v));
-                                        st.apply_paragraph_panel_to_selection();
-                                    }
-                                    Some(PanelKind::Stroke) | None => {
-                                        set_stroke_field(&mut st.stroke_panel, &f, &serde_json::json!(v));
-                                        st.apply_stroke_panel_to_selection(&f);
-                                    }
-                                    _ => {}
-                                }
+                                commit_panel_field(&mut st, panel_kind, &f, &serde_json::json!(v));
                             });
                         }
                         BindTarget::None => { return; }
@@ -7238,25 +6917,7 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     } else {
                                         serde_json::json!(v)
                                     };
-                                    match panel_kind {
-                                        Some(PanelKind::Character) => {
-                                            set_character_field(&mut st.character_panel, &f, &json_val);
-                                            st.character_panel_post_write(&f);
-                                            st.apply_character_panel_to_selection(&f);
-                                        }
-                                        Some(PanelKind::Paragraph) => {
-                                            st.sync_paragraph_panel_from_selection();
-                                            set_paragraph_field(&mut st.paragraph_panel, &f, &json_val);
-                                            st.apply_paragraph_panel_to_selection();
-                                        }
-                                        Some(PanelKind::Stroke) | None => {
-                                            set_stroke_field(&mut st.stroke_panel, &f, &json_val);
-                                            st.apply_stroke_panel_to_selection(&f);
-                                        }
-                                        // Other panels: no-op until their
-                                        // per-panel state structs land.
-                                        _ => {}
-                                    }
+                                    commit_panel_field(&mut st, panel_kind, &f, &json_val);
                                     // Generic: run the widget's declared
                                     // `event: commit` behavior after the
                                     // native write (e.g. linked scale mirror).
@@ -13665,6 +13326,39 @@ mod tests {
         }
         new_doc.selection = vec![ElementSelection::all(vec![0, 0])];
         st.tabs[st.active_tab].model.set_document_for_test(new_doc);
+    }
+
+    /// The five input handlers whose per-panel writes were one block reach
+    /// the selection through `commit_panel_field`, once each. The handlers are
+    /// closures a native test cannot fire, so this reads their source: a
+    /// handler that stops calling the host, or grows its own copy of the
+    /// Character arm again, reds here. `text_input` and `toggle` keep their
+    /// own blocks (their Stroke arms do not apply), and `length_input`'s
+    /// nullable path keeps its Leading arm.
+    #[test]
+    fn value_handlers_write_panel_fields_through_one_host() {
+        let src = include_str!("renderer.rs");
+        // A top-level fn runs from its `fn` line to the first `}` in column 0.
+        let body = |name: &str| -> &str {
+            let head = format!("\nfn {name}(");
+            assert_eq!(src.matches(&head).count(), 1, "fn {name} in renderer.rs");
+            let start = src.find(&head).unwrap() + 1;
+            let len = src[start..].find("\n}\n").expect("a closing brace in column 0");
+            &src[start..start + len]
+        };
+        let host = "commit_panel_field(";
+        let arm = "Some(PanelKind::Character)";
+        for (name, arms) in [("render_number_input", 0), ("render_length_input", 1),
+                             ("render_select", 0), ("render_icon_select", 0),
+                             ("render_combo_box", 0)] {
+            let b = body(name);
+            assert_eq!(b.matches(host).count(), 1, "{name} must call the host once");
+            assert_eq!(b.matches(arm).count(), arms, "{name}: its own Character arms");
+        }
+        for name in ["render_text_input", "render_toggle"] {
+            assert_eq!(body(name).matches(host).count(), 0, "{name}");
+            assert_eq!(body(name).matches(arm).count(), 1, "{name}");
+        }
     }
 
     // ── Part B.2: Properties panel field editing ──────────────────────

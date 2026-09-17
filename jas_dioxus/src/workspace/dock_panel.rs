@@ -649,39 +649,7 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     // prop_-prefixed so they never collide with the Color panel's short y / h
     // keys (this map is applied to every panel by leaf-name match).
     if let Some(tab) = st.tab() {
-        let doc = tab.model.document();
-        let (px, py, pw, ph) = crate::canvas::render::selection_evaluated_bounds(doc);
-        let r2 = |v: f64| (v * 100.0).round() / 100.0;
-        m.insert("prop_x".into(), serde_json::json!(r2(px)));
-        m.insert("prop_y".into(), serde_json::json!(r2(py)));
-        m.insert("prop_w".into(), serde_json::json!(r2(pw)));
-        m.insert("prop_h".into(), serde_json::json!(r2(ph)));
-        // Part B.3: rotation / opacity / blend from the FIRST selected
-        // element (like the Stroke panel weight). Defaults 0deg / 100% /
-        // normal. Blend serializes to its snake_case id via serde.
-        let mut rot = 0.0_f64;
-        let mut shear = 0.0_f64;
-        let mut op = 100.0_f64;
-        let mut blend = J::String("normal".into());
-        if let Some(e) = doc.selection.first().and_then(|es| doc.get_element(&es.path)) {
-            if let Some(t) = e.transform() {
-                rot = t.b.atan2(t.a).to_degrees();
-                // Decomposed shear (M = R . ShearX . Scale): k = (a*c+b*d)/det,
-                // shear = atan(k). 0 for any shear-free or degenerate matrix.
-                let sx = (t.a * t.a + t.b * t.b).sqrt();
-                let det = t.a * t.d - t.b * t.c;
-                if sx != 0.0 && det != 0.0 {
-                    shear = ((t.a * t.c + t.b * t.d) / det).atan().to_degrees();
-                }
-            }
-            op = e.opacity() * 100.0;
-            blend = serde_json::to_value(e.mode())
-                .unwrap_or_else(|_| J::String("normal".into()));
-        }
-        m.insert("prop_rotation".into(), serde_json::json!(r2(rot)));
-        m.insert("prop_shear".into(), serde_json::json!(r2(shear)));
-        m.insert("prop_opacity".into(), serde_json::json!(r2(op)));
-        m.insert("prop_blend".into(), blend);
+        m.extend(crate::interpreter::properties_host::live_values(tab.model.document()));
     }
     // Properties constrain-proportions lock — a sticky AppState toggle, so the
     // icon binding (chain_linked / chain_broken) reflects it.
