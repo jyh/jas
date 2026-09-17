@@ -1009,6 +1009,19 @@ public func isGradientRenderKey(_ key: String) -> Bool {
 
 // MARK: - Gradient panel writeback (Phase 5)
 
+/// A gradient render key as a Double. A `set:` stores a whole number as an
+/// Int, which `as? Double` does not match: an angle of 45 applied as 0, from
+/// a widget commit and from a library tile alike. Same reading as
+/// ``strokePanelNumber``.
+private func gradientNumber(_ store: StateStore, _ key: String) -> Double? {
+    switch store.get(key) {
+    case let n as NSNumber: return n.doubleValue
+    case let d as Double: return d
+    case let i as Int: return Double(i)
+    default: return nil
+    }
+}
+
 /// Apply the current gradient panel state to the selected element(s).
 /// Builds a Gradient from store keys and writes it via the controller.
 /// Mirrors jas_dioxus::AppState::apply_gradient_panel_to_selection.
@@ -1037,8 +1050,8 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     }
     let g = Gradient(
         type: gType,
-        angle: (store.get("gradient_angle") as? Double) ?? 0,
-        aspectRatio: (store.get("gradient_aspect_ratio") as? Double) ?? 100,
+        angle: gradientNumber(store, "gradient_angle") ?? 0,
+        aspectRatio: gradientNumber(store, "gradient_aspect_ratio") ?? 100,
         method: gMethod,
         dither: (store.get("gradient_dither") as? Bool) ?? false,
         strokeSubMode: gSub
