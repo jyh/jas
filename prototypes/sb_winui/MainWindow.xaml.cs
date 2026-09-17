@@ -882,7 +882,7 @@ public sealed partial class MainWindow : Window
             // AFTER the scene, so the app's own preload has landed and the plan
             // is read against the document a person will actually see. The
             // queue is ordered, so this is a sequence, not a race.
-            if (_paneWanted) { _canvas.OpenPanel(PanePanelId, PaneAvailW); }
+            if (_paneWanted) { _canvas.OpenPanel(PaneFirstPanelId, PaneAvailW, "app"); }
 
             // ⭐ Q6's SYNTHETIC ARM (W2-6), queued AFTER the open so it runs on
             // the plan the pane is drawn from. The knob names a widget id; the
@@ -894,7 +894,7 @@ public sealed partial class MainWindow : Window
             var synth = Environment.GetEnvironmentVariable("SB_PANEL_SYNTH");
             if (!string.IsNullOrWhiteSpace(synth))
             {
-                if (_paneWanted) { _canvas.PanelSynth(PanePanelId, synth); }
+                if (_paneWanted) { _canvas.PanelSynth(PaneFirstPanelId, synth); }
                 else
                 {
                     Report($"RUSTFAIL PANEL SYNTH REFUSED widget={synth} -- SB_PANEL_SYNTH needs "
@@ -1735,8 +1735,28 @@ public sealed partial class MainWindow : Window
     // pass exists to end (wave-2 block §1).
     // =======================================================================
 
-    /// <summary>The panel the pane shows, by its CONTENT id.</summary>
-    private const string PanePanelId = "align_panel_content";
+    /// <summary>
+    /// The panel the pane opens with, by its CONTENT id. Q6's replay
+    /// (`SB_PANEL_SYNTH`) runs on this one, so it stays Align: W2b-2's selector
+    /// changes what a PERSON can open, never what a sitting reads.
+    /// </summary>
+    private const string PaneFirstPanelId = "align_panel_content";
+
+    /// <summary>
+    /// The panel whose plan the drawn controls were built from. A control
+    /// addresses THIS panel, so a click is always sent to the panel whose
+    /// control it is, even while a switch is still queued.
+    /// </summary>
+    private string _paneDrawnPanel = PaneFirstPanelId;
+
+    /// <summary>The selector has been filled from the core's list (or refused).</summary>
+    private bool _pickerRead;
+
+    /// <summary>
+    /// Set while THIS code moves the selector, so its handler does not read
+    /// the move as a person's choice and reopen the panel already open.
+    /// </summary>
+    private bool _pickerSync;
 
     /// <summary>
     /// The width the plan is laid out at, in canonical panel units, which this
@@ -1808,7 +1828,9 @@ public sealed partial class MainWindow : Window
         if (snap is null) { return; }
         try
         {
+            if (!_pickerRead) { FillPicker(); }
             DrawPane(snap);
+            SyncPicker(snap.PanelId);
         }
         catch (Exception ex)
         {
@@ -1845,22 +1867,26 @@ public sealed partial class MainWindow : Window
         }
         var height = root.GetProperty("height").GetInt64();
 
-        var signature = string.Join("\n", leaves.Select(l =>
+        // The panel id is part of the signature: two panels with the same
+        // leaves would otherwise keep controls that address the wrong panel.
+        var signature = snap.PanelId + "\n" + string.Join("\n", leaves.Select(l =>
             $"{l.Path}|{l.Type}|{l.Id}|{l.X},{l.Y},{l.W},{l.H}|{l.IconName}|"
             + string.Join(";", l.Static.OrderBy(kv => kv.Key, StringComparer.Ordinal)
                                        .Select(kv => $"{kv.Key}={kv.Value}"))));
         var rebuilt = signature != _paneSignature;
+        _paneDrawnPanel = snap.PanelId;
         if (rebuilt) { BuildPane(leaves, icons, height); }
         _paneSignature = signature;
 
-        var (disabled, @checked, hidden) = (0, 0, 0);
+        var (disabled, @checked, hidden, editing) = (0, 0, 0, 0);
         foreach (var leaf in leaves)
         {
             if (!_paneControls.TryGetValue(leaf.Path, out var el)) { continue; }
-            var (d, c, h) = ApplyLeafValues(el, leaf);
+            var (d, c, h, ed) = ApplyLeafValues(el, leaf);
             disabled += d;
             @checked += c;
             hidden += h;
+            editing += ed;
         }
 
         // ⚠️ THE MENU ROW's ARITHMETIC, AND ITS LIMIT: this handler also reads the
@@ -1871,6 +1897,7 @@ public sealed partial class MainWindow : Window
         Report($"PANEL DRAWN panel={snap.PanelId} seq={snap.Seq} cause={snap.Cause} "
              + $"missed={(missed > 0 ? missed : 0)} rebuilt={(rebuilt ? "true" : "false")} "
              + $"controls={_paneControls.Count} disabled={disabled} checked={@checked} hidden={hidden} "
+             + $"editing={editing} "
              + $"pane-dips={PaneHost.ActualWidth:0}x{PaneHost.ActualHeight:0} "
              + $"canvas-dips={this.Canvas.ActualWidth:0}x{this.Canvas.ActualHeight:0}");
     }
@@ -1907,7 +1934,7 @@ public sealed partial class MainWindow : Window
             Height = height,
             Margin = new Thickness(PanePad),
         };
-        var (texts, buttons, inputs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0);
+        var (texts, buttons, inputs, toggles, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0);
         foreach (var leaf in leaves)
         {
             FrameworkElement el;
@@ -1933,19 +1960,14 @@ public sealed partial class MainWindow : Window
 
                 case "number_input":
                     inputs++;
-                    // ⚠️ DISPLAY ONLY IN 2a, AND THE CORE IS WHY: align's one
-                    // input is enabled only with a designated key object, which
-                    // the engine has no way to designate, so it is always
-                    // disabled by the core's own verdict. Its commit path is
-                    // unbuilt and named rather than faked.
-                    el = new TextBox
-                    {
-                        IsReadOnly = true,
-                        FontSize = 12,
-                        MinWidth = 0,
-                        MinHeight = 0,
-                        Padding = new Thickness(4, 0, 4, 0),
-                    };
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    el = BuildNumberInput(leaf);
+                    break;
+
+                case "toggle":
+                    toggles++;
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    el = BuildToggle(leaf);
                     break;
 
                 default:
@@ -1967,8 +1989,8 @@ public sealed partial class MainWindow : Window
         }
         PaneScroll.Content = host;
 
-        Report($"PANEL BUILT panel={PanePanelId} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-             + $"buttons={buttons} inputs={inputs} unmaterialized={unmaterialized} "
+        Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
+             + $"buttons={buttons} inputs={inputs} toggles={toggles} unmaterialized={unmaterialized} "
              + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
     }
@@ -2085,24 +2107,27 @@ public sealed partial class MainWindow : Window
 
     /// <summary>Stop 4's receipt: how each icon_button's face was drawn, once every load settled.</summary>
     private void ReportPaneIcons() =>
-        Report($"PANEL ICONS panel={PanePanelId} build={_paneBuild} svg={_paneIconsSvg} "
+        Report($"PANEL ICONS panel={_paneDrawnPanel} build={_paneBuild} svg={_paneIconsSvg} "
              + $"text={_paneIconsText} failed={_paneIconsFailed} "
              + $"icon={(_paneIconsSvg > 0 && _paneIconsText + _paneIconsFailed == 0 ? "SVG" : "TEXT")}");
 
     /// <summary>
     /// Show what the core says about one control. Returns `(disabled, checked,
-    /// hidden)` as 0/1 for the row.
+    /// hidden, editing)` as 0/1 for the row. `editing` is a focused number box
+    /// whose text a person has changed and not committed: its text is left
+    /// alone, and the core's value is still recorded as the one it shows.
     ///
     /// ⛔ THESE ARE READINGS, NOT EVALUATIONS. Each value is the canonical
     /// string the core resolved; `"true"` is the only true. An unaddressable
     /// button (no id) is never enabled, since a click could not name it.
     /// </summary>
-    private (int Disabled, int Checked, int Hidden) ApplyLeafValues(FrameworkElement el, PaneLeaf leaf)
+    private (int Disabled, int Checked, int Hidden, int Editing) ApplyLeafValues(FrameworkElement el, PaneLeaf leaf)
     {
         var shown = (leaf.Value("bind.visible") ?? leaf.Value("visible")) != "false";
         el.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
         var off = leaf.Value("bind.disabled") == "true";
         var on = leaf.Value("bind.checked") == "true";
+        var typing = false;
 
         switch (el)
         {
@@ -2128,13 +2153,25 @@ public sealed partial class MainWindow : Window
                 break;
 
             case TextBox box:
-                var unit = leaf.Literal("unit") ?? leaf.Literal("suffix");
+                // The value ALONE, as both active ports show it: the text is
+                // what a commit sends, and the core refuses "5 pt" for a number.
                 var value = leaf.Value("bind.value") ?? "";
-                box.Text = unit is null ? value : $"{value} {unit}";
+                typing = box.FocusState != FocusState.Unfocused
+                         && !string.Equals(box.Text, box.Tag as string ?? "", StringComparison.Ordinal);
+                box.Tag = value;
+                if (!typing) { box.Text = value; }
+                off = off || leaf.Id.Length == 0;
                 box.IsEnabled = !off;
                 break;
+
+            case CheckBox toggle:
+                off = off || leaf.Id.Length == 0;
+                toggle.Tag = on;
+                toggle.IsChecked = on;
+                toggle.IsEnabled = !off;
+                break;
         }
-        return (off ? 1 : 0, on ? 1 : 0, shown ? 0 : 1);
+        return (off ? 1 : 0, on ? 1 : 0, shown ? 0 : 1, typing ? 1 : 0);
     }
 
     /// <summary>
@@ -2142,19 +2179,166 @@ public sealed partial class MainWindow : Window
     /// What the click does is the core's (`jas_panel_behavior`); the row it
     /// writes is the receipt.
     /// </summary>
-    private void OnPaneClick(string widget)
+    private void OnPaneClick(string widget) => SendPane(widget, "click", null);
+
+    /// <summary>
+    /// Send one act on a pane control to the core, addressed to the panel the
+    /// control was built from. A press is `click` with no value; a commit is
+    /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
+    /// </summary>
+    private void SendPane(string widget, string eventName, string? value)
     {
         _canvas.PanelClick(new PanelClickCmd
         {
-            PanelId = PanePanelId,
+            PanelId = _paneDrawnPanel,
             Widget = widget,
             Via = "hand",
+            Event = eventName,
+            Value = value,
             Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
             Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
             Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
             Meta = IsKeyDown(Windows.System.VirtualKey.LeftWindows)
                    || IsKeyDown(Windows.System.VirtualKey.RightWindows),
         });
+    }
+
+    // =======================================================================
+    // W2b-2 — THE SELECTOR, AND THE CONTROLS A PERSON CAN CHANGE
+    //
+    // ⛔ STILL NOT ONE VALUE IS DECIDED HERE. A number box sends the TEXT it
+    // holds and a toggle sends a press; the core parses, writes and runs the
+    // behaviors (`WIDGET_EVENTS.md`), and the plan it publishes afterwards is
+    // what the controls show. So each control is put back to the core's last
+    // value AS IT SENDS: a refused commit then leaves the core's value on
+    // screen, and an accepted one is shown by the re-read, never by the
+    // control's own guess.
+    // =======================================================================
+
+    /// <summary>
+    /// A `number_input`. Enter commits; losing focus commits only a changed
+    /// text (<see cref="PanelWire.CommitOnBlur"/>). A declared unit is the
+    /// tooltip, since the box holds exactly what a commit sends. A box with no
+    /// id cannot be addressed, so it is read-only.
+    /// </summary>
+    private TextBox BuildNumberInput(PaneLeaf leaf)
+    {
+        var box = new TextBox
+        {
+            FontSize = 12,
+            MinWidth = 0,
+            MinHeight = 0,
+            Padding = new Thickness(4, 0, 4, 0),
+            IsSpellCheckEnabled = false,
+            IsReadOnly = leaf.Id.Length == 0,
+        };
+        var unit = leaf.Literal("unit") ?? leaf.Literal("suffix");
+        if (!string.IsNullOrEmpty(unit)) { ToolTipService.SetToolTip(box, unit); }
+        if (leaf.Id.Length == 0) { return box; }
+
+        var id = leaf.Id;
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key != Windows.System.VirtualKey.Enter) { return; }
+            e.Handled = true;
+            CommitBox(box, id);
+        };
+        box.LostFocus += (_, _) =>
+        {
+            if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id); }
+        };
+        return box;
+    }
+
+    private void CommitBox(TextBox box, string widget)
+    {
+        var text = box.Text;
+        box.Text = box.Tag as string ?? "";
+        SendPane(widget, "commit", text);
+    }
+
+    /// <summary>
+    /// A `toggle`: a check box labelled with the plan's `label`. A press is a
+    /// `click`; what it writes is the core's, which is why the box is put back
+    /// to the core's value before the press is sent.
+    /// </summary>
+    private CheckBox BuildToggle(PaneLeaf leaf)
+    {
+        var box = new CheckBox
+        {
+            Content = leaf.Literal("label") ?? leaf.Id,
+            FontSize = 12,
+            MinWidth = 0,
+            MinHeight = 0,
+            IsThreeState = false,
+        };
+        var id = leaf.Id;
+        box.Click += (_, _) =>
+        {
+            box.IsChecked = box.Tag is true;
+            if (id.Length > 0) { SendPane(id, "click", null); }
+        };
+        return box;
+    }
+
+    /// <summary>
+    /// Fill the selector from `jas_panel_list`, once. Every entry is the core's:
+    /// its label is the panel's summary (or its id), its tag the content id.
+    /// </summary>
+    private void FillPicker()
+    {
+        var json = _canvas.PanelList;
+        if (json is null) { return; }
+        _pickerRead = true;
+        if (json.Length == 0) { return; }   // the render thread named the refusal
+
+        var list = PanelWire.ReadPanelList(json);
+        if (list is null)
+        {
+            Report($"RUSTFAIL PANEL LIST UNREADABLE bytes={json.Length} -- the pane offers no other panel");
+            return;
+        }
+        _pickerSync = true;
+        try
+        {
+            foreach (var (id, label) in list.Rows)
+            {
+                PanePicker.Items.Add(new ComboBoxItem { Content = label, Tag = id });
+            }
+        }
+        finally
+        {
+            _pickerSync = false;
+        }
+        PanePicker.SelectionChanged += OnPickerChanged;
+        PanePicker.IsEnabled = list.Rows.Count > 0;
+        Report($"PANEL LIST panels={list.Rows.Count} skipped={list.Skipped} bytes={json.Length} "
+             + $"first={(list.Rows.Any(r => r.Id == PaneFirstPanelId) ? PaneFirstPanelId : "ABSENT")}");
+    }
+
+    /// <summary>Show the open panel in the selector, without reading that as a choice.</summary>
+    private void SyncPicker(string panelId)
+    {
+        _pickerSync = true;
+        try
+        {
+            PanePicker.SelectedItem = PanePicker.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(i => i.Tag as string == panelId);
+        }
+        finally
+        {
+            _pickerSync = false;
+        }
+    }
+
+    private void OnPickerChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_pickerSync) { return; }
+        if (PanePicker.SelectedItem is not ComboBoxItem { Tag: string id }) { return; }
+        if (id == _paneDrawnPanel) { return; }
+        Report($"PANEL SWITCH REQUESTED from={_paneDrawnPanel} to={id} via=hand");
+        _canvas.OpenPanel(id, PaneAvailW, "hand");
     }
 
     private static bool IsKeyDown(Windows.System.VirtualKey key) =>

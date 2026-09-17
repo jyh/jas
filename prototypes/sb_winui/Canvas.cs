@@ -231,6 +231,12 @@ internal sealed class PanelOpenCmd : Cmd
 {
     internal string PanelId = "";
     internal long AvailW;
+
+    /// <summary>
+    /// WHO opened it: `app` for the pane's first panel, `hand` for a person's
+    /// choice in the selector (W2b-2). It is on the open row.
+    /// </summary>
+    internal string Via = "app";
 }
 
 /// <summary>
@@ -245,6 +251,18 @@ internal sealed class PanelClickCmd : Cmd
     internal bool Shift;
     internal bool Ctrl;
     internal bool Meta;
+
+    /// <summary>
+    /// The widget event (W2b-2): `click` for a press, `commit` for a value.
+    /// Only `WIDGET_EVENTS.md`'s names are sent; the core refuses the rest.
+    /// </summary>
+    internal string Event = "click";
+
+    /// <summary>
+    /// A commit's TEXT, exactly as the control held it, or null for a press.
+    /// The core parses it by the widget's kind; this shell never does.
+    /// </summary>
+    internal string? Value;
 
     /// <summary>
     /// WHO clicked: `hand` for a person, `synth:&lt;step&gt;` for Q6's replay.
@@ -3907,8 +3925,15 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Something in this drain may have moved the document. Render thread only.</summary>
     private bool _panelStale;
 
-    internal void OpenPanel(string panelId, long availW) =>
-        _queue.Add(new PanelOpenCmd { PanelId = panelId, AvailW = availW });
+    internal void OpenPanel(string panelId, long availW, string via) =>
+        _queue.Add(new PanelOpenCmd { PanelId = panelId, AvailW = availW, Via = via });
+
+    /// <summary>
+    /// `jas_panel_list`'s bytes, read ONCE on the render thread at the first
+    /// open and published before that open's plan (W2b-2). Null until then,
+    /// and the empty string when the core refused.
+    /// </summary>
+    internal volatile string? PanelList;
 
     internal void PanelClick(PanelClickCmd click) => _queue.Add(click);
 
@@ -3963,6 +3988,22 @@ internal sealed unsafe class Canvas : IDisposable
         }
         _panelId = open.PanelId;
         _panelAvailW = open.AvailW;
+
+        // ⛔ READ BEFORE THE COUNTER WINDOW, NOT INSIDE IT. The open row's
+        // `crossings=` is the plan call and its release, and Q6.2 requires 2;
+        // the list's call and release inside the window would read 4 on the
+        // first open and 2 on every later one.
+        if (PanelList is null)
+        {
+            var list = JasCore.TakeString(JasCore.jas_panel_list());
+            if (list.Length == 0)
+            {
+                _report($"RUSTFAIL PANEL LIST REFUSED -- jas_panel_list returned the empty span, "
+                      + $"so the pane offers no other panel {Tids()}");
+            }
+            PanelList = list;
+        }
+
         var before = BoundaryTotals();
         var plan = ApplyPanelRefresh("open");
         var after = BoundaryTotals();
@@ -3974,7 +4015,7 @@ internal sealed unsafe class Canvas : IDisposable
         var bytes = before.PlanBytesOut < 0 || after.PlanBytesOut < 0
             ? "UNREADABLE"
             : (after.PlanBytesOut - before.PlanBytesOut).ToString();
-        _report($"PANEL OPEN panel={open.PanelId} avail-w={open.AvailW} {PlanReading(plan)} "
+        _report($"PANEL OPEN panel={open.PanelId} via={open.Via} avail-w={open.AvailW} {PlanReading(plan)} "
               + $"crossings={crossings} bytes={bytes} plan-bytes={System.Text.Encoding.UTF8.GetByteCount(plan)} "
               + $"seq={_panelSeq} {Tids()}");
     }
@@ -4053,6 +4094,17 @@ internal sealed unsafe class Canvas : IDisposable
     private bool ApplyPanelClick(PanelClickCmd click)
     {
         if (_engine == IntPtr.Zero) { return false; }
+        var head = ClickHead(click);
+        if (!string.Equals(click.PanelId, _panelId, StringComparison.Ordinal))
+        {
+            // A person used a control of the pane they were LOOKING AT, and the
+            // selector's open ran first. Its reply rows could not be checked
+            // against the plan now open, and the panel it names is no longer
+            // shown, so it is dropped and said so, never run.
+            _report($"PANEL CLICK DROPPED {head} -- the pane opened '{_panelId ?? "(none)"}' "
+                  + $"before this ran {Tids()}");
+            return false;
+        }
         var id = System.Text.Encoding.UTF8.GetBytes(click.PanelId);
         var ev = PanelEventJson(click);
         var reply = JasCore.TakeString(
@@ -4063,12 +4115,11 @@ internal sealed unsafe class Canvas : IDisposable
         {
             if (channel.Length == 0)
             {
-                _report($"RUSTFAIL PANEL CLICK SILENT panel={click.PanelId} widget={click.Widget} via={click.Via} -- "
+                _report($"RUSTFAIL PANEL CLICK SILENT {head} -- "
                       + $"an empty reply and an empty error channel {Tids()}");
                 return false;
             }
-            _report($"PANEL CLICK REFUSED panel={click.PanelId} widget={click.Widget} via={click.Via} "
-                  + $"channel={channel} {Tids()}");
+            _report($"PANEL CLICK REFUSED {head} channel={channel} {Tids()}");
             return false;
         }
 
@@ -4082,8 +4133,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         catch (Exception ex)
         {
-            _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE panel={click.PanelId} widget={click.Widget} via={click.Via} "
-                  + $"{ex.GetType().Name} {Tids()}");
+            _report($"RUSTFAIL PANEL CLICK REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
             return false;
         }
 
@@ -4092,11 +4142,11 @@ internal sealed unsafe class Canvas : IDisposable
         // The plan is re-read NOW, not at the end of the drain, because the
         // reply's rows are checked against it and a later command in the same
         // drain could move the values first.
-        var plan = ApplyPanelRefresh("click");
+        var plan = ApplyPanelRefresh(click.Event);
         _panelStale = false;
         var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
         var outcome = channel.Length == 0 ? "changed" : "unchanged";
-        var row = $"PANEL CLICK panel={click.PanelId} widget={click.Widget} via={click.Via} outcome={outcome} "
+        var row = $"PANEL CLICK {head} outcome={outcome} "
                 + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
                 + $"delta-mismatch={mismatch} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
         _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
@@ -4229,20 +4279,23 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
-    /// The click's event JSON, written by a serializer. `widget` is an id the
-    /// PLAN supplied; the modifiers reach the behavior's `condition` as
-    /// `event.*`, which the core evaluates.
+    /// The click's event JSON (<see cref="PanelWire.EventJson"/>). `widget` is
+    /// an id the PLAN supplied; the modifiers reach the behavior's `condition`
+    /// as `event.*`, which the core evaluates; a commit's text is the core's to
+    /// parse.
     /// </summary>
     private static byte[] PanelEventJson(PanelClickCmd click) =>
-        System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new Dictionary<string, object>
-        {
-            ["widget"] = click.Widget,
-            ["event"] = "click",
-            ["alt"] = click.Alt,
-            ["shift"] = click.Shift,
-            ["ctrl"] = click.Ctrl,
-            ["meta"] = click.Meta,
-        });
+        PanelWire.EventJson(click.Widget, click.Event, click.Value,
+                            click.Alt, click.Shift, click.Ctrl, click.Meta);
+
+    /// <summary>
+    /// The fields every click row opens with. `event=` and `value=` come AFTER
+    /// `via=`, so the replay's reader (`Select-SbSynthClick`, which keys on
+    /// `widget=\S+ via=`) reads these rows exactly as it read them before.
+    /// </summary>
+    private static string ClickHead(PanelClickCmd click) =>
+        $"panel={click.PanelId} widget={click.Widget} via={click.Via} "
+        + $"event={click.Event} value={PanelWire.RowValue(click.Value)}";
 
     /// <summary>
     /// How many of the reply's rows for THIS panel disagree with the plan read
