@@ -18027,11 +18027,11 @@
                 "unit": "pt",
                 "summary": "Selection X",
                 "description": "Left edge of the selection bounding box (document X), in points. Editing moves the selection.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_x"
                 }
               },
@@ -18050,11 +18050,11 @@
                 "unit": "pt",
                 "summary": "Selection Y",
                 "description": "Top edge of the selection bounding box (document Y), in points. Editing moves the selection.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_y"
                 }
               }
@@ -18083,11 +18083,11 @@
                 "unit": "pt",
                 "summary": "Selection width",
                 "description": "Width of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_w"
                 }
               },
@@ -18106,11 +18106,11 @@
                 "unit": "pt",
                 "summary": "Selection height",
                 "description": "Height of the selection bounding box, in points. Editing scales the object; a multi-selection scales as a group about the bbox top-left.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_h"
                 }
               },
@@ -18122,8 +18122,8 @@
                 "style": {
                   "size": 18
                 },
-                "disabled": "active_document.selection_count == 0",
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "icon": "if panel.prop_constrain then \"chain_linked\" else \"chain_broken\"",
                   "checked": "panel.prop_constrain"
                 },
@@ -18166,11 +18166,11 @@
                 "suffix": "\u00b0",
                 "summary": "Selection rotation",
                 "description": "Rotation angle of the first selected element, in degrees. Editing rotates about the bbox center; a multi-selection rotates rigidly as a group by the delta.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_rotation"
                 }
               }
@@ -18199,11 +18199,11 @@
                 "suffix": "\u00b0",
                 "summary": "Selection shear",
                 "description": "Horizontal shear (skew) angle of the first selected element, in degrees. Editing shears about the bbox center; a multi-selection shears as a group by the delta.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_shear"
                 }
               }
@@ -18234,11 +18234,11 @@
                 "suffix": "%",
                 "summary": "Selection opacity",
                 "description": "Opacity of the first selected element, 0-100 percent. Editing sets opacity on every selected element.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_opacity"
                 }
               }
@@ -18266,11 +18266,11 @@
                 "type": "select",
                 "summary": "Selection blend mode",
                 "description": "Blend mode of the first selected element. Editing sets the blend mode on every selected element.",
-                "disabled": "active_document.selection_count == 0",
                 "style": {
                   "flex": 1
                 },
                 "bind": {
+                  "disabled": "active_document.selection_count == 0",
                   "value": "panel.prop_blend"
                 },
                 "options": [
