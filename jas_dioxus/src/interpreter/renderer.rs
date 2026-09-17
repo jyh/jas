@@ -13361,6 +13361,30 @@ mod tests {
         }
     }
 
+    /// **W2b-P (FB wave 2b, block §1.3).** `properties.yaml` says *"All
+    /// fields are editable. Editing X/Y moves the selection."* A Properties
+    /// value committed through the panel host reaches the selection, for each
+    /// of the three kinds the panel binds: X is a `length_input`, opacity a
+    /// `number_input`, blend a `select`. The web handlers dropped all three.
+    #[test]
+    fn properties_fields_commit_through_the_panel_host() {
+        use crate::geometry::element::BlendMode;
+        let mut st = AppState::new();
+        select_first_rect(&mut st, None); // rect (0,0,100,50)
+        let x = |st: &AppState| crate::canvas::render::selection_evaluated_bounds(
+            st.tab().unwrap().model.document()).0;
+        commit_panel_field(&mut st, Some(PanelKind::Properties), "prop_x", &serde_json::json!(40.0));
+        assert!((x(&st) - 40.0).abs() < 1e-6, "X = 40 left the box at {}", x(&st));
+        commit_panel_field(&mut st, Some(PanelKind::Properties), "prop_x", &serde_json::json!(70.0));
+        assert!((x(&st) - 70.0).abs() < 1e-6, "X = 70 left the box at {}", x(&st));
+        commit_panel_field(&mut st, Some(PanelKind::Properties), "prop_opacity", &serde_json::json!(40.0));
+        commit_panel_field(&mut st, Some(PanelKind::Properties), "prop_blend", &serde_json::json!("multiply"));
+        let doc = st.tab().unwrap().model.document();
+        let e = doc.get_element(&vec![0, 0]).unwrap();
+        assert!((e.opacity() - 0.4).abs() < 1e-6, "opacity {}", e.opacity());
+        assert_eq!(e.mode(), BlendMode::Multiply);
+    }
+
     // ── Part B.2: Properties panel field editing ──────────────────────
     #[test]
     fn props_apply_x_moves() {
