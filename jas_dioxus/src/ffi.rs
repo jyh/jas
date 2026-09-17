@@ -2632,6 +2632,29 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **A12 (W2b-12).** The engine has no dialog door, so a behavior that
+    /// opens a dialog is refused by the dialog's name, and nothing of its
+    /// batch runs. Until A12, New Brush with a selection RAN: it opened the
+    /// dialog in the engine's store, which no shell can show, and replied as a
+    /// success with the error channel empty.
+    #[test]
+    fn panel_behavior_refuses_a_dialog_by_name() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = stroked_engine();
+        let _ = plan_of(e, "brushes_panel_content", 228, 0);
+        let before = doc_json(e);
+        let store_before = engine_of(e).store.borrow().eval_context();
+        let (reply, err) = behave(e, "brushes_panel_content",
+                                  r#"{"widget":"bp_new_brush_btn","event":"click"}"#);
+        assert_eq!(err, refusal("PlatformEffect", "Dialog:brush_options"));
+        assert_eq!(reply, "");
+        assert_eq!(doc_json(e), before);
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), None,
+                   "the refused batch opened a dialog on the live store");
+        assert_eq!(engine_of(e).store.borrow().eval_context(), store_before);
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **D7.** Every other refusal, each with its exact string.
     #[test]
     fn panel_behavior_refuses_by_name_where_there_is_nothing_to_run() {
