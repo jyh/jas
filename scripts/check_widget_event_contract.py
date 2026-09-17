@@ -290,49 +290,68 @@ def self_test() -> int:
     outside = {"type": "icon_button", "id": "ib",
                "behavior": [{"event": "mouse_down"}, {"event": "anything"}]}
 
-    def gate(widgets, doc=None, extra=None, tracked=None):
+    def attempt(widgets, doc=None, extra=None, tracked=None):
+        """("judged", findings, report) or ("refused", message)."""
         with tempfile.TemporaryDirectory() as d:
             root = pathlib.Path(d)
-            files = {"workspace/panels/p.yaml": _yaml_widgets(widgets)}
+            (root / "workspace").mkdir()
+            files = {"workspace/panels/p.yaml": _yaml_widgets(widgets)} \
+                if widgets is not None else {}
             files.update(extra or {})
             _fixture(root, files, "")
             rels = set(files) if tracked is None else tracked
-            return run(root, table, _doc_for(table) if doc is None else doc, rels)
+            try:
+                return ("judged",) + run(
+                    root, table, _doc_for(table) if doc is None else doc, rels)
+            except Refusal as e:
+                return ("refused", str(e))
 
-    def refuses(**kw):
-        try:
-            gate(**kw)
-        except Refusal:
-            return True
-        return False
+    def gate(widgets, **kw):
+        """A judgement, or an arm failure naming the refusal. A refusal here
+        must fail the ARM, never escape as a traceback, or the arm that
+        should have caught a mutant is not the thing that caught it."""
+        got = attempt(widgets, **kw)
+        if got[0] == "refused":
+            arm("a fixture expected to be JUDGED was judged (refused: "
+                + got[1] + ")", False)
+            return [("<refused>", "<refused>", "-", got[1])], {
+                "conforming": {}, "widgets": {}}
+        return got[1], got[2]
+
+    def refuses(because, **kw):
+        """True only for a refusal whose message names `because`: two
+        refusals can fire on one fixture, and the arm must see its own."""
+        got = attempt(**kw)
+        return got[0] == "refused" and because in got[1]
 
     # Refusals first: a gate that cannot measure must never read as clean.
-    with tempfile.TemporaryDirectory() as d:
-        root = pathlib.Path(d)
-        (root / "workspace").mkdir()
-        try:
-            run(root, table, _doc_for(table), set())
-            arm("an empty population REFUSES", False)
-        except Refusal:
-            arm("an empty population REFUSES", True)
+    arm("an empty population REFUSES",
+        refuses("no workspace YAML files", widgets=None, tracked=set()))
     arm("a tracked file the walk did not find REFUSES",
-        refuses(widgets=clean, tracked={"workspace/panels/p.yaml",
-                                        "workspace/panels/gone.yaml"}))
+        refuses("not found by the walk", widgets=clean,
+                tracked={"workspace/panels/p.yaml", "workspace/panels/gone.yaml"}))
     arm("an unparseable file REFUSES",
-        refuses(widgets=clean, extra={"workspace/panels/bad.yaml": "a: [1, 2\n"}))
+        refuses("unparseable YAML", widgets=clean,
+                extra={"workspace/panels/bad.yaml": "a: [1, 2\n"}))
     arm("a value kind with no widget anywhere REFUSES",
-        refuses(widgets=[w for w in clean if w["type"] != "toggle"]))
+        refuses("no widget of kind toggle anywhere",
+                widgets=[w for w in clean if w["type"] != "toggle"]))
     arm("a tree with no behavior on any value kind REFUSES",
-        refuses(widgets=[{"type": k} for k in table]))
-    arm("a document with no table REFUSES", refuses(widgets=clean, doc="# t\n"))
+        refuses("census read nothing", widgets=[{"type": k} for k in table]))
+    arm("a document with no table REFUSES",
+        refuses("exactly one table", widgets=clean, doc="# t\n"))
     arm("a document with two tables REFUSES",
-        refuses(widgets=clean, doc=_doc_for(table) * 2))
+        refuses("exactly one table", widgets=clean, doc=_doc_for(table) * 2))
     arm("a table line with no colon REFUSES",
-        refuses(widgets=clean, doc=_doc_for(table).replace(
-            "toggle: click, change", "toggle click, change")))
+        refuses("is not 'kind: events'", widgets=clean,
+                doc=_doc_for(table).replace("toggle: click, change",
+                                            "toggle click, change")))
     arm("a table naming a kind twice REFUSES",
-        refuses(widgets=clean, doc=_doc_for(table).replace(
-            "checkbox:", "toggle:")))
+        refuses("names 'toggle' twice", widgets=clean,
+                doc=_doc_for(table).replace("checkbox:", "toggle:")))
+    arm("an empty table REFUSES",
+        refuses("table is empty", widgets=clean,
+                doc="\n".join([TABLE_BEGIN, "```", "```", TABLE_END])))
 
     # Green.
     findings, report = gate(clean + [outside])
