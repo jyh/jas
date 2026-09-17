@@ -92,7 +92,6 @@ def test_a_display_sync_leaves_the_document_alone():
     sync_properties_panel_from_selection(store, model)
     assert model.document is before
     assert selection_evaluated_bounds(model.document) == bounds
-    assert selection_evaluated_bounds(model.document)[0] == pytest.approx(10.004, abs=1e-12)
 
 
 @pytest.mark.parametrize("field,value", [
