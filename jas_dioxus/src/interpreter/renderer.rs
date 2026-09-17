@@ -13369,6 +13369,11 @@ mod tests {
         apply_properties_panel_field(&mut st, "prop_x", &serde_json::json!(40.0));
         let doc = st.tab().unwrap().model.document();
         assert!((crate::canvas::render::selection_evaluated_bounds(doc).0 - 40.0).abs() < 1e-6);
+        // From a box that does not start at 0, so the move is the DIFFERENCE:
+        // a host that moved by the typed value alone passed the first half.
+        apply_properties_panel_field(&mut st, "prop_x", &serde_json::json!(70.0));
+        let doc = st.tab().unwrap().model.document();
+        assert!((crate::canvas::render::selection_evaluated_bounds(doc).0 - 70.0).abs() < 1e-6);
     }
 
     #[test]
