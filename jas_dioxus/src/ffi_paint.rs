@@ -1940,6 +1940,10 @@ mod tests {
     /// collapse into one code -- one is a dead session, the other a dead buffer.
     #[test]
     fn a_null_engine_and_a_null_surface_are_told_apart() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         assert_eq!(
             unsafe { jas_paint_document(core::ptr::null_mut(), core::ptr::null_mut(), 1.0, 1.0) },
             JAS_PAINT_NULL_ENGINE,
@@ -1982,6 +1986,10 @@ mod tests {
     /// file was bad. Those are opposite diagnoses.
     #[test]
     fn a_malformed_file_is_refused_rather_than_opened_as_a_blank_drawing() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = crate::ffi::jas_engine_new();
         for bad in ["", "not xml at all", "\u{0}\u{1}\u{2}"] {
             let rc = unsafe { jas_load_svg(e.cast(), bad.as_ptr(), bad.len()) };
@@ -2030,6 +2038,10 @@ mod tests {
     /// "refuse everything" would pass every assertion above.
     #[test]
     fn a_well_formed_but_empty_drawing_loads_rather_than_refusing() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = crate::ffi::jas_engine_new();
         let empty = r#"<svg xmlns="http://www.w3.org/2000/svg"></svg>"#;
         assert_eq!(
@@ -2050,6 +2062,10 @@ mod tests {
     /// perfectly successfully.
     #[test]
     fn a_real_svg_file_opens_and_paints_its_own_colour_onto_the_surface() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = crate::ffi::jas_engine_new();
         // Authored here rather than read from `test_fixtures/` so the arm states
         // its own expectation: the colour asserted below is visible in the

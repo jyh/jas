@@ -151,6 +151,11 @@ jobs:
       # table lives once, in workspace_interpreter/widget_event.py; this holds
       # the YAML and the document's copy to it.
       - run: python scripts/check_widget_event_contract.py --self-test && python scripts/check_widget_event_contract.py
+      # A Rust test that crosses a recording export holds ffi_instr's counter
+      # lock, the lock's own stated law. An unlocked engine created between
+      # two reads of the process-global counters reds an unrelated test, and
+      # only sometimes: jas main 191dc79a went red that way on Linux.
+      - run: python scripts/check_ffi_counter_lock.py --self-test && python scripts/check_ffi_counter_lock.py
       # One vocabulary for the Layers type filter, spoken identically by the
       # YAML and both active ports, and derived from the ELEMENT. jas_dioxus
       # parsed the row LABEL, so naming an element exempted it from the filter
@@ -915,6 +920,8 @@ jobs:
           python scripts/check_widget_kind_dispatch.py
           python scripts/check_widget_event_contract.py --self-test
           python scripts/check_widget_event_contract.py
+          python scripts/check_ffi_counter_lock.py --self-test
+          python scripts/check_ffi_counter_lock.py
           python scripts/check_layers_type_filter.py --self-test
           python scripts/check_layers_type_filter.py
           python scripts/check_action_implementations.py --self-test

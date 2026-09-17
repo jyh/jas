@@ -1165,6 +1165,10 @@ mod tests {
 
     #[test]
     fn a_rejected_op_reports_its_frozen_class_and_detail() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let (p, n) = bytes(r#"{"op":"no_such_verb_at_all"}"#);
         assert_eq!(unsafe { jas_dispatch_event(e, p, n) }, JasStatus::UnknownVerb);
@@ -1176,6 +1180,10 @@ mod tests {
 
     #[test]
     fn a_malformed_envelope_reports_class_one() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let (p, n) = bytes(r#"{"not_an_op":1}"#);
         assert_eq!(
@@ -1187,6 +1195,10 @@ mod tests {
 
     #[test]
     fn last_error_is_cleared_by_a_successful_call() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         let (p, n) = bytes(r#"{"op":"nope"}"#);
         assert_ne!(unsafe { jas_dispatch_event(e, p, n) }, JasStatus::Ok);
@@ -1201,6 +1213,10 @@ mod tests {
 
     #[test]
     fn widget_tree_matches_the_corpus_driver_exactly() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         // The Rust half of S-A gate (ii): every case in the shared golden, through
         // the ABI, byte-identical to what the corpus driver asserts.
         let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures");
@@ -2707,6 +2723,10 @@ mod tests {
 
     #[test]
     fn widget_event_corpus_through_the_door() {
+        // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
+        // export, and every export records a crossing on the process-global
+        // counters -- so it races `ffi_instr`'s tests unless it takes this.
+        let _counters = crate::ffi_instr::test_lock::lock();
         use std::collections::HashMap;
         // Fixture-relative, the shape `check_corpus_manifest.py` reads as a claim.
         const CORPUS: &str = "widget_events/corpus.json";
