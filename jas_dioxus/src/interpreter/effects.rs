@@ -12330,6 +12330,38 @@ mod tests {
         assert_eq!(got, seen(&[("x", json!(1)), ("y", json!(2))]));
     }
 
+    /// A host that writes a global itself, from its hook, has that write
+    /// reported too: after the next effect, or at the end of the batch when
+    /// its trigger was the last one.
+    #[test]
+    fn a_hosts_own_write_is_reported_at_the_end_of_the_batch() {
+        use serde_json::json;
+        struct Echo {
+            seen: Vec<String>,
+        }
+        impl EffectHost for Echo {
+            fn run(&mut self, _: &str, _: &serde_json::Value, _: &mut StateStore,
+                   _: Option<&mut Model>) -> bool {
+                false
+            }
+            fn global_written(&mut self, key: &str, store: &mut StateStore, _: Option<&mut Model>) {
+                self.seen.push(key.to_string());
+                if key == "a" {
+                    store.set("echo", json!(true));
+                }
+            }
+        }
+        let mut store = StateStore::new();
+        let mut host = Echo { seen: vec![] };
+        run_effects_hosted(&[json!({"set": {"a": "1"}})], &json!({}), &mut store, None, None,
+                           None, None, &mut host);
+        assert_eq!(host.seen, vec!["a", "echo"]);
+        let mut host = Echo { seen: vec![] };
+        run_effects_hosted(&[json!({"set": {"a": "1"}}), json!({"set": {"b": "2"}})],
+                           &json!({}), &mut store, None, None, None, None, &mut host);
+        assert_eq!(host.seen, vec!["a", "echo", "b"]);
+    }
+
     /// The journal exists only while a hosted batch runs: an unhosted batch,
     /// and a direct `set` after a hosted one, record nothing.
     #[test]
