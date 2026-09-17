@@ -101,6 +101,30 @@ private let gradient = "gradient_panel_content"
     }
 }
 
+@Test func theSeedNeverOverwritesAGlobalThatIsPresent() {
+    // Only an ABSENT bound global is seeded. A present one is the truth the
+    // field was hydrated from, however the two came to differ.
+    let model = modelWithSelectedRect()
+    model.stateStore.set("stroke_width", 5.0)
+    let route = events(model, stroke)
+    #expect(number(model.stateStore.getPanel(stroke, "weight")) != 5,
+            "the arm needs a field that differs from the global")
+    route.press(shipped(stroke, "stk_dashed"))
+    #expect(number(model.stateStore.get("stroke_width")) == 5)
+}
+
+@Test func anEventWritesItsOwnPanelWhenAnotherRenderedLast() {
+    // The dock pins the active panel at render, so the panel that rendered
+    // LAST is active. The route pins its own before the event.
+    let model = Model()
+    let route = events(model, magicWand)
+    _ = events(model, stroke)
+    #expect(model.stateStore.getActivePanelId() == stroke)
+    route.commit(shipped(magicWand, "mwp_fill_tolerance"), text: "40")
+    #expect(number(model.stateStore.getPanel(magicWand, "fill_tolerance")) == 40)
+    #expect(model.stateStore.getPanel(stroke, "fill_tolerance") == nil)
+}
+
 @Test func aDisabledToleranceIsRefusedAndMovesNothing() {
     let model = Model()
     _ = events(model, magicWand).press(shipped(magicWand, "mwp_fill_color"))
