@@ -85,6 +85,50 @@ pub fn element_evaluated_bbox(doc: &Document, path: &[usize]) -> Option<(f64, f6
     Some((min_x, min_y, max_x - min_x, max_y - min_y))
 }
 
+/// The combined transform mapping `path`'s LOCAL space to DOCUMENT space:
+/// the element's own transform with every ancestor (group / layer) transform
+/// applied outward, layer last.
+///
+/// `include_own = false` stops at the element's PARENT — the space a move that
+/// rides on the element's own `transform` is already expressed in (see
+/// `Controller::moves_in_parent_space`).
+///
+/// It walks the SAME chain as [`element_evaluated_bbox`] above, so a delta
+/// converted with this and a bbox measured there agree about what document
+/// space is. Returns `None` when nothing on the path carries a transform (the
+/// common case, which keeps the untransformed move bit-for-bit unchanged) or
+/// when `path` does not resolve. Twin: the reference's
+/// `_accumulated_transform` and JasSwift's `accumulatedTransform`.
+pub fn accumulated_transform(
+    doc: &Document,
+    path: &[usize],
+    include_own: bool,
+) -> Option<Transform> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut node = doc.layers.get(path[0])?;
+    let mut ancestors: Vec<Option<Transform>> = Vec::new();
+    if path.len() > 1 {
+        ancestors.push(node.transform().copied()); // layer
+        for &idx in &path[1..path.len() - 1] {
+            node = node.children().and_then(|c| c.get(idx))?;
+            ancestors.push(node.transform().copied());
+        }
+        node = node.children().and_then(|c| c.get(path[path.len() - 1]))?;
+    }
+    // Innermost first, then each ancestor outward — the painter's CTM.
+    let own = if include_own { node.transform().copied() } else { None };
+    let mut combined: Option<Transform> = None;
+    for t in std::iter::once(own).chain(ancestors.iter().rev().copied()).flatten() {
+        combined = Some(match combined {
+            None => t,
+            Some(c) => t.multiply(&c),
+        });
+    }
+    combined
+}
+
 /// Union `(x, y, w, h)` of every selected element's evaluated geometric bbox
 /// (see [`element_evaluated_bbox`]) in DOCUMENT space — the post-transform
 /// values the Properties panel shows. `(0, 0, 0, 0)` when the selection is empty

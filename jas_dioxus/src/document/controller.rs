@@ -1145,7 +1145,77 @@ impl Controller {
         model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
     }
 
-    /// Move all selected control points by (dx, dy).
+    /// True when `move_control_points` implements this move by translating
+    /// the element's OWN `transform` rather than its local control points.
+    ///
+    /// A reference has no geometry of its own, so a whole-element move adds
+    /// the delta to its `common.transform`'s `e`/`f` (see the Reference arm of
+    /// `translate_element`). That lands the element in its PARENT's space
+    /// already, so the element's own transform must be left OUT of the
+    /// conversion — while every ancestor's is still applied. Converting a
+    /// reference by the full chain moves it along its own rotated axes: the
+    /// exact defect this repair exists to remove, reintroduced one level down.
+    ///
+    /// The `is_all` total is read from `control_point_count` rather than
+    /// hard-coded to 0, so this predicate and the mover's own container arm
+    /// stay in lockstep — guarding on `is_all(0)` is a defect that arm's
+    /// comment already records. Twin: the reference's
+    /// `_moves_in_parent_space`.
+    fn moves_in_parent_space(elem: &Element, kind: &SelectionKind) -> bool {
+        use crate::geometry::element::control_point_count;
+        matches!(elem, Element::Live(crate::geometry::live::LiveVariant::Reference(_)))
+            && kind.is_all(control_point_count(elem))
+    }
+
+    /// Map a DOCUMENT-space delta to `path`'s LOCAL space.
+    ///
+    /// With `M` the linear part of the accumulated transform, a local move of
+    /// `v` displaces the rendered element by `M v`; so to displace it by
+    /// `(dx, dy)` the local move is `M^-1 (dx, dy)`. ⛔ ONLY THE LINEAR PART
+    /// PARTICIPATES — a translation component moves points, not the vectors
+    /// between them, so it must never be added to a delta. (`Transform::inverse`
+    /// returns a full affine inverse; this reads only `a`/`b`/`c`/`d` from it,
+    /// which is what makes the translation-bearing arms pass.)
+    ///
+    /// Returns the delta unchanged when there is no transform — so the
+    /// untransformed path is bit-for-bit what it always was — and when the
+    /// matrix is SINGULAR: a degenerate transform collapses the element onto a
+    /// line or a point, where no local delta can produce an arbitrary
+    /// document-space displacement. Leaving the delta alone there preserves the
+    /// long-standing behaviour rather than inventing one, and is stated here
+    /// because it is a choice, not an oversight.
+    fn document_delta_to_local(
+        doc: &Document,
+        path: &[usize],
+        dx: f64,
+        dy: f64,
+        elem: &Element,
+        kind: &SelectionKind,
+    ) -> (f64, f64) {
+        let include_own = !Self::moves_in_parent_space(elem, kind);
+        let combined = match crate::document::evaluated_bounds::accumulated_transform(
+            doc, path, include_own,
+        ) {
+            Some(t) => t,
+            None => return (dx, dy),
+        };
+        match combined.inverse() {
+            Some(inv) => (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy),
+            None => (dx, dy),
+        }
+    }
+
+    /// Move all selected control points by the DOCUMENT-space delta (dx, dy).
+    ///
+    /// The delta is expressed in document (page) space — the space the
+    /// Properties panel's X/Y fields, the canvas drag and a journaled
+    /// `move_selection` op all speak. Control points live in the element's
+    /// LOCAL space, so each element's delta is mapped through
+    /// `document_delta_to_local` before it reaches `move_control_points`
+    /// (which is local-space by contract and is not the site of this
+    /// correction). Without that mapping a transformed element travels along
+    /// its own rotated / scaled axes — the S-3 transform-blind class,
+    /// `transcripts/EDIT_SEMANTICS_FREEZE.md` §3.3.
     ///
     /// A corner drag arrives here once per mousemove sample with an
     /// INCREMENTAL delta (workspace/tools/partial_selection.yaml), so a
@@ -1183,7 +1253,11 @@ impl Controller {
                 continue;
             }
             if let Some(elem) = doc.get_element(&es.path) {
-                let new_elem = move_control_points(elem, &es.kind, dx, dy);
+                // S-3: the delta arrives in DOCUMENT space; control points
+                // live in the element's LOCAL space.
+                let (ldx, ldy) =
+                    Self::document_delta_to_local(&doc, &es.path, dx, dy, elem, &es.kind);
+                let new_elem = move_control_points(elem, &es.kind, ldx, ldy);
                 let kind = remap_cp_selection_after_move(elem, &new_elem, &es.kind);
                 new_doc = new_doc.replace_element(&es.path, new_elem);
                 new_selection.push(ElementSelection { path: es.path.clone(), kind });
@@ -6382,6 +6456,166 @@ mod tests {
                 assert_eq!(r.height, 10.0);
             }
             other => panic!("expected Rect to remain a Rect, got {:?}", other),
+        }
+    }
+
+    // ── S-3, THE MOVE LAW: a `move_selection` delta is DOCUMENT space ──
+    //
+    // Twin of the reference's `test_move_selection_transform.py` and of
+    // JasSwift's `MoveSelectionTransformTests`. Control points live in the
+    // element's LOCAL space, so a document-space delta must be mapped through
+    // the inverse of the accumulated transform before it reaches
+    // `move_control_points` (which is local-space by contract and is NOT the
+    // site of this correction). Without that mapping a transformed element
+    // travels along its own rotated / scaled axes: x=100 typed on a 30-degree
+    // rect landed at 83.74. See `transcripts/EDIT_SEMANTICS_FREEZE.md` §3.3.
+
+    /// A rect at (10, 20) selected whole, optionally transformed, optionally
+    /// under a transformed layer. Mirrors the reference's `_rect_model`.
+    fn transform_rect_model(
+        transform: Option<Transform>,
+        layer_transform: Option<Transform>,
+    ) -> Model {
+        let mut rect = make_rect(10.0, 20.0, 30.0, 40.0);
+        rect.common_mut().transform = transform;
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(rect)],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps {
+                name: Some("L0".to_string()),
+                transform: layer_transform,
+                ..Default::default()
+            },
+        });
+        let doc = Document {
+            layers: vec![layer],
+            selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0])],
+            ..Document::default()
+        };
+        Model::new(doc, None)
+    }
+
+    /// The element's DOCUMENT-space bbox origin — the point a translation
+    /// moves. The same oracle the reference arm uses, so the two ports and
+    /// the reference agree about what document space is.
+    fn evaluated_origin(model: &Model, path: &[usize]) -> (f64, f64) {
+        let bbox = crate::document::evaluated_bounds::element_evaluated_bbox(model.document(), path)
+            .expect("path did not resolve");
+        (bbox.0, bbox.1)
+    }
+
+    #[test]
+    fn a_rect_moves_by_the_document_delta() {
+        // ⛔ THE TRANSLATION-BEARING CASES ARE NOT DECORATION. Every rotate /
+        // scale / shear here has e = f = 0, so applying the inverse as a POINT
+        // and applying only its LINEAR part give the same answer — a mutant
+        // that translated the delta survives all of them. A translation moves
+        // points, not the vectors between them, so it must never reach a
+        // delta, and only a transform that HAS one can witness that. The
+        // reference arm found this by mutation; it is ported, not re-derived.
+        let rot = Transform::rotate(30.0);
+        let cases: Vec<(&str, Option<Transform>, Option<Transform>)> = vec![
+            ("untransformed", None, None),
+            ("rotated", Some(rot), None),
+            ("scaled", Some(Transform::scale(2.0, 3.0)), None),
+            ("sheared", Some(Transform::shear(0.25, 0.0)), None),
+            ("under a rotated layer", None, Some(rot)),
+            ("rotated under a rotated layer", Some(rot), Some(rot)),
+            ("translated", Some(Transform::translate(50.0, 60.0)), None),
+            (
+                "rotated and translated",
+                Some(Transform::translate(50.0, 60.0).multiply(&rot)),
+                None,
+            ),
+            ("under a translated layer", None, Some(Transform::translate(50.0, 60.0))),
+        ];
+        for (name, transform, layer_transform) in cases {
+            let mut model = transform_rect_model(transform, layer_transform);
+            let before = evaluated_origin(&model, &[0, 0]);
+            Controller::move_selection(&mut model, 12.0, -7.0);
+            let after = evaluated_origin(&model, &[0, 0]);
+            assert!(
+                (after.0 - before.0 - 12.0).abs() < 1e-9,
+                "{name}: dx was {}, expected 12.0",
+                after.0 - before.0
+            );
+            assert!(
+                (after.1 - before.1 + 7.0).abs() < 1e-9,
+                "{name}: dy was {}, expected -7.0",
+                after.1 - before.1
+            );
+        }
+    }
+
+    #[test]
+    fn a_reference_moves_by_the_document_delta() {
+        // ⛔ THE TWO MOVE SPACES. A `ReferenceElem` has no geometry of its
+        // own: a whole-element move rides on its OWN `transform`, translating
+        // its e/f, and that lands it in its PARENT's space already. So for a
+        // reference the element's own transform is LEFT OUT of the conversion
+        // while every ancestor's is kept. Converting a reference by the full
+        // chain re-creates the very defect this repair removes, one level
+        // down — it was introduced and caught inside the reference's own
+        // repair, and this arm is why.
+        let rot = Transform::rotate(30.0);
+        let cases: Vec<(&str, Option<Transform>, Option<Transform>)> = vec![
+            ("untransformed", None, None),
+            ("rotated", Some(rot), None),
+            ("scaled", Some(Transform::scale(2.0, 3.0)), None),
+            ("under a rotated layer", None, Some(rot)),
+            ("rotated under a rotated layer", Some(rot), Some(rot)),
+            ("translated", Some(Transform::translate(50.0, 60.0)), None),
+            ("under a translated layer", None, Some(Transform::translate(50.0, 60.0))),
+        ];
+        for (name, transform, layer_transform) in cases {
+            let mut model = Model::default();
+            Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
+            Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
+            let mut doc = model.document().clone();
+            let mut elem = doc.get_element(&vec![0, 0]).unwrap().clone();
+            elem.common_mut().transform = transform;
+            doc = doc.replace_element(&vec![0, 0], elem);
+            if let Some(lt) = layer_transform {
+                doc.layers[0].common_mut().transform = Some(lt);
+            }
+            // The transform edit is a DOCUMENT change, so it goes through
+            // `edit_document`; only the selection may ride the unbracketed
+            // Selection intent, which `model.rs` refuses to widen. (The first
+            // draft of this fixture put both through Selection and was
+            // refused — a red that named the fixture, not the subject.)
+            model.edit_document(doc);
+            Controller::select_element(&mut model, &vec![0, 0]);
+            let before = evaluated_origin(&model, &[0, 0]);
+            Controller::move_selection(&mut model, 12.0, -7.0);
+            let after = evaluated_origin(&model, &[0, 0]);
+            assert!(
+                (after.0 - before.0 - 12.0).abs() < 1e-9,
+                "{name}: dx was {}, expected 12.0",
+                after.0 - before.0
+            );
+            assert!(
+                (after.1 - before.1 + 7.0).abs() < 1e-9,
+                "{name}: dy was {}, expected -7.0",
+                after.1 - before.1
+            );
+        }
+    }
+
+    #[test]
+    fn an_untransformed_move_is_unchanged_by_the_conversion() {
+        // CONTROL. With no transform anywhere the conversion must be the
+        // identity, so the delta reaches `move_control_points` exactly as it
+        // was passed — the property that keeps every pre-existing golden
+        // valid. This arm must be GREEN before the repair as well as after.
+        let mut model = transform_rect_model(None, None);
+        Controller::move_selection(&mut model, 12.0, -7.0);
+        match model.document().get_element(&vec![0, 0]).unwrap() {
+            Element::Rect(r) => {
+                assert_eq!((r.x, r.y), (22.0, 13.0));
+            }
+            other => panic!("expected Rect, got {other:?}"),
         }
     }
 
