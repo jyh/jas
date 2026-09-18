@@ -77,6 +77,47 @@ public func elementEvaluatedBBox(_ doc: Document, _ path: ElementPath) -> BBox? 
     return (minX, minY, maxX - minX, maxY - minY)
 }
 
+/// The combined transform mapping `path`'s LOCAL space to DOCUMENT space: the
+/// element's own transform with every ancestor (group / layer) transform
+/// applied outward, layer last.
+///
+/// `includeOwn: false` stops at the element's PARENT — the space a move that
+/// rides on the element's own `transform` is already expressed in (see
+/// `Controller.movesInParentSpace`).
+///
+/// It walks the SAME chain as `elementEvaluatedBBox` above, so a delta
+/// converted with this and a bbox measured there agree about what document
+/// space is. Returns `nil` when nothing on the path carries a transform (the
+/// common case, which keeps the untransformed move bit-for-bit unchanged) or
+/// when `path` does not resolve. Twin: the reference's `_accumulated_transform`
+/// and Rust's `accumulated_transform`.
+public func accumulatedTransform(
+    _ doc: Document, _ path: ElementPath, includeOwn: Bool
+) -> Transform? {
+    guard !path.isEmpty, path[0] < doc.layers.count else { return nil }
+    var node: Element = .layer(doc.layers[path[0]])
+    var ancestors: [Transform?] = []  // outermost (layer) first
+    if path.count > 1 {
+        ancestors.append(node.transform)
+        for idx in path[1..<path.count - 1] {
+            let kids = propChildren(node)
+            guard idx < kids.count else { return nil }
+            node = kids[idx]
+            ancestors.append(node.transform)
+        }
+        let kids = propChildren(node)
+        guard let last = path.last, last < kids.count else { return nil }
+        node = kids[last]
+    }
+    // Innermost first, then each ancestor outward — the painter's CTM.
+    let chain: [Transform?] = [includeOwn ? node.transform : nil] + ancestors.reversed()
+    var combined: Transform?
+    for case let t? in chain {
+        combined = combined.map { t.multiply($0) } ?? t
+    }
+    return combined
+}
+
 /// Union AABB of every selected element's evaluated bbox, document space.
 /// `(0, 0, 0, 0)` when the selection is empty or nothing resolves.
 func selectionEvaluatedBounds(_ doc: Document) -> BBox {

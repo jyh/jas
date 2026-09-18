@@ -1097,6 +1097,70 @@ public class Controller {
         }
     }
 
+    /// True when `moveControlPoints` implements this move by translating the
+    /// element's OWN `transform` rather than its local control points.
+    ///
+    /// A reference has no geometry of its own, so a whole-element move adds the
+    /// delta to its `transform`'s `e`/`f`. That lands the element in its
+    /// PARENT's space already, so the element's own transform must be left OUT
+    /// of the conversion — while every ancestor's is still applied. Converting
+    /// a reference by the full chain moves it along its own rotated axes: the
+    /// exact defect this repair exists to remove, reintroduced one level down.
+    ///
+    /// ⚠️ THE `total: 0` MIRRORS THIS PORT'S OWN MOVER AND IS NOT A COPY OF
+    /// RUST'S. `Element.moveControlPoints`'s reference arm guards
+    /// `kind.isAll(total: 0)`, while Rust's container arm reads
+    /// `control_point_count(elem)` — which is 4 for a reference in BOTH ports
+    /// (`Element.controlPointCount`'s `default`). So a `.partial([0,1,2,3])`
+    /// reference selection is a whole-element move in Rust and a no-op here.
+    /// That divergence is PRE-EXISTING and is deliberately not repaired by this
+    /// commit; what matters for S-3 is that this predicate agrees with the
+    /// mover it predicts, or the conversion would be applied to a move that
+    /// does not happen. Flagged, not fixed. Twin: the reference's
+    /// `_moves_in_parent_space`.
+    private func movesInParentSpace(_ elem: Element, _ kind: SelectionKind) -> Bool {
+        if case .live(.reference) = elem { return kind.isAll(total: 0) }
+        return false
+    }
+
+    /// Map a DOCUMENT-space delta to `path`'s LOCAL space.
+    ///
+    /// With `M` the linear part of the accumulated transform, a local move of
+    /// `v` displaces the rendered element by `M v`; so to displace it by
+    /// `(dx, dy)` the local move is `M^-1 (dx, dy)`. ⛔ ONLY THE LINEAR PART
+    /// PARTICIPATES — a translation component moves points, not the vectors
+    /// between them, so it must never be added to a delta. (`inverse()` returns
+    /// a full affine inverse; this reads only `a`/`b`/`c`/`d` from it, which is
+    /// what makes the translation-bearing arms pass.)
+    ///
+    /// Returns the delta unchanged when there is no transform — so the
+    /// untransformed path is bit-for-bit what it always was — and when the
+    /// matrix is SINGULAR: a degenerate transform collapses the element onto a
+    /// line or a point, where no local delta can produce an arbitrary
+    /// document-space displacement. Leaving the delta alone there preserves the
+    /// long-standing behaviour rather than inventing one, and is stated here
+    /// because it is a choice, not an oversight.
+    private func documentDeltaToLocal(
+        _ doc: Document, _ path: ElementPath, dx: Double, dy: Double,
+        _ elem: Element, _ kind: SelectionKind
+    ) -> (Double, Double) {
+        let includeOwn = !movesInParentSpace(elem, kind)
+        guard let combined = accumulatedTransform(doc, path, includeOwn: includeOwn),
+              let inv = combined.inverse() else { return (dx, dy) }
+        return (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy)
+    }
+
+    /// Move all selected control points by the DOCUMENT-space delta (dx, dy).
+    ///
+    /// The delta is expressed in document (page) space — the space the
+    /// Properties panel's X/Y fields, the canvas drag and a journaled
+    /// `move_selection` op all speak. Control points live in the element's
+    /// LOCAL space, so each element's delta is mapped through
+    /// `documentDeltaToLocal` before it reaches `moveControlPoints` (which is
+    /// local-space by contract and is not the site of this correction).
+    /// Without that mapping a transformed element travels along its own
+    /// rotated / scaled axes — the S-3 transform-blind class,
+    /// `transcripts/EDIT_SEMANTICS_FREEZE.md` §3.3.
     public func moveSelection(dx: Double, dy: Double) {
         var doc = model.document
         let entries = doc.selection
@@ -1124,7 +1188,10 @@ public class Controller {
                     && Array(es.path.prefix(other.path.count)) == other.path
             }) { continue }
             let elem = doc.getElement(es.path)
-            let newElem = elem.moveControlPoints(es.kind, dx: dx, dy: dy)
+            // S-3: the delta arrives in DOCUMENT space; control points live in
+            // the element's LOCAL space.
+            let (ldx, ldy) = documentDeltaToLocal(doc, es.path, dx: dx, dy: dy, elem, es.kind)
+            let newElem = elem.moveControlPoints(es.kind, dx: ldx, dy: ldy)
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)
