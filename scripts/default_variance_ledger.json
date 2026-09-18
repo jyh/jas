@@ -91,7 +91,7 @@
   "declared_debt": {
     "_doc": [
       "WHAT IS NOT PAYABLE TODAY, WITH ITS MEASUREMENT, so the number is visible",
-      "rather than forgotten. 310 of 382 populated (family x field) cells hold",
+      "rather than forgotten. 321 of 396 populated (family x field) cells hold",
       "fewer than three non-default carriers. Reding all of them would mean",
       "authoring hundreds of fixtures, and the tree is held for a regeneration",
       "of ~103 goldens besides.",
@@ -113,14 +113,14 @@
 
     "measured": {
       "thin_cells": {
-        "value": 310,
+        "value": 321,
         "improves": "down",
-        "why_not_closed": "The headline. 310 of 382 populated cells hold fewer than 3 non-default carriers, over the 27 families with at least 3 documents. Closing a cell means authoring fixtures, not editing a gate, and the census's own advice is not to try: seed the pairs whose consequence is real and leave the rest measured. READ THIS ROW ONLY WITH populated_cells: it is a numerator over a population that moves, so deleting evidence LOWERS it."
+        "why_not_closed": "The headline. 321 of 396 populated cells hold fewer than 3 non-default carriers, over the 28 families with at least 3 documents. RESTATED 310 -> 321 (jas, 2026-09-18), and it is the population moving rather than the corpus thinning: S-3's cross-language move fixtures took `operations/move` from 2 documents to 4, so that family CROSSED the three-document threshold and all 14 of its cells entered the count at once -- 11 of them thin. The 27 -> 28 family count is the whole mechanism and is stated here because the numerator alone reads as a regression. Not a promotion: nothing was paid, a family became visible. The gate asked for a promotion or a restatement; this is the restatement, and it is written here rather than implied by the number. Closing a cell means authoring fixtures, not editing a gate, and the census's own advice is not to try: seed the pairs whose consequence is real and leave the rest measured. READ THIS ROW ONLY WITH populated_cells: it is a numerator over a population that moves, so deleting evidence LOWERS it."
       },
       "populated_cells": {
-        "value": 382,
+        "value": 396,
         "improves": "up",
-        "why_not_closed": "THE DENOMINATOR, declared because thin_cells alone points the wrong way when the corpus shrinks. Measured 2026-08-02: deleting one fixture from the three-document gestures/select family drops it below the three-document threshold, takes all of its cells out of the count, and moves thin_cells 310 -> 298 -- so the gate's ONLY red read 'PAID DOWN -- promote it to an obligation' for a change that destroyed evidence. `improves` fixes the polarity of the comparison; it cannot fix a quantity whose population moves underneath it. With both declared the shape is legible: both up = the corpus grew, both down = it SHRANK, thin down and this steady = somebody actually paid. Left as debt rather than an obligation because it is a measurement of the corpus's size, not a floor anybody should be held to."
+        "why_not_closed": "THE DENOMINATOR, declared because thin_cells alone points the wrong way when the corpus shrinks. Measured 2026-08-02: deleting one fixture from the three-document gestures/select family drops it below the three-document threshold, takes all of its cells out of the count, and moves thin_cells 310 -> 298 -- so the gate's ONLY red read 'PAID DOWN -- promote it to an obligation' for a change that destroyed evidence. `improves` fixes the polarity of the comparison; it cannot fix a quantity whose population moves underneath it. With both declared the shape is legible: both up = the corpus grew, both down = it SHRANK, thin down and this steady = somebody actually paid. Left as debt rather than an obligation because it is a measurement of the corpus's size, not a floor anybody should be held to. RESTATED 382 -> 396 (jas, 2026-09-18): BOTH numbers moved up, which by this row's own legend is the corpus-grew reading -- the one it exists to make legible, and the first time that legend has been exercised by a growth rather than by a deletion."
       },
       "families_varying:selected_layer": {
         "value": 0,
