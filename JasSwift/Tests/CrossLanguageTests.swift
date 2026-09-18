@@ -807,6 +807,28 @@ private func recordedCanonicalDocument() -> Document {
     try runOperationFixture("select_and_move.json")
 }
 
+/// S-3, THE MOVE LAW, cross-language: a `move_selection` delta is DOCUMENT
+/// space, so a TRANSFORMED element must end up displaced by exactly that delta
+/// on the page — which means its LOCAL coordinates must change by something
+/// else. Twin: Rust `operation_move_transform_aware`.
+///
+/// ⚠️ WHAT THIS GATES, STATED NARROWLY: the two ports agreeing BYTE FOR BYTE.
+/// Both goldens were derived from a Rust run, so this is a symmetry gate, not
+/// an independent oracle for the law — which is what the family is for
+/// (`required_consumers: [rust, swift]`, `port_symmetry: true`). The LAW is
+/// gated by `MoveSelectionTransformTests`, which measures the document-space
+/// bbox origin against the delta in this port's own terms.
+///
+/// ANTI-VACUITY, readable from the goldens themselves: the transform-blind
+/// answer is the delta applied raw, i.e. x=12, y=-7. `move_translated_rect`
+/// carries exactly that (correctly — a translation has an identity linear
+/// part), while `move_rotated_rect` carries x=3.535568, y=-13.435158. A port
+/// that skipped the conversion would produce 12 / -7 for BOTH and fail the
+/// second, so the pair is a contrast, not two copies of one case.
+@Test func operationMoveTransformAware() throws {
+    try runOperationFixture("move_transform_aware.json")
+}
+
 @Test func operationUndoRedoLaws() throws {
     try runOperationFixture("undo_redo_laws.json")
 }

@@ -4253,6 +4253,23 @@ mod tests {
         run_operation_fixture("operations/select_and_move.json");
     }
 
+    /// S-3, THE MOVE LAW, cross-language: a `move_selection` delta is DOCUMENT
+    /// space, so a TRANSFORMED element must end up displaced by exactly that
+    /// delta on the page — which means its LOCAL coordinates must change by
+    /// something else. Twin: `JasSwift` `operationMoveTransformAware`.
+    ///
+    /// ⚠️ WHAT THIS GATES, STATED NARROWLY: the two ports agreeing BYTE FOR
+    /// BYTE. It is not an independent oracle for the law — both goldens were
+    /// derived from a run, which is what the corpus family is for
+    /// (`required_consumers: [rust, swift]`, `port_symmetry: true`). The LAW
+    /// is gated by the unit arms in `document/controller.rs`, which measure
+    /// the document-space bbox origin against the delta. Two checks, two
+    /// different claims; neither substitutes for the other.
+    #[test]
+    fn operation_move_transform_aware() {
+        run_operation_fixture("operations/move_transform_aware.json");
+    }
+
     /// OP_LOG.md §5 Fork 4 / 3c-1 — the id-primary op-addressing flip. The fixture
     /// carries TWO cases on the SAME `eye.svg` pointing at the SAME golden:
     ///   - `selrel_move_eye`  : `[select_rect, move_selection]` (selection-relative)
