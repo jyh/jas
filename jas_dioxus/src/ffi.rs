@@ -2390,10 +2390,20 @@ mod tests {
 
     const PROPERTIES: &str = crate::interpreter::properties_host::PROPERTIES_PANEL;
 
-    /// The calibrated fixture, all selected, after measuring the X oracle's
-    /// precondition: the document carries no transform. Properties X is in the
-    /// S-3 transform-blind class (`properties_host::apply_field`), so "X = 40
-    /// puts the box at 40" holds only on an untransformed selection.
+    /// The calibrated fixture, all selected. It carries no transform, and the
+    /// `assert` below keeps it that way.
+    ///
+    /// ⚠️ THE REASON CHANGED ON 2026-09-18 AND THE FIXTURE DID NOT. This
+    /// comment used to read *"Properties X is in the S-3 transform-blind class
+    /// (`properties_host::apply_field`), so 'X = 40 puts the box at 40' holds
+    /// only on an untransformed selection"* — a real precondition that S-3
+    /// (#188) removed: `apply_field` hands `move_selection` a document-space
+    /// delta and that delta is now converted, so the oracle holds on a
+    /// transformed selection too (`an_x_edit_lands_on_a_transformed_selection`).
+    /// The fixture stays untransformed because it is the CALIBRATED one and
+    /// changing it would move every number measured against it — which is a
+    /// different reason from the one that used to be written here, and the
+    /// assert is a staleness guard on the fixture, not on the oracle.
     fn untransformed_engine() -> *mut JasEngine {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/complex_document.svg")).unwrap();
