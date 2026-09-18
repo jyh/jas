@@ -1,0 +1,34 @@
+[
+  {
+    "name": "move_rotated_rect",
+    "setup_svg": "transform_rotate.svg",
+    "ops": [
+      {
+        "op": "select_element",
+        "path": [0, 0]
+      },
+      {
+        "dx": 12,
+        "dy": -7,
+        "op": "move_selection"
+      }
+    ],
+    "expected_json": "move_rotated_rect.json"
+  },
+  {
+    "name": "move_translated_rect",
+    "setup_svg": "transform_translate.svg",
+    "ops": [
+      {
+        "op": "select_element",
+        "path": [0, 0]
+      },
+      {
+        "dx": 12,
+        "dy": -7,
+        "op": "move_selection"
+      }
+    ],
+    "expected_json": "move_translated_rect.json"
+  }
+]

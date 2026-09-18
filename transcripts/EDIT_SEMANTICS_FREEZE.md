@@ -391,11 +391,37 @@ Decisions this clause makes beyond the landed code:
   was censused from. ⇒ **A CLASS CENSUSED BY READING ONE PIPELINE HAS
   THE SHAPE OF THAT PIPELINE**, and the members it misses are the ones
   that reach the same wrong answer from outside it.
-  **Status: the REFERENCE is repaired** (`Controller.move_selection`
-  maps the delta through the inverse of the accumulated transform;
-  arms in `workspace_interpreter/tests/test_move_selection_transform.py`).
-  **The Rust and Swift moves and the canvas drag still read the old way**,
-  and `copy_selection`'s paste offset shares the shape and is untouched.
+  **Status: ALL THREE IMPLEMENTATIONS ARE REPAIRED** — the reference
+  2026-09-17 (`Controller.move_selection`, arms in
+  `workspace_interpreter/tests/test_move_selection_transform.py`), and the
+  two ACTIVE ports 2026-09-18 (`Controller::document_delta_to_local` in
+  `jas_dioxus/src/document/controller.rs`, `documentDeltaToLocal` in
+  `JasSwift/Sources/Document/Controller.swift`; arms
+  `a_rect_moves_by_the_document_delta` / `aRectMovesByTheDocumentDelta` and
+  their reference twins). Each maps the delta through the inverse of the
+  accumulated transform's LINEAR part. The cross-language gate is
+  `test_fixtures/operations/move_transform_aware.json`, which the corpus
+  manifest requires BOTH ports to claim — which is why the ports and the
+  fixture had to land in one commit rather than as sequential steps.
+  **The CANVAS DRAG is repaired by inheritance and not separately, and the
+  verb is not the one this clause used to name**: `selection.yaml` emits
+  `doc.translate_selection`, which BOTH ports implement by routing to
+  `move_selection` (`jas_dioxus/src/interpreter/effects.rs`,
+  `JasSwift/Sources/Tools/YamlToolEffects.swift` — each says so in its own
+  comment), so it rides the same conversion. Each mousemove sample carries an
+  INCREMENTAL document-space delta and each is converted, which is the
+  behaviour wanted. ⇒ Searching `workspace/` for `move_selection` returns a
+  TRUE zero: the spec's verb and the implementation's verb differ, and the
+  zero is about the name, not about the plumbing. ⚠️ **So
+  does the MAKE-INSTANCE paste offset**, which calls `move_selection` in all
+  three implementations (`jas/menu/menu.py`,
+  `jas_dioxus/.../controller.rs`, `JasSwift/.../MenuActions.swift`) — its
+  behaviour on a transformed target therefore changed with this repair,
+  symmetrically and without being commissioned. Recorded because a change
+  nobody asked for is the one no reader will look for.
+  ⛔ **STILL TRANSFORM-BLIND AND DELIBERATELY UNTOUCHED: `copy_selection`'s
+  own paste offset**, which is a different site from the make-instance
+  offset above and adds its delta without conversion in all three.
   ⛔ **TWO MOVE SPACES, learned by writing the regression and catching it:**
   a `ReferenceElem` has no geometry of its own, so a whole-element move
   translates its OWN transform — which already lands in its PARENT's
