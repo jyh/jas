@@ -21,6 +21,38 @@ private func rectE(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Elemen
     #expect(selectionEvaluatedBounds(m.document).x == 50)
 }
 
+/// AN X EDIT LANDS WHERE IT WAS TYPED ON A **TRANSFORMED** SELECTION.
+///
+/// ⛔ THIS ARM COULD NOT HAVE BEEN WRITTEN BEFORE 2026-09-18. The wave-2b
+/// block recorded the limit in its own words — *"the X oracle holds only on
+/// an untransformed selection: X/Y belongs to the S-3 class"* — and the
+/// calibrated fixture carries no transform precisely because of it.
+/// `applyPropertiesField` computes `v - bbox.x`, a DOCUMENT-space delta off
+/// the evaluated bounds, and hands it to `moveSelection`, which was
+/// transform-blind: on a rotated rect the element travelled along its own
+/// axes and the box did not land on the typed number. S-3 (#188) converts
+/// that delta, so the oracle now holds for the whole class and the limit is
+/// CLOSED rather than filed.
+///
+/// MEASURED COST OF THE OLD BEHAVIOUR, by disabling the conversion in the
+/// twin: typing 40 landed the box at **31.78**. Rotation is chosen so the
+/// linear part is not the identity and `e = f = 0` cannot hide a mistreated
+/// translation. Twin: Rust `an_x_edit_lands_on_a_transformed_selection`.
+@Test func anXEditLandsOnATransformedSelection() {
+    let cases: [(String, Transform)] = [
+        ("rotated", Transform.rotate(30)),
+        ("scaled", Transform.scale(2, 3)),
+        ("rotated and translated", Transform.translate(50, 60).multiply(Transform.rotate(30))),
+    ]
+    for (name, t) in cases {
+        let m = applyModel([.rect(Rect(x: 10, y: 20, width: 30, height: 40, transform: t))],
+                           selected: [[0, 0]])
+        applyPropertiesField(controller: Controller(model: m), field: "x", value: 40.0)
+        let landed = selectionEvaluatedBounds(m.document).x
+        #expect(abs(landed - 40) < 1e-9, "\(name): x landed at \(landed), typed 40")
+    }
+}
+
 @Test func applyWScalesToValue() {
     let m = applyModel([rectE(0, 0, 100, 50)], selected: [[0, 0]])
     applyPropertiesField(controller: Controller(model: m), field: "w", value: 200.0)

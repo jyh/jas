@@ -475,6 +475,46 @@ mod tests {
         assert_eq!(live_values(model.document())["prop_x"], json!(40.0));
     }
 
+    /// AN X EDIT LANDS WHERE IT WAS TYPED ON A **TRANSFORMED** SELECTION.
+    ///
+    /// ⛔ THIS ARM COULD NOT HAVE BEEN WRITTEN BEFORE 2026-09-18. The
+    /// wave-2b block recorded the limit in its own words — *"the X oracle
+    /// holds only on an untransformed selection: X/Y belongs to the S-3
+    /// class"* — and the calibrated fixture carries no transform precisely
+    /// because of it. `apply_field` computes `v - bbox.0`, a DOCUMENT-space
+    /// delta off the evaluated bounds, and hands it to `move_selection`,
+    /// which was transform-blind: on a rotated rect the element travelled
+    /// along its own axes and the box did not land on the typed number.
+    /// S-3 (#188) converts that delta, so the oracle now holds for every
+    /// element in the class, and the limit is CLOSED rather than filed.
+    ///
+    /// Rotation is chosen so the linear part is not the identity and
+    /// `e = f = 0` does not hide a mistreated translation; the assertion is
+    /// on the EVALUATED bounds, which is what the panel actually shows.
+    /// Twin: JasSwift `anXEditLandsOnATransformedSelection`.
+    #[test]
+    fn an_x_edit_lands_on_a_transformed_selection() {
+        for (name, t) in [
+            ("rotated", Transform::rotate(30.0)),
+            ("scaled", Transform::scale(2.0, 3.0)),
+            ("rotated and translated",
+             Transform::translate(50.0, 60.0).multiply(&Transform::rotate(30.0))),
+        ] {
+            let mut model = one_rect(10.0, 20.0, 30.0, 40.0);
+            let mut doc = model.document().clone();
+            let mut elem = doc.get_element(&vec![0, 0]).unwrap().clone();
+            elem.common_mut().transform = Some(t);
+            doc = doc.replace_element(&vec![0, 0], elem);
+            model.set_document_for_test(doc);
+
+            apply_field(&mut model, "prop_x", &json!(40.0), false);
+            let landed = selection_evaluated_bounds(model.document()).0;
+            assert!((landed - 40.0).abs() < 1e-9,
+                    "{name}: x landed at {landed}, typed 40.0");
+            assert_eq!(live_values(model.document())["prop_x"], json!(40.0), "{name}");
+        }
+    }
+
     /// A key outside the eight, and a value that is not a number, write
     /// nothing.
     #[test]
