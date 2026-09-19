@@ -17,6 +17,13 @@ visible in the window", and a gate demanding completeness would force the very
 degenerate controls that make a placeholder dishonest. So this asserts only
 SOUNDNESS -- every label the shell switches on is real -- and never coverage.
 
+⚠️ WHAT THIS GATE DOES NOT COVER, stated beside its verdict rather than
+inferred: it reads `MainWindow.xaml.cs` as plain `utf-8` (the house
+convention for `.cs`) and that file CARRIES A BOM -- harmless here because
+nothing below depends on byte 0, and driven green against the real file.
+There is no CRLF axis at all: `.gitattributes` sets `* text=auto eol=lf`
+and says so in words, so every checkout is LF including Windows.
+
 The spec's table is `workspace_interpreter/widget_event.py` (INPUT_KINDS,
 BOOLEAN_KINDS), and the structural kinds a panel tree also carries come from
 the compiled workspace itself, so neither side of the comparison is typed here

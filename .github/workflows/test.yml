@@ -973,14 +973,29 @@ jobs:
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
           # W2b-9's widget-kind join reads `Materializer.cs`, which SHIPS to
-          # Windows — so the lane that can see CRLF and encoding is where its
-          # two regexes are actually tested. `check_lane_coverage.py` refused
-          # the ubuntu-only wiring by name, which is how this got here.
+          # Windows, so this is where its two regexes are actually tested.
+          # `check_lane_coverage.py` refused the ubuntu-only wiring by name,
+          # which is how this got here.
+          #
+          # ⛔ THIS COMMENT SAID "the lane that can see CRLF and encoding" AND
+          # THE CRLF HALF IS FALSE -- corrected 2026-09-19 at the object.
+          # `.gitattributes` opens "LF is law in this repository ... Text files
+          # are LF on every platform, including Windows" and sets
+          # `* text=auto eol=lf`, so NO checkout of this repo has CRLF and no
+          # lane can exercise a CRLF claim. The Windows lane's real value is
+          # unchanged and is the rest of the sentence: the gate runs where its
+          # subject ships, on that platform's encoding, path and interpreter
+          # behaviour. A reason that cannot happen makes a correct wiring look
+          # like it was argued from something that was never measured.
           python scripts/check_shell_widget_kinds.py --self-test
           python scripts/check_shell_widget_kinds.py
           # Same reason, one file over: `check_shell_kind_labels.py` reads
           # `MainWindow.xaml.cs`, which SHIPS to Windows. A gate that cannot
           # fail on the platform its subject runs on is not watching there.
+          # (Not CRLF -- see above. `MainWindow.xaml.cs` carries a BOM and is
+          # read as plain `utf-8`, the house convention for `.cs`; nothing in
+          # that gate depends on byte 0, and it is driven green against the
+          # real BOM-bearing file.)
           python scripts/check_shell_kind_labels.py --self-test
           python scripts/check_shell_kind_labels.py
           # The scene join reads a `.ps1` with `utf-8-sig` and a `.cs` with
