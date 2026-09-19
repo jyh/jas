@@ -300,6 +300,16 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));
     }
+    // W2b-8: the five selection-level predicates the YAML binds by BARE NAME
+    // (`selection_has_mask`, the mask clip/invert/linked triple, and
+    // `editing_target_is_mask`). They sit at the scope ROOT because that is
+    // where the panel compiler reads them — not under `panel.` or `state.`.
+    // ⛔ Two of them are the bound expressions of CHECKBOXES, and a boolean
+    // press writes the NEGATION of what it reads, so a scope without them
+    // negates a value that is not there (the W2b-7 defect, second panel).
+    if let Some(root) = scope.as_object_mut() {
+        root.extend(crate::interpreter::mask_facts::selection_predicates(model));
+    }
     scope
 }
 

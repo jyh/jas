@@ -2760,6 +2760,109 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    // -----------------------------------------------------------------------
+    // W2b-8 -- the Opacity panel. ⛔ NOT an extraction node: the document write
+    // already lives in `properties_host` (`prop_opacity` / `prop_blend`), and
+    // this panel's two inputs now run that same law through a mapping.
+    // -----------------------------------------------------------------------
+
+    const OPACITY: &str = "opacity_panel_content";
+
+    /// `(opacity, blend mode)` of every selected element, read off the
+    /// ELEMENTS rather than through the host, so the oracle cannot agree with
+    /// the thing it is checking.
+    fn selected_opacities(e: *mut JasEngine) -> Vec<(f64, String)> {
+        engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter()
+                .filter_map(|es| doc.get_element(&es.path))
+                .map(|el| (el.opacity(),
+                           serde_json::to_value(el.mode()).ok()
+                               .and_then(|v| v.as_str().map(str::to_string))
+                               .unwrap_or_default()))
+                .collect()
+        })
+    }
+
+    /// **W2b-8's oracle.** An opacity commit on the Opacity panel reaches the
+    /// selection — through the law the Properties panel already owns.
+    ///
+    /// ⭐ **The second assert is the one that would not pass by accident: the
+    /// PERCENT → FRACTION conversion.** `panel.opacity` is 0–100 and the model
+    /// is 0.0–1.0, and the mapping passes the percent through unconverted
+    /// because `properties_host` divides. An arm that only checked "the
+    /// opacity changed" would pass with 50.0 written into a 0–1 field.
+    #[test]
+    fn opacity_panel_commit_writes_the_fraction_to_the_selection() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before = selected_opacities(e);
+        assert!(!before.is_empty(),
+                "the calibrated fixture has no selection, so this oracle would \
+                 be vacuous");
+        // ⚠️ NOT 50: the fixture carries `<g opacity="0.5">`, and this guard
+        // caught the vacuous arm before it could pass. 40 % is unused by it.
+        assert!(before.iter().all(|(o, _)| (*o - 0.4).abs() > 1e-9),
+                "the commit could not be seen: something is already at 0.4");
+        let doc_before = doc_json(e);
+
+        // A number_input is an INPUT_KIND, so its event is `commit` and its
+        // value is a STRING (a bare number answers `BadValue`).
+        let (reply, err) = behave(
+            e, OPACITY, r#"{"widget":"op_opacity","event":"commit","value":"40"}"#);
+        assert_eq!(err, "", "{reply}");
+
+        for (i, (o, _)) in selected_opacities(e).iter().enumerate() {
+            assert!((o - 0.4).abs() < 1e-9,
+                    "element {i} reads {o}: the percent reached the model \
+                     unconverted, or the write did not land");
+        }
+        undo(e);
+        assert_eq!(doc_json(e), doc_before, "ONE undo must restore the document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Opacity panel's other four declared keys reach no element
+    /// attribute — two are panel-local UI and two are document preferences
+    /// with nowhere yet to live. A write to one must not touch the document.
+    #[test]
+    fn an_opacity_panel_local_key_writes_nothing_to_the_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before = doc_json(e);
+        for w in ["op_disclosure"] {
+            let (_reply, _err) = behave(
+                e, OPACITY,
+                &format!(r#"{{"widget":"{w}","event":"click"}}"#));
+        }
+        assert_eq!(doc_json(e), before,
+                   "a panel-local Opacity widget reached the document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **The five bare predicates are IN the engine's scope**, which is what
+    /// the two mask checkboxes' bindings read. Before W2b-8 the scope carried
+    /// none of them, so `selection_mask_clip` evaluated to nothing and a press
+    /// negated a value that was not there.
+    #[test]
+    fn the_engine_scope_carries_every_bare_selection_predicate() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let eng = engine_of(e);
+        let scope = crate::panel_scope::engine_scope(
+            &eng.panel.borrow(), &eng.store.borrow(), &eng.model.borrow(), OPACITY);
+        let root = scope.as_object().expect("scope is an object");
+        for name in crate::interpreter::mask_facts::BARE_FACTS {
+            let v = root.get(name)
+                .unwrap_or_else(|| panic!("the engine scope omits `{name}`, so a \
+                                           binding on it reads nothing"));
+            assert!(v.is_boolean(), "`{name}` is {v}, not a bool");
+        }
+        // Anti-vacuity: the scope is not simply full of every name we ask for.
+        assert!(root.get("selection_has_no_such_fact").is_none());
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-5's oracle.** X = 40 moves the selection's box left edge to 40,
     /// writes what the shared host writes, shows 40, and is ONE undo step.
     #[test]

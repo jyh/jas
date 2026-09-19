@@ -28,6 +28,7 @@ pub mod stroke_host;
 pub mod character_host;
 pub mod properties_host;
 pub mod paragraph_host;
+pub mod mask_facts;
 pub mod menu_state;
 
 #[cfg(feature = "web")]
