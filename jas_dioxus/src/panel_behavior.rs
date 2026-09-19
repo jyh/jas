@@ -79,6 +79,7 @@ use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unh
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
 use crate::interpreter::character_host::{self, CHARACTER_PANEL};
+use crate::interpreter::paragraph_host::{self, PARAGRAPH_PANEL};
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
@@ -240,6 +241,20 @@ impl EffectHost for EngineHost {
                 model.begin_txn();
             }
             character_host::apply_field(model, store, key);
+            return;
+        }
+        // W2b-7: a write to a Paragraph field applies the panel AS THE STORE
+        // HOLDS IT. Like Character this passes the whole store rather than one
+        // value, but for a different reason: the paragraph apply is
+        // WHOLE-PANEL — every wrapper attribute is written on every call — so
+        // `key` decides only WHETHER to write, never what. The panel's two
+        // derived predicates (`text_selected`, `area_text_selected`) answer
+        // false to `is_field_key` and never open a transaction.
+        if panel_id == PARAGRAPH_PANEL && paragraph_host::is_field_key(key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            paragraph_host::apply_field(model, store, key);
         }
     }
 }

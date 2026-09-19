@@ -443,3 +443,423 @@ pub fn apply_field(
     if !is_field_key(key) { return false; }
     apply_to_selection(model, &ParagraphPanelState::from_store(store))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ⛔ **EVERY ARM IN THIS MODULE RUNS IN A BUILD WITH NO WEB FEATURE, AND
+    /// THAT IS THE WHOLE POINT OF W2b-7.** Before this move the paragraph law
+    /// lived inside `#[cfg(feature = "web")] app_state`, so not one of these
+    /// tests could be written — the types they name did not exist in a
+    /// web-free build. They are the reachability receipt, not extra coverage.
+    ///
+    /// ⚠️ **THE COMMAND MATTERS AND THE OBVIOUS ONE IS WRONG.** This crate
+    /// declares `default = ["web"]`, so `cargo test --lib` *and*
+    /// `cargo test --lib --features ffi` both build WITH web and would pass
+    /// these arms with the gate still in place. The web-free set is
+    /// `cargo test --lib --no-default-features --features ffi`, which is what
+    /// CI runs.
+    ///
+    /// Every `panel.<key>` the Paragraph panel's YAML declares, read from the
+    /// artifact — a key list typed into a test is a claim about the panel that
+    /// nothing re-checks when the panel changes.
+    fn declared_panel_keys() -> Vec<String> {
+        let src = std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../workspace/panels/paragraph.yaml"))
+            .expect("paragraph.yaml is readable");
+        let mut out: Vec<String> = Vec::new();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("panel.") {
+            rest = &rest[i + 6..];
+            let k: String = rest.chars()
+                .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_')
+                .collect();
+            if !k.is_empty() && !out.contains(&k) {
+                out.push(k);
+            }
+        }
+        assert!(out.len() > 12, "read only {} keys — the YAML's shape changed", out.len());
+        out
+    }
+
+    /// **THE KEY TABLE, PARTITIONED AGAINST THE PANEL'S OWN YAML.** The panel
+    /// declares N keys; each either reaches the document or is a derived
+    /// read-only predicate, and the split must be exactly sixteen against the
+    /// two. Drift in EITHER direction reds.
+    ///
+    /// ⚠️ **SIXTEEN, NOT THE FIFTEEN THE PANEL HAS BODY INPUTS FOR.** The
+    /// sixteenth, `hanging_punctuation`, is reachable only through the panel
+    /// MENU (`action: toggle_hanging_punctuation`). A key list derived from
+    /// body widgets reads 15 and would agree with a host that had dropped it —
+    /// which is why this partitions `panel.<key>` occurrences, a population
+    /// that includes the menu's `checked:` binding.
+    #[test]
+    fn the_yaml_keys_partition_into_sixteen_fields_and_two_predicates() {
+        let declared = declared_panel_keys();
+        let (owns, derived): (Vec<&String>, Vec<&String>) =
+            declared.iter().partition(|k| is_field_key(k));
+        assert_eq!(owns.len(), 16,
+                   "the panel declares {} document-writing keys, not 16: {:?}",
+                   owns.len(), owns);
+        let mut preds: Vec<&str> = derived.iter().map(|s| s.as_str()).collect();
+        preds.sort_unstable();
+        assert_eq!(preds, ["area_text_selected", "text_selected"],
+                   "a declared key reaches no attribute and is not one of the \
+                    two derived predicates");
+        // Anti-vacuity: the partition covers the WHOLE declared set, so
+        // neither side can be right by being empty.
+        assert_eq!(owns.len() + preds.len(), declared.len());
+    }
+
+    /// The two derived predicates drive `disabled:` bindings and own no
+    /// attribute; a write to one must not push an undo step that changes
+    /// nothing.
+    #[test]
+    fn derived_predicates_are_not_field_keys() {
+        for k in ["text_selected", "area_text_selected", "not_a_field", ""] {
+            assert!(!is_field_key(k), "{k}");
+        }
+        // Anti-vacuity: the same predicate says YES to a real field, so the
+        // four NOs above are a reading and not a function that always refuses.
+        assert!(is_field_key("align_left"));
+        assert!(is_field_key("hanging_punctuation"));
+    }
+
+    fn with_align(which: &str) -> ParagraphPanelState {
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field(which, &serde_json::json!(true));
+        pp
+    }
+
+    const ALIGN_KEYS: [&str; 7] = [
+        "align_left", "align_center", "align_right",
+        "justify_left", "justify_center", "justify_right", "justify_all",
+    ];
+
+    /// **THE SEVEN ALIGNMENT STATES MUST READ PAIRWISE DISTINCT, AND EVERY
+    /// PAIR IS ASSERTED.** A table's power is in its probes, not its row count:
+    /// two rows collapsing to the same `(text-align, text-align-last)` pair
+    /// would make the mapping untested for both, and the rows being
+    /// semantically distinct is not evidence that their readings are.
+    #[test]
+    fn the_seven_alignment_states_read_pairwise_distinct() {
+        let pairs: Vec<(Option<String>, Option<String>)> =
+            ALIGN_KEYS.iter().map(|k| paragraph_align_attrs(&with_align(k))).collect();
+        assert_eq!(pairs.len(), 7);
+        for i in 0..pairs.len() {
+            for j in (i + 1)..pairs.len() {
+                assert_ne!(pairs[i], pairs[j],
+                           "{} and {} both read {:?} — the mapping is untested \
+                            for both", ALIGN_KEYS[i], ALIGN_KEYS[j], pairs[i]);
+            }
+        }
+        // align_left is the default and writes NOTHING (identity-value rule).
+        assert_eq!(pairs[0], (None, None), "align_left must omit both attributes");
+    }
+
+    /// `apply_align_radio` is the inverse of `paragraph_align_attrs`, and a
+    /// round trip through the attribute pair must return the same state. The
+    /// two are one law; this is what keeps them from drifting apart.
+    #[test]
+    fn every_alignment_state_round_trips_through_its_attributes() {
+        for k in ALIGN_KEYS {
+            let pp = with_align(k);
+            let (ta, tal) = paragraph_align_attrs(&pp);
+            let mut back = ParagraphPanelState::default();
+            apply_align_radio(&mut back,
+                              ta.as_deref().unwrap_or(""),
+                              tal.as_deref().unwrap_or(""));
+            assert_eq!(flags_of(&back), flags_of(&pp),
+                       "{k} did not survive a round trip through {:?}/{:?}", ta, tal);
+        }
+    }
+
+    fn flags_of(pp: &ParagraphPanelState) -> [bool; 7] {
+        [pp.align_left, pp.align_center, pp.align_right,
+         pp.justify_left, pp.justify_center, pp.justify_right, pp.justify_all]
+    }
+
+    /// The radio law: setting one alignment true clears the other six, so
+    /// exactly one is ever set.
+    #[test]
+    fn setting_an_alignment_clears_the_other_six() {
+        for k in ALIGN_KEYS {
+            let pp = with_align(k);
+            assert_eq!(flags_of(&pp).iter().filter(|b| **b).count(), 1,
+                       "{k} left {:?}", flags_of(&pp));
+        }
+    }
+
+    /// Bullets and numbered-list both spell the single `jas_list_style`
+    /// attribute, so a non-empty write to one clears the other.
+    #[test]
+    fn bullets_and_numbered_list_are_mutually_exclusive() {
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("bullets", &serde_json::json!("disc"));
+        assert_eq!(pp.bullets, "disc");
+        pp.set_field("numbered_list", &serde_json::json!("decimal"));
+        assert_eq!(pp.numbered_list, "decimal");
+        assert_eq!(pp.bullets, "", "a numbered list must clear the bullets");
+        pp.set_field("bullets", &serde_json::json!("circle"));
+        assert_eq!(pp.numbered_list, "", "bullets must clear the numbered list");
+    }
+
+    /// ⚠️ **THE EMPTY STRING IS "no marker", NOT "clear the other one".**
+    /// Clearing on empty would make deselecting bullets silently deselect a
+    /// numbered list too.
+    #[test]
+    fn an_empty_list_string_does_not_clear_the_other() {
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("numbered_list", &serde_json::json!("decimal"));
+        pp.set_field("bullets", &serde_json::json!(""));
+        assert_eq!(pp.numbered_list, "decimal",
+                   "an empty bullets write cleared the numbered list");
+    }
+
+    /// A value of the wrong JSON type leaves the field alone, as the web
+    /// renderer's setter did.
+    #[test]
+    fn a_wrong_typed_value_leaves_the_field_alone() {
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("left_indent", &serde_json::json!("not a number"));
+        assert_eq!(pp.left_indent, 0.0);
+        pp.set_field("hyphenate", &serde_json::json!(12));
+        assert!(!pp.hyphenate);
+        pp.set_field("bullets", &serde_json::json!(true));
+        assert_eq!(pp.bullets, "");
+    }
+
+    /// A null or absent store entry leaves the declared default — and the
+    /// default that matters is `align_left = true`, because it is the one
+    /// state that writes no attribute at all.
+    #[test]
+    fn from_store_on_an_empty_store_is_the_declared_default() {
+        let store = crate::interpreter::state_store::StateStore::new();
+        let pp = ParagraphPanelState::from_store(&store);
+        assert!(pp.align_left, "the default alignment was lost");
+        assert_eq!(flags_of(&pp).iter().filter(|b| **b).count(), 1);
+        assert_eq!(paragraph_align_attrs(&pp), (None, None));
+    }
+
+    fn body(content: &str) -> Tspan {
+        Tspan { content: content.into(), ..Tspan::default_tspan() }
+    }
+
+    fn wrapper() -> Tspan {
+        Tspan { jas_role: Some("paragraph".into()), ..Tspan::default_tspan() }
+    }
+
+    /// With no wrapper anywhere, one is prepended so the apply always has a
+    /// target — and it is prepended, not appended, because the wrapper carries
+    /// the paragraph attributes for the content that follows it.
+    #[test]
+    fn a_wrapper_is_prepended_when_none_exists() {
+        let mut tspans = vec![body("hello"), body("world")];
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(idx, vec![0]);
+        assert_eq!(tspans.len(), 3);
+        assert_eq!(tspans[0].jas_role.as_deref(), Some("paragraph"));
+        assert!(tspans[0].content.is_empty(), "the wrapper must hold no content");
+        assert_eq!(tspans[1].content, "hello", "the body tspans must survive in order");
+        assert_eq!(tspans[2].content, "world");
+    }
+
+    /// **THE REPAIR ARM.** A wrapper carrying content is corrupt: it is demoted
+    /// to a body tspan and a fresh empty wrapper INHERITING its paragraph
+    /// attributes takes its place. The content must survive and the attributes
+    /// must move — asserting only one of those passes if the other is dropped.
+    #[test]
+    fn a_wrapper_with_content_is_demoted_and_its_attributes_are_inherited() {
+        let mut bad = wrapper();
+        bad.content = "trapped".into();
+        bad.text_align = Some("center".into());
+        bad.jas_left_indent = Some(12.0);
+        let mut tspans = vec![bad];
+
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+
+        assert_eq!(idx, vec![0], "the fresh wrapper is the target");
+        assert_eq!(tspans.len(), 2);
+        // The new wrapper inherited the paragraph attributes...
+        assert_eq!(tspans[0].jas_role.as_deref(), Some("paragraph"));
+        assert_eq!(tspans[0].text_align.as_deref(), Some("center"));
+        assert_eq!(tspans[0].jas_left_indent, Some(12.0));
+        assert!(tspans[0].content.is_empty());
+        // ...and the demoted tspan kept its CONTENT and lost the role and the
+        // attributes, so the pair cannot both claim to be the wrapper.
+        assert_eq!(tspans[1].content, "trapped", "the content was lost");
+        assert_eq!(tspans[1].jas_role, None, "the demoted tspan is still a wrapper");
+        assert_eq!(tspans[1].text_align, None, "the demoted tspan kept an attribute");
+        assert_eq!(tspans[1].jas_left_indent, None);
+    }
+
+    /// An existing empty wrapper is used as-is — no repair, no second wrapper.
+    #[test]
+    fn an_existing_empty_wrapper_is_reused() {
+        let mut tspans = vec![wrapper(), body("hello")];
+        let idx = ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(idx, vec![0]);
+        assert_eq!(tspans.len(), 2, "a second wrapper was inserted");
+    }
+
+    // ---- the document write, in a build with no web feature ----------------
+
+    fn text_doc() -> crate::document::document::Document {
+        use crate::geometry::element::{CommonProps, Element, TextElem};
+        use crate::document::document::{Document, ElementSelection};
+        let elem = Element::Text(TextElem::from_string(
+            0.0, 16.0, "hello", "sans-serif", 16.0, "normal", "normal", "none",
+            0.0, 0.0, None, None, CommonProps::default()));
+        let mut doc = Document::default();
+        doc.layers = vec![elem];
+        doc.selection = vec![ElementSelection::all(vec![0])];
+        doc
+    }
+
+    fn wrapper_of(model: &crate::document::model::Model) -> Tspan {
+        use crate::geometry::element::Element;
+        let doc = model.document();
+        match doc.get_element(&vec![0]) {
+            Some(Element::Text(t)) => t.tspans.iter()
+                .find(|s| s.jas_role.as_deref() == Some("paragraph"))
+                .expect("no paragraph wrapper on the element").clone(),
+            other => panic!("expected a Text element, got {:?}", other.map(|_| "other")),
+        }
+    }
+
+    /// **THE REACHABILITY ARM: the engine's own route writes the document, in
+    /// a build with no web feature.** Until this move the paragraph apply was
+    /// behind `feature = "web"` and this could not be written at all.
+    #[test]
+    fn apply_to_selection_writes_the_wrapper_web_free() {
+        let mut model = crate::document::model::Model::new(text_doc(), None);
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("align_center", &serde_json::json!(true));
+        pp.set_field("left_indent", &serde_json::json!(12.0));
+        pp.set_field("hyphenate", &serde_json::json!(true));
+
+        assert!(apply_to_selection(&mut model, &pp), "the apply reported no change");
+
+        let w = wrapper_of(&model);
+        assert_eq!(w.text_align.as_deref(), Some("center"));
+        assert_eq!(w.jas_left_indent, Some(12.0));
+        assert_eq!(w.jas_hyphenate, Some(true));
+    }
+
+    /// **THE IDENTITY-VALUE RULE: a field at its default is OMITTED, not
+    /// written.** This is what makes a default panel clear the wrapper rather
+    /// than stamp zeros onto it, and it is the half a "did it write?" arm
+    /// cannot see.
+    #[test]
+    fn a_default_panel_omits_every_attribute() {
+        let mut model = crate::document::model::Model::new(text_doc(), None);
+        // First put values on, so the omission below is a READING and not the
+        // trivial truth that nothing was ever there.
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("align_right", &serde_json::json!(true));
+        pp.set_field("left_indent", &serde_json::json!(12.0));
+        pp.set_field("space_before", &serde_json::json!(4.0));
+        pp.set_field("hyphenate", &serde_json::json!(true));
+        pp.set_field("bullets", &serde_json::json!("disc"));
+        apply_to_selection(&mut model, &pp);
+        let before = wrapper_of(&model);
+        assert_eq!(before.text_align.as_deref(), Some("right"));
+        assert_eq!(before.jas_left_indent, Some(12.0));
+        assert_eq!(before.jas_list_style.as_deref(), Some("disc"));
+
+        // Now the default panel, which must clear all of it.
+        apply_to_selection(&mut model, &ParagraphPanelState::default());
+        let w = wrapper_of(&model);
+        assert_eq!(w.text_align, None, "align_left must omit text-align");
+        assert_eq!(w.text_align_last, None);
+        assert_eq!(w.jas_left_indent, None, "a zero indent must be omitted");
+        assert_eq!(w.jas_right_indent, None);
+        assert_eq!(w.text_indent, None);
+        assert_eq!(w.jas_space_before, None);
+        assert_eq!(w.jas_space_after, None);
+        assert_eq!(w.jas_hyphenate, None, "a false flag must be omitted, not written false");
+        assert_eq!(w.jas_hanging_punctuation, None);
+        assert_eq!(w.jas_list_style, None);
+    }
+
+    /// A negative first-line indent is a HANGING indent and is a real value —
+    /// it must survive the identity-value rule, which keys on zero and not on
+    /// sign.
+    #[test]
+    fn a_negative_first_line_indent_is_written() {
+        let mut model = crate::document::model::Model::new(text_doc(), None);
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("first_line_indent", &serde_json::json!(-8.0));
+        apply_to_selection(&mut model, &pp);
+        assert_eq!(wrapper_of(&model).text_indent, Some(-8.0));
+    }
+
+    /// **THE SCOPING LAW, AND IT IS THIS NODE'S CLOBBER GUARD.** The apply is
+    /// whole-panel, so it is tempting to read it as "the wrapper is rebuilt
+    /// from panel state" — it is NOT. It writes the TEN attributes the panel
+    /// owns and must leave the rest of the wrapper alone; the justification
+    /// and hyphenation detail (`jas_word_spacing_*`, `jas_glyph_scaling_*`,
+    /// `jas_hyphenate_limit` …) belongs to the Justification and Hyphenation
+    /// dialogs, and an alignment click that cleared them would be a silent
+    /// data loss with no panel showing it.
+    ///
+    /// ⚠️ The arm does NOT restate which ten the panel owns — that list IS
+    /// `apply_to_selection`, and an arm repeating it would agree with it by
+    /// construction and survive any change to it. It asserts the COMPLEMENT:
+    /// these attributes are not the panel's, so they must be exactly what the
+    /// element had.
+    #[test]
+    fn an_alignment_edit_leaves_the_justification_detail_alone() {
+        use crate::geometry::element::Element;
+        let mut doc = text_doc();
+        // Seed a wrapper carrying dialog-owned detail the panel cannot express.
+        let mut w = wrapper();
+        w.jas_word_spacing_min = Some(0.8);
+        w.jas_word_spacing_desired = Some(1.0);
+        w.jas_word_spacing_max = Some(1.33);
+        w.jas_glyph_scaling_min = Some(0.97);
+        w.jas_hyphenate_limit = Some(2.0);
+        w.jas_hyphenate_zone = Some(36.0);
+        w.jas_single_word_justify = Some("full_justify".into());
+        if let Some(Element::Text(t)) = doc.get_element(&vec![0]) {
+            let mut nt = t.clone();
+            nt.tspans = vec![w, body("hello")];
+            doc = doc.replace_element(&vec![0], Element::Text(nt));
+        } else {
+            panic!("fixture is not a Text element");
+        }
+        let mut model = crate::document::model::Model::new(doc, None);
+
+        let mut pp = ParagraphPanelState::default();
+        pp.set_field("align_center", &serde_json::json!(true));
+        assert!(apply_to_selection(&mut model, &pp));
+
+        let w = wrapper_of(&model);
+        // The edit landed...
+        assert_eq!(w.text_align.as_deref(), Some("center"), "the edit did not land");
+        // ...and nothing the panel does not own was touched.
+        assert_eq!(w.jas_word_spacing_min, Some(0.8), "justification was clobbered");
+        assert_eq!(w.jas_word_spacing_desired, Some(1.0));
+        assert_eq!(w.jas_word_spacing_max, Some(1.33));
+        assert_eq!(w.jas_glyph_scaling_min, Some(0.97));
+        assert_eq!(w.jas_hyphenate_limit, Some(2.0));
+        assert_eq!(w.jas_hyphenate_zone, Some(36.0));
+        assert_eq!(w.jas_single_word_justify.as_deref(), Some("full_justify"));
+    }
+
+    /// **A KEY THAT OWNS NO ATTRIBUTE MUST NOT REACH THE DOCUMENT**, and the
+    /// refusal is asserted by its return value rather than by "the document
+    /// did not change" — which would also pass if the apply were dead.
+    #[test]
+    fn apply_field_refuses_a_derived_predicate() {
+        let mut model = crate::document::model::Model::new(text_doc(), None);
+        let store = crate::interpreter::state_store::StateStore::new();
+        assert!(!apply_field(&mut model, &store, "text_selected"));
+        assert!(!apply_field(&mut model, &store, "area_text_selected"));
+        assert!(!apply_field(&mut model, &store, "not_a_field"));
+        // Anti-vacuity: a REAL key through the same door does write, so the
+        // three refusals above are the guard and not a dead function.
+        assert!(apply_field(&mut model, &store, "align_left"));
+    }
+}
