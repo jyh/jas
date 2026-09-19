@@ -111,6 +111,23 @@ internal static class PanelWire
         }
     }
 
+    /// <summary>
+    /// W2b-9: the string a control SHOWS — the core's formatted `display`
+    /// when it sent one, else the resolved value.
+    ///
+    /// ⛔ PRESENCE, NEVER TRUTHINESS. An EMPTY display is a real answer and
+    /// must win over a non-empty value: a `length_input` whose bind resolves
+    /// to anything but a number displays empty in every port
+    /// (`length::format(None, ..)`), while its raw value may still be a
+    /// string. A `?? ` on the display would show that string and no port does.
+    ///
+    /// ⛔ AND THE SHELL STILL COMPUTES NOTHING. `display` arrives already
+    /// formatted — unit appended, converted out of pt, rounded to the widget's
+    /// precision — because that is interpretation and the core owns it. The
+    /// one choice here is WHICH of two strings the core sent to show.
+    /// </summary>
+    internal static string DisplayText(string? display, string? value) => display ?? value ?? "";
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
