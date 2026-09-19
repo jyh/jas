@@ -241,6 +241,8 @@ jobs:
       # Rust and says of itself that it stops there.
       - run: python scripts/check_shell_abi_bindings.py --self-test
       - run: python scripts/check_shell_abi_bindings.py
+      - run: python scripts/check_shell_widget_kinds.py --self-test
+      - run: python scripts/check_shell_widget_kinds.py
       # The materializer gate (wave 1 / W0). SELF-TEST ONLY, and that is the
       # whole design: its clause (b) asserts the shell HAS a menubar, which is
       # red on `main` by construction until W4 lands one. A red gate facing the
