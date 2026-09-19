@@ -35,7 +35,8 @@
 //! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
 //!          "values": {"<bind_values key>": "<resolved value>", ...},
 //!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
-//!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...}}
+//!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...},
+//!          "display": {"<bind key>": "<the core-formatted display string>", ...}}
 //! ```
 //!
 //! # What a person reads (W2-5a)
@@ -67,6 +68,7 @@ use std::collections::HashMap;
 use serde_json::{json, Map, Value};
 
 use crate::interpreter::bind_values::bind_values;
+use crate::interpreter::length;
 use crate::interpreter::panel_layout::{render_plan_with_omitted, RenderLeaf};
 
 fn path_of(v: &Value) -> Vec<i64> {
@@ -140,6 +142,49 @@ fn flags_of(node: &Value) -> Map<String, Value> {
     out
 }
 
+/// A value the SHELL MUST NOT COMPUTE, computed here (W2b-9).
+///
+/// `values` carries what `bind_values` resolved, and that pass says of itself
+/// that it "adds no new number-formatting" — so a `length_input` bound to 12 pt
+/// reaches a shell as `"12"`. Every port DISPLAYS `"12 pt"`, because each one
+/// formats at its view layer: Rust `renderer.rs::render_length_input`, Swift
+/// `YamlPanelBodyView`, the reference's `format_length`.
+///
+/// ⛔ ALL THREE OF THOSE VIEWS SIT INSIDE THE INTERPRETER. The native shell is
+/// the first view this project has that does not, so it is the first one that
+/// cannot follow the precedent every port sets — it can neither evaluate nor
+/// convert. This map is how the core hands it the answer instead.
+///
+/// ⛔ AND THE SUFFIX SHORTCUT IS WRONG, NOT MERELY IMPURE. The stored value is
+/// in PT and the display unit is a CONVERSION: 72 pt is `1 in`, not `72 in`.
+/// All 12 `length_input`s in the workspace declare `unit: pt` today, so a shell
+/// that appended its `unit` would agree with every one of them and be wrong by
+/// the conversion factor on the first widget that does not — a defect no
+/// shipped input can witness. `a_non_pt_unit_is_converted_by_the_core...` is
+/// the arm that does.
+///
+/// Empty for every other kind: a shell reads `display` first and must never
+/// find a stale or invented string shadowing a resolved value.
+fn display_of(node: &Value, values: &Map<String, Value>) -> Map<String, Value> {
+    let mut out = Map::new();
+    if node.get("type").and_then(Value::as_str) != Some("length_input") {
+        return out;
+    }
+    let unit = node.get("unit").and_then(Value::as_str).unwrap_or("pt");
+    let precision =
+        node.get("precision").and_then(Value::as_u64).map(|p| p as usize).unwrap_or(2);
+    // The web port takes a `Number` and treats everything else — including
+    // `Null` and an absent bind — as `None`. Parsing the canonical string
+    // back is the same partition reached from the other side: `bind_values`
+    // renders a number as a number and a null as the empty string.
+    let pt = values
+        .get("bind.value")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse::<f64>().ok());
+    out.insert("bind.value".to_string(), Value::String(length::format(pt, unit, precision)));
+    out
+}
+
 /// The icon names an entry displays: its static `icon`, an `icon` node's
 /// `name`, and the resolved `bind.icon` row.
 fn icon_names(entry: &Value, out: &mut Vec<String>) {
@@ -168,6 +213,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
     }
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
+    let display = display_of(&item.node, &values);
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
@@ -176,6 +222,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
         "values": values,
         "static": st,
         "flags": flags_of(&item.node),
+        "display": display,
     })
 }
 
@@ -1338,4 +1385,139 @@ mod tests {
         assert_eq!(super::panel_list(&Value::Null), json!([]));
         assert_eq!(super::panel_list(&json!(["a_panel_content"])), json!([]));
     }
+
+    // ───────────────────────────────────────────────────────────────────
+    // W2b-9: the `display` channel — a value the SHELL must not compute.
+    //
+    // Every port formats a length at its VIEW layer (Rust `renderer.rs`,
+    // Swift `YamlPanelBodyView`, the reference's `format_length`), and all
+    // three of those views sit INSIDE the interpreter. The WinUI shell is
+    // the first view that does not, so it is the first one that cannot
+    // format — and `bind_values` says of itself that it "adds no new
+    // number-formatting". Without this channel the shell shows `12` where
+    // every other port shows `12 pt`.
+    // ───────────────────────────────────────────────────────────────────
+
+    /// A scope that puts a REAL number under every `length_input` this test
+    /// drives. The engine's default slice resolves every one of them to the
+    /// empty string (no selection), so an oracle run against it compares
+    /// `""` to `""` twelve times and passes having measured nothing.
+    fn loaded_stroke_ctx() -> Value {
+        json!({"panel": {"weight": 12.0, "dash_1": 4.5, "gap_1": 2.0}})
+    }
+
+    /// THE ORACLE, and its two sides are derived by DIFFERENT ROUTES.
+    ///
+    /// The plan computes its display from the CANONICAL STRING `bind_values`
+    /// resolved; this arm computes the expectation the way the WEB PORT does
+    /// (`renderer.rs:6116-6135`) — evaluate the node's own bind expression
+    /// against the leaf's ctx, take a `Number` and nothing else, and hand it
+    /// to `length::format`. Two derivations, one answer, so agreement is
+    /// evidence rather than construction.
+    #[test]
+    fn the_plan_display_of_a_length_input_equals_the_web_ports_own_recipe() {
+        use crate::interpreter::{expr, length, panel_layout::render_plan};
+
+        let ws = Workspace::load().expect("workspace");
+        let mut compared = 0usize;
+        let mut non_empty = 0usize;
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            for ctx in [loaded_stroke_ctx(), engine_scope()] {
+                let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons());
+                let rp = render_plan(spec, 228, 0, &ctx);
+                for (e, leaf) in plan["leaves"].as_array().expect("leaves").iter().zip(rp.leaves.iter()) {
+                    if e["type"] != "length_input" {
+                        continue;
+                    }
+                    let node = &leaf.node;
+                    let unit = node.get("unit").and_then(Value::as_str).unwrap_or("pt");
+                    let precision = node
+                        .get("precision")
+                        .and_then(Value::as_u64)
+                        .map(|p| p as usize)
+                        .unwrap_or(2);
+                    let bind_expr =
+                        node.get("bind").and_then(|b| b.get("value")).and_then(Value::as_str).unwrap_or("");
+                    let pt = if bind_expr.is_empty() {
+                        None
+                    } else {
+                        match expr::eval(bind_expr, &leaf.ctx) {
+                            crate::interpreter::expr_types::Value::Number(n) => Some(n),
+                            _ => None,
+                        }
+                    };
+                    let want = length::format(pt, unit, precision);
+                    let got = e["display"]["bind.value"].as_str().unwrap_or("<MISSING>");
+                    assert_eq!(got, want, "{panel} {} display: {e}", e["id"]);
+                    compared += 1;
+                    if !want.is_empty() {
+                        non_empty += 1;
+                    }
+                }
+            }
+        }
+        // ⛔ TWO FLOORS, AND THE SECOND IS THE ONE THAT MATTERS. The first
+        // proves the walk found length widgets at all; the second proves it
+        // compared a REAL FORMATTED STRING and not twelve empty ones, which
+        // is exactly what the unloaded engine scope hands back.
+        assert!(compared >= 12, "vacuous: only {compared} length_input leaves compared");
+        assert!(non_empty > 0, "vacuous: every compared display was empty ({compared} compared)");
+    }
+
+    /// The population the workspace CANNOT witness: all 12 shipped
+    /// `length_input`s declare `unit: pt`, so every one of them agrees with a
+    /// shell that merely appends its unit to the plan's number. A non-pt unit
+    /// is where that shortcut is wrong by the conversion factor, and this is
+    /// the only arm that can see it.
+    #[test]
+    fn a_non_pt_unit_is_converted_by_the_core_and_not_merely_suffixed() {
+        use crate::interpreter::length;
+
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "length_input", "id": "inches", "unit": "in", "bind": {"value": "panel.v"}},
+        ]}});
+        let ctx = json!({"panel": {"v": 72.0}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let got = plan["leaves"][0]["display"]["bind.value"].as_str().unwrap_or("<MISSING>");
+
+        // Derived, never typed (idiom law 1): the expectation is the core's
+        // own formatter, and the raw value beside it is what a suffixing
+        // shell would have shown.
+        assert_eq!(got, length::format(Some(72.0), "in", 2), "{plan}");
+        let raw = plan["leaves"][0]["values"]["bind.value"].as_str().unwrap_or("");
+        assert_ne!(
+            got, format!("{raw} in"),
+            "the conversion is the whole point: a suffixing shell would have agreed here"
+        );
+    }
+
+    /// An unresolved length is EMPTY, never `0 pt`. The engine's own slice
+    /// hands every length widget this case (no selection), so it is the one
+    /// a person sees most often.
+    #[test]
+    fn an_unresolved_length_displays_empty_rather_than_zero() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "length_input", "id": "none", "unit": "pt", "bind": {"value": "panel.missing"}},
+        ]}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null);
+        assert_eq!(plan["leaves"][0]["display"]["bind.value"], json!(""), "{plan}");
+    }
+
+    /// The channel does not leak: a kind whose value needs no core formatting
+    /// carries an EMPTY display map, so a shell reading `display` first never
+    /// shadows a value with a stale or invented one.
+    #[test]
+    fn a_kind_that_needs_no_core_formatting_carries_an_empty_display_map() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "number_input", "id": "plain", "unit": "pt", "bind": {"value": "panel.v"}},
+        ]}});
+        let ctx = json!({"panel": {"v": 12.0}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        assert_eq!(plan["leaves"][0]["display"], json!({}), "{plan}");
+        // The control: the same node DOES carry the resolved value, so the
+        // empty display above is a scoping decision and not a dead walk.
+        assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("12"), "{plan}");
+    }
+
 }
