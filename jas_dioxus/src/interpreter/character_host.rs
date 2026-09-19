@@ -812,6 +812,105 @@ mod tests {
         assert_eq!(out.kerning, base.kerning);
     }
 
+    /// The sixteen element attributes, as `(name, value)`, so a change set can
+    /// be computed without naming which group owns what — naming that here
+    /// would re-implement `character_with_group` and the arm would agree with
+    /// it by construction.
+    fn as_pairs(a: &CharacterAttrs) -> Vec<(&'static str, String)> {
+        vec![
+            ("font_family", a.font_family.clone()),
+            ("font_size", a.font_size.to_string()),
+            ("font_weight", a.font_weight.clone()),
+            ("font_style", a.font_style.clone()),
+            ("text_decoration", a.text_decoration.clone()),
+            ("text_transform", a.text_transform.clone()),
+            ("font_variant", a.font_variant.clone()),
+            ("baseline_shift", a.baseline_shift.clone()),
+            ("line_height", a.line_height.clone()),
+            ("letter_spacing", a.letter_spacing.clone()),
+            ("xml_lang", a.xml_lang.clone()),
+            ("aa_mode", a.aa_mode.clone()),
+            ("rotate", a.rotate.clone()),
+            ("horizontal_scale", a.horizontal_scale.clone()),
+            ("vertical_scale", a.vertical_scale.clone()),
+            ("kerning", a.kerning.clone()),
+        ]
+    }
+
+    /// A panel whose every field differs from `attrs()`, so "this attribute did
+    /// not change" is a reading and never an accident of two values matching.
+    fn contrary_panel() -> CharacterPanelState {
+        let mut cp = CharacterPanelState::default();
+        cp.font_family = "Helvetica".into();
+        cp.style_name = "Bold".into();
+        cp.font_size = 48.0;
+        cp.leading = 99.0;
+        cp.kerning = "Metrics".into();
+        cp.tracking = 250.0;
+        cp.vertical_scale = 80.0;
+        cp.horizontal_scale = 90.0;
+        cp.baseline_shift = 7.0;
+        cp.character_rotation = 45.0;
+        cp.all_caps = false;
+        cp.small_caps = false;
+        cp.superscript = false;
+        cp.subscript = true;
+        cp.underline = false;
+        cp.strikethrough = true;
+        cp.language = "de".into();
+        cp.anti_aliasing = "sharp".into();
+        cp
+    }
+
+    /// **THE CLOBBER GUARD, OVER ALL EIGHTEEN GROUPS — the declared gap in
+    /// W2b-6's price ("the 24 inputs' individual arms") for the apply side.**
+    ///
+    /// `transcripts/CHARACTER.md` records the defect this law exists to stop:
+    /// a Tracking edit on a 30pt bold italic underlined Georgia run reset it to
+    /// the panel's defaults — *sixteen attributes clobbered by one edit*. So
+    /// for every key the panel declares: the edit must change at least one
+    /// attribute (or the field is dead) and at most two (the largest groups —
+    /// Style, Case — own exactly a pair), against a panel that differs from the
+    /// element on every field.
+    ///
+    /// It deliberately does NOT assert WHICH attributes each group owns: that
+    /// table is what `character_with_group` implements, and an arm that
+    /// restated it would agree with the implementation by construction and
+    /// survive any mutation of it.
+    #[test]
+    fn no_single_field_edit_clobbers_more_than_its_own_group() {
+        let base = attrs();
+        let cp = contrary_panel();
+        let mut covered: std::collections::BTreeSet<&'static str> = Default::default();
+        let mut sizes = Vec::new();
+        for key in declared_panel_keys() {
+            let Some(group) = CharacterEditGroup::from_field(&key) else { continue };
+            let out = character_with_group(base.clone(), &cp, group);
+            let before = as_pairs(&base);
+            let after = as_pairs(&out);
+            let changed: Vec<&'static str> = before.iter().zip(after.iter())
+                .filter(|(b, a)| b.1 != a.1)
+                .map(|(b, _)| b.0)
+                .collect();
+            assert!(!changed.is_empty(),
+                    "`{key}` changed nothing: the field is dead, or the contrary \
+                     panel happens to match the element on it");
+            assert!(changed.len() <= 2,
+                    "`{key}` wrote {} attributes {:?} — an edit must not reach \
+                     outside its own group (CHARACTER.md, the field-scoped apply law)",
+                    changed.len(), changed);
+            sizes.push((key.clone(), changed.len()));
+            covered.extend(changed);
+        }
+        assert_eq!(sizes.len(), 18, "not every mapped key was driven");
+        // Anti-vacuity on the SWEEP, not just on each arm: if the groups
+        // between them touched only one or two attributes, every assert above
+        // would pass and the law would be untested over most of the element.
+        assert!(covered.len() >= 12,
+                "the eighteen edits touched only {} of the sixteen attributes \
+                 {:?} — this arm is not exercising the law", covered.len(), covered);
+    }
+
     /// The three groups with no tspan-level representation must say so, or a
     /// per-range write pushes an undo step that can express nothing.
     #[test]
