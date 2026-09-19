@@ -116,7 +116,12 @@ def main() -> int:
 
     for p in (SHELL, SPEC, WORKSPACE):
         if not p.exists():
-            refuse(f"{p} does not exist")
+            # `.as_posix()`: the path here is DATA in a message, and `str(Path)`
+            # yields "/" on this box and "\\" on Windows -- so a gate keyed on
+            # this text would agree with itself on both platforms it ran on and
+            # disagree with the one it did not. `check_path_keying.py` caught
+            # exactly this, in this file, on its first CI run.
+            refuse(f"{p.as_posix()} does not exist")
 
     labels = shell_case_labels(SHELL.read_text(encoding="utf-8"))
     known = spec_kinds(SPEC.read_text(encoding="utf-8")) | workspace_kinds(WORKSPACE)
