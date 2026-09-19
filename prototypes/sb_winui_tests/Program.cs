@@ -48,6 +48,10 @@ static class Program
         else { _failed++; Console.WriteLine($"  FAIL  {name}  --  {detail}"); }
     }
 
+    /// <summary>A nullable reading as a printable token, so "(null)" is a CASE
+    /// and not an empty string that an absent value would also produce.</summary>
+    static string Show(string? v) => v ?? "(null)";
+
     static void Eq(string name, string expected, string actual) =>
         Check(name, expected == actual, $"expected '{expected}', got '{actual}'");
 
@@ -448,6 +452,39 @@ static class Program
         Check("W2b-9: CONTROL: display and value differ in the winning case",
             PanelWire.DisplayText("12 pt", "12") != "12",
             "the preference cannot be observed if the two agree");
+
+        // ─────────────────────────────────────────────────────────────
+        // W2b-9: which name a glyph is looked up under.
+        //
+        // The producer (`panel_plan.rs::icon_names`) special-cases the `icon`
+        // TYPE and reads `name`; every other kind names its glyph under
+        // `icon`. A shell that looked only under `icon` resolves every bare
+        // `icon` to null and never asks for the SVG.
+        // ─────────────────────────────────────────────────────────────
+        Eq("W2b-9: an icon_button names its glyph under `icon`",
+            "plus", Show(PanelWire.IconName(null, "plus", null, "icon_button")));
+        // ⛔ THE ARM FOR THE BUG THIS FOUND: without the type-gated `name`
+        //    branch this is null, and all 15 bare icons draw an empty face.
+        Eq("W2b-9: a bare `icon` node names its glyph under `name`",
+            "char_size", Show(PanelWire.IconName(null, null, "char_size", "icon")));
+        // ⛔ AND THE BRANCH IS TYPE-GATED: `name` is a STATIC_KEYS display
+        //    string other kinds carry, so reading it unconditionally would
+        //    turn some other widget's label into an icon lookup.
+        Eq("W2b-9: `name` on a NON-icon kind is not a glyph lookup",
+            "(null)", Show(PanelWire.IconName(null, null, "char_size", "text")));
+        Eq("W2b-9: a resolved bind.icon wins over both literals",
+            "bound", Show(PanelWire.IconName("bound", "literal", "named", "icon")));
+        Eq("W2b-9: nothing named is null, so the caller counts an icon-text",
+            "(null)", Show(PanelWire.IconName(null, null, null, "icon")));
+        // The control: the three inputs are pairwise distinct in the winning
+        // case, so the precedence above is observable. Without it a reader
+        // cannot tell a working precedence from a function returning its first
+        // non-null argument in some other order.
+        Check("W2b-9: CONTROL: the icon-name inputs differ in the winning case",
+            PanelWire.IconName("bound", "literal", "named", "icon") == "bound"
+            && PanelWire.IconName(null, "literal", "named", "icon") == "literal"
+            && PanelWire.IconName(null, null, "named", "icon") == "named",
+            "the three sources must be separable");
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

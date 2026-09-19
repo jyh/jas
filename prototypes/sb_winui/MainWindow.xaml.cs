@@ -1844,8 +1844,13 @@ public sealed partial class MainWindow : Window
         /// </summary>
         internal string? Shown(string key) => Display.TryGetValue(key, out var v) ? v : null;
 
-        /// <summary>A resolved `bind.icon` wins over the literal, as in every port.</summary>
-        internal string? IconName => Value("bind.icon") ?? Literal("icon");
+        /// <summary>
+        /// The name this leaf's glyph is looked up under. The RULE lives in
+        /// `PanelWire.IconName` so the desktop-less runner drives it; an
+        /// `icon` node names its glyph under `name`, not `icon`.
+        /// </summary>
+        internal string? IconName => PanelWire.IconName(
+            Value("bind.icon"), Literal("icon"), Literal("name"), Type);
     }
 
     // INSTANCE fields, not static: a brush is a XAML object, and an instance
@@ -1983,7 +1988,7 @@ public sealed partial class MainWindow : Window
         // `inputs` is in the same position for {number_input, length_input}, and
         // that set is NOT complete: select/combo_box/icon_select join it when the
         // plan gains an options channel.
-        var (texts, buttons, inputs, toggles, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0);
+        var (texts, buttons, inputs, toggles, glyphs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0, 0);
         foreach (var leaf in leaves)
         {
             FrameworkElement el;
@@ -1999,6 +2004,13 @@ public sealed partial class MainWindow : Window
                         TextWrapping = TextWrapping.NoWrap,
                         VerticalAlignment = VerticalAlignment.Center,
                     };
+                    break;
+
+                // A bare `icon` is decoration: no id, no bind, no click. It
+                // is NOT counted in `unaddressable` -- see BuildIcon.
+                case "icon":
+                    glyphs++;
+                    el = BuildIcon(leaf, icons);
                     break;
 
                 case "icon_button":
@@ -2048,8 +2060,12 @@ public sealed partial class MainWindow : Window
         }
         PaneScroll.Content = host;
 
+        // `glyphs=` is a NEW field, and adding one is safe MEASURED rather than
+        // assumed: `harness_common.ps1` reads this row BY NAME (`Get-SbField`)
+        // and asserts only `leaves` and `controls`; nothing sums the category
+        // counters, and the self-test's row is an INPUT to that parser.
         Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-             + $"buttons={buttons} inputs={inputs} toggles={toggles} unmaterialized={unmaterialized} "
+             + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} unmaterialized={unmaterialized} "
              + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
     }
@@ -2099,6 +2115,56 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
+    /// A bare `icon`: decoration. The workspace's 15 `icon` nodes carry
+    /// EXACTLY `{type, name, style}` -- no id, no bind, and NO TEXT KEY --
+    /// measured, against `icon_button`'s 87 nodes carrying `summary` on 86.
+    ///
+    /// ⛔ SO ITS FAILURE FALLBACK IS A DECISION, NOT A PORT, AND IT IS RULED
+    /// (jas, 2026-09-19, r.6e): fall back to the icon's own `name` as TEXT,
+    /// counted as `icon-text`, exactly as `icon_button` already does.
+    ///   (a) draw nothing        REFUSED -- this shell's README calls an empty
+    ///                           pane over a healthy status line "the ambiguous
+    ///                           failure this shell refuses"
+    ///   (c) a "missing" glyph   REFUSED -- a new vocabulary for a case the
+    ///                           shell already answers
+    /// It is DELIBERATELY UGLY: a failed icon shows `char_size`. That is the
+    /// point -- readable as a defect by anyone looking at the pane, where a
+    /// blank space is not, and countable from the row without a screenshot.
+    ///
+    /// ⛔ NOT `unaddressable`: that counter is for widgets a CLICK could not
+    /// name. An `icon` has no click and is never addressable BY DESIGN, so
+    /// counting it there would be a standing false alarm.
+    /// </summary>
+    private ContentControl BuildIcon(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
+    {
+        var name = leaf.IconName;
+        var host = new ContentControl
+        {
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Content = new TextBlock
+            {
+                Text = name ?? string.Empty,
+                FontSize = 8,
+                Foreground = _paneMutedBrush,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            },
+        };
+        if (name is not null && icons.TryGetValue(name, out var def))
+        {
+            _paneIconsPending++;
+            LoadIcon(host, def.Viewbox, def.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild);
+        }
+        else
+        {
+            // Named nothing, or named an icon the workspace does not define
+            // (`icons_missing`): the name stays on screen, by the ruling above.
+            _paneIconsText++;
+        }
+        return host;
+    }
+
+    /// <summary>
     /// Draw a workspace icon through the platform's SVG reader.
     ///
     /// The document is the workspace's own `viewbox` and `svg`, wrapped, with
@@ -2107,7 +2173,12 @@ public sealed partial class MainWindow : Window
     /// reader honours `currentColor` is read, not measured. A load that does
     /// not SUCCEED leaves the text face and is counted as failed.
     /// </summary>
-    private async void LoadIcon(Button btn, string viewbox, string svg, double box, int build)
+    // ⛔ `ContentControl`, not `Button`: a bare `icon` widget needs this same
+    // loader and is not a button. A Button IS a ContentControl, so the
+    // icon_button call site is unchanged and this widens the type rather than
+    // duplicating the loader -- the alternative was a second copy of the SVG
+    // wrapping, the currentColor substitution and the staleness guard.
+    private async void LoadIcon(ContentControl host, string viewbox, string svg, double box, int build)
     {
         var ok = false;
         try
@@ -2134,7 +2205,7 @@ public sealed partial class MainWindow : Window
                 // this shell, like the Swift port's icon size is of that one.
                 var side = box - 4;
                 if (side < 1) { side = box; }
-                btn.Content = new Image
+                host.Content = new Image
                 {
                     Source = source,
                     Width = side,

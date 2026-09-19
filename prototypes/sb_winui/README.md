@@ -204,7 +204,12 @@ carries the same keys for each). ⛔ The remaining value kinds are still
 unbuilt: `select`, `combo_box` and `icon_select` need a plan-side OPTIONS
 channel the plan does not have -- built from `bind.value` alone each one is a
 control that draws, counts as materialized, and cannot select anything.
-`icon` is unbuilt and cheap (the `LoadIcon` route already exists); a panel that was
+`icon` is now materialized too: it reuses `LoadIcon` (widened from `Button` to
+`ContentControl`) and, when the SVG does not load, shows the icon's own `name`
+as text and counts an `icon-text`, exactly as `icon_button` does -- an `icon`
+node carries no label, summary or id, so that name is the only text there is,
+and a blank space would be the ambiguous failure this shell refuses. Its count
+is the row's new `glyphs=` field; a panel that was
 switched away from stays ENROLLED, since the ABI has no close, so later ticks
 still evaluate it; whether a WinUI `TextBox` raises `KeyDown` for Enter, and
 whether a `CheckBox`'s `Click` arrives after its own toggle, are read, not
