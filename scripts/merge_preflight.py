@@ -178,6 +178,35 @@ def evaluate(state: State) -> Verdict:
 # --------------------------------------------------------------------------
 
 
+class SchemaChanged(RuntimeError):
+    """A key this tool reads is not in the forge's payload any more."""
+
+
+def require_key(mapping: dict, key: str, where: str):
+    """Read a key that MUST be there, and refuse rather than default.
+
+    ⛔ THE ASYMMETRY THIS EXISTS FOR, and it is the reason `.get()` is not
+    uniformly safe here. `payload.get("check_runs", [])` on a missing key
+    yields an empty population, which condition (2) REFUSES -- it fails
+    SAFE. `meta.get("draft")` on a missing key yields None, `bool(None)` is
+    False, and a DRAFT PULL REQUEST SAILS THROUGH CONDITION (1) -- it fails
+    UNSAFE, silently, and looks exactly like a pull request that is not a
+    draft. A null-on-miss read makes a schema change, a typo and a genuine
+    False all read as False.
+
+    Measured at the object 2026-09-19: `draft`, `head` and `check_runs` are
+    all present on the live payloads. That is a fact about today, which is
+    precisely why the read is not written as though it were permanent.
+    """
+    if key not in mapping:
+        raise SchemaChanged(
+            f"{where}: the forge's payload has no `{key}` key. This tool reads "
+            f"it to decide a merge, so it refuses rather than defaulting -- a "
+            f"default here would read as a PASS."
+        )
+    return mapping[key]
+
+
 def _gh(*args: str) -> str:
     proc = subprocess.run(
         ("gh",) + args, capture_output=True, text=True, encoding="utf-8"
@@ -189,14 +218,18 @@ def _gh(*args: str) -> str:
 
 def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
     meta = json.loads(_gh("api", f"repos/{repo}/pulls/{pr}"))
-    head = meta["head"]["sha"]
+    head = require_key(meta, "head", f"pulls/{pr}")["sha"]
+    draft = bool(require_key(meta, "draft", f"pulls/{pr}"))
 
     payload = json.loads(
         _gh("api", f"repos/{repo}/commits/{head}/check-runs?per_page=100")
     )
+    # `check_runs` is required for a different reason than `draft`: a missing
+    # key here would fail safe (condition 2 refuses an empty population), so
+    # this one is required for a clear MESSAGE rather than for safety.
     runs = tuple(
         Run(r["name"], r["status"], r.get("conclusion"))
-        for r in payload.get("check_runs", [])
+        for r in require_key(payload, "check_runs", f"commits/{head[:8]}/check-runs")
     )
 
     try:
@@ -221,7 +254,7 @@ def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
         ).returncode
         == 0
     )
-    return State(head, bool(meta.get("draft")), runs, required, ancestor)
+    return State(head, draft, runs, required, ancestor)
 
 
 # --------------------------------------------------------------------------
@@ -336,6 +369,27 @@ def self_test(fixture: Path | None = None) -> int:
             False,
             "NON-PASS",
         )
+
+    # (d2) THE GLUE. Every arm above constructs a State directly, so until
+    #      here NOTHING witnessed the step that builds one from forge JSON --
+    #      an extraction leaves its glue unwitnessed. These pin the read that
+    #      fails UNSAFE: a missing `draft` key must RAISE, never default to
+    #      False, because False is the value that merges.
+    declared += 1
+    try:
+        require_key({"draft": True}, "draft", "t")
+    except SchemaChanged:
+        failures.append("require_key must return a key that is present")
+    declared += 1
+    try:
+        require_key({"other": 1}, "draft", "t")
+        failures.append("a MISSING `draft` key must raise, not default to False")
+    except SchemaChanged as e:
+        if "draft" not in str(e):
+            failures.append(f"the refusal must name the missing key: {e}")
+    declared += 1
+    if require_key({"draft": False}, "draft", "t") is not False:
+        failures.append("a present-and-False key must come back as False, not as missing")
 
     # (e) THE RECEIPT CARRIES ITS OWN DENOMINATOR. A bare refusal count is 0
     #     for a run that examined nothing, so the verdict states how many
