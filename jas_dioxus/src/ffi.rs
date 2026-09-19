@@ -2690,6 +2690,52 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **THE WHOLE-PANEL HAZARD, AND IT IS WHAT THE DOCUMENT BASE IS FOR.**
+    /// A paragraph edit writes ALL sixteen fields, so every field the user did
+    /// not touch is written from the base. If that base were the store — which
+    /// only ever receives one key per press and is never synced from the
+    /// selection — an alignment click would stamp the store's stale zeros over
+    /// an indent the document actually carries.
+    ///
+    /// ⭐ Written because a mutant SURVIVED: basing `apply_field` on the store
+    /// still passed the radio arm, because the edited-key-last line covers the
+    /// radio case. Nothing witnessed the base itself until this.
+    #[test]
+    fn an_alignment_click_does_not_stamp_stale_values_over_untouched_fields() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+
+        // Put an indent on the DOCUMENT without going through the panel, so
+        // the store has never heard of it — exactly the state a fresh engine
+        // is in after loading a file that already has paragraph formatting.
+        engine_of(e).with_model_mut(|m| {
+            let mut pp = crate::interpreter::paragraph_host::panel_from_document(
+                m.document());
+            pp.set_field("left_indent", &serde_json::json!(24.0));
+            crate::interpreter::paragraph_host::apply_to_selection(m, &pp);
+        });
+        let indent_of = |e: *mut JasEngine| -> Option<f64> {
+            selected_paragraph_wrappers(e).first().cloned().flatten()
+                .and_then(|w| w.jas_left_indent)
+        };
+        assert_eq!(indent_of(e), Some(24.0), "the fixture's indent did not land");
+        assert!(engine_of(e).store.borrow()
+                    .get_panel(crate::interpreter::paragraph_host::PARAGRAPH_PANEL,
+                               "left_indent").as_f64().unwrap_or(0.0) != 24.0,
+                "the store already knows the indent, so this arm would be vacuous");
+
+        let (reply, err) = behave(
+            e, PARAGRAPH, r#"{"widget":"pg_align_center","event":"click"}"#);
+        assert_eq!(err, "", "{reply}");
+
+        // The edit landed AND the untouched field survived.
+        assert_eq!(selected_paragraph_wrappers(e).first().cloned().flatten()
+                       .and_then(|w| w.text_align).as_deref(), Some("center"));
+        assert_eq!(indent_of(e), Some(24.0),
+                   "an alignment click stamped a stale value over the indent");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A derived predicate owns no attribute, so a write to one must not reach
     /// the document. Asserted BY NAME on the refusal, because "the document
     /// did not change" alone would also pass if the whole path were dead.

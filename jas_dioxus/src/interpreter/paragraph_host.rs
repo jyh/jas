@@ -541,7 +541,42 @@ pub fn live_values(doc: &crate::document::document::Document)
     m.insert("hanging_punctuation".into(), json!(pp.hanging_punctuation));
     debug_assert_eq!(m.len(), FIELDS.len(),
                      "live_values must expose every field the panel declares");
+    // The two DERIVED PREDICATES. They reach no attribute — `is_field_key`
+    // answers false for both — but they drive every control's `disabled:`
+    // binding, and the panel's own YAML states the obligation: *"Native apps
+    // overwrite on selection change; flask demo keeps the default."* Both
+    // default to TRUE, so an engine that does not overwrite them reports every
+    // control enabled on an empty selection. Swift computes them in
+    // `paragraphPanelLiveOverrides`; this is the same law.
+    let (any_text, all_area) = text_selection_facts(doc);
+    m.insert("text_selected".into(), json!(any_text));
+    m.insert("area_text_selected".into(), json!(any_text && all_area));
     m
+}
+
+/// `(any text selected, every selected text element is AREA text)`.
+///
+/// Area text is a wrapping frame — `width > 0 && height > 0`. A TextPath is
+/// never area text, which is why it clears `all_area` while still counting as
+/// text: the JUSTIFY_* controls, the indents and hyphenation are area-only.
+fn text_selection_facts(doc: &crate::document::document::Document) -> (bool, bool) {
+    use crate::geometry::element::Element;
+    let mut any_text = false;
+    let mut all_area = true;
+    for es in doc.selection.iter() {
+        match doc.get_element(&es.path) {
+            Some(Element::Text(t)) => {
+                any_text = true;
+                if !(t.width > 0.0 && t.height > 0.0) { all_area = false; }
+            }
+            Some(Element::TextPath(_)) => {
+                any_text = true;
+                all_area = false;
+            }
+            _ => {}
+        }
+    }
+    (any_text, all_area)
 }
 
 /// **The engine's entry point: apply a write to `key`.** A key that owns no
@@ -911,6 +946,39 @@ mod tests {
         assert_eq!(w.jas_hyphenate, None, "a false flag must be omitted, not written false");
         assert_eq!(w.jas_hanging_punctuation, None);
         assert_eq!(w.jas_list_style, None);
+    }
+
+    /// **THE TWO DERIVED PREDICATES, WHICH THE PANEL'S OWN YAML MAKES AN
+    /// OBLIGATION:** *"Native apps overwrite on selection change; flask demo
+    /// keeps the default."* Both default to TRUE, so an engine that does not
+    /// overwrite them reports every control enabled on an EMPTY selection —
+    /// a green that is wrong in the permissive direction.
+    #[test]
+    fn live_values_derives_the_two_predicates_from_the_selection() {
+        use crate::document::document::Document;
+        let v = |d: &Document, k: &str| live_values(d).get(k).and_then(|x| x.as_bool());
+
+        // Empty selection: neither holds, against a YAML default of true.
+        let empty = Document::default();
+        assert_eq!(v(&empty, "text_selected"), Some(false),
+                   "an empty selection reported text selected");
+        assert_eq!(v(&empty, "area_text_selected"), Some(false));
+
+        // A point-text element (width/height 0) is text but NOT area text,
+        // which is what gates the JUSTIFY_* controls and the indents.
+        let point = text_doc();
+        assert_eq!(v(&point, "text_selected"), Some(true));
+        assert_eq!(v(&point, "area_text_selected"), Some(false),
+                   "point text was reported as area text");
+
+        // And every field key is present beside them, so the scope a widget
+        // binds against is complete rather than partly store-backed.
+        let m = live_values(&point);
+        for f in FIELDS {
+            assert!(m.contains_key(f), "live_values omits the declared field {f}");
+        }
+        assert_eq!(m.len(), FIELDS.len() + 2,
+                   "live_values exposes something the panel does not declare");
     }
 
     /// A negative first-line indent is a HANGING indent and is a real value —
