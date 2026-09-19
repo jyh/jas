@@ -1768,7 +1768,6 @@ if ($squeezeAsked -and [string]::IsNullOrWhiteSpace($probeAsked)) {
     # the walk. And the bracket is refused when a gesture or a driven resize lies
     # inside it, because then the inequality would be about that instead.
     $sqHashes = @($rows | Where-Object { $_ -match 'hash=[0-9a-f]{64}' })
-    $sqHashes = @($rows | Where-Object { $_ -match 'hash=[0-9a-f]{64}' })
     $refIdx = if ($null -ne $refuseRow) { [array]::IndexOf($rows, $refuseRow) } else { -1 }
     $before6 = $null; $after6 = $null
     if ($refIdx -ge 0) {

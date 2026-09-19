@@ -348,6 +348,16 @@ if ($Stay) {
     }
     $known = Get-SbAppPids $exe
     $logMark = Get-SbLogMark $log
+    # ⛔ THE SAME RESOLUTION THE WAITER USES, FOR THE SAME REASON THIS FILE
+    # ALREADY GIVES BELOW: a hardcoded pattern in a parameterised path is a
+    # second table with one row. `-Stay -Scene retained` with `SB_SQUEEZE=1` in
+    # the caller's environment is a legal invocation, and before this it waited
+    # 90 s for a row that run cannot write.
+    $stayResolved = Resolve-SbSceneSpec -Scene $Scene `
+                                        -Resize $env:SB_RESIZE `
+                                        -Squeeze $env:SB_SQUEEZE `
+                                        -Probe $env:SB_SURFACE_PROBE `
+                                        -Hand $false
 
     if ($DryRun) {
         Write-Host "== DRY RUN -- -Stay plan, nothing launched =="
@@ -355,7 +365,7 @@ if ($Stay) {
         Write-Host "  scene        : $Scene"
         Write-Host "  svg          : $(if ($svgAbs) { $svgAbs } else { '(none)' })"
         Write-Host "  task         : $stayTask"
-        Write-Host "  waits for    : $($sceneSpec[$Scene].Label) in $([IO.Path]::GetFileName($log))"
+        Write-Host "  waits for    : $($stayResolved.Label) in $([IO.Path]::GetFileName($log))"
         Write-Host "  timeout      : 90s, then a named refusal"
         Write-Host "  record       : $stayRecord"
         Write-Host "  already up   : $(($known -join ', '))"
@@ -386,7 +396,7 @@ if ($Stay) {
     # `-Stay -Scene app` on a HEALTHY app timed out after 90 s and left the
     # window alive to be stopped by hand.
     # ⇒ A HARDCODED PATTERN IN A PARAMETERISED PATH IS A SECOND TABLE WITH ONE ROW.
-    $stayWait = $sceneSpec[$Scene]
+    $stayWait = $stayResolved
     $wait = Wait-SbRow -Log $log -Mark $logMark -Patterns $stayWait.Done -TimeoutSeconds 90
     if ($null -eq $wait.Row) {
         Write-Host "  NOT RUN: timed out after $($wait.Waited)s waiting for $($stayWait.Label) (scene '$Scene')." -ForegroundColor Red
