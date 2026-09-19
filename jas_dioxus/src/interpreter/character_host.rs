@@ -719,24 +719,53 @@ mod tests {
         }
     }
 
-    /// The field → group table, reachable from a build with no web feature.
-    /// The count is the one the 2026-09-18 census measured across all three
-    /// implementations (reference 18 · Rust 18 · Swift 18), so a field added
-    /// on one side and not the others trips here.
-    #[test]
-    fn the_field_to_group_table_is_reachable_and_is_the_censused_eighteen() {
-        let keys = [
-            "font_family", "style_name", "font_size", "leading", "kerning",
-            "tracking", "vertical_scale", "horizontal_scale", "baseline_shift",
-            "superscript", "subscript", "character_rotation", "all_caps",
-            "small_caps", "underline", "strikethrough", "language",
-            "anti_aliasing",
-        ];
-        assert_eq!(keys.len(), 18, "the censused table size changed");
-        for k in keys {
-            assert!(CharacterEditGroup::from_field(k).is_some(),
-                    "{k} owns no group, so a panel edit of it would write nothing");
+    /// Every `panel.<key>` the Character panel's YAML declares. Read from the
+    /// artifact, because a key list typed into a test is a claim about the
+    /// panel that nothing re-checks when the panel changes — the seat's own
+    /// "no typed expectations, derive them from the artifact's bytes" rule.
+    fn declared_panel_keys() -> Vec<String> {
+        let src = std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../workspace/panels/character.yaml"))
+            .expect("character.yaml is readable");
+        let mut out: Vec<String> = Vec::new();
+        let mut rest = src.as_str();
+        while let Some(i) = rest.find("panel.") {
+            rest = &rest[i + 6..];
+            let k: String = rest.chars()
+                .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_')
+                .collect();
+            if !k.is_empty() && !out.contains(&k) {
+                out.push(k);
+            }
         }
+        assert!(out.len() > 20, "read only {} keys — the YAML's shape changed", out.len());
+        out
+    }
+
+    /// **THE FIELD → GROUP TABLE, PARTITIONED AGAINST THE PANEL'S OWN YAML,
+    /// AND EVERY NUMBER IS DERIVED.** The panel declares N keys; each either
+    /// owns an element attribute or is UI-only, and the split must be exactly
+    /// the censused eighteen against the seven `snap_*` flags. Drift in EITHER
+    /// direction reds: a key added to the YAML with no mapping lands in
+    /// `no_group` and is not one of the seven, and a mapping dropped from the
+    /// table takes the count below eighteen. Both drove.
+    #[test]
+    fn the_yaml_keys_partition_into_the_censused_eighteen_and_the_seven_flags() {
+        let declared = declared_panel_keys();
+        let (owns, no_group): (Vec<&String>, Vec<&String>) = declared.iter()
+            .partition(|k| CharacterEditGroup::from_field(k).is_some());
+        assert_eq!(owns.len(), 18,
+                   "the censused table is 18 (reference 18 · Rust 18 · Swift 18); \
+                    the YAML now maps {}: {:?}", owns.len(), owns);
+        let mut flags: Vec<&str> = no_group.iter().map(|s| s.as_str()).collect();
+        flags.sort_unstable();
+        assert_eq!(flags, ["snap_anchor_point", "snap_angular_guides", "snap_baseline",
+                           "snap_glyph_bounds", "snap_proximity_guides",
+                           "snap_to_glyph_visible", "snap_x_height"],
+                   "a declared key owns no group and is not one of the seven UI-only flags");
+        // Anti-vacuity: the partition covers the whole declared set, so neither
+        // side can be right by being empty.
+        assert_eq!(owns.len() + flags.len(), declared.len());
     }
 
     /// A key that owns no element attribute must map to no group, or a UI-only
