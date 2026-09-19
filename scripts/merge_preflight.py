@@ -50,6 +50,23 @@ cannot witness a case it never contains. The narrowing is a CHOICE, it is
 pinned by its own arm in the self-test, and the cost of being wrong is one
 human look -- against a bad merge in the other direction.
 
+A LIMIT THAT RIDES WITH EVERY VERDICT: WE ARE STRICTER THAN THE FORGE
+---------------------------------------------------------------------
+One check-run NAME can carry several RECORDS on a single head sha. Branch
+protection resolves LATEST-WINS PER NAME; this tool counts every record. So a
+stale `cancelled` record beside a fresh `success` for the same name makes this
+tool REFUSE where the forge would merge.
+
+That is the conservative direction and it is deliberate, but it is SILENT --
+it reads as a bug in this tool rather than as a policy. So the receipt names
+the duplication whenever it is present, and says which way the divergence
+runs. It is not an edge case here: `scrub.yml` fires on BOTH `push:` and
+`pull_request:` (both required by `check_scrub_trigger.py`, for reasons
+written into that gate), and their `github.ref` values differ, so the
+per-ref concurrency group cannot merge them. Measured on this tool's own
+pull request: 6 of 25 names carried 2 records each.
+
+
 NOT A CHECK GATE, AND THE NAME SAYS SO ON PURPOSE
 -------------------------------------------------
 `scripts/check_*.py` files are enumerated by `check_lane_coverage.py` and must
@@ -81,6 +98,14 @@ PASS_CONCLUSIONS = frozenset({"success"})
 # that narrowing the logic without saying so turns the self-test red: a bare
 # refusal count is 0 for a run that examined nothing.
 CONDITIONS = ("draft", "population", "pending", "non-pass", "required", "ancestor")
+
+# Everything this tool PRINTS is ASCII. The seat most likely to run it is on a
+# Windows box whose console is cp1252, where one non-ASCII character raises
+# UnicodeEncodeError -- and this tool exits 1 when it crashes, the same code a
+# legitimate refusal returns. Rich characters stay in docstrings and comments,
+# which are never printed.
+PREFIX_REFUSAL = "  X "
+PREFIX_NOTE = "WARNING: "
 
 
 class Run(NamedTuple):
@@ -162,11 +187,28 @@ def evaluate(state: State) -> Verdict:
             "the green tree is not the merged tree"
         )
 
+    # ⛔ RECORDS AND NAMES ARE DIFFERENT POPULATIONS, AND PRINTING THEM
+    #   UNLABELLED BESIDE EACH OTHER READS AS FAILURES. Found by running this
+    #   tool on its own pull request: `check-runs 31; green 25` on a tree where
+    #   nothing failed. Six names carried two records each.
+    names = {r.name for r in state.runs}
+    dup_names = sorted(
+        n for n in names if sum(1 for r in state.runs if r.name == n) > 1
+    )
+    dup_note = (
+        f"; {PREFIX_NOTE}{len(dup_names)} name(s) duplicated "
+        f"({', '.join(dup_names[:3])}{'...' if len(dup_names) > 3 else ''}) -- "
+        "the forge resolves LATEST-WINS per name and this tool counts EVERY "
+        "record, so it refuses where the forge would merge"
+        if dup_names
+        else ""
+    )
     receipt = (
         f"conditions ran {len(CONDITIONS)} ({', '.join(CONDITIONS)}); "
-        f"check-runs {len(state.runs)}; green {len(green)}; "
+        f"check-runs {len(state.runs)} record(s) over {len(names)} distinct name(s); "
+        f"green {len(green)}/{len(names)} name(s); "
         f"required {len(state.required) - len(missing)}/{len(state.required)} present; "
-        f"refusals {len(refusals)}"
+        f"refusals {len(refusals)}{dup_note}"
     )
     return Verdict(not refusals, tuple(refusals), receipt)
 
@@ -391,6 +433,102 @@ def self_test(fixture: Path | None = None) -> int:
     if require_key({"draft": False}, "draft", "t") is not False:
         failures.append("a present-and-False key must come back as False, not as missing")
 
+    # (d3) ⛔ DUPLICATE RECORDS FOR ONE NAME. Found by running this tool on its
+    #      OWN pull request: the receipt read `check-runs 31; green 25` on a
+    #      FULLY GREEN tree, because 31 counts RECORDS and 25 counts DISTINCT
+    #      NAMES. Both numbers were right and the pair reads as six failures.
+    #      This repo produces duplicates BY DESIGN -- `scrub.yml` fires on both
+    #      `push:` and `pull_request:` and `check_scrub_trigger.py` requires
+    #      both -- so they never go away and must be reported, not survived.
+    declared += 1
+    dup = _state(
+        runs=(
+            Run("required A", "completed", "success"),
+            Run("required A", "queued", None),
+            Run("required B", "completed", "success"),
+        ),
+    )
+    v = evaluate(dup)
+    if v.ok:
+        failures.append("a name with a still-queued duplicate must REFUSE")
+    if "duplicated" not in v.receipt:
+        failures.append(
+            f"the receipt must SAY a name carries several records, or `31 records` "
+            f"beside `25 green` reads as 6 failures: {v.receipt!r}"
+        )
+
+    # (d4) THE DIVERGENCE FROM THE FORGE, PINNED IN THE SAFE DIRECTION. Branch
+    #      protection resolves LATEST-WINS PER NAME; this tool counts every
+    #      record. A cancelled duplicate beside a success therefore REFUSES
+    #      here and would MERGE at the forge. That is deliberate and it is the
+    #      conservative side -- but it is silent, so the receipt must expose it
+    #      or the refusal reads as a bug in this tool.
+    declared += 1
+    stale = _state(
+        runs=(
+            Run("required A", "completed", "cancelled"),
+            Run("required A", "completed", "success"),
+            Run("required B", "completed", "success"),
+        ),
+    )
+    v = evaluate(stale)
+    if v.ok:
+        failures.append("a cancelled duplicate must REFUSE (we are stricter than the forge)")
+    elif "duplicated" not in v.receipt:
+        failures.append(f"a refusal caused by a duplicate must say so: {v.receipt!r}")
+
+    # (d5) AND THE CONTROL: with no duplicates the receipt must NOT cry wolf.
+    declared += 1
+    if "duplicated" in evaluate(_state()).receipt:
+        failures.append("the duplication note must be absent when there are none")
+
+    # (d5b) ⛔ THE ARM A SURVIVING MUTANT DEMANDED. (d3) pins the duplication
+    #       NOTE, and reverting the receipt to a bare `check-runs {N}` left
+    #       every arm green -- so the ORIGINAL defect, two unlabelled counts
+    #       standing side by side, was not pinned by anything. The receipt must
+    #       name BOTH populations, and on a duplicate state the two must differ.
+    declared += 1
+    r_dup = evaluate(dup).receipt
+    if "record(s)" not in r_dup or "distinct name(s)" not in r_dup:
+        failures.append(
+            f"the receipt must label RECORDS and DISTINCT NAMES separately, or two "
+            f"correct numbers read as failures: {r_dup!r}"
+        )
+    declared += 1
+    if "3 record(s) over 2 distinct name(s)" not in r_dup:
+        failures.append(
+            f"the two populations must be counted independently (3 records, 2 names): {r_dup!r}"
+        )
+
+    # (d6) ⛔⛔ EVERY PRINTED BYTE MUST SURVIVE A cp1252 CONSOLE, BECAUSE THE
+    #      SEAT MOST LIKELY TO RUN THIS IS ON WINDOWS. Driven, not imagined:
+    #      with PYTHONIOENCODING=cp1252 this tool raised UnicodeEncodeError on
+    #      its own receipt line -- and it exits 1 when it crashes, which is the
+    #      SAME code a legitimate refusal returns, so a crash and a refusal are
+    #      indistinguishable to the caller. The self-test did not see it because
+    #      the non-ASCII lived on paths the happy path never prints.
+    declared += 1
+    probes = [PREFIX_REFUSAL, PREFIX_NOTE]
+    for st in (
+        _state(),
+        _state(draft=True, base_is_ancestor=False),
+        _state(runs=(Run("required A", "completed", "success"),
+                     Run("required A", "queued", None),
+                     Run("required B", "completed", "success"))),
+        _state(runs=()),
+    ):
+        v = evaluate(st)
+        probes.append(v.receipt)
+        probes.extend(v.refusals)
+    for text in probes:
+        try:
+            text.encode("cp1252")
+        except UnicodeEncodeError as e:
+            failures.append(
+                f"printed text is not cp1252-safe ({e.reason} at {e.start}): {text[:70]!r}"
+            )
+            break
+
     # (e) THE RECEIPT CARRIES ITS OWN DENOMINATOR. A bare refusal count is 0
     #     for a run that examined nothing, so the verdict states how many
     #     conditions it ran -- and this arm reds if the logic is narrowed
@@ -411,11 +549,11 @@ def self_test(fixture: Path | None = None) -> int:
         # its input is absent turns a missing file into a green suite. REPORT
         # and VALUE are separated -- this says NOT RUN out loud.
         print(
-            "merge_preflight --self-test: ⚠️ real-payload arm NOT RUN (no fixture); "
+            "merge_preflight --self-test: " + PREFIX_NOTE + "real-payload arm NOT RUN (no fixture); "
             "the parser is unwitnessed by forge bytes in this invocation"
         )
     if fixture and not Path(fixture).exists():
-        print(f"merge_preflight --self-test: ⚠️ fixture {fixture} is ABSENT")
+        print("merge_preflight --self-test: " + PREFIX_NOTE + "fixture " + fixture.as_posix() + " is ABSENT")
         fixture = None
     if fixture:
         declared += 1
@@ -478,7 +616,7 @@ def main() -> int:
         return 0
     print(f"merge_preflight: REFUSED on {len(verdict.refusals)} condition(s)")
     for r in verdict.refusals:
-        print(f"  ⛔ {r}")
+        print(f"{PREFIX_REFUSAL}{r}")
     return 1
 
 
