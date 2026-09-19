@@ -110,6 +110,17 @@ def workspace_kinds(path: Path) -> set[str]:
     return found
 
 
+# ⛔ EVERY STRING THIS FILE PRINTS IS ASCII, DELIBERATELY. The Windows console
+# is cp1252 and a single non-ASCII character in a `print()` raises
+# UnicodeEncodeError -- ON THE SUCCESS PATH, which is the one nobody tests.
+# This gate did exactly that: it PASSED its own check and then died reporting
+# the pass, so it was red on Windows and green everywhere else. Its `--self-test`
+# arm stayed green throughout, because that arm's output happened to be ASCII.
+# Drive every output path with `PYTHONIOENCODING=cp1252` before believing any of
+# them. (The docstring and comments above may hold glyphs: they are never
+# printed. Only what reaches stdout/stderr is constrained.)
+
+
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
@@ -150,7 +161,7 @@ def main() -> int:
         f"check_shell_kind_labels: OK ({len(labels)} case label(s) in {SHELL.name}'s leaf switch, "
         f"every one of them a kind the spec's tables or the compiled workspace uses; "
         f"{len(known)} known kind(s) derived, none typed here). "
-        "⚠️ SOUNDNESS ONLY, NEVER COVERAGE: the shell is not required to materialize every kind -- "
+        "SOUNDNESS ONLY, NEVER COVERAGE: the shell is not required to materialize every kind -- "
         "the labelled placeholder is what keeps the unbuilt count honest."
     )
     return 0
