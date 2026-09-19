@@ -2110,61 +2110,17 @@ impl AppState {
     /// renderer's mixed-state aggregator independently shows blank).
     /// Phase 4.
     pub(crate) fn sync_paragraph_panel_from_selection(&mut self) {
-        use crate::geometry::element::Element;
-        let mut wrappers: Vec<crate::geometry::tspan::Tspan> = Vec::new();
-        if let Some(tab) = self.tab() {
-            let doc = tab.model.document();
-            for es in doc.selection.iter() {
-                if let Some(el) = doc.get_element(&es.path) {
-                    let tspans: Option<&[crate::geometry::tspan::Tspan]> = match el {
-                        Element::Text(t) => Some(&t.tspans[..]),
-                        Element::TextPath(tp) => Some(&tp.tspans[..]),
-                        _ => None,
-                    };
-                    if let Some(tspans) = tspans {
-                        for ts in tspans {
-                            if ts.jas_role.as_deref() == Some("paragraph") {
-                                wrappers.push(ts.clone());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        if wrappers.is_empty() { return; }
-        fn agree<T: PartialEq + Clone>(values: &[T]) -> Option<T> {
-            let first = values.first()?.clone();
-            if values.iter().all(|v| *v == first) { Some(first) } else { None }
-        }
-        let pp = &mut self.paragraph_panel;
-        let lefts: Vec<f64> = wrappers.iter().map(|w| w.jas_left_indent.unwrap_or(0.0)).collect();
-        if let Some(v) = agree(&lefts) { pp.left_indent = v; }
-        let rights: Vec<f64> = wrappers.iter().map(|w| w.jas_right_indent.unwrap_or(0.0)).collect();
-        if let Some(v) = agree(&rights) { pp.right_indent = v; }
-        let firsts: Vec<f64> = wrappers.iter().map(|w| w.text_indent.unwrap_or(0.0)).collect();
-        if let Some(v) = agree(&firsts) { pp.first_line_indent = v; }
-        let sb: Vec<f64> = wrappers.iter().map(|w| w.jas_space_before.unwrap_or(0.0)).collect();
-        if let Some(v) = agree(&sb) { pp.space_before = v; }
-        let sa: Vec<f64> = wrappers.iter().map(|w| w.jas_space_after.unwrap_or(0.0)).collect();
-        if let Some(v) = agree(&sa) { pp.space_after = v; }
-        let hy: Vec<bool> = wrappers.iter().map(|w| w.jas_hyphenate.unwrap_or(false)).collect();
-        if let Some(v) = agree(&hy) { pp.hyphenate = v; }
-        let hp: Vec<bool> = wrappers.iter().map(|w| w.jas_hanging_punctuation.unwrap_or(false)).collect();
-        if let Some(v) = agree(&hp) { pp.hanging_punctuation = v; }
-        let styles: Vec<String> = wrappers.iter()
-            .map(|w| w.jas_list_style.clone().unwrap_or_default()).collect();
-        if let Some(ls) = agree(&styles) {
-            if ls.starts_with("bullet-") { pp.bullets = ls; pp.numbered_list.clear(); }
-            else if ls.starts_with("num-") { pp.numbered_list = ls; pp.bullets.clear(); }
-            else { pp.bullets.clear(); pp.numbered_list.clear(); }
-        }
-        let tas: Vec<String> = wrappers.iter()
-            .map(|w| w.text_align.clone().unwrap_or_else(|| "left".into())).collect();
-        let tals: Vec<String> = wrappers.iter()
-            .map(|w| w.text_align_last.clone().unwrap_or_default()).collect();
-        if let (Some(ta), Some(tal)) = (agree(&tas), agree(&tals)) {
-            apply_align_radio(pp, &ta, &tal);
-        }
+        // W2b-7: the law is the ungated host's, because the ENGINE needs the
+        // same pre-write sync — a whole-panel apply writes every field, so the
+        // base must agree with the document or one edit stamps stale values
+        // over the rest. This is the web path's door to it.
+        let wrappers = match self.tab() {
+            Some(tab) => crate::interpreter::paragraph_host::selected_wrappers(
+                tab.model.document()),
+            None => return,
+        };
+        crate::interpreter::paragraph_host::sync_from_wrappers(
+            &mut self.paragraph_panel, &wrappers);
     }
 }
 

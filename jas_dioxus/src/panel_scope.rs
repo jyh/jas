@@ -289,6 +289,13 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
         if panel_id == crate::interpreter::properties_host::PROPERTIES_PANEL {
             panel.extend(crate::interpreter::properties_host::live_values(model.document()));
         }
+        // W2b-7. The Paragraph panel's fields describe the SELECTION, so the
+        // scope must be derived from the document exactly as Properties' is.
+        // A store-backed scope makes a boolean press read a stale sibling and
+        // negate the wrong value — `paragraph_host::live_values` says how.
+        if panel_id == crate::interpreter::paragraph_host::PARAGRAPH_PANEL {
+            panel.extend(crate::interpreter::paragraph_host::live_values(model.document()));
+        }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));

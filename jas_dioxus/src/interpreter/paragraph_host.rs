@@ -428,12 +428,138 @@ pub fn apply_to_selection(
     changed
 }
 
-/// The engine's entry point: apply the panel the store now holds, for a write
-/// to `key`. A key that owns no document attribute is refused — the panel's
-/// two derived predicates must not push an undo step that changes nothing.
+/// Every paragraph wrapper tspan of every selected Text / TextPath, in
+/// selection order. The wrapper is the tspan whose `jas_role` is
+/// `"paragraph"`; a selection may hold several.
+pub fn selected_wrappers(doc: &crate::document::document::Document) -> Vec<Tspan> {
+    use crate::geometry::element::Element;
+    let mut out: Vec<Tspan> = Vec::new();
+    for es in doc.selection.iter() {
+        let tspans: Option<&[Tspan]> = match doc.get_element(&es.path) {
+            Some(Element::Text(t)) => Some(&t.tspans[..]),
+            Some(Element::TextPath(tp)) => Some(&tp.tspans[..]),
+            _ => None,
+        };
+        if let Some(tspans) = tspans {
+            out.extend(tspans.iter()
+                       .filter(|ts| ts.jas_role.as_deref() == Some("paragraph"))
+                       .cloned());
+        }
+    }
+    out
+}
+
+/// **Read the selection's wrappers back into panel state**, taking a value
+/// only where EVERY wrapper agrees — a mixed selection leaves the field as it
+/// was, which is how a panel shows "no single value".
+///
+/// ⛔ **THIS IS NOT DISPLAY-ONLY, AND IT IS THE ONE PLACE PARAGRAPH'S BOUNDARY
+/// DIFFERS FROM CHARACTER'S.** The web app calls it immediately before every
+/// paragraph write, and its own comment says why: *"Sync first so untouched
+/// fields hold the selection's current values, not stale panel state, before
+/// the new field is set and the whole panel is re-applied."* Because the apply
+/// is WHOLE-PANEL, the pre-write sync is what stops an edit to one field from
+/// stamping stale values over the other fifteen. The engine needs it for the
+/// same reason, so it lives here and not beside `character_panel_post_write`.
+pub fn sync_from_wrappers(pp: &mut ParagraphPanelState, wrappers: &[Tspan]) {
+    if wrappers.is_empty() { return; }
+    fn agree<T: PartialEq + Clone>(values: &[T]) -> Option<T> {
+        let first = values.first()?.clone();
+        if values.iter().all(|v| *v == first) { Some(first) } else { None }
+    }
+    let lefts: Vec<f64> = wrappers.iter().map(|w| w.jas_left_indent.unwrap_or(0.0)).collect();
+    if let Some(v) = agree(&lefts) { pp.left_indent = v; }
+    let rights: Vec<f64> = wrappers.iter().map(|w| w.jas_right_indent.unwrap_or(0.0)).collect();
+    if let Some(v) = agree(&rights) { pp.right_indent = v; }
+    let firsts: Vec<f64> = wrappers.iter().map(|w| w.text_indent.unwrap_or(0.0)).collect();
+    if let Some(v) = agree(&firsts) { pp.first_line_indent = v; }
+    let sb: Vec<f64> = wrappers.iter().map(|w| w.jas_space_before.unwrap_or(0.0)).collect();
+    if let Some(v) = agree(&sb) { pp.space_before = v; }
+    let sa: Vec<f64> = wrappers.iter().map(|w| w.jas_space_after.unwrap_or(0.0)).collect();
+    if let Some(v) = agree(&sa) { pp.space_after = v; }
+    let hy: Vec<bool> = wrappers.iter().map(|w| w.jas_hyphenate.unwrap_or(false)).collect();
+    if let Some(v) = agree(&hy) { pp.hyphenate = v; }
+    let hp: Vec<bool> = wrappers.iter()
+        .map(|w| w.jas_hanging_punctuation.unwrap_or(false)).collect();
+    if let Some(v) = agree(&hp) { pp.hanging_punctuation = v; }
+    let styles: Vec<String> = wrappers.iter()
+        .map(|w| w.jas_list_style.clone().unwrap_or_default()).collect();
+    if let Some(ls) = agree(&styles) {
+        if ls.starts_with("bullet-") { pp.bullets = ls; pp.numbered_list.clear(); }
+        else if ls.starts_with("num-") { pp.numbered_list = ls; pp.bullets.clear(); }
+        else { pp.bullets.clear(); pp.numbered_list.clear(); }
+    }
+    let tas: Vec<String> = wrappers.iter()
+        .map(|w| w.text_align.clone().unwrap_or_else(|| "left".into())).collect();
+    let tals: Vec<String> = wrappers.iter()
+        .map(|w| w.text_align_last.clone().unwrap_or_default()).collect();
+    if let (Some(ta), Some(tal)) = (agree(&tas), agree(&tals)) {
+        apply_align_radio(pp, &ta, &tal);
+    }
+}
+
+/// The panel as the DOCUMENT says it is — the engine's base for a write.
+pub fn panel_from_document(doc: &crate::document::document::Document)
+    -> ParagraphPanelState {
+    let mut pp = ParagraphPanelState::default();
+    sync_from_wrappers(&mut pp, &selected_wrappers(doc));
+    pp
+}
+
+/// **The sixteen fields as the SELECTION holds them**, for the engine's panel
+/// scope — the role `properties_host::live_values` plays for Properties.
+///
+/// ⛔ **WITHOUT THIS, THE PANEL'S SCOPE IS WHATEVER THE STORE LAST HAPPENED TO
+/// HOLD, AND A BOOLEAN WIDGET READS IT TO DECIDE WHAT A PRESS MEANS.** The
+/// seven alignment controls are checkboxes bound to `panel.align_*`, and a
+/// press writes the NEGATION of the bound expression. `bind_write` writes the
+/// one bool pressed and never clears its siblings, so a store-backed scope
+/// still reads `align_left = true` after the user has moved to centre — and
+/// the next press on Left evaluates `not true`, writes FALSE, and selects
+/// nothing. Derived from the document the same press evaluates `not false`
+/// and selects Left, which is what the web app achieves by syncing first.
+pub fn live_values(doc: &crate::document::document::Document)
+    -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::json;
+    let pp = panel_from_document(doc);
+    let mut m = serde_json::Map::new();
+    m.insert("align_left".into(), json!(pp.align_left));
+    m.insert("align_center".into(), json!(pp.align_center));
+    m.insert("align_right".into(), json!(pp.align_right));
+    m.insert("justify_left".into(), json!(pp.justify_left));
+    m.insert("justify_center".into(), json!(pp.justify_center));
+    m.insert("justify_right".into(), json!(pp.justify_right));
+    m.insert("justify_all".into(), json!(pp.justify_all));
+    m.insert("bullets".into(), json!(pp.bullets));
+    m.insert("numbered_list".into(), json!(pp.numbered_list));
+    m.insert("left_indent".into(), json!(pp.left_indent));
+    m.insert("right_indent".into(), json!(pp.right_indent));
+    m.insert("first_line_indent".into(), json!(pp.first_line_indent));
+    m.insert("space_before".into(), json!(pp.space_before));
+    m.insert("space_after".into(), json!(pp.space_after));
+    m.insert("hyphenate".into(), json!(pp.hyphenate));
+    m.insert("hanging_punctuation".into(), json!(pp.hanging_punctuation));
+    debug_assert_eq!(m.len(), FIELDS.len(),
+                     "live_values must expose every field the panel declares");
+    m
+}
+
+/// **The engine's entry point: apply a write to `key`.** A key that owns no
+/// document attribute is refused — the panel's two derived predicates must not
+/// push an undo step that changes nothing.
+///
+/// ⛔ **THE BASE IS THE SELECTION, NOT THE STORE**, and this is the whole
+/// reason [`sync_from_wrappers`] is in this file. The apply is WHOLE-PANEL, so
+/// every field not being edited is written from the base — and the store's
+/// copy of those fields can be arbitrarily stale (it is only ever written by
+/// `bind_write`, one key per press, with no sibling ever cleared). Basing on
+/// the store would let one edit stamp stale values over the other fifteen, and
+/// would resolve the alignment radio by `FIELDS` array order rather than by
+/// what the user pressed. The web app avoids both by syncing first; this is
+/// the same act.
 ///
 /// ⚠️ Note the asymmetry with [`super::character_host::apply_field`]: there
-/// the key selects the group to write, here it only decides *whether* to
+/// the key selects the GROUP to write, here it only decides *whether* to
 /// write, because the paragraph apply is whole-panel.
 pub fn apply_field(
     model: &mut crate::document::model::Model,
@@ -441,7 +567,11 @@ pub fn apply_field(
     key: &str,
 ) -> bool {
     if !is_field_key(key) { return false; }
-    apply_to_selection(model, &ParagraphPanelState::from_store(store))
+    let mut pp = panel_from_document(model.document());
+    // The edited key LAST, so its mutual exclusions are applied over a base
+    // that already agrees with the document.
+    pp.set_field(key, store.get_panel(PARAGRAPH_PANEL, key));
+    apply_to_selection(model, &pp)
 }
 
 #[cfg(test)]
