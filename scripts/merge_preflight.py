@@ -482,6 +482,24 @@ def self_test(fixture: Path | None = None) -> int:
     if "duplicated" in evaluate(_state()).receipt:
         failures.append("the duplication note must be absent when there are none")
 
+    # (d5b) ⛔ THE ARM A SURVIVING MUTANT DEMANDED. (d3) pins the duplication
+    #       NOTE, and reverting the receipt to a bare `check-runs {N}` left
+    #       every arm green -- so the ORIGINAL defect, two unlabelled counts
+    #       standing side by side, was not pinned by anything. The receipt must
+    #       name BOTH populations, and on a duplicate state the two must differ.
+    declared += 1
+    r_dup = evaluate(dup).receipt
+    if "record(s)" not in r_dup or "distinct name(s)" not in r_dup:
+        failures.append(
+            f"the receipt must label RECORDS and DISTINCT NAMES separately, or two "
+            f"correct numbers read as failures: {r_dup!r}"
+        )
+    declared += 1
+    if "3 record(s) over 2 distinct name(s)" not in r_dup:
+        failures.append(
+            f"the two populations must be counted independently (3 records, 2 names): {r_dup!r}"
+        )
+
     # (d6) ⛔⛔ EVERY PRINTED BYTE MUST SURVIVE A cp1252 CONSOLE, BECAUSE THE
     #      SEAT MOST LIKELY TO RUN THIS IS ON WINDOWS. Driven, not imagined:
     #      with PYTHONIOENCODING=cp1252 this tool raised UnicodeEncodeError on
