@@ -2441,6 +2441,122 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    // -----------------------------------------------------------------------
+    // W2b-6 -- the Character panel's field-scoped apply, through the store's
+    // panel-write report. The law is shared with the web app and with the
+    // reference (`workspace_interpreter/character_law.py`); before W2b-6 the
+    // engine could not call any of it.
+    // -----------------------------------------------------------------------
+
+    const CHARACTER: &str = crate::interpreter::character_host::CHARACTER_PANEL;
+
+    /// `(font_size, font_family, font_weight)` of every selected Text /
+    /// TextPath, in selection order. Read off the ELEMENTS, never through the
+    /// host, so the oracle cannot agree with the thing it is checking.
+    fn selected_text_faces(e: *mut JasEngine) -> Vec<(f64, String, String)> {
+        use crate::geometry::element::Element;
+        engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter()
+                .filter_map(|es| match doc.get_element(&es.path) {
+                    Some(Element::Text(t)) =>
+                        Some((t.font_size, t.font_family.clone(), t.font_weight.clone())),
+                    Some(Element::TextPath(tp)) =>
+                        Some((tp.font_size, tp.font_family.clone(), tp.font_weight.clone())),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    /// **W2b-6's oracle.** A font-size commit on a selected text element puts
+    /// that size on the element, writes what the shared host writes, and is
+    /// ONE undo step.
+    ///
+    /// ⭐ **The third assert is the node's whole point and the first two would
+    /// pass without it:** the commit must leave the element's OTHER character
+    /// attributes alone. That is the field-scoped apply law
+    /// (`transcripts/CHARACTER.md`), whose defect was a single edit resetting
+    /// sixteen attributes to the panel's defaults — and on the engine path it
+    /// was previously untestable, because the law was behind `feature = "web"`.
+    #[test]
+    fn character_font_size_commit_writes_only_the_size_on_the_selection() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before_faces = selected_text_faces(e);
+        assert!(!before_faces.is_empty(),
+                "the calibrated fixture has no selected text element, so this \
+                 oracle would be vacuous");
+        assert!(before_faces.iter().all(|f| f.0 != 48.0),
+                "the commit could not be seen: something is already 48pt");
+        let before = doc_json(e);
+
+        let pre = engine_of(e).with_model(|m| m.clone());
+        let (reply, err) = behave(
+            // ⚠️ THE WIDGET ID IS NOT THE FIELD KEY. The panel's controls are
+            // `ch_`-prefixed (`ch_font_size`) and BIND `panel.font_size`, so the
+            // store key the host sees is the unprefixed one. Driving the field
+            // key here returns `MissingTarget` — which is how this was found.
+            e, CHARACTER, r#"{"widget":"ch_font_size","event":"commit","value":"48"}"#);
+        assert_eq!(err, "", "{reply}");
+        let r = reply_json(&reply, &err);
+        assert_eq!(r["doc_changed"], true, "{reply}");
+
+        let after_faces = selected_text_faces(e);
+        assert_eq!(after_faces.len(), before_faces.len());
+        for (i, (a, b)) in after_faces.iter().zip(before_faces.iter()).enumerate() {
+            assert_eq!(a.0, 48.0, "element {i} did not take the committed size");
+            // FIELD SCOPING: family and weight are outside the FONT_SIZE group
+            // and must be exactly what the element had.
+            assert_eq!(a.1, b.1, "element {i}'s family was clobbered by a size edit");
+            assert_eq!(a.2, b.2, "element {i}'s weight was clobbered by a size edit");
+        }
+
+        // The engine wrote what the SHARED host writes, applied to a copy of
+        // the pre-commit model — the same equivalence W2b-5's oracle asserts.
+        let mut copy = pre.clone();
+        let mut cp = crate::interpreter::character_host::CharacterPanelState::from_store(
+            &engine_of(e).store.borrow());
+        cp.font_size = 48.0;
+        crate::interpreter::character_host::apply_to_selection(&mut copy, &cp, "font_size");
+        assert_eq!(doc_json(e),
+                   crate::geometry::test_json::document_to_test_json(copy.document()));
+
+        undo(e);
+        assert_eq!(doc_json(e), before, "ONE undo must restore the pre-commit document");
+    }
+
+    /// A `snap_*` flag owns no element attribute, so committing one must not
+    /// touch the document — not even an undo step that changes nothing.
+    ///
+    /// ⭐ **AND IT IS REFUSED ONE LAYER EARLIER THAN THE HOST, WHICH IS WORTH
+    /// KNOWING RATHER THAN ASSUMING:** the panel declares NO behavior on these
+    /// widgets, so the commit never reaches `panel_written` at all and the
+    /// engine answers `EmptyBehavior`. `character_host::is_field_key` returning
+    /// false for the seven flags is therefore belt-and-braces at this layer —
+    /// it is load-bearing for a caller that writes the store key directly. The
+    /// test asserts the refusal BY NAME, because "the document did not change"
+    /// alone would also pass if the widget silently did nothing.
+    #[test]
+    fn a_character_ui_only_flag_writes_nothing_to_the_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before = doc_json(e);
+        // `behave` returns (reply, err) and the refusal rides in the SECOND —
+        // asserting on the first passes an empty string to `contains` and reds
+        // with a blank message, which is how this line was got wrong once.
+        let (reply, err) = behave(
+            e, CHARACTER, r#"{"widget":"ch_snap_baseline","event":"commit","value":true}"#);
+        assert!(err.contains("EmptyBehavior"),
+                "expected the panel to declare no behavior on a UI-only flag: \
+                 reply={reply} err={err}");
+        assert_eq!(doc_json(e), before, "a UI-only flag reached the document");
+        // And the host refuses it too, for a caller that reaches the store key
+        // without going through a widget.
+        assert!(!crate::interpreter::character_host::is_field_key("snap_baseline"));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-5's oracle.** X = 40 moves the selection's box left edge to 40,
     /// writes what the shared host writes, shows 40, and is ONE undo step.
     #[test]
