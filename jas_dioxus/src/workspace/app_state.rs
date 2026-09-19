@@ -47,6 +47,17 @@ pub(crate) use crate::interpreter::character_host::{
     fmt_num, parse_style_name, text_decoration_flags, text_decoration_from_flags,
 };
 
+// W2b-7: the Paragraph apply law lives in the ungated `paragraph_host` so the
+// engine can call it. Re-exported here under its old spellings so not one web
+// call site moved — a half-lifted host is worse than none, it is a SECOND COPY
+// of the rules.
+pub(crate) use crate::interpreter::paragraph_host::{
+    ParagraphPanelState,
+    apply_align_radio,
+    ensure_paragraph_wrapper,
+    paragraph_align_attrs,
+};
+
 
 /// Build a YAML-driven canvas tool from the embedded workspace's
 /// `tools.<id>` spec. Shared by every migrated tool — each one is a
@@ -447,53 +458,6 @@ impl Default for GradientPanelState {
 /// `apply_paragraph_panel_to_selection` to push the attributes onto
 /// the paragraph wrapper tspan(s) inside the selected Text /
 /// TextPath element. Phase 4.
-#[derive(Debug, Clone)]
-pub(crate) struct ParagraphPanelState {
-    /// Alignment radio group — exactly one of these seven is true.
-    pub align_left: bool,
-    pub align_center: bool,
-    pub align_right: bool,
-    pub justify_left: bool,
-    pub justify_center: bool,
-    pub justify_right: bool,
-    pub justify_all: bool,
-    /// Single-attr-shared dropdowns; mutually exclusive at write time.
-    /// Empty string ⇒ no marker / clears the attribute.
-    pub bullets: String,
-    pub numbered_list: String,
-    pub left_indent: f64,
-    pub right_indent: f64,
-    /// Signed; negative ⇒ hanging indent.
-    pub first_line_indent: f64,
-    pub space_before: f64,
-    pub space_after: f64,
-    pub hyphenate: bool,
-    pub hanging_punctuation: bool,
-}
-
-impl Default for ParagraphPanelState {
-    fn default() -> Self {
-        Self {
-            align_left: true,
-            align_center: false,
-            align_right: false,
-            justify_left: false,
-            justify_center: false,
-            justify_right: false,
-            justify_all: false,
-            bullets: String::new(),
-            numbered_list: String::new(),
-            left_indent: 0.0,
-            right_indent: 0.0,
-            first_line_indent: 0.0,
-            space_before: 0.0,
-            space_after: 0.0,
-            hyphenate: false,
-            hanging_punctuation: false,
-        }
-    }
-}
-
 /// Align panel state — mirrors the four fields documented in
 /// `transcripts/ALIGN.md` §Panel state:
 /// - `align_to`: selection target mode.
@@ -1710,103 +1674,14 @@ impl AppState {
     /// `jas_list_style` attribute (mutual exclusion is enforced by
     /// the setter, so at most one is non-empty).
     pub(crate) fn apply_paragraph_panel_to_selection(&mut self) {
-        use crate::geometry::element::Element;
         let pp = self.paragraph_panel.clone();
-        let (text_align, text_align_last) = paragraph_align_attrs(&pp);
-        let text_anchor = paragraph_text_anchor(&pp);
-        let list_style = if !pp.bullets.is_empty() {
-            Some(pp.bullets.clone())
-        } else if !pp.numbered_list.is_empty() {
-            Some(pp.numbered_list.clone())
-        } else {
-            None
-        };
-        let opt_f = |v: f64| if v == 0.0 { None } else { Some(v) };
-        let opt_b = |v: bool| if !v { None } else { Some(true) };
-        let left_indent = opt_f(pp.left_indent);
-        let right_indent = opt_f(pp.right_indent);
-        let first_line_indent =
-            if pp.first_line_indent == 0.0 { None } else { Some(pp.first_line_indent) };
-        let space_before = opt_f(pp.space_before);
-        let space_after = opt_f(pp.space_after);
-        let hyph = opt_b(pp.hyphenate);
-        let hang_punct = opt_b(pp.hanging_punctuation);
-
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
-        let target_paths: Vec<Vec<usize>> = {
-            let doc = tab.model.document();
-            doc.selection
-                .iter()
-                .filter_map(|es| {
-                    let elem = doc.get_element(&es.path)?;
-                    match elem {
-                        Element::Text(_) | Element::TextPath(_) => Some(es.path.clone()),
-                        _ => None,
-                    }
-                })
-                .collect()
-        };
-        if target_paths.is_empty() { return; }
-        tab.model.begin_txn();
-        for path in target_paths {
-            let doc = tab.model.document().clone();
-            let new_elem = match doc.get_element(&path) {
-                Some(Element::Text(t)) => {
-                    let mut new_t = t.clone();
-                    let mut tspans = new_t.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.text_align = text_align.clone();
-                        w.text_align_last = text_align_last.clone();
-                        w.text_indent = first_line_indent;
-                        w.jas_left_indent = left_indent;
-                        w.jas_right_indent = right_indent;
-                        w.jas_space_before = space_before;
-                        w.jas_space_after = space_after;
-                        w.jas_hyphenate = hyph;
-                        w.jas_hanging_punctuation = hang_punct;
-                        w.jas_list_style = list_style.clone();
-                    }
-                    new_t.tspans = tspans;
-                    // Point text uses text-anchor on the <text> element
-                    // (not the wrapper tspan) — empty text_anchor means
-                    // omit per identity rule, but we store the panel
-                    // mapping on the panel-anchor field which Text
-                    // uses for `text-anchor`. Text element has no
-                    // text_anchor field today; defer to a Phase 5
-                    // rendering follow-up when text_anchor lands.
-                    let _ = text_anchor;
-                    Some(Element::Text(new_t))
-                }
-                Some(Element::TextPath(tp)) => {
-                    let mut new_tp = tp.clone();
-                    let mut tspans = new_tp.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.text_align = text_align.clone();
-                        w.text_align_last = text_align_last.clone();
-                        w.text_indent = first_line_indent;
-                        w.jas_left_indent = left_indent;
-                        w.jas_right_indent = right_indent;
-                        w.jas_space_before = space_before;
-                        w.jas_space_after = space_after;
-                        w.jas_hyphenate = hyph;
-                        w.jas_hanging_punctuation = hang_punct;
-                        w.jas_list_style = list_style.clone();
-                    }
-                    new_tp.tspans = tspans;
-                    Some(Element::TextPath(new_tp))
-                }
-                _ => None,
-            };
-            if let Some(elem) = new_elem {
-                let new_doc = doc.replace_element(&path, elem);
-                tab.model.set_document(new_doc);
-            }
-        }
-        tab.model.commit_txn();
+        // W2b-7: the WHOLE-PANEL route, and it is the only one this panel has
+        // — so unlike Character there is no web-only sibling route beside it.
+        // The host owns the document write; the panel-display reads
+        // (`sync_paragraph_panel_from_selection`) stay here, by the same rule
+        // that kept `character_panel_post_write` web-side.
+        crate::interpreter::paragraph_host::apply_to_selection(&mut tab.model, &pp);
     }
 
     /// Reset every Paragraph panel control to its default per
@@ -2320,145 +2195,6 @@ impl AppState {
 /// `apply_paragraph_panel_to_selection`,
 /// `apply_justification_dialog_to_selection`, and
 /// `apply_hyphenation_dialog_to_selection`.
-fn ensure_paragraph_wrapper(tspans: &mut Vec<crate::geometry::tspan::Tspan>) -> Vec<usize> {
-    use crate::geometry::tspan::Tspan;
-    // Repair: if any wrapper has non-empty content, demote it to a
-    // body tspan and prepend a fresh empty wrapper that inherits
-    // the paragraph attributes.
-    let bad: Vec<usize> = tspans.iter().enumerate()
-        .filter_map(|(i, t)|
-            if t.jas_role.as_deref() == Some("paragraph") && !t.content.is_empty() {
-                Some(i)
-            } else { None })
-        .collect();
-    for &i in bad.iter().rev() {
-        // Build a new wrapper with the paragraph attrs lifted off
-        // the corrupted tspan; the corrupted tspan keeps its
-        // content but loses its wrapper role and paragraph attrs.
-        let src = &tspans[i];
-        let new_wrapper = Tspan {
-            jas_role: Some("paragraph".into()),
-            text_align: src.text_align.clone(),
-            text_align_last: src.text_align_last.clone(),
-            text_indent: src.text_indent,
-            jas_left_indent: src.jas_left_indent,
-            jas_right_indent: src.jas_right_indent,
-            jas_space_before: src.jas_space_before,
-            jas_space_after: src.jas_space_after,
-            jas_hyphenate: src.jas_hyphenate,
-            jas_hanging_punctuation: src.jas_hanging_punctuation,
-            jas_list_style: src.jas_list_style.clone(),
-            jas_word_spacing_min: src.jas_word_spacing_min,
-            jas_word_spacing_desired: src.jas_word_spacing_desired,
-            jas_word_spacing_max: src.jas_word_spacing_max,
-            jas_letter_spacing_min: src.jas_letter_spacing_min,
-            jas_letter_spacing_desired: src.jas_letter_spacing_desired,
-            jas_letter_spacing_max: src.jas_letter_spacing_max,
-            jas_glyph_scaling_min: src.jas_glyph_scaling_min,
-            jas_glyph_scaling_desired: src.jas_glyph_scaling_desired,
-            jas_glyph_scaling_max: src.jas_glyph_scaling_max,
-            jas_auto_leading: src.jas_auto_leading,
-            jas_single_word_justify: src.jas_single_word_justify.clone(),
-            jas_hyphenate_min_word: src.jas_hyphenate_min_word,
-            jas_hyphenate_min_before: src.jas_hyphenate_min_before,
-            jas_hyphenate_min_after: src.jas_hyphenate_min_after,
-            jas_hyphenate_limit: src.jas_hyphenate_limit,
-            jas_hyphenate_zone: src.jas_hyphenate_zone,
-            jas_hyphenate_bias: src.jas_hyphenate_bias,
-            jas_hyphenate_capitalized: src.jas_hyphenate_capitalized,
-            ..Tspan::default_tspan()
-        };
-        // Demote the corrupted tspan: keep content + per-character
-        // overrides (font/style/etc.), drop paragraph role + attrs.
-        tspans[i].jas_role = None;
-        tspans[i].text_align = None;
-        tspans[i].text_align_last = None;
-        tspans[i].text_indent = None;
-        tspans[i].jas_left_indent = None;
-        tspans[i].jas_right_indent = None;
-        tspans[i].jas_space_before = None;
-        tspans[i].jas_space_after = None;
-        tspans[i].jas_hyphenate = None;
-        tspans[i].jas_hanging_punctuation = None;
-        tspans[i].jas_list_style = None;
-        tspans[i].jas_word_spacing_min = None;
-        tspans[i].jas_word_spacing_desired = None;
-        tspans[i].jas_word_spacing_max = None;
-        tspans[i].jas_letter_spacing_min = None;
-        tspans[i].jas_letter_spacing_desired = None;
-        tspans[i].jas_letter_spacing_max = None;
-        tspans[i].jas_glyph_scaling_min = None;
-        tspans[i].jas_glyph_scaling_desired = None;
-        tspans[i].jas_glyph_scaling_max = None;
-        tspans[i].jas_auto_leading = None;
-        tspans[i].jas_single_word_justify = None;
-        tspans[i].jas_hyphenate_min_word = None;
-        tspans[i].jas_hyphenate_min_before = None;
-        tspans[i].jas_hyphenate_min_after = None;
-        tspans[i].jas_hyphenate_limit = None;
-        tspans[i].jas_hyphenate_zone = None;
-        tspans[i].jas_hyphenate_bias = None;
-        tspans[i].jas_hyphenate_capitalized = None;
-        tspans.insert(i, new_wrapper);
-    }
-    // Now collect indices of (post-repair) wrappers.
-    let existing: Vec<usize> = tspans.iter().enumerate()
-        .filter_map(|(i, t)|
-            if t.jas_role.as_deref() == Some("paragraph") { Some(i) } else { None })
-        .collect();
-    if !existing.is_empty() { return existing; }
-    // No wrapper anywhere: prepend an empty one.
-    let wrapper = Tspan {
-        jas_role: Some("paragraph".into()),
-        ..Tspan::default_tspan()
-    };
-    tspans.insert(0, wrapper);
-    vec![0]
-}
-
-fn paragraph_align_attrs(pp: &ParagraphPanelState)
-    -> (Option<String>, Option<String>) {
-    if pp.align_center { (Some("center".into()), None) }
-    else if pp.align_right { (Some("right".into()), None) }
-    else if pp.justify_left { (Some("justify".into()), Some("left".into())) }
-    else if pp.justify_center { (Some("justify".into()), Some("center".into())) }
-    else if pp.justify_right { (Some("justify".into()), Some("right".into())) }
-    else if pp.justify_all { (Some("justify".into()), Some("justify".into())) }
-    else { (None, None) }  // ALIGN_LEFT_BUTTON (default) → omit
-}
-
-/// Map the alignment radio bools to `text-anchor` for point text /
-/// text-on-path per the §Alignment sub-mapping (point text). Only
-/// the three non-justify buttons map; `JUSTIFY_*` falls through to
-/// the default `start` (those buttons are grayed for point text).
-fn paragraph_text_anchor(pp: &ParagraphPanelState) -> Option<String> {
-    if pp.align_center { Some("middle".into()) }
-    else if pp.align_right { Some("end".into()) }
-    else { None }  // ALIGN_LEFT_BUTTON → start (default; omit)
-}
-
-/// Inverse of `paragraph_align_attrs`: set the appropriate radio bool
-/// from a `(text_align, text_align_last)` pair. Used by
-/// `sync_paragraph_panel_from_selection` when reading wrappers.
-fn apply_align_radio(pp: &mut ParagraphPanelState, ta: &str, tal: &str) {
-    pp.align_left = false;
-    pp.align_center = false;
-    pp.align_right = false;
-    pp.justify_left = false;
-    pp.justify_center = false;
-    pp.justify_right = false;
-    pp.justify_all = false;
-    match (ta, tal) {
-        ("center", _) => pp.align_center = true,
-        ("right", _) => pp.align_right = true,
-        ("justify", "left") => pp.justify_left = true,
-        ("justify", "center") => pp.justify_center = true,
-        ("justify", "right") => pp.justify_right = true,
-        ("justify", "justify") => pp.justify_all = true,
-        _ => pp.align_left = true,
-    }
-}
-
 /// Build a `Tspan` override template from the Character panel state
 /// that forces every panel-driven field onto the targeted tspans
 /// regardless of element-level defaults. Used by the per-range
