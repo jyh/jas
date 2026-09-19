@@ -195,9 +195,11 @@ The event bytes, the row token, the focus-loss rule and the list reader are
 `chrome` and `containers` entries are counted and not drawn (align has none); a
 `bind.icon` that a tick moves outside the plan's `icons` map shows its text
 face; whether WinUI's SVG reader honours `currentColor` is read, not measured,
-which is why the pane is light and the ink is substituted. From W2b-2: the
-other value kinds (`length_input`, `select`, `icon_select`, `combo_box`,
-`checkbox`, `icon`) are still `[type]` placeholders (W2b-9); a panel that was
+which is why the pane is light and the ink is substituted. From W2b-2, narrowed by
+W2b-9: `length_input` is now materialized (it is `number_input`'s control
+showing the core's formatted `display` string); the remaining value kinds
+(`select`, `icon_select`, `combo_box`, `checkbox`, `icon`) are still `[type]`
+placeholders (W2b-9); a panel that was
 switched away from stays ENROLLED, since the ABI has no close, so later ticks
 still evaluate it; whether a WinUI `TextBox` raises `KeyDown` for Enter, and
 whether a `CheckBox`'s `Click` arrives after its own toggle, are read, not

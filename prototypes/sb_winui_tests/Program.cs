@@ -421,6 +421,34 @@ static class Program
         Eq("W2b-3: an empty knob is refused",
             "(null)", ShowSplit(PanelWire.SplitCommitKnob("")));
 
+        // ─────────────────────────────────────────────────────────────
+        // W2b-9: which of the core's two strings a control shows.
+        //
+        // The plan hands a `length_input` its raw value ("12") AND a
+        // core-formatted display ("12 pt"). Every other port shows the
+        // formatted one, because each formats at a view layer INSIDE the
+        // interpreter; this shell is the first view that is outside one.
+        // ─────────────────────────────────────────────────────────────
+        Eq("W2b-9: the core's formatted display wins over the raw value",
+            "12 pt", PanelWire.DisplayText("12 pt", "12"));
+        // ⛔ THE ARM THAT MATTERS, AND THE ONE A `??` ON THE WRONG SIDE
+        //    BREAKS: an EMPTY display is a real answer. A length whose bind
+        //    resolves to anything but a number displays empty in every port,
+        //    while its raw value may still be a string.
+        Eq("W2b-9: an EMPTY display still wins -- presence, never truthiness",
+            "", PanelWire.DisplayText("", "not-a-number"));
+        Eq("W2b-9: no display sent, so the resolved value is shown",
+            "12", PanelWire.DisplayText(null, "12"));
+        Eq("W2b-9: neither sent is the empty string, never null",
+            "", PanelWire.DisplayText(null, null));
+        // The control: the two inputs are distinguishable, so the four cases
+        // above are about the RULE and not about two strings that happen to
+        // agree. Without this a reader cannot tell a working preference from
+        // a function that returns its second argument.
+        Check("W2b-9: CONTROL: display and value differ in the winning case",
+            PanelWire.DisplayText("12 pt", "12") != "12",
+            "the preference cannot be observed if the two agree");
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

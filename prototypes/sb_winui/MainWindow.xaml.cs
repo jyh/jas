@@ -1831,10 +1831,18 @@ public sealed partial class MainWindow : Window
     /// <summary>One plan leaf, as this shell reads it. Values and static strings are the core's.</summary>
     private sealed record PaneLeaf(
         string Path, string Type, string Id, double X, double Y, double W, double H,
-        Dictionary<string, string> Values, Dictionary<string, string> Static)
+        Dictionary<string, string> Values, Dictionary<string, string> Static,
+        Dictionary<string, string> Display)
     {
         internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
         internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
+
+        /// <summary>
+        /// W2b-9: the core's own formatted display string for a bind key, or
+        /// null when it sent none. NULL AND EMPTY ARE DIFFERENT ANSWERS here:
+        /// see `PanelWire.DisplayText`.
+        /// </summary>
+        internal string? Shown(string key) => Display.TryGetValue(key, out var v) ? v : null;
 
         /// <summary>A resolved `bind.icon` wins over the literal, as in every port.</summary>
         internal string? IconName => Value("bind.icon") ?? Literal("icon");
@@ -1888,7 +1896,8 @@ public sealed partial class MainWindow : Window
                 rect.GetProperty("w").GetInt64(),
                 rect.GetProperty("h").GetInt64(),
                 Strings(e.GetProperty("values")),
-                Strings(e.GetProperty("static"))));
+                Strings(e.GetProperty("static")),
+                Strings(e.GetProperty("display"))));
         }
         var icons = new Dictionary<string, (string Viewbox, string Svg)>();
         foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -1989,7 +1998,11 @@ public sealed partial class MainWindow : Window
                     el = BuildIconButton(leaf, icons);
                     break;
 
+                // A `length_input` is this control too: the person types TEXT
+                // and the core parses it by the widget's kind. What differs is
+                // the DISPLAY, and the core now sends that ready-made.
                 case "number_input":
+                case "length_input":
                     inputs++;
                     if (leaf.Id.Length == 0) { unaddressable++; }
                     el = BuildNumberInput(leaf);
@@ -2184,11 +2197,26 @@ public sealed partial class MainWindow : Window
                 break;
 
             case TextBox box:
-                // The value ALONE, as both active ports show it: the text is
-                // what a commit sends, and the core refuses "5 pt" for a number.
-                var value = leaf.Value("bind.value") ?? "";
+                // ⛔ THE COMMENT HERE USED TO READ "the value ALONE, as both
+                // active ports show it ... and the core refuses `5 pt` for a
+                // number". BOTH CLAUSES ARE FALSE FOR `length_input` and both
+                // are quoted rather than deleted, because they were TRUE of
+                // `number_input` -- the only kind this arm had when they were
+                // written -- and a reader who meets only the new rule will
+                // restore the tidier one.
+                //   the ports show   `length::format(..)` = "12 pt", not "12"
+                //   the core ACCEPTS a unit suffix on this kind, by the
+                //                    widget's own description
+                // So the shown string is the core's `display` when it sent one
+                // and the resolved value otherwise. NULL AND EMPTY DIFFER:
+                // `PanelWire.DisplayText` holds that rule and is driven on the
+                // desktop-less runner.
+                var value = PanelWire.DisplayText(leaf.Shown("bind.value"), leaf.Value("bind.value"));
                 typing = box.FocusState != FocusState.Unfocused
                          && !string.Equals(box.Text, box.Tag as string ?? "", StringComparison.Ordinal);
+                // The Tag is the SHOWN text, not the raw value: `CommitOnBlur`
+                // compares against it, so a Tag holding "12" under a box
+                // showing "12 pt" would commit on every focus loss.
                 box.Tag = value;
                 if (!typing) { box.Text = value; }
                 off = off || leaf.Id.Length == 0;
