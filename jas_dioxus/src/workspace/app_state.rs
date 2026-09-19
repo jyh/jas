@@ -1688,53 +1688,12 @@ impl AppState {
             return;
         }
 
-        let target_paths: Vec<Vec<usize>> = {
-            let doc = tab.model.document();
-            doc.selection
-                .iter()
-                .filter_map(|es| {
-                    let elem = doc.get_element(&es.path)?;
-                    match elem {
-                        Element::Text(_) | Element::TextPath(_) => Some(es.path.clone()),
-                        _ => None,
-                    }
-                })
-                .collect()
-        };
-        let mut acc_doc = tab.model.document().clone();
-        let mut changed = false;
-        for path in target_paths {
-            // PER ELEMENT: the group's attributes come from panel state and
-            // every other attribute is lifted from THIS element, so a
-            // multi-element selection keeps each element's own values.
-            let new_elem = match acc_doc.get_element(&path) {
-                Some(Element::Text(t)) => {
-                    let attrs = character_with_group(
-                        character_attrs_for!(t), &cp, group);
-                    let mut new_t = t.clone();
-                    set_character_attrs!(new_t, attrs);
-                    Some(Element::Text(new_t))
-                }
-                Some(Element::TextPath(tp)) => {
-                    let attrs = character_with_group(
-                        character_attrs_for!(tp), &cp, group);
-                    let mut new_tp = tp.clone();
-                    set_character_attrs!(new_tp, attrs);
-                    Some(Element::TextPath(new_tp))
-                }
-                _ => None,
-            };
-            if let Some(elem) = new_elem {
-                acc_doc = acc_doc.replace_element(&path, elem);
-                changed = true;
-            }
-        }
-        // Self-bracketing single write so a multi-element font change is one
-        // undo step (OP_LOG.md Increment 1). edit_document opens+commits its
-        // own txn when called standalone (the panel handler does not bracket).
-        if changed {
-            tab.model.edit_document(acc_doc);
-        }
+        // WHOLE-ELEMENT ROUTE: the one route the engine also has, so it is
+        // the shared host's (W2b-6). The two routes above are NOT shared —
+        // both read the active tool's edit session, which the engine has no
+        // instance of. Self-bracketing single write, so a multi-element font
+        // change is one undo step (OP_LOG.md Increment 1).
+        crate::interpreter::character_host::apply_to_selection(&mut tab.model, &cp, edited);
     }
 
     /// Push the typed paragraph panel state onto every paragraph

@@ -78,6 +78,7 @@ use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
+use crate::interpreter::character_host::{self, CHARACTER_PANEL};
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
@@ -220,15 +221,26 @@ impl EffectHost for EngineHost {
     fn panel_written(&mut self, panel_id: &str, key: &str, store: &mut StateStore,
                      model: Option<&mut Model>) {
         let Some(model) = model else { return };
-        if panel_id != PROPERTIES_PANEL || !properties_host::is_field_key(key) {
+        if panel_id == PROPERTIES_PANEL && properties_host::is_field_key(key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            let value = store.get_panel(panel_id, key).clone();
+            let constrain = store.get_panel(panel_id, "prop_constrain").as_bool().unwrap_or(false);
+            properties_host::apply_field(model, key, &value, constrain);
             return;
         }
-        if !model.in_txn() {
-            model.begin_txn();
+        // W2b-6: a write to a Character field applies the panel AS THE STORE
+        // HOLDS IT to the selection, because the edited field's SIBLINGS decide
+        // the write (the three baseline-shift fields share one attribute, the
+        // two case toggles share two). That is why this passes the whole store
+        // and not one value, unlike Properties directly above.
+        if panel_id == CHARACTER_PANEL && character_host::is_field_key(key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            character_host::apply_field(model, store, key);
         }
-        let value = store.get_panel(panel_id, key).clone();
-        let constrain = store.get_panel(panel_id, "prop_constrain").as_bool().unwrap_or(false);
-        properties_host::apply_field(model, key, &value, constrain);
     }
 }
 
