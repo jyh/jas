@@ -337,15 +337,39 @@ mod tests {
 
     #[test]
     fn point_text_alignment_falls_back_to_left() {
-        // Center alignment on point text would be confusing — the
-        // renderer collapses it (canvas point text uses
-        // text-anchor on the <text> element, set elsewhere).
+        // ⛔ POINT-TEXT ALIGNMENT IS UNIMPLEMENTED, AND THERE IS NO
+        // COMPENSATING CHANNEL. `PARAGRAPH.md` §Storage maps it to
+        // `text-anchor` on the `<text>` element (ALIGN_LEFT → start ·
+        // CENTER → middle · RIGHT → end, "paragraph wrapper not used for
+        // anchor"). That attribute exists NOWHERE — measured 2026-09-19,
+        // each count against a live control:
+        //
+        //   `text_anchor` in the crate   3 files, ALL PROSE (two doc
+        //                                comments and this one)
+        //                                control: `text_align` → 13 files
+        //   element model                0   (geometry/element.rs)
+        //   SVG codec                    0   control: `text-align` → 8
+        //                                    in that same file
+        //   painter / canvas             0
+        //   reference · Swift            0 files each
+        //
+        // ⚠️ THIS COMMENT PREVIOUSLY SAID the anchor was "set elsewhere"
+        // and that "the renderer's text_anchor channel takes over". Both
+        // were false, and a test that PINS a gap must not carry a
+        // qualifier that dissolves it — the next reader meets the comment
+        // and concludes the limitation is already handled. Corrected on
+        // the helm's ruling of 2026-09-19.
         let segs = build_segments_from_text(
             &[wrapper(0.0, 0.0, 0.0, 0.0, 0.0, Some("center")), body("x")],
             "x", false);
-        // Point-text mapping isn't fully wired yet — center still
-        // round-trips through TextAlign::Center, but the renderer's
-        // text_anchor channel takes over. Documented limitation.
+        // So this arm pins what the code DOES, not what the spec says:
+        // center round-trips through `TextAlign::Center` and the apply
+        // writes the wrapper's `text-align`, which is the AREA-text
+        // storage the spec explicitly says is not the anchor. The
+        // implementation is a PRICED NODE (helm, 2026-09-19) spanning the
+        // element model, the codec and all three implementations, with the
+        // three-row mapping above as its oracle and a codec round-trip arm,
+        // since that is where the gap would hide again.
         assert_eq!(segs[0].text_align, TextAlign::Center);
     }
 
