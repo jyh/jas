@@ -948,6 +948,46 @@ mod tests {
         assert_eq!(w.jas_list_style, None);
     }
 
+    /// **THE UNANIMITY LAW: A MIXED SELECTION LEAVES THE FIELD ALONE.**
+    /// `sync_from_wrappers` takes a value only where EVERY wrapper agrees —
+    /// that is how a panel shows "no single value", and it is what stops a
+    /// multi-paragraph selection from silently adopting whichever paragraph
+    /// happened to be first and then writing it over all of them.
+    ///
+    /// ⭐ Written because a mutant SURVIVED: making `agree` return the first
+    /// value instead of requiring unanimity passed every arm I had. Each arm
+    /// used a single wrapper, so none could tell the two apart.
+    #[test]
+    fn a_mixed_selection_leaves_the_disagreeing_field_alone() {
+        let mut a = wrapper();
+        a.jas_left_indent = Some(10.0);
+        a.text_align = Some("center".into());
+        let mut b = wrapper();
+        b.jas_left_indent = Some(99.0);       // disagrees
+        b.text_align = Some("center".into()); // agrees
+
+        let mut pp = ParagraphPanelState::default();
+        pp.left_indent = 7.0;   // a sentinel the sync must not overwrite
+        sync_from_wrappers(&mut pp, &[a.clone(), b.clone()]);
+
+        assert_eq!(pp.left_indent, 7.0,
+                   "a disagreeing field took a value ({}) instead of being left \
+                    alone — `agree` is not requiring unanimity", pp.left_indent);
+        // Anti-vacuity: the field they DO agree on was taken, so the sync ran
+        // and the assertion above is a reading rather than a dead call.
+        assert!(pp.align_center, "the agreed field was not taken, so the sync \
+                                  did not run and the first assert proves nothing");
+
+        // And with the disagreement removed, the same field IS taken — so the
+        // refusal above is about disagreement and not about that field.
+        let mut c = b.clone();
+        c.jas_left_indent = Some(10.0);
+        let mut pp2 = ParagraphPanelState::default();
+        pp2.left_indent = 7.0;
+        sync_from_wrappers(&mut pp2, &[a, c]);
+        assert_eq!(pp2.left_indent, 10.0, "an agreed indent was not taken");
+    }
+
     /// **THE TWO DERIVED PREDICATES, WHICH THE PANEL'S OWN YAML MAKES AN
     /// OBLIGATION:** *"Native apps overwrite on selection change; flask demo
     /// keeps the default."* Both default to TRUE, so an engine that does not
