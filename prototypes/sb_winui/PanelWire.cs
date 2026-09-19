@@ -128,6 +128,33 @@ internal static class PanelWire
     /// </summary>
     internal static string DisplayText(string? display, string? value) => display ?? value ?? "";
 
+    /// <summary>
+    /// W2b-9: which name a leaf's glyph is looked up under.
+    ///
+    /// ⛔ AN `icon` NODE NAMES ITS GLYPH UNDER `name`, NOT `icon`, AND NOTHING
+    /// ELSE DOES. This mirrors the PRODUCER exactly --
+    /// `panel_plan.rs::icon_names` carries the same special case:
+    ///
+    ///     push(&amp;st["icon"]);
+    ///     if entry["type"] == "icon" { push(&amp;st["name"]); }
+    ///     push(&amp;entry["values"]["bind.icon"]);
+    ///
+    /// which is how the plan's `icons` map acquires the definition at all. A
+    /// shell that looked only under `icon` would resolve EVERY bare `icon` to
+    /// null: it draws an empty face, counts an `icon-text`, and never asks for
+    /// the SVG -- a complete, silent failure that passes every gate, because
+    /// nothing downstream knows a glyph was expected.
+    ///
+    /// ⛔ AND THE `name` BRANCH IS TYPE-GATED DELIBERATELY. `name` is a
+    /// STATIC_KEYS display string that other kinds also carry, so reading it
+    /// unconditionally would make some other widget's label into an icon
+    /// lookup. The producer gates it on the type; so does this.
+    ///
+    /// A resolved `bind.icon` wins over either literal, as in every port.
+    /// </summary>
+    internal static string? IconName(string? boundIcon, string? literalIcon, string? literalName, string type)
+        => boundIcon ?? literalIcon ?? (type == "icon" ? literalName : null);
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
