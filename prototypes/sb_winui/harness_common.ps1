@@ -918,6 +918,94 @@ function Get-SbWaitPatterns([string[]]$Patterns, [string]$Scene) {
     return @($all | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 }
 
+# ⛔⛔ THE COMPLETION ROW IS PRODUCED BY A KNOB, AND THE TABLE IS KEYED BY SCENE.
+# `retained` IS ONE SCENE WITH THREE CONFIGURATIONS AND ONLY ONE OF THEM CAN
+# WRITE THE ROW THE TABLE WAITS FOR.
+#
+#   SB_RESIZE=<list>      the walk runs          -> `A'`, the table's own row
+#   SB_SQUEEZE=1          no walk, no hand       -> the SQUEEZE receipt
+#   SB_SURFACE_PROBE=WxH  no walk, a REAL hand   -> `HAND CLOSED`
+#
+# `A'` is written only from `OnSurfaceSettled`, which labels a stop only when
+# `_resizeStep` is non-zero, and `_resizeSteps` is populated ONLY by the
+# `SB_RESIZE` parser (`MainWindow.xaml.cs`). Both `o6` runs deliberately carry no
+# `SB_RESIZE` -- `sitting.ps1` says so in its own comment, because a driven resize
+# would move the surface inside O6.4a's bracket -- so for those two runs the
+# table was asking for a row the run is CONSTRUCTED not to produce. Measured
+# 2026-09-19: both burned the full 150 s and reported `FAIL: NOT RUN: timed out
+# waiting for the A' hash row` on every sitting since the scene was born.
+#
+# ⛔ THE CAUSE IS NOT THE SQUEEZE BEING REFUSED. `SQUEEZE delivered NONE` is true
+# and is O6.1's business; `A'` would be absent even if the squeeze landed in full.
+# A repair aimed at the window manager or at `SurfacePolicy` would fix nothing.
+#
+# ⭐ IT IS THE `pointer` DEFECT AGAIN (see that spec's comment, 2026-09-06) AND
+# THE SAME REPAIR IS WRONG HERE. Those four patterns are mutually exclusive by
+# construction; these three are ORDERED. `Canvas.ApplyPointerReport` hashes
+# `A-MUT` and posts the scene's completion BEFORE the resize walk starts, so
+# putting `HAND CLOSED` in the table would end the DEFAULT `retained` run early
+# and skip the entire walk -- the exact hazard that comment names about a bare
+# `POINTER ` pattern. So the row is chosen from the knobs, and `-Hand` is asked
+# FIRST because a hand always closes later than a scene-start receipt: waiting
+# too long is bounded by `Timeout`, and waiting for the unproducible is not.
+#
+# ⚠️ THE HAND PATTERNS ARE SPELLED HERE AND IN `$sceneSpec['pointer']`, WHICH IS
+# TWO PLACES FOR ONE FACT. Hoisting them into a shared variable would edit a
+# working table for a gain this repair does not need, so instead
+# `harness_selftest.ps1` drives ONE fixture row against BOTH lists: if the two
+# spellings ever diverge, an arm reds and names which one moved.
+#
+# Returns a COPY. A caller may assign to `.Done`, and `sitting.ps1` runs every
+# scene of a sitting in ONE process, so handing back the table's own hashtable
+# would let one run rewrite the next run's completion row.
+function Resolve-SbSceneSpec {
+    param(
+        [string]$Scene,
+        [string]$Resize  = '',
+        [string]$Squeeze = '',
+        [string]$Probe   = '',
+        [bool]$Hand      = $false
+    )
+    $base = $sceneSpec[$Scene]
+    if ($null -eq $base) { return $null }
+
+    $spec = @{}
+    foreach ($key in $base.Keys) { $spec[$key] = $base[$key] }
+
+    # Every other scene's row is written by the scene itself, whatever the knobs
+    # say. The knobs are read only where the table's row is knob-produced.
+    if ($Scene -ne 'retained') { return $spec }
+
+    # The walk runs: `A'` is coming and it is LAST. Unchanged, and this is the
+    # only configuration in which the table's own row is reachable at all.
+    if (-not [string]::IsNullOrWhiteSpace($Resize)) { return $spec }
+
+    if ($Hand) {
+        $spec.Done  = @('HAND CLOSED scene=', 'NOT RUN: hand refused')
+        $spec.Label = "the HAND CLOSED row or its named refusal (this run drives no SB_RESIZE walk, so no A' row is coming)"
+        return $spec
+    }
+
+    if ($Squeeze -eq '1') {
+        # ⭐ THE RECEIPT IS WRITTEN IN EVERY OUTCOME -- delivered, `NONE` from the
+        # bounded deadline, or `THREW` -- which is what makes it a terminal marker
+        # rather than a success marker. `ReportSqueezeDelivered`'s own comment
+        # already said it is "the LAST row of the run" on an o6 squeeze run; it
+        # was filed under the window-title question, one file from the table that
+        # needed it.
+        # ⛔ AND THE PRESENTER REFUSAL IS THE OTHER TERMINAL: `MaybeSqueeze`
+        # returns before arming anything, so no receipt can ever follow it.
+        $spec.Done  = @((Get-SbRowPattern 'SQUEEZE delivered' ' '),
+                        (Get-SbRowPattern 'SB_SQUEEZE needs an OverlappedPresenter'))
+        $spec.Label = 'the SQUEEZE delivered receipt, or the presenter refusal after which no receipt can come'
+        return $spec
+    }
+
+    # No knob we know how to read: keep the table's answer rather than invent
+    # one. An empty `Done` would match every row, which is worse than waiting.
+    return $spec
+}
+
 # ⛔⛔ THE COMPLETION WAIT AND THE COMPLETION VERDICT ARE TWO QUESTIONS, AND ONE
 # MECHANISM WAS ANSWERING BOTH. That conflation IS the defect.
 #

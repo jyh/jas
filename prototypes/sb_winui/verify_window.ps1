@@ -191,7 +191,16 @@ if (-not $sceneSpec.ContainsKey($Scene)) {
     Write-Output "VERIFY: FAIL"
     exit 1
 }
-$spec = $sceneSpec[$Scene]
+# ⛔ THE ROW IS CHOSEN FROM THE KNOBS, NOT FROM THE SCENE NAME ALONE. `retained`
+# is one scene with three configurations and only the `SB_RESIZE` one can write
+# the `A'` row the table names; both `o6` runs carry no walk, so before this
+# resolver they waited out the full 150 s for a row they are CONSTRUCTED not to
+# produce. `Resolve-SbSceneSpec`'s own header carries the measurement.
+$spec = Resolve-SbSceneSpec -Scene $Scene `
+                            -Resize $env:SB_RESIZE `
+                            -Squeeze $env:SB_SQUEEZE `
+                            -Probe $env:SB_SURFACE_PROBE `
+                            -Hand ([bool]$Hand)
 
 # ⛔ AND THE RESOLVED SCENE GOES BACK INTO THE ENVIRONMENT, or this harness waits
 # for one experiment while the app runs another. `-Scene` READ SB_SCENE above and

@@ -1711,16 +1711,27 @@ Test-Case 'o6: the probe run does NOT end on the probe''s own row -- the hand ha
 Test-Case 'o6: nor on the probe''s malformed refusal, which is written before the hand' {
     Test-O6Match $o6ProbeBad (Resolve-SbSceneSpec -Scene 'retained' -Probe 'zz' -Hand $true).Done
 } 'False'
-# ⭐ THE STRUCTURAL ARM, and it states the law rather than a case: the `A'` row may
-# be waited for ONLY when `SB_RESIZE` is set, because that is the only knob that
-# can cause it. Driven over all four configurations at once, so a resolver that
-# got one right by accident cannot pass.
-Test-Case 'o6: A'' is waited for if and ONLY if SB_RESIZE is set' {
+# ⭐ THE STRUCTURAL ARM, and it states the law rather than a case: among the three
+# configurations `sitting.ps1` ACTUALLY RUNS, the `A'` row is waited for only in
+# the `SB_RESIZE` one, because that is the only knob that can cause it. Driven
+# over all three at once, so a resolver that got one right by accident cannot pass.
+#
+# ⛔ THE FOURTH CONFIGURATION IS EXCLUDED HERE, AND THE EXCLUSION IS DECLARED
+# RATHER THAN QUIET, BECAUSE A SILENT SKIP READS AS COVERAGE. A `retained` run
+# with NO knob at all (`verify_window.ps1 -Scene retained` by hand) writes no
+# completion row of any kind -- `retained` has no row of its own; every one of
+# its rows is knob-produced, and the table's entry is really the `SB_RESIZE`
+# configuration's row serving as the default. The resolver deliberately leaves
+# that case as it has always behaved rather than inventing an answer for a
+# configuration nothing runs, so it is pinned by its OWN arm below instead of
+# being folded in here. Writing the law as a flat "if and only if" over all four
+# would have stated it over a population that includes a case I chose not to
+# change -- which is how a floor ends up phrased over the wrong population.
+Test-Case 'o6: among the configurations that run, A'' is waited for ONLY under SB_RESIZE' {
     $rows = @(
         @{ Resize = '1000x600,original'; Squeeze = '';  Probe = '';         Hand = $true  },
         @{ Resize = '';                  Squeeze = '1'; Probe = '';         Hand = $false },
-        @{ Resize = '';                  Squeeze = '';  Probe = '1000x600'; Hand = $true  },
-        @{ Resize = '';                  Squeeze = '';  Probe = '';         Hand = $false }
+        @{ Resize = '';                  Squeeze = '';  Probe = '1000x600'; Hand = $true  }
     )
     (@($rows | ForEach-Object {
         $d = (Resolve-SbSceneSpec -Scene 'retained' -Resize $_.Resize -Squeeze $_.Squeeze `
@@ -1729,8 +1740,11 @@ Test-Case 'o6: A'' is waited for if and ONLY if SB_RESIZE is set' {
         if ((Test-O6Match $o6AprimeRow $d) -eq $wants) { 'ok' } else { 'MISMATCH' }
     }) -join ' ')
 } 'ok ok ok ok'
-# A run with no knob at all keeps the table's own answer: the fallback is the
-# scene's row, never an empty list (which would match every row).
+# THE FOURTH CONFIGURATION, PINNED DELIBERATELY: a run with no knob at all keeps
+# the table's own answer. It is the one case where the resolver still names a row
+# that run cannot write -- unchanged from today's behaviour on purpose, because an
+# empty `Done` would match EVERY row, which is worse than waiting. Nothing in
+# `sitting.ps1` produces this configuration; it exists only for a hand invocation.
 Test-Case 'o6: an unknobbed retained run falls back to the table, and never to empty' {
     $d = @((Resolve-SbSceneSpec -Scene 'retained').Done)
     "$($d.Count) $([bool]@($d | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count)"
