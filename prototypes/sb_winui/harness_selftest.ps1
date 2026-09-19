@@ -1733,13 +1733,22 @@ Test-Case 'o6: among the configurations that run, A'' is waited for ONLY under S
         @{ Resize = '';                  Squeeze = '1'; Probe = '';         Hand = $false },
         @{ Resize = '';                  Squeeze = '';  Probe = '1000x600'; Hand = $true  }
     )
-    (@($rows | ForEach-Object {
+    # ⛔ THE VERDICT CARRIES ITS OWN DENOMINATOR, because a bare mismatch count
+    # is 0 for a run that examined NOTHING, and a joined 'ok ok ok' silently
+    # changes arity the moment a row is added or removed -- which is exactly how
+    # this arm first went red: I narrowed the list from four configurations to
+    # three and left the expected string at four.
+    # ⭐ The `3` below is PINNED ON PURPOSE. It is the anti-vacuity floor, not a
+    # value that should track the data: adding a fourth configuration SHOULD red
+    # this arm and make someone state what that configuration's answer is.
+    $results = @($rows | ForEach-Object {
         $d = (Resolve-SbSceneSpec -Scene 'retained' -Resize $_.Resize -Squeeze $_.Squeeze `
                                   -Probe $_.Probe -Hand $_.Hand).Done
         $wants = -not [string]::IsNullOrWhiteSpace($_.Resize)
         if ((Test-O6Match $o6AprimeRow $d) -eq $wants) { 'ok' } else { 'MISMATCH' }
-    }) -join ' ')
-} 'ok ok ok ok'
+    })
+    "ran $($results.Count), mismatches $(@($results | Where-Object { $_ -ne 'ok' }).Count)"
+} 'ran 3, mismatches 0'
 # THE FOURTH CONFIGURATION, PINNED DELIBERATELY: a run with no knob at all keeps
 # the table's own answer. It is the one case where the resolver still names a row
 # that run cannot write -- unchanged from today's behaviour on purpose, because an
