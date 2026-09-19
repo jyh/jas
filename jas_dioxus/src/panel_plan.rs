@@ -34,7 +34,8 @@
 //!  "icons_missing": ["<name>", ...]}
 //! entry = {"path": [...], "rect": {x,y,w,h}, "type": "...", "id": "...",
 //!          "values": {"<bind_values key>": "<resolved value>", ...},
-//!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...}}
+//!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
+//!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...}}
 //! ```
 //!
 //! # What a person reads (W2-5a)
@@ -85,6 +86,27 @@ fn path_of(v: &Value) -> Vec<i64> {
 pub const STATIC_KEYS: [&str; 8] =
     ["content", "label", "summary", "icon", "name", "unit", "suffix", "placeholder"];
 
+/// The node keys whose LITERAL bool a shell may act on (W2b-9 prerequisite).
+///
+/// ⛔ AN ALLOW-LIST, NEVER "every bool key", for the same reason [`STATIC_KEYS`]
+/// is one — and here the reason is MEASURED rather than argued by analogy.
+/// Across the compiled workspace there are **114** distinct boolean keys:
+/// `default` (218) and `global` (216) on state declarations, every `dialog.*`,
+/// every `boolean_*` / `align_*` / `distribute_*` ACTION name, and DERIVED
+/// FACTS (`can_undo`, `has_selection`, …). A shell handed those would be
+/// holding state, actions and facts it has no business interpreting.
+///
+/// Measured on the population this module actually walks — the panel CONTENT
+/// trees, which do not contain the `state:` block — **583 typed nodes carry
+/// exactly TWO distinct boolean attributes**: `nullable` (5, all on
+/// `length_input`) and `hollow` (2, on `color_swatch`).
+///
+/// ⚠️ `nullable` occurs **37** times in the compiled workspace and only those
+/// 5 are widget attributes; the other 32 are `state:`-schema declarations this
+/// module never sees. A list built from the raw count would be 7× over and
+/// would cross schema into the shell.
+pub const FLAG_KEYS: [&str; 2] = ["hollow", "nullable"];
+
 /// A node's allow-listed LITERAL display strings, plus the allow-listed keys it
 /// carries as a TEMPLATE that the plan does not resolve.
 ///
@@ -104,6 +126,18 @@ fn static_of(node: &Value) -> (Map<String, Value>, Vec<&'static str>) {
         }
     }
     (out, withheld)
+}
+
+/// A node's allow-listed LITERAL booleans. The mirror of [`static_of`], and
+/// simpler than it: a bool cannot be a `{{`-template, so nothing is withheld.
+fn flags_of(node: &Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    for key in FLAG_KEYS {
+        if let Some(b) = node.get(key).and_then(Value::as_bool) {
+            out.insert(key.to_string(), Value::Bool(b));
+        }
+    }
+    out
 }
 
 /// The icon names an entry displays: its static `icon`, an `icon` node's
@@ -141,6 +175,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
         "id": id,
         "values": values,
         "static": st,
+        "flags": flags_of(&item.node),
     })
 }
 
@@ -1149,6 +1184,11 @@ mod tests {
         let ws = Workspace::load().expect("workspace");
         let defs = ws.icons().as_object().expect("icons map");
         let (mut carried, mut icons_seen, mut missing_seen) = (0usize, 0usize, 0usize);
+        // ⛔ ITS OWN counter, NOT `carried`: the existing floor is satisfied by the
+        // STATIC keys alone, so folding flags into it would give the new
+        // assertions no anti-vacuity floor at all — they could carry ZERO and
+        // the arm would still read green.
+        let mut flags_carried = 0usize;
         for pid in panel_ids(&ws) {
             let spec = ws.panel(&pid).unwrap();
             for (sname, ctx) in scopes() {
@@ -1174,6 +1214,26 @@ mod tests {
                                     if !s.contains("{{") {
                                         assert!(st.contains_key(k), "{at}: literal {k} dropped from {e}");
                                     }
+                                }
+                            }
+                            // ⛔ THE SAME THREE ASSERTIONS FOR `flags`, because a
+                            // second channel to the shell is a second hole unless
+                            // it is guarded exactly as the first one is: nothing
+                            // crosses that is not allow-listed, every value is the
+                            // node's OWN, and nothing allow-listed is dropped.
+                            let fl = e["flags"].as_object()
+                                .unwrap_or_else(|| panic!("{at}: no flags map on {e}"));
+                            for (k, v) in fl {
+                                assert!(super::FLAG_KEYS.contains(&k.as_str()),
+                                        "{at}: flag {k} crossed");
+                                assert_eq!(Some(v), node.get(k),
+                                           "{at}: flag {k} is not the node's own");
+                                flags_carried += 1;
+                            }
+                            for k in super::FLAG_KEYS {
+                                if node.get(k).and_then(Value::as_bool).is_some() {
+                                    assert!(fl.contains_key(k),
+                                            "{at}: literal flag {k} dropped from {e}");
                                 }
                             }
                             if let Some(n) = st.get("icon").and_then(Value::as_str) {
@@ -1212,6 +1272,10 @@ mod tests {
         }
         assert!(carried > 0 && icons_seen > 0 && missing_seen > 0,
             "vacuous: carried={carried} icons={icons_seen} missing={missing_seen}");
+        assert!(flags_carried > 0,
+            "vacuous: not one FLAG_KEYS bool was carried, so the flag assertions \
+             above never ran — the panels walked here have no `nullable`/`hollow` \
+             node, or `flags_of` stopped emitting");
     }
 
     /// W2b-2: the list is sorted by content id, whatever order the map
