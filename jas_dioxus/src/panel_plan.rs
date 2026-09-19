@@ -1492,6 +1492,32 @@ mod tests {
         );
     }
 
+    /// A `length_input` that declares NO `unit` falls back to pt, and the
+    /// fallback must be the WEB PORT's (`renderer.rs:6110`, `unwrap_or("pt")`)
+    /// — a different default here would put the two ports one conversion
+    /// apart on a shape neither of them refuses.
+    ///
+    /// ⭐ THIS ARM EXISTS BECAUSE A MUTANT SURVIVED. Changing the fallback to
+    /// `in` passed every other arm: all 12 shipped `length_input`s declare
+    /// `unit: pt` and both synthetic arms declare one too, so nothing reached
+    /// the `unwrap_or` at all. A default is load-bearing exactly where no
+    /// input states it.
+    #[test]
+    fn a_length_input_with_no_unit_falls_back_to_pt_as_the_web_port_does() {
+        use crate::interpreter::length;
+
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "length_input", "id": "bare", "bind": {"value": "panel.v"}},
+        ]}});
+        let ctx = json!({"panel": {"v": 36.0}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let got = plan["leaves"][0]["display"]["bind.value"].as_str().unwrap_or("<MISSING>");
+        assert_eq!(got, length::format(Some(36.0), "pt", 2), "{plan}");
+        // The control: the node really does carry no unit, so the assertion
+        // above exercised the fallback rather than a declared value.
+        assert_eq!(plan["leaves"][0]["static"].get("unit"), None, "{plan}");
+    }
+
     /// An unresolved length is EMPTY, never `0 pt`. The engine's own slice
     /// hands every length widget this case (no selection), so it is the one
     /// a person sees most often.
