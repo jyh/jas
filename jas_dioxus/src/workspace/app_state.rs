@@ -23,6 +23,31 @@ pub(crate) use crate::interpreter::stroke_host::StrokePanelState;
 #[cfg(test)]
 use crate::interpreter::stroke_host::StrokeEditGroup;
 
+// W2b-6: the Character panel's field-scoped apply law now lives in an
+// UNGATED host so the engine can call it (`interpreter/character_host.rs`).
+// It MOVED; it was not copied. These re-exports keep every existing call
+// site in this module and in `renderer.rs` spelled exactly as it was, which
+// is what makes the move reviewable as a move.
+// Only the names this module and its neighbours actually spell: the six the
+// compiler reported as unused (the three field enums, `case_flags`,
+// `baseline_shift_state`, `kerning_attr`) are internal to the law and are
+// imported from the host directly by anything that needs them later.
+pub(crate) use crate::interpreter::character_host::{
+    CharacterAttrs,
+    CharacterEditGroup,
+    CharacterPanelState,
+    character_attrs_of,
+    character_with_group,
+    cp_with_element_siblings,
+};
+pub(crate) use crate::interpreter::character_host::{
+    character_attrs_for, set_character_attrs,
+};
+pub(crate) use crate::interpreter::character_host::{
+    fmt_num, parse_style_name, text_decoration_flags, text_decoration_from_flags,
+};
+
+
 /// Build a YAML-driven canvas tool from the embedded workspace's
 /// `tools.<id>` spec. Shared by every migrated tool — each one is a
 /// one-line `yaml_tool("rect")`-style construction in `with_model`.
@@ -401,544 +426,20 @@ impl Default for GradientPanelState {
     }
 }
 
-/// Character panel state fields — mirror the panel-local state
-/// declared in `workspace/panels/character.yaml`. Written to by the
-/// renderer when the user edits a Character panel control; read by
-/// `apply_character_panel_to_selection` to push the attributes onto
-/// the selected Text / TextPath element via
-/// `Controller::set_character_attribute`.
-#[derive(Debug, Clone)]
-pub(crate) struct CharacterPanelState {
-    pub font_family: String,
-    pub style_name: String,
-    pub font_size: f64,
-    pub leading: f64,
-    /// Kerning — accepts named modes `Auto` / `Optical` / `Metrics`
-    /// (stored verbatim, pass through to the element attribute), or a
-    /// numeric string in 1/1000 em (e.g. `"25"`). Empty / `"0"` /
-    /// `"Auto"` all round-trip to an empty element attribute, matching
-    /// the identity-omission rule.
-    pub kerning: String,
-    pub tracking: f64,
-    pub vertical_scale: f64,
-    pub horizontal_scale: f64,
-    pub baseline_shift: f64,
-    pub character_rotation: f64,
-    pub all_caps: bool,
-    pub small_caps: bool,
-    pub superscript: bool,
-    pub subscript: bool,
-    pub underline: bool,
-    pub strikethrough: bool,
-    pub language: String,
-    pub anti_aliasing: String,
-    pub snap_to_glyph_visible: bool,
-    pub snap_baseline: bool,
-    pub snap_x_height: bool,
-    pub snap_glyph_bounds: bool,
-    pub snap_proximity_guides: bool,
-    pub snap_angular_guides: bool,
-    pub snap_anchor_point: bool,
-}
 
-/// Which of the CASE group's two toggles the user committed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CaseField {
-    AllCaps,
-    SmallCaps,
-}
 
-/// Which of the DECORATION group's two toggles the user committed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DecorationField {
-    Underline,
-    Strikethrough,
-}
 
-/// Which of the BASELINE_SHIFT group's three fields the user committed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BaselineField {
-    /// The numeric Baseline Shift input.
-    Number,
-    Superscript,
-    Subscript,
-}
 
-/// The character attributes ONE Character-panel field owns.
-///
-/// A panel edit must write only the group it touched and preserve every
-/// other attribute from the element (see
-/// `AppState::apply_character_panel_to_selection`). Fields that move
-/// together stay in one group, and only where that is forced:
-///
-/// - `Style` is one dropdown naming a `font_weight` + `font_style` PAIR;
-///   there is no control that moves the weight without the style.
-/// - `Case` is the All Caps / Small Caps pair, whose mutual exclusion can
-///   only be expressed by writing `text_transform` and `font_variant`
-///   together — turning All Caps ON must clear a small-caps variant.
-/// - `Decoration` is the Underline / Strikethrough pair feeding ONE CSS
-///   token list, which cannot be written a token at a time.
-///
-/// The three groups fed by MORE THAN ONE panel field carry which field the
-/// user committed, because that is what decides where the OTHER fields of
-/// the group are read from: the committed one comes from panel state, its
-/// siblings from THE ELEMENT (see `character_with_group`). The remaining
-/// eleven groups have one field each, so there is nothing to tag.
-///
-/// The two glyph scales are deliberately SEPARATE groups (as the Stroke
-/// law's two arrowhead scales are), and `FontSize` owns only the size —
-/// never the leading, because Auto leading is an ABSENT `line-height` and
-/// preserving it keeps Auto alive across a size change.
-///
-/// Mirrors the reference `CHARACTER_EDIT_GROUPS` + `MULTI_FIELD_GROUPS`
-/// (`workspace_interpreter/character_law.py`), which states the table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CharacterEditGroup {
-    FontFamily,
-    Style,
-    FontSize,
-    Leading,
-    Kerning,
-    Tracking,
-    VerticalScale,
-    HorizontalScale,
-    BaselineShift(BaselineField),
-    Rotation,
-    Case(CaseField),
-    Decoration(DecorationField),
-    Language,
-    AaMode,
-}
 
-impl CharacterEditGroup {
-    /// Map a Character-panel field key to the group it owns. `None` means
-    /// the key owns no element attribute, so editing it writes nothing to
-    /// the selection.
-    ///
-    /// Unlike the Stroke panel there is no flat-global spelling to
-    /// normalize: every Character control binds `panel.<field>` only
-    /// (`workspace/panels/character.yaml`).
-    pub(crate) fn from_field(key: &str) -> Option<Self> {
-        Some(match key {
-            "font_family" => Self::FontFamily,
-            "style_name" => Self::Style,
-            "font_size" => Self::FontSize,
-            "leading" => Self::Leading,
-            "kerning" => Self::Kerning,
-            "tracking" => Self::Tracking,
-            "vertical_scale" => Self::VerticalScale,
-            "horizontal_scale" => Self::HorizontalScale,
-            // Three fields, one attribute: the two the user did NOT commit
-            // are read from the element, and the committed one wins any
-            // conflict with them.
-            "baseline_shift" => Self::BaselineShift(BaselineField::Number),
-            "superscript" => Self::BaselineShift(BaselineField::Superscript),
-            "subscript" => Self::BaselineShift(BaselineField::Subscript),
-            "character_rotation" => Self::Rotation,
-            "all_caps" => Self::Case(CaseField::AllCaps),
-            "small_caps" => Self::Case(CaseField::SmallCaps),
-            "underline" => Self::Decoration(DecorationField::Underline),
-            "strikethrough" => Self::Decoration(DecorationField::Strikethrough),
-            "language" => Self::Language,
-            "anti_aliasing" => Self::AaMode,
-            // The seven snap_* flags and the section-visibility flags are
-            // UI-only state: toggling one must not push an undo step that
-            // changes nothing.
-            _ => return None,
-        })
-    }
 
-    /// Whether this group has ANY tspan-level representation.
-    ///
-    /// `Tspan` carries no glyph scales and no kerning mode, so a per-range
-    /// write of those three groups can express nothing at all. The apply
-    /// returns before touching the document rather than pushing an undo step
-    /// that changes nothing — the same clause the `snap_*` flags get. (A
-    /// tspan-level kerning / scale is banked in CHARACTER.md's follow-ups.)
-    fn writes_tspan_field(self) -> bool {
-        use CharacterEditGroup as G;
-        !matches!(self, G::Kerning | G::VerticalScale | G::HorizontalScale)
-    }
 
-    /// The tspan override fields this group writes, applied to a template
-    /// tspan built by `build_panel_full_overrides`. Fields outside the
-    /// group are cleared to `None` so `merge_tspan_overrides` leaves the
-    /// range's existing values alone.
-    ///
-    /// Groups with no tspan-level field (`writes_tspan_field`) yield an
-    /// override template with nothing set — a range write for those is not
-    /// expressible on a Tspan, and stamping the panel's other attributes
-    /// instead is exactly what this law forbids.
-    fn restrict_tspan_overrides(self, t: &mut crate::geometry::tspan::Tspan) {
-        use CharacterEditGroup as G;
-        let keep_family = matches!(self, G::FontFamily);
-        let keep_style = matches!(self, G::Style);
-        let keep_size = matches!(self, G::FontSize);
-        let keep_leading = matches!(self, G::Leading);
-        let keep_tracking = matches!(self, G::Tracking);
-        let keep_baseline = matches!(self, G::BaselineShift(_));
-        let keep_rotation = matches!(self, G::Rotation);
-        let keep_case = matches!(self, G::Case(_));
-        let keep_decoration = matches!(self, G::Decoration(_));
-        let keep_language = matches!(self, G::Language);
-        let keep_aa = matches!(self, G::AaMode);
-        if !keep_family { t.font_family = None; }
-        if !keep_style { t.font_weight = None; t.font_style = None; }
-        if !keep_size { t.font_size = None; }
-        if !keep_leading { t.line_height = None; }
-        if !keep_tracking { t.letter_spacing = None; }
-        if !keep_baseline { t.baseline_shift = None; }
-        if !keep_rotation { t.rotate = None; }
-        if !keep_case { t.text_transform = None; t.font_variant = None; }
-        if !keep_decoration { t.text_decoration = None; }
-        if !keep_language { t.xml_lang = None; }
-        if !keep_aa { t.jas_aa_mode = None; }
-    }
-}
 
-/// The character attributes a Character-panel edit can reach, lifted out
-/// of a Text / TextPath element as a flat record.
-///
-/// The two element types carry the same sixteen fields; this record is the
-/// shared shape the field-scoped law operates on, so `character_with_group`
-/// can be a pure function the conformance corpus drives directly. Names are
-/// the element's own (SVG / CSS) names, not panel field names.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CharacterAttrs {
-    pub font_family: String,
-    pub font_size: f64,
-    pub font_weight: String,
-    pub font_style: String,
-    pub text_decoration: String,
-    pub text_transform: String,
-    pub font_variant: String,
-    pub baseline_shift: String,
-    pub line_height: String,
-    pub letter_spacing: String,
-    pub xml_lang: String,
-    pub aa_mode: String,
-    pub rotate: String,
-    pub horizontal_scale: String,
-    pub vertical_scale: String,
-    pub kerning: String,
-}
 
-/// Lift / lower the sixteen character attributes for either text element
-/// type. `TextElem` and `TextPathElem` declare the same field names, so
-/// one macro body serves both without a trait.
-macro_rules! character_attrs_for {
-    ($e:expr) => {
-        CharacterAttrs {
-            font_family: $e.font_family.clone(),
-            font_size: $e.font_size,
-            font_weight: $e.font_weight.clone(),
-            font_style: $e.font_style.clone(),
-            text_decoration: $e.text_decoration.clone(),
-            text_transform: $e.text_transform.clone(),
-            font_variant: $e.font_variant.clone(),
-            baseline_shift: $e.baseline_shift.clone(),
-            line_height: $e.line_height.clone(),
-            letter_spacing: $e.letter_spacing.clone(),
-            xml_lang: $e.xml_lang.clone(),
-            aa_mode: $e.aa_mode.clone(),
-            rotate: $e.rotate.clone(),
-            horizontal_scale: $e.horizontal_scale.clone(),
-            vertical_scale: $e.vertical_scale.clone(),
-            kerning: $e.kerning.clone(),
-        }
-    };
-}
 
-/// An element's sixteen character attributes, or `None` when it is not a
-/// Text / TextPath. The function form of `character_attrs_for!`, for callers
-/// that hold an `Element` rather than one of the two concrete types.
-pub(crate) fn character_attrs_of(
-    elem: &crate::geometry::element::Element,
-) -> Option<CharacterAttrs> {
-    use crate::geometry::element::Element;
-    match elem {
-        Element::Text(t) => Some(character_attrs_for!(t)),
-        Element::TextPath(tp) => Some(character_attrs_for!(tp)),
-        _ => None,
-    }
-}
 
-macro_rules! set_character_attrs {
-    ($e:expr, $a:expr) => {{
-        $e.font_family = $a.font_family.clone();
-        $e.font_size = $a.font_size;
-        $e.font_weight = $a.font_weight.clone();
-        $e.font_style = $a.font_style.clone();
-        $e.text_decoration = $a.text_decoration.clone();
-        $e.text_transform = $a.text_transform.clone();
-        $e.font_variant = $a.font_variant.clone();
-        $e.baseline_shift = $a.baseline_shift.clone();
-        $e.line_height = $a.line_height.clone();
-        $e.letter_spacing = $a.letter_spacing.clone();
-        $e.xml_lang = $a.xml_lang.clone();
-        $e.aa_mode = $a.aa_mode.clone();
-        $e.rotate = $a.rotate.clone();
-        $e.horizontal_scale = $a.horizontal_scale.clone();
-        $e.vertical_scale = $a.vertical_scale.clone();
-        $e.kerning = $a.kerning.clone();
-    }};
-}
 
-/// The element's `kerning` attribute for a Kerning combo entry. Named
-/// modes pass through verbatim; a numeric entry is 1/1000 em and
-/// serialises to `"{N}em"`. Empty / `"0"` / `"Auto"` all round-trip to an
-/// empty attribute, since Auto is the element default.
-pub(crate) fn kerning_attr(raw: &str) -> String {
-    match raw.trim() {
-        "" | "0" | "Auto" => String::new(),
-        "Optical" | "Metrics" => raw.trim().to_string(),
-        other => match other.parse::<f64>() {
-            Ok(n) if n == 0.0 => String::new(),
-            Ok(n) => format!("{}em", fmt_num(n / 1000.0)),
-            Err(_) => String::new(),
-        },
-    }
-}
 
-/// The Character panel state ONE group's write should read: the committed
-/// field as the panel holds it, the group's SIBLING fields taken from
-/// `base` — the element (or tspan) being edited.
-///
-/// The law itself reads siblings out of its `base` (`character_with_group`),
-/// which covers the whole-element route. The two TSPAN routes go through
-/// override BUILDERS that read panel state instead, because a tspan stores
-/// these attributes in a different shape (an `Option<f64>` baseline shift, a
-/// token `Vec` decoration). This is the same rule in the builders'
-/// representation, so there is one rule and not two: normalise the panel
-/// state ONCE, hand it to the builder, and every downstream derivation
-/// agrees with the law by construction (`sibling_normalization_agrees_with_
-/// the_law` pins that).
-///
-/// A no-op for the eleven single-field groups: nothing in them has a sibling.
-pub(crate) fn cp_with_element_siblings(
-    cp: &CharacterPanelState, base: &CharacterAttrs, group: CharacterEditGroup,
-) -> CharacterPanelState {
-    use CharacterEditGroup as G;
-    let mut out = cp.clone();
-    match group {
-        G::Decoration(field) => {
-            let (u, s) = text_decoration_flags(&base.text_decoration);
-            match field {
-                DecorationField::Underline => out.strikethrough = s,
-                DecorationField::Strikethrough => out.underline = u,
-            }
-        }
-        G::Case(field) => {
-            let (all_caps, small_caps) =
-                case_flags(&base.text_transform, &base.font_variant);
-            match field {
-                // The committed toggle turned ON wins the exclusion, which
-                // the law expresses by ignoring the sibling in that case; in
-                // this representation the sibling has to be cleared for the
-                // builder to reach the same answer.
-                CaseField::AllCaps => out.small_caps = small_caps && !cp.all_caps,
-                CaseField::SmallCaps => out.all_caps = all_caps && !cp.small_caps,
-            }
-        }
-        G::BaselineShift(field) => {
-            let (sup, sub, num) = baseline_shift_state(&base.baseline_shift);
-            match field {
-                BaselineField::Superscript => {
-                    out.subscript = sub && !cp.superscript;
-                    out.baseline_shift = num;
-                }
-                BaselineField::Subscript => {
-                    out.superscript = sup && !cp.subscript;
-                    out.baseline_shift = num;
-                }
-                BaselineField::Number => {
-                    // A committed 0 carries no intent, so the element's
-                    // super / sub stands; an explicit shift replaces it.
-                    let explicit = cp.baseline_shift != 0.0;
-                    out.superscript = sup && !explicit;
-                    out.subscript = sub && !explicit;
-                }
-            }
-        }
-        _ => {}
-    }
-    out
-}
 
-/// `(all_caps, small_caps)` implied by an element's `text-transform` /
-/// `font-variant`. The element side of the CASE group's sibling rule; also
-/// what the panel display mirror reads. Mirrors the reference `case_flags`.
-pub(crate) fn case_flags(text_transform: &str, font_variant: &str) -> (bool, bool) {
-    (text_transform == "uppercase", font_variant == "small-caps")
-}
-
-/// `(superscript, subscript, numeric_pt)` implied by an element's
-/// `baseline-shift`. The three are mutually exclusive on the element: a
-/// `super` / `sub` keyword carries no number and a number carries neither
-/// keyword. Mirrors the reference `baseline_shift_state`.
-pub(crate) fn baseline_shift_state(bs: &str) -> (bool, bool, f64) {
-    match bs.trim() {
-        "super" => (true, false, 0.0),
-        "sub" => (false, true, 0.0),
-        other => (false, false, parse_pt(other).unwrap_or(0.0)),
-    }
-}
-
-/// Overwrite `base`'s `group` attributes from the Character panel state,
-/// leaving every other attribute of `base` untouched.
-///
-/// Only the COMMITTED field is read from `cp`. Everything else comes from
-/// `base`:
-///
-/// - every attribute outside the group, trivially — that is field scoping;
-/// - the SIBLING fields of the three multi-field groups (`Case`,
-///   `Decoration`, `BaselineShift`), read back out of `base`'s own
-///   attributes. Panel state is NOT a picture of the selection, so reading a
-///   sibling from it destroyed the element's attribute: with
-///   `text-decoration: line-through` on the element and the panel's
-///   strikethrough flag at its `false` default, an Underline click wrote a
-///   bare `underline`. Where the committed field conflicts with an
-///   element-read sibling the COMMITTED field wins — it is what the user
-///   just chose;
-/// - and the values a derivation needs from the element — notably the
-///   `Leading` group's Auto test, which compares the panel's leading against
-///   the ELEMENT's `font_size * 1.2` rather than the panel's font size. The
-///   whole-rebuild law used the panel's, which was harmless only because it
-///   rewrote the size in the same breath; under the field-scoped law a
-///   leading edit must not consult a font-size field the user did not touch.
-///
-/// Mirrors the reference `character_with_field`
-/// (`workspace_interpreter/character_law.py`), whose `field` parameter is
-/// this port's tagged `group`.
-pub(crate) fn character_with_group(
-    base: CharacterAttrs, cp: &CharacterPanelState, group: CharacterEditGroup,
-) -> CharacterAttrs {
-    use CharacterEditGroup as G;
-    let mut c = base;
-    match group {
-        G::FontFamily => c.font_family = cp.font_family.clone(),
-        G::Style => {
-            // Unknown style names leave BOTH halves of the pair alone
-            // rather than guessing one.
-            if let Some((fw, fst)) = parse_style_name(&cp.style_name) {
-                c.font_weight = fw;
-                c.font_style = fst;
-            }
-        }
-        G::FontSize => c.font_size = cp.font_size,
-        G::Leading => {
-            // Auto (an ABSENT line-height) is 120% of the ELEMENT's size.
-            let auto = c.font_size * 1.2;
-            c.line_height = if (cp.leading - auto).abs() < 1e-6 {
-                String::new()
-            } else {
-                format!("{}pt", fmt_num(cp.leading))
-            };
-        }
-        G::Kerning => c.kerning = kerning_attr(&cp.kerning),
-        G::Tracking => {
-            c.letter_spacing = if cp.tracking == 0.0 {
-                String::new()
-            } else {
-                format!("{}em", fmt_num(cp.tracking / 1000.0))
-            };
-        }
-        G::VerticalScale => {
-            c.vertical_scale = if cp.vertical_scale == 100.0 {
-                String::new()
-            } else {
-                fmt_num(cp.vertical_scale)
-            };
-        }
-        G::HorizontalScale => {
-            c.horizontal_scale = if cp.horizontal_scale == 100.0 {
-                String::new()
-            } else {
-                fmt_num(cp.horizontal_scale)
-            };
-        }
-        G::BaselineShift(field) => {
-            // THREE fields, one attribute: the two the user did not commit
-            // come from the element, so a toggle turned OFF falls back to the
-            // element's other keyword or its own numeric shift instead of
-            // wiping the attribute with the panel's 0.
-            let (mut sup, mut sub, mut num) = baseline_shift_state(&c.baseline_shift);
-            match field {
-                BaselineField::Superscript => {
-                    sup = cp.superscript;
-                    if sup { sub = false; }
-                }
-                BaselineField::Subscript => {
-                    sub = cp.subscript;
-                    if sub { sup = false; }
-                }
-                BaselineField::Number => {
-                    num = cp.baseline_shift;
-                    // An explicit shift replaces super / sub; a committed 0
-                    // does not, because 0 is what the input displays while
-                    // super / sub is set.
-                    if num != 0.0 { sup = false; sub = false; }
-                }
-            }
-            c.baseline_shift = if sup {
-                "super".to_string()
-            } else if sub {
-                "sub".to_string()
-            } else if num != 0.0 {
-                format!("{}pt", fmt_num(num))
-            } else {
-                String::new()
-            };
-        }
-        G::Rotation => {
-            c.rotate = if cp.character_rotation == 0.0 {
-                String::new()
-            } else {
-                fmt_num(cp.character_rotation)
-            };
-        }
-        G::Case(field) => {
-            // The sibling toggle comes from the element, so turning one off
-            // cannot clear the other's attribute; the committed toggle turned
-            // ON still wins the exclusion.
-            let (mut all_caps, mut small_caps) =
-                case_flags(&c.text_transform, &c.font_variant);
-            match field {
-                CaseField::AllCaps => all_caps = cp.all_caps,
-                CaseField::SmallCaps => {
-                    small_caps = cp.small_caps;
-                    if small_caps { all_caps = false; }
-                }
-            }
-            c.text_transform = if all_caps { "uppercase".into() } else { String::new() };
-            c.font_variant = if small_caps && !all_caps {
-                "small-caps".into()
-            } else {
-                String::new()
-            };
-        }
-        G::Decoration(field) => {
-            // One token list, two fields: the token the user did not commit
-            // is read off the element, so underlining never un-strikes.
-            let (mut underline, mut strikethrough) =
-                text_decoration_flags(&c.text_decoration);
-            match field {
-                DecorationField::Underline => underline = cp.underline,
-                DecorationField::Strikethrough => strikethrough = cp.strikethrough,
-            }
-            c.text_decoration = text_decoration_from_flags(underline, strikethrough);
-        }
-        G::Language => c.xml_lang = cp.language.clone(),
-        G::AaMode => {
-            c.aa_mode = if cp.anti_aliasing == "Sharp" || cp.anti_aliasing.is_empty() {
-                String::new()
-            } else {
-                cp.anti_aliasing.clone()
-            };
-        }
-    }
-    c
-}
 
 /// Paragraph panel state fields — mirror the panel-local state
 /// declared in `workspace/panels/paragraph.yaml`. Written to by the
@@ -1140,44 +641,6 @@ impl Default for SwatchesPanelState {
     }
 }
 
-impl Default for CharacterPanelState {
-    fn default() -> Self {
-        Self {
-            font_family: "sans-serif".into(),
-            style_name: "Regular".into(),
-            font_size: 12.0,
-            leading: 14.4,
-            // "Auto" — the workspace-declared default, not an empty string.
-            // Both spell the same element attribute (`kerning_attr` maps ""
-            // and "Auto" to empty alike), which is why the drift survived
-            // unnoticed until `character_panel_defaults_match_the_workspace`
-            // compared the struct against the bundle; the DISPLAY told them
-            // apart, showing a blank Kerning combo with no selection where
-            // the other two ports showed "Auto".
-            kerning: "Auto".into(),
-            tracking: 0.0,
-            vertical_scale: 100.0,
-            horizontal_scale: 100.0,
-            baseline_shift: 0.0,
-            character_rotation: 0.0,
-            all_caps: false,
-            small_caps: false,
-            superscript: false,
-            subscript: false,
-            underline: false,
-            strikethrough: false,
-            language: "en".into(),
-            anti_aliasing: "Sharp".into(),
-            snap_to_glyph_visible: true,
-            snap_baseline: false,
-            snap_x_height: false,
-            snap_glyph_bounds: false,
-            snap_proximity_guides: false,
-            snap_angular_guides: false,
-            snap_anchor_point: false,
-        }
-    }
-}
 
 impl AppState {
     pub(crate) fn new() -> Self {
@@ -3289,18 +2752,6 @@ pub(crate) fn build_panel_pending_template(
     if any { Some(t) } else { None }
 }
 
-/// Format a number for CSS length/value output: integers have no
-/// decimal, fractions drop trailing zeros. Matches the visual form
-/// users expect in a vector illustration application's numeric fields
-/// (e.g. `14.4pt`, `0.025em`, `5pt`).
-pub(crate) fn fmt_num(n: f64) -> String {
-    if n == n.trunc() {
-        format!("{}", n as i64)
-    } else {
-        let s = format!("{:.4}", n);
-        s.trim_end_matches('0').trim_end_matches('.').to_string()
-    }
-}
 
 // ⭐ ROW DU: `parse_pt` / `parse_em_as_thousandths` now live in
 // `geometry::tspan` beside `identity_omit_tspan`, which needs them and must
@@ -3308,19 +2759,6 @@ pub(crate) fn fmt_num(n: f64) -> String {
 // `app_state::parse_pt` call site keeps resolving.
 pub(crate) use crate::geometry::tspan::{parse_em_as_thousandths, parse_pt};
 
-/// Parse a Character-panel Style name into the `(font_weight,
-/// font_style)` pair used on Text / TextPath elements. Returns `None`
-/// for names the parser doesn't recognise — callers should leave the
-/// existing weight/style alone in that case.
-pub(crate) fn parse_style_name(name: &str) -> Option<(String, String)> {
-    match name.trim() {
-        "Regular" => Some(("normal".into(), "normal".into())),
-        "Italic" => Some(("normal".into(), "italic".into())),
-        "Bold" => Some(("bold".into(), "normal".into())),
-        "Bold Italic" | "Italic Bold" => Some(("bold".into(), "italic".into())),
-        _ => None,
-    }
-}
 
 /// Inverse of `parse_style_name` — build the Character-panel display
 /// name from an element's font_weight / font_style. Falls back to
@@ -3337,35 +2775,7 @@ pub(crate) fn format_style_name(font_weight: &str, font_style: &str) -> String {
     }
 }
 
-/// Build the CSS `text-decoration` value from two independent flags.
-/// Combines them in a stable alphabetical order — matches what the SVG
-/// serializer already emits for tspan text_decoration arrays.
-pub(crate) fn text_decoration_from_flags(underline: bool, strikethrough: bool) -> String {
-    match (underline, strikethrough) {
-        (true, true) => "line-through underline".to_string(),
-        (true, false) => "underline".to_string(),
-        (false, true) => "line-through".to_string(),
-        (false, false) => String::new(),
-    }
-}
 
-/// Inverse of `text_decoration_from_flags` — extract the two flags from
-/// a `text-decoration` string. Whitespace-split so "underline
-/// line-through", "line-through underline", and mixed-case input all
-/// round-trip cleanly through the Character panel's Underline /
-/// Strikethrough toggles.
-pub(crate) fn text_decoration_flags(td: &str) -> (bool, bool) {
-    let mut underline = false;
-    let mut strikethrough = false;
-    for tok in td.split_whitespace() {
-        match tok {
-            "underline" => underline = true,
-            "line-through" => strikethrough = true,
-            _ => {}
-        }
-    }
-    (underline, strikethrough)
-}
 
 #[cfg(test)]
 mod opacity_panel_state_tests {
