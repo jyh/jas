@@ -243,6 +243,8 @@ jobs:
       - run: python scripts/check_shell_abi_bindings.py
       - run: python scripts/check_shell_widget_kinds.py --self-test
       - run: python scripts/check_shell_widget_kinds.py
+      - run: python scripts/check_shell_kind_labels.py --self-test
+      - run: python scripts/check_shell_kind_labels.py
       # The materializer gate (wave 1 / W0). SELF-TEST ONLY, and that is the
       # whole design: its clause (b) asserts the shell HAS a menubar, which is
       # red on `main` by construction until W4 lands one. A red gate facing the
@@ -976,6 +978,11 @@ jobs:
           # the ubuntu-only wiring by name, which is how this got here.
           python scripts/check_shell_widget_kinds.py --self-test
           python scripts/check_shell_widget_kinds.py
+          # Same reason, one file over: `check_shell_kind_labels.py` reads
+          # `MainWindow.xaml.cs`, which SHIPS to Windows. A gate that cannot
+          # fail on the platform its subject runs on is not watching there.
+          python scripts/check_shell_kind_labels.py --self-test
+          python scripts/check_shell_kind_labels.py
           # The scene join reads a `.ps1` with `utf-8-sig` and a `.cs` with
           # `utf-8`; the harness scripts carry a BOM and `Canvas.cs` does not.
           # This lane is where that claim is actually tested.

@@ -1974,6 +1974,15 @@ public sealed partial class MainWindow : Window
             Height = height,
             Margin = new Thickness(PanePad),
         };
+        // ⚠️ `toggles` COUNTS BOTH BOOLEAN KINDS since W2b-9, so its name now
+        // understates its population -- ask what a count is a count OF before
+        // quoting this row. It is NOT renamed: nothing parses these fields (only
+        // a synthetic fixture string in `harness_selftest.ps1` carries them), the
+        // vocabulary is read by eye on kenai, and `BOOLEAN_KINDS` is COMPLETE at
+        // {toggle, checkbox} -- so the field can never drift further from its name.
+        // `inputs` is in the same position for {number_input, length_input}, and
+        // that set is NOT complete: select/combo_box/icon_select join it when the
+        // plan gains an options channel.
         var (texts, buttons, inputs, toggles, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0);
         foreach (var leaf in leaves)
         {
@@ -2008,7 +2017,13 @@ public sealed partial class MainWindow : Window
                     el = BuildNumberInput(leaf);
                     break;
 
+                // A `checkbox` is this control too. The spec's own table puts
+                // both in ONE contract -- `BOOLEAN_KINDS = {toggle, checkbox}`,
+                // reached by PRESS_EVENTS -- and the plan carries the same keys
+                // for each (`bind.checked`, `label`, `summary`), so the builder
+                // and the applier below are already right for it.
                 case "toggle":
+                case "checkbox":
                     toggles++;
                     if (leaf.Id.Length == 0) { unaddressable++; }
                     el = BuildToggle(leaf);
