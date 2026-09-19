@@ -241,6 +241,8 @@ jobs:
       # Rust and says of itself that it stops there.
       - run: python scripts/check_shell_abi_bindings.py --self-test
       - run: python scripts/check_shell_abi_bindings.py
+      - run: python scripts/check_shell_widget_kinds.py --self-test
+      - run: python scripts/check_shell_widget_kinds.py
       # The materializer gate (wave 1 / W0). SELF-TEST ONLY, and that is the
       # whole design: its clause (b) asserts the shell HAS a menubar, which is
       # red on `main` by construction until W4 lands one. A red gate facing the
@@ -968,6 +970,12 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          # W2b-9's widget-kind join reads `Materializer.cs`, which SHIPS to
+          # Windows — so the lane that can see CRLF and encoding is where its
+          # two regexes are actually tested. `check_lane_coverage.py` refused
+          # the ubuntu-only wiring by name, which is how this got here.
+          python scripts/check_shell_widget_kinds.py --self-test
+          python scripts/check_shell_widget_kinds.py
           # The scene join reads a `.ps1` with `utf-8-sig` and a `.cs` with
           # `utf-8`; the harness scripts carry a BOM and `Canvas.cs` does not.
           # This lane is where that claim is actually tested.
