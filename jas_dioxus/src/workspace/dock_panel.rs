@@ -65,38 +65,22 @@ fn tool_kind_name(kind: crate::tools::tool::ToolKind) -> &'static str {
 /// first selected element's mask, driving the "first-wins" bindings
 /// on CLIP_CHECKBOX / INVERT_MASK_CHECKBOX.
 pub(crate) fn build_selection_predicates(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
-    let mut m = serde_json::Map::new();
-    let (has_mask, clip, invert, linked) = st.tab().map(|t| {
-        let doc = t.model.document();
-        let has = !doc.selection.is_empty() && doc.selection.iter().all(|es| {
-            doc.get_element(&es.path)
-                .map(|e| e.common().mask.is_some())
-                .unwrap_or(false)
-        });
-        let first_mask = doc.selection.first()
-            .and_then(|es| doc.get_element(&es.path))
-            .and_then(|e| e.common().mask.as_ref());
-        let (c, i, l) = match first_mask {
-            // Default ``linked`` to true so the LINK_INDICATOR shows
-            // the linked glyph when no mask exists — matches the
-            // "New masks are linked" spec default.
-            Some(mask) => (mask.clip, mask.invert, mask.linked),
-            None => (false, false, true),
-        };
-        (has, c, i, l)
-    }).unwrap_or((false, false, false, true));
-    m.insert("selection_has_mask".into(), serde_json::Value::Bool(has_mask));
-    m.insert("selection_mask_clip".into(), serde_json::Value::Bool(clip));
-    m.insert("selection_mask_invert".into(), serde_json::Value::Bool(invert));
-    m.insert("selection_mask_linked".into(), serde_json::Value::Bool(linked));
-    // OPACITY.md §Preview interactions: ``editing_target_is_mask``
-    // reflects whether mask-editing mode is active, so OPACITY_PREVIEW
-    // and MASK_PREVIEW can show a persistent highlight on the current
-    // editing target.
-    let editing_mask = matches!(st.tab().map(|t| &t.model.editing_target),
-        Some(crate::workspace::app_state::EditingTarget::Mask(_)));
-    m.insert("editing_target_is_mask".into(), serde_json::Value::Bool(editing_mask));
-    m
+    // W2b-8: the law is the ungated `interpreter::mask_facts`, because the
+    // ENGINE needs these five too — the YAML binds them by BARE NAME and two
+    // of them are the bound expressions of checkboxes, whose press writes the
+    // NEGATION of what it reads. This is the web path's door to it.
+    match st.tab() {
+        Some(t) => crate::interpreter::mask_facts::selection_predicates(&t.model),
+        None => {
+            // No tab: the same defaults the predicates give for an empty
+            // document, so the two paths cannot disagree about "nothing open".
+            let mut m = serde_json::Map::new();
+            for k in crate::interpreter::mask_facts::BARE_FACTS {
+                m.insert(k.into(), serde_json::Value::Bool(k == "selection_mask_linked"));
+            }
+            m
+        }
+    }
 }
 
 pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<String, serde_json::Value> {

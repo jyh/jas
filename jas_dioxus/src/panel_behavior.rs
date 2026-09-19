@@ -80,6 +80,24 @@ use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
 use crate::interpreter::character_host::{self, CHARACTER_PANEL};
 use crate::interpreter::paragraph_host::{self, PARAGRAPH_PANEL};
+
+/// The Opacity panel's id: `workspace/panels/opacity.yaml`'s own top-level id.
+const OPACITY_PANEL: &str = "opacity_panel_content";
+
+/// The Opacity panel's two document-writing keys, mapped onto the Properties
+/// law that already implements them. Returns `None` for the panel's other four
+/// declared keys, which reach no element attribute: `thumbnails_hidden` and
+/// `options_shown` are panel-local UI, and `new_masks_clipping` /
+/// `new_masks_inverted` are document PREFERENCES parked on panel state until
+/// the document model grows somewhere to keep them. A write to any of the four
+/// must not push an undo step that changes nothing.
+fn opacity_prop_key(key: &str) -> Option<&'static str> {
+    match key {
+        "opacity" => Some("prop_opacity"),
+        "blend_mode" => Some("prop_blend"),
+        _ => None,
+    }
+}
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
@@ -255,6 +273,27 @@ impl EffectHost for EngineHost {
                 model.begin_txn();
             }
             paragraph_host::apply_field(model, store, key);
+            return;
+        }
+        // W2b-8: the Opacity panel's two inputs write the SAME two element
+        // attributes the Properties panel writes, so they run the SAME law.
+        // ⛔ There is deliberately no `opacity_host`: `properties_host` already
+        // owns `prop_opacity` and `prop_blend`, ungated and engine-reachable,
+        // and a second host would be a second copy of two writes. What was
+        // missing was never a law — it was this mapping.
+        //
+        // ⚠️ The units already line up and that is not an accident to rely on
+        // silently: `panel.opacity` is PERCENT (the YAML's default is 100) and
+        // `properties_host` divides by 100 and clamps. Passing the percent
+        // through unconverted is correct, and an arm pins it.
+        if panel_id == OPACITY_PANEL {
+            if let Some(prop) = opacity_prop_key(key) {
+                if !model.in_txn() {
+                    model.begin_txn();
+                }
+                let value = store.get_panel(panel_id, key).clone();
+                properties_host::apply_field(model, prop, &value, false);
+            }
         }
     }
 }
