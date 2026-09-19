@@ -1637,6 +1637,144 @@ Test-Case 'V: CONTROL -- Q6 reads the value run''s pane and names its own replay
 Test-Case 'V: CONTROL -- the value replay''s rows are never read as Q6''s replay' { Format-SbQ6 (Get-SbPaneVerdicts (New-SbMwFixture) 'app' 'align_left_button') } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
 
 # ---------------------------------------------------------------------------
+# THE COMPLETION ROW IS PRODUCED BY A KNOB, NOT BY THE SCENE (o6)
+# ---------------------------------------------------------------------------
+#
+# ⛔ `retained` IS ONE SCENE WITH THREE CONFIGURATIONS AND ONLY ONE OF THEM CAN
+# WRITE THE ROW THE TABLE WAITS FOR. `$sceneSpec['retained'].Done` is the `A'`
+# hash row; `A'` is written ONLY from `OnSurfaceSettled`, which labels a stop
+# only when `_resizeStep` is non-zero, and `_resizeSteps` is populated ONLY by
+# the `SB_RESIZE` parser (`MainWindow.xaml.cs`). Both `o6` runs deliberately set
+# no `SB_RESIZE` -- `sitting.ps1` says so in its own comment, because a driven
+# resize would move the surface inside O6.4a's bracket.
+#
+# ⇒ MEASURED 2026-09-19 over every version that has ever existed: the o6 squeeze
+# run has never carried `SB_RESIZE` (10 of 10 versions since its birth at
+# `a255a1d2`), and `retained`'s `Done` has never been anything but the `A'`
+# pattern (22 of 22 versions, across both files the table has lived in). So both
+# o6 runs have waited out the full 150 s and reported `FAIL: NOT RUN: timed out
+# waiting for the A' hash row` on EVERY sitting since the scene was born. The
+# scene has never passed and could not have -- and the cause is NOT the window
+# manager refusing the squeeze (which is true, and is O6.1's business): `A'`
+# would be absent even if the squeeze were delivered in full.
+#
+# ⭐ THIS IS THE `pointer` DEFECT AGAIN. `$sceneSpec['pointer']`'s own comment
+# records it for `SB_SYNTH_DRAG` on 2026-09-06 -- *"the wait was asking for a row
+# the arm is constructed not to produce"* -- and that repair widened one scene's
+# `Done`. `retained` has the same defect for its two o6 configurations and was
+# never revisited.
+#
+# ⛔ AND THE FLAT FIX IS WRONG HERE, WHICH IS WHY THIS IS A FUNCTION AND NOT A
+# LONGER LIST. The four `pointer` patterns are mutually exclusive by
+# construction; these three are ORDERED. `HAND CLOSED` is written BEFORE the
+# resize walk starts (`Canvas.cs` hashes `A-MUT` and posts the completion there),
+# so adding it to the table would end the DEFAULT `retained` run early and skip
+# the entire walk -- the exact hazard the `pointer` comment names about a bare
+# `POINTER ` pattern. The terminal row has to be chosen from the knobs.
+#
+# The fixture rows below carry `Report`'s own leading TAB, because the patterns
+# under test are tab-anchored and a row without it is not a row.
+$o6SqueezeRow  = "`tRUSTOK SQUEEZE delivered 1904x0 (requested height 35; min-height policy=1) policy=EVENT"
+$o6SqueezeNone = "`tRUSTOK SQUEEZE delivered NONE (requested height 35; min-height policy=1) policy=NONE"
+$o6NoPresenter = "`tRUSTFAIL SB_SQUEEZE needs an OverlappedPresenter; this window has Default"
+$o6HandClosed  = "`tRUSTOK HAND CLOSED scene=retained pointer=REAL doc=4 loads(shell)=1"
+$o6ProbeAccept = "`tRESIZE ACCEPTED 1000x600 policy=PROBE tids=3/4"
+$o6ProbeBad    = "`tRUSTFAIL SB_SURFACE_PROBE malformed: 'zz' (want WxH)"
+$o6AprimeRow   = "`tRUSTOK A' surface=1904x941 hash=5808b7a6"
+
+function Test-O6Match($Row, $Done) {
+    return [bool]@(@($Done) | Where-Object { $Row -match $_ }).Count
+}
+
+Test-Case 'o6: a resize walk still waits for the A'' hash row' {
+    @((Resolve-SbSceneSpec -Scene 'retained' -Resize '1000x600,original' -Hand $true).Done) -join ' | '
+} (@($sceneSpec['retained'].Done) -join ' | ')
+Test-Case 'o6: THE DEFAULT RUN MUST NOT COMPLETE ON THE HAND -- it comes before the walk' {
+    Test-O6Match $o6HandClosed (Resolve-SbSceneSpec -Scene 'retained' -Resize '1000x600,original' -Hand $true).Done
+} 'False'
+Test-Case 'o6: the squeeze run ends on the SQUEEZE receipt -- written in every outcome' {
+    $d = (Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1').Done
+    "$(Test-O6Match $o6SqueezeRow $d) $(Test-O6Match $o6SqueezeNone $d)"
+} 'True True'
+Test-Case 'o6: the squeeze run also ends on the presenter refusal, after which no receipt can come' {
+    Test-O6Match $o6NoPresenter (Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1').Done
+} 'True'
+Test-Case 'o6: the squeeze run does NOT wait for a row only a resize walk can write' {
+    Test-O6Match $o6AprimeRow (Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1').Done
+} 'False'
+Test-Case 'o6: the probe run ends on HAND CLOSED -- the last row it can produce' {
+    Test-O6Match $o6HandClosed (Resolve-SbSceneSpec -Scene 'retained' -Probe '1000x600' -Hand $true).Done
+} 'True'
+Test-Case 'o6: the probe run does NOT end on the probe''s own row -- the hand has not moved yet' {
+    Test-O6Match $o6ProbeAccept (Resolve-SbSceneSpec -Scene 'retained' -Probe '1000x600' -Hand $true).Done
+} 'False'
+Test-Case 'o6: nor on the probe''s malformed refusal, which is written before the hand' {
+    Test-O6Match $o6ProbeBad (Resolve-SbSceneSpec -Scene 'retained' -Probe 'zz' -Hand $true).Done
+} 'False'
+# ⭐ THE STRUCTURAL ARM, and it states the law rather than a case: the `A'` row may
+# be waited for ONLY when `SB_RESIZE` is set, because that is the only knob that
+# can cause it. Driven over all four configurations at once, so a resolver that
+# got one right by accident cannot pass.
+Test-Case 'o6: A'' is waited for if and ONLY if SB_RESIZE is set' {
+    $rows = @(
+        @{ Resize = '1000x600,original'; Squeeze = '';  Probe = '';         Hand = $true  },
+        @{ Resize = '';                  Squeeze = '1'; Probe = '';         Hand = $false },
+        @{ Resize = '';                  Squeeze = '';  Probe = '1000x600'; Hand = $true  },
+        @{ Resize = '';                  Squeeze = '';  Probe = '';         Hand = $false }
+    )
+    (@($rows | ForEach-Object {
+        $d = (Resolve-SbSceneSpec -Scene 'retained' -Resize $_.Resize -Squeeze $_.Squeeze `
+                                  -Probe $_.Probe -Hand $_.Hand).Done
+        $wants = -not [string]::IsNullOrWhiteSpace($_.Resize)
+        if ((Test-O6Match $o6AprimeRow $d) -eq $wants) { 'ok' } else { 'MISMATCH' }
+    }) -join ' ')
+} 'ok ok ok ok'
+# A run with no knob at all keeps the table's own answer: the fallback is the
+# scene's row, never an empty list (which would match every row).
+Test-Case 'o6: an unknobbed retained run falls back to the table, and never to empty' {
+    $d = @((Resolve-SbSceneSpec -Scene 'retained').Done)
+    "$($d.Count) $([bool]@($d | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count)"
+} "$(@($sceneSpec['retained'].Done).Count) False"
+# Every other scene is untouched, whatever the knobs say.
+Test-Case 'o6: another scene is returned unchanged even with the knobs set' {
+    @((Resolve-SbSceneSpec -Scene 'benchmark' -Squeeze '1' -Probe '1000x600' -Hand $true).Done) -join ' | '
+} (@($sceneSpec['benchmark'].Done) -join ' | ')
+Test-Case 'o6: the rest of the spec rides through unchanged' {
+    $s = Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1'
+    "$($s.Timeout) $(@($s.Refused) -join ',')"
+} "$($sceneSpec['retained'].Timeout) $(@($sceneSpec['retained'].Refused) -join ',')"
+# ⛔ A HASHTABLE IS A REFERENCE. If the resolver handed back the table's own row
+# and a caller assigned to `.Done`, the NEXT run in the same process would wait
+# for the previous run's row -- and `sitting.ps1` runs every scene in one process.
+Test-Case 'o6: the resolver returns a COPY -- the table cannot be corrupted through it' {
+    $before = @($sceneSpec['retained'].Done) -join ' | '
+    $s = Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1'
+    $s.Done = @('MUTATED')
+    (@($sceneSpec['retained'].Done) -join ' | ') -eq $before
+} 'True'
+# An unknown scene is the caller's error to report, not this function's to guess.
+Test-Case 'o6: an unknown scene resolves to nothing rather than inventing a spec' {
+    $null -eq (Resolve-SbSceneSpec -Scene 'no-such-scene' -Squeeze '1')
+} 'True'
+# The printed "waits for" line is read by a person diagnosing a run, so it must
+# not keep naming the A' row in a run that cannot write one.
+Test-Case 'o6: the label names the row actually waited for' {
+    $sq = (Resolve-SbSceneSpec -Scene 'retained' -Squeeze '1').Label
+    $pr = (Resolve-SbSceneSpec -Scene 'retained' -Probe '1000x600' -Hand $true).Label
+    $aprime = [regex]::Escape("A'")
+    "$([bool]($sq -match 'SQUEEZE')) $([bool]($sq -match $aprime)) $([bool]($pr -match 'HAND CLOSED'))"
+} 'True False True'
+# CONTROL on the fixtures themselves: each row really is matched by the pattern
+# the TABLE already ships, so a fixture that matches nothing cannot supply a
+# green by being unmatchable.
+Test-Case 'o6: CONTROL -- the A'' fixture is matched by the table''s own shipped pattern' {
+    Test-O6Match $o6AprimeRow $sceneSpec['retained'].Done
+} 'True'
+Test-Case 'o6: CONTROL -- the HAND CLOSED fixture is matched by the pointer table''s own pattern' {
+    Test-O6Match $o6HandClosed $sceneSpec['pointer'].Done
+} 'True'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
