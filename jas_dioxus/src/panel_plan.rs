@@ -1492,6 +1492,52 @@ mod tests {
         );
     }
 
+    /// EVERY entry in ALL THREE arrays carries `display`, because a consumer
+    /// reads it by name and a missing key is a THROW, not a fallback.
+    ///
+    /// It is uniform by construction today — `leaves`, `chrome` and
+    /// `containers` are all built by the one `entry()` — and that is exactly
+    /// the kind of fact that stops being true when someone adds a fourth
+    /// array. The shell parses only `leaves` now; W2b-10/-11 draw the other
+    /// two, so the consumer is coming.
+    #[test]
+    fn every_entry_in_every_array_carries_a_display_map() {
+        let ws = Workspace::load().expect("workspace");
+        let mut seen = 0usize;
+        // ⛔ DISTINCT ARRAY KINDS, never a running count of non-empty arrays.
+        // The first version of this floor counted the latter and a mutant
+        // walking ONLY `leaves` SURVIVED it: with more than three panels,
+        // `leaves` alone clears any such total. A floor phrased over the
+        // wrong population is not a weak floor, it is no floor at all.
+        let mut kinds_reached: BTreeSet<&str> = BTreeSet::new();
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
+            for key in ["leaves", "chrome", "containers"] {
+                let arr = plan[key].as_array().unwrap_or_else(|| panic!("{key} is an array: {plan}"));
+                if !arr.is_empty() {
+                    kinds_reached.insert(key);
+                }
+                for e in arr {
+                    assert!(
+                        e.get("display").map(Value::is_object).unwrap_or(false),
+                        "{panel} {key} entry has no display map: {e}"
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        // Two floors: entries were seen at all, and they came from more than
+        // one array — a walk that only ever reached `leaves` would pass the
+        // first floor while proving nothing about the other two.
+        assert!(seen > 100, "vacuous: only {seen} entries checked");
+        assert_eq!(
+            kinds_reached.iter().copied().collect::<Vec<_>>(),
+            vec!["chrome", "containers", "leaves"],
+            "vacuous: the walk did not reach all three arrays"
+        );
+    }
+
     /// A `length_input` that declares NO `unit` falls back to pt, and the
     /// fallback must be the WEB PORT's (`renderer.rs:6110`, `unwrap_or("pt")`)
     /// — a different default here would put the two ports one conversion
