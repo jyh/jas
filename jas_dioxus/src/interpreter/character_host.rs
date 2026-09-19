@@ -664,6 +664,157 @@ pub fn character_with_group(
     c
 }
 
+// ── THE ENGINE'S DOOR ──────────────────────────────────────────────────────
+// W2b-6's second half. The move above made the law reachable; this makes it
+// CALLED. The shape is `stroke_host`'s, not `properties_host`'s: Properties'
+// fields are DERIVED from the selection and its apply takes one value, while
+// Character's are panel-local state whose SIBLING fields decide the write, so
+// the apply needs the whole panel struct and the store is where the engine
+// keeps it.
+
+/// The Character panel's id: the store scope its keys live in.
+pub const CHARACTER_PANEL: &str = "character_panel_content";
+
+/// Every panel-local field of [`CharacterPanelState`], spelled as
+/// `workspace/panels/character.yaml` declares it. A test partitions this
+/// list against the YAML, so a field added to the panel and not to the struct
+/// reds instead of silently reading its default forever.
+pub const FIELDS: [&str; 25] = [
+    "font_family", "style_name", "font_size", "leading", "kerning", "tracking",
+    "vertical_scale", "horizontal_scale", "baseline_shift", "character_rotation",
+    "all_caps", "small_caps", "superscript", "subscript", "underline",
+    "strikethrough", "language", "anti_aliasing",
+    "snap_to_glyph_visible", "snap_baseline", "snap_x_height",
+    "snap_glyph_bounds", "snap_proximity_guides", "snap_angular_guides",
+    "snap_anchor_point",
+];
+
+/// True when a write to the Character panel's `key` reaches the selection.
+/// The seven `snap_*` flags and the section-visibility flags are UI-only and
+/// answer false: editing one must not push an undo step that changes nothing.
+pub fn is_field_key(key: &str) -> bool {
+    CharacterEditGroup::from_field(key).is_some()
+}
+
+impl CharacterPanelState {
+    /// Write ONE field from a YAML-interpreted value. A value of the wrong
+    /// type, and an unknown key, write nothing — the panel keeps its default
+    /// rather than taking a zero from a malformed store entry.
+    pub fn set_field(&mut self, key: &str, v: &serde_json::Value) {
+        let num = |v: &serde_json::Value| v.as_f64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()));
+        match key {
+            "font_family" => if let Some(x) = v.as_str() { self.font_family = x.into() },
+            "style_name" => if let Some(x) = v.as_str() { self.style_name = x.into() },
+            "kerning" => if let Some(x) = v.as_str() { self.kerning = x.into() },
+            "language" => if let Some(x) = v.as_str() { self.language = x.into() },
+            "anti_aliasing" => if let Some(x) = v.as_str() { self.anti_aliasing = x.into() },
+            "font_size" => if let Some(x) = num(v) { self.font_size = x },
+            "leading" => if let Some(x) = num(v) { self.leading = x },
+            "tracking" => if let Some(x) = num(v) { self.tracking = x },
+            "vertical_scale" => if let Some(x) = num(v) { self.vertical_scale = x },
+            "horizontal_scale" => if let Some(x) = num(v) { self.horizontal_scale = x },
+            "baseline_shift" => if let Some(x) = num(v) { self.baseline_shift = x },
+            "character_rotation" => if let Some(x) = num(v) { self.character_rotation = x },
+            "all_caps" => if let Some(x) = v.as_bool() { self.all_caps = x },
+            "small_caps" => if let Some(x) = v.as_bool() { self.small_caps = x },
+            "superscript" => if let Some(x) = v.as_bool() { self.superscript = x },
+            "subscript" => if let Some(x) = v.as_bool() { self.subscript = x },
+            "underline" => if let Some(x) = v.as_bool() { self.underline = x },
+            "strikethrough" => if let Some(x) = v.as_bool() { self.strikethrough = x },
+            "snap_to_glyph_visible" => if let Some(x) = v.as_bool() { self.snap_to_glyph_visible = x },
+            "snap_baseline" => if let Some(x) = v.as_bool() { self.snap_baseline = x },
+            "snap_x_height" => if let Some(x) = v.as_bool() { self.snap_x_height = x },
+            "snap_glyph_bounds" => if let Some(x) = v.as_bool() { self.snap_glyph_bounds = x },
+            "snap_proximity_guides" => if let Some(x) = v.as_bool() { self.snap_proximity_guides = x },
+            "snap_angular_guides" => if let Some(x) = v.as_bool() { self.snap_angular_guides = x },
+            "snap_anchor_point" => if let Some(x) = v.as_bool() { self.snap_anchor_point = x },
+            _ => {}
+        }
+    }
+
+    /// The panel as the store holds it. ⚠️ **Unlike Stroke there is NO flat
+    /// global spelling to fall back to** — every Character control binds
+    /// `panel.<field>` only (`workspace/panels/character.yaml`), which
+    /// `CharacterEditGroup::from_field`'s own doc comment records. A null or
+    /// absent entry leaves the declared default.
+    pub fn from_store(store: &crate::interpreter::state_store::StateStore) -> Self {
+        let mut cp = Self::default();
+        for f in FIELDS {
+            let v = store.get_panel(CHARACTER_PANEL, f);
+            if !v.is_null() {
+                cp.set_field(f, v);
+            }
+        }
+        cp
+    }
+}
+
+/// **Push a Character-panel edit onto every Text / TextPath in the selection,
+/// field-scoped.** Returns whether the document changed.
+///
+/// This is the WHOLE-ELEMENT route and it is the only one the engine has. The
+/// web app's two other routes (the next-typed-character override and the
+/// per-range tspan write) read the active tool's EDIT SESSION, which is UI
+/// state with no engine counterpart; they stay in `AppState`. Nothing here
+/// touches panel display state — `character_panel_post_write`'s Auto-leading
+/// bump is web-side by the same rule, so **the engine path does not get it,
+/// and that is correct: there is no panel here to display it.**
+///
+/// One `edit_document` for the whole selection, so a multi-element font change
+/// is ONE undo step (OP_LOG.md Increment 1).
+pub fn apply_to_selection(
+    model: &mut crate::document::model::Model, cp: &CharacterPanelState, edited: &str,
+) -> bool {
+    use crate::geometry::element::Element;
+    // A field owning no element attribute must not reach the document.
+    let Some(group) = CharacterEditGroup::from_field(edited) else { return false };
+    let mut doc = model.document().clone();
+    let paths: Vec<Vec<usize>> = doc.selection.iter()
+        .filter(|es| matches!(doc.get_element(&es.path),
+                              Some(Element::Text(_)) | Some(Element::TextPath(_))))
+        .map(|es| es.path.clone())
+        .collect();
+    let mut changed = false;
+    for path in paths {
+        // PER ELEMENT: the group's attributes come from panel state and every
+        // other attribute is lifted from THIS element, so a multi-element
+        // selection keeps each element's own values.
+        let new_elem = match doc.get_element(&path) {
+            Some(Element::Text(t)) => {
+                let attrs = character_with_group(character_attrs_for!(t), cp, group);
+                let mut nt = t.clone();
+                set_character_attrs!(nt, attrs);
+                Some(Element::Text(nt))
+            }
+            Some(Element::TextPath(tp)) => {
+                let attrs = character_with_group(character_attrs_for!(tp), cp, group);
+                let mut ntp = tp.clone();
+                set_character_attrs!(ntp, attrs);
+                Some(Element::TextPath(ntp))
+            }
+            _ => None,
+        };
+        if let Some(e) = new_elem {
+            doc = doc.replace_element(&path, e);
+            changed = true;
+        }
+    }
+    if changed {
+        model.edit_document(doc);
+    }
+    changed
+}
+
+/// The engine's entry point: apply the value the store now holds for `key`.
+pub fn apply_field(
+    model: &mut crate::document::model::Model,
+    store: &crate::interpreter::state_store::StateStore,
+    key: &str,
+) -> bool {
+    apply_to_selection(model, &CharacterPanelState::from_store(store), key)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
