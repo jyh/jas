@@ -2011,49 +2011,17 @@ fn set_opacity_field(
 /// writing a non-empty bullets value clears numbered_list (and vice
 /// versa). Phase 4 setter; called from widget onchange handlers and
 /// the toggle_hanging_punctuation action.
+/// Write ONE Paragraph panel field. **W2b-7: the law is the ungated host's**
+/// — the radio group and the bullets ↔ numbered-list exclusion are stated once,
+/// in `paragraph_host::ParagraphPanelState::set_field`, and this is the web
+/// path's door to it. Kept as a free function so its twenty call sites did not
+/// move.
 fn set_paragraph_field(
     pp: &mut crate::workspace::app_state::ParagraphPanelState,
     key: &str,
     val: &serde_json::Value,
 ) {
-    fn clear_aligns(pp: &mut crate::workspace::app_state::ParagraphPanelState) {
-        pp.align_left = false;
-        pp.align_center = false;
-        pp.align_right = false;
-        pp.justify_left = false;
-        pp.justify_center = false;
-        pp.justify_right = false;
-        pp.justify_all = false;
-    }
-    match key {
-        "align_left"          => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_left = true; } } }
-        "align_center"        => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_center = true; } } }
-        "align_right"         => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.align_right = true; } } }
-        "justify_left"        => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_left = true; } } }
-        "justify_center"      => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_center = true; } } }
-        "justify_right"       => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_right = true; } } }
-        "justify_all"         => { if let Some(b) = val.as_bool() { if b { clear_aligns(pp); pp.justify_all = true; } } }
-        "bullets"             => {
-            if let Some(s) = val.as_str() {
-                pp.bullets = s.into();
-                if !s.is_empty() { pp.numbered_list.clear(); }
-            }
-        }
-        "numbered_list"       => {
-            if let Some(s) = val.as_str() {
-                pp.numbered_list = s.into();
-                if !s.is_empty() { pp.bullets.clear(); }
-            }
-        }
-        "left_indent"         => { if let Some(n) = val.as_f64() { pp.left_indent = n; } }
-        "right_indent"        => { if let Some(n) = val.as_f64() { pp.right_indent = n; } }
-        "first_line_indent"   => { if let Some(n) = val.as_f64() { pp.first_line_indent = n; } }
-        "space_before"        => { if let Some(n) = val.as_f64() { pp.space_before = n; } }
-        "space_after"         => { if let Some(n) = val.as_f64() { pp.space_after = n; } }
-        "hyphenate"           => { if let Some(b) = val.as_bool() { pp.hyphenate = b; } }
-        "hanging_punctuation" => { if let Some(b) = val.as_bool() { pp.hanging_punctuation = b; } }
-        _ => {}
-    }
+    pp.set_field(key, val);
 }
 
 /// Build an expression evaluation context from AppState + action params.

@@ -2557,6 +2557,209 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    // -----------------------------------------------------------------------
+    // W2b-7 -- the Paragraph panel's whole-panel apply, through the store's
+    // panel-write report. ⛔ UNLIKE CHARACTER THERE IS NO REFERENCE LAW HERE:
+    // `workspace_interpreter` implements no paragraph law at all, so the only
+    // two implementations are this one and Swift's `ParagraphPanelSync`.
+    // -----------------------------------------------------------------------
+
+    const PARAGRAPH: &str = crate::interpreter::paragraph_host::PARAGRAPH_PANEL;
+
+    /// The paragraph wrapper tspan of every selected Text / TextPath, in
+    /// selection order. Read off the ELEMENTS, never through the host, so the
+    /// oracle cannot agree with the thing it is checking.
+    fn selected_paragraph_wrappers(e: *mut JasEngine)
+        -> Vec<Option<crate::geometry::tspan::Tspan>> {
+        use crate::geometry::element::Element;
+        engine_of(e).with_model(|m| {
+            let doc = m.document();
+            doc.selection.iter()
+                .filter_map(|es| {
+                    let tspans = match doc.get_element(&es.path) {
+                        Some(Element::Text(t)) => t.tspans.clone(),
+                        Some(Element::TextPath(tp)) => tp.tspans.clone(),
+                        _ => return None,
+                    };
+                    Some(tspans.into_iter()
+                         .find(|s| s.jas_role.as_deref() == Some("paragraph")))
+                })
+                .collect()
+        })
+    }
+
+    /// **W2b-7's oracle.** An alignment commit on a selected paragraph puts
+    /// that alignment on the element's paragraph wrapper, writes what the
+    /// shared host writes, and is ONE undo step.
+    ///
+    /// ⚠️ **The block priced this as "an alignment `icon_select`", and the
+    /// alignment controls are icon-bearing CHECKBOXES** (`pg_align_center`,
+    /// `type: checkbox`, `icon: para_align_center`). The panel's only two
+    /// `icon_select`s are bullets and numbered-list. The oracle's SUBJECT was
+    /// right and its widget type was not.
+    ///
+    /// ⭐ **The third assert is the one that would not pass by accident:** the
+    /// paragraph write lands on the WRAPPER TSPAN and must leave the element's
+    /// own character attributes alone. A whole-panel apply that reached the
+    /// element would still satisfy the first two.
+    #[test]
+    fn paragraph_alignment_commit_writes_the_wrapper_on_the_selection() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before_wrappers = selected_paragraph_wrappers(e);
+        assert!(!before_wrappers.is_empty(),
+                "the calibrated fixture has no selected text element, so this \
+                 oracle would be vacuous");
+        assert!(before_wrappers.iter().all(|w| w.as_ref()
+                    .and_then(|s| s.text_align.clone()).as_deref() != Some("center")),
+                "the commit could not be seen: something is already centred");
+        let before_faces = selected_text_faces(e);
+        let before = doc_json(e);
+        let pre = engine_of(e).with_model(|m| m.clone());
+
+        // ⚠️ THE WIDGET ID IS NOT THE FIELD KEY: the controls are `pg_`-prefixed
+        // and BIND `panel.align_center`, so the store key the host sees is the
+        // unprefixed one.
+        // ⚠️ A checkbox is a BOOLEAN kind, so its event is `click`/`change` and
+        // the value is the NEGATION of the bound expression — not `commit`,
+        // which is for input kinds and answers `EmptyBehavior` here.
+        let (reply, err) = behave(
+            e, PARAGRAPH, r#"{"widget":"pg_align_center","event":"click"}"#);
+        assert_eq!(err, "", "{reply}");
+        let r = reply_json(&reply, &err);
+        assert_eq!(r["doc_changed"], true, "{reply}");
+
+        let after = selected_paragraph_wrappers(e);
+        assert_eq!(after.len(), before_wrappers.len());
+        for (i, w) in after.iter().enumerate() {
+            let w = w.as_ref().unwrap_or_else(||
+                panic!("element {i} has no paragraph wrapper after the commit"));
+            assert_eq!(w.text_align.as_deref(), Some("center"),
+                       "element {i} did not take the committed alignment");
+            assert!(w.content.is_empty(), "element {i}'s wrapper holds content");
+        }
+        // SCOPING: the paragraph write lives on the wrapper tspan and must not
+        // have touched the element's own character attributes.
+        assert_eq!(selected_text_faces(e), before_faces,
+                   "an alignment commit changed the element's character attributes");
+
+        // The engine wrote what the SHARED host writes, applied to a copy of
+        // the pre-commit model.
+        let mut copy = pre.clone();
+        let pp = crate::interpreter::paragraph_host::ParagraphPanelState::from_store(
+            &engine_of(e).store.borrow());
+        crate::interpreter::paragraph_host::apply_to_selection(&mut copy, &pp);
+        assert_eq!(doc_json(e),
+                   crate::geometry::test_json::document_to_test_json(copy.document()));
+
+        undo(e);
+        assert_eq!(doc_json(e), before, "ONE undo must restore the pre-commit document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **THE RADIO, DRIVEN IN BOTH DIRECTIONS — and the second direction is
+    /// the one that can fail.** `bind_write` writes the ONE bool the user
+    /// pressed and never clears its siblings, so the store can hold two
+    /// alignment bools true at once. If the engine rebuilt the panel by
+    /// replaying the store in `FIELDS` order, whichever key sits LATER in that
+    /// array would win — which happens to be right for left -> centre and
+    /// wrong for centre -> left. The order of a `const` array must not decide
+    /// what a click does.
+    #[test]
+    fn the_alignment_radio_switches_back_as_well_as_forward() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let align_of = |e: *mut JasEngine| -> Option<String> {
+            selected_paragraph_wrappers(e).first().cloned().flatten()
+                .and_then(|w| w.text_align)
+        };
+
+        let (reply, err) = behave(
+            e, PARAGRAPH, r#"{"widget":"pg_align_center","event":"click"}"#);
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(align_of(e).as_deref(), Some("center"), "forward: left -> centre");
+
+        // Back to left. align_left is the default and writes NOTHING, so the
+        // attribute must be ABSENT again — not still "center".
+        let (reply, err) = behave(
+            e, PARAGRAPH, r#"{"widget":"pg_align_left","event":"click"}"#);
+        assert_eq!(err, "", "{reply}");
+        assert_eq!(align_of(e), None,
+                   "backward: centre -> left did not take; the store's stale \
+                    sibling won over the key the user actually pressed");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **THE WHOLE-PANEL HAZARD, AND IT IS WHAT THE DOCUMENT BASE IS FOR.**
+    /// A paragraph edit writes ALL sixteen fields, so every field the user did
+    /// not touch is written from the base. If that base were the store — which
+    /// only ever receives one key per press and is never synced from the
+    /// selection — an alignment click would stamp the store's stale zeros over
+    /// an indent the document actually carries.
+    ///
+    /// ⭐ Written because a mutant SURVIVED: basing `apply_field` on the store
+    /// still passed the radio arm, because the edited-key-last line covers the
+    /// radio case. Nothing witnessed the base itself until this.
+    #[test]
+    fn an_alignment_click_does_not_stamp_stale_values_over_untouched_fields() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+
+        // Put an indent on the DOCUMENT without going through the panel, so
+        // the store has never heard of it — exactly the state a fresh engine
+        // is in after loading a file that already has paragraph formatting.
+        engine_of(e).with_model_mut(|m| {
+            let mut pp = crate::interpreter::paragraph_host::panel_from_document(
+                m.document());
+            pp.set_field("left_indent", &serde_json::json!(24.0));
+            crate::interpreter::paragraph_host::apply_to_selection(m, &pp);
+        });
+        let indent_of = |e: *mut JasEngine| -> Option<f64> {
+            selected_paragraph_wrappers(e).first().cloned().flatten()
+                .and_then(|w| w.jas_left_indent)
+        };
+        assert_eq!(indent_of(e), Some(24.0), "the fixture's indent did not land");
+        assert!(engine_of(e).store.borrow()
+                    .get_panel(crate::interpreter::paragraph_host::PARAGRAPH_PANEL,
+                               "left_indent").as_f64().unwrap_or(0.0) != 24.0,
+                "the store already knows the indent, so this arm would be vacuous");
+
+        let (reply, err) = behave(
+            e, PARAGRAPH, r#"{"widget":"pg_align_center","event":"click"}"#);
+        assert_eq!(err, "", "{reply}");
+
+        // The edit landed AND the untouched field survived.
+        assert_eq!(selected_paragraph_wrappers(e).first().cloned().flatten()
+                       .and_then(|w| w.text_align).as_deref(), Some("center"));
+        assert_eq!(indent_of(e), Some(24.0),
+                   "an alignment click stamped a stale value over the indent");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A derived predicate owns no attribute, so a write to one must not reach
+    /// the document. Asserted BY NAME on the refusal, because "the document
+    /// did not change" alone would also pass if the whole path were dead.
+    #[test]
+    fn a_paragraph_derived_predicate_writes_nothing_to_the_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = untransformed_engine();
+        let before = doc_json(e);
+        let mut model = engine_of(e).with_model(|m| m.clone());
+        let store = engine_of(e).store.borrow();
+        // The host refuses it for a caller that reaches the store key directly,
+        // which is the layer this guard is load-bearing at.
+        assert!(!crate::interpreter::paragraph_host::apply_field(
+                    &mut model, &store, "text_selected"));
+        assert!(!crate::interpreter::paragraph_host::apply_field(
+                    &mut model, &store, "area_text_selected"));
+        // Anti-vacuity: a real key through the same door DOES write.
+        assert!(crate::interpreter::paragraph_host::apply_field(
+                    &mut model, &store, "align_center"));
+        drop(store);
+        assert_eq!(doc_json(e), before, "the engine's own document was disturbed");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-5's oracle.** X = 40 moves the selection's box left edge to 40,
     /// writes what the shared host writes, shows 40, and is ONE undo step.
     #[test]
