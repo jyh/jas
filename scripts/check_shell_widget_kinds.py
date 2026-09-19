@@ -86,7 +86,18 @@ def run_self_test() -> int:
     src = SOURCE.read_text(encoding="utf-8")
     failures: list[str] = []
 
-    if compare(src):
+    def probe(label: str, text: str) -> list[str] | None:
+        """Every self-test read goes through here. ⚠️ A reader that reports a
+        defect by RAISING dumps a traceback instead of naming it, and wrapping
+        ONE call site only moves the crash to the next one — driven twice while
+        writing this."""
+        try:
+            return compare(text)
+        except LookupError as exc:
+            failures.append(f"self-test: reading {label} raised — {exc}")
+            return None
+
+    if probe("the real file", src):
         failures.append("the real file must be clean at the moment this gate lands")
 
     # (a) a kind in EasyKinds with no arm
@@ -94,7 +105,8 @@ def run_self_test() -> int:
                           '"number_input", "text_input", "button", "planted_kind"', 1)
     if planted == src:
         failures.append("self-test (a) anchor did not apply — the mutation was a no-op")
-    elif not any("planted_kind" in f and "no switch arm" in f for f in compare(planted)):
+    elif not any("planted_kind" in f and "no switch arm" in f
+                 for f in (probe("self-test (a)", planted) or [])):
         failures.append("self-test (a): a kind in EasyKinds with no arm was NOT caught")
 
     # (b) an arm with no kind — the other direction, which a one-way
@@ -103,12 +115,45 @@ def run_self_test() -> int:
                             '            case "orphan_kind":\n            case "spacer":', 1)
     if planted_b == src:
         failures.append("self-test (b) anchor did not apply — the mutation was a no-op")
-    elif not any("orphan_kind" in f and "not in EasyKinds" in f for f in compare(planted_b)):
+    elif not any("orphan_kind" in f and "not in EasyKinds" in f
+                 for f in (probe("self-test (b)", planted_b) or [])):
         failures.append("self-test (b): an arm with no EasyKinds entry was NOT caught")
 
     # (c) the anti-vacuity floor fires when the reader reads nothing
-    if not compare('EasyKinds = new() { "a" };\nswitch (kind)\n default:'):
+    if not probe("self-test (c)", 'EasyKinds = new() {\n "a" };\nswitch (kind)\n default:'):
         failures.append("self-test (c): the anti-vacuity floor did not fire on an empty read")
+
+    # (e) THE WINDOWS LANE'S CLAIM, TESTED ON EVERY PLATFORM. This gate is
+    #     wired on windows-latest because `Materializer.cs` ships there, and a
+    #     checkout on that lane has CRLF line endings. A regex that silently
+    #     matched NOTHING under CRLF would report two empty sets as AGREEING —
+    #     which is the failure this gate exists to catch, one level up. So the
+    #     arm is not "does it parse CRLF" but "does it still CATCH under CRLF".
+    #     ⚠️ Each read is wrapped: an LF-only assumption in either regex raises
+    #     `LookupError` here, and an arm that reports a defect by RAISING dumps
+    #     a traceback instead of naming it. Driven: a mutant requiring a bare
+    #     `\n` after the EasyKinds brace is caught by name because of this.
+    def _safe(label: str, text: str, expect_clean: bool, needle: str = "") -> None:
+        found = probe(f"self-test (e) {label}", text)
+        if found is None:
+            return
+        if expect_clean and found:
+            failures.append(f"self-test (e): the clean file reds when read as {label}")
+        if needle and not any(needle in f for f in found):
+            failures.append(
+                f"self-test (e): a planted divergence was MISSED under {label} "
+                "— that lane would report agreement on two empty reads")
+
+    crlf = src.replace("\n", "\r\n")
+    _safe("CRLF", crlf, expect_clean=True)
+    crlf_mutant = crlf.replace('"combo_box", "checkbox", "toggle", "label",',
+                               '"checkbox", "toggle", "label",', 1)
+    if crlf_mutant == crlf:
+        failures.append("self-test (e) anchor did not apply under CRLF")
+    else:
+        _safe("CRLF", crlf_mutant, expect_clean=False, needle="combo_box")
+    # And a BOM, which the sibling scene gate documents as real in this tree.
+    _safe("a UTF-8 BOM", "\ufeff" + src, expect_clean=True)
 
     # (d) CI must run the LIVE arm, not `--self-test` alone. A gate that only
     #     ever self-tests is a gate that has never looked at the subject.
