@@ -2927,6 +2927,48 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+/// The identity moves no point, so every null-transform element vector in the
+/// shared hit-test corpus must answer the same with an identity transform. An
+/// element WITH a transform takes the polygon path, so a kind that either path
+/// forgets answers differently the moment it gains one (TRANSFORMHIT,
+/// `d464b3b0`). The corpus pins explicit control pairs for some kinds; this is
+/// the property over every element vector in it. Mirrors
+/// `hit_test_identity_transform_changes_no_answer` in Rust and the reference's
+/// `test_identity_transform_changes_no_answer_over_the_shared_corpus`, which
+/// found 9 of 31 disagreeing there before its arms were ported.
+@Test func hitTestIdentityTransformChangesNoAnswer() throws {
+    let json = readFixture("algorithms/hit_test.json")
+    let rawTests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!)
+        as! [[String: Any]]
+    let identity: [String: Any] = ["a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0]
+    var checked = 0
+    for tc in rawTests {
+        let function = tc["function"] as! String
+        guard function == "element_intersects_rect" || function == "element_intersects_polygon"
+        else { continue }
+        var moved = tc["element"] as! [String: Any]
+        guard moved["transform"] is NSNull else { continue }
+        moved["transform"] = identity
+        let plain = parseElement(tc["element"]!)
+        let ident = parseElement(moved)
+        #expect(ident.transform != nil, "\(tc["name"]!): the identity did not reach the element")
+        let a: Bool, b: Bool
+        if function == "element_intersects_rect" {
+            let r = tc["args"] as! [Double]
+            a = elementIntersectsRect(plain, r[0], r[1], r[2], r[3])
+            b = elementIntersectsRect(ident, r[0], r[1], r[2], r[3])
+        } else {
+            let poly = (tc["polygon"] as! [[Double]]).map { ($0[0], $0[1]) }
+            a = elementIntersectsPolygon(plain, poly)
+            b = elementIntersectsPolygon(ident, poly)
+        }
+        #expect(a == b, "\(tc["name"]!): \(a) with no transform, \(b) with the identity")
+        checked += 1
+    }
+    // A floor, not a pin: an added vector passes, a lost enumeration does not.
+    #expect(checked >= 32, "only \(checked) null-transform element vectors reached")
+}
+
 // MARK: - number_input commit vectors
 
 /// The `number_input` COMMIT corpus: typed text → the value written to state,

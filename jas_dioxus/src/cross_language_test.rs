@@ -651,6 +651,58 @@ mod tests {
         }
     }
 
+    /// The identity moves no point, so every null-transform element vector in
+    /// the shared hit-test corpus must answer the same with an identity
+    /// transform. An element WITH a transform takes the polygon path, so a
+    /// kind that either path forgets answers differently the moment it gains
+    /// one (TRANSFORMHIT, `d464b3b0`). The corpus pins explicit control pairs
+    /// for some kinds; this is the property over every element vector in it.
+    /// Mirrors `test_identity_transform_changes_no_answer_over_the_shared_corpus`
+    /// in jas/algorithms/hit_test_test.py, which found 9 of 31 disagreeing in
+    /// the reference before its arms were ported.
+    #[test]
+    fn hit_test_identity_transform_changes_no_answer() {
+        let json_str = read_fixture("algorithms/hit_test.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse hit_test.json");
+        let identity = serde_json::json!(
+            {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0});
+        let mut checked = 0;
+        for tc in tests.as_array().unwrap() {
+            let func = tc["function"].as_str().unwrap();
+            if func != "element_intersects_rect" && func != "element_intersects_polygon" {
+                continue;
+            }
+            if !tc["element"]["transform"].is_null() {
+                continue;
+            }
+            let mut moved = tc["element"].clone();
+            moved["transform"] = identity.clone();
+            let plain = crate::geometry::test_json::parse_element(&tc["element"]);
+            let ident = crate::geometry::test_json::parse_element(&moved);
+            assert!(ident.transform().is_some(),
+                "{}: the identity did not reach the element", tc["name"]);
+            let (a, b) = if func == "element_intersects_rect" {
+                let r: Vec<f64> = tc["args"].as_array().unwrap()
+                    .iter().map(|v| v.as_f64().unwrap()).collect();
+                (hit_test::element_intersects_rect(&plain, r[0], r[1], r[2], r[3]),
+                 hit_test::element_intersects_rect(&ident, r[0], r[1], r[2], r[3]))
+            } else {
+                let poly: Vec<(f64, f64)> = tc["polygon"].as_array().unwrap().iter()
+                    .map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap()))
+                    .collect();
+                (hit_test::element_intersects_polygon(&plain, &poly),
+                 hit_test::element_intersects_polygon(&ident, &poly))
+            };
+            assert_eq!(a, b, "{}: {} with no transform, {} with the identity",
+                tc["name"], a, b);
+            checked += 1;
+        }
+        // A floor, not a pin: an added vector passes, a lost enumeration does not.
+        assert!(checked >= 32,
+            "only {} null-transform element vectors reached", checked);
+    }
+
     /// The `number_input` COMMIT corpus: typed text → the value written to
     /// state, or nothing at all. Acceptance goldens are derived from the live
     /// reference's numeric-string coercion (see the fixture's `_doc`); the
