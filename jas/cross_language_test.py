@@ -411,6 +411,38 @@ class CrossLanguageTest(absltest.TestCase):
                     f"codec_field_survival: {codec}/{field} -- fixture says "
                     f"{expected}, python measured {actual}{note}")
 
+    def test_svg_tool_origin_survives_without_arrowheads(self):
+        # A `jas:`-prefixed attribute obliges the root <svg> to declare the
+        # namespace. The XML parser rejects an undeclared prefix, and it
+        # rejects the WHOLE DOCUMENT, not the attribute. The element is what
+        # Blob Brush actually commits: a tool-origin tag, no arrowheads, and
+        # an otherwise default document. Mirrors
+        # `svg_tool_origin_survives_without_arrowheads` in
+        # jas_dioxus/src/cross_language_test.rs and
+        # `svgToolOriginSurvivesWithoutArrowheads` in JasSwift.
+        from document.document import Document
+        from geometry.element import (
+            Color, Layer, LineTo, MoveTo, Path, Stroke)
+        p = Path(d=(MoveTo(0.0, 0.0), LineTo(10.0, 10.0)),
+                 stroke=Stroke(Color.rgb(0.0, 0.0, 0.0), width=2.0),
+                 tool_origin="blob_brush")
+        doc = Document(layers=(Layer(name="L", children=(p,)),))
+        svg = document_to_svg(doc)
+        self.assertIn('jas:tool-origin="blob_brush"', svg,
+                      "the writer must emit jas:tool-origin")
+        self.assertIn("xmlns:jas=", svg,
+                      "a jas:-prefixed attribute obliges the root <svg> to "
+                      "declare xmlns:jas")
+        kids = svg_to_document(svg).layers[0].children
+        self.assertEqual(
+            len(kids), 1,
+            "svg_tool_origin_survives_without_arrowheads: the round-tripped "
+            "document lost its content (an undeclared namespace prefix makes "
+            "the parser reject the whole file)")
+        self.assertEqual(kids[0].tool_origin, "blob_brush",
+                         "svg_tool_origin_survives_without_arrowheads: the "
+                         "tool origin did not survive the SVG round trip")
+
     # ---------------------------------------------------------------
     # SVG parse equivalence
     # ---------------------------------------------------------------
