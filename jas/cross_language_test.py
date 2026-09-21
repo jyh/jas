@@ -413,6 +413,105 @@ class CrossLanguageTest(absltest.TestCase):
                     f"codec_field_survival: {codec}/{field} -- fixture says "
                     f"{expected}, python measured {actual}{note}")
 
+    def test_binary_wire(self):
+        # The byte-level binary gate both ports share
+        # (test_fixtures/expected/binary_wire.json): every tag's packed slot
+        # count, then each case's exact bytes, uncompressed so the pin is the
+        # msgpack itself. Mirrors `binary_wire` in
+        # jas_dioxus/src/cross_language_test.rs and `binaryWire` in JasSwift;
+        # the case documents below are theirs, shape for shape. A difference
+        # is reported by the first differing SLOT, not the hex, so the
+        # failure names what drifted.
+        import msgpack
+        from document.document import Document
+        from geometry.binary import element_tag_label, packed_element_slot_count
+        from geometry.element import (
+            CompoundOperation, CompoundShape, Ellipse, GeneratedElem, Group,
+            Layer, Line, LineTo, MoveTo, Path, Polygon, Polyline,
+            RecordedElem, Rect, ReferenceElem, Text, TextPath)
+        fx = json.loads(_read_fixture("expected/binary_wire.json"))
+        tag_elems = [
+            Layer(children=()), Group(children=()),
+            Line(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            Rect(x=0.0, y=0.0, width=1.0, height=2.0),
+            Ellipse(cx=0.0, cy=0.0, rx=1.0, ry=1.0),
+            Ellipse(cx=0.0, cy=0.0, rx=1.0, ry=2.0),
+            Polyline(points=((0.0, 0.0), (1.0, 1.0))),
+            Polygon(points=((0.0, 0.0), (1.0, 1.0), (2.0, 0.0))),
+            Path(d=(MoveTo(0.0, 0.0), LineTo(1.0, 1.0))),
+            Text(x=1.0, y=2.0, content="hi", font_family="Arial",
+                 font_size=12.0, font_weight="normal", font_style="normal",
+                 text_decoration="none", width=10.0, height=12.0),
+            TextPath(d=(MoveTo(0.0, 0.0), LineTo(1.0, 1.0)), content="hi",
+                     start_offset=0.0, font_family="Arial", font_size=12.0,
+                     font_weight="normal", font_style="normal",
+                     text_decoration="none"),
+            ReferenceElem(target="m1"),
+        ]
+        live_elems = [
+            CompoundShape(operation=CompoundOperation.UNION, operands=()),
+            ReferenceElem(target="m1"), RecordedElem(inputs=(), ops=()),
+            GeneratedElem(concept_id="spiral", params={}),
+        ]
+
+        # (1) ARITY, for every tag the fixture declares.
+        arity = fx["tag_arity"]
+        seen = set()
+        for elem in tag_elems + live_elems:
+            label = element_tag_label(elem)
+            self.assertEqual(
+                packed_element_slot_count(elem), arity.get(label),
+                f"binary_wire: tag '{label}' packs a different slot count "
+                f"than the fixture declares")
+            seen.add(label)
+        self.assertEqual(sorted(seen), sorted(arity),
+                         "binary_wire: every declared tag must be reached")
+
+        # (2) BYTES, one shared golden per case.
+        def doc(kids):
+            return Document(layers=(Layer(children=tuple(kids)),),
+                            selected_layer=0)
+        cases = {
+            "shapes_default": doc([e for e in tag_elems if not isinstance(
+                e, (Text, TextPath, Layer, ReferenceElem))]),
+            "text_default": doc([e for e in tag_elems
+                                 if isinstance(e, (Text, TextPath))]),
+            "live_default": doc(live_elems),
+            "saturated_extension": doc([_survival_saturated_path()]),
+        }
+
+        def first_difference(want, got, path=""):
+            if isinstance(want, list) and isinstance(got, list):
+                for i, (w, g) in enumerate(zip(want, got)):
+                    d = first_difference(w, g, f"{path}/{i}")
+                    if d:
+                        return d
+                if len(want) != len(got):
+                    return f"{path} has {len(got)} slots, the fixture {len(want)}"
+                return None
+            if type(want) is not type(got) or want != got:
+                return f"slot {path or '/'} (fixture {want!r}, python {got!r})"
+            return None
+
+        self.assertEqual(sorted(cases), sorted(c["name"] for c in fx["cases"]),
+                         "binary_wire: the cases built here are not the fixture's")
+        for case in fx["cases"]:
+            name = case["name"]
+            expected = case.get("port_hex", {}).get("python") or case["hex"]
+            got = document_to_binary(cases[name], compress=False)
+            want = bytes.fromhex(expected)
+            # assertEqual, never self.fail: the drift ratchet records an
+            # assertEqual and continues, so one differing case cannot hide the
+            # cases after it.
+            where = None if got == want else first_difference(
+                msgpack.unpackb(want[8:]), msgpack.unpackb(got[8:]))
+            self.assertEqual(where, None,
+                             f"binary_wire: case '{name}' differs at {where}")
+            # The pinned bytes must also decode, or the gate is green over a
+            # broken reader.
+            self.assertTrue(binary_to_document(want).layers,
+                            f"binary_wire: case '{name}' decoded to no layers")
+
     def test_svg_tool_origin_survives_without_arrowheads(self):
         # A `jas:`-prefixed attribute obliges the root <svg> to declare the
         # namespace. The XML parser rejects an undeclared prefix, and it

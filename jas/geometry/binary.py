@@ -27,7 +27,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
-    GeneratedElem,
+    GeneratedElem, BlendMode, Mask,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -99,6 +99,50 @@ _ARROWALIGN_TO_INT = {
     ArrowAlign.TIP_AT_END: 0, ArrowAlign.CENTER_AT_END: 1,
 }
 _INT_TO_ARROWALIGN = {v: k for k, v in _ARROWALIGN_TO_INT.items()}
+
+# -- The per-tag trailing extension (jas_dioxus binary.rs, RULED 2026-07-27) --
+#
+# The shared common block sits at FIXED indices 1..6 and every payload starts
+# at 7, so it cannot grow. The fields it never carried ride PER TAG, after the
+# tag's own base slots: [mode, mask, tool_origin] on every tag; then a path's
+# brush pair, or a group's or layer's blending pair (the same two offsets --
+# a tag carries one pair or the other, never both). Every slot is WRITTEN
+# ALWAYS, so a tag's arity is constant and test_fixtures/expected/
+# binary_wire.json can pin it, and READ TOLERANTLY, so a blob written before
+# the extension loads with exactly the values it was authored with. VERSION
+# stays 2: the frozen tag-pinned readers index positionally and ignore
+# trailing slots.
+#
+# The base arity is the slot a tag's extension starts at. Mirrors Rust's
+# `tag_base_arity` and JasSwift's `tagBaseArity`.
+_TAG_BASE_ARITY = {
+    _TAG_LAYER: 8, _TAG_GROUP: 8, _TAG_LINE: 13, _TAG_RECT: 15,
+    _TAG_CIRCLE: 12, _TAG_ELLIPSE: 13, _TAG_POLYLINE: 10, _TAG_POLYGON: 10,
+    _TAG_PATH: 12, _TAG_TEXT: 20, _TAG_TEXT_PATH: 18, _TAG_LIVE: 10,
+}
+_EXT_MODE, _EXT_MASK, _EXT_TOOL_ORIGIN = 0, 1, 2
+_COMMON_EXT_LEN = 3
+_EXT_STROKE_BRUSH = _EXT_ISOLATED_BLENDING = _COMMON_EXT_LEN
+_EXT_STROKE_BRUSH_OVERRIDES = _EXT_KNOCKOUT_GROUP = _COMMON_EXT_LEN + 1
+
+# Blend-mode wire tags, written out by name rather than taken from the enum's
+# order, so reordering the enum cannot silently renumber saved files. An
+# unrecognised tag reads as NORMAL. Mirrors Rust's `blend_mode_tag`.
+_BLEND_MODE_TO_INT = {
+    BlendMode.NORMAL: 0, BlendMode.DARKEN: 1, BlendMode.MULTIPLY: 2,
+    BlendMode.COLOR_BURN: 3, BlendMode.LIGHTEN: 4, BlendMode.SCREEN: 5,
+    BlendMode.COLOR_DODGE: 6, BlendMode.OVERLAY: 7, BlendMode.SOFT_LIGHT: 8,
+    BlendMode.HARD_LIGHT: 9, BlendMode.DIFFERENCE: 10, BlendMode.EXCLUSION: 11,
+    BlendMode.HUE: 12, BlendMode.SATURATION: 13, BlendMode.COLOR: 14,
+    BlendMode.LUMINOSITY: 15,
+}
+_INT_TO_BLEND_MODE = {v: k for k, v in _BLEND_MODE_TO_INT.items()}
+
+# The fill rule the ports carry at a path's slot 11. This model holds no fill
+# rule, so it writes the value the ports read as the default (nonzero) and
+# ignores the slot on read -- the slot exists so the path's extension starts
+# where theirs does.
+_FILL_RULE_NON_ZERO = 0
 
 # -- Pack (Document -> msgpack-ready structure) ------------------------------
 
@@ -332,7 +376,52 @@ def _pack_common(elem: Element) -> list:
     ]
 
 
+def _pack_mask(m: Mask | None):
+    """[subtree, clip, invert, disabled, linked, unlink_transform], or nil.
+    Mirrors Rust's `pack_mask`."""
+    if m is None:
+        return None
+    return [_pack_element(m.subtree), m.clip, m.invert, m.disabled, m.linked,
+            _pack_transform(m.unlink_transform)]
+
+
 def _pack_element(elem: Element) -> list:
+    """An element's base slots, then its trailing extension. Appended here,
+    not inside each arm, so no tag can be forgotten. Mirrors Rust's
+    `pack_element`."""
+    slots = _pack_element_base(elem)
+    slots += [_BLEND_MODE_TO_INT[elem.blend_mode], _pack_mask(elem.mask),
+              getattr(elem, "tool_origin", None)]
+    if isinstance(elem, Path):
+        slots += [elem.stroke_brush, elem.stroke_brush_overrides]
+    elif isinstance(elem, Group):   # Layer is a Group
+        slots += [elem.isolated_blending, elem.knockout_group]
+    return slots
+
+
+def element_tag_label(elem: Element) -> str:
+    """The wire tag name, as test_fixtures/expected/binary_wire.json keys its
+    `tag_arity`. Mirrors Rust's `element_tag_label`."""
+    if isinstance(elem, Layer):
+        return "layer"
+    # `Circle` is the frozen app's class; the shared layer never builds one.
+    for cls, label in ((Group, "group"), (Line, "line"), (Rect, "rect"),
+                       (Circle, "circle"), (Ellipse, "ellipse"), (Polyline, "polyline"),
+                       (Polygon, "polygon"), (Path, "path"), (Text, "text"),
+                       (TextPath, "text_path")):
+        if isinstance(elem, cls):
+            return label
+    return "live"
+
+
+def packed_element_slot_count(elem: Element) -> int:
+    """The number of msgpack slots written for ``elem``: the arity the
+    trailing extension is defined against. Mirrors Rust's
+    `packed_element_slot_count`."""
+    return len(_pack_element(elem))
+
+
+def _pack_element_base(elem: Element) -> list:
     common = _pack_common(elem)
 
     # Layer must be checked before Group since Layer extends Group.
@@ -370,7 +459,7 @@ def _pack_element(elem: Element) -> list:
         cmds = [_pack_path_command(c) for c in elem.d]
         return [_TAG_PATH, *common,
                 cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke),
-                _pack_width_points(elem.width_points)]
+                _pack_width_points(elem.width_points), _FILL_RULE_NON_ZERO]
     elif isinstance(elem, Text):
         tspans = [_pack_tspan(t) for t in elem.tspans]
         return [_TAG_TEXT, *common,
@@ -553,17 +642,61 @@ def _unpack_common(arr: list) -> dict:
     )
 
 
+def _slot(arr: list, i: int):
+    return arr[i] if i < len(arr) else None
+
+
+def _tolerant_bool(v) -> bool:
+    return v if isinstance(v, bool) else False
+
+
+def _tolerant_str(v) -> str | None:
+    return v if isinstance(v, str) else None
+
+
+def _unpack_mask(v) -> Mask | None:
+    """Inverse of `_pack_mask`, tolerant: absent, nil, not an array, or an
+    array whose subtree slot is not itself an element array all read as no
+    mask. A short array takes the field defaults. Mirrors Rust's
+    `unpack_mask`."""
+    if not (isinstance(v, list) and v and isinstance(v[0], list)):
+        return None
+    def flag(i, default):
+        x = _slot(v, i)
+        return x if isinstance(x, bool) else default
+    ut = _slot(v, 5)
+    return Mask(subtree=_unpack_element(v[0]),
+                clip=flag(1, True), invert=flag(2, False),
+                disabled=flag(3, False), linked=flag(4, True),
+                unlink_transform=_unpack_transform(ut) if isinstance(ut, list) else None)
+
+
+def _unpack_mode(v) -> BlendMode:
+    # `bool` is an `int` here and is NOT a mode tag (Rust's `as_i64` refuses
+    # a boolean too).
+    if isinstance(v, int) and not isinstance(v, bool):
+        return _INT_TO_BLEND_MODE.get(v, BlendMode.NORMAL)
+    return BlendMode.NORMAL
+
+
 def _unpack_element(arr: list) -> Element:
     tag = arr[0]
     common = _unpack_common(arr)
+    # The trailing extension at the tag's base arity, read tolerantly.
+    base = _TAG_BASE_ARITY.get(tag, len(arr))
+    common["blend_mode"] = _unpack_mode(_slot(arr, base + _EXT_MODE))
+    common["mask"] = _unpack_mask(_slot(arr, base + _EXT_MASK))
+    blending = dict(
+        isolated_blending=_tolerant_bool(_slot(arr, base + _EXT_ISOLATED_BLENDING)),
+        knockout_group=_tolerant_bool(_slot(arr, base + _EXT_KNOCKOUT_GROUP)))
     # Type-specific payload begins at index 7 (after the common block).
 
     if tag == _TAG_LAYER:
         children = tuple(_unpack_element(c) for c in arr[7])
-        return Layer(children=children, **common)
+        return Layer(children=children, **blending, **common)
     elif tag == _TAG_GROUP:
         children = tuple(_unpack_element(c) for c in arr[7])
-        return Group(children=children, **common)
+        return Group(children=children, **blending, **common)
     elif tag == _TAG_LINE:
         wp = _unpack_width_points(arr[12]) if len(arr) > 12 else ()
         return Line(x1=arr[7], y1=arr[8], x2=arr[9], y2=arr[10],
@@ -599,10 +732,16 @@ def _unpack_element(arr: list) -> Element:
     elif tag == _TAG_PATH:
         cmds = tuple(_unpack_path_command(c) for c in arr[7])
         wp = _unpack_width_points(arr[10]) if len(arr) > 10 else ()
+        # Slot 11 is the ports' fill rule, which this model does not hold.
         return Path(d=cmds,
                     fill=_unpack_fill(arr[8]),
                     stroke=_unpack_stroke(arr[9]),
-                    width_points=wp, **common)
+                    width_points=wp,
+                    tool_origin=_tolerant_str(_slot(arr, base + _EXT_TOOL_ORIGIN)),
+                    stroke_brush=_tolerant_str(_slot(arr, base + _EXT_STROKE_BRUSH)),
+                    stroke_brush_overrides=_tolerant_str(
+                        _slot(arr, base + _EXT_STROKE_BRUSH_OVERRIDES)),
+                    **common)
     elif tag == _TAG_TEXT:
         # Prefer the trailing tspans field when present; otherwise
         # fall back to the single-default-tspan derived from content
