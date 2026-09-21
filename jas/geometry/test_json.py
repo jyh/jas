@@ -31,12 +31,16 @@ from geometry.normalize import dedupe_element_ids
 # ------------------------------------------------------------------ #
 
 def _fmt(v: float) -> str:
+    # SIX decimals (R3), as in both active ports since 2026-08-02. At 4dp the
+    # oracle shared the SVG writer's position quantizer, so a divergence below
+    # 1e-4 was invisible by construction. Six and not more: see the rationale
+    # beside `fmt` in jas_dioxus/src/geometry/test_json.rs.
     # Use math.floor(x + 0.5) instead of round() to avoid Python's
     # banker's rounding (round-half-to-even), matching the other languages.
-    rounded = math.floor(v * 10000 + 0.5) / 10000
+    rounded = math.floor(v * 1000000 + 0.5) / 1000000
     if rounded == math.trunc(rounded) and rounded % 1 == 0:
         return f"{rounded:.1f}"
-    s = f"{rounded:.4f}"
+    s = f"{rounded:.6f}"
     # Strip trailing zeros but keep at least one digit after decimal.
     while s.endswith("0") and not s.endswith(".0"):
         s = s[:-1]
