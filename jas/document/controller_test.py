@@ -1560,5 +1560,67 @@ class RectPromotionPreservesIdentityTest(absltest.TestCase):
                 self.assertEqual(getattr(out, name), getattr(src, name))
 
 
+class GroupMoveTest(absltest.TestCase):
+    """GROUPMOVE: a container selected as ONE entry moves its members.
+
+    A container has no control points of its own beyond its four bbox
+    corners, so a full selection of it is a selection of its subtree, and a
+    move must translate every member. Both active ports carry this arm
+    (element.rs move_control_points, "CONTAINERS AND THE REMAINING LIVE
+    KINDS") since 2026-07-29. The reference fell through to ``case _`` and
+    returned the element unchanged, so a group could not be moved at all.
+    The predicate is the element's OWN control-point count, never zero: a
+    full selection is spelled `all` or `partial([0, 1, 2, 3])` (CPGUARD).
+    """
+
+    def _doc(self):
+        a = Rect(x=0, y=0, width=10, height=10)
+        b = Rect(x=20, y=20, width=5, height=5)
+        group = Group(children=(a, b))
+        return Document(layers=(Layer(children=(group,), name="L0"),))
+
+    def _drag(self, path):
+        model = Model(document=self._doc())
+        ctrl = Controller(model=model)
+        ctrl.select_element(path)
+        ctrl.move_selection(10.0, 5.0)
+        group = model.document.layers[0].children[0]
+        return [(c.x, c.y) for c in group.children]
+
+    def test_a_group_selected_as_one_entry_moves(self):
+        # The group's parent is a Layer, so the selection is the group alone.
+        self.assertEqual(self._drag((0, 0)), [(10.0, 5.0), (30.0, 25.0)])
+
+    def test_a_group_selected_through_its_child_moves_once(self):
+        # The reference selects the group AND each child here (the pre-§20
+        # shape); every entry is read from the original document, so the
+        # members still move exactly once.
+        self.assertEqual(self._drag((0, 0, 0)), [(10.0, 5.0), (30.0, 25.0)])
+
+    def test_the_full_selection_has_two_spellings(self):
+        from document.document import selection_all, selection_partial
+        group = self._doc().layers[0].children[0]
+        for kind in (selection_all(), selection_partial([0, 1, 2, 3])):
+            with self.subTest(kind=kind):
+                moved = move_control_points(group, kind, 5.0, 7.0)
+                self.assertEqual(moved.children[0].x, 5.0)
+                self.assertEqual(moved.children[1].y, 27.0)
+
+    def test_one_corner_of_a_group_is_not_a_move(self):
+        # A partial container selection is a resize gesture, and group
+        # resize does not exist: the group is returned unchanged.
+        from document.document import selection_partial
+        group = self._doc().layers[0].children[0]
+        self.assertEqual(move_control_points(group, selection_partial([0]), 5.0, 7.0),
+                         group)
+
+    def test_a_compound_shape_selected_whole_moves_its_operands(self):
+        from document.document import selection_all
+        from geometry.element import CompoundShape
+        compound = CompoundShape(operands=(Rect(x=0, y=0, width=10, height=10),))
+        moved = move_control_points(compound, selection_all(), 5.0, 7.0)
+        self.assertEqual((moved.operands[0].x, moved.operands[0].y), (5.0, 7.0))
+
+
 if __name__ == "__main__":
     absltest.main()
