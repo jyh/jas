@@ -276,3 +276,43 @@ def test_text_path_lasso_enclosing_its_bounds_hits():
     assert bw > 0 and bh > 0
     lasso = _box(bx - 10, by - 10, bx + bw + 10, by + bh + 10)
     assert element_intersects_polygon(tp, lasso)
+
+
+def test_identity_transform_changes_no_answer_over_the_shared_corpus():
+    # The class behind every arm above: an element WITH a transform takes
+    # the polygon path, so a kind either path forgets answers differently
+    # the moment it gains one. The identity moves no point, so each
+    # null-transform element vector in the shared corpus must answer the
+    # same with it. Before these arms, 9 of the corpus's 31 did not.
+    import dataclasses
+    import json
+    import os
+    from geometry.test_json import parse_element_json
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    fixture = os.path.join(here, "..", "..", "test_fixtures", "algorithms",
+                           "hit_test.json")
+    with open(fixture, encoding="utf-8") as f:
+        vectors = json.load(f)
+    checked = 0
+    for v in vectors:
+        if v["function"] not in ("element_intersects_rect",
+                                 "element_intersects_polygon"):
+            continue
+        elem = parse_element_json(v["element"])
+        if elem.transform is not None:
+            continue
+        ident = dataclasses.replace(elem, transform=Transform())
+        if v["function"] == "element_intersects_rect":
+            plain = element_intersects_rect(elem, *v["args"])
+            moved = element_intersects_rect(ident, *v["args"])
+        else:
+            poly = [tuple(p) for p in v["polygon"]]
+            plain = element_intersects_polygon(elem, poly)
+            moved = element_intersects_polygon(ident, poly)
+        assert plain == moved, (
+            f"{v['name']}: {plain} with no transform, {moved} with the identity")
+        checked += 1
+    # The corpus held 31 such vectors when this was written; a floor, not a
+    # pin, so an added vector passes and a lost enumeration does not.
+    assert checked >= 31, f"only {checked} null-transform element vectors reached"
