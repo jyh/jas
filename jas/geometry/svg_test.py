@@ -1083,5 +1083,139 @@ class Phase2MetadataSvgTest(absltest.TestCase):
         self.assertEqual(parsed.print_preferences, p)
 
 
+class SvgCodecFieldsTest(absltest.TestCase):
+    """The attributes the ports' SVG codec carries and this one dropped, each
+    measured by `codec_field_survival` (test_fixtures/expected/). Mirrors
+    jas_dioxus/src/geometry/svg.rs: `stroke-dasharray` / `stroke-miterlimit`,
+    `jas:locked`, `jas:isolated-blending` / `jas:knockout-group`, and the
+    stroke profile (`jas:width-points`, `jas:stroke-brush`,
+    `jas:stroke-brush-overrides`). Every one is omitted at its default, so a
+    plain document serializes byte-identically to before."""
+
+    def _round_trip(self, *children):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),))
+        svg = document_to_svg(doc)
+        return svg, svg_to_document(svg).layers[0].children
+
+    def _stroke(self, **kw):
+        return Stroke(color=RgbColor(0, 0, 0), **kw)
+
+    def test_plain_stroke_writes_none_of_the_new_attributes(self):
+        svg, _ = self._round_trip(
+            Path(d=(MoveTo(0, 0), LineTo(10, 10)), stroke=self._stroke()))
+        for attr in ("stroke-dasharray", "stroke-miterlimit", "jas:locked",
+                     "jas:isolated-blending", "jas:knockout-group",
+                     "jas:width-points", "jas:stroke-brush"):
+            self.assertNotIn(attr, svg)
+        self.assertNotIn("xmlns:jas", svg)
+
+    def test_dash_pattern_and_miter_limit_round_trip(self):
+        stroke = self._stroke(dash_pattern=(3.0, 1.5, 6.0, 0.75), miter_limit=7.5)
+        svg, (p,) = self._round_trip(Path(d=(MoveTo(0, 0), LineTo(10, 10)), stroke=stroke))
+        self.assertIn('stroke-dasharray="4,2,8,1"', svg)  # pt -> px
+        self.assertIn('stroke-miterlimit="7.5"', svg)     # a ratio: unitless
+        self.assertEqual(p.stroke.dash_pattern, (3.0, 1.5, 6.0, 0.75))
+        self.assertEqual(p.stroke.miter_limit, 7.5)
+
+    def _read_stroke(self, extra):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg"><g>'
+               f'<path d="M0 0 L10 10" stroke="#000000"{extra}/></g></svg>')
+        return svg_to_document(svg).layers[0].children[0].stroke
+
+    def test_dasharray_reader_accepts_both_separators_and_none(self):
+        self.assertEqual(self._read_stroke(' stroke-dasharray="4, 2  8"').dash_pattern,
+                         (3.0, 1.5, 6.0))
+        self.assertEqual(self._read_stroke(' stroke-dasharray="none"').dash_pattern, ())
+        self.assertEqual(self._read_stroke("").dash_pattern, ())
+        self.assertEqual(self._read_stroke("").miter_limit, 10.0)
+
+    def test_dasharray_reader_truncates_at_six_and_refuses_a_bad_token(self):
+        # The ports hold at most six and cut a longer foreign list; a token
+        # that is not a number empties the pattern rather than half-reading it.
+        self.assertEqual(
+            len(self._read_stroke(' stroke-dasharray="4 4 4 4 4 4 4 4"').dash_pattern), 6)
+        self.assertEqual(self._read_stroke(' stroke-dasharray="4 x 4"').dash_pattern, ())
+
+    def test_locked_survives_on_every_kind(self):
+        # The writer's id helper is called by every arm, so the flag rides
+        # each one; a missed arm would be a silent drop.
+        kinds = (
+            Line(x1=0, y1=0, x2=1, y2=1, stroke=self._stroke(), locked=True),
+            Rect(x=0, y=0, width=1, height=1, locked=True),
+            Ellipse(cx=0, cy=0, rx=1, ry=2, locked=True),
+            Ellipse(cx=0, cy=0, rx=1, ry=1, locked=True),
+            Polyline(points=((0, 0), (1, 1)), locked=True),
+            Polygon(points=((0, 0), (1, 0), (1, 1)), locked=True),
+            Path(d=(MoveTo(0, 0), LineTo(1, 1)), locked=True),
+            Text(x=0, y=0, content="a", locked=True),
+            TextPath(d=(MoveTo(0, 0), LineTo(10, 0)), content="a", locked=True),
+            Group(children=(Rect(x=0, y=0, width=1, height=1),), locked=True),
+        )
+        svg, back = self._round_trip(*kinds)
+        self.assertEqual(svg.count('jas:locked="true"'), len(kinds))
+        self.assertIn("xmlns:jas", svg)
+        self.assertEqual([type(e).__name__ for e in back],
+                         [type(e).__name__ for e in kinds])
+        self.assertEqual([e.locked for e in back], [True] * len(kinds))
+
+    def test_locked_layer_and_live_kinds_survive(self):
+        from geometry.element import CompoundOperation, CompoundShape, ReferenceElem
+        cs = CompoundShape(operation=CompoundOperation.UNION,
+                           operands=(Rect(x=0, y=0, width=1, height=1),), locked=True)
+        ref = ReferenceElem(target="t", locked=True)
+        doc = Document(layers=(Layer(name="L", children=(cs, ref), locked=True),))
+        back = svg_to_document(document_to_svg(doc)).layers[0]
+        self.assertTrue(back.locked)
+        self.assertEqual([e.locked for e in back.children], [True, True])
+
+    def test_only_the_string_true_locks(self):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1"><g>'
+               '<rect x="0" y="0" width="1" height="1" jas:locked="yes"/>'
+               '<rect x="0" y="0" width="1" height="1" jas:locked="true"/>'
+               '</g></svg>')
+        kids = svg_to_document(svg).layers[0].children
+        self.assertEqual([k.locked for k in kids], [False, True])
+
+    def test_container_blend_flags_round_trip_on_group_and_layer(self):
+        g = Group(children=(Rect(x=0, y=0, width=1, height=1),),
+                  isolated_blending=True, knockout_group=True)
+        doc = Document(layers=(Layer(name="L", children=(g,),
+                                     isolated_blending=True, knockout_group=True),))
+        svg = document_to_svg(doc)
+        self.assertEqual(svg.count('jas:isolated-blending="true"'), 2)
+        self.assertEqual(svg.count('jas:knockout-group="true"'), 2)
+        layer = svg_to_document(svg).layers[0]
+        self.assertEqual((layer.isolated_blending, layer.knockout_group), (True, True))
+        grp = layer.children[0]
+        self.assertEqual((grp.isolated_blending, grp.knockout_group), (True, True))
+
+    def test_container_blend_flags_are_independent(self):
+        g = Group(children=(Rect(x=0, y=0, width=1, height=1),), knockout_group=True)
+        _, (back,) = self._round_trip(g)
+        self.assertEqual((back.isolated_blending, back.knockout_group), (False, True))
+
+    def test_stroke_profile_round_trips_on_a_path(self):
+        from geometry.element import StrokeWidthPoint
+        overrides = '{"angle":30,"name":"a \\"q\\" & <b>"}'
+        p = Path(d=(MoveTo(0, 0), LineTo(10, 10)), stroke=self._stroke(),
+                 width_points=(StrokeWidthPoint(t=0.0, width_left=1.0, width_right=2.0),
+                               StrokeWidthPoint(t=1.0, width_left=3.0, width_right=4.5)),
+                 stroke_brush="basic/calligraphic_5",
+                 stroke_brush_overrides=overrides)
+        svg, (back,) = self._round_trip(p)
+        self.assertIn('jas:width-points="0,1,2 1,3,4.5"', svg)
+        self.assertEqual(back.width_points, p.width_points)
+        self.assertEqual(back.stroke_brush, "basic/calligraphic_5")
+        self.assertEqual(back.stroke_brush_overrides, overrides)
+
+    def test_width_points_reader_refuses_a_row_with_a_fourth_field(self):
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1"><g>'
+               '<path d="M0 0 L1 1" jas:width-points="0,1,2 0.5,1,2,9 1,3,4"/>'
+               '</g></svg>')
+        (p,) = svg_to_document(svg).layers[0].children
+        self.assertEqual([(w.t, w.width_left, w.width_right) for w in p.width_points],
+                         [(0.0, 1.0, 2.0), (1.0, 3.0, 4.0)])
+
+
 if __name__ == "__main__":
     absltest.main()
