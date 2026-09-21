@@ -1162,7 +1162,7 @@ def op_apply(model: Model, op: dict) -> None:
     # selection-only batch as an undoable step. ``select_by_ids`` is the id-primary
     # twin (selection-only, non-undoable), so it is excluded for the identical
     # reason.
-    if name not in ("select_rect", "select_by_ids") and not model.in_txn:
+    if name not in ("select_rect", "select_by_ids", "select_element") and not model.in_txn:
         model.begin_txn()
 
     ctrl = Controller(model=model)
@@ -1214,6 +1214,22 @@ def op_apply(model: Model, op: dict) -> None:
         # Keystone: the resolved selection is this op's targets, so
         # ``capture_recipe`` can seed its working set (empty targets => empty
         # recipe). Resolved AFTER the Controller call.
+        targets = selection_to_ids(model.document)
+    elif name == "select_element":
+        # Selection-only, like select_rect. Mirrors op_apply.rs "select_element"
+        # and JasSwift's twin. Until 2026-09-21 the reference had no such verb,
+        # so the final ``else`` skipped it SILENTLY: every corpus case that
+        # selects by path selected nothing, and whatever followed acted on an
+        # empty selection. A path naming no element is skipped here; Rust
+        # returns MissingTarget, and the reference has no op-error channel.
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        try:
+            model.document.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        ctrl.select_element(path)
         targets = selection_to_ids(model.document)
     elif name == "move_selection":
         ctrl.move_selection(num_field(op, "dx"), num_field(op, "dy"))
@@ -1504,8 +1520,11 @@ def op_apply(model: Model, op: dict) -> None:
         ctrl.simplify_selection(precision)
     else:
         # Unknown verb: a malformed/unsupported production payload is skipped
-        # rather than raising. (The harness corpus only carries known verbs, so
-        # this never fires under test — the byte-gate would catch a typo.)
+        # rather than raising. NOTE: this used to say the corpus "only carries
+        # known verbs, so this never fires under test". It fired: the ports
+        # added `select_element` after the five-port-parity tag and the corpus
+        # used it, and this branch swallowed it without a sound until
+        # scripts/check_reference_drift.py ran the harness at HEAD.
         return
 
     # Capture the op into the open transaction so the journal replays to the same
