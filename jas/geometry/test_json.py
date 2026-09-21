@@ -1209,10 +1209,14 @@ def _parse_element_base(d: dict) -> Element:
     elif typ == "text":
         tspans = _parse_tspans_field(d)
         tspans_kw = {"tspans": tspans} if tspans is not None else {}
+        # Absent keys take the defaults the Rust reader gives them
+        # (`parse_element`'s text arm): sans-serif, normal, normal, 0.
         return Text(x=d["x"], y=d["y"],
                     content=_parse_content_or_tspans(d),
-                    font_family=d["font_family"], font_size=d["font_size"],
-                    font_weight=d["font_weight"], font_style=d["font_style"],
+                    font_family=d.get("font_family", "sans-serif"),
+                    font_size=d["font_size"],
+                    font_weight=d.get("font_weight", "normal"),
+                    font_style=d.get("font_style", "normal"),
                     text_decoration=_parse_text_decoration_field(d.get("text_decoration")),
                     text_transform=d.get("text_transform") or "",
                     font_variant=d.get("font_variant") or "",
@@ -1225,7 +1229,7 @@ def _parse_element_base(d: dict) -> Element:
                     horizontal_scale=d.get("horizontal_scale") or "",
                     vertical_scale=d.get("vertical_scale") or "",
                     kerning=d.get("jas_kerning_mode") or "",
-                    width=d["width"], height=d["height"],
+                    width=d.get("width", 0.0), height=d.get("height", 0.0),
                     fill=_parse_fill(d["fill"]),
                     stroke=_parse_stroke(d["stroke"]), **tspans_kw, **common)
     elif typ == "text_path":
@@ -1234,11 +1238,11 @@ def _parse_element_base(d: dict) -> Element:
         tspans_kw = {"tspans": tspans} if tspans is not None else {}
         return TextPath(d=cmds,
                         content=_parse_content_or_tspans(d),
-                        start_offset=d["start_offset"],
-                        font_family=d["font_family"],
+                        start_offset=d.get("start_offset", 0.0),
+                        font_family=d.get("font_family", "sans-serif"),
                         font_size=d["font_size"],
-                        font_weight=d["font_weight"],
-                        font_style=d["font_style"],
+                        font_weight=d.get("font_weight", "normal"),
+                        font_style=d.get("font_style", "normal"),
                         text_decoration=_parse_text_decoration_field(d.get("text_decoration")),
                         text_transform=d.get("text_transform") or "",
                         font_variant=d.get("font_variant") or "",
