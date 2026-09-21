@@ -2050,9 +2050,18 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
             for i in range(4):
                 if _contains(kind, i):
                     pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
-            return Polygon(points=tuple(pts),
-                           fill=elem.fill, stroke=elem.stroke,
-                           opacity=elem.opacity, transform=elem.transform)
+            # A 1->1 reshape preserves identity: every field with a
+            # counterpart on Polygon is carried (EDIT_SEMANTICS_FREEZE §3.1),
+            # derived from the dataclasses so a new shared field is carried
+            # without an edit. It used to name four fields, and dropped id,
+            # name, lock, visibility, blend mode, mask and both gradients.
+            # NOT YET MIRRORED: the active ports also flatten rx/ry into
+            # the emitted points (ruled answer (3)); here a rounded rect
+            # still promotes to its four square corners.
+            carried = {f.name: getattr(elem, f.name)
+                       for f in dataclasses.fields(Polygon)
+                       if f.name != "points" and hasattr(elem, f.name)}
+            return Polygon(points=tuple(pts), **carried)
         case Circle(cx=cx, cy=cy, r=r):
             if _is_all(kind, 4):
                 return replace(elem, cx=cx + dx, cy=cy + dy)
