@@ -61,6 +61,167 @@ def _assert_svg_parse(test: absltest.TestCase, name: str):
     test.assertEqual(actual, expected, f"Cross-language test '{name}' failed")
 
 
+# ---------------------------------------------------------------
+# CODEC FIELD SURVIVAL -- the reference's consumer of
+# test_fixtures/expected/codec_field_survival.json.
+#
+# The shared matrix says, per codec and per field, whether an
+# attribute-SATURATED element survives a round trip. Rust
+# (`codec_field_survival` in jas_dioxus/src/cross_language_test.rs) and
+# Swift (`codecFieldSurvival` in JasSwift/Tests/CrossLanguageTests.swift)
+# have consumed it since 2026-07-28. The reference never did, so the
+# reference's canonical test-JSON kept dropping all twelve fields the
+# ports' CODECSEE wave restored, and no lane could see it.
+#
+# This compares at the MODEL level (dataclass equality), mirroring the
+# ports row for row, with two additions the reference needs:
+#   * NOT-HELD. A field the reference model has no attribute for would
+#     compare None == None and read PRESERVED by construction. It is
+#     reported as its own state instead, so it reds against PRESERVED.
+#   * Saturation is checked. Every watched field must differ from its
+#     dataclass default, or the row cannot fail and says nothing.
+# The port name for `port_overrides` is "python".
+# ---------------------------------------------------------------
+
+_SURVIVAL_NOT_HELD = "NOT-HELD"
+
+
+def _survival_gradient():
+    from geometry.element import (
+        Gradient, GradientMethod, GradientStop, GradientType, StrokeSubMode,
+    )
+    # Stop colours are hex strings in this model, as in JasSwift.
+    return Gradient(
+        type=GradientType.RADIAL, angle=45.0, aspect_ratio=200.0,
+        method=GradientMethod.SMOOTH, dither=True,
+        stroke_sub_mode=StrokeSubMode.ALONG,
+        stops=(GradientStop(color="#ff0000", location=0.0, opacity=100.0,
+                            midpoint_to_next=25.0),
+               GradientStop(color="#0000ff", location=100.0, opacity=50.0,
+                            midpoint_to_next=50.0)))
+
+
+def _survival_saturated_path():
+    """The attribute-SATURATED Path: every optional field on the kind set to
+    a non-default value. Mirrors `survival_saturated_path()` in Rust and
+    `saturatedPath()` in JasSwift. The reference model has no `fill_rule`,
+    so it cannot be set here; the row reports it NOT-HELD."""
+    from geometry.element import (
+        ArrowAlign, Arrowhead, BlendMode, ClosePath, Color, Fill, LineCap,
+        LineJoin, LineTo, Mask, MoveTo, Path, Rect, Stroke, StrokeAlign,
+        StrokeWidthPoint, Transform, Visibility,
+    )
+    return Path(
+        d=(MoveTo(0.0, 0.0), LineTo(10.0, 10.0), ClosePath()),
+        fill=Fill(color=Color.hsb(120.0, 0.5, 0.6, 0.8), opacity=0.6),
+        stroke=Stroke(
+            color=Color.cmyk(0.1, 0.2, 0.3, 0.4, 0.9), width=4.5,
+            linecap=LineCap.ROUND, linejoin=LineJoin.BEVEL,
+            miter_limit=7.5, align=StrokeAlign.INSIDE,
+            # 3/1.5/6/0.75 pt are 4/2/8/1 px exactly, so the SVG round trip
+            # cannot read DROPPED for a precision reason. Mirrored in both
+            # ports.
+            dash_pattern=(3.0, 1.5, 6.0, 0.75), dash_align_anchors=True,
+            start_arrow=Arrowhead.CLOSED_ARROW, end_arrow=Arrowhead.CIRCLE,
+            start_arrow_scale=150.0, end_arrow_scale=75.0,
+            arrow_align=ArrowAlign.CENTER_AT_END, opacity=0.75),
+        width_points=(StrokeWidthPoint(0.0, 1.0, 2.0),
+                      StrokeWidthPoint(1.0, 3.0, 4.0)),
+        opacity=0.5,
+        transform=Transform(a=2.0, b=0.0, c=0.0, d=3.0, e=5.0, f=7.0),
+        locked=True,
+        visibility=Visibility.OUTLINE,
+        blend_mode=BlendMode.MULTIPLY,
+        mask=Mask(
+            subtree=Rect(x=1.0, y=2.0, width=3.0, height=4.0,
+                         fill=Fill(color=Color.rgb(1.0, 1.0, 1.0))),
+            clip=True, invert=True, disabled=False, linked=False,
+            unlink_transform=Transform(a=1.0, b=0.0, c=0.0, d=1.0,
+                                       e=9.0, f=9.0)),
+        fill_gradient=_survival_gradient(),
+        stroke_gradient=_survival_gradient(),
+        stroke_brush="basic/calligraphic_5",
+        stroke_brush_overrides='{"angle":30}',
+        tool_origin="blob_brush",
+        name="name_path",
+        id="id_path")
+
+
+def _survival_saturated_group():
+    """The container half. `isolated_blending` and `knockout_group` live on
+    Group and Layer only. It carries a child on purpose: an EMPTY container
+    is a shape a codec may legitimately drop."""
+    from geometry.element import Color, Fill, Group, Rect
+    return Group(
+        children=(Rect(x=30.0, y=40.0, width=5.0, height=6.0,
+                       fill=Fill(color=Color.rgb(1.0, 1.0, 1.0))),),
+        isolated_blending=True, knockout_group=True,
+        name="name_group", id="id_group")
+
+
+def _survival_doc():
+    from document.document import Document
+    from geometry.element import Layer
+    return Document(layers=(Layer(
+        name="Layer 1",
+        children=(_survival_saturated_path(), _survival_saturated_group()),
+        isolated_blending=True, knockout_group=True),))
+
+
+# (field, subject, attribute chain), in the ports' row order. The subject is
+# which element of the saturated document carries the field.
+_SURVIVAL_ROWS = [
+    ("common.locked", "path", ("locked",)),
+    ("common.mask", "path", ("mask",)),
+    ("common.mode", "path", ("blend_mode",)),
+    ("common.tool_origin", "path", ("tool_origin",)),
+    ("fill_gradient", "path", ("fill_gradient",)),
+    ("fill_rule", "path", ("fill_rule",)),
+    ("group.isolated_blending", "group", ("isolated_blending",)),
+    ("group.knockout_group", "group", ("knockout_group",)),
+    ("layer.isolated_blending", "layer", ("isolated_blending",)),
+    ("layer.knockout_group", "layer", ("knockout_group",)),
+    ("stroke.align", "path", ("stroke", "align")),
+    ("stroke.dash_align_anchors", "path", ("stroke", "dash_align_anchors")),
+    ("stroke.dash_pattern", "path", ("stroke", "dash_pattern")),
+    ("stroke.miter_limit", "path", ("stroke", "miter_limit")),
+    ("stroke_brush", "path", ("stroke_brush",)),
+    ("stroke_brush_overrides", "path", ("stroke_brush_overrides",)),
+    ("stroke_gradient", "path", ("stroke_gradient",)),
+    ("width_points", "path", ("width_points",)),
+]
+
+
+def _survival_subjects(doc):
+    """(path, group, layer) of a saturated document, or None for any the
+    round trip lost. A lost subject is a STRUCTURAL loss, not a field loss."""
+    from geometry.element import Group, Layer, Path
+    layer = doc.layers[0] if doc.layers else None
+    if not isinstance(layer, Layer):
+        return (None, None, None)
+    kids = layer.children
+    path = kids[0] if kids and isinstance(kids[0], Path) else None
+    group = next((c for c in kids
+                  if isinstance(c, Group) and not isinstance(c, Layer)), None)
+    return (path, group, layer)
+
+
+def _survival_default(obj, attr):
+    """The dataclass default of `attr` on `obj`'s class."""
+    import dataclasses
+    for f in dataclasses.fields(obj):
+        if f.name == attr:
+            if f.default is not dataclasses.MISSING:
+                return f.default
+            if f.default_factory is not dataclasses.MISSING:
+                return f.default_factory()
+    return dataclasses.MISSING
+
+
+# ---------------------------------------------------------------
+# CrossLanguageTest
+# ---------------------------------------------------------------
+
 class CrossLanguageTest(absltest.TestCase):
     # ---------------------------------------------------------------
     # SVG round-trip idempotence
@@ -176,6 +337,79 @@ class CrossLanguageTest(absltest.TestCase):
             actual = document_to_test_json(doc2)
             self.assertEqual(actual, expected,
                 f"Binary round-trip '{name}' failed: canonical JSON changed")
+
+    # ---------------------------------------------------------------
+    # Codec field survival (see the block above the class)
+    # ---------------------------------------------------------------
+
+    def test_codec_field_survival(self):
+        fx = json.loads(_read_fixture("expected/codec_field_survival.json"))
+        fields = fx["fields"]
+        self.assertTrue(fields, "codec_field_survival: the field list is empty")
+        watched = [r[0] for r in _SURVIVAL_ROWS]
+        if sorted(watched) != sorted(fields):
+            self.fail("codec_field_survival: the gate watches "
+                      f"{sorted(watched)}, the fixture declares {sorted(fields)}")
+        overrides = fx["port_overrides"]["entries"]
+
+        doc = _survival_doc()
+        before = _survival_subjects(doc)
+        by_subject = dict(zip(("path", "group", "layer"), before))
+
+        # Saturation: a field left at its default cannot be dropped, so its
+        # row would read PRESERVED whatever the codec does.
+        for field, subject, attrs in _SURVIVAL_ROWS:
+            owner = by_subject[subject]
+            for a in attrs[:-1]:
+                owner = getattr(owner, a, None)
+            if owner is None or not hasattr(owner, attrs[-1]):
+                continue  # NOT-HELD, reported per codec below
+            if getattr(owner, attrs[-1]) == _survival_default(owner, attrs[-1]):
+                self.fail(f"codec_field_survival: the saturated document "
+                          f"leaves {field} at its default, so its row "
+                          f"cannot fail")
+
+        codecs = [
+            ("test_json",
+             lambda: test_json_to_document(document_to_test_json(doc))),
+            ("binary",
+             lambda: binary_to_document(
+                 document_to_binary(doc, compress=False))),
+            ("svg", lambda: svg_to_document(document_to_svg(doc))),
+        ]
+        for codec, round_trip in codecs:
+            after = _survival_subjects(round_trip())
+            for subject, b, a in zip(("path", "group", "layer"), before, after):
+                if a is None:
+                    self.fail(f"codec_field_survival: the saturated "
+                              f"{subject} did not survive the {codec} round "
+                              f"trip AT ALL -- every {codec} row is "
+                              f"meaningless")
+            after_by = dict(zip(("path", "group", "layer"), after))
+            for field, subject, attrs in _SURVIVAL_ROWS:
+                vb, va = by_subject[subject], after_by[subject]
+                held = True
+                for a in attrs:
+                    if not hasattr(vb, a):
+                        held = False
+                        break
+                    vb, va = getattr(vb, a), getattr(va, a, None)
+                if not held:
+                    actual = _SURVIVAL_NOT_HELD
+                else:
+                    actual = "PRESERVED" if vb == va else "DROPPED"
+                override = next(
+                    (e["value"] for e in overrides
+                     if e.get("codec") == codec and e.get("field") == field
+                     and e.get("port") == "python"), None)
+                expected = override or fx["survival"][codec][field]
+                note = (" (a port_overrides entry pins this cell; if the "
+                        "divergence closed, delete the entry)"
+                        if override else "")
+                self.assertEqual(
+                    actual, expected,
+                    f"codec_field_survival: {codec}/{field} -- fixture says "
+                    f"{expected}, python measured {actual}{note}")
 
     # ---------------------------------------------------------------
     # SVG parse equivalence
