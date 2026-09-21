@@ -16,7 +16,7 @@ from geometry.element import (
     flatten_path_commands,
     Line, Rect, Circle, Ellipse, Polyline, Polygon, Path, Text, TextPath, Group, Layer,
     path_point_at_offset, path_closest_offset, path_distance_to_point,
-    clear_ids,
+    clear_ids, CompoundShape, CompoundOperation,
     with_fill, with_stroke,
     Gradient, GradientStop, GradientNode, GradientType, GradientMethod, StrokeSubMode,
 )
@@ -1048,6 +1048,33 @@ class ClearIdsTest(absltest.TestCase):
         self.assertIsNone(cleared.children[0].id)
         # Other fields preserved.
         self.assertEqual(cleared.name, "L0")
+
+    def test_clears_a_compound_shapes_operands(self):
+        # A compound's operands are OWNED, but they are not `children`, so a
+        # walk over children alone clears the compound's own id and leaves
+        # every operand id duplicated on the copy. Both active ports fixed
+        # this on 2026-07-27 (element.rs `clear_ids` descends `operands`,
+        # mirroring `Document::element_ids`); the reference never received it.
+        nested = Rect(x=5, y=5, width=2, height=2, id="nested-1")
+        operands = (
+            Rect(x=0, y=0, width=10, height=10, id="operand-a"),
+            Group(children=(nested,), id="operand-b"),
+        )
+        compound = CompoundShape(operation=CompoundOperation.EXCLUDE,
+                                 operands=operands, id="compound-1")
+        cleared = clear_ids(compound)
+        self.assertIsInstance(cleared, CompoundShape)
+        self.assertIsNone(cleared.id)
+        self.assertEqual([o.id for o in cleared.operands], [None, None])
+        self.assertIsNone(cleared.operands[1].children[0].id)
+        # Bystanders: the operation and the operand geometry are untouched.
+        self.assertEqual(cleared.operation, CompoundOperation.EXCLUDE)
+        self.assertEqual(cleared.operands[0].width, 10)
+        # The source keeps every identity it had.
+        self.assertEqual(compound.id, "compound-1")
+        self.assertEqual([o.id for o in compound.operands],
+                         ["operand-a", "operand-b"])
+        self.assertEqual(compound.operands[1].children[0].id, "nested-1")
 
 
 if __name__ == "__main__":
