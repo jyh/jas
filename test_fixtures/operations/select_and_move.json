@@ -94,5 +94,24 @@
       "undo"
     ],
     "expected_json": "undo_move.json"
+  },
+  {
+    "expected_json": "move_group_as_one_entry.json",
+    "name": "move_group_as_one_entry",
+    "ops": [
+      {
+        "op": "select_element",
+        "path": [
+          0,
+          0
+        ]
+      },
+      {
+        "dx": 10,
+        "dy": 5,
+        "op": "move_selection"
+      }
+    ],
+    "setup_svg": "group_nested.svg"
   }
 ]
