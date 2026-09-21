@@ -480,18 +480,20 @@ class CrossLanguageTest(absltest.TestCase):
             "saturated_extension": doc([_survival_saturated_path()]),
         }
 
-        def first_difference(want, got, path=""):
+        def differences(want, got, path=""):
+            # EVERY differing slot, never the first: a case with one known
+            # difference would otherwise hide each later slot behind it, and
+            # the ratchet key -- which is this message -- would not move.
             if isinstance(want, list) and isinstance(got, list):
+                out = []
                 for i, (w, g) in enumerate(zip(want, got)):
-                    d = first_difference(w, g, f"{path}/{i}")
-                    if d:
-                        return d
+                    out += differences(w, g, f"{path}/{i}")
                 if len(want) != len(got):
-                    return f"{path} has {len(got)} slots, the fixture {len(want)}"
-                return None
+                    out.append(f"{path} has {len(got)} slots, the fixture {len(want)}")
+                return out
             if type(want) is not type(got) or want != got:
-                return f"slot {path or '/'} (fixture {want!r}, python {got!r})"
-            return None
+                return [f"slot {path or '/'} (fixture {want!r}, python {got!r})"]
+            return []
 
         self.assertEqual(sorted(cases), sorted(c["name"] for c in fx["cases"]),
                          "binary_wire: the cases built here are not the fixture's")
@@ -503,8 +505,8 @@ class CrossLanguageTest(absltest.TestCase):
             # assertEqual, never self.fail: the drift ratchet records an
             # assertEqual and continues, so one differing case cannot hide the
             # cases after it.
-            where = None if got == want else first_difference(
-                msgpack.unpackb(want[8:]), msgpack.unpackb(got[8:]))
+            where = None if got == want else "; ".join(differences(
+                msgpack.unpackb(want[8:]), msgpack.unpackb(got[8:]))) or "the header"
             self.assertEqual(where, None,
                              f"binary_wire: case '{name}' differs at {where}")
             # The pinned bytes must also decode, or the gate is green over a

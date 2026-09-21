@@ -472,12 +472,33 @@ class BinaryCommonExtensionTest(absltest.TestCase):
         self.assertEqual((back.blend_mode, back.mask, back.tool_origin,
                           back.stroke_brush, back.stroke_brush_overrides),
                          (BlendMode.NORMAL, None, None, None, None))
+        # A group's base is 8: mode 8, mask 9, tool_origin 10, then the pair.
         g = _pack_element(Group(children=()))
-        g[11] = [5, True]            # a mask whose subtree slot is not an element
-        g[13:15] = ["yes", 1]        # the blending pair, not booleans
+        self.assertEqual(len(g), 13)
+        g[8] = True                  # a boolean is not a mode tag (True == 1)
+        g[9] = [5, True]             # a mask whose subtree slot is not an element
+        g[11:13] = ["yes", 1]        # the blending pair, not booleans
         back = _unpack_element(g)
-        self.assertEqual((back.mask, back.isolated_blending, back.knockout_group),
-                         (None, False, False))
+        self.assertEqual((back.blend_mode, back.mask, back.isolated_blending,
+                          back.knockout_group),
+                         (BlendMode.NORMAL, None, False, False))
+
+    def test_a_short_mask_array_takes_the_field_defaults(self):
+        from geometry.binary import _pack_element, _unpack_element
+        p = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1))))
+        p[13] = [_pack_element(Rect(x=0, y=0, width=1, height=1))]   # subtree only
+        m = _unpack_element(p).mask
+        self.assertEqual((m.clip, m.invert, m.disabled, m.linked, m.unlink_transform),
+                         (True, False, False, True, None))
+
+    def test_blend_tags_follow_the_enum_declaration_order_the_ports_share(self):
+        # The table is written by name so the enum cannot renumber files; the
+        # two statements must still agree, because every port numbers its tags
+        # in this declaration order. A swap of two tags no fixture uses would
+        # otherwise round-trip symmetrically and pass everything else.
+        from geometry.binary import _BLEND_MODE_TO_INT
+        from geometry.element import BlendMode
+        self.assertEqual(_BLEND_MODE_TO_INT, {m: i for i, m in enumerate(BlendMode)})
 
 
 if __name__ == "__main__":
