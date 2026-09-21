@@ -23,7 +23,7 @@ from geometry.element import (
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
     GeneratedElem,
-    BlendMode, Gradient, GradientMethod, GradientNode, GradientStop,
+    BlendMode, FillRule, Gradient, GradientMethod, GradientNode, GradientStop,
     GradientType, Mask, StrokeAlign, StrokeSubMode, StrokeWidthPoint,
 )
 from geometry.normalize import dedupe_element_ids
@@ -551,6 +551,11 @@ def _element_json(elem: Element) -> str:
         cmds = [_path_command_json(c) for c in elem.d]
         o.raw("d", _json_array(cmds))
         o.raw("fill", _fill_json(elem.fill))
+        # The carried rule is part of what a path MEANS; emitted only when
+        # it is not the nonzero default (identity omission), so existing
+        # goldens are unchanged. Mirrors the Rust `Element::Path` arm.
+        if elem.fill_rule is FillRule.EVENODD:
+            o.str("fill_rule", "evenodd")
         o.raw("stroke", _stroke_json(elem.stroke))
     elif isinstance(elem, Text):
         o.str("type", "text")
@@ -1203,9 +1208,13 @@ def _parse_element_base(d: dict) -> Element:
                        stroke=_parse_stroke(d["stroke"]), **common)
     elif typ == "path":
         cmds = tuple(_parse_path_command(c) for c in d["d"])
+        # Absent means the nonzero default, the serializer's omission.
         return Path(d=cmds,
                     fill=_parse_fill(d["fill"]),
-                    stroke=_parse_stroke(d["stroke"]), **common)
+                    stroke=_parse_stroke(d["stroke"]),
+                    fill_rule=(FillRule.EVENODD if d.get("fill_rule") == "evenodd"
+                               else FillRule.NONZERO),
+                    **common)
     elif typ == "text":
         tspans = _parse_tspans_field(d)
         tspans_kw = {"tspans": tspans} if tspans is not None else {}

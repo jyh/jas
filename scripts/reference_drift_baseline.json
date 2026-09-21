@@ -34,10 +34,6 @@
  ],
  "failing": {
   "test_action_corpus :: Action test 'boolean_exclude_overlapping_rects' failed: canonical JSON mismatch": 1,
-  "test_binary_wire :: binary_wire: case 'saturated_extension' differs at slot /0/0/7/0/11 (fixture 1, python 0)": 1,
-  "test_codec_field_survival :: codec_field_survival: binary/fill_rule -- fixture says PRESERVED, python measured NOT-HELD": 1,
-  "test_codec_field_survival :: codec_field_survival: svg/fill_rule -- fixture says PRESERVED, python measured NOT-HELD": 1,
-  "test_codec_field_survival :: codec_field_survival: test_json/fill_rule -- fixture says PRESERVED, python measured NOT-HELD": 1,
   "test_gesture_corpus :: Gesture test 'blob_paint_fill' failed: canonical JSON mismatch": 1,
   "test_shortcut_structure :: Workspace test 'shortcut_structure' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'close_and_show_panel' failed: canonical JSON mismatch": 1,

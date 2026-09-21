@@ -21,6 +21,7 @@ from geometry.element import (
     GeneratedElem,
     SmoothCurveTo,
     SmoothQuadTo, Stroke, StrokeWidthPoint, Text, TextPath, Transform,
+    FillRule,
 )
 
 _PT_TO_PX = 96.0 / 72.0
@@ -403,8 +404,11 @@ def _element_svg(elem: Element, indent: str) -> str:
                 f' jas:tool-origin="{escape(tool_origin)}"'
                 if tool_origin else ""
             )
+            # `fill-rule` only when it is not the SVG default (nonzero).
+            fr_attr = (' fill-rule="evenodd"'
+                       if elem.fill_rule is FillRule.EVENODD else "")
             return (f'{indent}<path d="{_path_data(cmds)}"'
-                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
+                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}{fr_attr}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
                     f'{tool_origin_attr}'
                     f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}'
@@ -1361,6 +1365,8 @@ def _parse_element(node: ET.Element) -> Element | None:
                     opacity=opacity, transform=transform,
                     tool_origin=tool_origin,
                     stroke_brush=brush, stroke_brush_overrides=brush_overrides,
+                    fill_rule=(FillRule.EVENODD if node.get("fill-rule") == "evenodd"
+                               else FillRule.NONZERO),
                     name=name, id=eid, locked=locked)
 
     if tag == "text":

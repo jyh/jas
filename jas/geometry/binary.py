@@ -27,7 +27,7 @@ from geometry.element import (
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
-    GeneratedElem, BlendMode, Mask,
+    GeneratedElem, BlendMode, FillRule, Mask,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -138,11 +138,10 @@ _BLEND_MODE_TO_INT = {
 }
 _INT_TO_BLEND_MODE = {v: k for k, v in _BLEND_MODE_TO_INT.items()}
 
-# The fill rule the ports carry at a path's slot 11. This model holds no fill
-# rule, so it writes the value the ports read as the default (nonzero) and
-# ignores the slot on read -- the slot exists so the path's extension starts
-# where theirs does.
-_FILL_RULE_NON_ZERO = 0
+# A path's fill rule rides its slot 11: 0 nonzero, 1 evenodd. Absent (a blob
+# from before the slot) or unrecognised reads nonzero, the value those files
+# were written with. Mirrors Rust's `pack_fill_rule` / `unpack_fill_rule`.
+_FILL_RULE_TO_INT = {FillRule.NONZERO: 0, FillRule.EVENODD: 1}
 
 # -- Pack (Document -> msgpack-ready structure) ------------------------------
 
@@ -459,7 +458,8 @@ def _pack_element_base(elem: Element) -> list:
         cmds = [_pack_path_command(c) for c in elem.d]
         return [_TAG_PATH, *common,
                 cmds, _pack_fill(elem.fill), _pack_stroke(elem.stroke),
-                _pack_width_points(elem.width_points), _FILL_RULE_NON_ZERO]
+                _pack_width_points(elem.width_points),
+                _FILL_RULE_TO_INT[elem.fill_rule]]
     elif isinstance(elem, Text):
         tspans = [_pack_tspan(t) for t in elem.tspans]
         return [_TAG_TEXT, *common,
@@ -732,8 +732,11 @@ def _unpack_element(arr: list) -> Element:
     elif tag == _TAG_PATH:
         cmds = tuple(_unpack_path_command(c) for c in arr[7])
         wp = _unpack_width_points(arr[10]) if len(arr) > 10 else ()
-        # Slot 11 is the ports' fill rule, which this model does not hold.
+        fr = _slot(arr, 11)
         return Path(d=cmds,
+                    fill_rule=(FillRule.EVENODD
+                               if fr == 1 and not isinstance(fr, bool)
+                               else FillRule.NONZERO),
                     fill=_unpack_fill(arr[8]),
                     stroke=_unpack_stroke(arr[9]),
                     width_points=wp,

@@ -106,11 +106,11 @@ def _survival_gradient():
 def _survival_saturated_path():
     """The attribute-SATURATED Path: every optional field on the kind set to
     a non-default value. Mirrors `survival_saturated_path()` in Rust and
-    `saturatedPath()` in JasSwift. The reference model has no `fill_rule`,
-    so it cannot be set here; the row reports it NOT-HELD."""
+    `saturatedPath()` in JasSwift. `fill_rule` is evenodd, as in both ports
+    (the reference model has carried it since 2026-09-21)."""
     from geometry.element import (
-        ArrowAlign, Arrowhead, BlendMode, ClosePath, Color, Fill, LineCap,
-        LineJoin, LineTo, Mask, MoveTo, Path, Rect, Stroke, StrokeAlign,
+        ArrowAlign, Arrowhead, BlendMode, ClosePath, Color, Fill, FillRule,
+        LineCap, LineJoin, LineTo, Mask, MoveTo, Path, Rect, Stroke, StrokeAlign,
         StrokeWidthPoint, Transform, Visibility,
     )
     return Path(
@@ -145,6 +145,7 @@ def _survival_saturated_path():
         stroke_brush="basic/calligraphic_5",
         stroke_brush_overrides='{"angle":30}',
         tool_origin="blob_brush",
+        fill_rule=FillRule.EVENODD,
         name="name_path",
         id="id_path")
 

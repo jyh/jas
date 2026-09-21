@@ -409,9 +409,8 @@ class BinaryCommonExtensionTest(absltest.TestCase):
 
     def test_path_writes_the_fill_rule_slot_the_extension_is_counted_from(self):
         # Rust and Swift carry fill_rule at slot 11, so a path's extension
-        # starts at 12. This model does not hold a fill rule, so it writes
-        # the one the ports read as the default (0, nonzero); without the
-        # slot every later path slot would sit one index early.
+        # starts at 12; without the slot every later path slot would sit one
+        # index early. A default path writes 0 (nonzero) there.
         from geometry.binary import _pack_element
         arr = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1))))
         self.assertEqual(arr[11], 0)
