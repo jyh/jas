@@ -23,6 +23,8 @@ from geometry.element import (
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
     GeneratedElem,
+    BlendMode, Gradient, GradientMethod, GradientNode, GradientStop,
+    GradientType, Mask, StrokeAlign, StrokeSubMode, StrokeWidthPoint,
 )
 from geometry.normalize import dedupe_element_ids
 
@@ -163,7 +165,86 @@ def _stroke_json(stroke: Stroke | None) -> str:
     o.str("linejoin", stroke.linejoin.value)
     o.num("opacity", stroke.opacity)
     o.num("width", stroke.width)
+    # The four stroke fields this codec dropped by construction until the
+    # reference caught up with the ports' CODECSEE wave (see
+    # `_extended_element_fields`). Emitted only when non-default, per this
+    # file's identity-omission convention, so a stroke that carries none of
+    # them serializes byte-identically to before. Mirrors the Rust
+    # `stroke_json` key for key.
+    if stroke.align != StrokeAlign.CENTER:
+        o.str("align", stroke.align.value)
+    if stroke.dash_pattern:
+        o.raw("dash_pattern", _json_array([_fmt(x) for x in stroke.dash_pattern]))
+    if stroke.dash_align_anchors:
+        o.bool_("dash_align_anchors", True)
+    if stroke.miter_limit != 10.0:
+        o.num("miter_limit", stroke.miter_limit)
     return o.build()
+
+
+def _gradient_json(g: Gradient) -> str:
+    """A gradient, in the ONE form every implementation can write
+    byte-identically. A stop's colour is written as this file's colour
+    OBJECT, not the hex string this model stores: jas_dioxus stores a
+    `Color`, so hex is the narrower form. As in JasSwift, the reader
+    converts the object back to hex, so a shared fixture can only carry a
+    stop colour a hex string can express."""
+    o = _JsonObj()
+    o.num("angle", g.angle)
+    o.num("aspect_ratio", g.aspect_ratio)
+    o.bool_("dither", g.dither)
+    o.str("method", g.method.value)
+    nodes = []
+    for n in g.nodes:
+        n_o = _JsonObj()
+        n_o.raw("color", _color_json(_hex_color(n.color)))
+        n_o.num("opacity", n.opacity)
+        n_o.num("spread", n.spread)
+        n_o.num("x", n.x)
+        n_o.num("y", n.y)
+        nodes.append(n_o.build())
+    o.raw("nodes", _json_array(nodes))
+    stops = []
+    for st in g.stops:
+        s_o = _JsonObj()
+        s_o.raw("color", _color_json(_hex_color(st.color)))
+        s_o.num("location", st.location)
+        s_o.num("midpoint_to_next", st.midpoint_to_next)
+        s_o.num("opacity", st.opacity)
+        stops.append(s_o.build())
+    o.raw("stops", _json_array(stops))
+    o.str("stroke_sub_mode", g.stroke_sub_mode.value)
+    o.str("type", g.type.value)
+    return o.build()
+
+
+def _hex_color(s: str) -> Color:
+    # JasSwift's fallback for an unparseable stop colour: opaque black.
+    return Color.from_hex(s) or RgbColor(r=0.0, g=0.0, b=0.0, a=1.0)
+
+
+def _mask_json(m: Mask) -> str:
+    """An opacity mask. The subtree is a FULL nested element, so the mask's
+    own artwork carries everything an element carries, recursively."""
+    o = _JsonObj()
+    o.bool_("clip", m.clip)
+    o.bool_("disabled", m.disabled)
+    o.bool_("invert", m.invert)
+    o.bool_("linked", m.linked)
+    o.raw("subtree", _element_json(m.subtree))
+    o.raw("unlink_transform", _transform_json(m.unlink_transform))
+    return o.build()
+
+
+def _width_points_json(pts) -> str:
+    items = []
+    for p in pts:
+        o = _JsonObj()
+        o.num("t", p.t)
+        o.num("width_left", p.width_left)
+        o.num("width_right", p.width_right)
+        items.append(o.build())
+    return _json_array(items)
 
 
 def _transform_json(t: Transform | None) -> str:
@@ -349,6 +430,57 @@ def _points_json(points) -> str:
 # ------------------------------------------------------------------ #
 # Element serializer                                                  #
 # ------------------------------------------------------------------ #
+
+def _extended_element_fields(o: _JsonObj, elem: Element):
+    """The TWELVE fields this codec dropped by construction, emitted for
+    every element kind that can hold them. Mirrors the Rust
+    `extended_element_fields` and the JasSwift `extendedElementFields`.
+
+    WHY. Every document-level gate snapshots this codec, including THE
+    PRESERVATION LAW's (transcripts/EDIT_SEMANTICS_FREEZE.md 4.1/4.2,
+    "serialize before, serialize after, diff"). A field the codec does not
+    emit is a field that law cannot range over. The ports closed this on
+    2026-07-28 (CODECSEE); the reference did not, and the `test_json` column
+    of test_fixtures/expected/codec_field_survival.json is where
+    `test_codec_field_survival` measures it.
+
+    Every key is emitted only when non-default, so an element carrying none
+    of them serializes byte-identically to before, and a destroyed field
+    loses its key, which is part of the diff. A field this model does not
+    hold on a kind is never written for it: `tool_origin` lives on Path
+    alone here, as in JasSwift.
+    """
+    mode = getattr(elem, "blend_mode", BlendMode.NORMAL)
+    if mode != BlendMode.NORMAL:
+        o.str("mode", mode.value)
+    mask = getattr(elem, "mask", None)
+    if mask is not None:
+        o.raw("mask", _mask_json(mask))
+    tool_origin = getattr(elem, "tool_origin", None)
+    if tool_origin is not None:
+        o.str("tool_origin", tool_origin)
+    fill_gradient = getattr(elem, "fill_gradient", None)
+    if fill_gradient is not None:
+        o.raw("fill_gradient", _gradient_json(fill_gradient))
+    stroke_gradient = getattr(elem, "stroke_gradient", None)
+    if stroke_gradient is not None:
+        o.raw("stroke_gradient", _gradient_json(stroke_gradient))
+    width_points = getattr(elem, "width_points", ())
+    if width_points:
+        o.raw("width_points", _width_points_json(width_points))
+    if isinstance(elem, Path):
+        if elem.stroke_brush is not None:
+            o.str("stroke_brush", elem.stroke_brush)
+        if elem.stroke_brush_overrides is not None:
+            o.str("stroke_brush_overrides", elem.stroke_brush_overrides)
+    # The two CONTAINER-only flags (Group, and Layer by inheritance), only
+    # when true, which keeps every shipped golden byte-identical.
+    if isinstance(elem, Group):
+        if elem.isolated_blending:
+            o.bool_("isolated_blending", True)
+        if elem.knockout_group:
+            o.bool_("knockout_group", True)
+
 
 def _element_json(elem: Element) -> str:
     o = _JsonObj()
@@ -537,6 +669,7 @@ def _element_json(elem: Element) -> str:
         _common_fields(o, elem)
         o.str("concept", elem.concept_id)
         o.raw("params", _canonical_value(elem.params))
+    _extended_element_fields(o, elem)
     return o.build()
 
 
@@ -796,13 +929,73 @@ def _parse_fill(d) -> Fill | None:
 def _parse_stroke(d) -> Stroke | None:
     if d is None:
         return None
+    # The four extended stroke keys; absent means the default, matching the
+    # writer's identity-omission convention. Mirrors the Rust `parse_stroke`,
+    # including its cap of six dash entries.
     return Stroke(
         color=_parse_color(d["color"]),
         width=d["width"],
         linecap=_LINECAP_MAP[d["linecap"]],
         linejoin=_LINEJOIN_MAP[d["linejoin"]],
         opacity=d.get("opacity", 1.0),
+        miter_limit=float(d.get("miter_limit", 10.0)),
+        align=_enum_or(StrokeAlign, d.get("align"), StrokeAlign.CENTER),
+        dash_pattern=tuple(float(x) for x in (d.get("dash_pattern") or [])[:6]),
+        dash_align_anchors=bool(d.get("dash_align_anchors", False)),
     )
+
+
+def _enum_or(enum_cls, value, default):
+    """`enum_cls(value)`, or `default` when the value is absent or unknown
+    (the ports' `match ... _ => default`)."""
+    try:
+        return enum_cls(value)
+    except ValueError:
+        return default
+
+
+def _parse_gradient(v) -> Gradient | None:
+    if not isinstance(v, dict):
+        return None
+    return Gradient(
+        type=_enum_or(GradientType, v.get("type"), GradientType.LINEAR),
+        angle=float(v.get("angle", 0.0)),
+        aspect_ratio=float(v.get("aspect_ratio", 100.0)),
+        method=_enum_or(GradientMethod, v.get("method"), GradientMethod.CLASSIC),
+        dither=bool(v.get("dither", False)),
+        stroke_sub_mode=_enum_or(StrokeSubMode, v.get("stroke_sub_mode"),
+                                 StrokeSubMode.WITHIN),
+        stops=tuple(
+            GradientStop(color="#" + _parse_color(st["color"]).to_hex(),
+                         location=float(st.get("location", 0.0)),
+                         opacity=float(st.get("opacity", 100.0)),
+                         midpoint_to_next=float(st.get("midpoint_to_next", 50.0)))
+            for st in v.get("stops") or []),
+        nodes=tuple(
+            GradientNode(x=float(n.get("x", 0.0)), y=float(n.get("y", 0.0)),
+                         color="#" + _parse_color(n["color"]).to_hex(),
+                         opacity=float(n.get("opacity", 100.0)),
+                         spread=float(n.get("spread", 25.0)))
+            for n in v.get("nodes") or []),
+    )
+
+
+def _parse_mask(v) -> Mask | None:
+    if not isinstance(v, dict) or v.get("subtree") is None:
+        return None
+    return Mask(subtree=_parse_element(v["subtree"]),
+                clip=bool(v.get("clip", True)),
+                invert=bool(v.get("invert", False)),
+                disabled=bool(v.get("disabled", False)),
+                linked=bool(v.get("linked", True)),
+                unlink_transform=_parse_transform(v.get("unlink_transform")))
+
+
+def _parse_width_points(v) -> tuple[StrokeWidthPoint, ...]:
+    return tuple(StrokeWidthPoint(t=float(p.get("t", 0.0)),
+                                  width_left=float(p.get("width_left", 0.0)),
+                                  width_right=float(p.get("width_right", 0.0)))
+                 for p in v or [])
 
 
 def _parse_transform(d) -> Transform | None:
@@ -934,6 +1127,40 @@ def _parse_text_decoration_field(v) -> str:
 
 def _parse_element(d: dict) -> Element:
     """Parse a JSON dict into an Element."""
+    return _apply_extended_element_fields(_parse_element_base(d), d)
+
+
+def _apply_extended_element_fields(elem: Element, d: dict) -> Element:
+    """Read back the twelve fields `_extended_element_fields` writes.
+
+    A post-pass over the built element rather than a change to every
+    constructor call in `_parse_element_base`, so every kind that can hold a
+    field gets it from ONE place and a new kind cannot silently miss one.
+    A field is set only on a kind whose dataclass has it. Mirrors the Rust
+    `apply_extended_element_fields`.
+    """
+    import dataclasses
+    have = {f.name for f in dataclasses.fields(elem)}
+    wanted = {
+        "blend_mode": _enum_or(BlendMode, d.get("mode"), BlendMode.NORMAL),
+        "mask": _parse_mask(d.get("mask")),
+        "tool_origin": d.get("tool_origin"),
+        "fill_gradient": _parse_gradient(d.get("fill_gradient")),
+        "stroke_gradient": _parse_gradient(d.get("stroke_gradient")),
+        "width_points": _parse_width_points(d.get("width_points")),
+        "stroke_brush": d.get("stroke_brush"),
+        "stroke_brush_overrides": d.get("stroke_brush_overrides"),
+        "isolated_blending": bool(d.get("isolated_blending", False)),
+        "knockout_group": bool(d.get("knockout_group", False)),
+    }
+    changes = {k: v for k, v in wanted.items()
+               if k in have and getattr(elem, k) != v}
+    return dataclasses.replace(elem, **changes) if changes else elem
+
+
+def _parse_element_base(d: dict) -> Element:
+    """Build an Element from its per-kind keys. The extended fields are
+    applied by `_parse_element`."""
     typ = d["type"]
     common = _parse_common(d)
 
