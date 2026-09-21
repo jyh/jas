@@ -442,6 +442,10 @@ def test_recognize_element_skips_circle():
     elem = Circle(cx=50, cy=50, r=30)
     assert recognize_element(elem, cfg) is None
 
+def test_recognize_element_skips_a_round_ellipse():
+    elem = Ellipse(cx=50, cy=50, rx=30, ry=30)
+    assert recognize_element(elem, cfg) is None
+
 def test_recognize_element_skips_polygon():
     elem = Polygon(points=((0, 0), (100, 0), (50, 86.6)))
     assert recognize_element(elem, cfg) is None
@@ -455,7 +459,10 @@ def test_recognize_element_converts_path_circle():
     assert result is not None
     kind, el = result
     assert kind == ShapeKind.CIRCLE
-    assert isinstance(el, Circle)
+    # ONE ROUND KIND: the recogniser still RECOGNISES a circle (a statement
+    # about the traced geometry) and builds the one round kind. Mirrors Rust.
+    assert isinstance(el, Ellipse)
+    assert el.rx == el.ry
 
 def test_recognize_element_square_returns_square_kind():
     pts = _sample_rect(0, 0, 80, 80, 16)

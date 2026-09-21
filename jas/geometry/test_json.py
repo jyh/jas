@@ -1182,9 +1182,13 @@ def _parse_element_base(d: dict) -> Element:
                     fill=_parse_fill(d["fill"]),
                     stroke=_parse_stroke(d["stroke"]), **common)
     elif typ == "circle":
-        return Circle(cx=d["cx"], cy=d["cy"], r=d["r"],
-                      fill=_parse_fill(d["fill"]),
-                      stroke=_parse_stroke(d["stroke"]), **common)
+        # ONE ROUND KIND (2026-07-30). Deliberately NOT tolerant, unlike the
+        # binary codec's legacy tag: a stray "circle" must fail loudly, or an
+        # implementation could keep writing the old kind and it would read as
+        # agreement. A round shape is an ellipse with rx == ry.
+        raise ValueError("the canonical test-JSON has no circle kind "
+                         "(one round kind): a round shape is an ellipse "
+                         "with rx == ry")
     elif typ == "ellipse":
         return Ellipse(cx=d["cx"], cy=d["cy"], rx=d["rx"], ry=d["ry"],
                        fill=_parse_fill(d["fill"]),

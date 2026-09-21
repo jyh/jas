@@ -574,9 +574,14 @@ def _unpack_element(arr: list) -> Element:
                     fill=_unpack_fill(arr[13]),
                     stroke=_unpack_stroke(arr[14]), **common)
     elif tag == _TAG_CIRCLE:
-        return Circle(cx=arr[7], cy=arr[8], r=arr[9],
-                      fill=_unpack_fill(arr[10]),
-                      stroke=_unpack_stroke(arr[11]), **common)
+        # READ-ONLY LEGACY TAG. The model has one round kind (2026-07-30), so
+        # nothing in the shared layer builds a circle any more, but binary is
+        # a persisted user format and a file saved before that day must still
+        # open. It reads as an ellipse with equal radii, which is what it
+        # always meant. Mirrors the Rust `unpack_element`.
+        return Ellipse(cx=arr[7], cy=arr[8], rx=arr[9], ry=arr[9],
+                       fill=_unpack_fill(arr[10]),
+                       stroke=_unpack_stroke(arr[11]), **common)
     elif tag == _TAG_ELLIPSE:
         return Ellipse(cx=arr[7], cy=arr[8], rx=arr[9], ry=arr[10],
                        fill=_unpack_fill(arr[11]),

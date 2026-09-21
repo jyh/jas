@@ -309,6 +309,17 @@ def _element_svg(elem: Element, indent: str) -> str:
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry,
                      fill=fill, stroke=stroke, opacity=opacity, transform=transform,
                      name=name, id=eid):
+            # ONE ROUND KIND: the tag is RE-DERIVED, not stored. Equal radii
+            # emit <circle>, so a file's circles survive a round trip. The
+            # mirror is a rewrite we accept: a deliberate <ellipse rx=5 ry=5>
+            # comes back out as <circle>. The transform is not consulted.
+            # Mirrors the Rust `element_svg` Ellipse arm.
+            if rx == ry:
+                return (f'{indent}<circle cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
+                        f' r="{_fmt(_px(rx))}"'
+                        f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
+                        f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
+                        f'{_id_attr(eid)}{_name_attr(name)}/>')
             return (f'{indent}<ellipse cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' rx="{_fmt(_px(rx))}" ry="{_fmt(_px(ry))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
@@ -1225,10 +1236,13 @@ def _parse_element(node: ET.Element) -> Element | None:
             name=name, id=eid)
 
     if tag == "circle":
-        return Circle(
+        # ONE ROUND KIND (JYH, 2026-07-30): `<circle r>` is an ellipse whose
+        # radii are equal. The writer re-derives the tag from rx == ry.
+        r = _pt(_safe_float(node.get("r")))
+        return Ellipse(
             cx=_pt(_safe_float(node.get("cx"))),
             cy=_pt(_safe_float(node.get("cy"))),
-            r=_pt(_safe_float(node.get("r"))),
+            rx=r, ry=r,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
             name=name, id=eid)
 
