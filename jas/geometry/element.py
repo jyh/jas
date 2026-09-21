@@ -2144,6 +2144,23 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
             existing = elem.transform if elem.transform is not None else Transform()
             return replace(elem, transform=replace(
                 existing, e=existing.e + dx, f=existing.f + dy))
+        case (Group() | CompoundShape() | RecordedElem() | GeneratedElem()) if _is_all(
+                kind, control_point_count(elem)):
+            # CONTAINERS AND THE REMAINING LIVE KINDS (GROUPMOVE, CPGUARD).
+            # A container's full selection is a selection of its subtree, so a
+            # move translates its members; `translate_element` already does
+            # that for every one of these kinds (it is the paste path), so
+            # this delegates rather than re-deriving. Until 2026-09-21 this
+            # fell to ``case _`` and a group selected as ONE entry did not
+            # move. Both active ports have carried the arm since 2026-07-29.
+            # The predicate is the element's OWN control-point count (a Group
+            # has four bbox corners), so "fully selected" is spelled `all` OR
+            # `partial([0, 1, 2, 3])`; one corner is a resize and falls through.
+            # ReferenceElem is deliberately NOT here: Rust's arm also catches a
+            # reference selected as `partial([0, 1, 2, 3])` and Swift does not,
+            # an unruled divergence between the ports, so the reference keeps
+            # its own `all`-only arm above until that is ruled.
+            return translate_element(elem, dx, dy)
         case _:
             return elem
 
