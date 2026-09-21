@@ -12,7 +12,7 @@ from absl.testing import absltest
 from algorithms.hit_test import (
     point_in_rect, segments_intersect, segment_intersects_rect,
     rects_intersect, circle_intersects_rect, ellipse_intersects_rect,
-    point_in_polygon,
+    point_in_polygon, element_intersects_rect, element_intersects_polygon,
 )
 from document.controller import Controller, selection_to_ids
 from document.model import Model
@@ -20,7 +20,9 @@ from document.op_apply import op_apply
 from document.op_log import PrimitiveOp
 from geometry.svg import document_to_svg, svg_to_document
 from geometry.binary import document_to_binary, binary_to_document
-from geometry.test_json import document_to_test_json, test_json_to_document
+from geometry.test_json import (
+    document_to_test_json, parse_element_json, test_json_to_document,
+)
 from workspace.workspace_layout import (
     WorkspaceLayout, DockEdge, PanelKind, GroupAddr, PanelAddr,
 )
@@ -611,6 +613,27 @@ class CrossLanguageTest(absltest.TestCase):
             elif func_name == "point_in_polygon":
                 poly = [tuple(p) for p in tc["polygon"]]
                 actual = point_in_polygon(*args, poly=poly)
+            # Element-level marquee / lasso: `element` is a canonical
+            # test-JSON element, `args` the marquee rect x/y/w/h, `polygon`
+            # the lasso outline. Mirrors the Rust harness's dispatch. Until
+            # this arm existed, the first element vector aborted the method
+            # and 123 of the file's 157 vectors were never measured here.
+            #
+            # An element the reference cannot PARSE is that vector's failure,
+            # not the method's: it becomes the case's `actual`, so it ends
+            # only its own case and the vectors after it are still measured.
+            elif func_name in ("element_intersects_rect",
+                               "element_intersects_polygon"):
+                try:
+                    elem = parse_element_json(tc["element"])
+                except (KeyError, ValueError, TypeError) as e:
+                    actual = f"unparseable ({type(e).__name__}: {e})"
+                else:
+                    if func_name == "element_intersects_rect":
+                        actual = element_intersects_rect(elem, *args)
+                    else:
+                        poly = [tuple(p) for p in tc["polygon"]]
+                        actual = element_intersects_polygon(elem, poly)
             else:
                 self.fail(f"Unknown function: {func_name}")
 
