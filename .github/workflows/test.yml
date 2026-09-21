@@ -1629,6 +1629,12 @@ jobs:
         run: |
           python scripts/check_reference_drift.py --self-test
           python scripts/check_reference_drift.py
+      # The same layer's own unit tests. Like the harness above they ran only
+      # at the tag, and at HEAD 12 of them had gone red on the 4dp oracle
+      # before R3 reached the reference. They are green now, and they run
+      # here, blocking, so the next drift is seen at the commit that makes it.
+      - name: Reference domain layer -- its unit tests at HEAD
+        run: cd jas && python -m pytest document geometry algorithms
 
   # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
   # lane checks out the WHOLE repo at the tag — not just fixtures — because
