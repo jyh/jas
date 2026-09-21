@@ -19,8 +19,9 @@ document; they should not restate it.
 | `jas_dioxus` (Rust/Dioxus) | **Active** | blocking |
 | `JasSwift` (Swift/AppKit) | **Active** | blocking |
 | `workspace_interpreter/` (Python reference interpreter) | **Live reference** | blocking |
+| `jas/document`, `jas/geometry`, `jas/algorithms` (the reference's domain layer) | **Live** — shared with the frozen app; see below | blocking (`check_reference_drift.py`) |
 | `jas_ocaml` (OCaml/GTK) | **Frozen at the tag** | tag-pinned canary, non-blocking |
-| `jas` (Python/Qt) | **Frozen at the tag** | tag-pinned canary, non-blocking |
+| `jas` (Python/Qt app) | **Frozen at the tag** | tag-pinned canary, non-blocking |
 | `jas_flask` (Python/Flask) | Non-gating reference renderer | non-blocking |
 
 The four native apps were built as behaviorally identical peers of one
@@ -30,6 +31,28 @@ ports; the OCaml port and the Python Qt app are preserved exactly as
 tagged, with CI canary lanes that check out the tag (sources, fixtures,
 and bundle together) so they can only fail on toolchain drift. Frozen
 ports receive no new features; toolchain or security fixes only.
+
+**What the freeze covers, and what it does not.** The freeze protects the
+Python Qt *app's* behaviour. It does not freeze the shared domain layer
+that the live reference interpreter imports. That layer is the set of
+`jas/` packages that `workspace_interpreter/` actually loads: today
+`jas/document`, `jas/geometry` and `jas/algorithms`, re-derived on every run
+by `scripts/check_reference_drift.py` rather than listed by hand. The same
+bytes are the frozen app's internals *and* the reference's executable
+meaning, and one tree cannot stand still for one purpose and stay current
+for the other. So the domain layer is **live**:
+
+- Drift between it and the shared corpus is a defect to close, not a state
+  to describe. It takes reference-affecting fixes, each one red-first with
+  its own fixture.
+- `scripts/check_reference_drift.py` runs the layer's corpus harness
+  (`jas/cross_language_test.py`) at HEAD in a blocking lane. It reds on any
+  failing case missing from its tracked baseline
+  (`scripts/reference_drift_baseline.json`), and that baseline may only
+  shrink. A harness case that reaches the frozen app still runs, but it is
+  counted apart as *recorded, not owed*.
+- The rest of `jas/` (`workspace/`, `tools/`, `menu/`, `panels/`,
+  `canvas/` and the app shell) stays frozen at the tag.
 
 The **active** apps are **behaviorally identical** from the user's
 perspective, modulo platform approximations documented in

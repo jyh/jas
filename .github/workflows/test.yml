@@ -894,6 +894,13 @@ jobs:
           python scripts/check_preservation_corpus.py
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
+          # The reference's own corpus harness at HEAD, per case, against a
+          # ratcheted baseline (POLICY.md section 1). It runs here as well as
+          # in the reference lane because the harness opens its fixtures with
+          # the locale codec, which is cp1252 on this runner. The gate's child
+          # runs `-X utf8`, and this is the platform where that is load-bearing.
+          python scripts/check_reference_drift.py --self-test
+          python scripts/check_reference_drift.py
           # Added here after this gate landed 2026-07-28 keyed on str(Path) and
           # failed WHOLESALE on Windows while CI stayed green — it runs in the
           # ubuntu job, and ubuntu is the platform that cannot see the defect.
@@ -1611,6 +1618,17 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m pytest workspace_interpreter/tests
       - run: python -m pytest spec/geometry/tests
+      # The reference's DOMAIN LAYER (jas/document, jas/geometry,
+      # jas/algorithms) is what the interpreter above computes through. Its
+      # corpus harness used to run only at the five-port-parity tag, in the
+      # frozen canary below, so the reference drifted behind the ports for
+      # seven weeks with every blocking lane green. This runs that harness at
+      # HEAD, per case, and reds on any failing case not in the tracked
+      # baseline (POLICY.md section 1).
+      - name: Reference drift -- self-test, then the ratchet
+        run: |
+          python scripts/check_reference_drift.py --self-test
+          python scripts/check_reference_drift.py
 
   # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
   # lane checks out the WHOLE repo at the tag — not just fixtures — because
