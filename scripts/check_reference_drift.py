@@ -597,12 +597,15 @@ def self_test() -> int:
         arm("a count falling is STALE", kinds(higher) == ["STALE"])
         arm("a moved closure is SCOPE",
             kinds(dict(base, closure_packages=["apppkg", "inpkg"])) == ["SCOPE"])
-        arm("a moved exclusion is SCOPE",
+        arm("a moved app-reaching set is SCOPE",
             kinds(dict(base, app_reaching={"test_uses_app": "x"})) == ["SCOPE"])
         arm("a changed zero-assertion set is VACUOUS",
             kinds(dict(base, zero_assert_methods=["test_zero"])) == ["VACUOUS"])
         arm("nothing executed is VACUOUS",
             "VACUOUS" in {k for k, _ in problems(dict(result, executed=[]), base)})
+        arm("ONE method silently not run is VACUOUS",
+            "VACUOUS" in {k for k, _ in problems(
+                dict(result, executed=result["executed"][:-1]), base)})
         arm("zero assertions is VACUOUS",
             "VACUOUS" in {k for k, _ in problems(dict(result, assert_calls=0), base)})
 
