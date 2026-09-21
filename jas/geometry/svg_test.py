@@ -1220,5 +1220,27 @@ class SvgCodecFieldsTest(absltest.TestCase):
                          [(0.0, 1.0, 2.0), (1.0, 3.0, 4.0)])
 
 
+class SvgFillRuleTest(absltest.TestCase):
+    """`fill-rule="evenodd"` on a path, only when it is not the default; any
+    other value reads as nonzero. Mirrors jas_dioxus svg.rs."""
+
+    def test_evenodd_round_trips_and_nonzero_is_omitted(self):
+        from geometry.element import FillRule
+        odd = Path(d=(MoveTo(0, 0), LineTo(1, 1)), fill_rule=FillRule.EVENODD)
+        plain = Path(d=(MoveTo(0, 0), LineTo(1, 1)))
+        svg = document_to_svg(Document(layers=(Layer(children=(odd, plain)),)))
+        self.assertEqual(svg.count('fill-rule="evenodd"'), 1)
+        self.assertNotIn('fill-rule="nonzero"', svg)
+        back = svg_to_document(svg).layers[0].children
+        self.assertEqual([p.fill_rule for p in back], [FillRule.EVENODD, FillRule.NONZERO])
+
+    def test_an_unrecognised_value_reads_nonzero(self):
+        from geometry.element import FillRule
+        svg = ('<svg xmlns="http://www.w3.org/2000/svg"><g>'
+               '<path d="M0 0 L1 1" fill-rule="inherit"/></g></svg>')
+        (p,) = svg_to_document(svg).layers[0].children
+        self.assertEqual(p.fill_rule, FillRule.NONZERO)
+
+
 if __name__ == "__main__":
     absltest.main()

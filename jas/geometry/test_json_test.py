@@ -73,5 +73,31 @@ class CommonIdTest(absltest.TestCase):
                          f"id-less element must not emit id key: {s}")
 
 
+class FillRuleTestJsonTest(absltest.TestCase):
+    """A path's fill rule, as the ports carry it (jas_dioxus test_json.rs):
+    `"fill_rule":"evenodd"` only when it is not the nonzero default, and an
+    absent key reads as nonzero."""
+
+    def _path(self, **kw):
+        from geometry.element import LineTo, MoveTo, Path
+        return Path(d=(MoveTo(0, 0), LineTo(1, 1)), **kw)
+
+    def test_a_path_defaults_to_nonzero(self):
+        from geometry.element import FillRule
+        self.assertEqual(self._path().fill_rule, FillRule.NONZERO)
+
+    def test_evenodd_is_written_and_read_back(self):
+        from geometry.element import FillRule
+        j = _element_json(self._path(fill_rule=FillRule.EVENODD))
+        self.assertIn('"fill_rule":"evenodd"', j)
+        self.assertEqual(parse_element_json(json.loads(j)).fill_rule, FillRule.EVENODD)
+
+    def test_nonzero_is_omitted_and_an_absent_key_reads_nonzero(self):
+        from geometry.element import FillRule
+        j = _element_json(self._path())
+        self.assertNotIn("fill_rule", j)
+        self.assertEqual(parse_element_json(json.loads(j)).fill_rule, FillRule.NONZERO)
+
+
 if __name__ == "__main__":
     absltest.main()

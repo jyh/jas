@@ -501,5 +501,29 @@ class BinaryCommonExtensionTest(absltest.TestCase):
         self.assertEqual(_BLEND_MODE_TO_INT, {m: i for i, m in enumerate(BlendMode)})
 
 
+class BinaryFillRuleTest(absltest.TestCase):
+    """A path's slot 11: 0 nonzero, 1 evenodd; absent or unrecognised reads
+    nonzero. Mirrors jas_dioxus binary.rs `pack_fill_rule`."""
+
+    def test_evenodd_rides_slot_eleven_and_round_trips(self):
+        from geometry.binary import _pack_element
+        from geometry.element import FillRule
+        p = Path(d=(MoveTo(0, 0), LineToCmd(1, 1)), fill_rule=FillRule.EVENODD)
+        self.assertEqual(_pack_element(p)[11], 1)
+        doc = Document(layers=(Layer(children=(p,)),))
+        (back,) = binary_to_document(document_to_binary(doc)).layers[0].children
+        self.assertEqual(back.fill_rule, FillRule.EVENODD)
+
+    def test_absent_or_unrecognised_reads_nonzero(self):
+        from geometry.binary import _pack_element, _unpack_element
+        from geometry.element import FillRule
+        arr = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1)),
+                                 fill_rule=FillRule.EVENODD))
+        self.assertEqual(_unpack_element(arr[:11]).fill_rule, FillRule.NONZERO)
+        for junk in (7, "evenodd", True, None):
+            arr[11] = junk
+            self.assertEqual(_unpack_element(arr).fill_rule, FillRule.NONZERO, repr(junk))
+
+
 if __name__ == "__main__":
     absltest.main()
