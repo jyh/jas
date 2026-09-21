@@ -444,6 +444,58 @@ class CrossLanguageTest(absltest.TestCase):
                          "tool origin did not survive the SVG round trip")
 
     # ---------------------------------------------------------------
+    # ONE ROUND KIND (JYH, 2026-07-30; the ports' ONEROUNDKIND, 715944d0)
+    #
+    # The ports deleted the circle kind: a `<circle r>` is an ellipse whose
+    # radii are equal. The reference keeps the `Circle` CLASS, because the
+    # frozen Qt app imports it at HEAD, but no shared-layer entry point
+    # builds one any more (arm A, bus 2026-09-21 12:36).
+    # ---------------------------------------------------------------
+
+    def test_round_ellipses_serialize_as_circle_and_squashed_ones_do_not(self):
+        # `<circle>` survives a round trip because the writer re-derives the
+        # tag from rx == ry. The mirror is a REWRITE we accept: an
+        # `<ellipse rx=20 ry=20>` comes back out as `<circle>`. Mirrors the
+        # Rust test of the same name.
+        doc = svg_to_document(_read_fixture("svg/circle_ellipse_mix.svg"))
+        out = document_to_svg(doc)
+        self.assertEqual(out.count("<circle"), 2,
+                         "round_ellipses: both round shapes should emit <circle>")
+        self.assertEqual(out.count("<ellipse"), 1,
+                         "round_ellipses: only the rx != ry shape should emit <ellipse>")
+        self.assertEqual(document_to_svg(svg_to_document(out)), out,
+                         "round_ellipses: svg -> doc -> svg is not idempotent")
+
+    def test_a_legacy_circle_tag_still_reads_as_a_round_ellipse(self):
+        # Binary is a PERSISTED USER FORMAT: a file saved before the
+        # migration must still open, so tag 3 stays readable, as an ellipse
+        # with equal radii. Mirrors the Rust test of the same name.
+        from geometry.binary import _TAG_CIRCLE, _unpack_element
+        from geometry.element import Ellipse
+        # [tag, locked, opacity, vis, xform, name, id, cx, cy, r, fill, stroke]
+        packed = [_TAG_CIRCLE, False, 1.0, 0, None, None, None,
+                  36.0, 36.0, 18.0, None, None]
+        elem = _unpack_element(packed)
+        self.assertIsInstance(elem, Ellipse,
+                              "legacy tag 3 must read as a round Ellipse")
+        self.assertEqual((elem.cx, elem.cy, elem.rx, elem.ry),
+                         (36.0, 36.0, 18.0, 18.0),
+                         "legacy circle: r must land on rx AND ry")
+
+    def test_canonical_test_json_has_no_circle_kind(self):
+        # The canonical test-JSON is deliberately NOT tolerant: a stray
+        # "circle" must fail loudly, or an implementation could keep writing
+        # the old kind and it would read as agreement.
+        doc = ('{"layers":[{"children":[{"cx":1.0,"cy":1.0,"fill":null,'
+               '"locked":false,"name":null,"opacity":1.0,"r":1.0,'
+               '"stroke":null,"transform":null,"type":"circle",'
+               '"visibility":"preview"}],"locked":false,"name":"L",'
+               '"opacity":1.0,"transform":null,"type":"layer",'
+               '"visibility":"preview"}],"selected_layer":0,"selection":[]}')
+        with self.assertRaisesRegex(ValueError, "circle"):
+            test_json_to_document(doc)
+
+    # ---------------------------------------------------------------
     # SVG parse equivalence
     # ---------------------------------------------------------------
 
