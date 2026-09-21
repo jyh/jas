@@ -1500,5 +1500,65 @@ class MaskLifecycleTest(absltest.TestCase):
             len(ctrl.document.layers[0].children), layer_count_before + 1)
 
 
+class RectPromotionPreservesIdentityTest(absltest.TestCase):
+    """A partial corner drag promotes a Rect to a Polygon: a 1->1 reshape.
+
+    The preservation law's 1->1 clause says a reshape PRESERVES IDENTITY, and
+    every field with a counterpart on the output kind survives it
+    (transcripts/EDIT_SEMANTICS_FREEZE.md §3.1). Both active ports carry the
+    whole common block and both gradients (element.rs move_control_points,
+    Rect arm). Until 2026-09-21 the reference built a fresh Polygon from
+    fill, stroke, opacity and transform alone, so a corner drag dropped the
+    element's id, name, lock, visibility, blend mode, mask and both
+    gradients.
+
+    The field list is DERIVED from the two dataclasses, never typed: a
+    thirteenth shared field joins this arm without an edit.
+    """
+
+    def _loaded_rect(self):
+        from geometry.element import (
+            BlendMode, Gradient, GradientStop, GradientType, Visibility)
+        grad = Gradient(type=GradientType.LINEAR, angle=30, stops=(
+            GradientStop(color="#ff0000", opacity=100, location=0,
+                         midpoint_to_next=50),
+            GradientStop(color="#0000ff", opacity=100, location=100,
+                         midpoint_to_next=50)))
+        return Rect(
+            x=0.0, y=0.0, width=10.0, height=20.0,
+            id="rect-1", name="hull", locked=True,
+            visibility=Visibility.INVISIBLE, blend_mode=BlendMode.SCREEN,
+            opacity=0.5, transform=Transform(a=1, b=0, c=0, d=1, e=3, f=4),
+            fill=Fill(color=RgbColor(0.2, 0.4, 0.6)),
+            stroke=Stroke(color=RgbColor(0.1, 0.1, 0.1), width=2.0),
+            fill_gradient=grad,
+            stroke_gradient=dataclasses.replace(grad, angle=60),
+            mask=Mask(subtree=Rect(x=0, y=0, width=5, height=5)))
+
+    def _shared(self):
+        return sorted({f.name for f in dataclasses.fields(Rect)}
+                      & {f.name for f in dataclasses.fields(Polygon)})
+
+    def test_the_fixture_loads_every_shared_field(self):
+        # Non-vacuity: a field left at its default would agree trivially.
+        src = self._loaded_rect()
+        defaults = Polygon(points=())
+        shared = self._shared()
+        self.assertGreater(len(shared), 0)
+        for name in shared:
+            with self.subTest(field=name):
+                self.assertNotEqual(getattr(src, name), getattr(defaults, name))
+
+    def test_every_shared_field_survives_a_corner_drag(self):
+        from document.document import selection_partial
+        src = self._loaded_rect()
+        out = move_control_points(src, selection_partial([2]), 5.0, 7.0)
+        self.assertIsInstance(out, Polygon)
+        self.assertEqual(out.points[2], (15.0, 27.0))  # the target moved
+        for name in self._shared():
+            with self.subTest(field=name):
+                self.assertEqual(getattr(out, name), getattr(src, name))
+
+
 if __name__ == "__main__":
     absltest.main()
