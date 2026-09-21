@@ -1922,17 +1922,55 @@ def with_stroke(element: Element, stroke: Stroke | None) -> Element:
     return element
 
 
+def promote_to_path_for_brush(element: Element) -> Element:
+    """Promote a Line (or open Polyline) to a geometry-identical Path, so it
+    can carry Path-only attributes such as ``stroke_brush``.
+
+    The "upgrade naturally" convention (JYH 2026-07-25), mirroring the
+    Rect-to-Polygon corner-drag promotion. The caller replaces the element in
+    place at its tree path, so identity is preserved. Every field the source
+    kind shares with Path is carried WHOLE (stroke, width profile, opacity,
+    transform, lock, visibility, blend mode, mask, gradients, name, id). The
+    shared set is read from the dataclasses rather than listed, so a field
+    both kinds gain later cannot be dropped here. A Line has no fill, so the
+    Path's fill is None; a Polyline's fill carries across. Anything else,
+    including a degenerate Polyline with fewer than two points, is returned
+    unchanged. Mirrors the Rust ``promote_to_path_for_brush``. See
+    BRUSHES.md §Stroke styling interaction.
+    """
+    if isinstance(element, Line):
+        d = (MoveTo(element.x1, element.y1), LineTo(element.x2, element.y2))
+    elif isinstance(element, Polyline) and len(element.points) >= 2:
+        (x0, y0), rest = element.points[0], element.points[1:]
+        d = (MoveTo(x0, y0),) + tuple(LineTo(x, y) for x, y in rest)
+    else:
+        return element
+    path_fields = {f.name for f in dataclasses.fields(Path)}
+    carried = {f.name: getattr(element, f.name)
+               for f in dataclasses.fields(element) if f.name in path_fields}
+    return Path(d=d, **carried)
+
+
 def with_stroke_brush(element: Element, slug: str | None) -> Element:
-    """Return a copy of element with stroke_brush replaced. Path-only;
-    other element types are returned unchanged. See BRUSHES.md."""
+    """Return a copy of element with stroke_brush replaced. A Path carries
+    the brush directly. Applying a brush (a non-None slug) to a Line or open
+    Polyline PROMOTES it to a Path that then carries the brush; see
+    ``promote_to_path_for_brush``. Clearing (None) is not a brush
+    application, so it never promotes. Other elements are returned
+    unchanged. Mirrors the Rust ``with_stroke_brush``. See BRUSHES.md."""
+    if slug is not None:
+        element = promote_to_path_for_brush(element)
     if isinstance(element, Path):
         return dataclasses.replace(element, stroke_brush=slug)
     return element
 
 
 def with_stroke_brush_overrides(element: Element, overrides: str | None) -> Element:
-    """Return a copy of element with stroke_brush_overrides replaced.
-    Path-only."""
+    """Return a copy of element with stroke_brush_overrides replaced. A
+    Line or open Polyline is promoted to a Path first when the value is not
+    None, as in ``with_stroke_brush``. Clearing never promotes."""
+    if overrides is not None:
+        element = promote_to_path_for_brush(element)
     if isinstance(element, Path):
         return dataclasses.replace(element, stroke_brush_overrides=overrides)
     return element

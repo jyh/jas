@@ -58,8 +58,6 @@
   "test_gesture_corpus :: Gesture test 'draw_rect' failed: canonical JSON mismatch": 1,
   "test_gesture_corpus :: Gesture test 'draw_rounded_rect' failed: canonical JSON mismatch": 1,
   "test_gesture_corpus :: Gesture test 'draw_star' failed: canonical JSON mismatch": 1,
-  "test_operation_set_attr_on_selection :: Operation test 'set_attr_on_selection_line_promotes_to_path' failed": 1,
-  "test_operation_set_attr_on_selection :: Operation test 'set_attr_on_selection_polyline_promotes_to_path' failed": 1,
   "test_operation_symbols_ops :: Operation test 'redefine_master_from_selection' failed": 1,
   "test_operation_wrap_in_layer :: Operation test 'wrap_in_layer_empty_paths_noop' failed": 1,
   "test_operation_wrap_in_layer :: Operation test 'wrap_in_layer_malformed_paths_skips' failed": 1,
