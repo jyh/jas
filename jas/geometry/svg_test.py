@@ -1172,9 +1172,12 @@ class SvgCodecFieldsTest(absltest.TestCase):
         svg = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1"><g>'
                '<rect x="0" y="0" width="1" height="1" jas:locked="yes"/>'
                '<rect x="0" y="0" width="1" height="1" jas:locked="true"/>'
+               '<rect x="0" y="0" width="1" height="1" locked="true"/>'
                '</g></svg>')
         kids = svg_to_document(svg).layers[0].children
-        self.assertEqual([k.locked for k in kids], [False, True])
+        # The third is a foreign file's own `locked`, outside the jas
+        # namespace: it must not lock anything.
+        self.assertEqual([k.locked for k in kids], [False, True, False])
 
     def test_container_blend_flags_round_trip_on_group_and_layer(self):
         g = Group(children=(Rect(x=0, y=0, width=1, height=1),),
