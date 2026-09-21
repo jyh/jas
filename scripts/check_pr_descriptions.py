@@ -1025,7 +1025,10 @@ def self_test() -> int:
     try:
         def wf(text):
             p = os.path.join(d, "w.yml")
-            with open(p, "w", encoding="utf-8") as fh:
+            # newline="" per this repo's encoding-hygiene gate: a text-mode
+            # write without it emits CRLF on Windows, and these bytes are
+            # parsed back by the arm below.
+            with open(p, "w", encoding="utf-8", newline="") as fh:
                 fh.write(text)
             return p
         top = "on:\n  push:\n  pull_request:\n"
