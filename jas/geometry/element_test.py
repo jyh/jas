@@ -1077,5 +1077,132 @@ class ClearIdsTest(absltest.TestCase):
         self.assertEqual(compound.operands[1].children[0].id, "nested-1")
 
 
+class BrushPromotionTest(absltest.TestCase):
+    """Applying a brush to a Line or an open Polyline PROMOTES it to a
+    geometry-identical Path that carries the brush (the "upgrade naturally"
+    convention, BRUSHES.md §Stroke styling interaction). Mirrors the Rust
+    `brush_apply_promotes_*` arms beside `promote_to_path_for_brush`.
+
+    The carried fields are DERIVED from the dataclasses, not listed: every
+    field the source kind shares with Path is set away from its default in
+    the fixture below and must arrive unchanged, so a field added to both
+    kinds later is covered without editing this test."""
+
+    def _decorated_line(self):
+        from geometry.element import StrokeWidthPoint, Visibility
+        return Line(
+            x1=1.0, y1=2.0, x2=30.0, y2=40.0,
+            stroke=Stroke(RgbColor(0.1, 0.2, 0.3), width=5.0),
+            width_points=(StrokeWidthPoint(0.5, 2.0, 2.0),),
+            opacity=0.5,
+            transform=Transform(e=3.0, f=4.0),
+            locked=True,
+            visibility=Visibility.OUTLINE,
+            blend_mode=BlendMode.MULTIPLY,
+            mask=Mask(subtree=Rect(x=0, y=0, width=1, height=1)),
+            stroke_gradient=Gradient(type=GradientType.RADIAL),
+            name="my line",
+            id="line-7")
+
+    def _decorated_polyline(self):
+        from geometry.element import Visibility
+        return Polyline(
+            points=((0.0, 0.0), (10.0, 5.0), (20.0, 0.0)),
+            fill=Fill(RgbColor(1.0, 0.0, 0.0)),
+            stroke=Stroke(RgbColor(0.0, 0.0, 0.0), width=3.0),
+            opacity=0.25,
+            transform=Transform(e=7.0, f=8.0),
+            locked=True,
+            visibility=Visibility.OUTLINE,
+            blend_mode=BlendMode.SCREEN,
+            mask=Mask(subtree=Rect(x=0, y=0, width=1, height=1)),
+            fill_gradient=Gradient(type=GradientType.LINEAR, angle=30.0),
+            stroke_gradient=Gradient(type=GradientType.RADIAL),
+            name="my poly",
+            id="poly-1")
+
+    def _assert_shared_fields_carried(self, source, promoted):
+        import dataclasses
+        path_fields = {f.name for f in dataclasses.fields(Path)}
+        shared = [f for f in dataclasses.fields(source)
+                  if f.name in path_fields]
+        self.assertGreaterEqual(len(shared), 10,
+                                "the shared-field census found too few fields")
+        for f in shared:
+            value = getattr(source, f.name)
+            default = (f.default if f.default is not dataclasses.MISSING
+                       else dataclasses.MISSING)
+            self.assertNotEqual(
+                value, default,
+                f"fixture leaves {type(source).__name__}.{f.name} at its "
+                f"default, so this arm cannot see it dropped")
+            self.assertEqual(getattr(promoted, f.name), value,
+                             f"{f.name} was not carried across the promotion")
+
+    def test_brush_apply_promotes_line_to_path_geometry_identical(self):
+        from geometry.element import with_stroke_brush
+        line = self._decorated_line()
+        promoted = with_stroke_brush(line, "charcoal")
+        self.assertIsInstance(promoted, Path,
+                              "a brush on a Line must promote it to a Path")
+        self.assertEqual(promoted.d, (MoveTo(1.0, 2.0), LineTo(30.0, 40.0)))
+        self.assertEqual(promoted.stroke_brush, "charcoal")
+        # A Line has no fill, so none is synthesised.
+        self.assertIsNone(promoted.fill)
+        self.assertIsNone(promoted.fill_gradient)
+        self._assert_shared_fields_carried(line, promoted)
+
+    def test_brush_apply_promotes_polyline_carrying_fill(self):
+        from geometry.element import with_stroke_brush
+        poly = self._decorated_polyline()
+        promoted = with_stroke_brush(poly, "charcoal")
+        self.assertIsInstance(promoted, Path,
+                              "a brush on a Polyline must promote it to a Path")
+        self.assertEqual(promoted.d, (MoveTo(0.0, 0.0), LineTo(10.0, 5.0),
+                                      LineTo(20.0, 0.0)))
+        self.assertEqual(promoted.stroke_brush, "charcoal")
+        self._assert_shared_fields_carried(poly, promoted)
+
+    def test_brush_overrides_on_a_line_also_promotes(self):
+        from geometry.element import with_stroke_brush_overrides
+        promoted = with_stroke_brush_overrides(self._decorated_line(),
+                                               '{"angle":9}')
+        self.assertIsInstance(promoted, Path)
+        self.assertEqual(promoted.stroke_brush_overrides, '{"angle":9}')
+        self.assertIsNone(promoted.stroke_brush)
+        self.assertEqual(promoted.d, (MoveTo(1.0, 2.0), LineTo(30.0, 40.0)))
+
+    def test_brush_overrides_on_a_polyline_also_promotes(self):
+        from geometry.element import with_stroke_brush_overrides
+        promoted = with_stroke_brush_overrides(self._decorated_polyline(),
+                                               '{"angle":9}')
+        self.assertIsInstance(promoted, Path)
+        self.assertEqual(promoted.stroke_brush_overrides, '{"angle":9}')
+        self.assertEqual(len(promoted.d), 3)
+
+    def test_brush_clear_does_not_promote(self):
+        # Clearing (None) is not a brush application.
+        from geometry.element import (
+            with_stroke_brush, with_stroke_brush_overrides)
+        for elem in (self._decorated_line(), self._decorated_polyline()):
+            self.assertIs(with_stroke_brush(elem, None), elem)
+            self.assertIs(with_stroke_brush_overrides(elem, None), elem)
+
+    def test_degenerate_polyline_is_not_promoted(self):
+        from geometry.element import (
+            with_stroke_brush, with_stroke_brush_overrides)
+        for pts in ((), ((5.0, 5.0),)):
+            poly = Polyline(points=pts, stroke=Stroke(RgbColor(0, 0, 0)))
+            self.assertIs(with_stroke_brush(poly, "charcoal"), poly)
+            self.assertIs(with_stroke_brush_overrides(poly, "{}"), poly)
+
+    def test_other_kinds_are_unchanged(self):
+        from geometry.element import with_stroke_brush
+        for elem in (Rect(x=0, y=0, width=5, height=5),
+                     Polygon(points=((0, 0), (5, 0), (5, 5))),
+                     Ellipse(cx=0, cy=0, rx=2, ry=3)):
+            self.assertIs(with_stroke_brush(elem, "charcoal"), elem)
+
+
 if __name__ == "__main__":
     absltest.main()
