@@ -1994,16 +1994,22 @@ def clear_ids(elem: Element) -> Element:
     (VISION.md §6.2).
 
     Elements are frozen dataclasses, so this rebuilds via ``dataclasses.replace``.
-    Only Group/Layer carry children to recurse into, mirroring the Rust
-    ``clear_ids`` which descends only into Group/Layer ``children``.
+    The walk descends Group/Layer ``children`` AND a compound shape's owned
+    ``operands``, which are not children, mirroring both active ports
+    (``clear_ids`` in element.rs, ``clearingIds`` in Element.swift). Until
+    2026-09-21 it walked children alone, so copying a compound cleared the
+    compound's own id and left every operand id duplicated on the copy. The
+    ports fixed that on 2026-07-27 and the reference never received it.
     """
     if isinstance(elem, Group):  # also matches Layer (a Group subclass)
         cleared_children = tuple(clear_ids(c) for c in elem.children)
         return dataclasses.replace(elem, id=None, children=cleared_children)
+    if isinstance(elem, CompoundShape):
+        cleared_operands = tuple(clear_ids(o) for o in elem.operands)
+        return dataclasses.replace(elem, id=None, operands=cleared_operands)
     if hasattr(elem, "id"):
         return dataclasses.replace(elem, id=None)
-    # Elements without an id field are returned unchanged (none remain today —
-    # CompoundShape carries an id and is handled by the hasattr branch above).
+    # Elements without an id field are returned unchanged.
     return elem
 
 
