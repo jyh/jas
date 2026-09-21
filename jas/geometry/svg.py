@@ -663,29 +663,16 @@ def document_to_svg(doc: Document) -> str:
           f"{_fmt(_px(bw))} {_fmt(_px(bh))}")
     setup_default = doc.document_setup == DocumentSetup()
     prefs_default = doc.print_preferences == PrintPreferences()
-    needs_jas = (not setup_default) or (not prefs_default)
-    ns_attrs = (
-        f'xmlns="http://www.w3.org/2000/svg"'
-        f' xmlns:inkscape="{_INKSCAPE_NS}"'
-    )
-    if needs_jas:
-        ns_attrs += (
-            f' xmlns:sodipodi="{_SODIPODI_NS}"'
-            f' xmlns:jas="{_JAS_NS}"'
-        )
-    lines = [
-        '<?xml version="1.0" encoding="UTF-8"?>',
-        f'<svg {ns_attrs}'
-        f' viewBox="{vb}"'
-        f' width="{_fmt(_px(bw))}" height="{_fmt(_px(bh))}">',
-    ]
-    if needs_jas:
-        lines.append('  <sodipodi:namedview id="namedview1">')
-        if not setup_default:
-            lines.append(_document_setup_to_xml(doc.document_setup, "    "))
-        if not prefs_default:
-            lines.append(_print_preferences_to_xml(doc.print_preferences, "    "))
-        lines.append('  </sodipodi:namedview>')
+    needs_namedview = (not setup_default) or (not prefs_default)
+    # The body is built first so the root can declare xmlns:jas whenever ANY
+    # jas:-prefixed attribute is in it, not only when the namedview is.
+    # `jas:tool-origin` is written by the <path> arm, and the parser rejects
+    # the WHOLE DOCUMENT on an undeclared prefix, so a Blob Brush stroke in an
+    # otherwise default document used to come back empty. Matching the prefix
+    # itself keeps the next jas: attribute from reopening the hole; the
+    # leading space anchors it to an attribute position. Plain documents stay
+    # byte-identical. Mirrors JasSwift's `documentToSvg`.
+    body: list[str] = []
     # Symbols (master store, SYMBOLS.md §5 / Fork S3): masters serialize
     # inside a single <defs> block (each as its normal element SVG, carrying
     # its id), placed before the layer content so the standard SVG
@@ -697,12 +684,35 @@ def document_to_svg(doc: Document) -> str:
     if doc.symbols:
         sorted_masters = sorted(
             doc.symbols, key=lambda m: getattr(m, "id", None) or "")
-        lines.append("  <defs>")
+        body.append("  <defs>")
         for master in sorted_masters:
-            lines.append(_element_svg(master, "    "))
-        lines.append("  </defs>")
+            body.append(_element_svg(master, "    "))
+        body.append("  </defs>")
     for layer in doc.layers:
-        lines.append(_element_svg(layer, "  "))
+        body.append(_element_svg(layer, "  "))
+    needs_jas_ns = needs_namedview or any(" jas:" in b for b in body)
+    ns_attrs = (
+        f'xmlns="http://www.w3.org/2000/svg"'
+        f' xmlns:inkscape="{_INKSCAPE_NS}"'
+    )
+    if needs_namedview:
+        ns_attrs += f' xmlns:sodipodi="{_SODIPODI_NS}"'
+    if needs_jas_ns:
+        ns_attrs += f' xmlns:jas="{_JAS_NS}"'
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        f'<svg {ns_attrs}'
+        f' viewBox="{vb}"'
+        f' width="{_fmt(_px(bw))}" height="{_fmt(_px(bh))}">',
+    ]
+    if needs_namedview:
+        lines.append('  <sodipodi:namedview id="namedview1">')
+        if not setup_default:
+            lines.append(_document_setup_to_xml(doc.document_setup, "    "))
+        if not prefs_default:
+            lines.append(_print_preferences_to_xml(doc.print_preferences, "    "))
+        lines.append('  </sodipodi:namedview>')
+    lines.extend(body)
     lines.append("</svg>")
     return "\n".join(lines)
 
@@ -1245,7 +1255,11 @@ def _parse_element(node: ET.Element) -> Element | None:
 
     if tag == "path":
         d = _parse_path_d(node.get("d", ""))
-        tool_origin = node.get("jas:tool-origin")
+        # Namespace-qualified first: a file that declares xmlns:jas (every
+        # file this writer produces with the attribute) parses it as
+        # {urn:jas:1}tool-origin, and the literal name matched nothing.
+        tool_origin = (node.get(f"{{{_JAS_NS}}}tool-origin")
+                       or node.get("jas:tool-origin"))
         return Path(d=d, fill=fill, stroke=stroke,
                     opacity=opacity, transform=transform,
                     tool_origin=tool_origin,
