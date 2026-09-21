@@ -48,9 +48,11 @@ for the other. So the domain layer is **live**:
 - `scripts/check_reference_drift.py` runs the layer's corpus harness
   (`jas/cross_language_test.py`) at HEAD in a blocking lane. It reds on any
   failing case missing from its tracked baseline
-  (`scripts/reference_drift_baseline.json`), and that baseline may only
-  shrink. A harness case that reaches the frozen app still runs, but it is
-  counted apart as *recorded, not owed*.
+  (`scripts/reference_drift_baseline.json`). The tool only ever shrinks
+  that baseline. A key is added by hand, and only in the change that adds
+  the measurement finding it, so a reviewer sees every addition and a
+  regression can never be absorbed as one. A harness case that reaches the
+  frozen app still runs, but it is counted apart as *recorded, not owed*.
 - The rest of `jas/` (`workspace/`, `tools/`, `menu/`, `panels/`,
   `canvas/` and the app shell) stays frozen at the tag.
 
