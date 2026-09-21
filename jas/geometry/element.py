@@ -1994,16 +1994,22 @@ def clear_ids(elem: Element) -> Element:
     (VISION.md §6.2).
 
     Elements are frozen dataclasses, so this rebuilds via ``dataclasses.replace``.
-    Only Group/Layer carry children to recurse into, mirroring the Rust
-    ``clear_ids`` which descends only into Group/Layer ``children``.
+    The walk descends Group/Layer ``children`` AND a compound shape's owned
+    ``operands``, which are not children, mirroring both active ports
+    (``clear_ids`` in element.rs, ``clearingIds`` in Element.swift). Until
+    2026-09-21 it walked children alone, so copying a compound cleared the
+    compound's own id and left every operand id duplicated on the copy. The
+    ports fixed that on 2026-07-27 and the reference never received it.
     """
     if isinstance(elem, Group):  # also matches Layer (a Group subclass)
         cleared_children = tuple(clear_ids(c) for c in elem.children)
         return dataclasses.replace(elem, id=None, children=cleared_children)
+    if isinstance(elem, CompoundShape):
+        cleared_operands = tuple(clear_ids(o) for o in elem.operands)
+        return dataclasses.replace(elem, id=None, operands=cleared_operands)
     if hasattr(elem, "id"):
         return dataclasses.replace(elem, id=None)
-    # Elements without an id field are returned unchanged (none remain today —
-    # CompoundShape carries an id and is handled by the hasattr branch above).
+    # Elements without an id field are returned unchanged.
     return elem
 
 
@@ -2044,9 +2050,18 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
             for i in range(4):
                 if _contains(kind, i):
                     pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
-            return Polygon(points=tuple(pts),
-                           fill=elem.fill, stroke=elem.stroke,
-                           opacity=elem.opacity, transform=elem.transform)
+            # A 1->1 reshape preserves identity: every field with a
+            # counterpart on Polygon is carried (EDIT_SEMANTICS_FREEZE §3.1),
+            # derived from the dataclasses so a new shared field is carried
+            # without an edit. It used to name four fields, and dropped id,
+            # name, lock, visibility, blend mode, mask and both gradients.
+            # NOT YET MIRRORED: the active ports also flatten rx/ry into
+            # the emitted points (ruled answer (3)); here a rounded rect
+            # still promotes to its four square corners.
+            carried = {f.name: getattr(elem, f.name)
+                       for f in dataclasses.fields(Polygon)
+                       if f.name != "points" and hasattr(elem, f.name)}
+            return Polygon(points=tuple(pts), **carried)
         case Circle(cx=cx, cy=cy, r=r):
             if _is_all(kind, 4):
                 return replace(elem, cx=cx + dx, cy=cy + dy)
