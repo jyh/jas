@@ -142,7 +142,7 @@ def closure_packages(root: pathlib.Path, app_pkgs: set) -> list:
     targets = set()
     modules = []
     for f in files:
-        tree = ast.parse(f.read_text(encoding="utf-8"), filename=str(f))
+        tree = ast.parse(f.read_text(encoding="utf-8"), filename=f.as_posix())
         targets.update(t for t in _import_targets(tree)
                        if t.split(".")[0] in app_pkgs)
         rel = f.relative_to(root).with_suffix("")
@@ -158,7 +158,7 @@ def closure_packages(root: pathlib.Path, app_pkgs: set) -> list:
 
 def harness_scope(harness: pathlib.Path, app_pkgs: set, in_pkgs: set):
     """(test methods, {app-reaching method: reason}) by static reading."""
-    tree = ast.parse(harness.read_text(encoding="utf-8"), filename=str(harness))
+    tree = ast.parse(harness.read_text(encoding="utf-8"), filename=harness.as_posix())
     imported = {}
     for node in tree.body:
         if isinstance(node, ast.Import):
@@ -214,8 +214,8 @@ class _Abort(Exception):
 def run_driver(root: pathlib.Path, out: pathlib.Path) -> int:
     root = root.resolve()
     jas_dir = root / "jas"
-    sys.path.insert(0, str(root))
-    sys.path.insert(0, str(jas_dir))
+    sys.path.insert(0, root.as_posix())
+    sys.path.insert(0, jas_dir.as_posix())
     os.chdir(jas_dir)
     app_pkgs = _app_packages(jas_dir)
     closure = closure_packages(root, app_pkgs)
@@ -303,8 +303,8 @@ def measure(root: pathlib.Path):
     with tempfile.TemporaryDirectory() as td:
         out = pathlib.Path(td) / "result.json"
         proc = subprocess.run(
-            [sys.executable, "-X", "utf8", str(pathlib.Path(__file__).resolve()),
-             "--driver", str(root), str(out)],
+            [sys.executable, "-X", "utf8", pathlib.Path(__file__).resolve(),
+             "--driver", root, out],
             capture_output=True)
         if proc.returncode != 0 or not out.is_file():
             tail = proc.stderr.decode("utf-8", "replace").strip().splitlines()[-3:]
@@ -529,7 +529,7 @@ def _build(td: pathlib.Path, files: dict) -> pathlib.Path:
 def _run_cli(root: pathlib.Path, *args, env_extra=None):
     env = dict(os.environ, **(env_extra or {}))
     proc = subprocess.run(
-        [sys.executable, str(pathlib.Path(__file__).resolve()), "--root", str(root),
+        [sys.executable, pathlib.Path(__file__).resolve(), "--root", root,
          *args], capture_output=True, env=env)
     return (proc.returncode, proc.stdout.decode("utf-8", "replace"),
             proc.stderr.decode("utf-8", "replace"))
