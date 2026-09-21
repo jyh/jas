@@ -360,15 +360,20 @@ class SvgImportTest(absltest.TestCase):
         self.assertIsNotNone(elem.fill)
         self.assertAlmostEqual(elem.fill.color.r, 1.0, places=1)
 
-    def test_roundtrip_circle(self):
+    def test_roundtrip_round_ellipse_through_the_circle_tag(self):
+        # ONE ROUND KIND (2026-07-30): a round Ellipse writes as <circle>,
+        # and <circle> reads back as a round Ellipse.
         layer = Layer(children=(
-            Circle(cx=36, cy=36, r=18,
-                   fill=Fill(color=RgbColor(0, 0, 1))),
+            Ellipse(cx=36, cy=36, rx=18, ry=18,
+                    fill=Fill(color=RgbColor(0, 0, 1))),
         ))
-        doc2 = self._roundtrip(Document(layers=(layer,)))
+        doc = Document(layers=(layer,))
+        self.assertIn("<circle ", document_to_svg(doc))
+        doc2 = self._roundtrip(doc)
         elem = doc2.layers[0].children[0]
-        self.assertIsInstance(elem, Circle)
-        self.assertAlmostEqual(elem.r, 18, places=2)
+        self.assertIsInstance(elem, Ellipse)
+        self.assertAlmostEqual(elem.rx, 18, places=2)
+        self.assertAlmostEqual(elem.ry, 18, places=2)
 
     def test_roundtrip_ellipse(self):
         layer = Layer(children=(

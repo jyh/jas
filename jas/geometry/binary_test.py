@@ -130,10 +130,13 @@ class BinaryRoundtripTest(absltest.TestCase):
                  stroke=Stroke(color=RgbColor(0.0, 0.0, 0.0),
                                width=1.0))))
 
-    def test_roundtrip_circle(self):
+    def test_roundtrip_round_ellipse(self):
+        # ONE ROUND KIND (2026-07-30): a round shape is an Ellipse with
+        # rx == ry. The legacy circle tag's read path has its own arm in the
+        # corpus harness (a_legacy_circle_tag_still_reads_as_a_round_ellipse).
         self._assert_roundtrip(_wrap(
-            Circle(cx=50.0, cy=50.0, r=25.0,
-                   fill=Fill(color=RgbColor(0.0, 1.0, 0.0)))))
+            Ellipse(cx=50.0, cy=50.0, rx=25.0, ry=25.0,
+                    fill=Fill(color=RgbColor(0.0, 1.0, 0.0)))))
 
     def test_roundtrip_ellipse(self):
         self._assert_roundtrip(_wrap(
@@ -188,7 +191,7 @@ class BinaryRoundtripTest(absltest.TestCase):
         self._assert_roundtrip(_wrap(
             Group(children=(
                 Rect(x=0.0, y=0.0, width=10.0, height=10.0),
-                Circle(cx=5.0, cy=5.0, r=3.0),
+                Ellipse(cx=5.0, cy=5.0, rx=3.0, ry=3.0),
             ))))
 
     def test_roundtrip_nested_group(self):
@@ -227,7 +230,7 @@ class BinaryRoundtripTest(absltest.TestCase):
         layer1 = Layer(name="Layer 1", children=(
             Rect(x=0.0, y=0.0, width=10.0, height=10.0),))
         layer2 = Layer(name="Layer 2", children=(
-            Circle(cx=5.0, cy=5.0, r=3.0),))
+            Ellipse(cx=5.0, cy=5.0, rx=3.0, ry=3.0),))
         doc = Document(layers=(layer1, layer2), selected_layer=1)
         self._assert_roundtrip(doc)
 

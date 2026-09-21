@@ -720,9 +720,11 @@ def recognized_to_element(shape: RecognizedShape, template: Element) -> Element:
                         fill=a.fill, stroke=a.stroke, opacity=a.opacity,
                         transform=a.transform, locked=a.locked, visibility=a.visibility)
     elif isinstance(shape, RecognizedCircle):
-        return CircleElem(cx=shape.cx, cy=shape.cy, r=shape.r,
-                          fill=a.fill, stroke=a.stroke, opacity=a.opacity,
-                          transform=a.transform, locked=a.locked, visibility=a.visibility)
+        # The recogniser still RECOGNISES a circle, which is a statement
+        # about the traced geometry. It builds the one round kind (2026-07-30).
+        return EllipseElem(cx=shape.cx, cy=shape.cy, rx=shape.r, ry=shape.r,
+                           fill=a.fill, stroke=a.stroke, opacity=a.opacity,
+                           transform=a.transform, locked=a.locked, visibility=a.visibility)
     elif isinstance(shape, RecognizedEllipse):
         return EllipseElem(cx=shape.cx, cy=shape.cy, rx=shape.rx, ry=shape.ry,
                            fill=a.fill, stroke=a.stroke, opacity=a.opacity,
