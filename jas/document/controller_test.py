@@ -205,6 +205,25 @@ class SelectionControllerTest(absltest.TestCase):
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(ctrl.document.selection, frozenset())
 
+    def test_unlock_all_clears_every_flag_and_keeps_the_selection(self):
+        """UNLOCKSEL (ruled 2026-07-29, as in the ports): Unlock All speaks to
+        `locked` and preserves the rest, the selection included, and it
+        clears EVERY flag, a layer's own among them."""
+        free = Rect(x=50, y=50, width=5, height=5)
+        group = Group(children=(Rect(x=0, y=0, width=1, height=1, locked=True),
+                                Rect(x=2, y=0, width=1, height=1)), locked=True)
+        doc = Document(layers=(
+            Layer(children=(free, group, Rect(x=9, y=9, width=1, height=1, locked=True)),
+                  name="L0"),
+            Layer(children=(Rect(x=0, y=0, width=1, height=1),), name="L1", locked=True)),
+            selection=frozenset({ElementSelection.all((0, 0))}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.unlock_all()
+        d = ctrl.document
+        self.assertEqual(_sel_paths(d.selection), frozenset({(0, 0)}), "the selection is kept")
+        for path in ((0,), (0, 1), (0, 1, 0), (0, 1, 1), (0, 2), (1,), (1, 0)):
+            self.assertFalse(d.get_element(path).locked, f"{path} unlocked")
+
     def test_select_rect_replaces_previous(self):
         """Marquee selection replaces any prior selection."""
         self.ctrl.set_selection(_sel((0, 0)))
