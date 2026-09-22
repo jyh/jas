@@ -697,6 +697,34 @@ class MoveSelectionTest(absltest.TestCase):
                          (3.0, 4.0, 13.0, 14.0))
         self.assertEqual((moved_rect.x, moved_rect.y), (23.0, 24.0))
 
+    def test_rounded_rect_corner_drag_survives_a_second_sample(self):
+        # A corner drag is a MULTI-SAMPLE gesture: the first sample promotes
+        # the rounded Rect to a Polygon (ratified answer (3) flattens the
+        # rounding into arc runs) and the second lands on the Polygon.
+        # Without the remap in move_selection the second sample would drag
+        # one arc point and shred the corner. Mirrors the Rust
+        # `rounded_rect_corner_drag_survives_a_second_sample`.
+        from geometry.element import rounded_rect_corner_runs
+        rect = Rect(x=0, y=0, width=100, height=60, rx=20, ry=10)
+        doc = Document(layers=(Layer(children=(rect,)),),
+                       selection=frozenset({ElementSelection.partial((0, 0), [1])}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(10.0, 0.0)
+        ctrl.move_selection(10.0, 0.0)
+        poly = ctrl.document.layers[0].children[0]
+        self.assertIsInstance(poly, Polygon)
+        n = len(poly.points) // 4
+        self.assertGreater(n, 1, "the rounding should have flattened into arc runs")
+        reference = rounded_rect_corner_runs(0, 0, 100, 60, 20, 10)
+        for i, want in enumerate(reference[1]):
+            got = poly.points[n + i]
+            self.assertAlmostEqual(got[0], want[0] + 20, delta=1e-9, msg=f"corner-1 point {i}")
+            self.assertAlmostEqual(got[1], want[1], delta=1e-9, msg=f"corner-1 point {i}")
+        for i, want in enumerate(reference[0]):
+            got = poly.points[i]
+            self.assertAlmostEqual(got[0], want[0], delta=1e-9, msg=f"corner-0 point {i} moved")
+            self.assertAlmostEqual(got[1], want[1], delta=1e-9, msg=f"corner-0 point {i} moved")
+
 
 class CopySelectionTest(absltest.TestCase):
 

@@ -18,6 +18,7 @@ from geometry.element import (
     ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
     Path, PathCommand, Polygon, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
+    remap_cp_selection_after_move,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
@@ -932,6 +933,16 @@ class Controller:
                 doc, es.path, dx, dy, elem, es.kind)
             new_elem = move_control_points(elem, es.kind, ldx, ldy)
             new_doc = new_doc.replace_element(es.path, new_elem)
+            # A sample that PROMOTES the element (Rect -> Polygon) must carry
+            # the control-point selection across the promotion, or the next
+            # sample of the same drag addresses indices that no longer mean
+            # what they did. Mirrors the Rust `move_selection`.
+            kind = remap_cp_selection_after_move(elem, new_elem, es.kind)
+            if kind != es.kind:
+                new_doc = replace(new_doc, selection=frozenset(
+                    ElementSelection(path=e.path, kind=kind)
+                    if e.path == es.path else e
+                    for e in new_doc.selection))
         self._model.edit_document(new_doc)
 
     def simplify_selection(self, precision: float) -> None:

@@ -2051,21 +2051,82 @@ def clear_ids(elem: Element) -> Element:
     return elem
 
 
+def rounded_rect_corner_runs(x: float, y: float, w: float, h: float,
+                             rx_in: float, ry_in: float) -> list[list[tuple[float, float]]]:
+    """The rounded rect's outline, split into ONE POINT RUN PER CORNER, in
+    the same order as a Rect's four control points: 0 top-left, 1 top-right,
+    2 bottom-right, 3 bottom-left. Concatenating the runs in that order gives
+    the closed outline.
+
+    A SQUARE rect (both radii <= 0, or a clamp that lands there) gives four
+    single-point runs, i.e. exactly the four corners. A ROUNDED rect gives
+    four arc runs: each corner's quadratic sampled at t = 0 .. FLATTEN_STEPS,
+    clamped as the renderer clamps (rx to w/2, ry to h/2).
+
+    Mirrors the Rust ``rounded_rect_corner_runs`` (ratified answer (3),
+    EDIT_SEMANTICS_FREEZE.md section 8) in the same operation order, so the
+    three implementations produce the same floats;
+    ``test_fixtures/algorithms/rect_corner_promotion.json`` pins them."""
+    if rx_in <= 0 and ry_in <= 0:
+        rx, ry = 0.0, 0.0
+    else:
+        rx, ry = min(max(rx_in, 0.0), w / 2), min(max(ry_in, 0.0), h / 2)
+    if rx <= 0 and ry <= 0:
+        return [[(x, y)], [(x + w, y)], [(x + w, y + h)], [(x, y + h)]]
+    # (start, control, end) of each corner's quadratic, walked clockwise.
+    corners = [
+        ((x, y + ry), (x, y), (x + rx, y)),
+        ((x + w - rx, y), (x + w, y), (x + w, y + ry)),
+        ((x + w, y + h - ry), (x + w, y + h), (x + w - rx, y + h)),
+        ((x + rx, y + h), (x, y + h), (x, y + h - ry)),
+    ]
+    runs = []
+    for p0, p1, p2 in corners:
+        run = []
+        for i in range(FLATTEN_STEPS + 1):
+            t = i / FLATTEN_STEPS
+            mt = 1.0 - t
+            run.append((mt * mt * p0[0] + 2.0 * mt * t * p1[0] + t * t * p2[0],
+                        mt * mt * p0[1] + 2.0 * mt * t * p1[1] + t * t * p2[1]))
+        runs.append(run)
+    return runs
+
+
 def remap_cp_selection_after_move(before: Element, after: Element, kind):
     """Remap a control-point selection across a `move_control_points` call
-    that changed the element's REPRESENTATION. Mirrors the Rust
+    that changed the element's REPRESENTATION.
+
+    A corner drag is a MULTI-SAMPLE gesture fed an incremental delta per
+    mousemove, so the Rect -> Polygon promotion happens on the first sample
+    and later samples land on the Polygon. Once the rounding flattens into
+    arc runs, corner i is a RUN of indices; without this remap the second
+    sample would drag a single arc point and shred the corner.
+
+    Returns `kind` unchanged for every other transition. Mirrors the Rust
     ``remap_cp_selection_after_move``."""
-    return kind
+    from document.document import _SelectionPartial, selection_partial
+    if not (isinstance(before, Rect) and isinstance(after, Polygon)
+            and isinstance(kind, _SelectionPartial)):
+        return kind
+    runs = rounded_rect_corner_runs(before.x, before.y, before.width,
+                                    before.height, before.rx, before.ry)
+    out: list[int] = []
+    base = 0
+    for i, run in enumerate(runs):
+        if i in kind.cps:
+            out.extend(range(base, base + len(run)))
+        base += len(run)
+    return selection_partial(out)
 
 
 def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
     """Return a new element with the specified control points moved by (dx, dy).
 
     `kind` is a `SelectionKind` (`.all` or `.partial(SortedCps)`). For
-    Rect/Circle/Ellipse, `.all` translates the primitive in place;
-    `.partial` (even if it covers every CP) converts to a polygon for
-    Rect, since "I selected each CP individually" is a different intent
-    than "I selected the element as a whole".
+    Rect/Circle/Ellipse, a kind that covers every CP (`.all`, or a
+    `.partial` naming all of them) translates the primitive in place, as
+    in both active ports; any other `.partial` converts a Rect to a
+    Polygon, flattening its rounding.
 
     `.partial(empty)` — "element selected, no CPs highlighted" — is a
     no-op: the element is returned unchanged. Without this guard, the
@@ -2091,18 +2152,24 @@ def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
         case Rect(x=x, y=y, width=w, height=h):
             if _is_all(kind, 4):
                 return replace(elem, x=x + dx, y=y + dy)
-            pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
-            for i in range(4):
-                if _contains(kind, i):
-                    pts[i] = (pts[i][0] + dx, pts[i][1] + dy)
+            # RATIFIED ANSWER (3) (EDIT_SEMANTICS_FREEZE.md section 8): rx/ry
+            # have no counterpart on Polygon, so the rounding is FLATTENED
+            # into the emitted points rather than evaporating. One point run
+            # per corner in control-point order, so a dragged corner moves
+            # its WHOLE arc; a square rect gives the four corners. The drag
+            # pipeline remaps the selection onto the runs
+            # (`remap_cp_selection_after_move`, called by `move_selection`).
+            pts = []
+            for i, run in enumerate(rounded_rect_corner_runs(
+                    x, y, w, h, elem.rx, elem.ry)):
+                moved = _contains(kind, i)
+                pts.extend((px + dx, py + dy) if moved else (px, py)
+                           for px, py in run)
             # A 1->1 reshape preserves identity: every field with a
             # counterpart on Polygon is carried (EDIT_SEMANTICS_FREEZE §3.1),
             # derived from the dataclasses so a new shared field is carried
             # without an edit. It used to name four fields, and dropped id,
             # name, lock, visibility, blend mode, mask and both gradients.
-            # NOT YET MIRRORED: the active ports also flatten rx/ry into
-            # the emitted points (ruled answer (3)); here a rounded rect
-            # still promotes to its four square corners.
             carried = {f.name: getattr(elem, f.name)
                        for f in dataclasses.fields(Polygon)
                        if f.name != "points" and hasattr(elem, f.name)}
