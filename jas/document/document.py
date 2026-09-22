@@ -248,6 +248,26 @@ class Document:
         except ValueError:
             return None
 
+    def effective_locked(self, path: ElementPath) -> bool:
+        """True when the element at ``path`` or any ancestor is locked.
+
+        ``locked`` is ORed down the path, as ``effective_visibility`` folds
+        visibility: a child cannot be unlocked inside a locked parent
+        (LAYER_STRUCTURE.md section 13). An empty path or a missing layer is
+        not locked; an out-of-range child index keeps what the walk already
+        saw. Mirrors the Rust ``Document::effective_locked``.
+        """
+        if not path or path[0] >= len(self.layers):
+            return False
+        node: Element = self.layers[path[0]]
+        locked = node.locked
+        for idx in path[1:]:
+            if not isinstance(node, Group) or idx >= len(node.children):
+                return locked
+            node = node.children[idx]
+            locked = locked or node.locked
+        return locked
+
     def effective_visibility(self, path: ElementPath) -> "Visibility":
         """Return the effective visibility of the element at ``path``.
 

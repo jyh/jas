@@ -872,8 +872,12 @@ class Controller:
         if not path:
             raise ValueError("Path must be non-empty")
         doc = self._model.document
-        elem = doc.get_element(path)
-        if elem.locked:
+        doc.get_element(path)  # a path that names no element raises, as before
+        # The lock is read DOWN THE PATH (LOCKINHERIT, LAYER_STRUCTURE.md
+        # section 13), as the visibility read below already is, so a click on
+        # a child of a locked layer or group selects nothing. Mirrors the
+        # ports' `select_element`.
+        if doc.effective_locked(path):
             return
         if doc.effective_visibility(path) == Visibility.INVISIBLE:
             return
