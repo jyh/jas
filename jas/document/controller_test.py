@@ -748,6 +748,42 @@ class MoveSelectionTest(absltest.TestCase):
             ctrl.select_element(path)
             self.assertEqual(bool(ctrl.document.selection), selects, label)
 
+    def test_paint_on_a_selected_group_reaches_its_members(self):
+        # PAINTRECURSE / BRUSHRECURSE, mirrored from the ports'
+        # `map_paintable`: a Group has no paint of its own, so a paint write
+        # on a group selected ALONE must reach every member, recursively.
+        # Before this, the six writers asked the Group itself and changed
+        # nothing. Each writer is driven on its own document.
+        from geometry.element import (
+            Color, Fill, Gradient, LineTo, MoveTo, Path, Stroke)
+        red = Fill(color=Color.rgb(1.0, 0.0, 0.0))
+        blue = Stroke(color=Color.rgb(0.0, 0.0, 1.0), width=3.0)
+        grad = Gradient()
+        writers = [
+            ("fill", lambda c: c.set_selection_fill(red), lambda e: e.fill == red),
+            ("stroke", lambda c: c.set_selection_stroke(blue), lambda e: e.stroke == blue),
+            ("fill_gradient", lambda c: c.set_selection_fill_gradient(grad),
+             lambda e: e.fill_gradient == grad),
+            ("stroke_gradient", lambda c: c.set_selection_stroke_gradient(grad),
+             lambda e: e.stroke_gradient == grad),
+            ("stroke_brush", lambda c: c.set_selection_stroke_brush("basic/round_3"),
+             lambda e: e.stroke_brush == "basic/round_3"),
+            ("stroke_brush_overrides",
+             lambda c: c.set_selection_stroke_brush_overrides('{"angle":30}'),
+             lambda e: e.stroke_brush_overrides == '{"angle":30}'),
+        ]
+        for name, write, holds in writers:
+            leaf = lambda x: Path(d=(MoveTo(x, 0.0), LineTo(x + 5.0, 5.0)))
+            inner = Group(children=(leaf(20.0),))
+            group = Group(children=(leaf(0.0), inner))
+            doc = Document(layers=(Layer(children=(group,)),),
+                           selection=frozenset({ElementSelection.all((0, 0))}))
+            ctrl = Controller(model=Model(document=doc))
+            write(ctrl)
+            g = ctrl.document.get_element((0, 0))
+            self.assertTrue(holds(g.children[0]), f"{name}: the direct member")
+            self.assertTrue(holds(g.children[1].children[0]), f"{name}: the nested member")
+
     def test_a_marquee_reads_the_lock_down_the_path(self):
         # LOCKINHERIT in the flat (marquee) walk, mirrored from the ports'
         # `select_flat`: a locked LAYER yields nothing, and a locked
