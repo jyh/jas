@@ -1107,19 +1107,19 @@ public class Controller {
     /// a reference by the full chain moves it along its own rotated axes: the
     /// exact defect this repair exists to remove, reintroduced one level down.
     ///
-    /// ⚠️ THE `total: 0` MIRRORS THIS PORT'S OWN MOVER AND IS NOT A COPY OF
-    /// RUST'S. `Element.moveControlPoints`'s reference arm guards
-    /// `kind.isAll(total: 0)`, while Rust's container arm reads
-    /// `control_point_count(elem)` — which is 4 for a reference in BOTH ports
-    /// (`Element.controlPointCount`'s `default`). So a `.partial([0,1,2,3])`
-    /// reference selection is a whole-element move in Rust and a no-op here.
-    /// That divergence is PRE-EXISTING and is deliberately not repaired by this
-    /// commit; what matters for S-3 is that this predicate agrees with the
-    /// mover it predicts, or the conversion would be applied to a move that
-    /// does not happen. Flagged, not fixed. Twin: the reference's
+    /// The predicate must agree with the MOVER it predicts, or the conversion
+    /// is applied to a move that does not happen (or withheld from one that
+    /// does), silently. `Element.moveControlPoints` moves a reference whole
+    /// for `.all` (its reference arm) AND for `.partial([0,1,2,3])` (the
+    /// `.group, .layer, .live` arm, which reads the element's OWN
+    /// control-point count — 4 for a reference, `controlPointCount`'s
+    /// `default`). So this reads the same count. Until 2026-09-21 it read
+    /// `isAll(total: 0)` and converted the corners spelling through the
+    /// reference's own transform: a scaled instance moved by half the delta.
+    /// Twin: Rust's `moves_in_parent_space`, the reference's
     /// `_moves_in_parent_space`.
     private func movesInParentSpace(_ elem: Element, _ kind: SelectionKind) -> Bool {
-        if case .live(.reference) = elem { return kind.isAll(total: 0) }
+        if case .live(.reference) = elem { return kind.isAll(total: elem.controlPointCount) }
         return false
     }
 
@@ -1193,6 +1193,16 @@ public class Controller {
             let (ldx, ldy) = documentDeltaToLocal(doc, es.path, dx: dx, dy: dy, elem, es.kind)
             let newElem = elem.moveControlPoints(es.kind, dx: ldx, dy: ldy)
             doc = doc.replaceElement(es.path, with: newElem)
+            // A sample that PROMOTES the element (Rect -> Polygon) must carry
+            // the control-point selection across the promotion, or the next
+            // sample of the same drag addresses indices that no longer mean
+            // what they did. Twin of Rust's `move_selection`.
+            let kind = remapCpSelectionAfterMove(elem, newElem, es.kind)
+            if kind != es.kind {
+                doc = doc.replacing(selection: doc.selection.map {
+                    $0.path == es.path ? ElementSelection(path: es.path, kind: kind) : $0
+                })
+            }
         }
         model.editDocument(doc)
     }

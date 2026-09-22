@@ -248,6 +248,48 @@ class Document:
         except ValueError:
             return None
 
+    def toggling_element_lock(self, path: ElementPath) -> "Document":
+        """Return a document with the element at ``path``'s OWN lock flag
+        flipped (the Layers-panel lock toggle). Nothing is written onto its
+        descendants: they are locked by inheritance (``effective_locked``),
+        the materialization having been repealed (LAYER_STRUCTURE.md section
+        13). Locking removes the element and its descendants from the
+        selection; unlocking restores nothing. A path naming no element
+        returns the document unchanged. Mirrors the Rust
+        ``Document::toggling_element_lock``."""
+        from dataclasses import replace as _replace
+        try:
+            elem = self.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return self
+        was_unlocked = not elem.locked
+        new_doc = self.replace_element(path, _replace(elem, locked=was_unlocked))
+        if was_unlocked:
+            n = len(path)
+            new_doc = _replace(new_doc, selection=frozenset(
+                es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))
+        return new_doc
+
+    def effective_locked(self, path: ElementPath) -> bool:
+        """True when the element at ``path`` or any ancestor is locked.
+
+        ``locked`` is ORed down the path, as ``effective_visibility`` folds
+        visibility: a child cannot be unlocked inside a locked parent
+        (LAYER_STRUCTURE.md section 13). An empty path or a missing layer is
+        not locked; an out-of-range child index keeps what the walk already
+        saw. Mirrors the Rust ``Document::effective_locked``.
+        """
+        if not path or path[0] >= len(self.layers):
+            return False
+        node: Element = self.layers[path[0]]
+        locked = node.locked
+        for idx in path[1:]:
+            if not isinstance(node, Group) or idx >= len(node.children):
+                return locked
+            node = node.children[idx]
+            locked = locked or node.locked
+        return locked
+
     def effective_visibility(self, path: ElementPath) -> "Visibility":
         """Return the effective visibility of the element at ``path``.
 

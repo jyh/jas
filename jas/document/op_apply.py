@@ -1231,6 +1231,19 @@ def op_apply(model: Model, op: dict) -> None:
             return
         ctrl.select_element(path)
         targets = selection_to_ids(model.document)
+    elif name == "toggle_element_lock":
+        # The Layers-panel lock toggle, through the same pure
+        # Document.toggling_element_lock the panel calls. Mirrors op_apply.rs
+        # "toggle_element_lock". A path naming no element is skipped (Rust
+        # returns MissingTarget; the reference has no op-error channel).
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        try:
+            model.document.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        model.edit_document(model.document.toggling_element_lock(path))
     elif name == "move_selection":
         ctrl.move_selection(num_field(op, "dx"), num_field(op, "dy"))
     elif name == "copy_selection":

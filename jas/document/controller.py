@@ -18,6 +18,7 @@ from geometry.element import (
     ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
     Path, PathCommand, Polygon, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
+    remap_cp_selection_after_move, map_paintable, paintable_leaves,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
@@ -196,11 +197,13 @@ def _moves_in_parent_space(elem, kind) -> bool:
     OUT of the conversion — while every ancestor's is still applied.
     Converting a reference by the full chain moves it along its own rotated
     axes: the exact defect this repair exists to remove, reintroduced one
-    level down. A partial (control-point) selection on a reference is a
-    no-op in the mover, so only the whole-element case is named here.
+    level down. The mover moves a reference whole for ``all`` AND for its
+    four bbox corners ``partial([0, 1, 2, 3])``, so the predicate reads the
+    element's own control-point count, as in both active ports.
     """
-    from geometry.element import ReferenceElem
-    return isinstance(elem, ReferenceElem) and selection_kind_is_all(kind, 0)
+    from geometry.element import ReferenceElem, control_point_count
+    return (isinstance(elem, ReferenceElem)
+            and selection_kind_is_all(kind, control_point_count(elem)))
 
 
 def _document_delta_to_local(doc, path, dx: float, dy: float,
@@ -714,31 +717,41 @@ class Controller:
 
     def _select_flat(self, predicate: Callable[[Element], bool],
                      *, extend: bool = False) -> None:
-        """Flat 2-level selection with group expansion.
+        """Flat 2-level selection.
 
-        Iterates layers and their direct children.  Groups that contain
-        at least one hit are expanded (the group itself *and* every child
-        are selected).  Parameterized by *predicate* which receives an
-        element and returns whether it is hit.
+        Iterates layers and their direct children. A group containing at
+        least one unlocked hit is selected ALONE (section 20). Parameterized
+        by *predicate*, which receives an element and returns whether it is
+        hit.
         """
         doc = self._model.document
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
-            if layer.visibility == Visibility.INVISIBLE:
+            # The lock is read DOWN THE PATH (LOCKINHERIT, LAYER_STRUCTURE.md
+            # section 13), as in the ports' `select_flat`: a locked layer
+            # yields nothing, and a locked member neither triggers its
+            # group's selection nor joins it. HONEST NOTE: the layer guard is
+            # expressive, not behavioural -- the child read below already ORs
+            # the layer's flag, so deleting the guard leaves every test green
+            # (measured). Rust's walk is the mirror image (its layer guard
+            # enforces and its child read is expressive).
+            if (doc.effective_locked((li,))
+                    or layer.visibility == Visibility.INVISIBLE):
                 continue
             for ci, child in enumerate(layer.children):
-                if child.locked:
+                if doc.effective_locked((li, ci)):
                     continue
                 child_vis = min(layer.visibility, child.visibility,
                                 key=lambda v: v.value)
                 if child_vis == Visibility.INVISIBLE:
                     continue
                 if isinstance(child, Group) and not isinstance(child, Layer):
-                    if any(predicate(gc) for gc in child.children):
+                    free = [gi for gi in range(len(child.children))
+                            if not doc.effective_locked((li, ci, gi))]
+                    # The band ASKS about members and ANSWERS with the group
+                    # alone (sections 16.4 / 20, as in the ports).
+                    if any(predicate(child.children[gi]) for gi in free):
                         entries.append(ElementSelection.all((li, ci)))
-                        for gi in range(len(child.children)):
-                            entries.append(
-                                ElementSelection.all((li, ci, gi)))
                 elif predicate(child):
                     entries.append(ElementSelection.all((li, ci)))
         new_sel = frozenset(entries)
@@ -861,16 +874,20 @@ class Controller:
     def select_element(self, path: ElementPath) -> None:
         """Select an element by path.
 
-        If the element's immediate parent is a Group (not a Layer), all
-        children of that Group are selected.  Otherwise just the single
-        element is selected.  Locked elements cannot be selected.
+        If the element's immediate parent is a Group (not a Layer), the
+        Group alone is selected (section 20). Otherwise just the element is
+        selected. An element whose path is locked cannot be selected.
         """
 
         if not path:
             raise ValueError("Path must be non-empty")
         doc = self._model.document
-        elem = doc.get_element(path)
-        if elem.locked:
+        doc.get_element(path)  # a path that names no element raises, as before
+        # The lock is read DOWN THE PATH (LOCKINHERIT, LAYER_STRUCTURE.md
+        # section 13), as the visibility read below already is, so a click on
+        # a child of a locked layer or group selects nothing. Mirrors the
+        # ports' `select_element`.
+        if doc.effective_locked(path):
             return
         if doc.effective_visibility(path) == Visibility.INVISIBLE:
             return
@@ -878,14 +895,15 @@ class Controller:
             parent_path = path[:-1]
             parent = doc.get_element(parent_path)
             if isinstance(parent, Group) and not isinstance(parent, Layer):
-                entries = [ElementSelection.all(parent_path)]
-                entries.extend(
-                    ElementSelection.all(parent_path + (i,))
-                    for i in range(len(parent.children))
-                )
+                # THE GROUP ALONE (section 20, as in the ports). The group
+                # and every member used to be written, the one selection
+                # shape no operation reads coherently: copy_selection copied
+                # the group, then each member INTO it. Operations reach
+                # members through map_paintable / paintable_leaves and the
+                # container move arm.
                 # Selection-only: non-undoable (OP_LOG.md §7/§8).
                 self._model.set_document_unbracketed(
-                    replace(doc, selection=frozenset(entries)))
+                    replace(doc, selection=frozenset({ElementSelection.all(parent_path)})))
                 return
         # Selection-only: non-undoable (OP_LOG.md §7/§8).
         self._model.set_document_unbracketed(
@@ -927,11 +945,29 @@ class Controller:
         doc = self._model.document
         new_doc = doc
         for es in doc.selection:
+            # AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (section
+            # 16.4). Every entry is read from the pristine `doc` and written
+            # back absolutely, so a descendant's write would land on top of
+            # its ancestor's and strand it. The ancestor's own entry carries
+            # the whole move. Mirrors the Rust and Swift `move_selection`.
+            if any(len(o.path) < len(es.path) and es.path[:len(o.path)] == o.path
+                   for o in doc.selection):
+                continue
             elem = doc.get_element(es.path)
             ldx, ldy = _document_delta_to_local(
                 doc, es.path, dx, dy, elem, es.kind)
             new_elem = move_control_points(elem, es.kind, ldx, ldy)
             new_doc = new_doc.replace_element(es.path, new_elem)
+            # A sample that PROMOTES the element (Rect -> Polygon) must carry
+            # the control-point selection across the promotion, or the next
+            # sample of the same drag addresses indices that no longer mean
+            # what they did. Mirrors the Rust `move_selection`.
+            kind = remap_cp_selection_after_move(elem, new_elem, es.kind)
+            if kind != es.kind:
+                new_doc = replace(new_doc, selection=frozenset(
+                    ElementSelection(path=e.path, kind=kind)
+                    if e.path == es.path else e
+                    for e in new_doc.selection))
         self._model.edit_document(new_doc)
 
     def simplify_selection(self, precision: float) -> None:
@@ -1042,59 +1078,38 @@ class Controller:
     def lock_selection(self) -> None:
         """Lock all selected elements and clear the selection.
 
-        When a Group is locked, all its children are locked recursively.
+        Only each target's OWN flag is set (LOCKMAT, section 13, as in the
+        ports): a group's members are locked by inheritance, which
+        ``Document.effective_locked`` reads. Stamping the flag onto members
+        would survive save and reload, and nothing would ever clear it. The
+        selection is cleared because nothing downstream refuses to move a
+        locked element.
         """
         doc = self._model.document
         if not doc.selection:
             return
-
-        def _lock(elem: Element) -> Element:
-            if isinstance(elem, Group) and not isinstance(elem, Layer):
-                new_children = tuple(_lock(c) for c in elem.children)
-                return replace(elem, children=new_children, locked=True)
-            return replace(elem, locked=True)
-
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_doc = new_doc.replace_element(es.path, _lock(elem))
+            new_doc = new_doc.replace_element(es.path, replace(elem, locked=True))
         self._model.edit_document(replace(new_doc, selection=frozenset()))
 
     def unlock_all(self) -> None:
-        """Unlock all locked elements and select them."""
-        from geometry.element import control_point_count
+        """Unlock every element, a layer's own flag included, and KEEP the
+        selection (UNLOCKSEL, ruled 2026-07-29, as in both ports): the edit
+        speaks to ``locked`` and preserves the rest. Lock and Hide clear the
+        selection because nothing downstream refuses to move a locked
+        element; unlocking makes nothing unselectable, so clearing would
+        destroy the artist's state for nothing."""
         doc = self._model.document
-        unlocked_paths: list[tuple[ElementPath, Element]] = []
-
-        def _collect_locked(path: ElementPath, elem: Element) -> None:
-            if isinstance(elem, Group) and not isinstance(elem, Layer):
-                if elem.locked:
-                    unlocked_paths.append((path, elem))
-                for i, child in enumerate(elem.children):
-                    _collect_locked(path + (i,), child)
-            elif elem.locked:
-                unlocked_paths.append((path, elem))
-
-        for li, layer in enumerate(doc.layers):
-            for ci, child in enumerate(layer.children):
-                _collect_locked((li, ci), child)
 
         def _unlock(elem: Element) -> Element:
             if isinstance(elem, Group):
-                new_children = tuple(_unlock(c) for c in elem.children)
-                return replace(elem, children=new_children, locked=False)
+                elem = replace(elem, children=tuple(_unlock(c) for c in elem.children))
             return replace(elem, locked=False)
 
-        new_layers = tuple(
-            replace(layer, children=tuple(_unlock(c) for c in layer.children))
-            for layer in doc.layers
-        )
-        # Select all newly unlocked elements
-        new_selection: set[ElementSelection] = set()
-        new_doc = replace(doc, layers=new_layers)
-        for path, _ in unlocked_paths:
-            new_selection.add(ElementSelection.all(path))
-        self._model.edit_document(replace(new_doc, selection=frozenset(new_selection)))
+        self._model.edit_document(
+            replace(doc, layers=tuple(_unlock(layer) for layer in doc.layers)))
 
     def move_path_handle(self, path: ElementPath, anchor_idx: int,
                          handle_type: str, dx: float, dy: float) -> None:
@@ -1168,7 +1183,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_fill(elem, fill)
+            new_elem = map_paintable(elem, lambda e: _with_fill(e, fill))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         return new_doc
@@ -1180,7 +1195,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke(elem, stroke)
+            new_elem = map_paintable(elem, lambda e: _with_stroke(e, stroke))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         return new_doc
@@ -1213,7 +1228,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_brush(elem, slug)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_brush(e, slug))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1224,7 +1239,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_brush_overrides(elem, overrides)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_brush_overrides(e, overrides))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1239,7 +1254,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_fill_gradient(elem, gradient)
+            new_elem = map_paintable(elem, lambda e: _with_fill_gradient(e, gradient))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1250,7 +1265,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_gradient(elem, gradient)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_gradient(e, gradient))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1411,15 +1426,19 @@ def selection_fill_summary(doc: Document) -> FillSummary:
     """Compute the fill summary for the current selection."""
     if not doc.selection:
         return FillSummaryNoSelection()
+    # A selected CONTAINER summarises the paint of its members, at any depth
+    # (the read twin of map_paintable), as in the ports: reading the Group's
+    # own paint reported "none" for a group whose members all carry one.
     first = None
     first_set = False
     for es in doc.selection:
-        fill = _element_fill(doc.get_element(es.path))
-        if not first_set:
-            first = fill
-            first_set = True
-        elif first != fill:
-            return FillSummaryMixed()
+        for leaf in paintable_leaves(doc.get_element(es.path)):
+            fill = _element_fill(leaf)
+            if not first_set:
+                first = fill
+                first_set = True
+            elif first != fill:
+                return FillSummaryMixed()
     return FillSummaryUniform(fill=first)
 
 
@@ -1427,13 +1446,17 @@ def selection_stroke_summary(doc: Document) -> StrokeSummary:
     """Compute the stroke summary for the current selection."""
     if not doc.selection:
         return StrokeSummaryNoSelection()
+    # A selected CONTAINER summarises the paint of its members, at any depth
+    # (the read twin of map_paintable), as in the ports: reading the Group's
+    # own paint reported "none" for a group whose members all carry one.
     first = None
     first_set = False
     for es in doc.selection:
-        stroke = _element_stroke(doc.get_element(es.path))
-        if not first_set:
-            first = stroke
-            first_set = True
-        elif first != stroke:
-            return StrokeSummaryMixed()
+        for leaf in paintable_leaves(doc.get_element(es.path)):
+            stroke = _element_stroke(leaf)
+            if not first_set:
+                first = stroke
+                first_set = True
+            elif first != stroke:
+                return StrokeSummaryMixed()
     return StrokeSummaryUniform(stroke=first)

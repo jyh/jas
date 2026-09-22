@@ -39,6 +39,46 @@ class DocumentTest(absltest.TestCase):
         self.assertEqual(doc.layers[1].name, "B")
 
 
+class EffectiveLockedTest(absltest.TestCase):
+    """`Document.effective_locked` ORs `locked` down the path, as
+    `effective_visibility` folds visibility (LAYER_STRUCTURE.md section 13:
+    a child cannot be unlocked inside a locked parent). Mirrors the Rust
+    `effective_locked_ors_down_the_path`."""
+
+    def _doc(self, layer_locked=False, group_locked=False, leaf_locked=False):
+        group = Group(children=(Rect(x=0, y=0, width=1, height=1),
+                                Rect(x=2, y=0, width=1, height=1, locked=leaf_locked)),
+                      locked=group_locked)
+        return Document(layers=(Layer(children=(Rect(x=5, y=5, width=1, height=1), group),
+                                      locked=layer_locked),))
+
+    def test_nothing_locked(self):
+        doc = self._doc()
+        for path in ((0,), (0, 0), (0, 1), (0, 1, 0), (0, 1, 1)):
+            self.assertFalse(doc.effective_locked(path), path)
+
+    def test_the_leaf_own_flag(self):
+        doc = self._doc(leaf_locked=True)
+        self.assertTrue(doc.effective_locked((0, 1, 1)))
+        for path in ((0,), (0, 1), (0, 1, 0)):
+            self.assertFalse(doc.effective_locked(path), path)
+
+    def test_a_container_flag_reaches_every_descendant(self):
+        doc = self._doc(group_locked=True)
+        for path in ((0, 1), (0, 1, 0), (0, 1, 1)):
+            self.assertTrue(doc.effective_locked(path), path)
+        self.assertFalse(doc.effective_locked((0, 0)))
+        doc = self._doc(layer_locked=True)
+        for path in ((0,), (0, 0), (0, 1), (0, 1, 0), (0, 1, 1)):
+            self.assertTrue(doc.effective_locked(path), path)
+
+    def test_addresses_that_name_no_artwork(self):
+        self.assertFalse(self._doc().effective_locked(()))
+        self.assertFalse(self._doc(layer_locked=True).effective_locked((7,)))
+        # An out-of-range CHILD index still inherits what the walk already saw.
+        self.assertTrue(self._doc(layer_locked=True).effective_locked((0, 9)))
+
+
 class SelectionTest(absltest.TestCase):
 
     def setUp(self):

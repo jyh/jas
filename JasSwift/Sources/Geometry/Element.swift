@@ -759,6 +759,70 @@ public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 /// Exact for every axis-preserving transform and for any subtree whose
 /// geometry reaches its bbox corners; otherwise the box of the transformed
 /// BOUNDS, the same over-approximation the evaluated-bbox family makes.
+/// The rounded rect's outline, split into ONE POINT RUN PER CORNER, in the
+/// same order as a Rect's four control points: 0 = top-left, 1 = top-right,
+/// 2 = bottom-right, 3 = bottom-left. Concatenating the runs in that order
+/// yields the closed outline.
+///
+/// A SQUARE rect (`rx <= 0 && ry <= 0`, or a clamp that lands there) gives
+/// four single-point runs, i.e. exactly the four corners. A ROUNDED rect gives
+/// four arc runs: each corner's quadratic sampled at `t = 0 ... flattenSteps`,
+/// clamped as the renderer clamps (`rx` to `w/2`, `ry` to `h/2`).
+///
+/// Twin of Rust's `rounded_rect_corner_runs` (ratified answer (3),
+/// EDIT_SEMANTICS_FREEZE.md §8), in the same operation order so the two
+/// produce the same doubles; `test_fixtures/algorithms/rect_corner_promotion.json`
+/// pins them.
+public func roundedRectCornerRuns(_ x: Double, _ y: Double, _ w: Double, _ h: Double,
+                                  _ rxIn: Double, _ ryIn: Double) -> [[(Double, Double)]] {
+    let (rx, ry): (Double, Double) = (rxIn <= 0 && ryIn <= 0)
+        ? (0, 0)
+        : (min(max(rxIn, 0), w / 2), min(max(ryIn, 0), h / 2))
+    if rx <= 0 && ry <= 0 {
+        return [[(x, y)], [(x + w, y)], [(x + w, y + h)], [(x, y + h)]]
+    }
+    // (start, control, end) of each corner's quadratic, walked clockwise.
+    let corners: [((Double, Double), (Double, Double), (Double, Double))] = [
+        ((x, y + ry), (x, y), (x + rx, y)),
+        ((x + w - rx, y), (x + w, y), (x + w, y + ry)),
+        ((x + w, y + h - ry), (x + w, y + h), (x + w - rx, y + h)),
+        ((x + rx, y + h), (x, y + h), (x, y + h - ry)),
+    ]
+    return corners.map { (p0, p1, p2) in
+        (0...elementFlattenSteps).map { i in
+            let t = Double(i) / Double(elementFlattenSteps)
+            let mt = 1.0 - t
+            return (mt * mt * p0.0 + 2.0 * mt * t * p1.0 + t * t * p2.0,
+                    mt * mt * p0.1 + 2.0 * mt * t * p1.1 + t * t * p2.1)
+        }
+    }
+}
+
+/// Remap a control-point selection across a `moveControlPoints` call that
+/// changed the element's REPRESENTATION.
+///
+/// A corner drag is a MULTI-SAMPLE gesture fed an incremental delta per
+/// mousemove, so the Rect -> Polygon promotion happens on the first sample and
+/// every later sample lands on the Polygon. Once the rounding flattens into
+/// arc runs, corner `i` is a RUN of indices; without this remap the second
+/// sample would drag a single arc point and shred the corner.
+///
+/// Returns `kind` unchanged for every other transition. Twin of Rust's
+/// `remap_cp_selection_after_move`.
+public func remapCpSelectionAfterMove(_ before: Element, _ after: Element,
+                                      _ kind: SelectionKind) -> SelectionKind {
+    guard case .rect(let r) = before, case .polygon = after,
+          case .partial = kind else { return kind }
+    let runs = roundedRectCornerRuns(r.x, r.y, r.width, r.height, r.rx, r.ry)
+    var out: [Int] = []
+    var base = 0
+    for (i, run) in runs.enumerated() {
+        if kind.contains(i) { out.append(contentsOf: base..<(base + run.count)) }
+        base += run.count
+    }
+    return .partial(SortedCps(out))
+}
+
 public func aabbThrough(_ b: BBox, _ t: Transform) -> BBox {
     let x0 = b.x, y0 = b.y, x1 = b.x + b.width, y1 = b.y + b.height
     var minX = Double.infinity, minY = Double.infinity
@@ -1098,19 +1162,19 @@ public enum Element: Equatable {
                 n.x += dx; n.y += dy
                 return .rect(n)
             }
-            // Rect -> Polygon. `rx`/`ry` have no counterpart on Polygon and
-            // are DISCARDED here: a rounded rect's corners come out square.
-            // Rust flattens the rounding into the emitted points instead
-            // (`rounded_rect_corner_runs`, ratified answer (3) of
-            // EDIT_SEMANTICS_FREEZE.md §8), so the two ports diverge on a
-            // ROUNDED rect's corner drag. Closing that needs the corner-run
-            // flattener AND the control-point remap that follows it
-            // (`remap_cp_selection_after_move`, which the drag pipeline must
-            // call between samples) — it is not a change to this arm alone.
-            var pts = [(v.x, v.y), (v.x + v.width, v.y),
-                       (v.x + v.width, v.y + v.height), (v.x, v.y + v.height)]
-            for i in 0..<4 where kind.contains(i) {
-                pts[i] = (pts[i].0 + dx, pts[i].1 + dy)
+            // Rect -> Polygon. RATIFIED ANSWER (3) (EDIT_SEMANTICS_FREEZE.md
+            // §8): `rx`/`ry` have no counterpart on Polygon, so the rounding
+            // is FLATTENED into the emitted points (WYSIWYG at promotion)
+            // rather than evaporating. `roundedRectCornerRuns` gives one point
+            // run per corner in control-point order, so a dragged corner
+            // translates its WHOLE arc; a square rect gives the four corners.
+            // The drag pipeline remaps the selection onto the runs
+            // (`remapCpSelectionAfterMove`, called by `moveSelection`).
+            var pts: [(Double, Double)] = []
+            let runs = roundedRectCornerRuns(v.x, v.y, v.width, v.height, v.rx, v.ry)
+            for (i, run) in runs.enumerated() {
+                let moved = kind.contains(i)
+                for (px, py) in run { pts.append(moved ? (px + dx, py + dy) : (px, py)) }
             }
             return .polygon(Polygon(points: pts,
                                        fill: v.fill, stroke: v.stroke,

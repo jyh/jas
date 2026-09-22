@@ -103,11 +103,13 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(_sel_paths(self.ctrl.document.selection), frozenset({(0, 0)}))
 
     def test_select_element_in_group(self):
-        """Clicking an element inside a Group selects all group children."""
+        """Clicking an element inside a Group selects THE GROUP ALONE (section
+        20, as in the ports): the model holds one entry, and operations reach
+        its members through map_paintable / the container move arm."""
         self.ctrl.select_element((0, 1, 0))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
 
     def test_select_element_in_group_other_child(self):
@@ -115,7 +117,7 @@ class SelectionControllerTest(absltest.TestCase):
         self.ctrl.select_element((0, 1, 1))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
 
     def test_select_element_notifies_model(self):
@@ -141,7 +143,8 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(self.ctrl.document.selection, frozenset())
 
     def test_select_rect_group_expansion(self):
-        """Marquee hitting one group child selects all group children."""
+        """Marquee hitting one group child selects THE GROUP ALONE: the band
+        asks about members and answers with the group (section 16.4 / 20)."""
         rect_far = Rect(x=100, y=100, width=10, height=10)
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=1, y1=1, x2=2, y2=2)
@@ -153,8 +156,26 @@ class SelectionControllerTest(absltest.TestCase):
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(
             _sel_paths(ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
+
+    def test_marquee_then_copy_leaves_the_source_group_intact(self):
+        """The selection shape no operation reads coherently was the group AND
+        its members: copy_selection copied the group whole, then copied each
+        member INTO the source group. With the group alone, the source keeps
+        its two children and one copy of the group lands beside it."""
+        group = Group(children=(Line(x1=0, y1=0, x2=5, y2=5),
+                                Line(x1=1, y1=1, x2=2, y2=2)))
+        doc = Document(layers=(Layer(children=(Rect(x=100, y=100, width=10, height=10),
+                                               group), name="L0"),))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.select_rect(-1, -1, 7, 7)
+        ctrl.copy_selection(10.0, 0.0)
+        kids = ctrl.document.layers[0].children
+        self.assertEqual(len(kids), 3, "rect, source group, one copy")
+        self.assertEqual(len(kids[1].children), 2, "the source group keeps two children")
+        self.assertIsInstance(kids[2], Group)
+        self.assertEqual(len(kids[2].children), 2, "the copy carries two children")
 
     def test_locked_group_not_selectable(self):
         """Locking a group prevents it from being selected again."""
@@ -170,14 +191,38 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertTrue(len(ctrl.document.selection) > 0)
         ctrl.lock_selection()
         self.assertEqual(ctrl.document.selection, frozenset())
-        # Verify the group and children are locked
+        # The GROUP's own flag is set and nothing is written onto its members
+        # (LOCKMAT, section 13, as in the ports): they are locked by
+        # inheritance, which effective_locked reads. Stamped flags would
+        # survive save and reload, and nothing would ever clear them.
         locked_group = ctrl.document.layers[0].children[0]
         self.assertTrue(locked_group.locked)
-        self.assertTrue(locked_group.children[0].locked)
-        self.assertTrue(locked_group.children[1].locked)
+        self.assertFalse(locked_group.children[0].locked)
+        self.assertFalse(locked_group.children[1].locked)
+        self.assertTrue(ctrl.document.effective_locked((0, 0, 0)))
+        self.assertTrue(ctrl.document.effective_locked((0, 0, 1)))
         # Try to select again — should fail
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(ctrl.document.selection, frozenset())
+
+    def test_unlock_all_clears_every_flag_and_keeps_the_selection(self):
+        """UNLOCKSEL (ruled 2026-07-29, as in the ports): Unlock All speaks to
+        `locked` and preserves the rest, the selection included, and it
+        clears EVERY flag, a layer's own among them."""
+        free = Rect(x=50, y=50, width=5, height=5)
+        group = Group(children=(Rect(x=0, y=0, width=1, height=1, locked=True),
+                                Rect(x=2, y=0, width=1, height=1)), locked=True)
+        doc = Document(layers=(
+            Layer(children=(free, group, Rect(x=9, y=9, width=1, height=1, locked=True)),
+                  name="L0"),
+            Layer(children=(Rect(x=0, y=0, width=1, height=1),), name="L1", locked=True)),
+            selection=frozenset({ElementSelection.all((0, 0))}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.unlock_all()
+        d = ctrl.document
+        self.assertEqual(_sel_paths(d.selection), frozenset({(0, 0)}), "the selection is kept")
+        for path in ((0,), (0, 1), (0, 1, 0), (0, 1, 1), (0, 2), (1,), (1, 0)):
+            self.assertFalse(d.get_element(path).locked, f"{path} unlocked")
 
     def test_select_rect_replaces_previous(self):
         """Marquee selection replaces any prior selection."""
@@ -225,12 +270,11 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertIn((0, 0), _sel_paths(ctrl.document.selection))
 
     def test_select_rect_multiple_elements(self):
-        """Marquee covering both the rect and the group selects all."""
+        """Marquee covering both the rect and the group selects both; the
+        group is ONE entry and covers its members (section 20)."""
         self.ctrl.select_rect(-1, -1, 20, 20)
-        paths = _sel_paths(self.ctrl.document.selection)
-        self.assertIn((0, 0), paths)
-        self.assertIn((0, 1, 0), paths)
-        self.assertIn((0, 1, 1), paths)
+        self.assertEqual(_sel_paths(self.ctrl.document.selection),
+                         frozenset({(0, 0), (0, 1)}))
 
     def test_select_control_point(self):
         """Selecting a control point creates a partial ElementSelection."""
@@ -696,6 +740,205 @@ class MoveSelectionTest(absltest.TestCase):
         self.assertEqual((moved_line.x1, moved_line.y1, moved_line.x2, moved_line.y2),
                          (3.0, 4.0, 13.0, 14.0))
         self.assertEqual((moved_rect.x, moved_rect.y), (23.0, 24.0))
+
+    def test_a_reference_moves_by_the_document_delta_however_its_full_selection_is_spelled(self):
+        # A ReferenceElem's whole-element move rides on its OWN transform,
+        # which lives in its PARENT's space, so the delta must reach it
+        # unconverted by that transform. A full selection has two spellings:
+        # `all`, and the four bbox corners `partial([0, 1, 2, 3])`, which both
+        # active ports move as a whole (their container arm). Mirrors the
+        # corners half of `a_reference_moves_by_the_document_delta` (Rust)
+        # and `aReferenceMovesByTheDocumentDelta` (Swift).
+        from geometry.element import Transform
+        master = Rect(x=0, y=0, width=10, height=10, id="m1")
+        cases = [("untransformed", None), ("rotated", Transform.rotate(30.0)),
+                 ("scaled", Transform.scale(2.0, 3.0)),
+                 ("translated", Transform.translate(50.0, 60.0))]
+        spellings = [("all", ElementSelection.all((0, 0))),
+                     ("corners", ElementSelection.partial((0, 0), [0, 1, 2, 3]))]
+        for name, t in cases:
+            for spelling, es in spellings:
+                ref = ReferenceElem(target="m1", id="i1", transform=t)
+                doc = Document(layers=(Layer(children=(ref,)),), symbols=(master,),
+                               selection=frozenset({es}))
+                ctrl = Controller(model=Model(document=doc))
+                ctrl.move_selection(12.0, -7.0)
+                moved = ctrl.document.layers[0].children[0]
+                old = t if t is not None else Transform()
+                new = moved.transform if moved.transform is not None else Transform()
+                label = f"{name} / {spelling}"
+                self.assertEqual((new.a, new.b, new.c, new.d),
+                                 (old.a, old.b, old.c, old.d), label)
+                self.assertAlmostEqual(new.e - old.e, 12.0, delta=1e-9, msg=label)
+                self.assertAlmostEqual(new.f - old.f, -7.0, delta=1e-9, msg=label)
+
+    def test_select_element_refuses_a_child_of_a_locked_ancestor(self):
+        # LOCKINHERIT (LAYER_STRUCTURE.md section 13): the lock is read DOWN
+        # THE PATH, so a click on a child of a locked layer, or on a member of
+        # a locked group, selects nothing. Mirrors the ports' `select_element`
+        # (`effective_locked`). The unlocked control proves the click works.
+        cases = [
+            ("child of a locked layer", True, False, (0, 0), False),
+            ("member of a locked group", False, True, (0, 1, 0), False),
+            ("control: nothing locked", False, False, (0, 0), True),
+        ]
+        for label, layer_locked, group_locked, path, selects in cases:
+            group = Group(children=(Rect(x=0, y=0, width=1, height=1),
+                                    Rect(x=2, y=0, width=1, height=1)),
+                          locked=group_locked)
+            doc = Document(layers=(Layer(children=(Rect(x=5, y=5, width=1, height=1), group),
+                                         locked=layer_locked),))
+            ctrl = Controller(model=Model(document=doc))
+            ctrl.select_element(path)
+            self.assertEqual(bool(ctrl.document.selection), selects, label)
+
+    def test_a_selected_group_summarises_its_members_paint(self):
+        # PAINTSUMMARY, the read twin of map_paintable, mirrored from the
+        # ports' `selection_fill_summary` / `selection_stroke_summary`: a
+        # selected container summarises its members at any depth. Reading the
+        # Group's own paint gave "no fill" for a group whose members all carry
+        # one, and Mixed for the group-plus-members shape.
+        from document.controller import (
+            FillSummaryMixed, FillSummaryUniform, StrokeSummaryMixed,
+            StrokeSummaryUniform, selection_fill_summary, selection_stroke_summary)
+        from geometry.element import Color, Fill, Stroke
+        red, green = Fill(color=Color.rgb(1.0, 0.0, 0.0)), Fill(color=Color.rgb(0.0, 1.0, 0.0))
+        thin, thick = (Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=w) for w in (1.0, 4.0))
+        def doc(fills, strokes, expanded=False):
+            kids = tuple(Rect(x=10.0 * i, y=0, width=5, height=5, fill=f, stroke=st)
+                         for i, (f, st) in enumerate(zip(fills, strokes)))
+            group = Group(children=(kids[0], Group(children=kids[1:])))
+            sel = {ElementSelection.all((0, 0))}
+            if expanded:
+                sel |= {ElementSelection.all((0, 0, 0)), ElementSelection.all((0, 0, 1))}
+            return Document(layers=(Layer(children=(group,)),), selection=frozenset(sel))
+        for expanded in (False, True):
+            tag = "group+members" if expanded else "group alone"
+            self.assertEqual(selection_fill_summary(doc((red, red), (thin, thin), expanded)),
+                             FillSummaryUniform(fill=red), f"{tag}: members agree on fill")
+            self.assertEqual(selection_stroke_summary(doc((red, red), (thin, thin), expanded)),
+                             StrokeSummaryUniform(stroke=thin), f"{tag}: members agree on stroke")
+        self.assertEqual(selection_fill_summary(doc((red, green), (thin, thin))),
+                         FillSummaryMixed(), "members disagree on fill")
+        self.assertEqual(selection_stroke_summary(doc((red, red), (thin, thick))),
+                         StrokeSummaryMixed(), "members disagree on stroke")
+
+    def test_paint_on_a_selected_group_reaches_its_members(self):
+        # PAINTRECURSE / BRUSHRECURSE, mirrored from the ports'
+        # `map_paintable`: a Group has no paint of its own, so a paint write
+        # on a group selected ALONE must reach every member, recursively.
+        # Before this, the six writers asked the Group itself and changed
+        # nothing. Each writer is driven on its own document.
+        from geometry.element import (
+            Color, Fill, Gradient, LineTo, MoveTo, Path, Stroke)
+        red = Fill(color=Color.rgb(1.0, 0.0, 0.0))
+        blue = Stroke(color=Color.rgb(0.0, 0.0, 1.0), width=3.0)
+        grad = Gradient()
+        writers = [
+            ("fill", lambda c: c.set_selection_fill(red), lambda e: e.fill == red),
+            ("stroke", lambda c: c.set_selection_stroke(blue), lambda e: e.stroke == blue),
+            ("fill_gradient", lambda c: c.set_selection_fill_gradient(grad),
+             lambda e: e.fill_gradient == grad),
+            ("stroke_gradient", lambda c: c.set_selection_stroke_gradient(grad),
+             lambda e: e.stroke_gradient == grad),
+            ("stroke_brush", lambda c: c.set_selection_stroke_brush("basic/round_3"),
+             lambda e: e.stroke_brush == "basic/round_3"),
+            ("stroke_brush_overrides",
+             lambda c: c.set_selection_stroke_brush_overrides('{"angle":30}'),
+             lambda e: e.stroke_brush_overrides == '{"angle":30}'),
+        ]
+        for name, write, holds in writers:
+            leaf = lambda x: Path(d=(MoveTo(x, 0.0), LineTo(x + 5.0, 5.0)))
+            inner = Group(children=(leaf(20.0),))
+            group = Group(children=(leaf(0.0), inner))
+            doc = Document(layers=(Layer(children=(group,)),),
+                           selection=frozenset({ElementSelection.all((0, 0))}))
+            ctrl = Controller(model=Model(document=doc))
+            write(ctrl)
+            g = ctrl.document.get_element((0, 0))
+            self.assertTrue(holds(g.children[0]), f"{name}: the direct member")
+            self.assertTrue(holds(g.children[1].children[0]), f"{name}: the nested member")
+
+    def test_a_marquee_reads_the_lock_down_the_path(self):
+        # LOCKINHERIT in the flat (marquee) walk, mirrored from the ports'
+        # `select_flat`: a locked LAYER yields nothing, and a locked
+        # grandchild neither TRIGGERS its group's selection nor JOINS it. The
+        # group-plus-members shape itself is section 20's and is not changed
+        # here.
+        def doc_with(layer_locked=False, locked_member=None):
+            members = tuple(Rect(x=10.0 * i, y=0, width=5, height=5,
+                                 locked=(i == locked_member)) for i in range(2))
+            return Document(layers=(Layer(children=(
+                Rect(x=100, y=100, width=5, height=5), Group(children=members)),
+                locked=layer_locked),))
+        def marquee(doc, x, y, w, h):
+            ctrl = Controller(model=Model(document=doc))
+            ctrl.select_rect(x, y, w, h)
+            return {es.path for es in ctrl.document.selection}
+        self.assertEqual(marquee(doc_with(), 99, 99, 10, 10), {(0, 0)}, "control")
+        self.assertEqual(marquee(doc_with(layer_locked=True), 99, 99, 10, 10), set(),
+                         "a locked layer's child")
+        self.assertEqual(marquee(doc_with(locked_member=0), -1, -1, 7, 7), set(),
+                         "a band touching only a locked member")
+        self.assertNotIn((0, 1, 0), marquee(doc_with(locked_member=0), -1, -1, 20, 7),
+                         "a locked member does not join its group's selection")
+
+    def test_an_ancestor_in_the_selection_covers_its_descendants(self):
+        # A group selected WHOLE together with one of its members' control
+        # points: the group's move carries both members, whole. Each entry is
+        # read from the pristine document and written back absolutely, so a
+        # member entry written after its ancestor's lands on top of it and
+        # strands the member at its pristine place with one corner displaced.
+        # Which entry lands last depends on the frozenset's order, so several
+        # layouts are driven. Mirrors the Rust / Swift
+        # `an_ancestor_in_the_selection_covers_its_descendants` (§16.4).
+        for lead in (0, 1):
+            for member in (0, 1):
+                label = f"lead={lead} member={member}"
+                group = Group(children=(Rect(x=0, y=0, width=10, height=10),
+                                        Rect(x=20, y=0, width=10, height=10)))
+                kids = ((Rect(x=100, y=100, width=5, height=5),) * lead) + (group,)
+                g = (0, lead)
+                doc = Document(layers=(Layer(children=kids),), selection=frozenset({
+                    ElementSelection.all(g),
+                    ElementSelection.partial(g + (member,), [0])}))
+                ctrl = Controller(model=Model(document=doc))
+                ctrl.move_selection(24.0, 0.0)
+                moved = ctrl.document.get_element(g)
+                self.assertIsInstance(moved, Group, label)
+                for i, x0 in enumerate((0.0, 20.0)):
+                    child = moved.children[i]
+                    self.assertIsInstance(child, Rect, f"{label}: child {i} stays a Rect")
+                    self.assertEqual((child.x, child.y), (x0 + 24.0, 0.0),
+                                     f"{label}: child {i} rides the group's move whole")
+
+    def test_rounded_rect_corner_drag_survives_a_second_sample(self):
+        # A corner drag is a MULTI-SAMPLE gesture: the first sample promotes
+        # the rounded Rect to a Polygon (ratified answer (3) flattens the
+        # rounding into arc runs) and the second lands on the Polygon.
+        # Without the remap in move_selection the second sample would drag
+        # one arc point and shred the corner. Mirrors the Rust
+        # `rounded_rect_corner_drag_survives_a_second_sample`.
+        from geometry.element import rounded_rect_corner_runs
+        rect = Rect(x=0, y=0, width=100, height=60, rx=20, ry=10)
+        doc = Document(layers=(Layer(children=(rect,)),),
+                       selection=frozenset({ElementSelection.partial((0, 0), [1])}))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.move_selection(10.0, 0.0)
+        ctrl.move_selection(10.0, 0.0)
+        poly = ctrl.document.layers[0].children[0]
+        self.assertIsInstance(poly, Polygon)
+        n = len(poly.points) // 4
+        self.assertGreater(n, 1, "the rounding should have flattened into arc runs")
+        reference = rounded_rect_corner_runs(0, 0, 100, 60, 20, 10)
+        for i, want in enumerate(reference[1]):
+            got = poly.points[n + i]
+            self.assertAlmostEqual(got[0], want[0] + 20, delta=1e-9, msg=f"corner-1 point {i}")
+            self.assertAlmostEqual(got[1], want[1], delta=1e-9, msg=f"corner-1 point {i}")
+        for i, want in enumerate(reference[0]):
+            got = poly.points[i]
+            self.assertAlmostEqual(got[0], want[0], delta=1e-9, msg=f"corner-0 point {i} moved")
+            self.assertAlmostEqual(got[1], want[1], delta=1e-9, msg=f"corner-0 point {i} moved")
 
 
 class CopySelectionTest(absltest.TestCase):
