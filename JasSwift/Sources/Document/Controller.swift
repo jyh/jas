@@ -1193,6 +1193,16 @@ public class Controller {
             let (ldx, ldy) = documentDeltaToLocal(doc, es.path, dx: dx, dy: dy, elem, es.kind)
             let newElem = elem.moveControlPoints(es.kind, dx: ldx, dy: ldy)
             doc = doc.replaceElement(es.path, with: newElem)
+            // A sample that PROMOTES the element (Rect -> Polygon) must carry
+            // the control-point selection across the promotion, or the next
+            // sample of the same drag addresses indices that no longer mean
+            // what they did. Twin of Rust's `move_selection`.
+            let kind = remapCpSelectionAfterMove(elem, newElem, es.kind)
+            if kind != es.kind {
+                doc = doc.replacing(selection: doc.selection.map {
+                    $0.path == es.path ? ElementSelection(path: es.path, kind: kind) : $0
+                })
+            }
         }
         model.editDocument(doc)
     }

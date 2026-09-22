@@ -713,6 +713,36 @@ private func makeLockedLayerCtrl(lockFirst: Bool) -> Controller {
     } else { Issue.record("Expected line") }
 }
 
+/// A corner drag is a MULTI-SAMPLE gesture: the first sample promotes the
+/// rounded Rect to a Polygon (ratified answer (3) flattens the rounding into
+/// arc runs) and the second lands on the Polygon. Without the remap in
+/// `moveSelection` the second sample would drag one arc point and shred the
+/// corner. Twin of Rust's `rounded_rect_corner_drag_survives_a_second_sample`.
+@Test func roundedRectCornerDragSurvivesASecondSample() {
+    let rect = Element.rect(Rect(x: 0, y: 0, width: 100, height: 60, rx: 20, ry: 10))
+    let doc = Document(layers: [Layer(children: [rect])],
+                       selection: [ElementSelection(path: [0, 0], kind: .partial(SortedCps([1])))])
+    let ctrl = Controller(model: Model(document: doc))
+    ctrl.moveSelection(dx: 10, dy: 0)
+    ctrl.moveSelection(dx: 10, dy: 0)
+    guard case .polygon(let p) = ctrl.document.layers[0].children[0] else {
+        Issue.record("expected Polygon"); return
+    }
+    let n = p.points.count / 4
+    #expect(n > 1, "the rounding should have flattened into arc runs")
+    let reference = roundedRectCornerRuns(0, 0, 100, 60, 20, 10)
+    for (i, want) in reference[1].enumerated() {
+        let got = p.points[n + i]
+        #expect(abs(got.0 - want.0 - 20) < 1e-9 && abs(got.1 - want.1) < 1e-9,
+                "corner-1 point \(i): want \(want) + (20,0), got \(got)")
+    }
+    for (i, want) in reference[0].enumerated() {
+        let got = p.points[i]
+        #expect(abs(got.0 - want.0) < 1e-9 && abs(got.1 - want.1) < 1e-9,
+                "corner-0 point \(i) moved: want \(want), got \(got)")
+    }
+}
+
 @Test func moveSelectedRect() {
     let rect = Element.rect(Rect(x: 0, y: 0, width: 20, height: 10))
     let layer = Layer(children: [rect])
