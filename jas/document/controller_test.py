@@ -667,20 +667,57 @@ class SelectionInvariantTest(absltest.TestCase):
                          frozenset({(0, 0)}))
 
     def test_add_keeps_a_partial_entry_on_the_same_path(self):
-        # The idempotence guard matches by PATH, never by entry: a path held
-        # as a partial stays partial. A frozenset deduplicates equal entries
-        # for free, so only a partial entry can witness the guard here.
+        # A path held as a partial stays partial. ElementSelection compares
+        # by PATH ALONE, so the kinds are compared explicitly: a selection
+        # equality cannot tell a partial from a whole entry.
         ctrl = self._ctrl()
         partial = ElementSelection.partial((0, 1), (0, 2))
         ctrl.set_selection(frozenset({partial}))
         ctrl.add_to_selection((0, 1))
-        self.assertEqual(ctrl.document.selection, frozenset({partial}))
+        self.assertEqual([(es.path, es.kind) for es in ctrl.document.selection],
+                         [((0, 1), partial.kind)])
 
     def test_toggle_removes_a_partial_entry_by_path(self):
         ctrl = self._ctrl()
         ctrl.set_selection(frozenset({ElementSelection.partial((0, 1), (0,))}))
         ctrl.toggle_selection((0, 1))
         self.assertEqual(ctrl.document.selection, frozenset())
+
+
+class SelectionOnlyVerbsTest(absltest.TestCase):
+    """A selection-only op verb is non-undoable, so on a production frame with
+    no transaction open it must not open one. The corpus harness always
+    brackets its ops, so no fixture can see this. The verb list is the ports'
+    (Rust `is_selection_only_verb`), typed here rather than read from the
+    subject, so a verb missing from the subject's set reds."""
+
+    @staticmethod
+    def _model():
+        rect = Rect(x=0, y=0, width=10, height=10)
+        return Model(document=Document(layers=(Layer(children=(rect,), name="L"),)))
+
+    def test_a_selection_only_verb_opens_no_transaction(self):
+        from document.op_apply import op_apply
+        ops = [
+            {"op": "select_rect", "x": -1, "y": -1, "width": 20, "height": 20},
+            {"op": "select_by_ids", "ids": []},
+            {"op": "select_element", "path": [0, 0]},
+            {"op": "select_all"},
+            {"op": "add_to_selection", "path": [0, 0]},
+        ]
+        for op in ops:
+            model = self._model()
+            op_apply(model, op)
+            self.assertFalse(model.in_txn, op["op"])
+
+    def test_control_a_document_verb_does_open_one(self):
+        # Without this the arm above could pass on an instrument that never
+        # sees a transaction.
+        from document.op_apply import op_apply
+        model = self._model()
+        op_apply(model, {"op": "select_all"})
+        op_apply(model, {"op": "move_selection", "dx": 1.0, "dy": 0.0})
+        self.assertTrue(model.in_txn)
 
 
 class SelectAllTopLevelTest(absltest.TestCase):

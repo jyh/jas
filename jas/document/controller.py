@@ -942,6 +942,13 @@ class Controller:
         Mirrors Rust ``Controller::add_to_selection``."""
         path = tuple(path)
         sel = self._model.document.selection
+        # HONEST NOTE: this guard is expressive here, not behavioural
+        # (measured by mutation). ElementSelection hashes by path alone, and
+        # selection_with_path_added puts the kept entries BEFORE the new one,
+        # so the frozenset keeps the existing entry either way. In the ports
+        # the selection is an ordered list and the guard is what stops a
+        # duplicate; it becomes load-bearing here the day this Selection is
+        # ordered too (D6).
         if any(es.path == path for es in sel):
             return
         new_sel = selection_with_path_added(sel, path)
