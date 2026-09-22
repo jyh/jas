@@ -197,11 +197,13 @@ def _moves_in_parent_space(elem, kind) -> bool:
     OUT of the conversion — while every ancestor's is still applied.
     Converting a reference by the full chain moves it along its own rotated
     axes: the exact defect this repair exists to remove, reintroduced one
-    level down. A partial (control-point) selection on a reference is a
-    no-op in the mover, so only the whole-element case is named here.
+    level down. The mover moves a reference whole for ``all`` AND for its
+    four bbox corners ``partial([0, 1, 2, 3])``, so the predicate reads the
+    element's own control-point count, as in both active ports.
     """
-    from geometry.element import ReferenceElem
-    return isinstance(elem, ReferenceElem) and selection_kind_is_all(kind, 0)
+    from geometry.element import ReferenceElem, control_point_count
+    return (isinstance(elem, ReferenceElem)
+            and selection_kind_is_all(kind, control_point_count(elem)))
 
 
 def _document_delta_to_local(doc, path, dx: float, dy: float,
