@@ -97,6 +97,9 @@ private func assertSvgRoundtrip(_ name: String) {
         // carried it and agree with itself. Mirrors the Rust
         // svg_roundtrip_all_fixtures registration.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -145,6 +148,10 @@ private func assertSvgRoundtrip(_ name: String) {
 /// covered, stated rather than implied: `recorded` and `generated`, which
 /// neither port can read back from SVG at all.
 @Test func svgParseLockedAllKinds() { assertSvgParse("locked_all_kinds") }
+/// The SVG READ side of a Line's width profile, pinned against the shared
+/// golden that the Rust and reference readers also parse. Mirrors
+/// `svg_parse_line_width_profile` in Rust.
+@Test func svgParseLineWidthProfile() { assertSvgParse("line_width_profile") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -335,6 +342,9 @@ private func assertJsonRoundtrip(_ name: String) {
         // `locked` regression in test_json cannot hide behind the SVG lane
         // being the one under repair.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -382,6 +392,9 @@ private func readFixtureData(_ path: String) -> Data {
         // these two goldens make that a MEASUREMENT rather than an assumption,
         // on a document where the flag is actually true.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2927,6 +2940,48 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+/// The identity moves no point, so every null-transform element vector in the
+/// shared hit-test corpus must answer the same with an identity transform. An
+/// element WITH a transform takes the polygon path, so a kind that either path
+/// forgets answers differently the moment it gains one (TRANSFORMHIT,
+/// `d464b3b0`). The corpus pins explicit control pairs for some kinds; this is
+/// the property over every element vector in it. Mirrors
+/// `hit_test_identity_transform_changes_no_answer` in Rust and the reference's
+/// `test_identity_transform_changes_no_answer_over_the_shared_corpus`, which
+/// found 9 of 31 disagreeing there before its arms were ported.
+@Test func hitTestIdentityTransformChangesNoAnswer() throws {
+    let json = readFixture("algorithms/hit_test.json")
+    let rawTests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!)
+        as! [[String: Any]]
+    let identity: [String: Any] = ["a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0]
+    var checked = 0
+    for tc in rawTests {
+        let function = tc["function"] as! String
+        guard function == "element_intersects_rect" || function == "element_intersects_polygon"
+        else { continue }
+        var moved = tc["element"] as! [String: Any]
+        guard moved["transform"] is NSNull else { continue }
+        moved["transform"] = identity
+        let plain = parseElement(tc["element"]!)
+        let ident = parseElement(moved)
+        #expect(ident.transform != nil, "\(tc["name"]!): the identity did not reach the element")
+        let a: Bool, b: Bool
+        if function == "element_intersects_rect" {
+            let r = tc["args"] as! [Double]
+            a = elementIntersectsRect(plain, r[0], r[1], r[2], r[3])
+            b = elementIntersectsRect(ident, r[0], r[1], r[2], r[3])
+        } else {
+            let poly = (tc["polygon"] as! [[Double]]).map { ($0[0], $0[1]) }
+            a = elementIntersectsPolygon(plain, poly)
+            b = elementIntersectsPolygon(ident, poly)
+        }
+        #expect(a == b, "\(tc["name"]!): \(a) with no transform, \(b) with the identity")
+        checked += 1
+    }
+    // A floor, not a pin: an added vector passes, a lost enumeration does not.
+    #expect(checked >= 32, "only \(checked) null-transform element vectors reached")
+}
+
 // MARK: - number_input commit vectors
 
 /// The `number_input` COMMIT corpus: typed text → the value written to state,
@@ -5302,12 +5357,28 @@ private func saturatedGroup() -> Group {
           name: "name_group", id: "id_group")
 }
 
+/// The Line half. Line is the one kind besides Path whose model carries
+/// `widthPoints`, and it is watched for that field ONLY (the fixture's
+/// `saturated_line` block says why). Every value is exact at the writer's
+/// four-decimal floor and every endpoint exact in px, so the row reads DROPPED
+/// only for an omission. Mirrors `survival_saturated_line()` in Rust and
+/// `_survival_saturated_line()` in the reference.
+private func saturatedLine() -> Line {
+    Line(x1: 0, y1: 0, x2: 30, y2: 15,
+         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.25),
+         widthPoints: [StrokeWidthPoint(t: 0.0, widthLeft: 1.0, widthRight: 2.0),
+                       StrokeWidthPoint(t: 0.5, widthLeft: 2.5, widthRight: 0.5),
+                       StrokeWidthPoint(t: 1.0, widthLeft: 3.0, widthRight: 4.0)],
+         name: "name_line", id: "id_line")
+}
+
 private func survivalDoc() -> Document {
     // The enclosing Layer is saturated too: Group and Layer are watched
     // SEPARATELY because every codec in both ports has a distinct construction
     // site per kind, so one can be repaired and the other missed.
     Document(rawLayers: [Layer(name: "Layer 1",
-                               children: [.path(saturatedPath()), .group(saturatedGroup())],
+                               children: [.path(saturatedPath()), .group(saturatedGroup()),
+                                          .line(saturatedLine())],
                                isolatedBlending: true, knockoutGroup: true)],
              rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
              rawArtboardOptions: .default)
@@ -5324,6 +5395,12 @@ private func survivalFirstLayer(_ d: Document) -> Layer? { d.layers.first }
 private func survivalFirstGroup(_ d: Document) -> Group? {
     guard let l = d.layers.first else { return nil }
     for e in l.children { if case .group(let g) = e { return g } }
+    return nil
+}
+
+private func survivalFirstLine(_ d: Document) -> Line? {
+    guard let l = d.layers.first else { return nil }
+    for e in l.children { if case .line(let n) = e { return n } }
     return nil
 }
 
@@ -5348,6 +5425,10 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         Issue.record("codecFieldSurvival: the saturated Group did not survive the round trip AT ALL")
         return []
     }
+    guard let bn = survivalFirstLine(beforeDoc), let an = survivalFirstLine(afterDoc) else {
+        Issue.record("codecFieldSurvival: the saturated Line did not survive the round trip AT ALL")
+        return []
+    }
     func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
     return [
         ("common.locked", s(a.locked == before.locked)),
@@ -5360,6 +5441,7 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         ("group.knockout_group", s(ag.knockoutGroup == bg.knockoutGroup)),
         ("layer.isolated_blending", s(al.isolatedBlending == bl.isolatedBlending)),
         ("layer.knockout_group", s(al.knockoutGroup == bl.knockoutGroup)),
+        ("line.width_points", s(an.widthPoints == bn.widthPoints)),
         ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
         ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
         // The ACTIVE slice, not the fixed six-slot array: the two ports store

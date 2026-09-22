@@ -328,5 +328,201 @@ class BinaryCompressionTest(absltest.TestCase):
         self.assertEqual(actual, expected)
 
 
+class BinaryCommonExtensionTest(absltest.TestCase):
+    """The per-tag trailing extension the ports write (jas_dioxus
+    binary.rs, "the per-tag trailing common extension"): every tag carries
+    [mode, mask, tool_origin] after its base slots; a path then carries its
+    brush pair, a group or layer its blending pair. Read TOLERANTLY: an
+    absent, nil or ill-typed slot is the field's default. VERSION stays 2.
+    Measured by `codec_field_survival`; the slot layout by
+    test_fixtures/expected/binary_wire.json."""
+
+    def _rt(self, *children):
+        doc = Document(layers=(Layer(name="L", children=tuple(children)),))
+        return binary_to_document(document_to_binary(doc)).layers[0].children
+
+    def _mask(self):
+        from geometry.element import Mask
+        return Mask(subtree=Rect(x=1, y=2, width=3, height=4),
+                    clip=False, invert=True, disabled=True, linked=False,
+                    unlink_transform=Transform.translate(9, 9))
+
+    def test_mode_mask_and_tool_origin_round_trip_on_a_path(self):
+        from geometry.element import BlendMode
+        p = Path(d=(MoveTo(0, 0), LineToCmd(1, 1)), blend_mode=BlendMode.MULTIPLY,
+                 mask=self._mask(), tool_origin="blob_brush")
+        (back,) = self._rt(p)
+        self.assertEqual(back.blend_mode, BlendMode.MULTIPLY)
+        self.assertEqual(back.mask, p.mask)
+        self.assertEqual(back.tool_origin, "blob_brush")
+
+    def test_mode_and_mask_ride_every_tag(self):
+        from geometry.element import (
+            BlendMode, CompoundOperation, CompoundShape, GeneratedElem,
+            RecordedElem, ReferenceElem)
+        m = self._mask()
+        kinds = (
+            Line(x1=0, y1=0, x2=1, y2=1),
+            Rect(x=0, y=0, width=1, height=1),
+            Ellipse(cx=0, cy=0, rx=1, ry=2),
+            Polyline(points=((0, 0), (1, 1))),
+            Polygon(points=((0, 0), (1, 1), (2, 0))),
+            Text(x=0, y=0, content="a"),
+            TextPath(d=(MoveTo(0, 0), LineToCmd(1, 1)), content="a"),
+            Group(children=()),
+            CompoundShape(operation=CompoundOperation.UNION, operands=()),
+            ReferenceElem(target="m1"),
+            RecordedElem(inputs=(), ops=()),
+            GeneratedElem(concept_id="spiral", params={}),
+        )
+        from dataclasses import replace
+        kinds = tuple(replace(k, blend_mode=BlendMode.SCREEN, mask=m) for k in kinds)
+        back = self._rt(*kinds)
+        self.assertEqual([type(b).__name__ for b in back],
+                         [type(k).__name__ for k in kinds])
+        for k, b in zip(kinds, back):
+            self.assertEqual((type(b).__name__, b.blend_mode, b.mask),
+                             (type(k).__name__, BlendMode.SCREEN, m))
+
+    def test_a_layer_carries_the_extension_too(self):
+        from geometry.element import BlendMode
+        doc = Document(layers=(Layer(name="L", blend_mode=BlendMode.HUE,
+                                     mask=self._mask(), isolated_blending=True,
+                                     knockout_group=True),))
+        back = binary_to_document(document_to_binary(doc)).layers[0]
+        self.assertEqual((back.blend_mode, back.mask), (BlendMode.HUE, self._mask()))
+        self.assertEqual((back.isolated_blending, back.knockout_group), (True, True))
+
+    def test_group_blending_pair_round_trips_independently(self):
+        (a, b) = self._rt(Group(children=(), isolated_blending=True),
+                          Group(children=(), knockout_group=True))
+        self.assertEqual((a.isolated_blending, a.knockout_group), (True, False))
+        self.assertEqual((b.isolated_blending, b.knockout_group), (False, True))
+
+    def test_path_brush_pair_round_trips(self):
+        p = Path(d=(MoveTo(0, 0), LineToCmd(1, 1)),
+                 stroke_brush="basic/calligraphic_5",
+                 stroke_brush_overrides='{"angle":30}')
+        (back,) = self._rt(p)
+        self.assertEqual((back.stroke_brush, back.stroke_brush_overrides),
+                         ("basic/calligraphic_5", '{"angle":30}'))
+
+    def test_path_writes_the_fill_rule_slot_the_extension_is_counted_from(self):
+        # Rust and Swift carry fill_rule at slot 11, so a path's extension
+        # starts at 12; without the slot every later path slot would sit one
+        # index early. A default path writes 0 (nonzero) there.
+        from geometry.binary import _pack_element
+        arr = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1))))
+        self.assertEqual(arr[11], 0)
+
+    def test_tag_arity_matches_the_shared_wire_fixture(self):
+        import json
+        from geometry.binary import element_tag_label, packed_element_slot_count
+        from geometry.element import (
+            CompoundOperation, CompoundShape, GeneratedElem, RecordedElem,
+            ReferenceElem)
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "..", "..", "test_fixtures", "expected",
+                               "binary_wire.json"), encoding="utf-8") as f:
+            arity = json.load(f)["tag_arity"]
+        elems = (
+            Layer(children=()), Group(children=()),
+            Line(x1=0, y1=0, x2=1, y2=1), Rect(x=0, y=0, width=1, height=2),
+            Ellipse(cx=0, cy=0, rx=1, ry=2),
+            Polyline(points=((0, 0), (1, 1))),
+            Polygon(points=((0, 0), (1, 1), (2, 0))),
+            Path(d=(MoveTo(0, 0), LineToCmd(1, 1))),
+            Text(x=1, y=2, content="hi"),
+            TextPath(d=(MoveTo(0, 0), LineToCmd(1, 1)), content="hi"),
+            CompoundShape(operation=CompoundOperation.UNION, operands=()),
+            ReferenceElem(target="m1"), RecordedElem(inputs=(), ops=()),
+            GeneratedElem(concept_id="spiral", params={}),
+        )
+        seen = set()
+        for e in elems:
+            label = element_tag_label(e)
+            self.assertIn(label, arity)
+            self.assertEqual(packed_element_slot_count(e), arity[label],
+                             f"tag '{label}' packs a different slot count than the fixture")
+            seen.add(label)
+        self.assertEqual(seen, set(arity), "every tag the fixture declares must be reached")
+
+    def test_a_blob_written_before_the_extension_reads_defaults(self):
+        from geometry.binary import _pack_element, _unpack_element
+        from geometry.element import BlendMode
+        for e, base in ((Path(d=(MoveTo(0, 0), LineToCmd(1, 1))), 12),
+                        (Group(children=()), 8),
+                        (Rect(x=0, y=0, width=1, height=1), 15)):
+            back = _unpack_element(_pack_element(e)[:base])
+            self.assertEqual((back.blend_mode, back.mask), (BlendMode.NORMAL, None))
+            if isinstance(back, Path):
+                self.assertEqual((back.tool_origin, back.stroke_brush,
+                                  back.stroke_brush_overrides), (None, None, None))
+            if isinstance(back, Group):
+                self.assertEqual((back.isolated_blending, back.knockout_group),
+                                 (False, False))
+
+    def test_ill_typed_extension_slots_read_as_defaults(self):
+        from geometry.binary import _pack_element, _unpack_element
+        from geometry.element import BlendMode
+        arr = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1))))
+        arr[12:17] = ["multiply", 5, 3, 7, ["x"]]   # mode mask tool brush overrides
+        back = _unpack_element(arr)
+        self.assertEqual((back.blend_mode, back.mask, back.tool_origin,
+                          back.stroke_brush, back.stroke_brush_overrides),
+                         (BlendMode.NORMAL, None, None, None, None))
+        # A group's base is 8: mode 8, mask 9, tool_origin 10, then the pair.
+        g = _pack_element(Group(children=()))
+        self.assertEqual(len(g), 13)
+        g[8] = True                  # a boolean is not a mode tag (True == 1)
+        g[9] = [5, True]             # a mask whose subtree slot is not an element
+        g[11:13] = ["yes", 1]        # the blending pair, not booleans
+        back = _unpack_element(g)
+        self.assertEqual((back.blend_mode, back.mask, back.isolated_blending,
+                          back.knockout_group),
+                         (BlendMode.NORMAL, None, False, False))
+
+    def test_a_short_mask_array_takes_the_field_defaults(self):
+        from geometry.binary import _pack_element, _unpack_element
+        p = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1))))
+        p[13] = [_pack_element(Rect(x=0, y=0, width=1, height=1))]   # subtree only
+        m = _unpack_element(p).mask
+        self.assertEqual((m.clip, m.invert, m.disabled, m.linked, m.unlink_transform),
+                         (True, False, False, True, None))
+
+    def test_blend_tags_follow_the_enum_declaration_order_the_ports_share(self):
+        # The table is written by name so the enum cannot renumber files; the
+        # two statements must still agree, because every port numbers its tags
+        # in this declaration order. A swap of two tags no fixture uses would
+        # otherwise round-trip symmetrically and pass everything else.
+        from geometry.binary import _BLEND_MODE_TO_INT
+        from geometry.element import BlendMode
+        self.assertEqual(_BLEND_MODE_TO_INT, {m: i for i, m in enumerate(BlendMode)})
+
+
+class BinaryFillRuleTest(absltest.TestCase):
+    """A path's slot 11: 0 nonzero, 1 evenodd; absent or unrecognised reads
+    nonzero. Mirrors jas_dioxus binary.rs `pack_fill_rule`."""
+
+    def test_evenodd_rides_slot_eleven_and_round_trips(self):
+        from geometry.binary import _pack_element
+        from geometry.element import FillRule
+        p = Path(d=(MoveTo(0, 0), LineToCmd(1, 1)), fill_rule=FillRule.EVENODD)
+        self.assertEqual(_pack_element(p)[11], 1)
+        doc = Document(layers=(Layer(children=(p,)),))
+        (back,) = binary_to_document(document_to_binary(doc)).layers[0].children
+        self.assertEqual(back.fill_rule, FillRule.EVENODD)
+
+    def test_absent_or_unrecognised_reads_nonzero(self):
+        from geometry.binary import _pack_element, _unpack_element
+        from geometry.element import FillRule
+        arr = _pack_element(Path(d=(MoveTo(0, 0), LineToCmd(1, 1)),
+                                 fill_rule=FillRule.EVENODD))
+        self.assertEqual(_unpack_element(arr[:11]).fill_rule, FillRule.NONZERO)
+        for junk in (7, "evenodd", True, None):
+            arr[11] = junk
+            self.assertEqual(_unpack_element(arr).fill_rule, FillRule.NONZERO, repr(junk))
+
+
 if __name__ == "__main__":
     absltest.main()

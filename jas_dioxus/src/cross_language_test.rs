@@ -121,6 +121,9 @@ mod tests {
             // so a `locked` regression in test_json cannot hide behind the SVG
             // lane being the one under repair.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -172,6 +175,9 @@ mod tests {
             // did; these two goldens make that a MEASUREMENT rather than an
             // assumption, on a document where the flag is actually true.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -332,6 +338,9 @@ mod tests {
             "reference_instance_transform",
             // LOCKSVG: `common.locked` across the SVG boundary.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -378,6 +387,9 @@ mod tests {
             // `jas:locked`, because the reader would then read a file that
             // never carried it and agree with itself.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -528,6 +540,15 @@ mod tests {
         assert_svg_parse("locked_layer_and_element");
     }
 
+    /// The SVG READ side of a Line's width profile, pinned against a shared
+    /// golden: `codec_field_survival` round-trips each implementation through
+    /// its OWN writer, so a writer and reader that agreed on a misspelling
+    /// would pass it. Here all three readers parse the same bytes.
+    #[test]
+    fn svg_parse_line_width_profile() {
+        assert_svg_parse("line_width_profile");
+    }
+
     #[test]
     fn svg_parse_locked_all_kinds() {
         // The WRITER-ARM CENSUS. One locked instance of every element kind
@@ -649,6 +670,58 @@ mod tests {
             assert_eq!(actual, expected,
                 "Hit test '{}' failed: expected {}, got {}", name, expected, actual);
         }
+    }
+
+    /// The identity moves no point, so every null-transform element vector in
+    /// the shared hit-test corpus must answer the same with an identity
+    /// transform. An element WITH a transform takes the polygon path, so a
+    /// kind that either path forgets answers differently the moment it gains
+    /// one (TRANSFORMHIT, `d464b3b0`). The corpus pins explicit control pairs
+    /// for some kinds; this is the property over every element vector in it.
+    /// Mirrors `test_identity_transform_changes_no_answer_over_the_shared_corpus`
+    /// in jas/algorithms/hit_test_test.py, which found 9 of 31 disagreeing in
+    /// the reference before its arms were ported.
+    #[test]
+    fn hit_test_identity_transform_changes_no_answer() {
+        let json_str = read_fixture("algorithms/hit_test.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str)
+            .expect("Failed to parse hit_test.json");
+        let identity = serde_json::json!(
+            {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0});
+        let mut checked = 0;
+        for tc in tests.as_array().unwrap() {
+            let func = tc["function"].as_str().unwrap();
+            if func != "element_intersects_rect" && func != "element_intersects_polygon" {
+                continue;
+            }
+            if !tc["element"]["transform"].is_null() {
+                continue;
+            }
+            let mut moved = tc["element"].clone();
+            moved["transform"] = identity.clone();
+            let plain = crate::geometry::test_json::parse_element(&tc["element"]);
+            let ident = crate::geometry::test_json::parse_element(&moved);
+            assert!(ident.transform().is_some(),
+                "{}: the identity did not reach the element", tc["name"]);
+            let (a, b) = if func == "element_intersects_rect" {
+                let r: Vec<f64> = tc["args"].as_array().unwrap()
+                    .iter().map(|v| v.as_f64().unwrap()).collect();
+                (hit_test::element_intersects_rect(&plain, r[0], r[1], r[2], r[3]),
+                 hit_test::element_intersects_rect(&ident, r[0], r[1], r[2], r[3]))
+            } else {
+                let poly: Vec<(f64, f64)> = tc["polygon"].as_array().unwrap().iter()
+                    .map(|p| (p[0].as_f64().unwrap(), p[1].as_f64().unwrap()))
+                    .collect();
+                (hit_test::element_intersects_polygon(&plain, &poly),
+                 hit_test::element_intersects_polygon(&ident, &poly))
+            };
+            assert_eq!(a, b, "{}: {} with no transform, {} with the identity",
+                tc["name"], a, b);
+            checked += 1;
+        }
+        // A floor, not a pin: an added vector passes, a lost enumeration does not.
+        assert!(checked >= 32,
+            "only {} null-transform element vectors reached", checked);
     }
 
     /// The `number_input` COMMIT corpus: typed text → the value written to
@@ -7267,6 +7340,30 @@ mod tests {
         }
     }
 
+    /// The Line half. Line is the one kind besides Path whose model carries
+    /// `width_points`, and it is watched for that field ONLY (the fixture's
+    /// `saturated_line` block says why). Every value is exact at the writer's
+    /// four-decimal floor and every endpoint exact in px, so the row reads
+    /// DROPPED only for an omission. Mirrored by `saturatedLine()` in JasSwift
+    /// and `_survival_saturated_line()` in the reference.
+    fn survival_saturated_line() -> crate::geometry::element::LineElem {
+        use crate::geometry::element::*;
+        let mut c = CommonProps::default();
+        c.name = Some("name_line".to_string());
+        c.id = Some("id_line".to_string());
+        LineElem {
+            x1: 0.0, y1: 0.0, x2: 30.0, y2: 15.0,
+            stroke: Some(Stroke::new(Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, 2.25)),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 2.0 },
+                StrokeWidthPoint { t: 0.5, width_left: 2.5, width_right: 0.5 },
+                StrokeWidthPoint { t: 1.0, width_left: 3.0, width_right: 4.0 },
+            ],
+            common: c,
+            stroke_gradient: None,
+        }
+    }
+
     fn survival_doc() -> crate::document::document::Document {
         use crate::geometry::element::*;
         let mut d = crate::document::document::Document::default();
@@ -7280,6 +7377,7 @@ mod tests {
             children: vec![
                 std::rc::Rc::new(Element::Path(survival_saturated_path())),
                 std::rc::Rc::new(Element::Group(survival_saturated_group())),
+                std::rc::Rc::new(Element::Line(survival_saturated_line())),
             ],
             common: lc,
             isolated_blending: true,
@@ -7314,6 +7412,17 @@ mod tests {
         })
     }
 
+    fn survival_first_line(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::LineElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        kids.iter().find_map(|c| match c.as_ref() {
+            Element::Line(l) => Some(l.clone()),
+            _ => None,
+        })
+    }
+
     /// PRESERVED / DROPPED for each watched field of `after` against `before`.
     ///
     /// Takes the whole DOCUMENT on each side rather than the Path alone,
@@ -7343,6 +7452,10 @@ mod tests {
         let ag = survival_first_group(after_doc).unwrap_or_else(|| panic!(
             "codec_field_survival: the saturated Group did not survive the round trip \
              AT ALL -- the group.* rows below would be meaningless"));
+        let bn = survival_first_line(before_doc).expect("the saturated doc has a Line");
+        let an = survival_first_line(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Line did not survive the round trip \
+             AT ALL -- the line.* rows below would be meaningless"));
         let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
         vec![
             ("common.locked", s(a.common.locked == before.common.locked)),
@@ -7355,6 +7468,7 @@ mod tests {
             ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
             ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
             ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
+            ("line.width_points", s(an.width_points == bn.width_points)),
             ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
             ("stroke.dash_align_anchors",
              s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),

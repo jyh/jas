@@ -512,8 +512,11 @@ fn escape_xml(s: &str) -> String {
 pub fn element_svg(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
+            // A Line carries a width profile (the Width tool and the
+            // eyedropper both write one) and no stroke brush, so the profile
+            // helper is called with the brush pair absent.
             format!(
-                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}{}/>\n",
+                "{}<line x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\"{}{}{}{}{}{}/>\n",
                 indent,
                 fmt(px(e.x1)), fmt(px(e.y1)), fmt(px(e.x2)), fmt(px(e.y2)),
                 stroke_attrs(&e.stroke),
@@ -521,6 +524,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
                 transform_attr(&e.common.transform),
                 id_lock_attrs(&e.common.id, e.common.locked),
                 name_attr(&e.common.name),
+                stroke_profile_attrs(&e.width_points, &None, &None),
             )
         }
         Element::Rect(e) => {
@@ -1918,7 +1922,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
             x2: pt(get_f(node, "x2", 0.0)),
             y2: pt(get_f(node, "y2", 0.0)),
             stroke: parse_stroke(node),
-            width_points: vec![],
+            width_points: parse_width_points(get_s(node, "jas:width-points", "")),
             common,
                     stroke_gradient: None,
         })),

@@ -279,6 +279,15 @@ class Mask:
     unlink_transform: "Transform | None" = None
 
 
+class FillRule(Enum):
+    """How a path's interior is decided where its rings overlap or nest.
+    ``NONZERO`` is the default and SVG's; ``EVENODD`` is what a multi-ring
+    boolean result needs so its holes stay holes. Values are the canonical
+    test-JSON and SVG spellings. Mirrors the Rust ``FillRule``."""
+    NONZERO = "nonzero"
+    EVENODD = "evenodd"
+
+
 class LineCap(Enum):
     """SVG stroke-linecap."""
     BUTT = "butt"
@@ -944,6 +953,10 @@ class Path(Element):
     tool_origin: str | None = None
     # Stable, opaque element identity. See Line.id. Additive: None = no id.
     id: str | None = None
+    # The carried fill rule, part of what a path MEANS: a multi-ring boolean
+    # result needs evenodd to keep its holes. Last, so no positional
+    # construction moves. Mirrors the Rust ``PathElem::fill_rule``.
+    fill_rule: FillRule = FillRule.NONZERO
 
     def bounds(self) -> tuple[float, float, float, float]:
         return _inflate_bounds(_path_bounds(self.d), self.stroke)
