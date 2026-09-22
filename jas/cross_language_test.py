@@ -769,6 +769,18 @@ class CrossLanguageTest(absltest.TestCase):
         # _select_flat's guards and the group-alone producers had landed.
         self._run_operation_fixture("lock_inheritance.json")
 
+    def test_operation_lock_toggle_no_materialization(self):
+        # The Layers-panel lock toggle writes the target's OWN flag only
+        # (section 13's repeal of materialization) and prunes the selection
+        # on lock. Needs the `toggle_element_lock` verb.
+        self._run_operation_fixture("lock_toggle_no_materialization.json")
+
+    def test_operation_lock_selection_no_materialization(self):
+        # Object > Lock writes the target's own flag (LOCKMAT), a locked
+        # group's member is not selectable, and Unlock All keeps the
+        # selection it found (UNLOCKSEL).
+        self._run_operation_fixture("lock_selection_no_materialization.json")
+
     def test_operation_undo_redo_laws(self):
         self._run_operation_fixture("undo_redo_laws.json")
 
