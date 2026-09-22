@@ -191,11 +191,16 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertTrue(len(ctrl.document.selection) > 0)
         ctrl.lock_selection()
         self.assertEqual(ctrl.document.selection, frozenset())
-        # Verify the group and children are locked
+        # The GROUP's own flag is set and nothing is written onto its members
+        # (LOCKMAT, section 13, as in the ports): they are locked by
+        # inheritance, which effective_locked reads. Stamped flags would
+        # survive save and reload, and nothing would ever clear them.
         locked_group = ctrl.document.layers[0].children[0]
         self.assertTrue(locked_group.locked)
-        self.assertTrue(locked_group.children[0].locked)
-        self.assertTrue(locked_group.children[1].locked)
+        self.assertFalse(locked_group.children[0].locked)
+        self.assertFalse(locked_group.children[1].locked)
+        self.assertTrue(ctrl.document.effective_locked((0, 0, 0)))
+        self.assertTrue(ctrl.document.effective_locked((0, 0, 1)))
         # Try to select again — should fail
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(ctrl.document.selection, frozenset())
