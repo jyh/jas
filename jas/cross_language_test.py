@@ -569,6 +569,43 @@ class CrossLanguageTest(absltest.TestCase):
         # matching Rust's common_attrs_no_name (id but no name).
         _assert_svg_parse(self, "live_compound_id")
 
+    def test_rect_corner_promotion(self):
+        # Ratified answer (3): a Partial move on a Rect flattens its rounding
+        # into the emitted Polygon, and the control-point selection is
+        # remapped onto the corner runs. Mirrors Rust `rect_corner_promotion`
+        # (which generates the vectors) and Swift `rectCornerPromotion`.
+        from document.document import _SelectionPartial, selection_partial
+        from geometry.element import (
+            Polygon, Rect, move_control_points, remap_cp_selection_after_move)
+        fx = json.loads(_read_fixture("algorithms/rect_corner_promotion.json"))
+        vectors = fx["vectors"]
+        self.assertGreaterEqual(len(vectors), 7)
+        for v in vectors:
+            name = v["name"]
+            r = v["rect"]
+            before = Rect(x=r["x"], y=r["y"], width=r["width"], height=r["height"],
+                          rx=r["rx"], ry=r["ry"])
+            kind = selection_partial(v["cps"])
+            after = move_control_points(before, kind, v["dx"], v["dy"])
+            want = v["expected"]
+            if want["kind"] == "polygon":
+                self.assertIsInstance(after, Polygon, name)
+                self.assertEqual(len(after.points), len(want["points"]),
+                                 f"{name}: point count")
+                for i, (g, w) in enumerate(zip(after.points, want["points"])):
+                    for k in range(2):
+                        self.assertAlmostEqual(g[k], w[k], delta=1e-9,
+                                               msg=f"{name}: point {i}[{k}]")
+            else:
+                self.assertIsInstance(after, Rect, name)
+                for k in ("x", "y", "width", "height", "rx", "ry"):
+                    self.assertAlmostEqual(getattr(after, k), want[k], delta=1e-9,
+                                           msg=f"{name}: {k}")
+            remapped = remap_cp_selection_after_move(before, after, kind)
+            self.assertIsInstance(remapped, _SelectionPartial, name)
+            self.assertEqual(list(remapped.cps), v["remapped_cps"],
+                             f"{name}: remapped_cps")
+
     def test_svg_parse_symbols_basic(self):
         # The <defs> master (id="m1") imports into doc.symbols (NOT layers);
         # the <use href="#m1" id="i1"> imports as a live reference in the

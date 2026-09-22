@@ -5843,6 +5843,53 @@ private func wireUnhex(_ s: String) -> Data {
             "the defect's blank tree is not what the fixture records")
 }
 
+// MARK: - Rect corner promotion (ratified answer (3))
+
+/// A Partial move on a Rect flattens its rounding into the emitted Polygon and
+/// remaps the control-point selection onto the corner runs. Twin of Rust's
+/// `rect_corner_promotion`, which generates the vectors
+/// (`regenerate_rect_corner_promotion`); the reference reads them too.
+@Test func rectCornerPromotion() throws {
+    let raw = readFixture("algorithms/rect_corner_promotion.json")
+    let fx = try JSONSerialization.jsonObject(with: raw.data(using: .utf8)!) as! [String: Any]
+    let vectors = fx["vectors"] as! [[String: Any]]
+    #expect(vectors.count >= 7, "rectCornerPromotion: only \(vectors.count) vectors")
+    func num(_ a: Any?) -> Double { (a as! NSNumber).doubleValue }
+    for v in vectors {
+        let name = v["name"] as! String
+        let r = v["rect"] as! [String: Any]
+        let before = Element.rect(Rect(x: num(r["x"]), y: num(r["y"]),
+                                       width: num(r["width"]), height: num(r["height"]),
+                                       rx: num(r["rx"]), ry: num(r["ry"])))
+        let kind = SelectionKind.partial(SortedCps((v["cps"] as! [NSNumber]).map { $0.intValue }))
+        let after = before.moveControlPoints(kind, dx: num(v["dx"]), dy: num(v["dy"]))
+        let want = v["expected"] as! [String: Any]
+        switch (want["kind"] as! String, after) {
+        case ("polygon", .polygon(let p)):
+            let w = want["points"] as! [[NSNumber]]
+            #expect(p.points.count == w.count,
+                    "\(name): point count \(p.points.count) != \(w.count)")
+            for (i, (g, e)) in zip(p.points, w).enumerated() {
+                #expect(abs(g.0 - e[0].doubleValue) < 1e-9 && abs(g.1 - e[1].doubleValue) < 1e-9,
+                        "\(name): point \(i) \(g) != (\(e[0]), \(e[1]))")
+            }
+        case ("rect", .rect(let e)):
+            for (k, g) in [("x", e.x), ("y", e.y), ("width", e.width), ("height", e.height),
+                           ("rx", e.rx), ("ry", e.ry)] {
+                #expect(abs(g - num(want[k])) < 1e-9, "\(name): \(k) \(g) != \(num(want[k]))")
+            }
+        default:
+            Issue.record("\(name): expected \(want["kind"] as! String), got \(after)")
+        }
+        let remapped = remapCpSelectionAfterMove(before, after, kind)
+        let wantCps = (v["remapped_cps"] as! [NSNumber]).map { $0.intValue }
+        guard case .partial(let s) = remapped else {
+            Issue.record("\(name): a Partial move remapped to .all"); continue
+        }
+        #expect(s.toArray() == wantCps, "\(name): remapped_cps \(s.toArray()) != \(wantCps)")
+    }
+}
+
 // MARK: - FLOATSPELL: one spelling of a full-precision Double, both ports
 
 /// Twin of Rust's `algorithm_float_format_vectors`. Expected values are

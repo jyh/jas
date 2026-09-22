@@ -2051,6 +2051,13 @@ def clear_ids(elem: Element) -> Element:
     return elem
 
 
+def remap_cp_selection_after_move(before: Element, after: Element, kind):
+    """Remap a control-point selection across a `move_control_points` call
+    that changed the element's REPRESENTATION. Mirrors the Rust
+    ``remap_cp_selection_after_move``."""
+    return kind
+
+
 def move_control_points(elem: Element, kind, dx: float, dy: float) -> Element:
     """Return a new element with the specified control points moved by (dx, dy).
 

@@ -7055,6 +7055,101 @@ mod tests {
     // round trip speaks to NOTHING, so it must preserve EVERYTHING.
     // ---------------------------------------------------------------
 
+    // ---------------------------------------------------------------
+    // RECT CORNER PROMOTION -- ratified answer (3): a Partial move on a
+    // Rect flattens its rounding into the emitted Polygon, and the
+    // control-point selection is remapped onto the corner runs.
+    // Vectors: test_fixtures/algorithms/rect_corner_promotion.json, which
+    // this port generates (`regenerate_rect_corner_promotion`) and JasSwift
+    // (`rectCornerPromotion`) and the reference
+    // (`test_rect_corner_promotion`) consume.
+    // ---------------------------------------------------------------
+
+    /// Apply one vector: the element `move_control_points` returns, as the
+    /// fixture's `expected` object, and the remapped selection.
+    fn rect_corner_promotion_apply(v: &serde_json::Value) -> (serde_json::Value, Vec<usize>) {
+        use crate::document::document::{SelectionKind, SortedCps};
+        use crate::geometry::element::*;
+        let r = &v["rect"];
+        let f = |k: &str| r[k].as_f64().unwrap_or_else(|| panic!("rect.{k} missing"));
+        let before = Element::Rect(RectElem {
+            x: f("x"), y: f("y"), width: f("width"), height: f("height"),
+            rx: f("rx"), ry: f("ry"),
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let cps: Vec<usize> = v["cps"].as_array().unwrap().iter()
+            .map(|c| c.as_u64().unwrap() as usize).collect();
+        let kind = SelectionKind::Partial(SortedCps::from_iter(cps));
+        let after = move_control_points(&before, &kind,
+                                        v["dx"].as_f64().unwrap(), v["dy"].as_f64().unwrap());
+        let remapped = match remap_cp_selection_after_move(&before, &after, &kind) {
+            SelectionKind::Partial(s) => s.iter().collect(),
+            SelectionKind::All => panic!("a Partial move remapped to All"),
+        };
+        let expected = match &after {
+            Element::Polygon(p) => serde_json::json!({
+                "kind": "polygon",
+                "points": p.points.iter().map(|&(x, y)| serde_json::json!([x, y]))
+                    .collect::<Vec<_>>(),
+            }),
+            Element::Rect(e) => serde_json::json!({
+                "kind": "rect", "x": e.x, "y": e.y, "width": e.width,
+                "height": e.height, "rx": e.rx, "ry": e.ry,
+            }),
+            other => panic!("unexpected promotion result {other:?}"),
+        };
+        (expected, remapped)
+    }
+
+    /// Fill each vector's `expected` and `remapped_cps` from this port. Run with:
+    ///   cargo test regenerate_rect_corner_promotion -- --ignored
+    #[test]
+    #[ignore]
+    fn regenerate_rect_corner_promotion() {
+        let path = format!("{}/algorithms/rect_corner_promotion.json", FIXTURES);
+        let mut fx: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        for v in fx["vectors"].as_array_mut().unwrap() {
+            let (expected, remapped) = rect_corner_promotion_apply(v);
+            v["expected"] = expected;
+            v["remapped_cps"] = serde_json::json!(remapped);
+        }
+        std::fs::write(&path, serde_json::to_string_pretty(&fx).unwrap() + "\n").unwrap();
+    }
+
+    #[test]
+    fn rect_corner_promotion() {
+        let fx: serde_json::Value = serde_json::from_str(
+            &read_fixture("algorithms/rect_corner_promotion.json")).unwrap();
+        let vectors = fx["vectors"].as_array().unwrap();
+        assert!(vectors.len() >= 7, "rect_corner_promotion: only {} vectors", vectors.len());
+        for v in vectors {
+            let name = v["name"].as_str().unwrap();
+            let (got, remapped) = rect_corner_promotion_apply(v);
+            let want = &v["expected"];
+            assert_eq!(got["kind"], want["kind"], "{name}: kind");
+            if want["kind"] == "polygon" {
+                let (g, w) = (got["points"].as_array().unwrap(), want["points"].as_array().unwrap());
+                assert_eq!(g.len(), w.len(), "{name}: point count");
+                for (i, (a, b)) in g.iter().zip(w).enumerate() {
+                    for k in 0..2 {
+                        let (a, b) = (a[k].as_f64().unwrap(), b[k].as_f64().unwrap());
+                        assert!((a - b).abs() < 1e-9, "{name}: point {i}[{k}] {a} != {b}");
+                    }
+                }
+            } else {
+                for k in ["x", "y", "width", "height", "rx", "ry"] {
+                    let (a, b) = (got[k].as_f64().unwrap(), want[k].as_f64().unwrap());
+                    assert!((a - b).abs() < 1e-9, "{name}: {k} {a} != {b}");
+                }
+            }
+            let want_cps: Vec<usize> = v["remapped_cps"].as_array().unwrap().iter()
+                .map(|c| c.as_u64().unwrap() as usize).collect();
+            assert_eq!(remapped, want_cps, "{name}: remapped_cps");
+        }
+    }
+
     fn survival_gradient() -> Box<crate::geometry::element::Gradient> {
         use crate::geometry::element::*;
         Box::new(Gradient {

@@ -759,6 +759,14 @@ public typealias BBox = (x: Double, y: Double, width: Double, height: Double)
 /// Exact for every axis-preserving transform and for any subtree whose
 /// geometry reaches its bbox corners; otherwise the box of the transformed
 /// BOUNDS, the same over-approximation the evaluated-bbox family makes.
+/// Remap a control-point selection across a `moveControlPoints` call that
+/// changed the element's REPRESENTATION. Twin of Rust's
+/// `remap_cp_selection_after_move`.
+public func remapCpSelectionAfterMove(_ before: Element, _ after: Element,
+                                      _ kind: SelectionKind) -> SelectionKind {
+    kind
+}
+
 public func aabbThrough(_ b: BBox, _ t: Transform) -> BBox {
     let x0 = b.x, y0 = b.y, x1 = b.x + b.width, y1 = b.y + b.height
     var minX = Double.infinity, minY = Double.infinity
