@@ -20,7 +20,7 @@ from geometry.element import (
     PathCommand, Polygon, Polyline, QuadTo, Rect, RecordedElem, ReferenceElem,
     GeneratedElem,
     SmoothCurveTo,
-    SmoothQuadTo, Stroke, Text, TextPath, Transform,
+    SmoothQuadTo, Stroke, StrokeWidthPoint, Text, TextPath, Transform,
 )
 
 _PT_TO_PX = 96.0 / 72.0
@@ -68,6 +68,16 @@ def _stroke_attrs(stroke: Stroke | None) -> str:
         parts.append(f' stroke-linejoin="{stroke.linejoin.value}"')
     if stroke.opacity < 1.0:
         parts.append(f' stroke-opacity="{_fmt(stroke.opacity)}"')
+    # Standard SVG presentation attributes, both identity-omitted so a plain
+    # stroke stays byte-clean. Dash lengths ride the same pt -> px conversion
+    # as stroke-width; the miter limit is a ratio and is unitless. Neither was
+    # written or read here, so a dashed stroke came back SOLID. Mirrors the
+    # Rust `stroke_attrs`.
+    if stroke.dash_pattern:
+        parts.append(' stroke-dasharray="'
+                     + ",".join(_fmt(_px(v)) for v in stroke.dash_pattern) + '"')
+    if stroke.miter_limit != 10.0:
+        parts.append(f' stroke-miterlimit="{_fmt(stroke.miter_limit)}"')
     # Workspace-private attribute — see DASH_ALIGN.md §Persistence.
     # Identity-omitted when False; round-trips through jas-authored
     # files; ignored on import from non-jas SVG.
@@ -110,15 +120,56 @@ def _name_attr(name: str | None) -> str:
     return f' inkscape:label="{escape(name)}"'
 
 
-def _id_attr(eid: str | None) -> str:
-    """Stable element identity → standard SVG ``id`` attribute. Emitted
-    only when set (Some/non-empty); id-less elements serialize
-    byte-identically to before so existing fixtures stay stable.
-    Mirrors :func:`_name_attr`.
+def _id_lock_attrs(eid: str | None, locked: bool) -> str:
+    """Stable element identity → standard SVG ``id`` attribute, then the
+    workspace-private ``jas:locked`` flag. Each is emitted only when set, so
+    an id-less unlocked element serializes byte-identically to before.
+
+    ``locked`` is REQUIRED, not defaulted: every writer arm already calls this
+    helper, so one signature makes each arm state the flag, and an arm that
+    forgets it fails at the call instead of silently dropping the lock.
+    Mirrors the Rust ``id_lock_attrs``.
     """
-    if not eid:
-        return ""
-    return f' id="{escape(eid)}"'
+    out = f' id="{escape(eid)}"' if eid else ""
+    if locked:
+        out += ' jas:locked="true"'
+    return out
+
+
+def _container_blend_attrs(isolated_blending: bool, knockout_group: bool) -> str:
+    """The Opacity panel's two page-level blending flags, as workspace-private
+    attributes on a ``<g>``, each written only when true. There is no standard
+    SVG attribute for either, and neither renderer honours them yet, so a
+    ``jas:`` extension is the form that promises nothing it cannot keep.
+    Mirrors the Rust ``container_blend_attrs``."""
+    out = ""
+    if isolated_blending:
+        out += ' jas:isolated-blending="true"'
+    if knockout_group:
+        out += ' jas:knockout-group="true"'
+    return out
+
+
+# An attribute value is double-quoted, so a JSON value's quotes must be escaped.
+_QUOTE = {'"': "&quot;"}
+
+
+def _stroke_profile_attrs(width_points, stroke_brush: str | None,
+                          stroke_brush_overrides: str | None) -> str:
+    """A path's stroke profile: ``jas:width-points`` as space-separated
+    ``t,left,right`` triples through the ordinary coordinate format, then the
+    brush slug and its per-instance overrides (a JSON object, so escaped).
+    Each is omitted at its default. Mirrors the Rust ``stroke_profile_attrs``."""
+    out = ""
+    if width_points:
+        triples = " ".join(f"{_fmt(w.t)},{_fmt(w.width_left)},{_fmt(w.width_right)}"
+                           for w in width_points)
+        out += f' jas:width-points="{triples}"'
+    if stroke_brush:
+        out += f' jas:stroke-brush="{escape(stroke_brush, _QUOTE)}"'
+    if stroke_brush_overrides:
+        out += f' jas:stroke-brush-overrides="{escape(stroke_brush_overrides, _QUOTE)}"'
+    return out
 
 
 def _tspan_svg(t) -> str:
@@ -280,7 +331,7 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f' x2="{_fmt(_px(x2))}" y2="{_fmt(_px(y2))}"'
                     f'{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform,
@@ -295,7 +346,7 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{rxy}'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Circle(cx=cx, cy=cy, r=r,
                     fill=fill, stroke=stroke, opacity=opacity, transform=transform,
@@ -304,7 +355,7 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f' r="{_fmt(_px(r))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Ellipse(cx=cx, cy=cy, rx=rx, ry=ry,
                      fill=fill, stroke=stroke, opacity=opacity, transform=transform,
@@ -319,12 +370,12 @@ def _element_svg(elem: Element, indent: str) -> str:
                         f' r="{_fmt(_px(rx))}"'
                         f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                         f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                        f'{_id_attr(eid)}{_name_attr(name)}/>')
+                        f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
             return (f'{indent}<ellipse cx="{_fmt(_px(cx))}" cy="{_fmt(_px(cy))}"'
                     f' rx="{_fmt(_px(rx))}" ry="{_fmt(_px(ry))}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Polyline(points=pts, fill=fill, stroke=stroke,
                       opacity=opacity, transform=transform,
@@ -333,7 +384,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             return (f'{indent}<polyline points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Polygon(points=pts, fill=fill, stroke=stroke,
                      opacity=opacity, transform=transform,
@@ -342,7 +393,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             return (f'{indent}<polygon points="{ps}"'
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
 
         case Path(d=cmds, fill=fill, stroke=stroke,
                   opacity=opacity, transform=transform,
@@ -356,7 +407,8 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
                     f'{tool_origin_attr}'
-                    f'{_id_attr(eid)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}'
+                    f'{_stroke_profile_attrs(elem.width_points, elem.stroke_brush, elem.stroke_brush_overrides)}/>')
 
         case TextPath():
             # Destructure via attribute access to avoid an even wider
@@ -388,7 +440,7 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f' font-size="{_fmt(_px(elem_tp.font_size))}"'
                     f'{fw_attr}{fst_attr}{td_attr}{extra}'
                     f'{_opacity_attr(elem_tp.opacity)}{_transform_attr(elem_tp.transform)}'
-                    f'{_id_attr(elem_tp.id)}>'
+                    f'{_id_lock_attrs(elem_tp.id, elem_tp.locked)}>'
                     f'<textPath path="{_path_data(elem_tp.d)}"{offset_attr}{tp_space}>'
                     f'{tp_body}</textPath></text>')
 
@@ -422,13 +474,13 @@ def _element_svg(elem: Element, indent: str) -> str:
                     f'{area_attrs}'
                     f'{_fill_attrs(elem_t.fill)}{_stroke_attrs(elem_t.stroke)}'
                     f'{_opacity_attr(elem_t.opacity)}{_transform_attr(elem_t.transform)}'
-                    f'{_id_attr(elem_t.id)}{space_attr}>'
+                    f'{_id_lock_attrs(elem_t.id, elem_t.locked)}{space_attr}>'
                     f'{body}</text>')
 
         case Layer(children=children, name=name, opacity=opacity,
                    transform=transform, id=eid):
             label = f' inkscape:label="{escape(name)}"' if name else ""
-            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}{_id_attr(eid)}>']
+            lines = [f'{indent}<g inkscape:groupmode="layer"{label}{_opacity_attr(opacity)}{_transform_attr(transform)}{_id_lock_attrs(eid, elem.locked)}{_container_blend_attrs(elem.isolated_blending, elem.knockout_group)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -436,7 +488,7 @@ def _element_svg(elem: Element, indent: str) -> str:
 
         case Group(children=children, opacity=opacity, transform=transform,
                    name=name, id=eid):
-            lines = [f'{indent}<g{_id_attr(eid)}{_name_attr(name)}{_opacity_attr(opacity)}{_transform_attr(transform)}>']
+            lines = [f'{indent}<g{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}{_opacity_attr(opacity)}{_transform_attr(transform)}{_container_blend_attrs(elem.isolated_blending, elem.knockout_group)}>']
             for child in children:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -452,7 +504,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             # Mirror Rust's common_attrs_no_name: opacity + transform + id,
             # but NOT name (live elements never emit inkscape:label).
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}')
+                     f'{_id_lock_attrs(eid, elem.locked)}')
             lines = [f'{indent}<g data-jas-live="compound_shape"'
                      f' data-jas-operation="{operation.value}"{attrs}>']
             for child in operands:
@@ -473,7 +525,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             # matrix format, and ONLY when set so existing <use> fixtures stay
             # byte-identical.
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}'
+                     f'{_id_lock_attrs(eid, elem.locked)}'
                      f'{_instance_transform_attr(instance_transform)}')
             return f'{indent}<use href="#{escape(target)}"{attrs}/>'
 
@@ -485,7 +537,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             # Mirror Rust common_attrs_no_name: opacity + transform + id, no
             # name (live elements never emit inkscape:label).
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}')
+                     f'{_id_lock_attrs(eid, elem.locked)}')
             joined = ",".join(inputs)
             return (f'{indent}<g data-jas-live="recorded"'
                     f' data-jas-inputs="{escape(joined)}"{attrs}></g>')
@@ -496,7 +548,7 @@ def _element_svg(elem: Element, indent: str) -> str:
             # concept id + params. Full SVG round-trip is deferred (CONCEPTS.md);
             # no current fixture exercises it (data-jas-params is not compared).
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                     f'{_id_attr(eid)}')
+                     f'{_id_lock_attrs(eid, elem.locked)}')
             params_str = json.dumps(params, sort_keys=True,
                                     separators=(",", ":"))
             return (f'{indent}<g data-jas-live="generated"'
@@ -844,9 +896,29 @@ def _parse_stroke(node: ET.Element) -> Stroke | None:
     lc = {"butt": LineCap.BUTT, "round": LineCap.ROUND, "square": LineCap.SQUARE}.get(lc_str, LineCap.BUTT)
     lj = {"miter": LineJoin.MITER, "round": LineJoin.ROUND, "bevel": LineJoin.BEVEL}.get(lj_str, LineJoin.MITER)
     opacity = _safe_float(node.get("stroke-opacity"), 1.0)
+    # `stroke-dasharray` separates by commas, whitespace or both, and `none`
+    # means no dashing. Values arrive in px and are stored in pt. The ports
+    # hold at most SIX, so a longer foreign list is truncated, and a token
+    # that is not a number empties the pattern rather than half-reading it.
+    # Mirrors the Rust `parse_stroke`.
+    dashes: list[float] = []
+    raw = node.get("stroke-dasharray", "")
+    if raw.strip() != "none":
+        for tok in re.split(r"[,\s]+", raw.strip()):
+            if not tok:
+                continue
+            if len(dashes) == 6:
+                break
+            try:
+                dashes.append(float(tok) * _PX_TO_PT)
+            except ValueError:
+                dashes = []
+                break
+    miter_limit = _safe_float(node.get("stroke-miterlimit"), 10.0)
     dash_align_raw = (node.get("data-jas-dash-align-anchors") or "").strip()
     dash_align_anchors = dash_align_raw in ("true", "1")
     return Stroke(c, width, lc, lj, opacity,
+                  miter_limit=miter_limit, dash_pattern=tuple(dashes),
                   dash_align_anchors=dash_align_anchors)
 
 
@@ -1214,6 +1286,11 @@ def _parse_element(node: ET.Element) -> Element | None:
     # Stable element identity from the standard SVG `id` attribute
     # (absent -> None). Reading a foreign id is fine. Mirrors `name`.
     eid = node.get("id") or None
+    # The workspace-private lock flag (`_id_lock_attrs`). Only the exact
+    # string "true" locks: a foreign or malformed value must not silently
+    # protect artwork the artist never protected. Mirrors the Rust
+    # `parse_common`.
+    locked = _jas_get(node, "locked") == "true"
 
     if tag == "line":
         return Line(
@@ -1222,7 +1299,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             x2=_pt(_safe_float(node.get("x2"))),
             y2=_pt(_safe_float(node.get("y2"))),
             stroke=stroke, opacity=opacity, transform=transform,
-            name=name, id=eid)
+            name=name, id=eid, locked=locked)
 
     if tag == "rect":
         return Rect(
@@ -1233,7 +1310,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name, id=eid)
+            name=name, id=eid, locked=locked)
 
     if tag == "circle":
         # ONE ROUND KIND (JYH, 2026-07-30): `<circle r>` is an ellipse whose
@@ -1244,7 +1321,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             cy=_pt(_safe_float(node.get("cy"))),
             rx=r, ry=r,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name, id=eid)
+            name=name, id=eid, locked=locked)
 
     if tag == "ellipse":
         return Ellipse(
@@ -1253,19 +1330,19 @@ def _parse_element(node: ET.Element) -> Element | None:
             rx=_pt(_safe_float(node.get("rx"))),
             ry=_pt(_safe_float(node.get("ry"))),
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            name=name, id=eid)
+            name=name, id=eid, locked=locked)
 
     if tag == "polyline":
         pts = _parse_points(node.get("points", ""))
         return Polyline(points=pts, fill=fill, stroke=stroke,
                         opacity=opacity, transform=transform,
-                        name=name, id=eid)
+                        name=name, id=eid, locked=locked)
 
     if tag == "polygon":
         pts = _parse_points(node.get("points", ""))
         return Polygon(points=pts, fill=fill, stroke=stroke,
                        opacity=opacity, transform=transform,
-                       name=name, id=eid)
+                       name=name, id=eid, locked=locked)
 
     if tag == "path":
         d = _parse_path_d(node.get("d", ""))
@@ -1274,10 +1351,17 @@ def _parse_element(node: ET.Element) -> Element | None:
         # {urn:jas:1}tool-origin, and the literal name matched nothing.
         tool_origin = (node.get(f"{{{_JAS_NS}}}tool-origin")
                        or node.get("jas:tool-origin"))
+        # The stroke profile (`_stroke_profile_attrs`). ElementTree has
+        # already unescaped the values, so the overrides' JSON comes back as
+        # written.
+        brush = _jas_get(node, "stroke-brush") or None
+        brush_overrides = _jas_get(node, "stroke-brush-overrides") or None
         return Path(d=d, fill=fill, stroke=stroke,
+                    width_points=_parse_width_points(_jas_get(node, "width-points") or ""),
                     opacity=opacity, transform=transform,
                     tool_origin=tool_origin,
-                    name=name, id=eid)
+                    stroke_brush=brush, stroke_brush_overrides=brush_overrides,
+                    name=name, id=eid, locked=locked)
 
     if tag == "text":
         ff = node.get("font-family", "sans-serif")
@@ -1327,7 +1411,7 @@ def _parse_element(node: ET.Element) -> Element | None:
                     aa_mode=aa, rotate=rotate, horizontal_scale=hs,
                     vertical_scale=vs, kerning=kern,
                     fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-                    id=eid)
+                    id=eid, locked=locked)
                 if tp_tspans:
                     # Override the seeded-from-content tspans with the
                     # parsed children so per-range overrides survive.
@@ -1364,7 +1448,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             vertical_scale=vs, kerning=kern,
             width=tw, height=th,
             fill=fill, stroke=stroke, opacity=opacity, transform=transform,
-            id=eid)
+            id=eid, locked=locked)
         if tspan_children:
             t = dataclasses.replace(t, tspans=tspan_children)
         return t
@@ -1392,7 +1476,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             return CompoundShape(
                 operation=operation, operands=tuple(children),
                 fill=None, stroke=None,
-                opacity=opacity, transform=transform, id=eid)
+                opacity=opacity, transform=transform, id=eid, locked=locked)
         # Layer detection: only inkscape:groupmode="layer" promotes a
         # <g> to a Layer. inkscape:label alone is a Group name now
         # (was historically Layer-only, but with non-Layer naming
@@ -1401,12 +1485,18 @@ def _parse_element(node: ET.Element) -> Element | None:
         group_mode = (node.get(f"{{{_INKSCAPE_NS}}}groupmode")
                       or node.get("inkscape:groupmode"))
         label = node.get(f"{{{_INKSCAPE_NS}}}label") or node.get("inkscape:label")
+        # The two container-only blending flags (`_container_blend_attrs`);
+        # absent means false, so every existing file reads as authored.
+        iso = _jas_get(node, "isolated-blending") == "true"
+        ko = _jas_get(node, "knockout-group") == "true"
         if group_mode == "layer":
             return Layer(children=tuple(children), name=label or "",
-                         opacity=opacity, transform=transform, id=eid)
+                         opacity=opacity, transform=transform, id=eid,
+                         locked=locked, isolated_blending=iso, knockout_group=ko)
         return Group(children=tuple(children),
                      opacity=opacity, transform=transform,
-                     name=name, id=eid)
+                     name=name, id=eid,
+                     locked=locked, isolated_blending=iso, knockout_group=ko)
 
     if tag == "use":
         # Native SVG <use href="#id"> imports as a live reference
@@ -1422,7 +1512,7 @@ def _parse_element(node: ET.Element) -> Element | None:
         # data-jas-instance-transform (same matrix format as the render CTM
         # attr; e/f are px on the wire, pt in the model). SYMBOLS.md §4 / F2.
         return ReferenceElem(
-            target=target, id=eid, name=name,
+            target=target, id=eid, name=name, locked=locked,
             opacity=opacity, transform=transform,
             instance_transform=_parse_matrix_attr(
                 node, "data-jas-instance-transform"))
@@ -1431,6 +1521,33 @@ def _parse_element(node: ET.Element) -> Element | None:
         return None  # parent reads as the name
 
     return None
+
+
+def _jas_get(node: ET.Element, name: str) -> str | None:
+    """A ``jas:``-namespaced attribute. Qualified first: a file that declares
+    ``xmlns:jas`` (every file this writer produces with one) parses it as
+    ``{urn:jas:1}name``, and the literal ``jas:name`` matches only a file
+    parsed without the declaration. Unlike ``_attr_get`` it never falls back
+    to the BARE name, so a foreign ``locked="true"`` cannot lock anything."""
+    v = node.get(f"{{{_JAS_NS}}}{name}")
+    return v if v is not None else node.get("jas:" + name)
+
+
+def _parse_width_points(s: str) -> tuple:
+    """``t,left,right`` triples, space-separated. A row with a fourth field is
+    from a newer writer and is REFUSED rather than read as three of four; an
+    unparseable row is dropped. Mirrors the Rust ``parse_width_points``."""
+    out = []
+    for triple in s.split():
+        parts = triple.split(",")
+        if len(parts) != 3:
+            continue
+        try:
+            t, left, right = (float(x) for x in parts)
+        except ValueError:
+            continue
+        out.append(StrokeWidthPoint(t=t, width_left=left, width_right=right))
+    return tuple(out)
 
 
 def _attr_get(node: ET.Element, name: str) -> str | None:
