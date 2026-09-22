@@ -564,9 +564,13 @@ private func tspanSvg(_ t: Tspan) -> String {
 public func elementSvg(_ elem: Element, indent: String) -> String {
     switch elem {
     case .line(let v):
+        // A Line carries a width profile (the Width tool and the eyedropper
+        // both write one) and no stroke brush, so the profile helper is
+        // called with the brush pair absent.
         return "\(indent)<line x1=\"\(fmt(px(v.x1)))\" y1=\"\(fmt(px(v.y1)))\"" +
             " x2=\"\(fmt(px(v.x2)))\" y2=\"\(fmt(px(v.y2)))\"" +
-            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))/>"
+            "\(strokeAttrs(v.stroke))\(opacityAttr(v.opacity))\(transformAttr(v.transform))\(idLockAttrs(v.id, locked: v.locked))\(nameAttr(v.name))" +
+            "\(strokeProfileAttrs(v.widthPoints, nil, nil))/>"
 
     case .rect(let v):
         var rxy = ""
@@ -1675,7 +1679,10 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         return .line(Line(
             x1: toPt(attrF(elem, "x1")), y1: toPt(attrF(elem, "y1")),
             x2: toPt(attrF(elem, "x2")), y2: toPt(attrF(elem, "y2")),
-            stroke: stroke, opacity: opacity, transform: transform,
+            stroke: stroke,
+            widthPoints: parseWidthPoints(
+                elem.attribute(forName: "jas:width-points")?.stringValue ?? ""),
+            opacity: opacity, transform: transform,
             name: name, id: id))
 
     case "rect":
