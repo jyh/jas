@@ -1320,9 +1320,10 @@ private func omitCharacterAttributeIdentity(
 /// omission (drop overrides equal to the parent's effective value) →
 /// mergeTspans. Attribute names are snake_case (`font_family` /
 /// `font_size` / `font_weight` / `font_style`); unsupported names are
-/// silently ignored per-tspan. A missing element or a non-Text/TextPath
-/// target is a benign no-op (never an error) — mirrors Rust
-/// `Controller::set_character_attribute` exactly.
+/// silently ignored per-tspan. A missing element, a non-Text/TextPath
+/// target, or a range that is inverted or runs past the content is a benign
+/// no-op (never an error) — mirrors Rust `Controller::set_character_attribute`
+/// exactly.
 private func applySetCharacterAttribute(
     _ model: Model, _ path: ElementPath,
     _ charStart: Int, _ charEnd: Int,
@@ -1333,7 +1334,15 @@ private func applySetCharacterAttribute(
 
     func rewrite(_ tspans: [Tspan],
                  fontFamily: String, fontSize: Double,
-                 fontWeight: String, fontStyle: String) -> [Tspan] {
+                 fontWeight: String, fontStyle: String) -> [Tspan]? {
+        // `splitTspanRange` PRECONDITIONS on an in-bounds range, so an
+        // out-of-range op used to TRAP here rather than be the no-op the doc
+        // above promises (tspan_ops.json,
+        // `tspan_set_attribute_past_the_content_is_a_noop`). Counted in
+        // Unicode scalars, as the primitive counts. Twin: Rust
+        // `char_range_fits`.
+        let total = tspans.reduce(0) { $0 + $1.content.unicodeScalars.count }
+        guard charStart <= charEnd, charEnd <= total else { return nil }
         var (split, first, last) = splitTspanRange(
             tspans, charStart: charStart, charEnd: charEnd)
         if let f = first, let l = last {
@@ -1353,13 +1362,15 @@ private func applySetCharacterAttribute(
     let newElem: Element
     switch elem {
     case .text(let t):
-        newElem = .text(t.withTspans(rewrite(
+        guard let tspans = rewrite(
             t.tspans, fontFamily: t.fontFamily, fontSize: t.fontSize,
-            fontWeight: t.fontWeight, fontStyle: t.fontStyle)))
+            fontWeight: t.fontWeight, fontStyle: t.fontStyle) else { return }
+        newElem = .text(t.withTspans(tspans))
     case .textPath(let tp):
-        newElem = .textPath(tp.withTspans(rewrite(
+        guard let tspans = rewrite(
             tp.tspans, fontFamily: tp.fontFamily, fontSize: tp.fontSize,
-            fontWeight: tp.fontWeight, fontStyle: tp.fontStyle)))
+            fontWeight: tp.fontWeight, fontStyle: tp.fontStyle) else { return }
+        newElem = .textPath(tp.withTspans(tspans))
     default:
         return
     }

@@ -3181,6 +3181,9 @@ impl Controller {
         let doc = model.document().clone();
         let new_elem = match doc.get_element(path) {
             Some(Element::Text(t)) => {
+                if !char_range_fits(&t.tspans, char_start, char_end) {
+                    return;
+                }
                 let mut new_t = t.clone();
                 let parent_for_omission = t.clone();
                 let (tspans, first, last) = crate::geometry::tspan::split_range(
@@ -3205,6 +3208,9 @@ impl Controller {
                 Element::Text(new_t)
             }
             Some(Element::TextPath(tp)) => {
+                if !char_range_fits(&tp.tspans, char_start, char_end) {
+                    return;
+                }
                 let mut new_tp = tp.clone();
                 let parent_for_omission = tp.clone();
                 let (tspans, first, last) = crate::geometry::tspan::split_range(
@@ -3233,6 +3239,21 @@ impl Controller {
         let new_doc = doc.replace_element(path, new_elem);
         model.edit_document(new_doc);
     }
+}
+
+/// True when `[char_start, char_end)` is a range `split_range` accepts: not
+/// inverted, and not past the content, counted in `char`s as it counts.
+/// `split_range` ASSERTS on both, so without this check an out-of-range
+/// `set_character_attribute` op PANICKED rather than being the no-op its doc
+/// promises (tspan_ops.json, `tspan_set_attribute_past_the_content_is_a_noop`).
+/// Twin: the guard in JasSwift `applySetCharacterAttribute`.
+fn char_range_fits(
+    tspans: &[crate::geometry::tspan::Tspan],
+    char_start: usize,
+    char_end: usize,
+) -> bool {
+    let total: usize = tspans.iter().map(|t| t.content.chars().count()).sum();
+    char_start <= char_end && char_end <= total
 }
 
 /// Apply a character-panel attribute write to a single tspan by setting
