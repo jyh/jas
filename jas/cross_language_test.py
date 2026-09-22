@@ -931,6 +931,28 @@ class CrossLanguageTest(absltest.TestCase):
         # the verb; the other nine cases pass.
         self._run_operation_fixture("select_all_top_level.json")
 
+    def test_operation_paste_layers(self):
+        # Plain Paste (R2) flattens into the ACTIVE layer; Paste, Preserving
+        # Layers (R3) lands each fragment layer in the layer it names
+        # (LAYER_STRUCTURE.md section 3). Needs the `paste` verb.
+        self._run_operation_fixture("paste_layers.json")
+
+    def test_operation_paste_locked_layers(self):
+        # PASTELOCK (section 15): a locked ACTIVE layer refuses, a locked
+        # NAMED layer diverts to a suffixed sibling, and hidden is not locked.
+        self._run_operation_fixture("paste_locked_layers.json")
+
+    def test_operation_paste_stacking(self):
+        # Repeated pastes of one payload stack at 24, 48, 72 (section 14);
+        # a new payload restarts the run and paste-in-place stays out of it.
+        self._run_operation_fixture("paste_stacking.json")
+
+    def test_operation_paste_clipboard_text(self):
+        # D4/D5: what the clipboard holds decides what paste does. SVG markup
+        # takes the fragment path, other text becomes a Text element, and an
+        # empty or unreadable clipboard is a no-op.
+        self._run_operation_fixture("paste_clipboard_text.json")
+
     def test_operation_undo_redo_laws(self):
         self._run_operation_fixture("undo_redo_laws.json")
 

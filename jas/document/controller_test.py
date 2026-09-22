@@ -720,6 +720,69 @@ class SelectionOnlyVerbsTest(absltest.TestCase):
         self.assertTrue(model.in_txn)
 
 
+class PasteRunTest(absltest.TestCase):
+    """The paste run (LAYER_STRUCTURE.md section 14) against undo, which no
+    corpus case exercises. Rust `paste_run_apply` / `Model::undo`: undoing a
+    paste puts the next one exactly where the undone one was, and redo brings
+    the run forward again. The corpus family is paste_stacking.json."""
+
+    SVG = ('<svg xmlns="http://www.w3.org/2000/svg"><rect x="16" y="16" '
+           'width="16" height="16"/></svg>')  # x=16px is 12pt
+
+    def _model(self, locked=False):
+        layer = Layer(children=(), name="L", locked=locked)
+        return Model(document=Document(layers=(layer,)))
+
+    def _paste(self, model):
+        from document.op_apply import op_apply
+        op_apply(model, {"op": "paste", "svg": self.SVG, "offset": 24.0})
+        if model.in_txn:
+            model.commit_txn()
+
+    def _xs(self, model):
+        return [c.x for c in model.document.layers[0].children]
+
+    def test_consecutive_pastes_stack(self):
+        m = self._model()
+        self._paste(m)
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_undo_restores_the_run(self):
+        m = self._model()
+        self._paste(m)
+        m.undo()
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0])
+
+    def test_redo_restores_the_advanced_run(self):
+        m = self._model()
+        self._paste(m)
+        m.undo()
+        m.redo()
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_a_selection_change_does_not_reset_the_run(self):
+        # Paste itself SETS the selection, so a selection-keyed reset could
+        # never reach a second step.
+        from document.op_apply import op_apply
+        m = self._model()
+        self._paste(m)
+        op_apply(m, {"op": "select_all"})
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_a_refused_paste_records_nothing(self):
+        # A locked ACTIVE layer refuses (section 15): the document is
+        # unchanged and no undo step is recorded.
+        m = self._model(locked=True)
+        before = m.document
+        self._paste(m)
+        self.assertIs(m.document, before)
+        self.assertFalse(m.can_undo)
+
+
 class SelectAllTopLevelTest(absltest.TestCase):
     """Select All selects every unlocked, visible TOP-LEVEL object, a group
     counting as ONE and never looked inside (LAYER_STRUCTURE.md section 16),
