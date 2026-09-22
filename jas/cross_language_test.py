@@ -953,6 +953,38 @@ class CrossLanguageTest(absltest.TestCase):
         # empty or unreadable clipboard is a no-op.
         self._run_operation_fixture("paste_clipboard_text.json")
 
+    def test_operation_bystander_containers(self):
+        # An edit to one element preserves the containers it does not speak
+        # to (T4): replace, delete and insert_after leave an emptied layer or
+        # group in place.
+        self._run_operation_fixture("bystander_containers.json")
+
+    def test_operation_move_transform_aware(self):
+        # A move converts the document delta into the element's local space
+        # when the element carries a transform (rotated, translated).
+        self._run_operation_fixture("move_transform_aware.json")
+
+    def test_operation_tspan_ops(self):
+        # TSPAN.md's character-attribute write: split_range, set, identity
+        # omission, merge. Needs the `set_character_attribute` verb.
+        self._run_operation_fixture("tspan_ops.json")
+
+    def test_operation_boolean_collapse_default(self):
+        # The collinear-collapse pass is OFF by default
+        # (`state.boolean_remove_redundant_points` is false), so a default
+        # union keeps the seam vertices the sweep inserted. KNOWN FAILURE,
+        # counted in scripts/reference_drift_baseline.json: the reference's
+        # `boolean_union` verb lazily imports `panels.boolean_apply`, frozen-app
+        # code whose `remove_redundant_points` defaults to True, so it
+        # collapses them (4 vertices where the golden has 8), as Swift did
+        # before its fix. The drift gate counts this case as SHARED-LAYER,
+        # because its reach analysis is static and reads only this harness;
+        # it never follows the verb into op_apply's lazy import. Whether that
+        # file is frozen or, being imported by the live reference at run time,
+        # live is a scope question for a ruling, and until one exists this
+        # case is recorded and the frozen file is not edited.
+        self._run_operation_fixture("boolean_collapse_default.json")
+
     def test_operation_undo_redo_laws(self):
         self._run_operation_fixture("undo_redo_laws.json")
 

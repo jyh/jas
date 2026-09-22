@@ -783,6 +783,62 @@ class PasteRunTest(absltest.TestCase):
         self.assertFalse(m.can_undo)
 
 
+class SetCharacterAttributeTest(absltest.TestCase):
+    """The corpus family is tspan_ops.json. These pin what it cannot: a range
+    past the content, or a non-text target, writes nothing."""
+
+    def _model(self, elem):
+        return Model(document=Document(layers=(Layer(children=(elem,), name="L"),)))
+
+    def test_a_range_past_the_content_is_a_no_op(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        before = m.document
+        Controller(model=m).set_character_attribute((0, 0), 1, 99, "font_weight", "bold")
+        self.assertIs(m.document, before)
+        self.assertFalse(m.can_undo)
+
+    def test_a_non_text_target_is_a_no_op(self):
+        m = self._model(Rect(x=0, y=0, width=10, height=10))
+        before = m.document
+        Controller(model=m).set_character_attribute((0, 0), 0, 1, "font_weight", "bold")
+        self.assertIs(m.document, before)
+
+    def test_control_an_in_range_write_lands(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        Controller(model=m).set_character_attribute((0, 0), 1, 4, "font_weight", "bold")
+        weights = [t.font_weight for t in m.document.get_element((0, 0)).tspans]
+        self.assertEqual(weights, [None, "bold", None])
+
+    def test_font_size_is_parsed_and_a_non_number_is_ignored(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        ctrl = Controller(model=m)
+        ctrl.set_character_attribute((0, 0), 0, 2, "font_size", "24")
+        self.assertEqual([t.font_size for t in m.document.get_element((0, 0)).tspans],
+                         [24.0, None])
+        before = m.document
+        ctrl.set_character_attribute((0, 0), 2, 5, "font_size", "big")
+        self.assertEqual([t.font_size for t in m.document.get_element((0, 0)).tspans],
+                         [24.0, None])
+        self.assertEqual(m.document, before)
+
+    def test_the_verb_reads_a_bad_bound_as_zero(self):
+        # Rust's `as_u64().unwrap_or(0)`: a negative or non-integer bound is 0.
+        from document.op_apply import op_apply
+        from geometry.element import Text
+        def weights(start):
+            m = self._model(Text(x=0, y=0, content="Hello"))
+            op_apply(m, {"op": "set_character_attribute", "path": [0, 0],
+                         "attribute": "font_weight", "value": "bold",
+                         "char_start": start, "char_end": 3})
+            return [t.font_weight for t in m.document.get_element((0, 0)).tspans]
+        self.assertEqual(weights(0), ["bold", None], "control")
+        self.assertEqual(weights(-1), ["bold", None])
+        self.assertEqual(weights(1.5), ["bold", None])
+
+
 class SelectAllTopLevelTest(absltest.TestCase):
     """Select All selects every unlocked, visible TOP-LEVEL object, a group
     counting as ONE and never looked inside (LAYER_STRUCTURE.md section 16),

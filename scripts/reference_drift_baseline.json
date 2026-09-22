@@ -35,6 +35,7 @@
  "failing": {
   "test_action_corpus :: Action test 'boolean_exclude_overlapping_rects' failed: canonical JSON mismatch": 1,
   "test_gesture_corpus :: Gesture test 'blob_paint_fill' failed: canonical JSON mismatch": 1,
+  "test_operation_boolean_collapse_default :: Operation test 'boolean_union_keeps_collinear_seam_points_by_default' failed": 1,
   "test_operation_select_all_top_level :: Operation test 'add_to_selection_appends_in_the_order_the_paths_were_added' failed": 1,
   "test_shortcut_structure :: Workspace test 'shortcut_structure' failed: canonical JSON mismatch": 1,
   "test_workspace_panel_ops :: Workspace operation test 'close_and_show_panel' failed: canonical JSON mismatch": 1,

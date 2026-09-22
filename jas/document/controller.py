@@ -155,6 +155,35 @@ def selection_with_path_added(sel: Selection,
     return frozenset(kept + [ElementSelection.all(path)])
 
 
+_CHARACTER_ATTRIBUTES = ("font_family", "font_size", "font_weight", "font_style")
+
+
+def _tspan_with_attribute(ts, attribute: str, value: str):
+    """``ts`` with its override for ``attribute`` set to ``value``. An
+    unsupported name, or a ``font_size`` that is not a number, leaves it
+    unchanged. Mirrors Rust ``apply_attr_to_tspan``."""
+    if attribute not in _CHARACTER_ATTRIBUTES:
+        return ts
+    if attribute == "font_size":
+        try:
+            return replace(ts, font_size=float(value))
+        except ValueError:
+            return ts
+    return replace(ts, **{attribute: value})
+
+
+def _tspan_omit_identity(ts, parent, attribute: str):
+    """Clear ``ts``'s override for ``attribute`` when it equals the parent
+    element's own value, so a range set back to the element's value leaves
+    no override behind. Mirrors Rust ``omit_text_identity`` /
+    ``omit_textpath_identity``."""
+    if attribute not in _CHARACTER_ATTRIBUTES:
+        return ts
+    if getattr(ts, attribute) == getattr(parent, attribute):
+        return replace(ts, **{attribute: None})
+    return ts
+
+
 def _shift_path_for_insertion(path: ElementPath,
                               inserted_at: ElementPath) -> ElementPath:
     """``path`` rewritten for an element having been inserted at
@@ -344,6 +373,37 @@ class Controller:
         es = ElementSelection.all((idx, child_idx))
         self._model.edit_document(replace(doc, layers=new_layers,
                                        selection=frozenset({es})))
+
+    def set_character_attribute(self, path: ElementPath, char_start: int,
+                                char_end: int, attribute: str,
+                                value: str) -> None:
+        """TSPAN.md's character-attribute write on the text element at
+        ``path`` over ``[char_start, char_end)``: split_range, set the
+        attribute on every targeted tspan, omit an override equal to the
+        element's own value (identity omission), then merge adjacent equal
+        tspans. ``font_family`` / ``font_size`` / ``font_weight`` /
+        ``font_style`` are supported; any other name is ignored. A no-op when
+        the target is not a Text or TextPath, or the range is out of bounds.
+        Mirrors Rust ``Controller::set_character_attribute``."""
+        from geometry.element import Text, TextPath
+        from geometry.tspan import merge, split_range
+        doc = self._model.document
+        try:
+            elem = doc.get_element(tuple(path))
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        if not isinstance(elem, (Text, TextPath)):
+            return
+        try:
+            tspans, first, last = split_range(list(elem.tspans), char_start, char_end)
+        except ValueError:
+            return
+        if first is not None and last is not None:
+            for i in range(first, last + 1):
+                ts = _tspan_with_attribute(tspans[i], attribute, value)
+                tspans[i] = _tspan_omit_identity(ts, elem, attribute)
+        new_elem = replace(elem, tspans=tuple(merge(tspans)))
+        self._model.edit_document(doc.replace_element(tuple(path), new_elem))
 
     def assign_id(self, path: ElementPath, id: str) -> None:
         """Stamp a stable ``id`` onto the element at ``path`` — the lazy

@@ -1460,6 +1460,24 @@ def op_apply(model: Model, op: dict) -> None:
             if svg is None:
                 return
             apply_paste(model, svg, offset, preserve)
+    elif name == "set_character_attribute":
+        # TSPAN.md's character-attribute write. Mirrors op_apply.rs
+        # "set_character_attribute": a missing path, attribute or value skips
+        # (Rust returns MissingParam; the reference has no op-error channel),
+        # and a char bound that is absent or not a non-negative integer reads
+        # 0, as Rust's `as_u64().unwrap_or(0)` does.
+        path = parse_path(op.get("path"))
+        attribute = str_field(op, "attribute")
+        value = str_field(op, "value")
+        if not path or attribute is None or value is None:
+            return
+
+        def _u64_or_zero(v):
+            ok = isinstance(v, int) and not isinstance(v, bool) and v >= 0
+            return v if ok else 0
+        ctrl.set_character_attribute(
+            path, _u64_or_zero(op.get("char_start")),
+            _u64_or_zero(op.get("char_end")), attribute, value)
     elif name == "toggle_element_lock":
         # The Layers-panel lock toggle, through the same pure
         # Document.toggling_element_lock the panel calls. Mirrors op_apply.rs
