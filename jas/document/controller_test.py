@@ -246,12 +246,11 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertIn((0, 0), _sel_paths(ctrl.document.selection))
 
     def test_select_rect_multiple_elements(self):
-        """Marquee covering both the rect and the group selects all."""
+        """Marquee covering both the rect and the group selects both; the
+        group is ONE entry and covers its members (section 20)."""
         self.ctrl.select_rect(-1, -1, 20, 20)
-        paths = _sel_paths(self.ctrl.document.selection)
-        self.assertIn((0, 0), paths)
-        self.assertIn((0, 1, 0), paths)
-        self.assertIn((0, 1, 1), paths)
+        self.assertEqual(_sel_paths(self.ctrl.document.selection),
+                         frozenset({(0, 0), (0, 1)}))
 
     def test_select_control_point(self):
         """Selecting a control point creates a partial ElementSelection."""

@@ -717,12 +717,12 @@ class Controller:
 
     def _select_flat(self, predicate: Callable[[Element], bool],
                      *, extend: bool = False) -> None:
-        """Flat 2-level selection with group expansion.
+        """Flat 2-level selection.
 
-        Iterates layers and their direct children.  Groups that contain
-        at least one hit are expanded (the group itself *and* every child
-        are selected).  Parameterized by *predicate* which receives an
-        element and returns whether it is hit.
+        Iterates layers and their direct children. A group containing at
+        least one unlocked hit is selected ALONE (section 20). Parameterized
+        by *predicate*, which receives an element and returns whether it is
+        hit.
         """
         doc = self._model.document
         entries: list[ElementSelection] = []
@@ -748,11 +748,10 @@ class Controller:
                 if isinstance(child, Group) and not isinstance(child, Layer):
                     free = [gi for gi in range(len(child.children))
                             if not doc.effective_locked((li, ci, gi))]
+                    # The band ASKS about members and ANSWERS with the group
+                    # alone (sections 16.4 / 20, as in the ports).
                     if any(predicate(child.children[gi]) for gi in free):
                         entries.append(ElementSelection.all((li, ci)))
-                        for gi in free:
-                            entries.append(
-                                ElementSelection.all((li, ci, gi)))
                 elif predicate(child):
                     entries.append(ElementSelection.all((li, ci)))
         new_sel = frozenset(entries)
@@ -875,9 +874,9 @@ class Controller:
     def select_element(self, path: ElementPath) -> None:
         """Select an element by path.
 
-        If the element's immediate parent is a Group (not a Layer), all
-        children of that Group are selected.  Otherwise just the single
-        element is selected.  Locked elements cannot be selected.
+        If the element's immediate parent is a Group (not a Layer), the
+        Group alone is selected (section 20). Otherwise just the element is
+        selected. An element whose path is locked cannot be selected.
         """
 
         if not path:
@@ -896,14 +895,15 @@ class Controller:
             parent_path = path[:-1]
             parent = doc.get_element(parent_path)
             if isinstance(parent, Group) and not isinstance(parent, Layer):
-                entries = [ElementSelection.all(parent_path)]
-                entries.extend(
-                    ElementSelection.all(parent_path + (i,))
-                    for i in range(len(parent.children))
-                )
+                # THE GROUP ALONE (section 20, as in the ports). The group
+                # and every member used to be written, the one selection
+                # shape no operation reads coherently: copy_selection copied
+                # the group, then each member INTO it. Operations reach
+                # members through map_paintable / paintable_leaves and the
+                # container move arm.
                 # Selection-only: non-undoable (OP_LOG.md §7/§8).
                 self._model.set_document_unbracketed(
-                    replace(doc, selection=frozenset(entries)))
+                    replace(doc, selection=frozenset({ElementSelection.all(parent_path)})))
                 return
         # Selection-only: non-undoable (OP_LOG.md §7/§8).
         self._model.set_document_unbracketed(
