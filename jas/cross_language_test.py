@@ -972,17 +972,11 @@ class CrossLanguageTest(absltest.TestCase):
     def test_operation_boolean_collapse_default(self):
         # The collinear-collapse pass is OFF by default
         # (`state.boolean_remove_redundant_points` is false), so a default
-        # union keeps the seam vertices the sweep inserted. KNOWN FAILURE,
-        # counted in scripts/reference_drift_baseline.json: the reference's
-        # `boolean_union` verb lazily imports `panels.boolean_apply`, frozen-app
-        # code whose `remove_redundant_points` defaults to True, so it
-        # collapses them (4 vertices where the golden has 8), as Swift did
-        # before its fix. The drift gate counts this case as SHARED-LAYER,
-        # because its reach analysis is static and reads only this harness;
-        # it never follows the verb into op_apply's lazy import. Whether that
-        # file is frozen or, being imported by the live reference at run time,
-        # live is a scope question for a ruling, and until one exists this
-        # case is recorded and the frozen file is not edited.
+        # union keeps the seam vertices the sweep inserted. The reference's
+        # `boolean_union` verb reaches this through `panels.boolean_apply`,
+        # which the reference imports at run time and is therefore LIVE
+        # (ruled 2026-09-22); its `BooleanOptions` default said True until
+        # then and this case failed, 4 vertices where the golden has 8.
         self._run_operation_fixture("boolean_collapse_default.json")
 
     def test_operation_undo_redo_laws(self):

@@ -42,11 +42,12 @@ class BooleanOptions:
       flattening and collinear-point collapse.
     - remove_redundant_points: if True, collapse collinear / near-
       duplicate points in output rings within [precision] of the
-      line through their neighbors.
+      line through their neighbors. Off by default, as
+      workspace/state.yaml declares and both active ports implement.
     - divide_remove_unpainted: if True, DIVIDE drops fragments with
       no fill and no stroke (keeps only painted artwork)."""
     precision: float = DEFAULT_PRECISION
-    remove_redundant_points: bool = True
+    remove_redundant_points: bool = False
     divide_remove_unpainted: bool = False
 
 

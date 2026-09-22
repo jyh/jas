@@ -1633,8 +1633,11 @@ jobs:
       # at the tag, and at HEAD 12 of them had gone red on the 4dp oracle
       # before R3 reached the reference. They are green now, and they run
       # here, blocking, so the next drift is seen at the commit that makes it.
+      # panels/boolean_apply.py sits in the frozen app's tree but the
+      # reference's `boolean_union` verb imports it at run time, so it is
+      # live (ruled 2026-09-22) and its own tests run here too.
       - name: Reference domain layer -- its unit tests at HEAD
-        run: cd jas && python -m pytest document geometry algorithms
+        run: cd jas && python -m pytest document geometry algorithms panels/boolean_apply_test.py
 
   # The jas/ Qt app is FROZEN at the five-port-parity tag (POLICY.md): this
   # lane checks out the WHOLE repo at the tag — not just fixtures — because
