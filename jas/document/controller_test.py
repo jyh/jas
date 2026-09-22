@@ -748,6 +748,37 @@ class MoveSelectionTest(absltest.TestCase):
             ctrl.select_element(path)
             self.assertEqual(bool(ctrl.document.selection), selects, label)
 
+    def test_a_selected_group_summarises_its_members_paint(self):
+        # PAINTSUMMARY, the read twin of map_paintable, mirrored from the
+        # ports' `selection_fill_summary` / `selection_stroke_summary`: a
+        # selected container summarises its members at any depth. Reading the
+        # Group's own paint gave "no fill" for a group whose members all carry
+        # one, and Mixed for the group-plus-members shape.
+        from document.controller import (
+            FillSummaryMixed, FillSummaryUniform, StrokeSummaryMixed,
+            StrokeSummaryUniform, selection_fill_summary, selection_stroke_summary)
+        from geometry.element import Color, Fill, Stroke
+        red, green = Fill(color=Color.rgb(1.0, 0.0, 0.0)), Fill(color=Color.rgb(0.0, 1.0, 0.0))
+        thin, thick = (Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=w) for w in (1.0, 4.0))
+        def doc(fills, strokes, expanded=False):
+            kids = tuple(Rect(x=10.0 * i, y=0, width=5, height=5, fill=f, stroke=st)
+                         for i, (f, st) in enumerate(zip(fills, strokes)))
+            group = Group(children=(kids[0], Group(children=kids[1:])))
+            sel = {ElementSelection.all((0, 0))}
+            if expanded:
+                sel |= {ElementSelection.all((0, 0, 0)), ElementSelection.all((0, 0, 1))}
+            return Document(layers=(Layer(children=(group,)),), selection=frozenset(sel))
+        for expanded in (False, True):
+            tag = "group+members" if expanded else "group alone"
+            self.assertEqual(selection_fill_summary(doc((red, red), (thin, thin), expanded)),
+                             FillSummaryUniform(fill=red), f"{tag}: members agree on fill")
+            self.assertEqual(selection_stroke_summary(doc((red, red), (thin, thin), expanded)),
+                             StrokeSummaryUniform(stroke=thin), f"{tag}: members agree on stroke")
+        self.assertEqual(selection_fill_summary(doc((red, green), (thin, thin))),
+                         FillSummaryMixed(), "members disagree on fill")
+        self.assertEqual(selection_stroke_summary(doc((red, red), (thin, thick))),
+                         StrokeSummaryMixed(), "members disagree on stroke")
+
     def test_paint_on_a_selected_group_reaches_its_members(self):
         # PAINTRECURSE / BRUSHRECURSE, mirrored from the ports'
         # `map_paintable`: a Group has no paint of its own, so a paint write
