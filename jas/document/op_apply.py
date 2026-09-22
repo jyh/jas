@@ -21,6 +21,7 @@ Rust ``jas_dioxus/src/document/op_apply.rs``.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from document.controller import Controller, selection_to_ids
@@ -1114,6 +1115,198 @@ def apply_select_by_ids(model: Model, ctrl: Controller, ids: list[str]) -> list[
     return selection_to_ids(model.document)
 
 
+# -- PASTE (LAYER_STRUCTURE.md sections 3, 8, 14, 15) --------------------------
+# The reference's paste body, mirroring op_apply.rs one function for one:
+# `paste_fragment_into` answers WHERE a fragment lands, the clipboard pair
+# answers whether there is a fragment at all, and `_paste_run_apply` is the
+# only place the run moves. Until 2026-09-22 the reference had no paste body
+# in its shared layer, so the four paste families never ran here.
+
+def _split_fragment_entry(entry):
+    """A fragment's top-level entry as ``(layer name or None, children)``. A
+    Layer contributes its non-empty name and its children; anything else is an
+    unnamed entry of one. Mirrors Rust ``split_fragment_entry``."""
+    from geometry.element import Layer
+    if isinstance(entry, Layer):
+        return (entry.name or None, list(entry.children))
+    return (None, [entry])
+
+
+def _active_paste_target(doc) -> int | None:
+    """R2's target, the ACTIVE layer, or None when there is none or it is
+    locked (section 15: the artist chose it, so a locked one REFUSES). Mirrors
+    Rust ``active_paste_target``."""
+    if not doc.layers or doc.active_layer_locked():
+        return None
+    return min(doc.selected_layer, len(doc.layers) - 1)
+
+
+def _preserving_layer_target(new_doc, name: str):
+    """R3's target for a fragment layer named ``name``, matched against the
+    WORKING document so two fragment layers of one name collapse into one
+    target. A locked match DIVERTS to a suffixed sibling ('Sky 2', 'Sky 3',
+    ...), because the fragment chose it; a missing one is created at the end;
+    HIDDEN IS NOT LOCKED. Returns ``(new_doc, index)``. Mirrors Rust
+    ``preserving_layer_target``."""
+    from geometry.element import Layer
+    candidate, n = name, 1
+    while True:
+        found = next((i for i, layer in enumerate(new_doc.layers)
+                      if isinstance(layer, Layer) and layer.name == candidate),
+                     None)
+        if found is None:
+            new_doc = dataclasses.replace(
+                new_doc, layers=new_doc.layers + (Layer(name=candidate, children=()),))
+            return new_doc, len(new_doc.layers) - 1
+        if not new_doc.effective_locked((found,)):
+            return new_doc, found
+        n += 1
+        candidate = f"{name} {n}"
+
+
+def paste_fragment_into(doc, fragment, offset: float, preserve_layers: bool):
+    """The pasted document, or None when nothing lands. Plain Paste (R2)
+    flattens every entry into the ACTIVE layer, and a locked active layer
+    refuses the WHOLE paste (the working copy is discarded, including any
+    sibling an earlier entry created). Preserving Paste (R3) lands a NAMED
+    fragment layer in the layer it names. Every pasted element is translated
+    by ``offset`` and selected whole. Mirrors Rust ``paste_fragment_into``."""
+    from document.document import ElementSelection
+    from geometry.element import translate_element
+    if not doc.layers:
+        return None
+    active = _active_paste_target(doc)
+    new_doc = doc
+    new_selection: list = []
+    for entry in fragment:
+        name, children = _split_fragment_entry(entry)
+        if not children:
+            continue
+        if preserve_layers and name is not None:
+            new_doc, idx = _preserving_layer_target(new_doc, name)
+        elif active is None:
+            return None
+        else:
+            idx = active
+        for child in children:
+            layer = new_doc.layers[idx]
+            at = len(layer.children)
+            layer = dataclasses.replace(
+                layer, children=layer.children + (translate_element(child, offset, offset),))
+            new_doc = dataclasses.replace(
+                new_doc, layers=new_doc.layers[:idx] + (layer,) + new_doc.layers[idx + 1:])
+            new_selection.append(ElementSelection.all((idx, at)))
+    if not new_selection:
+        return None
+    return dataclasses.replace(new_doc, selection=frozenset(new_selection))
+
+
+def _paste_run_offset(doc, payload: str, base: float) -> float:
+    """The effective offset: the Nth consecutive paste of one payload travels
+    ``N * base``. ``base == 0`` is paste-in-place, ruled to apply no offset and
+    to stay OUTSIDE the run. Mirrors Rust ``Model::paste_run_offset``."""
+    if base == 0.0:
+        return 0.0
+    return base * (_paste_run_count_for(doc, payload) + 1)
+
+
+def _paste_run_count_for(doc, payload: str) -> int:
+    """How many consecutive offset pastes of ``payload`` have landed: 0 when
+    the run is empty or counting something else, which is the reset rule --
+    the run is keyed to WHAT is pasted."""
+    run = doc.paste_run
+    return run[1] if run is not None and run[0] == payload else 0
+
+
+def _paste_run_apply(model: Model, payload: str, base: float, body) -> bool:
+    """Apply a paste under the run and advance the run if it landed; the ONLY
+    place the run moves. A paste that lands nothing neither writes nor
+    advances. The advanced run is written in the SAME Document as the paste,
+    so one undo step takes both back. Mirrors Rust ``paste_run_apply``."""
+    doc = model.document
+    new_doc = body(doc, _paste_run_offset(doc, payload, base))
+    if new_doc is None:
+        return False
+    if base != 0.0:
+        new_doc = dataclasses.replace(
+            new_doc, paste_run=(payload, _paste_run_count_for(doc, payload) + 1))
+    model.edit_document(new_doc)
+    return True
+
+
+def apply_paste(model: Model, svg: str, offset: float, preserve_layers: bool) -> bool:
+    """``paste_fragment_into`` against a Model, under the run, from the
+    fragment MARKUP (what the run is keyed to). Mirrors Rust ``apply_paste``."""
+    from geometry.svg import svg_to_document
+
+    def body(doc, effective):
+        return paste_fragment_into(
+            doc, svg_to_document(svg).layers, effective, preserve_layers)
+    return _paste_run_apply(model, svg, offset, body)
+
+
+def clipboard_text_is_svg(text: str) -> bool:
+    """A PREFIX test on the trimmed payload, never a parse attempt: markup
+    copied from a browser is text the artist wants as text. Mirrors Rust
+    ``clipboard_text_is_svg``."""
+    trimmed = text.strip()
+    return trimmed.startswith("<?xml") or trimmed.startswith("<svg")
+
+
+def _paste_text_element_into(doc, text: str, offset: float):
+    """A non-SVG payload as a Text element in the ACTIVE layer at ``(offset,
+    offset + 16)``, every other field at its default and NO fill. A locked
+    active layer refuses (section 15). Mirrors Rust
+    ``paste_text_element_into``."""
+    from document.document import ElementSelection
+    from geometry.element import Text
+    active = _active_paste_target(doc)
+    if active is None:
+        return None
+    layer = doc.layers[active]
+    at = len(layer.children)
+    layer = dataclasses.replace(
+        layer, children=layer.children + (Text(x=offset, y=offset + 16.0, content=text),))
+    return dataclasses.replace(
+        doc, layers=doc.layers[:active] + (layer,) + doc.layers[active + 1:],
+        selection=frozenset({ElementSelection.all((active, at))}))
+
+
+def paste_clipboard_text_into(doc, text, offset: float, preserve_layers: bool):
+    """D4/D5: an unreadable (None) or empty clipboard is a no-op; SVG markup
+    takes the fragment path; anything else is pasted as text, where
+    ``preserve_layers`` has nothing to bite on. Mirrors Rust
+    ``paste_clipboard_text_into``."""
+    from geometry.svg import svg_to_document
+    if not text:
+        return None
+    if clipboard_text_is_svg(text):
+        return paste_fragment_into(
+            doc, svg_to_document(text).layers, offset, preserve_layers)
+    return _paste_text_element_into(doc, text, offset)
+
+
+def apply_paste_clipboard_text(model: Model, text, offset: float,
+                               preserve_layers: bool) -> bool:
+    """The production payload dispatch under the run. Mirrors Rust
+    ``apply_paste_clipboard_text``."""
+    if text is None:
+        return False
+    return _paste_run_apply(
+        model, text, offset,
+        lambda doc, eff: paste_clipboard_text_into(doc, text, eff, preserve_layers))
+
+
+# The SELECTION-ONLY verbs: they change ``doc.selection`` and nothing else, so
+# they are non-undoable and must stay journal-neutral (no transaction is opened
+# for them). Named ONCE so a new selection verb has one place to register.
+# Mirrors Rust ``is_selection_only_verb`` and JasSwift ``isSelectionOnlyVerb``.
+_SELECTION_ONLY_VERBS = frozenset({
+    "select_rect", "select_by_ids", "select_element", "select_all",
+    "add_to_selection",
+})
+
+
 def op_apply(model: Model, op: dict) -> None:
     """The single op dispatcher (OP_LOG.md §4). Applies one primitive op to the
     model and records it into the open transaction (the ``checkpoint_equivalence``
@@ -1162,7 +1355,7 @@ def op_apply(model: Model, op: dict) -> None:
     # selection-only batch as an undoable step. ``select_by_ids`` is the id-primary
     # twin (selection-only, non-undoable), so it is excluded for the identical
     # reason.
-    if name not in ("select_rect", "select_by_ids", "select_element") and not model.in_txn:
+    if name not in _SELECTION_ONLY_VERBS and not model.in_txn:
         model.begin_txn()
 
     ctrl = Controller(model=model)
@@ -1231,6 +1424,60 @@ def op_apply(model: Model, op: dict) -> None:
             return
         ctrl.select_element(path)
         targets = selection_to_ids(model.document)
+    elif name == "select_all":
+        # Selection-only. Top-level objects, a group counting as ONE (section
+        # 16). Mirrors op_apply.rs "select_all", through the production
+        # Controller.select_all, never a copy of its walk.
+        ctrl.select_all()
+        targets = selection_to_ids(model.document)
+    elif name == "add_to_selection":
+        # Selection-only. The additive seam shift-click uses: idempotent, and
+        # section 16.4 through Controller.add_to_selection. Mirrors
+        # op_apply.rs "add_to_selection". A path naming no element is skipped
+        # (Rust returns MissingTarget; the reference has no op-error channel).
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        try:
+            model.document.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        ctrl.add_to_selection(path)
+        targets = selection_to_ids(model.document)
+    elif name == "paste":
+        # The `text` param is the RAW CLIPBOARD PAYLOAD (JSON null = the read
+        # failed); `svg` is fragment markup that presupposes the SVG branch.
+        # Not two paths: SVG text lands in the same paste_fragment_into body.
+        # Mirrors op_apply.rs "paste".
+        offset = num_field(op, "offset")
+        preserve = bool_field(op, "preserve_layers")
+        if "text" in op:
+            text = op.get("text")
+            apply_paste_clipboard_text(
+                model, text if isinstance(text, str) else None, offset, preserve)
+        else:
+            svg = str_field(op, "svg")
+            if svg is None:
+                return
+            apply_paste(model, svg, offset, preserve)
+    elif name == "set_character_attribute":
+        # TSPAN.md's character-attribute write. Mirrors op_apply.rs
+        # "set_character_attribute": a missing path, attribute or value skips
+        # (Rust returns MissingParam; the reference has no op-error channel),
+        # and a char bound that is absent or not a non-negative integer reads
+        # 0, as Rust's `as_u64().unwrap_or(0)` does.
+        path = parse_path(op.get("path"))
+        attribute = str_field(op, "attribute")
+        value = str_field(op, "value")
+        if not path or attribute is None or value is None:
+            return
+
+        def _u64_or_zero(v):
+            ok = isinstance(v, int) and not isinstance(v, bool) and v >= 0
+            return v if ok else 0
+        ctrl.set_character_attribute(
+            path, _u64_or_zero(op.get("char_start")),
+            _u64_or_zero(op.get("char_end")), attribute, value)
     elif name == "toggle_element_lock":
         # The Layers-panel lock toggle, through the same pure
         # Document.toggling_element_lock the panel calls. Mirrors op_apply.rs

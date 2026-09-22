@@ -917,6 +917,74 @@ class CrossLanguageTest(absltest.TestCase):
         # selection it found (UNLOCKSEL).
         self._run_operation_fixture("lock_selection_no_materialization.json")
 
+    def test_operation_select_all_top_level(self):
+        # Select All selects top-level objects (section 16), the additive
+        # seam keeps section 16.4, and a duplicate selects its copies in
+        # document order (section 19). Needs the `select_all` and
+        # `add_to_selection` verbs.
+        # ONE CASE IS A KNOWN, OWED FAILURE, counted in
+        # scripts/reference_drift_baseline.json:
+        # `add_to_selection_appends_in_the_order_the_paths_were_added` pins
+        # insertion ORDER (D6, section 10). The reference's Selection is a
+        # frozenset and its serializer sorts by path, so it cannot express an
+        # order at all. That is the reference's missing D6, not a defect in
+        # the verb; the other nine cases pass.
+        self._run_operation_fixture("select_all_top_level.json")
+
+    def test_operation_paste_layers(self):
+        # Plain Paste (R2) flattens into the ACTIVE layer; Paste, Preserving
+        # Layers (R3) lands each fragment layer in the layer it names
+        # (LAYER_STRUCTURE.md section 3). Needs the `paste` verb.
+        self._run_operation_fixture("paste_layers.json")
+
+    def test_operation_paste_locked_layers(self):
+        # PASTELOCK (section 15): a locked ACTIVE layer refuses, a locked
+        # NAMED layer diverts to a suffixed sibling, and hidden is not locked.
+        self._run_operation_fixture("paste_locked_layers.json")
+
+    def test_operation_paste_stacking(self):
+        # Repeated pastes of one payload stack at 24, 48, 72 (section 14);
+        # a new payload restarts the run and paste-in-place stays out of it.
+        self._run_operation_fixture("paste_stacking.json")
+
+    def test_operation_paste_clipboard_text(self):
+        # D4/D5: what the clipboard holds decides what paste does. SVG markup
+        # takes the fragment path, other text becomes a Text element, and an
+        # empty or unreadable clipboard is a no-op.
+        self._run_operation_fixture("paste_clipboard_text.json")
+
+    def test_operation_bystander_containers(self):
+        # An edit to one element preserves the containers it does not speak
+        # to (T4): replace, delete and insert_after leave an emptied layer or
+        # group in place.
+        self._run_operation_fixture("bystander_containers.json")
+
+    def test_operation_move_transform_aware(self):
+        # A move converts the document delta into the element's local space
+        # when the element carries a transform (rotated, translated).
+        self._run_operation_fixture("move_transform_aware.json")
+
+    def test_operation_tspan_ops(self):
+        # TSPAN.md's character-attribute write: split_range, set, identity
+        # omission, merge. Needs the `set_character_attribute` verb.
+        self._run_operation_fixture("tspan_ops.json")
+
+    def test_operation_boolean_collapse_default(self):
+        # The collinear-collapse pass is OFF by default
+        # (`state.boolean_remove_redundant_points` is false), so a default
+        # union keeps the seam vertices the sweep inserted. KNOWN FAILURE,
+        # counted in scripts/reference_drift_baseline.json: the reference's
+        # `boolean_union` verb lazily imports `panels.boolean_apply`, frozen-app
+        # code whose `remove_redundant_points` defaults to True, so it
+        # collapses them (4 vertices where the golden has 8), as Swift did
+        # before its fix. The drift gate counts this case as SHARED-LAYER,
+        # because its reach analysis is static and reads only this harness;
+        # it never follows the verb into op_apply's lazy import. Whether that
+        # file is frozen or, being imported by the live reference at run time,
+        # live is a scope question for a ruling, and until one exists this
+        # case is recorded and the frozen file is not edited.
+        self._run_operation_fixture("boolean_collapse_default.json")
+
     def test_operation_undo_redo_laws(self):
         self._run_operation_fixture("undo_redo_laws.json")
 

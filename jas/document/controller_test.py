@@ -618,6 +618,271 @@ class ExtendSelectionTest(absltest.TestCase):
         self.assertEqual(_sel_paths(ctrl.document.selection), frozenset({(0, 0), (0, 1)}))
 
 
+class SelectionInvariantTest(absltest.TestCase):
+    """The additive seams keep section 16.4: a selection never holds an
+    element and its own descendant (LAYER_STRUCTURE.md section 22.4). The
+    ports' twins are Rust
+    `the_extend_seams_cannot_build_an_ancestor_descendant_selection` and
+    JasSwift's PaintRecursionTests. The shift-MARQUEE's XOR is deliberately
+    NOT covered here: in both ports it has no ancestor rule."""
+
+    @staticmethod
+    def _ctrl():
+        def rect(x):
+            return Rect(x=x, y=0, width=10, height=10)
+        group = Group(children=(rect(0), rect(20)))
+        layer = Layer(children=(group, rect(40)), name="L")
+        return Controller(model=Model(document=Document(layers=(layer,))))
+
+    def _seams(self):
+        return (("add_to_selection", Controller.add_to_selection),
+                ("toggle_selection", Controller.toggle_selection))
+
+    def test_a_member_of_a_selected_group_adds_nothing(self):
+        for label, add in self._seams():
+            ctrl = self._ctrl()
+            add(ctrl, (0, 0))
+            add(ctrl, (0, 0, 1))
+            self.assertEqual(_sel_paths(ctrl.document.selection),
+                             frozenset({(0, 0)}), label)
+
+    def test_selecting_the_group_subsumes_its_members(self):
+        for label, add in self._seams():
+            ctrl = self._ctrl()
+            add(ctrl, (0, 0, 0))
+            add(ctrl, (0, 0, 1))
+            add(ctrl, (0, 0))
+            self.assertEqual(_sel_paths(ctrl.document.selection),
+                             frozenset({(0, 0)}), label)
+
+    def test_disjoint_paths_accumulate_and_toggle_removes_a_repeat(self):
+        # Guards against a fix that makes the seams inert.
+        ctrl = self._ctrl()
+        ctrl.add_to_selection((0, 0))
+        ctrl.add_to_selection((0, 1))
+        self.assertEqual(_sel_paths(ctrl.document.selection),
+                         frozenset({(0, 0), (0, 1)}))
+        ctrl.toggle_selection((0, 1))
+        self.assertEqual(_sel_paths(ctrl.document.selection),
+                         frozenset({(0, 0)}))
+
+    def test_add_keeps_a_partial_entry_on_the_same_path(self):
+        # A path held as a partial stays partial. ElementSelection compares
+        # by PATH ALONE, so the kinds are compared explicitly: a selection
+        # equality cannot tell a partial from a whole entry.
+        ctrl = self._ctrl()
+        partial = ElementSelection.partial((0, 1), (0, 2))
+        ctrl.set_selection(frozenset({partial}))
+        ctrl.add_to_selection((0, 1))
+        self.assertEqual([(es.path, es.kind) for es in ctrl.document.selection],
+                         [((0, 1), partial.kind)])
+
+    def test_toggle_removes_a_partial_entry_by_path(self):
+        ctrl = self._ctrl()
+        ctrl.set_selection(frozenset({ElementSelection.partial((0, 1), (0,))}))
+        ctrl.toggle_selection((0, 1))
+        self.assertEqual(ctrl.document.selection, frozenset())
+
+
+class SelectionOnlyVerbsTest(absltest.TestCase):
+    """A selection-only op verb is non-undoable, so on a production frame with
+    no transaction open it must not open one. The corpus harness always
+    brackets its ops, so no fixture can see this. The verb list is the ports'
+    (Rust `is_selection_only_verb`), typed here rather than read from the
+    subject, so a verb missing from the subject's set reds."""
+
+    @staticmethod
+    def _model():
+        rect = Rect(x=0, y=0, width=10, height=10)
+        return Model(document=Document(layers=(Layer(children=(rect,), name="L"),)))
+
+    def test_a_selection_only_verb_opens_no_transaction(self):
+        from document.op_apply import op_apply
+        ops = [
+            {"op": "select_rect", "x": -1, "y": -1, "width": 20, "height": 20},
+            {"op": "select_by_ids", "ids": []},
+            {"op": "select_element", "path": [0, 0]},
+            {"op": "select_all"},
+            {"op": "add_to_selection", "path": [0, 0]},
+        ]
+        for op in ops:
+            model = self._model()
+            op_apply(model, op)
+            self.assertFalse(model.in_txn, op["op"])
+
+    def test_control_a_document_verb_does_open_one(self):
+        # Without this the arm above could pass on an instrument that never
+        # sees a transaction.
+        from document.op_apply import op_apply
+        model = self._model()
+        op_apply(model, {"op": "select_all"})
+        op_apply(model, {"op": "move_selection", "dx": 1.0, "dy": 0.0})
+        self.assertTrue(model.in_txn)
+
+
+class PasteRunTest(absltest.TestCase):
+    """The paste run (LAYER_STRUCTURE.md section 14) against undo, which no
+    corpus case exercises. Rust `paste_run_apply` / `Model::undo`: undoing a
+    paste puts the next one exactly where the undone one was, and redo brings
+    the run forward again. The corpus family is paste_stacking.json."""
+
+    SVG = ('<svg xmlns="http://www.w3.org/2000/svg"><rect x="16" y="16" '
+           'width="16" height="16"/></svg>')  # x=16px is 12pt
+
+    def _model(self, locked=False):
+        layer = Layer(children=(), name="L", locked=locked)
+        return Model(document=Document(layers=(layer,)))
+
+    def _paste(self, model):
+        from document.op_apply import op_apply
+        op_apply(model, {"op": "paste", "svg": self.SVG, "offset": 24.0})
+        if model.in_txn:
+            model.commit_txn()
+
+    def _xs(self, model):
+        return [c.x for c in model.document.layers[0].children]
+
+    def test_consecutive_pastes_stack(self):
+        m = self._model()
+        self._paste(m)
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_undo_restores_the_run(self):
+        m = self._model()
+        self._paste(m)
+        m.undo()
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0])
+
+    def test_redo_restores_the_advanced_run(self):
+        m = self._model()
+        self._paste(m)
+        m.undo()
+        m.redo()
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_a_selection_change_does_not_reset_the_run(self):
+        # Paste itself SETS the selection, so a selection-keyed reset could
+        # never reach a second step.
+        from document.op_apply import op_apply
+        m = self._model()
+        self._paste(m)
+        op_apply(m, {"op": "select_all"})
+        self._paste(m)
+        self.assertEqual(self._xs(m), [36.0, 60.0])
+
+    def test_a_refused_paste_records_nothing(self):
+        # A locked ACTIVE layer refuses (section 15): the document is
+        # unchanged and no undo step is recorded.
+        m = self._model(locked=True)
+        before = m.document
+        self._paste(m)
+        self.assertIs(m.document, before)
+        self.assertFalse(m.can_undo)
+
+
+class SetCharacterAttributeTest(absltest.TestCase):
+    """The corpus family is tspan_ops.json. These pin what it cannot: a range
+    past the content, or a non-text target, writes nothing."""
+
+    def _model(self, elem):
+        return Model(document=Document(layers=(Layer(children=(elem,), name="L"),)))
+
+    def test_a_range_past_the_content_is_a_no_op(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        before = m.document
+        Controller(model=m).set_character_attribute((0, 0), 1, 99, "font_weight", "bold")
+        self.assertIs(m.document, before)
+        self.assertFalse(m.can_undo)
+
+    def test_a_non_text_target_is_a_no_op(self):
+        m = self._model(Rect(x=0, y=0, width=10, height=10))
+        before = m.document
+        Controller(model=m).set_character_attribute((0, 0), 0, 1, "font_weight", "bold")
+        self.assertIs(m.document, before)
+
+    def test_control_an_in_range_write_lands(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        Controller(model=m).set_character_attribute((0, 0), 1, 4, "font_weight", "bold")
+        weights = [t.font_weight for t in m.document.get_element((0, 0)).tspans]
+        self.assertEqual(weights, [None, "bold", None])
+
+    def test_font_size_is_parsed_and_a_non_number_is_ignored(self):
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        ctrl = Controller(model=m)
+        ctrl.set_character_attribute((0, 0), 0, 2, "font_size", "24")
+        self.assertEqual([t.font_size for t in m.document.get_element((0, 0)).tspans],
+                         [24.0, None])
+        before = m.document
+        ctrl.set_character_attribute((0, 0), 2, 5, "font_size", "big")
+        self.assertEqual([t.font_size for t in m.document.get_element((0, 0)).tspans],
+                         [24.0, None])
+        self.assertEqual(m.document, before)
+
+    def test_an_unsupported_attribute_is_ignored(self):
+        # Rust's `apply_attr_to_tspan` ignores a name it does not know, so a
+        # caller may send any name: nothing changes and no undo step lands.
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        before = m.document.get_element((0, 0)).tspans
+        Controller(model=m).set_character_attribute((0, 0), 1, 4, "color", "red")
+        self.assertEqual(m.document.get_element((0, 0)).tspans, before)
+        self.assertFalse(m.can_undo)
+
+    def test_the_verb_reads_a_bad_bound_as_zero(self):
+        # Rust's `as_u64().unwrap_or(0)`: a negative or non-integer bound is 0.
+        from document.op_apply import op_apply
+        from geometry.element import Text
+        def weights(start):
+            m = self._model(Text(x=0, y=0, content="Hello"))
+            op_apply(m, {"op": "set_character_attribute", "path": [0, 0],
+                         "attribute": "font_weight", "value": "bold",
+                         "char_start": start, "char_end": 3})
+            return [t.font_weight for t in m.document.get_element((0, 0)).tspans]
+        self.assertEqual(weights(0), ["bold", None], "control")
+        self.assertEqual(weights(-1), ["bold", None])
+        self.assertEqual(weights(1.5), ["bold", None])
+
+
+class SelectAllTopLevelTest(absltest.TestCase):
+    """Select All selects every unlocked, visible TOP-LEVEL object, a group
+    counting as ONE and never looked inside (LAYER_STRUCTURE.md section 16),
+    as both ports' `select_all` loop does. Walking members through the
+    marquee's helper instead drops a group with no selectable member."""
+
+    def test_an_empty_group_is_selected(self):
+        layer = Layer(children=(Group(children=()),), name="L")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.select_all()
+        self.assertEqual(_sel_paths(ctrl.document.selection),
+                         frozenset({(0, 0)}))
+
+    def test_a_group_whose_members_are_all_locked_is_selected(self):
+        locked = Rect(x=0, y=0, width=10, height=10, locked=True)
+        group = Group(children=(locked, dataclasses.replace(locked, x=20)))
+        layer = Layer(children=(group,), name="L")
+        ctrl = Controller(model=Model(document=Document(layers=(layer,))))
+        ctrl.select_all()
+        self.assertEqual(_sel_paths(ctrl.document.selection),
+                         frozenset({(0, 0)}))
+
+    def test_a_locked_layer_and_a_locked_group_are_skipped(self):
+        rect = Rect(x=0, y=0, width=10, height=10)
+        open_layer = Layer(children=(rect, Group(children=(rect,), locked=True)),
+                           name="A")
+        locked_layer = Layer(children=(rect,), name="B", locked=True)
+        ctrl = Controller(model=Model(
+            document=Document(layers=(open_layer, locked_layer))))
+        ctrl.select_all()
+        self.assertEqual(_sel_paths(ctrl.document.selection),
+                         frozenset({(0, 0)}))
+
+
 class ControlPointPositionsTest(absltest.TestCase):
 
     def test_line_control_points(self):
@@ -960,6 +1225,42 @@ class CopySelectionTest(absltest.TestCase):
         copy = ctrl.document.layers[0].children[1]
         self.assertEqual((original.x, original.y), (10, 20))
         self.assertEqual((copy.x, copy.y), (15, 25))
+
+    def test_a_noncontiguous_copy_selects_both_copies_not_a_source(self):
+        # Section 19. The walk is descending, so the copy path recorded for
+        # the LATER element is shifted by the insertion below it and must be
+        # rewritten; without that it names the source. Four distinct x's make
+        # the identity checkable. Mirrors the corpus case
+        # duplicating_a_noncontiguous_pair_selects_both_copies_not_a_source.
+        rects = tuple(Rect(x=30.0 * i, y=0, width=10, height=10) for i in range(4))
+        doc = Document(layers=(Layer(children=rects, name="L0"),))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(doc, (0, 1), (0, 3)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(6.0, 0.0)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertEqual(paths, frozenset({(0, 2), (0, 5)}))
+        xs = [ctrl.document.get_element(p).x for p in sorted(paths)]
+        self.assertEqual(xs, [36.0, 96.0], "both selected elements are copies")
+
+    def test_a_copy_path_moves_only_under_the_insertion_parent(self):
+        # Across parents and depths: copying solo-a inserts at [0,1], which
+        # pushes the group holding t3 from [0,1] to [0,2], so t3's copy path
+        # travels from [0,1,3] to [0,2,3]; solo-b's copy in the OTHER layer
+        # must not move. Mirrors the corpus case
+        # duplicating_across_parents_and_depths_rewrites_only_the_paths_that_moved.
+        def r(x):
+            return Rect(x=x, y=0, width=5, height=5)
+        a = Layer(children=(r(0), Group(children=(r(10), r(20), r(30)))), name="A")
+        b = Layer(children=(Group(children=(r(40), r(50))), r(60)), name="B")
+        doc = Document(layers=(a, b))
+        doc = dataclasses.replace(doc, selection=self._sel_all_cps(
+            doc, (0, 0), (0, 1, 2), (1, 1)))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.copy_selection(6.0, 0.0)
+        paths = _sel_paths(ctrl.document.selection)
+        self.assertEqual(paths, frozenset({(0, 1), (0, 2, 3), (1, 2)}))
+        xs = sorted(ctrl.document.get_element(p).x for p in paths)
+        self.assertEqual(xs, [6.0, 36.0, 66.0], "every selected element is a copy")
 
     def test_copy_selection_updates_selection_to_copy(self):
         """After copy, the new selection points to the copied element."""
