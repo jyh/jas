@@ -106,11 +106,11 @@ def _survival_gradient():
 def _survival_saturated_path():
     """The attribute-SATURATED Path: every optional field on the kind set to
     a non-default value. Mirrors `survival_saturated_path()` in Rust and
-    `saturatedPath()` in JasSwift. The reference model has no `fill_rule`,
-    so it cannot be set here; the row reports it NOT-HELD."""
+    `saturatedPath()` in JasSwift. `fill_rule` is evenodd, as in both ports
+    (the reference model has carried it since 2026-09-21)."""
     from geometry.element import (
-        ArrowAlign, Arrowhead, BlendMode, ClosePath, Color, Fill, LineCap,
-        LineJoin, LineTo, Mask, MoveTo, Path, Rect, Stroke, StrokeAlign,
+        ArrowAlign, Arrowhead, BlendMode, ClosePath, Color, Fill, FillRule,
+        LineCap, LineJoin, LineTo, Mask, MoveTo, Path, Rect, Stroke, StrokeAlign,
         StrokeWidthPoint, Transform, Visibility,
     )
     return Path(
@@ -145,6 +145,7 @@ def _survival_saturated_path():
         stroke_brush="basic/calligraphic_5",
         stroke_brush_overrides='{"angle":30}',
         tool_origin="blob_brush",
+        fill_rule=FillRule.EVENODD,
         name="name_path",
         id="id_path")
 
@@ -161,12 +162,29 @@ def _survival_saturated_group():
         name="name_group", id="id_group")
 
 
+def _survival_saturated_line():
+    """The Line half. Line is the one kind besides Path whose model carries
+    `width_points`, and it is watched for that field ONLY (the fixture's
+    `saturated_line` block says why). Every value is exact at the writer's
+    four-decimal floor and every endpoint exact in px. Mirrors
+    `survival_saturated_line()` in Rust and `saturatedLine()` in JasSwift."""
+    from geometry.element import Color, Line, Stroke, StrokeWidthPoint
+    return Line(
+        x1=0.0, y1=0.0, x2=30.0, y2=15.0,
+        stroke=Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=2.25),
+        width_points=(StrokeWidthPoint(0.0, 1.0, 2.0),
+                      StrokeWidthPoint(0.5, 2.5, 0.5),
+                      StrokeWidthPoint(1.0, 3.0, 4.0)),
+        name="name_line", id="id_line")
+
+
 def _survival_doc():
     from document.document import Document
     from geometry.element import Layer
     return Document(layers=(Layer(
         name="Layer 1",
-        children=(_survival_saturated_path(), _survival_saturated_group()),
+        children=(_survival_saturated_path(), _survival_saturated_group(),
+                  _survival_saturated_line()),
         isolated_blending=True, knockout_group=True),))
 
 
@@ -183,6 +201,7 @@ _SURVIVAL_ROWS = [
     ("group.knockout_group", "group", ("knockout_group",)),
     ("layer.isolated_blending", "layer", ("isolated_blending",)),
     ("layer.knockout_group", "layer", ("knockout_group",)),
+    ("line.width_points", "line", ("width_points",)),
     ("stroke.align", "path", ("stroke", "align")),
     ("stroke.dash_align_anchors", "path", ("stroke", "dash_align_anchors")),
     ("stroke.dash_pattern", "path", ("stroke", "dash_pattern")),
@@ -194,18 +213,23 @@ _SURVIVAL_ROWS = [
 ]
 
 
+_SURVIVAL_SUBJECTS = ("path", "group", "layer", "line")
+
+
 def _survival_subjects(doc):
-    """(path, group, layer) of a saturated document, or None for any the
-    round trip lost. A lost subject is a STRUCTURAL loss, not a field loss."""
-    from geometry.element import Group, Layer, Path
+    """(path, group, layer, line) of a saturated document, or None for any
+    the round trip lost. A lost subject is a STRUCTURAL loss, not a field
+    loss."""
+    from geometry.element import Group, Layer, Line, Path
     layer = doc.layers[0] if doc.layers else None
     if not isinstance(layer, Layer):
-        return (None, None, None)
+        return (None, None, None, None)
     kids = layer.children
     path = kids[0] if kids and isinstance(kids[0], Path) else None
     group = next((c for c in kids
                   if isinstance(c, Group) and not isinstance(c, Layer)), None)
-    return (path, group, layer)
+    line = next((c for c in kids if isinstance(c, Line)), None)
+    return (path, group, layer, line)
 
 
 def _survival_default(obj, attr):
@@ -253,6 +277,9 @@ class CrossLanguageTest(absltest.TestCase):
             # data-jas-instance-transform on the <use> and round-trips through
             # SVG distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            # A Line's width profile (`jas:width-points`) across the SVG
+            # boundary. Mirrors the Rust registration.
+            "line_width_profile",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -293,6 +320,7 @@ class CrossLanguageTest(absltest.TestCase):
             # round-trips byte-identically to the Rust-authored golden — the
             # cross-language pin for the generated kind.
             "generated_polygon",
+            "line_width_profile",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -330,6 +358,7 @@ class CrossLanguageTest(absltest.TestCase):
             # CONCEPTS.md 3b: a Generated concept-instance round-trips through
             # the binary codec (concept slot 8, params-json slot 9).
             "generated_polygon",
+            "line_width_profile",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -356,7 +385,7 @@ class CrossLanguageTest(absltest.TestCase):
 
         doc = _survival_doc()
         before = _survival_subjects(doc)
-        by_subject = dict(zip(("path", "group", "layer"), before))
+        by_subject = dict(zip(_SURVIVAL_SUBJECTS, before))
 
         # Saturation: a field left at its default cannot be dropped, so its
         # row would read PRESERVED whatever the codec does.
@@ -381,13 +410,13 @@ class CrossLanguageTest(absltest.TestCase):
         ]
         for codec, round_trip in codecs:
             after = _survival_subjects(round_trip())
-            for subject, b, a in zip(("path", "group", "layer"), before, after):
+            for subject, b, a in zip(_SURVIVAL_SUBJECTS, before, after):
                 if a is None:
                     self.fail(f"codec_field_survival: the saturated "
                               f"{subject} did not survive the {codec} round "
                               f"trip AT ALL -- every {codec} row is "
                               f"meaningless")
-            after_by = dict(zip(("path", "group", "layer"), after))
+            after_by = dict(zip(_SURVIVAL_SUBJECTS, after))
             for field, subject, attrs in _SURVIVAL_ROWS:
                 vb, va = by_subject[subject], after_by[subject]
                 held = True
@@ -412,6 +441,107 @@ class CrossLanguageTest(absltest.TestCase):
                     actual, expected,
                     f"codec_field_survival: {codec}/{field} -- fixture says "
                     f"{expected}, python measured {actual}{note}")
+
+    def test_binary_wire(self):
+        # The byte-level binary gate both ports share
+        # (test_fixtures/expected/binary_wire.json): every tag's packed slot
+        # count, then each case's exact bytes, uncompressed so the pin is the
+        # msgpack itself. Mirrors `binary_wire` in
+        # jas_dioxus/src/cross_language_test.rs and `binaryWire` in JasSwift;
+        # the case documents below are theirs, shape for shape. A difference
+        # is reported by the first differing SLOT, not the hex, so the
+        # failure names what drifted.
+        import msgpack
+        from document.document import Document
+        from geometry.binary import element_tag_label, packed_element_slot_count
+        from geometry.element import (
+            CompoundOperation, CompoundShape, Ellipse, GeneratedElem, Group,
+            Layer, Line, LineTo, MoveTo, Path, Polygon, Polyline,
+            RecordedElem, Rect, ReferenceElem, Text, TextPath)
+        fx = json.loads(_read_fixture("expected/binary_wire.json"))
+        tag_elems = [
+            Layer(children=()), Group(children=()),
+            Line(x1=0.0, y1=0.0, x2=1.0, y2=1.0),
+            Rect(x=0.0, y=0.0, width=1.0, height=2.0),
+            Ellipse(cx=0.0, cy=0.0, rx=1.0, ry=1.0),
+            Ellipse(cx=0.0, cy=0.0, rx=1.0, ry=2.0),
+            Polyline(points=((0.0, 0.0), (1.0, 1.0))),
+            Polygon(points=((0.0, 0.0), (1.0, 1.0), (2.0, 0.0))),
+            Path(d=(MoveTo(0.0, 0.0), LineTo(1.0, 1.0))),
+            Text(x=1.0, y=2.0, content="hi", font_family="Arial",
+                 font_size=12.0, font_weight="normal", font_style="normal",
+                 text_decoration="none", width=10.0, height=12.0),
+            TextPath(d=(MoveTo(0.0, 0.0), LineTo(1.0, 1.0)), content="hi",
+                     start_offset=0.0, font_family="Arial", font_size=12.0,
+                     font_weight="normal", font_style="normal",
+                     text_decoration="none"),
+            ReferenceElem(target="m1"),
+        ]
+        live_elems = [
+            CompoundShape(operation=CompoundOperation.UNION, operands=()),
+            ReferenceElem(target="m1"), RecordedElem(inputs=(), ops=()),
+            GeneratedElem(concept_id="spiral", params={}),
+        ]
+
+        # (1) ARITY, for every tag the fixture declares.
+        arity = fx["tag_arity"]
+        seen = set()
+        for elem in tag_elems + live_elems:
+            label = element_tag_label(elem)
+            self.assertEqual(
+                packed_element_slot_count(elem), arity.get(label),
+                f"binary_wire: tag '{label}' packs a different slot count "
+                f"than the fixture declares")
+            seen.add(label)
+        self.assertEqual(sorted(seen), sorted(arity),
+                         "binary_wire: every declared tag must be reached")
+
+        # (2) BYTES, one shared golden per case.
+        def doc(kids):
+            return Document(layers=(Layer(children=tuple(kids)),),
+                            selected_layer=0)
+        cases = {
+            "shapes_default": doc([e for e in tag_elems if not isinstance(
+                e, (Text, TextPath, Layer, ReferenceElem))]),
+            "text_default": doc([e for e in tag_elems
+                                 if isinstance(e, (Text, TextPath))]),
+            "live_default": doc(live_elems),
+            "saturated_extension": doc([_survival_saturated_path()]),
+        }
+
+        def differences(want, got, path=""):
+            # EVERY differing slot, never the first: a case with one known
+            # difference would otherwise hide each later slot behind it, and
+            # the ratchet key -- which is this message -- would not move.
+            if isinstance(want, list) and isinstance(got, list):
+                out = []
+                for i, (w, g) in enumerate(zip(want, got)):
+                    out += differences(w, g, f"{path}/{i}")
+                if len(want) != len(got):
+                    out.append(f"{path} has {len(got)} slots, the fixture {len(want)}")
+                return out
+            if type(want) is not type(got) or want != got:
+                return [f"slot {path or '/'} (fixture {want!r}, python {got!r})"]
+            return []
+
+        self.assertEqual(sorted(cases), sorted(c["name"] for c in fx["cases"]),
+                         "binary_wire: the cases built here are not the fixture's")
+        for case in fx["cases"]:
+            name = case["name"]
+            expected = case.get("port_hex", {}).get("python") or case["hex"]
+            got = document_to_binary(cases[name], compress=False)
+            want = bytes.fromhex(expected)
+            # assertEqual, never self.fail: the drift ratchet records an
+            # assertEqual and continues, so one differing case cannot hide the
+            # cases after it.
+            where = None if got == want else "; ".join(differences(
+                msgpack.unpackb(want[8:]), msgpack.unpackb(got[8:]))) or "the header"
+            self.assertEqual(where, None,
+                             f"binary_wire: case '{name}' differs at {where}")
+            # The pinned bytes must also decode, or the gate is green over a
+            # broken reader.
+            self.assertTrue(binary_to_document(want).layers,
+                            f"binary_wire: case '{name}' decoded to no layers")
 
     def test_svg_tool_origin_survives_without_arrowheads(self):
         # A `jas:`-prefixed attribute obliges the root <svg> to declare the
@@ -568,6 +698,12 @@ class CrossLanguageTest(absltest.TestCase):
         # CompoundShape whose stable id is populated from the id attr,
         # matching Rust's common_attrs_no_name (id but no name).
         _assert_svg_parse(self, "live_compound_id")
+
+    def test_svg_parse_line_width_profile(self):
+        # A Line's width profile rides `jas:width-points`. The three readers
+        # parse the same bytes, so a writer and reader that agreed on a
+        # misspelling cannot pass here as they could the survival gate.
+        _assert_svg_parse(self, "line_width_profile")
 
     def test_svg_parse_symbols_basic(self):
         # The <defs> master (id="m1") imports into doc.symbols (NOT layers);

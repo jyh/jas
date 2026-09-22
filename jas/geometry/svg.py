@@ -21,6 +21,7 @@ from geometry.element import (
     GeneratedElem,
     SmoothCurveTo,
     SmoothQuadTo, Stroke, StrokeWidthPoint, Text, TextPath, Transform,
+    FillRule,
 )
 
 _PT_TO_PX = 96.0 / 72.0
@@ -156,10 +157,11 @@ _QUOTE = {'"': "&quot;"}
 
 def _stroke_profile_attrs(width_points, stroke_brush: str | None,
                           stroke_brush_overrides: str | None) -> str:
-    """A path's stroke profile: ``jas:width-points`` as space-separated
-    ``t,left,right`` triples through the ordinary coordinate format, then the
-    brush slug and its per-instance overrides (a JSON object, so escaped).
-    Each is omitted at its default. Mirrors the Rust ``stroke_profile_attrs``."""
+    """A path's or line's stroke profile: ``jas:width-points`` as
+    space-separated ``t,left,right`` triples through the ordinary coordinate
+    format, then the brush slug and its per-instance overrides (a JSON object,
+    so escaped). Each is omitted at its default; a Line has no brush, so its
+    arm passes None for the pair. Mirrors the Rust ``stroke_profile_attrs``."""
     out = ""
     if width_points:
         triples = " ".join(f"{_fmt(w.t)},{_fmt(w.width_left)},{_fmt(w.width_right)}"
@@ -327,11 +329,15 @@ def _element_svg(elem: Element, indent: str) -> str:
         case Line(x1=x1, y1=y1, x2=x2, y2=y2,
                   stroke=stroke, opacity=opacity, transform=transform,
                   name=name, id=eid):
+            # A Line carries a width profile (the Width tool and the
+            # eyedropper both write one) and no stroke brush, so the profile
+            # helper is called with the brush pair absent.
             return (f'{indent}<line x1="{_fmt(_px(x1))}" y1="{_fmt(_px(y1))}"'
                     f' x2="{_fmt(_px(x2))}" y2="{_fmt(_px(y2))}"'
                     f'{_stroke_attrs(stroke)}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
-                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}/>')
+                    f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}'
+                    f'{_stroke_profile_attrs(elem.width_points, None, None)}/>')
 
         case Rect(x=x, y=y, width=w, height=h, rx=rx, ry=ry,
                   fill=fill, stroke=stroke, opacity=opacity, transform=transform,
@@ -403,8 +409,11 @@ def _element_svg(elem: Element, indent: str) -> str:
                 f' jas:tool-origin="{escape(tool_origin)}"'
                 if tool_origin else ""
             )
+            # `fill-rule` only when it is not the SVG default (nonzero).
+            fr_attr = (' fill-rule="evenodd"'
+                       if elem.fill_rule is FillRule.EVENODD else "")
             return (f'{indent}<path d="{_path_data(cmds)}"'
-                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}'
+                    f'{_fill_attrs(fill)}{_stroke_attrs(stroke)}{fr_attr}'
                     f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
                     f'{tool_origin_attr}'
                     f'{_id_lock_attrs(eid, elem.locked)}{_name_attr(name)}'
@@ -1298,7 +1307,9 @@ def _parse_element(node: ET.Element) -> Element | None:
             y1=_pt(_safe_float(node.get("y1"))),
             x2=_pt(_safe_float(node.get("x2"))),
             y2=_pt(_safe_float(node.get("y2"))),
-            stroke=stroke, opacity=opacity, transform=transform,
+            stroke=stroke,
+            width_points=_parse_width_points(_jas_get(node, "width-points") or ""),
+            opacity=opacity, transform=transform,
             name=name, id=eid, locked=locked)
 
     if tag == "rect":
@@ -1361,6 +1372,8 @@ def _parse_element(node: ET.Element) -> Element | None:
                     opacity=opacity, transform=transform,
                     tool_origin=tool_origin,
                     stroke_brush=brush, stroke_brush_overrides=brush_overrides,
+                    fill_rule=(FillRule.EVENODD if node.get("fill-rule") == "evenodd"
+                               else FillRule.NONZERO),
                     name=name, id=eid, locked=locked)
 
     if tag == "text":
