@@ -930,6 +930,14 @@ class Controller:
         doc = self._model.document
         new_doc = doc
         for es in doc.selection:
+            # AN ANCESTOR IN THE SELECTION COVERS ITS DESCENDANTS (section
+            # 16.4). Every entry is read from the pristine `doc` and written
+            # back absolutely, so a descendant's write would land on top of
+            # its ancestor's and strand it. The ancestor's own entry carries
+            # the whole move. Mirrors the Rust and Swift `move_selection`.
+            if any(len(o.path) < len(es.path) and es.path[:len(o.path)] == o.path
+                   for o in doc.selection):
+                continue
             elem = doc.get_element(es.path)
             ldx, ldy = _document_delta_to_local(
                 doc, es.path, dx, dy, elem, es.kind)
