@@ -1095,40 +1095,21 @@ class Controller:
         self._model.edit_document(replace(new_doc, selection=frozenset()))
 
     def unlock_all(self) -> None:
-        """Unlock all locked elements and select them."""
-        from geometry.element import control_point_count
+        """Unlock every element, a layer's own flag included, and KEEP the
+        selection (UNLOCKSEL, ruled 2026-07-29, as in both ports): the edit
+        speaks to ``locked`` and preserves the rest. Lock and Hide clear the
+        selection because nothing downstream refuses to move a locked
+        element; unlocking makes nothing unselectable, so clearing would
+        destroy the artist's state for nothing."""
         doc = self._model.document
-        unlocked_paths: list[tuple[ElementPath, Element]] = []
-
-        def _collect_locked(path: ElementPath, elem: Element) -> None:
-            if isinstance(elem, Group) and not isinstance(elem, Layer):
-                if elem.locked:
-                    unlocked_paths.append((path, elem))
-                for i, child in enumerate(elem.children):
-                    _collect_locked(path + (i,), child)
-            elif elem.locked:
-                unlocked_paths.append((path, elem))
-
-        for li, layer in enumerate(doc.layers):
-            for ci, child in enumerate(layer.children):
-                _collect_locked((li, ci), child)
 
         def _unlock(elem: Element) -> Element:
             if isinstance(elem, Group):
-                new_children = tuple(_unlock(c) for c in elem.children)
-                return replace(elem, children=new_children, locked=False)
+                elem = replace(elem, children=tuple(_unlock(c) for c in elem.children))
             return replace(elem, locked=False)
 
-        new_layers = tuple(
-            replace(layer, children=tuple(_unlock(c) for c in layer.children))
-            for layer in doc.layers
-        )
-        # Select all newly unlocked elements
-        new_selection: set[ElementSelection] = set()
-        new_doc = replace(doc, layers=new_layers)
-        for path, _ in unlocked_paths:
-            new_selection.add(ElementSelection.all(path))
-        self._model.edit_document(replace(new_doc, selection=frozenset(new_selection)))
+        self._model.edit_document(
+            replace(doc, layers=tuple(_unlock(layer) for layer in doc.layers)))
 
     def move_path_handle(self, path: ElementPath, anchor_idx: int,
                          handle_type: str, dx: float, dy: float) -> None:
