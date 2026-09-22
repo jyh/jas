@@ -728,6 +728,35 @@ class MoveSelectionTest(absltest.TestCase):
                 self.assertAlmostEqual(new.e - old.e, 12.0, delta=1e-9, msg=label)
                 self.assertAlmostEqual(new.f - old.f, -7.0, delta=1e-9, msg=label)
 
+    def test_an_ancestor_in_the_selection_covers_its_descendants(self):
+        # A group selected WHOLE together with one of its members' control
+        # points: the group's move carries both members, whole. Each entry is
+        # read from the pristine document and written back absolutely, so a
+        # member entry written after its ancestor's lands on top of it and
+        # strands the member at its pristine place with one corner displaced.
+        # Which entry lands last depends on the frozenset's order, so several
+        # layouts are driven. Mirrors the Rust / Swift
+        # `an_ancestor_in_the_selection_covers_its_descendants` (§16.4).
+        for lead in (0, 1):
+            for member in (0, 1):
+                label = f"lead={lead} member={member}"
+                group = Group(children=(Rect(x=0, y=0, width=10, height=10),
+                                        Rect(x=20, y=0, width=10, height=10)))
+                kids = ((Rect(x=100, y=100, width=5, height=5),) * lead) + (group,)
+                g = (0, lead)
+                doc = Document(layers=(Layer(children=kids),), selection=frozenset({
+                    ElementSelection.all(g),
+                    ElementSelection.partial(g + (member,), [0])}))
+                ctrl = Controller(model=Model(document=doc))
+                ctrl.move_selection(24.0, 0.0)
+                moved = ctrl.document.get_element(g)
+                self.assertIsInstance(moved, Group, label)
+                for i, x0 in enumerate((0.0, 20.0)):
+                    child = moved.children[i]
+                    self.assertIsInstance(child, Rect, f"{label}: child {i} stays a Rect")
+                    self.assertEqual((child.x, child.y), (x0 + 24.0, 0.0),
+                                     f"{label}: child {i} rides the group's move whole")
+
     def test_rounded_rect_corner_drag_survives_a_second_sample(self):
         # A corner drag is a MULTI-SAMPLE gesture: the first sample promotes
         # the rounded Rect to a Polygon (ratified answer (3) flattens the
