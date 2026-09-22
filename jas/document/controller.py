@@ -1078,22 +1078,20 @@ class Controller:
     def lock_selection(self) -> None:
         """Lock all selected elements and clear the selection.
 
-        When a Group is locked, all its children are locked recursively.
+        Only each target's OWN flag is set (LOCKMAT, section 13, as in the
+        ports): a group's members are locked by inheritance, which
+        ``Document.effective_locked`` reads. Stamping the flag onto members
+        would survive save and reload, and nothing would ever clear it. The
+        selection is cleared because nothing downstream refuses to move a
+        locked element.
         """
         doc = self._model.document
         if not doc.selection:
             return
-
-        def _lock(elem: Element) -> Element:
-            if isinstance(elem, Group) and not isinstance(elem, Layer):
-                new_children = tuple(_lock(c) for c in elem.children)
-                return replace(elem, children=new_children, locked=True)
-            return replace(elem, locked=True)
-
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_doc = new_doc.replace_element(es.path, _lock(elem))
+            new_doc = new_doc.replace_element(es.path, replace(elem, locked=True))
         self._model.edit_document(replace(new_doc, selection=frozenset()))
 
     def unlock_all(self) -> None:
