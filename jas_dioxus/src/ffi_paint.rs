@@ -2178,7 +2178,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 71, "the fixture corpus changed size");
+        assert_eq!(total, 72, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2195,6 +2195,12 @@ mod tests {
         // a lane a Mac cannot run. The new document PRESENTS: it is one layer
         // of two rects and a group holding a line, and `refusing` stayed empty
         // on its first run.
+        //
+        // ⛔ 71 → 72 (jas, 2026-09-22): the three readers' shared golden
+        // `line_width_profile.svg` (one <line> carrying `jas:width-points`).
+        // It went in green on every lane a Mac runs and red here, exactly as
+        // the paragraph above says. `element_needs_legacy` has no width-point
+        // clause, so it is expected to present; this lane is the measurement.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
