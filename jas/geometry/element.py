@@ -2051,6 +2051,17 @@ def clear_ids(elem: Element) -> Element:
     return elem
 
 
+def map_paintable(elem: Element, f) -> Element:
+    """Apply ``f`` to every PAINTABLE leaf under ``elem``: a Group or Layer
+    has no paint of its own, so a paint write on it reaches its members,
+    recursively; any other element is passed to ``f`` itself. Mirrors the
+    Rust ``map_paintable`` (PAINTRECURSE / BRUSHRECURSE, 2026-07-29)."""
+    from dataclasses import replace
+    if isinstance(elem, Group):
+        return replace(elem, children=tuple(map_paintable(c, f) for c in elem.children))
+    return f(elem)
+
+
 def rounded_rect_corner_runs(x: float, y: float, w: float, h: float,
                              rx_in: float, ry_in: float) -> list[list[tuple[float, float]]]:
     """The rounded rect's outline, split into ONE POINT RUN PER CORNER, in

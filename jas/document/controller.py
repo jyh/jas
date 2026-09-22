@@ -18,7 +18,7 @@ from geometry.element import (
     ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
     Path, PathCommand, Polygon, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
-    remap_cp_selection_after_move,
+    remap_cp_selection_after_move, map_paintable,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
@@ -1204,7 +1204,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_fill(elem, fill)
+            new_elem = map_paintable(elem, lambda e: _with_fill(e, fill))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         return new_doc
@@ -1216,7 +1216,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke(elem, stroke)
+            new_elem = map_paintable(elem, lambda e: _with_stroke(e, stroke))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         return new_doc
@@ -1249,7 +1249,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_brush(elem, slug)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_brush(e, slug))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1260,7 +1260,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_brush_overrides(elem, overrides)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_brush_overrides(e, overrides))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1275,7 +1275,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_fill_gradient(elem, gradient)
+            new_elem = map_paintable(elem, lambda e: _with_fill_gradient(e, gradient))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
@@ -1286,7 +1286,7 @@ class Controller:
         new_doc = doc
         for es in doc.selection:
             elem = new_doc.get_element(es.path)
-            new_elem = _with_stroke_gradient(elem, gradient)
+            new_elem = map_paintable(elem, lambda e: _with_stroke_gradient(e, gradient))
             if new_elem is not elem:
                 new_doc = new_doc.replace_element(es.path, new_elem)
         self._model.edit_document(new_doc)
