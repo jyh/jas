@@ -727,19 +727,30 @@ class Controller:
         doc = self._model.document
         entries: list[ElementSelection] = []
         for li, layer in enumerate(doc.layers):
-            if layer.visibility == Visibility.INVISIBLE:
+            # The lock is read DOWN THE PATH (LOCKINHERIT, LAYER_STRUCTURE.md
+            # section 13), as in the ports' `select_flat`: a locked layer
+            # yields nothing, and a locked member neither triggers its
+            # group's selection nor joins it. HONEST NOTE: the layer guard is
+            # expressive, not behavioural -- the child read below already ORs
+            # the layer's flag, so deleting the guard leaves every test green
+            # (measured). Rust's walk is the mirror image (its layer guard
+            # enforces and its child read is expressive).
+            if (doc.effective_locked((li,))
+                    or layer.visibility == Visibility.INVISIBLE):
                 continue
             for ci, child in enumerate(layer.children):
-                if child.locked:
+                if doc.effective_locked((li, ci)):
                     continue
                 child_vis = min(layer.visibility, child.visibility,
                                 key=lambda v: v.value)
                 if child_vis == Visibility.INVISIBLE:
                     continue
                 if isinstance(child, Group) and not isinstance(child, Layer):
-                    if any(predicate(gc) for gc in child.children):
+                    free = [gi for gi in range(len(child.children))
+                            if not doc.effective_locked((li, ci, gi))]
+                    if any(predicate(child.children[gi]) for gi in free):
                         entries.append(ElementSelection.all((li, ci)))
-                        for gi in range(len(child.children)):
+                        for gi in free:
                             entries.append(
                                 ElementSelection.all((li, ci, gi)))
                 elif predicate(child):
