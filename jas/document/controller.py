@@ -130,6 +130,77 @@ def selection_to_ids(doc: Document) -> list[str]:
     return out
 
 
+def selection_with_path_added(sel: Selection,
+                              path: ElementPath) -> Selection | None:
+    """``sel`` with ``path`` added as a whole, keeping section 16.4: a
+    selection never holds an element and its own descendant. Returns None
+    when there is nothing to do.
+
+    * ALREADY COVERED by a selected (strict) ancestor: nothing to add.
+      Selecting a group selects its members "as if", and subtracting one
+      member from a selected group is partial group selection, which
+      section 16.3's "a group counts as ONE" does not permit. An exact
+      repeat is NOT caught here; the callers own that.
+    * COVERS existing entries: they are SUBSUMED and the ancestor stands,
+      "the outermost wins", as ``move_selection`` already applies.
+
+    Shared by both additive seams so they cannot drift. Mirrors Rust
+    ``Controller::selection_with_path_added`` and JasSwift
+    ``selectionWithPathAdded``.
+    """
+    n = len(path)
+    if any(len(es.path) < n and path[:len(es.path)] == es.path for es in sel):
+        return None
+    kept = [es for es in sel if not (len(es.path) > n and es.path[:n] == path)]
+    return frozenset(kept + [ElementSelection.all(path)])
+
+
+_CHARACTER_ATTRIBUTES = ("font_family", "font_size", "font_weight", "font_style")
+
+
+def _tspan_with_attribute(ts, attribute: str, value: str):
+    """``ts`` with its override for ``attribute`` set to ``value``. An
+    unsupported name, or a ``font_size`` that is not a number, leaves it
+    unchanged. Mirrors Rust ``apply_attr_to_tspan``."""
+    if attribute not in _CHARACTER_ATTRIBUTES:
+        return ts
+    if attribute == "font_size":
+        try:
+            return replace(ts, font_size=float(value))
+        except ValueError:
+            return ts
+    return replace(ts, **{attribute: value})
+
+
+def _tspan_omit_identity(ts, parent, attribute: str):
+    """Clear ``ts``'s override for ``attribute`` when it equals the parent
+    element's own value, so a range set back to the element's value leaves
+    no override behind. Mirrors Rust ``omit_text_identity`` /
+    ``omit_textpath_identity``."""
+    if attribute not in _CHARACTER_ATTRIBUTES:
+        return ts
+    if getattr(ts, attribute) == getattr(parent, attribute):
+        return replace(ts, **{attribute: None})
+    return ts
+
+
+def _shift_path_for_insertion(path: ElementPath,
+                              inserted_at: ElementPath) -> ElementPath:
+    """``path`` rewritten for an element having been inserted at
+    ``inserted_at``. Only the slot the insertion happened in can move: a path
+    is affected when it shares the insertion's parent prefix AND sits at or
+    after its index, and the subtree below that component moves intact.
+    ``copy_selection`` is where a stale path bit (section 19): it recorded a
+    copy path and then inserted below it, so the path came to name the
+    source. Mirrors Rust ``shift_path_for_insertion``."""
+    depth = len(inserted_at) - 1
+    if depth < 0 or len(path) <= depth or path[:depth] != inserted_at[:depth]:
+        return path
+    if path[depth] >= inserted_at[depth]:
+        return path[:depth] + (path[depth] + 1,) + path[depth + 1:]
+    return path
+
+
 def _accumulated_transform(doc, path, include_own: bool = True
                           ) -> Transform | None:
     """The combined transform mapping ``path``'s LOCAL space to DOCUMENT
@@ -302,6 +373,37 @@ class Controller:
         es = ElementSelection.all((idx, child_idx))
         self._model.edit_document(replace(doc, layers=new_layers,
                                        selection=frozenset({es})))
+
+    def set_character_attribute(self, path: ElementPath, char_start: int,
+                                char_end: int, attribute: str,
+                                value: str) -> None:
+        """TSPAN.md's character-attribute write on the text element at
+        ``path`` over ``[char_start, char_end)``: split_range, set the
+        attribute on every targeted tspan, omit an override equal to the
+        element's own value (identity omission), then merge adjacent equal
+        tspans. ``font_family`` / ``font_size`` / ``font_weight`` /
+        ``font_style`` are supported; any other name is ignored. A no-op when
+        the target is not a Text or TextPath, or the range is out of bounds.
+        Mirrors Rust ``Controller::set_character_attribute``."""
+        from geometry.element import Text, TextPath
+        from geometry.tspan import merge, split_range
+        doc = self._model.document
+        try:
+            elem = doc.get_element(tuple(path))
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        if not isinstance(elem, (Text, TextPath)):
+            return
+        try:
+            tspans, first, last = split_range(list(elem.tspans), char_start, char_end)
+        except ValueError:
+            return
+        if first is not None and last is not None:
+            for i in range(first, last + 1):
+                ts = _tspan_with_attribute(tspans[i], attribute, value)
+                tspans[i] = _tspan_omit_identity(ts, elem, attribute)
+        new_elem = replace(elem, tspans=tuple(merge(tspans)))
+        self._model.edit_document(doc.replace_element(tuple(path), new_elem))
 
     def assign_id(self, path: ElementPath, id: str) -> None:
         """Stamp a stable ``id`` onto the element at ``path`` — the lazy
@@ -862,14 +964,73 @@ class Controller:
         self._select_recursive(_leaf, extend=extend)
 
     def select_all(self) -> None:
-        """Select all unlocked, visible elements."""
-        self._select_flat(lambda _: True)
+        """Select every unlocked, visible TOP-LEVEL object, a group counting
+        as ONE (LAYER_STRUCTURE.md section 16). It never looks inside a
+        group, so an empty group, or one whose members are all locked, is
+        selected like any other. This used to delegate to ``_select_flat``,
+        whose group branch asks about the members, and so dropped both.
+        The lock is read down the path (section 13): ``effective_locked`` on
+        the child already folds in the layer's own flag. Mirrors the ports'
+        ``select_all`` loop."""
+        doc = self._model.document
+        entries: list[ElementSelection] = []
+        for li, layer in enumerate(doc.layers):
+            if layer.visibility == Visibility.INVISIBLE:
+                continue
+            for ci, child in enumerate(layer.children):
+                if doc.effective_locked((li, ci)):
+                    continue
+                child_vis = min(layer.visibility, child.visibility,
+                                key=lambda v: v.value)
+                if child_vis == Visibility.INVISIBLE:
+                    continue
+                entries.append(ElementSelection.all((li, ci)))
+        # Selection-only: a non-undoable write (OP_LOG.md §7/§8).
+        self._model.set_document_unbracketed(
+            replace(doc, selection=frozenset(entries)))
 
     def set_selection(self, selection: Selection) -> None:
         """Set the document selection directly. Selection-only: a non-undoable
         write (OP_LOG.md §7/§8)."""
         self._model.set_document_unbracketed(
             replace(self._model.document, selection=selection))
+
+    def add_to_selection(self, path: ElementPath) -> None:
+        """Add ``path`` as a whole entry: shift-click's additive seam. A path
+        already selected, in ANY kind, is a no-op, and so is one a selected
+        ancestor already covers (section 16.4, ``selection_with_path_added``).
+        Mirrors Rust ``Controller::add_to_selection``."""
+        path = tuple(path)
+        sel = self._model.document.selection
+        # HONEST NOTE: this guard is expressive here, not behavioural
+        # (measured by mutation). ElementSelection hashes by path alone, and
+        # selection_with_path_added puts the kept entries BEFORE the new one,
+        # so the frozenset keeps the existing entry either way. In the ports
+        # the selection is an ordered list and the guard is what stops a
+        # duplicate; it becomes load-bearing here the day this Selection is
+        # ordered too (D6).
+        if any(es.path == path for es in sel):
+            return
+        new_sel = selection_with_path_added(sel, path)
+        if new_sel is not None:
+            self.set_selection(new_sel)
+
+    def toggle_selection(self, path: ElementPath) -> None:
+        """Remove the entry on ``path`` if there is one, whatever its kind;
+        otherwise add ``path`` as a whole entry under section 16.4, so a
+        member of a selected group toggles to nothing. Mirrors Rust
+        ``Controller::toggle_selection`` (JasSwift runs the same body in its
+        ``doc.toggle_selection`` effect). Not the shift-marquee's XOR,
+        ``_toggle_selection``, which has no ancestor rule in any port."""
+        path = tuple(path)
+        sel = self._model.document.selection
+        existing = [es for es in sel if es.path == path]
+        if existing:
+            self.set_selection(sel - frozenset(existing))
+            return
+        new_sel = selection_with_path_added(sel, path)
+        if new_sel is not None:
+            self.set_selection(new_sel)
 
     def select_element(self, path: ElementPath) -> None:
         """Select an element by path.
@@ -1058,8 +1219,12 @@ class Controller:
         """Duplicate selected elements, offset by (dx, dy), leaving originals unchanged."""
         doc = self._model.document
         new_doc = doc
-        new_selection: set[ElementSelection] = set()
-        # Sort paths in reverse so insertions don't shift earlier paths
+        # Copying always selects the new element as a whole, so the running
+        # state is a plain path list that stays rewritable as the document
+        # shifts.
+        copy_paths: list[ElementPath] = []
+        # Sort paths in reverse so insertions don't shift the SOURCE paths
+        # still to be walked.
         sorted_sels = sorted(doc.selection, key=lambda es: es.path, reverse=True)
         for es in sorted_sels:
             elem = doc.get_element(es.path)
@@ -1070,10 +1235,14 @@ class Controller:
             new_doc = new_doc.insert_element_after(es.path, copied)
             # The copy is at path with last index incremented by 1
             copy_path = es.path[:-1] + (es.path[-1] + 1,)
-            # Copying always selects the new element as a whole.
-            new_selection.add(ElementSelection.all(copy_path))
-        self._model.edit_document(replace(
-            new_doc, selection=frozenset(new_selection)))
+            # This insertion moves every copy path already recorded that sits
+            # at or after it under the same parent (section 19); without the
+            # rewrite a recorded path comes to name a SOURCE.
+            copy_paths = [_shift_path_for_insertion(p, copy_path)
+                          for p in copy_paths]
+            copy_paths.append(copy_path)
+        self._model.edit_document(replace(new_doc, selection=frozenset(
+            ElementSelection.all(p) for p in copy_paths)))
 
     def lock_selection(self) -> None:
         """Lock all selected elements and clear the selection.

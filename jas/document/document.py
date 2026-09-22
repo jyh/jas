@@ -196,6 +196,15 @@ class Document:
     print_preferences: "PrintPreferences" = field(
         default_factory=lambda: _default_print_preferences()
     )
+    # THE PASTE RUN (LAYER_STRUCTURE.md section 14): ``(payload, count)`` of
+    # the consecutive offset pastes that have landed, or None. The ports keep
+    # it on the Model and put it in the undo Checkpoint; the reference keeps
+    # it HERE because undo and redo restore Documents, so the run rides undo
+    # exactly as it does there, with no second stack to keep in step. It is
+    # view state, not document data: never serialized, and outside equality.
+    # A fresh Document (file open, parse, decode) starts with no run, as a
+    # new Model does in the ports.
+    paste_run: tuple[str, int] | None = field(default=None, compare=False)
 
     def get_element_selection(self, path: ElementPath) -> ElementSelection | None:
         """Return the ElementSelection for the given path, or None."""
@@ -269,6 +278,16 @@ class Document:
             new_doc = _replace(new_doc, selection=frozenset(
                 es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))
         return new_doc
+
+    def active_layer_locked(self) -> bool:
+        """True when the ACTIVE layer is locked, the lock read down the path.
+        A document with NO layers is not locked: paste's own empty-document
+        no-op is a different refusal. The out-of-range clamp mirrors the
+        paste target's. Mirrors the Rust ``Document::active_layer_locked``."""
+        if not self.layers:
+            return False
+        return self.effective_locked(
+            (min(self.selected_layer, len(self.layers) - 1),))
 
     def effective_locked(self, path: ElementPath) -> bool:
         """True when the element at ``path`` or any ancestor is locked.
