@@ -324,6 +324,8 @@ So: **open an SVG containing `<polygon jas:tool-origin="…">` in both ports and
 
 The corpus reported green throughout, and the reason is worth keeping: the existing `boolean_ops.json` setup overlaps its two rects corner-to-corner, and that union ring has no collinear vertex — so the collapse pass was a no-op *in that fixture* and the flag's value was unobservable. `test_fixtures/operations/boolean_collapse_default.json` overlaps them in x with the same y-extent instead, which makes the sweep insert a vertex on the top and bottom edges at each operand's vertical edge; the golden pins 8 points where the collapse pass would leave 4. Flipping either port's default now fails it.
 
+The Python reference carried the same defect in `jas/panels/boolean_apply.py`, whose `BooleanOptions` defaulted the flag to `True`; the reference's `boolean_union` verb imports that file at run time, so it failed this fixture for as long as the reference ran it at HEAD. Fixed 2026-09-22, once that file was ruled live: the default is `False`, and a unit arm reads all three defaults from `workspace/state.yaml` instead of typing them.
+
 ### The boolean rebuild and the non-paint properties — paint FIXED, the rest BANKED 2026-07-26
 
 Same omission class as the Ship of Theseus sites above, at the boolean's output rebuild. Rust rebuilds with `common.clone()` from the paint source; Swift restates the fields by hand.

@@ -264,6 +264,28 @@ class DivideTrimMergeTest(absltest.TestCase):
 class BooleanOptionsTest(absltest.TestCase):
     """Tests for BooleanOptions threading and collinear collapse."""
 
+    def test_defaults_are_the_declared_state_defaults(self):
+        # `BooleanOptions()` is what a boolean run with no explicit options
+        # uses -- the reference's `boolean_union` verb among them -- so its
+        # defaults are the spec's, read from workspace/state.yaml rather than
+        # typed here. Rust's `BooleanOptions::default()` and Swift's init
+        # agree with the yaml; this default said True until 2026-09-22 and
+        # the reference collapsed seam points both ports keep.
+        import os
+        import yaml
+        state_yaml = os.path.join(
+            os.path.dirname(__file__), "..", "..", "workspace", "state.yaml")
+        with open(state_yaml) as f:
+            declared = yaml.safe_load(f)["state"]
+        options = BooleanOptions()
+        for key, field in (
+                ("boolean_precision", "precision"),
+                ("boolean_remove_redundant_points", "remove_redundant_points"),
+                ("boolean_divide_remove_unpainted", "divide_remove_unpainted")):
+            with self.subTest(key=key):
+                self.assertEqual(getattr(options, field),
+                                 declared[key]["default"])
+
     def test_collapse_collinear_points_drops_midpoint(self):
         # Triangle with a collinear midpoint on one edge.
         ring = [(0, 0), (5, 0), (10, 0), (10, 10), (0, 10)]
