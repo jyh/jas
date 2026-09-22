@@ -697,6 +697,37 @@ class MoveSelectionTest(absltest.TestCase):
                          (3.0, 4.0, 13.0, 14.0))
         self.assertEqual((moved_rect.x, moved_rect.y), (23.0, 24.0))
 
+    def test_a_reference_moves_by_the_document_delta_however_its_full_selection_is_spelled(self):
+        # A ReferenceElem's whole-element move rides on its OWN transform,
+        # which lives in its PARENT's space, so the delta must reach it
+        # unconverted by that transform. A full selection has two spellings:
+        # `all`, and the four bbox corners `partial([0, 1, 2, 3])`, which both
+        # active ports move as a whole (their container arm). Mirrors the
+        # corners half of `a_reference_moves_by_the_document_delta` (Rust)
+        # and `aReferenceMovesByTheDocumentDelta` (Swift).
+        from geometry.element import Transform
+        master = Rect(x=0, y=0, width=10, height=10, id="m1")
+        cases = [("untransformed", None), ("rotated", Transform.rotate(30.0)),
+                 ("scaled", Transform.scale(2.0, 3.0)),
+                 ("translated", Transform.translate(50.0, 60.0))]
+        spellings = [("all", ElementSelection.all((0, 0))),
+                     ("corners", ElementSelection.partial((0, 0), [0, 1, 2, 3]))]
+        for name, t in cases:
+            for spelling, es in spellings:
+                ref = ReferenceElem(target="m1", id="i1", transform=t)
+                doc = Document(layers=(Layer(children=(ref,)),), symbols=(master,),
+                               selection=frozenset({es}))
+                ctrl = Controller(model=Model(document=doc))
+                ctrl.move_selection(12.0, -7.0)
+                moved = ctrl.document.layers[0].children[0]
+                old = t if t is not None else Transform()
+                new = moved.transform if moved.transform is not None else Transform()
+                label = f"{name} / {spelling}"
+                self.assertEqual((new.a, new.b, new.c, new.d),
+                                 (old.a, old.b, old.c, old.d), label)
+                self.assertAlmostEqual(new.e - old.e, 12.0, delta=1e-9, msg=label)
+                self.assertAlmostEqual(new.f - old.f, -7.0, delta=1e-9, msg=label)
+
     def test_rounded_rect_corner_drag_survives_a_second_sample(self):
         # A corner drag is a MULTI-SAMPLE gesture: the first sample promotes
         # the rounded Rect to a Polygon (ratified answer (3) flattens the

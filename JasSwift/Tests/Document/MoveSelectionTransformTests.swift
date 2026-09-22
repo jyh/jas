@@ -93,7 +93,11 @@ struct MoveSelectionTransformTests {
             ("translated", Self.trans, nil),
             ("under a translated layer", nil, Self.trans),
         ]
-        for (name, transform, layerTransform) in cases {
+        // BOTH SPELLINGS of a full selection: `.all`, and the reference's four
+        // bbox corners `.partial([0,1,2,3])`, which the mover treats as a
+        // whole move (its container arm) and so must the delta conversion.
+        for ((caseName, transform, layerTransform), corners) in cases.flatMap({ c in [(c, false), (c, true)] }) {
+            let name = "\(caseName) / \(corners ? "corners" : "all")"
             let ctrl = Controller(model: Model())
             ctrl.addElement(.rect(Rect(x: 0, y: 0, width: 10, height: 10)))
             ctrl.makeSymbol([0, 0], masterId: "m1", refId: "i1")
@@ -111,6 +115,9 @@ struct MoveSelectionTransformTests {
             }
             ctrl.model.editDocument(doc)
             ctrl.selectElement([0, 0])
+            if corners {
+                ctrl.setSelection([ElementSelection(path: [0, 0], kind: .partial(SortedCps([0, 1, 2, 3])))])
+            }
             let before = evaluatedOrigin(ctrl.document, [0, 0])
             ctrl.moveSelection(dx: 12, dy: -7)
             let after = evaluatedOrigin(ctrl.document, [0, 0])

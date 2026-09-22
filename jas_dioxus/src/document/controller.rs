@@ -6569,7 +6569,15 @@ mod tests {
             ("translated", Some(Transform::translate(50.0, 60.0)), None),
             ("under a translated layer", None, Some(Transform::translate(50.0, 60.0))),
         ];
-        for (name, transform, layer_transform) in cases {
+        // BOTH SPELLINGS of a full selection: `All`, and the reference's four
+        // bbox corners `Partial([0,1,2,3])`, which the mover treats as a
+        // whole move (its container arm) and so must the delta conversion.
+        let runs: Vec<(String, Option<Transform>, Option<Transform>, bool)> = cases.iter()
+            .flat_map(|&(n, t, l)| [false, true].map(|corners| {
+                (format!("{n} / {}", if corners { "corners" } else { "all" }), t, l, corners)
+            }))
+            .collect();
+        for (name, transform, layer_transform, corners) in runs {
             let mut model = Model::default();
             Controller::add_element(&mut model, make_rect(0.0, 0.0, 10.0, 10.0));
             Controller::make_symbol(&mut model, &vec![0, 0], "m1", "i1");
@@ -6587,6 +6595,10 @@ mod tests {
             // refused — a red that named the fixture, not the subject.)
             model.edit_document(doc);
             Controller::select_element(&mut model, &vec![0, 0]);
+            if corners {
+                Controller::set_selection(&mut model,
+                    vec![ElementSelection::partial(vec![0, 0], [0usize, 1, 2, 3])]);
+            }
             let before = evaluated_origin(&model, &[0, 0]);
             Controller::move_selection(&mut model, 12.0, -7.0);
             let after = evaluated_origin(&model, &[0, 0]);
