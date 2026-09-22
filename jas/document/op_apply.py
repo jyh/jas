@@ -1114,6 +1114,16 @@ def apply_select_by_ids(model: Model, ctrl: Controller, ids: list[str]) -> list[
     return selection_to_ids(model.document)
 
 
+# The SELECTION-ONLY verbs: they change ``doc.selection`` and nothing else, so
+# they are non-undoable and must stay journal-neutral (no transaction is opened
+# for them). Named ONCE so a new selection verb has one place to register.
+# Mirrors Rust ``is_selection_only_verb`` and JasSwift ``isSelectionOnlyVerb``.
+_SELECTION_ONLY_VERBS = frozenset({
+    "select_rect", "select_by_ids", "select_element", "select_all",
+    "add_to_selection",
+})
+
+
 def op_apply(model: Model, op: dict) -> None:
     """The single op dispatcher (OP_LOG.md §4). Applies one primitive op to the
     model and records it into the open transaction (the ``checkpoint_equivalence``
@@ -1162,7 +1172,7 @@ def op_apply(model: Model, op: dict) -> None:
     # selection-only batch as an undoable step. ``select_by_ids`` is the id-primary
     # twin (selection-only, non-undoable), so it is excluded for the identical
     # reason.
-    if name not in ("select_rect", "select_by_ids", "select_element") and not model.in_txn:
+    if name not in _SELECTION_ONLY_VERBS and not model.in_txn:
         model.begin_txn()
 
     ctrl = Controller(model=model)
@@ -1230,6 +1240,26 @@ def op_apply(model: Model, op: dict) -> None:
         except (IndexError, KeyError, TypeError, AttributeError):
             return
         ctrl.select_element(path)
+        targets = selection_to_ids(model.document)
+    elif name == "select_all":
+        # Selection-only. Top-level objects, a group counting as ONE (section
+        # 16). Mirrors op_apply.rs "select_all", through the production
+        # Controller.select_all, never a copy of its walk.
+        ctrl.select_all()
+        targets = selection_to_ids(model.document)
+    elif name == "add_to_selection":
+        # Selection-only. The additive seam shift-click uses: idempotent, and
+        # section 16.4 through Controller.add_to_selection. Mirrors
+        # op_apply.rs "add_to_selection". A path naming no element is skipped
+        # (Rust returns MissingTarget; the reference has no op-error channel).
+        path = parse_path(op.get("path"))
+        if not path:
+            return
+        try:
+            model.document.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return
+        ctrl.add_to_selection(path)
         targets = selection_to_ids(model.document)
     elif name == "toggle_element_lock":
         # The Layers-panel lock toggle, through the same pure
