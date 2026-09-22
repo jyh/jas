@@ -2201,6 +2201,11 @@ mod tests {
         // It went in green on every lane a Mac runs and red here, exactly as
         // the paragraph above says. `element_needs_legacy` has no width-point
         // clause, so it is expected to present; this lane is the measurement.
+        // MEASURED on this lane the same day: the `refusing` set below stayed
+        // empty with the golden in it. The count is pinned TWICE in this test
+        // (here and in the final assertion), and the first bump missed the
+        // second: a search for the number with "svg"/"corpus" on the same line
+        // could not match a line that says neither.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2212,6 +2217,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 71, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 72, "the whole corpus presents");
     }
 }
