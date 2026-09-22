@@ -728,6 +728,26 @@ class MoveSelectionTest(absltest.TestCase):
                 self.assertAlmostEqual(new.e - old.e, 12.0, delta=1e-9, msg=label)
                 self.assertAlmostEqual(new.f - old.f, -7.0, delta=1e-9, msg=label)
 
+    def test_select_element_refuses_a_child_of_a_locked_ancestor(self):
+        # LOCKINHERIT (LAYER_STRUCTURE.md section 13): the lock is read DOWN
+        # THE PATH, so a click on a child of a locked layer, or on a member of
+        # a locked group, selects nothing. Mirrors the ports' `select_element`
+        # (`effective_locked`). The unlocked control proves the click works.
+        cases = [
+            ("child of a locked layer", True, False, (0, 0), False),
+            ("member of a locked group", False, True, (0, 1, 0), False),
+            ("control: nothing locked", False, False, (0, 0), True),
+        ]
+        for label, layer_locked, group_locked, path, selects in cases:
+            group = Group(children=(Rect(x=0, y=0, width=1, height=1),
+                                    Rect(x=2, y=0, width=1, height=1)),
+                          locked=group_locked)
+            doc = Document(layers=(Layer(children=(Rect(x=5, y=5, width=1, height=1), group),
+                                         locked=layer_locked),))
+            ctrl = Controller(model=Model(document=doc))
+            ctrl.select_element(path)
+            self.assertEqual(bool(ctrl.document.selection), selects, label)
+
     def test_an_ancestor_in_the_selection_covers_its_descendants(self):
         # A group selected WHOLE together with one of its members' control
         # points: the group's move carries both members, whole. Each entry is
