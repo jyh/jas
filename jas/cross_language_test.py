@@ -162,12 +162,29 @@ def _survival_saturated_group():
         name="name_group", id="id_group")
 
 
+def _survival_saturated_line():
+    """The Line half. Line is the one kind besides Path whose model carries
+    `width_points`, and it is watched for that field ONLY (the fixture's
+    `saturated_line` block says why). Every value is exact at the writer's
+    four-decimal floor and every endpoint exact in px. Mirrors
+    `survival_saturated_line()` in Rust and `saturatedLine()` in JasSwift."""
+    from geometry.element import Color, Line, Stroke, StrokeWidthPoint
+    return Line(
+        x1=0.0, y1=0.0, x2=30.0, y2=15.0,
+        stroke=Stroke(color=Color.rgb(0.0, 0.0, 0.0), width=2.25),
+        width_points=(StrokeWidthPoint(0.0, 1.0, 2.0),
+                      StrokeWidthPoint(0.5, 2.5, 0.5),
+                      StrokeWidthPoint(1.0, 3.0, 4.0)),
+        name="name_line", id="id_line")
+
+
 def _survival_doc():
     from document.document import Document
     from geometry.element import Layer
     return Document(layers=(Layer(
         name="Layer 1",
-        children=(_survival_saturated_path(), _survival_saturated_group()),
+        children=(_survival_saturated_path(), _survival_saturated_group(),
+                  _survival_saturated_line()),
         isolated_blending=True, knockout_group=True),))
 
 
@@ -184,6 +201,7 @@ _SURVIVAL_ROWS = [
     ("group.knockout_group", "group", ("knockout_group",)),
     ("layer.isolated_blending", "layer", ("isolated_blending",)),
     ("layer.knockout_group", "layer", ("knockout_group",)),
+    ("line.width_points", "line", ("width_points",)),
     ("stroke.align", "path", ("stroke", "align")),
     ("stroke.dash_align_anchors", "path", ("stroke", "dash_align_anchors")),
     ("stroke.dash_pattern", "path", ("stroke", "dash_pattern")),
@@ -195,18 +213,23 @@ _SURVIVAL_ROWS = [
 ]
 
 
+_SURVIVAL_SUBJECTS = ("path", "group", "layer", "line")
+
+
 def _survival_subjects(doc):
-    """(path, group, layer) of a saturated document, or None for any the
-    round trip lost. A lost subject is a STRUCTURAL loss, not a field loss."""
-    from geometry.element import Group, Layer, Path
+    """(path, group, layer, line) of a saturated document, or None for any
+    the round trip lost. A lost subject is a STRUCTURAL loss, not a field
+    loss."""
+    from geometry.element import Group, Layer, Line, Path
     layer = doc.layers[0] if doc.layers else None
     if not isinstance(layer, Layer):
-        return (None, None, None)
+        return (None, None, None, None)
     kids = layer.children
     path = kids[0] if kids and isinstance(kids[0], Path) else None
     group = next((c for c in kids
                   if isinstance(c, Group) and not isinstance(c, Layer)), None)
-    return (path, group, layer)
+    line = next((c for c in kids if isinstance(c, Line)), None)
+    return (path, group, layer, line)
 
 
 def _survival_default(obj, attr):
@@ -357,7 +380,7 @@ class CrossLanguageTest(absltest.TestCase):
 
         doc = _survival_doc()
         before = _survival_subjects(doc)
-        by_subject = dict(zip(("path", "group", "layer"), before))
+        by_subject = dict(zip(_SURVIVAL_SUBJECTS, before))
 
         # Saturation: a field left at its default cannot be dropped, so its
         # row would read PRESERVED whatever the codec does.
@@ -382,13 +405,13 @@ class CrossLanguageTest(absltest.TestCase):
         ]
         for codec, round_trip in codecs:
             after = _survival_subjects(round_trip())
-            for subject, b, a in zip(("path", "group", "layer"), before, after):
+            for subject, b, a in zip(_SURVIVAL_SUBJECTS, before, after):
                 if a is None:
                     self.fail(f"codec_field_survival: the saturated "
                               f"{subject} did not survive the {codec} round "
                               f"trip AT ALL -- every {codec} row is "
                               f"meaningless")
-            after_by = dict(zip(("path", "group", "layer"), after))
+            after_by = dict(zip(_SURVIVAL_SUBJECTS, after))
             for field, subject, attrs in _SURVIVAL_ROWS:
                 vb, va = by_subject[subject], after_by[subject]
                 held = True

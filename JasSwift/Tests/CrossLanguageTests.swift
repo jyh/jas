@@ -5344,12 +5344,28 @@ private func saturatedGroup() -> Group {
           name: "name_group", id: "id_group")
 }
 
+/// The Line half. Line is the one kind besides Path whose model carries
+/// `widthPoints`, and it is watched for that field ONLY (the fixture's
+/// `saturated_line` block says why). Every value is exact at the writer's
+/// four-decimal floor and every endpoint exact in px, so the row reads DROPPED
+/// only for an omission. Mirrors `survival_saturated_line()` in Rust and
+/// `_survival_saturated_line()` in the reference.
+private func saturatedLine() -> Line {
+    Line(x1: 0, y1: 0, x2: 30, y2: 15,
+         stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 2.25),
+         widthPoints: [StrokeWidthPoint(t: 0.0, widthLeft: 1.0, widthRight: 2.0),
+                       StrokeWidthPoint(t: 0.5, widthLeft: 2.5, widthRight: 0.5),
+                       StrokeWidthPoint(t: 1.0, widthLeft: 3.0, widthRight: 4.0)],
+         name: "name_line", id: "id_line")
+}
+
 private func survivalDoc() -> Document {
     // The enclosing Layer is saturated too: Group and Layer are watched
     // SEPARATELY because every codec in both ports has a distinct construction
     // site per kind, so one can be repaired and the other missed.
     Document(rawLayers: [Layer(name: "Layer 1",
-                               children: [.path(saturatedPath()), .group(saturatedGroup())],
+                               children: [.path(saturatedPath()), .group(saturatedGroup()),
+                                          .line(saturatedLine())],
                                isolatedBlending: true, knockoutGroup: true)],
              rawSelectedLayer: 0, rawSelection: [], rawArtboards: [],
              rawArtboardOptions: .default)
@@ -5366,6 +5382,12 @@ private func survivalFirstLayer(_ d: Document) -> Layer? { d.layers.first }
 private func survivalFirstGroup(_ d: Document) -> Group? {
     guard let l = d.layers.first else { return nil }
     for e in l.children { if case .group(let g) = e { return g } }
+    return nil
+}
+
+private func survivalFirstLine(_ d: Document) -> Line? {
+    guard let l = d.layers.first else { return nil }
+    for e in l.children { if case .line(let n) = e { return n } }
     return nil
 }
 
@@ -5390,6 +5412,10 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         Issue.record("codecFieldSurvival: the saturated Group did not survive the round trip AT ALL")
         return []
     }
+    guard let bn = survivalFirstLine(beforeDoc), let an = survivalFirstLine(afterDoc) else {
+        Issue.record("codecFieldSurvival: the saturated Line did not survive the round trip AT ALL")
+        return []
+    }
     func s(_ ok: Bool) -> String { ok ? "PRESERVED" : "DROPPED" }
     return [
         ("common.locked", s(a.locked == before.locked)),
@@ -5402,6 +5428,7 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         ("group.knockout_group", s(ag.knockoutGroup == bg.knockoutGroup)),
         ("layer.isolated_blending", s(al.isolatedBlending == bl.isolatedBlending)),
         ("layer.knockout_group", s(al.knockoutGroup == bl.knockoutGroup)),
+        ("line.width_points", s(an.widthPoints == bn.widthPoints)),
         ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
         ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
         // The ACTIVE slice, not the fixed six-slot array: the two ports store

@@ -7224,6 +7224,30 @@ mod tests {
         }
     }
 
+    /// The Line half. Line is the one kind besides Path whose model carries
+    /// `width_points`, and it is watched for that field ONLY (the fixture's
+    /// `saturated_line` block says why). Every value is exact at the writer's
+    /// four-decimal floor and every endpoint exact in px, so the row reads
+    /// DROPPED only for an omission. Mirrored by `saturatedLine()` in JasSwift
+    /// and `_survival_saturated_line()` in the reference.
+    fn survival_saturated_line() -> crate::geometry::element::LineElem {
+        use crate::geometry::element::*;
+        let mut c = CommonProps::default();
+        c.name = Some("name_line".to_string());
+        c.id = Some("id_line".to_string());
+        LineElem {
+            x1: 0.0, y1: 0.0, x2: 30.0, y2: 15.0,
+            stroke: Some(Stroke::new(Color::Rgb { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, 2.25)),
+            width_points: vec![
+                StrokeWidthPoint { t: 0.0, width_left: 1.0, width_right: 2.0 },
+                StrokeWidthPoint { t: 0.5, width_left: 2.5, width_right: 0.5 },
+                StrokeWidthPoint { t: 1.0, width_left: 3.0, width_right: 4.0 },
+            ],
+            common: c,
+            stroke_gradient: None,
+        }
+    }
+
     fn survival_doc() -> crate::document::document::Document {
         use crate::geometry::element::*;
         let mut d = crate::document::document::Document::default();
@@ -7237,6 +7261,7 @@ mod tests {
             children: vec![
                 std::rc::Rc::new(Element::Path(survival_saturated_path())),
                 std::rc::Rc::new(Element::Group(survival_saturated_group())),
+                std::rc::Rc::new(Element::Line(survival_saturated_line())),
             ],
             common: lc,
             isolated_blending: true,
@@ -7271,6 +7296,17 @@ mod tests {
         })
     }
 
+    fn survival_first_line(
+        d: &crate::document::document::Document,
+    ) -> Option<crate::geometry::element::LineElem> {
+        use crate::geometry::element::Element;
+        let kids = match d.layers.first()? { Element::Layer(e) => &e.children, _ => return None };
+        kids.iter().find_map(|c| match c.as_ref() {
+            Element::Line(l) => Some(l.clone()),
+            _ => None,
+        })
+    }
+
     /// PRESERVED / DROPPED for each watched field of `after` against `before`.
     ///
     /// Takes the whole DOCUMENT on each side rather than the Path alone,
@@ -7300,6 +7336,10 @@ mod tests {
         let ag = survival_first_group(after_doc).unwrap_or_else(|| panic!(
             "codec_field_survival: the saturated Group did not survive the round trip \
              AT ALL -- the group.* rows below would be meaningless"));
+        let bn = survival_first_line(before_doc).expect("the saturated doc has a Line");
+        let an = survival_first_line(after_doc).unwrap_or_else(|| panic!(
+            "codec_field_survival: the saturated Line did not survive the round trip \
+             AT ALL -- the line.* rows below would be meaningless"));
         let s = |ok: bool| if ok { "PRESERVED" } else { "DROPPED" };
         vec![
             ("common.locked", s(a.common.locked == before.common.locked)),
@@ -7312,6 +7352,7 @@ mod tests {
             ("group.knockout_group", s(ag.knockout_group == bg.knockout_group)),
             ("layer.isolated_blending", s(al.isolated_blending == bl.isolated_blending)),
             ("layer.knockout_group", s(al.knockout_group == bl.knockout_group)),
+            ("line.width_points", s(an.width_points == bn.width_points)),
             ("stroke.align", s(a.stroke.map(|x| x.align) == before.stroke.map(|x| x.align))),
             ("stroke.dash_align_anchors",
              s(a.stroke.map(|x| x.dash_align_anchors) == before.stroke.map(|x| x.dash_align_anchors))),

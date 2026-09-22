@@ -188,6 +188,54 @@
    "children": "one rect(30, 40, 5x6, fill #ffffff) -- a container with no children is a shape SVG can drop, which would confuse a structural loss with a field loss"
   }
  },
+ "saturated_line": {
+  "_doc": [
+   "THE LINE HALF, added 2026-09-21. Line is the one kind besides Path whose",
+   "model carries `width_points` (Rust LineElem, JasSwift Line, the reference's",
+   "Line), and the Width tool and the eyedropper both write a profile onto a",
+   "Line. But every writer calls its stroke-profile helper from the PATH arm",
+   "only, and every reader's line arm builds the element with no profile, so",
+   "a Line's width profile was lost on SVG save in all three implementations.",
+   "No gate could see it: this matrix watched a Path, and every differential",
+   "gate compares the three implementations, which agreed.",
+   "",
+   "SCOPE, stated so the row is not read as more than it is. The Line is",
+   "watched for ONE field, its width profile. Its other fields are not",
+   "saturated and not measured here. Line carries no stroke brush in any",
+   "model, so the brush pair has no Line row.",
+   "",
+   "The values are exact at the writer's four-decimal floor (width points are",
+   "written unconverted) and the endpoints are exact in px, so the row reads",
+   "DROPPED only for an omission, never for a rounding."
+  ],
+  "x1": 0,
+  "y1": 0,
+  "x2": 30,
+  "y2": 15,
+  "stroke": {
+   "color": "rgb(0, 0, 0)",
+   "width": 2.25
+  },
+  "width_points": [
+   {
+    "t": 0.0,
+    "width_left": 1.0,
+    "width_right": 2.0
+   },
+   {
+    "t": 0.5,
+    "width_left": 2.5,
+    "width_right": 0.5
+   },
+   {
+    "t": 1.0,
+    "width_left": 3.0,
+    "width_right": 4.0
+   }
+  ],
+  "name": "name_line",
+  "id": "id_line"
+ },
  "fields": [
   "common.locked",
   "common.mask",
@@ -199,6 +247,7 @@
   "group.knockout_group",
   "layer.isolated_blending",
   "layer.knockout_group",
+  "line.width_points",
   "stroke.align",
   "stroke.dash_align_anchors",
   "stroke.dash_pattern",
@@ -220,6 +269,7 @@
    "group.knockout_group": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
+   "line.width_points": "PRESERVED",
    "stroke.align": "PRESERVED",
    "stroke.dash_align_anchors": "PRESERVED",
    "stroke.dash_pattern": "PRESERVED",
@@ -240,6 +290,7 @@
    "group.knockout_group": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
+   "line.width_points": "PRESERVED",
    "stroke.align": "PRESERVED",
    "stroke.dash_align_anchors": "PRESERVED",
    "stroke.dash_pattern": "PRESERVED",
@@ -260,6 +311,7 @@
    "group.knockout_group": "PRESERVED",
    "layer.isolated_blending": "PRESERVED",
    "layer.knockout_group": "PRESERVED",
+   "line.width_points": "PRESERVED",
    "stroke.align": "DROPPED",
    "stroke.dash_align_anchors": "PRESERVED",
    "stroke.dash_pattern": "PRESERVED",
