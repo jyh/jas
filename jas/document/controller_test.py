@@ -824,6 +824,16 @@ class SetCharacterAttributeTest(absltest.TestCase):
                          [24.0, None])
         self.assertEqual(m.document, before)
 
+    def test_an_unsupported_attribute_is_ignored(self):
+        # Rust's `apply_attr_to_tspan` ignores a name it does not know, so a
+        # caller may send any name: nothing changes and no undo step lands.
+        from geometry.element import Text
+        m = self._model(Text(x=0, y=0, content="Hello"))
+        before = m.document.get_element((0, 0)).tspans
+        Controller(model=m).set_character_attribute((0, 0), 1, 4, "color", "red")
+        self.assertEqual(m.document.get_element((0, 0)).tspans, before)
+        self.assertFalse(m.can_undo)
+
     def test_the_verb_reads_a_bad_bound_as_zero(self):
         # Rust's `as_u64().unwrap_or(0)`: a negative or non-integer bound is 0.
         from document.op_apply import op_apply
