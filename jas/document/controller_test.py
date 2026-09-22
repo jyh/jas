@@ -103,11 +103,13 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(_sel_paths(self.ctrl.document.selection), frozenset({(0, 0)}))
 
     def test_select_element_in_group(self):
-        """Clicking an element inside a Group selects all group children."""
+        """Clicking an element inside a Group selects THE GROUP ALONE (section
+        20, as in the ports): the model holds one entry, and operations reach
+        its members through map_paintable / the container move arm."""
         self.ctrl.select_element((0, 1, 0))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
 
     def test_select_element_in_group_other_child(self):
@@ -115,7 +117,7 @@ class SelectionControllerTest(absltest.TestCase):
         self.ctrl.select_element((0, 1, 1))
         self.assertEqual(
             _sel_paths(self.ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
 
     def test_select_element_notifies_model(self):
@@ -141,7 +143,8 @@ class SelectionControllerTest(absltest.TestCase):
         self.assertEqual(self.ctrl.document.selection, frozenset())
 
     def test_select_rect_group_expansion(self):
-        """Marquee hitting one group child selects all group children."""
+        """Marquee hitting one group child selects THE GROUP ALONE: the band
+        asks about members and answers with the group (section 16.4 / 20)."""
         rect_far = Rect(x=100, y=100, width=10, height=10)
         line1 = Line(x1=0, y1=0, x2=5, y2=5)
         line2 = Line(x1=1, y1=1, x2=2, y2=2)
@@ -153,8 +156,26 @@ class SelectionControllerTest(absltest.TestCase):
         ctrl.select_rect(-1, -1, 7, 7)
         self.assertEqual(
             _sel_paths(ctrl.document.selection),
-            frozenset({(0, 1), (0, 1, 0), (0, 1, 1)}),
+            frozenset({(0, 1)}),
         )
+
+    def test_marquee_then_copy_leaves_the_source_group_intact(self):
+        """The selection shape no operation reads coherently was the group AND
+        its members: copy_selection copied the group whole, then copied each
+        member INTO the source group. With the group alone, the source keeps
+        its two children and one copy of the group lands beside it."""
+        group = Group(children=(Line(x1=0, y1=0, x2=5, y2=5),
+                                Line(x1=1, y1=1, x2=2, y2=2)))
+        doc = Document(layers=(Layer(children=(Rect(x=100, y=100, width=10, height=10),
+                                               group), name="L0"),))
+        ctrl = Controller(model=Model(document=doc))
+        ctrl.select_rect(-1, -1, 7, 7)
+        ctrl.copy_selection(10.0, 0.0)
+        kids = ctrl.document.layers[0].children
+        self.assertEqual(len(kids), 3, "rect, source group, one copy")
+        self.assertEqual(len(kids[1].children), 2, "the source group keeps two children")
+        self.assertIsInstance(kids[2], Group)
+        self.assertEqual(len(kids[2].children), 2, "the copy carries two children")
 
     def test_locked_group_not_selectable(self):
         """Locking a group prevents it from being selected again."""
