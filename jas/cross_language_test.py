@@ -762,6 +762,13 @@ class CrossLanguageTest(absltest.TestCase):
     def test_operation_select_and_move(self):
         self._run_operation_fixture("select_and_move.json")
 
+    def test_operation_lock_inheritance(self):
+        # LOCKINHERIT (section 13) and the group-alone selection (section 20)
+        # through the op verbs, the ports' shared gate. The reference ran it
+        # for the first time on 2026-09-21, once effective_locked,
+        # _select_flat's guards and the group-alone producers had landed.
+        self._run_operation_fixture("lock_inheritance.json")
+
     def test_operation_undo_redo_laws(self):
         self._run_operation_fixture("undo_redo_laws.json")
 
