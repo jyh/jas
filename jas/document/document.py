@@ -248,6 +248,28 @@ class Document:
         except ValueError:
             return None
 
+    def toggling_element_lock(self, path: ElementPath) -> "Document":
+        """Return a document with the element at ``path``'s OWN lock flag
+        flipped (the Layers-panel lock toggle). Nothing is written onto its
+        descendants: they are locked by inheritance (``effective_locked``),
+        the materialization having been repealed (LAYER_STRUCTURE.md section
+        13). Locking removes the element and its descendants from the
+        selection; unlocking restores nothing. A path naming no element
+        returns the document unchanged. Mirrors the Rust
+        ``Document::toggling_element_lock``."""
+        from dataclasses import replace as _replace
+        try:
+            elem = self.get_element(path)
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError):
+            return self
+        was_unlocked = not elem.locked
+        new_doc = self.replace_element(path, _replace(elem, locked=was_unlocked))
+        if was_unlocked:
+            n = len(path)
+            new_doc = _replace(new_doc, selection=frozenset(
+                es for es in new_doc.selection if tuple(es.path[:n]) != tuple(path)))
+        return new_doc
+
     def effective_locked(self, path: ElementPath) -> bool:
         """True when the element at ``path`` or any ancestor is locked.
 
