@@ -18,7 +18,7 @@ from geometry.element import (
     ClosePath, Element, Fill, Gradient, Group, Layer, LineTo, Mask, MoveTo,
     Path, PathCommand, Polygon, Stroke, StrokeWidthPoint, Transform, Visibility,
     clear_ids, control_point_count, control_points, move_control_points,
-    remap_cp_selection_after_move, map_paintable,
+    remap_cp_selection_after_move, map_paintable, paintable_leaves,
     move_path_handle as _move_path_handle,
     with_fill as _with_fill, with_stroke as _with_stroke,
     with_fill_gradient as _with_fill_gradient,
@@ -1447,15 +1447,19 @@ def selection_fill_summary(doc: Document) -> FillSummary:
     """Compute the fill summary for the current selection."""
     if not doc.selection:
         return FillSummaryNoSelection()
+    # A selected CONTAINER summarises the paint of its members, at any depth
+    # (the read twin of map_paintable), as in the ports: reading the Group's
+    # own paint reported "none" for a group whose members all carry one.
     first = None
     first_set = False
     for es in doc.selection:
-        fill = _element_fill(doc.get_element(es.path))
-        if not first_set:
-            first = fill
-            first_set = True
-        elif first != fill:
-            return FillSummaryMixed()
+        for leaf in paintable_leaves(doc.get_element(es.path)):
+            fill = _element_fill(leaf)
+            if not first_set:
+                first = fill
+                first_set = True
+            elif first != fill:
+                return FillSummaryMixed()
     return FillSummaryUniform(fill=first)
 
 
@@ -1463,13 +1467,17 @@ def selection_stroke_summary(doc: Document) -> StrokeSummary:
     """Compute the stroke summary for the current selection."""
     if not doc.selection:
         return StrokeSummaryNoSelection()
+    # A selected CONTAINER summarises the paint of its members, at any depth
+    # (the read twin of map_paintable), as in the ports: reading the Group's
+    # own paint reported "none" for a group whose members all carry one.
     first = None
     first_set = False
     for es in doc.selection:
-        stroke = _element_stroke(doc.get_element(es.path))
-        if not first_set:
-            first = stroke
-            first_set = True
-        elif first != stroke:
-            return StrokeSummaryMixed()
+        for leaf in paintable_leaves(doc.get_element(es.path)):
+            stroke = _element_stroke(leaf)
+            if not first_set:
+                first = stroke
+                first_set = True
+            elif first != stroke:
+                return StrokeSummaryMixed()
     return StrokeSummaryUniform(stroke=first)

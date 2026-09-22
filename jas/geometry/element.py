@@ -2051,6 +2051,16 @@ def clear_ids(elem: Element) -> Element:
     return elem
 
 
+def paintable_leaves(elem: Element) -> list[Element]:
+    """The PAINTABLE leaves under ``elem`` in document order: a Group or
+    Layer contributes its members, recursively; any other element is its own
+    leaf. The read twin of :func:`map_paintable`. Mirrors the Rust
+    ``for_each_paintable`` (PAINTSUMMARY, 2026-07-29)."""
+    if isinstance(elem, Group):
+        return [leaf for c in elem.children for leaf in paintable_leaves(c)]
+    return [elem]
+
+
 def map_paintable(elem: Element, f) -> Element:
     """Apply ``f`` to every PAINTABLE leaf under ``elem``: a Group or Layer
     has no paint of its own, so a paint write on it reaches its members,
