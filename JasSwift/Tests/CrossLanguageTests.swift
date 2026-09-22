@@ -97,6 +97,9 @@ private func assertSvgRoundtrip(_ name: String) {
         // carried it and agree with itself. Mirrors the Rust
         // svg_roundtrip_all_fixtures registration.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -145,6 +148,10 @@ private func assertSvgRoundtrip(_ name: String) {
 /// covered, stated rather than implied: `recorded` and `generated`, which
 /// neither port can read back from SVG at all.
 @Test func svgParseLockedAllKinds() { assertSvgParse("locked_all_kinds") }
+/// The SVG READ side of a Line's width profile, pinned against the shared
+/// golden that the Rust and reference readers also parse. Mirrors
+/// `svg_parse_line_width_profile` in Rust.
+@Test func svgParseLineWidthProfile() { assertSvgParse("line_width_profile") }
 /// Unique-id invariant on import (REFERENCE_GRAPH.md §2.5): two rects share
 /// id="dup"; after dedupe the first keeps it and the second has no id.
 @Test func svgParseDupIdImport() { assertSvgParse("dup_id_import") }
@@ -335,6 +342,9 @@ private func assertJsonRoundtrip(_ name: String) {
         // `locked` regression in test_json cannot hide behind the SVG lane
         // being the one under repair.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names { assertJsonRoundtrip(name) }
 }
@@ -382,6 +392,9 @@ private func readFixtureData(_ path: String) -> Data {
         // these two goldens make that a MEASUREMENT rather than an assumption,
         // on a document where the flag is actually true.
         "locked_layer_and_element", "locked_all_kinds",
+        // A Line's width profile (`jas:width-points`) across the SVG
+        // boundary. Mirrors the Rust registration.
+        "line_width_profile",
     ]
     for name in names {
         let expected = readFixture("expected/\(name).json").trimmingCharacters(in: .whitespacesAndNewlines)

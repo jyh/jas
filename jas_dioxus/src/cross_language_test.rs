@@ -121,6 +121,9 @@ mod tests {
             // so a `locked` regression in test_json cannot hide behind the SVG
             // lane being the one under repair.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -172,6 +175,9 @@ mod tests {
             // did; these two goldens make that a MEASUREMENT rather than an
             // assumption, on a document where the flag is actually true.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let json1 = read_fixture(&format!("expected/{}.json", name));
@@ -332,6 +338,9 @@ mod tests {
             "reference_instance_transform",
             // LOCKSVG: `common.locked` across the SVG boundary.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             let svg = read_fixture(&format!("svg/{}.svg", name));
@@ -378,6 +387,9 @@ mod tests {
             // `jas:locked`, because the reader would then read a file that
             // never carried it and agree with itself.
             "locked_layer_and_element", "locked_all_kinds",
+            // A Line's width profile (`jas:width-points`) across the SVG
+            // boundary; the three readers parse the same bytes.
+            "line_width_profile",
         ];
         for name in &names {
             assert_svg_roundtrip(name);
@@ -526,6 +538,15 @@ mod tests {
         // `locked: false` in the golden), plus a LOCKED ELEMENT sitting inside
         // an UNLOCKED layer.
         assert_svg_parse("locked_layer_and_element");
+    }
+
+    /// The SVG READ side of a Line's width profile, pinned against a shared
+    /// golden: `codec_field_survival` round-trips each implementation through
+    /// its OWN writer, so a writer and reader that agreed on a misspelling
+    /// would pass it. Here all three readers parse the same bytes.
+    #[test]
+    fn svg_parse_line_width_profile() {
+        assert_svg_parse("line_width_profile");
     }
 
     #[test]

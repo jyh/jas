@@ -277,6 +277,9 @@ class CrossLanguageTest(absltest.TestCase):
             # data-jas-instance-transform on the <use> and round-trips through
             # SVG distinct from the render CTM (SYMBOLS.md §4 / Fork F2).
             "reference_instance_transform",
+            # A Line's width profile (`jas:width-points`) across the SVG
+            # boundary. Mirrors the Rust registration.
+            "line_width_profile",
         ]
         for name in names:
             svg = _read_fixture(f"svg/{name}.svg")
@@ -317,6 +320,7 @@ class CrossLanguageTest(absltest.TestCase):
             # round-trips byte-identically to the Rust-authored golden — the
             # cross-language pin for the generated kind.
             "generated_polygon",
+            "line_width_profile",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -354,6 +358,7 @@ class CrossLanguageTest(absltest.TestCase):
             # CONCEPTS.md 3b: a Generated concept-instance round-trips through
             # the binary codec (concept slot 8, params-json slot 9).
             "generated_polygon",
+            "line_width_profile",
         ]
         for name in names:
             expected = _read_fixture(f"expected/{name}.json")
@@ -693,6 +698,12 @@ class CrossLanguageTest(absltest.TestCase):
         # CompoundShape whose stable id is populated from the id attr,
         # matching Rust's common_attrs_no_name (id but no name).
         _assert_svg_parse(self, "live_compound_id")
+
+    def test_svg_parse_line_width_profile(self):
+        # A Line's width profile rides `jas:width-points`. The three readers
+        # parse the same bytes, so a writer and reader that agreed on a
+        # misspelling cannot pass here as they could the survival gate.
+        _assert_svg_parse(self, "line_width_profile")
 
     def test_svg_parse_symbols_basic(self):
         # The <defs> master (id="m1") imports into doc.symbols (NOT layers);
