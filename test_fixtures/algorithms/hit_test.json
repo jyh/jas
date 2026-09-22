@@ -563,8 +563,13 @@
    "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 2.0, "b": 0.0, "c": 0.0, "d": 2.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
    "args": [], "polygon": [[100.0, 100.0], [110.0, 100.0], [110.0, 110.0], [100.0, 110.0]], "expected": false},
 
+  {"name": "text_path_lasso_encloses_bounds", "function": "element_intersects_polygon",
+   "why": "No transform. The path M0,0 L20,0 L20,10 bounds [0,20]x[0,10] (no stroke, so no inflation); the lasso [-10,30]x[-10,20] ENCLOSES it, so no lasso vertex lies inside the bounds and no edge crosses them -> HIT through the corners-of-the-bounds clause alone. The polygon path's bounding-box arm must list TextPath beside Text: a text-on-path that falls to the segments catch-all has no segments and misses.",
+   "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": null, "locked": false, "visibility": "preview"},
+   "args": [], "polygon": [[-10.0, -10.0], [30.0, -10.0], [30.0, 20.0], [-10.0, 20.0]], "expected": true},
+
   {"name": "text_path_identity_marquee_inside_bounds", "function": "element_intersects_rect",
-   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,20,10); marquee [5,9]x[2,6] inside -> HIT. The reference splits this pair: its bbox arm lists Text|Group|Layer and TextPath is not a Text subclass, so the identity leg falls to a segments-based catch-all that has no segments for it.",
+   "why": "CONTROL PAIR (identity leg). Doc box = local box (0,0,20,10); marquee [5,9]x[2,6] inside -> HIT. The reference's polygon-path bbox arm listed Text|Group|Layer and not TextPath until 2026-09-21, but at 72953869 this pair did not split it: the catch-all it fell to still hits when a marquee corner lies inside the bounds. text_path_lasso_encloses_bounds is the shape that did split it.",
    "element": {"type": "text_path", "d": [{"cmd": "M", "x": 0.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 0.0}, {"cmd": "L", "x": 20.0, "y": 10.0}], "content": "Ab", "start_offset": 0.0, "font_family": "sans-serif", "font_size": 10.0, "fill": {"color": {"space": "rgb", "r": 255.0, "g": 0.0, "b": 0.0, "a": 1.0}, "opacity": 1.0}, "stroke": null, "opacity": 1.0, "transform": {"a": 1.0, "b": 0.0, "c": 0.0, "d": 1.0, "e": 0.0, "f": 0.0}, "locked": false, "visibility": "preview"},
    "args": [5.0, 2.0, 4.0, 4.0], "expected": true},
 

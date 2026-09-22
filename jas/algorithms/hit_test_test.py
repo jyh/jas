@@ -183,3 +183,136 @@ def test_translated_line_intersects_polygon():
     assert element_intersects_polygon(line, sq)
     sq2 = [(0, 0), (10, 0), (10, 10), (0, 10)]
     assert not element_intersects_polygon(line, sq2)
+
+
+# ---- the second dispatch path covers the first's kinds ----
+#
+# `element_intersects_rect` sends a transformed element to the POLYGON
+# path (the inverse image of a marquee is a parallelogram), so every kind
+# must answer alike on both paths. The corpus's control pairs
+# (test_fixtures/algorithms/hit_test.json) pin that for the ports; these
+# pin the arms the reference was missing, each against the answer the
+# ports give (jas_dioxus/src/algorithms/hit_test.rs, JasSwift's
+# HitTest.swift).
+
+from geometry.element import (  # noqa: E402
+    Circle, CompoundOperation, CompoundShape, Ellipse, LineTo, MoveTo,
+    Path, Polygon, TextPath,
+)
+
+
+def _fill():
+    return Fill(color=RgbColor(r=1, g=0, b=0))
+
+
+def _box(x0, y0, x1, y1):
+    return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+
+
+def test_filled_ellipse_enclosed_by_lasso_hits():
+    # The ellipse occupies [4,16]x[6,14]; the lasso contains it. No vertex
+    # of the lasso is inside the ellipse and no segment crosses it, so only
+    # a real ellipse test can see this.
+    e = Ellipse(cx=10, cy=10, rx=6, ry=4, fill=_fill())
+    assert element_intersects_polygon(e, _box(0, 0, 20, 20))
+
+
+def test_unfilled_ellipse_lasso_hits_only_the_outline():
+    e = Ellipse(cx=10, cy=10, rx=6, ry=4, stroke=_stroke())
+    assert element_intersects_polygon(e, _box(14, 8, 18, 12))      # crosses (16,10)
+    assert not element_intersects_polygon(e, _box(8, 9, 12, 11))   # inside the outline
+    assert not element_intersects_polygon(e, _box(30, 30, 40, 40)) # far outside
+
+
+def test_filled_ellipse_identity_marquee_in_bbox_corner_misses():
+    # (4,6)-(5,7) is inside the bounding box and outside the paint:
+    # ((4.5-10)/6)^2 + ((6.5-10)/4)^2 = 0.84 + 0.77 > 1 at its nearest
+    # corner (5,7): 0.69 + 0.56 = 1.25 > 1.
+    e = Ellipse(cx=10, cy=10, rx=6, ry=4, fill=_fill(),
+                transform=Transform())
+    assert not element_intersects_rect(e, 4, 6, 1, 1)
+    assert element_intersects_rect(e, 0, 0, 20, 20)
+
+
+def test_circle_answers_alike_on_both_paths():
+    # The frozen app still builds `Circle`; its polygon path had no arm.
+    c = Circle(cx=10, cy=10, r=5, fill=_fill())
+    assert element_intersects_rect(c, 0, 0, 20, 20)
+    assert element_intersects_polygon(c, _box(0, 0, 20, 20))
+    ring = Circle(cx=10, cy=10, r=5, stroke=_stroke())
+    assert not element_intersects_polygon(ring, _box(9, 9, 11, 11))
+    assert element_intersects_polygon(ring, _box(14, 9, 16, 11))
+
+
+def test_filled_polygon_marquee_wholly_inside_hits():
+    sq = Polygon(points=((0, 0), (20, 0), (20, 20), (0, 20)), fill=_fill())
+    assert element_intersects_rect(sq, 5, 5, 4, 4)
+
+
+def test_filled_path_marquee_wholly_inside_hits():
+    tri = Path(d=(MoveTo(0, 0), LineTo(20, 0), LineTo(20, 10)), fill=_fill())
+    assert element_intersects_rect(tri, 15, 2, 2, 2)
+
+
+def _donut():
+    outer = Rect(x=0, y=0, width=100, height=100)
+    hole = Rect(x=30, y=30, width=40, height=40)
+    return CompoundShape(operation=CompoundOperation.SUBTRACT_FRONT,
+                         operands=(outer, hole))
+
+
+def test_compound_shape_hole_is_not_the_shape():
+    donut = _donut()
+    assert not element_intersects_rect(donut, 40, 40, 20, 20)
+    assert not element_intersects_polygon(donut, _box(40, 40, 60, 60))
+    assert element_intersects_rect(donut, 25, 40, 10, 10)       # crosses the hole's ring
+    assert element_intersects_polygon(donut, _box(-5, 40, 5, 50))  # crosses the outer ring
+
+
+def test_text_path_lasso_enclosing_its_bounds_hits():
+    tp = TextPath(d=(MoveTo(0, 0), LineTo(20, 0), LineTo(20, 10)), content="Ab",
+                  fill=_fill())
+    bx, by, bw, bh = tp.bounds()
+    assert bw > 0 and bh > 0
+    lasso = _box(bx - 10, by - 10, bx + bw + 10, by + bh + 10)
+    assert element_intersects_polygon(tp, lasso)
+
+
+def test_identity_transform_changes_no_answer_over_the_shared_corpus():
+    # The class behind every arm above: an element WITH a transform takes
+    # the polygon path, so a kind either path forgets answers differently
+    # the moment it gains one. The identity moves no point, so each
+    # null-transform element vector in the shared corpus must answer the
+    # same with it. Before these arms, 9 of the corpus's 31 did not.
+    import dataclasses
+    import json
+    import os
+    from geometry.test_json import parse_element_json
+
+    here = os.path.dirname(os.path.abspath(__file__))
+    fixture = os.path.join(here, "..", "..", "test_fixtures", "algorithms",
+                           "hit_test.json")
+    with open(fixture, encoding="utf-8") as f:
+        vectors = json.load(f)
+    checked = 0
+    for v in vectors:
+        if v["function"] not in ("element_intersects_rect",
+                                 "element_intersects_polygon"):
+            continue
+        elem = parse_element_json(v["element"])
+        if elem.transform is not None:
+            continue
+        ident = dataclasses.replace(elem, transform=Transform())
+        if v["function"] == "element_intersects_rect":
+            plain = element_intersects_rect(elem, *v["args"])
+            moved = element_intersects_rect(ident, *v["args"])
+        else:
+            poly = [tuple(p) for p in v["polygon"]]
+            plain = element_intersects_polygon(elem, poly)
+            moved = element_intersects_polygon(ident, poly)
+        assert plain == moved, (
+            f"{v['name']}: {plain} with no transform, {moved} with the identity")
+        checked += 1
+    # The corpus held 31 such vectors when this was written; a floor, not a
+    # pin, so an added vector passes and a lost enumeration does not.
+    assert checked >= 31, f"only {checked} null-transform element vectors reached"
