@@ -748,6 +748,30 @@ class MoveSelectionTest(absltest.TestCase):
             ctrl.select_element(path)
             self.assertEqual(bool(ctrl.document.selection), selects, label)
 
+    def test_a_marquee_reads_the_lock_down_the_path(self):
+        # LOCKINHERIT in the flat (marquee) walk, mirrored from the ports'
+        # `select_flat`: a locked LAYER yields nothing, and a locked
+        # grandchild neither TRIGGERS its group's selection nor JOINS it. The
+        # group-plus-members shape itself is section 20's and is not changed
+        # here.
+        def doc_with(layer_locked=False, locked_member=None):
+            members = tuple(Rect(x=10.0 * i, y=0, width=5, height=5,
+                                 locked=(i == locked_member)) for i in range(2))
+            return Document(layers=(Layer(children=(
+                Rect(x=100, y=100, width=5, height=5), Group(children=members)),
+                locked=layer_locked),))
+        def marquee(doc, x, y, w, h):
+            ctrl = Controller(model=Model(document=doc))
+            ctrl.select_rect(x, y, w, h)
+            return {es.path for es in ctrl.document.selection}
+        self.assertEqual(marquee(doc_with(), 99, 99, 10, 10), {(0, 0)}, "control")
+        self.assertEqual(marquee(doc_with(layer_locked=True), 99, 99, 10, 10), set(),
+                         "a locked layer's child")
+        self.assertEqual(marquee(doc_with(locked_member=0), -1, -1, 7, 7), set(),
+                         "a band touching only a locked member")
+        self.assertNotIn((0, 1, 0), marquee(doc_with(locked_member=0), -1, -1, 20, 7),
+                         "a locked member does not join its group's selection")
+
     def test_an_ancestor_in_the_selection_covers_its_descendants(self):
         # A group selected WHOLE together with one of its members' control
         # points: the group's move carries both members, whole. Each entry is
