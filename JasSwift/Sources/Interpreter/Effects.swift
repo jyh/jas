@@ -1338,7 +1338,13 @@ func applyOverridesToTspanRange(
     _ tspans: [Tspan], charStart: Int, charEnd: Int, overrides: Tspan,
     elem: Element? = nil
 ) -> [Tspan] {
-    guard charStart < charEnd else { return tspans }
+    // An empty, inverted, or OVERRUNNING range passes through unchanged. The
+    // range comes from the live edit session and the tspans from the
+    // document, and `splitTspanRange` preconditions on an overrun, so a
+    // document shortened under a session would trap here. Twin: Rust
+    // `apply_overrides_to_tspan_range_with_elem`.
+    let total = tspans.reduce(0) { $0 + $1.content.unicodeScalars.count }
+    guard charStart < charEnd, charEnd <= total else { return tspans }
     let (split, first, last) = splitTspanRange(tspans,
                                                  charStart: charStart,
                                                  charEnd: charEnd)
