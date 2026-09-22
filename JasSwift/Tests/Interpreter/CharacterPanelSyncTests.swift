@@ -676,6 +676,19 @@ private func storedLeading(_ model: Model) -> Double? {
     #expect(out == base)
 }
 
+/// A range that runs PAST the content passes through unchanged, as an empty
+/// or inverted one does. The range comes from the live edit session and the
+/// tspans from the document, so a document shortened under a session would
+/// otherwise reach `splitTspanRange`'s precondition. Twin: Rust
+/// `apply_overrides_to_a_range_past_the_content_is_passthrough`.
+@Test func applyOverridesToARangePastTheContentIsPassthrough() {
+    let base = [Tspan(id: 0, content: "hi")]
+    let overrides = Tspan(id: 0, content: "", fontWeight: "bold")
+    let out = applyOverridesToTspanRange(base, charStart: 1, charEnd: 5,
+                                          overrides: overrides)
+    #expect(out == base)
+}
+
 @Test func applyOverridesMergesAdjacentEqual() {
     let base = [
         Tspan(id: 0, content: "foo"),

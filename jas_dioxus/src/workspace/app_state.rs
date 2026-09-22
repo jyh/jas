@@ -2244,7 +2244,12 @@ pub(crate) fn apply_overrides_to_tspan_range_with_elem(
     elem: Option<&crate::geometry::element::Element>,
 ) -> Vec<crate::geometry::tspan::Tspan> {
     use crate::geometry::tspan::{merge, merge_tspan_overrides, split_range};
-    if char_start >= char_end {
+    // An empty, inverted, or OVERRUNNING range passes through unchanged. The
+    // range comes from the live edit session and the tspans from the
+    // document, and `split_range` asserts on an overrun, so a document
+    // shortened under a session panicked here (driven 2026-09-22).
+    let total: usize = tspans.iter().map(|t| t.content.chars().count()).sum();
+    if char_start >= char_end || char_end > total {
         return tspans.to_vec();
     }
     let (mut split, first, last) = split_range(tspans, char_start, char_end);
@@ -2715,6 +2720,23 @@ mod pending_override_tests {
         let overrides = Tspan { font_weight: Some("bold".into()),
                                 ..Tspan::default_tspan() };
         let out = apply_overrides_to_tspan_range(&base, 2, 2, &overrides);
+        assert_eq!(out, base);
+    }
+
+    /// A range that runs PAST the content passes through unchanged, as an
+    /// empty or inverted one does. The range comes from the live edit
+    /// session and the tspans from the document; if the document's text is
+    /// shortened under a session, `split_range` would assert. Driven
+    /// 2026-09-22 through a real Type session: a panel write PANICKED at
+    /// `tspan.rs:686`. Twin: Swift
+    /// `applyOverridesToARangePastTheContentIsPassthrough`.
+    #[test]
+    fn apply_overrides_to_a_range_past_the_content_is_passthrough() {
+        use crate::geometry::tspan::Tspan;
+        let base = vec![Tspan { content: "hi".into(), ..Tspan::default_tspan() }];
+        let overrides = Tspan { font_weight: Some("bold".into()),
+                                ..Tspan::default_tspan() };
+        let out = apply_overrides_to_tspan_range(&base, 1, 5, &overrides);
         assert_eq!(out, base);
     }
 
