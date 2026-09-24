@@ -122,8 +122,9 @@ fn declared_bound(widget: &serde_json::Value, key: &str) -> Option<f64> {
 }
 
 /// An option's declared value, written as the reference's `str()` writes it,
-/// so the committed text can be matched against it.
-fn option_text(value: &serde_json::Value) -> Option<String> {
+/// so the committed text can be matched against it. The panel plan's options
+/// channel sends a shell exactly this text, so what it commits back matches.
+pub(crate) fn option_text(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Null => None,
         serde_json::Value::String(s) => Some(s.clone()),
