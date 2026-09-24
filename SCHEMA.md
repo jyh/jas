@@ -665,6 +665,27 @@ recommended for every element.
 Any string not in this table is treated as an **opaque custom widget** —
 rendered as a labeled rectangle in wireframe mode.
 
+### `options` — the list a `select`, `combo_box` or `icon_select` offers
+
+`options` is either an expression (computed options, whose values are the
+strings it yields) or a literal list. Each item of a literal list is exactly
+one of:
+
+| item | meaning |
+|---|---|
+| a map with a `value` | an option: `value` is what a pick writes; `label` is what a person reads (the value's text when absent); `glyph` is an `icon_select`'s collapsed face; `status` is advisory |
+| a bare number or string other than `separator` | an option whose value is the item itself, labelled by its own text |
+| the bare string `separator` | a **divider between groups**, never a value: it is drawn as a rule, cannot be picked, and a commit of the text `separator` matches no option |
+| a map with no `value` | nothing: it cannot be written, so it is not offered |
+
+`separator` has the meaning it has in a menubar's `items`. An option whose
+value is the string `separator` must be written as a map
+(`{value: separator, label: …}`); the bare form is always the divider.
+
+The rule is pinned for every reader by
+`test_fixtures/algorithms/option_rows.json`: the rows a list reads as, and what
+a commit of each text accepts.
+
 ---
 
 ## `pane` — Extra Properties

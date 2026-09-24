@@ -3008,6 +3008,48 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Option rows (SCHEMA.md `options`)
+
+/// The `options` corpus: how a literal list reads, and what a commit of each
+/// text accepts. A bare `separator` is a DIVIDER and never a value. Mirror of
+/// Rust's `algorithm_option_rows_vectors` and the reference's
+/// `test_the_shared_option_rows_corpus`. Before it, this port's views cast
+/// `options` to `[[String: Any]]`, which fails WHOLE on any list holding a bare
+/// item: the blend-mode menu and every numeric preset list drew EMPTY.
+@Test func algorithmOptionRowsVectors() throws {
+    let json = readFixture("algorithms/option_rows.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(vectors.count >= 8, "option_rows.json is short: \(vectors.count)")
+
+    var commits = 0
+    var dividers = 0
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let want = tc["rows"] as! [[String: Any]]
+        let got = WidgetEvent.optionRows(tc["options"])?.map { $0.asJSON() } ?? []
+        #expect(got.count == want.count, "option_rows '\(name)': \(got.count) rows, corpus pins \(want.count)")
+        for (g, w) in zip(got, want) {
+            #expect(NSDictionary(dictionary: g).isEqual(to: w), "option_rows '\(name)': \(g) vs \(w)")
+        }
+        dividers += want.filter { $0["kind"] as? String == "separator" }.count
+        let widget: [String: Any] = ["type": "select", "options": tc["options"]!]
+        for c in tc["commits"] as! [[String: Any]] {
+            let text = c["text"] as! String
+            let accepted = c["accepted"] as! Bool
+            let r = WidgetEvent.parseCommit(widget: widget, text: text)
+            #expect(r.accepted == accepted, "option_rows '\(name)': commit \(text.debugDescription) accepted=\(r.accepted)")
+            if accepted, let v = r.value {
+                #expect(WidgetEvent.optionText(v) == WidgetEvent.optionText(c["value"]!),
+                        "option_rows '\(name)': commit \(text.debugDescription) gave \(v)")
+            }
+            commits += 1
+        }
+    }
+    #expect(commits > 10 && dividers >= 3, "vacuous: \(commits) commits, \(dividers) dividers")
+    #expect(WidgetEvent.optionRows("state.font_families") == nil, "computed options have no rows")
+}
+
 // MARK: - Colour conversion algorithm vectors
 
 /// The colour-conversion corpus: the four primitives every port's Color panel is

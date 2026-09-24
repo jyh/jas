@@ -165,16 +165,14 @@ enum WidgetEvent {
         case "text_input":
             return (true, text)
         case "select", "icon_select":
-            guard let options = widget["options"] as? [Any] else {
+            guard let rows = optionRows(widget["options"]) else {
                 // Computed options: the shell offered what the expression
                 // produced, so the text is the value.
                 return (true, text)
             }
-            for option in options {
-                let value: Any? = option is [String: Any]
-                    ? (option as? [String: Any])?["value"]
-                    : option
-                if let value = value, !(value is NSNull), optionText(value) == text {
+            // A divider is not a row a commit can match (SCHEMA.md, `options`).
+            for row in rows where !row.isDivider {
+                if let value = row.value, optionText(value) == text {
                     return (true, value)
                 }
             }
@@ -194,6 +192,58 @@ enum WidgetEvent {
     private static func declaredBound(_ v: Any?) -> Double? {
         guard let v = v, !(v is NSNull), case .number(let n) = Value.fromJson(v) else { return nil }
         return n
+    }
+
+    /// One row of a literal `options` list (SCHEMA.md, `options`): an option
+    /// with its declared value, or a divider between groups.
+    struct OptionRow {
+        let isDivider: Bool
+        let value: Any?
+        let label: String
+        let glyph: String?
+
+        /// The row in the shared corpus's form (`option_rows.json`).
+        func asJSON() -> [String: Any] {
+            if isDivider { return ["kind": "separator"] }
+            var d: [String: Any] = ["kind": "option", "value": value ?? NSNull(), "label": label]
+            if let g = glyph { d["glyph"] = g }
+            return d
+        }
+    }
+
+    /// A bare list item that is a divider between groups, never a value. The
+    /// same token a menubar's `items` use.
+    static let optionDivider = "separator"
+
+    /// How a literal `options` list reads, or nil for computed options (an
+    /// expression), which have no declared rows. A bare item is an option
+    /// labelled by its own text; the bare string `separator` is a divider; a
+    /// map with no `value` cannot be written and is not offered. Pinned by
+    /// `test_fixtures/algorithms/option_rows.json`.
+    ///
+    /// ⛔ READ AS `[Any]`, NEVER `[[String: Any]]`: that cast fails WHOLE on a
+    /// list holding one bare item, and it drew op_mode's blend-mode menu and
+    /// every numeric preset list empty.
+    static func optionRows(_ options: Any?) -> [OptionRow]? {
+        guard let list = options as? [Any] else { return nil }
+        var rows: [OptionRow] = []
+        for item in list {
+            if let s = item as? String, s == optionDivider {
+                rows.append(OptionRow(isDivider: true, value: nil, label: "", glyph: nil))
+                continue
+            }
+            if let o = item as? [String: Any] {
+                guard let v = o["value"], !(v is NSNull) else { continue }
+                let text = optionText(v)
+                rows.append(OptionRow(isDivider: false, value: v,
+                                      label: o["label"] as? String ?? text,
+                                      glyph: o["glyph"] as? String))
+                continue
+            }
+            if item is NSNull { continue }
+            rows.append(OptionRow(isDivider: false, value: item, label: optionText(item), glyph: nil))
+        }
+        return rows
     }
 
     /// An option value as the reference's `str()` writes it: `True`/`False`

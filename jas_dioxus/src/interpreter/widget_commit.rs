@@ -122,14 +122,54 @@ fn declared_bound(widget: &serde_json::Value, key: &str) -> Option<f64> {
 }
 
 /// An option's declared value, written as the reference's `str()` writes it,
-/// so the committed text can be matched against it.
-fn option_text(value: &serde_json::Value) -> Option<String> {
+/// so the committed text can be matched against it. The panel plan's options
+/// channel sends a shell exactly this text, so what it commits back matches.
+pub(crate) fn option_text(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Null => None,
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Bool(b) => Some(if *b { "True" } else { "False" }.to_string()),
         other => Some(other.to_string()),
     }
+}
+
+/// A bare list item that is a divider between groups, never a value
+/// (SCHEMA.md, `options`). The same token a menubar's `items` use.
+pub const OPTION_DIVIDER: &str = "separator";
+
+/// How a literal `options` list reads (SCHEMA.md, `options`), or `None` for
+/// computed options (an expression), which have no declared rows.
+///
+/// One row per offered item, in order: `{"kind": "option", "value": v,
+/// "label": s}` (plus `"glyph"` when declared) or `{"kind": "separator"}`. A
+/// bare item is an option labelled by its own text; the bare string
+/// `separator` is a divider; a map with no `value` cannot be written and is
+/// not offered. Pinned by `test_fixtures/algorithms/option_rows.json`.
+pub fn option_rows(options: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+    use serde_json::{json, Value};
+    let list = options.as_array()?;
+    let mut rows = vec![];
+    for item in list {
+        if item.as_str() == Some(OPTION_DIVIDER) {
+            rows.push(json!({"kind": "separator"}));
+            continue;
+        }
+        let (value, label, glyph) = match item.as_object() {
+            Some(o) => (
+                o.get("value").unwrap_or(&Value::Null),
+                o.get("label").and_then(Value::as_str),
+                o.get("glyph").and_then(Value::as_str),
+            ),
+            None => (item, None, None),
+        };
+        let Some(text) = option_text(value) else { continue };
+        let mut row = json!({"kind": "option", "value": value, "label": label.map_or(text, str::to_string)});
+        if let Some(g) = glyph {
+            row["glyph"] = Value::String(g.to_string());
+        }
+        rows.push(row);
+    }
+    Some(rows)
 }
 
 /// The text a person committed, parsed by the widget's kind. `None` is a
@@ -148,13 +188,14 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
                 .map(|v| json!(clamp_to_declared(v, lo, hi)))
         }
         "text_input" => Some(json!(text)),
-        "select" | "icon_select" => match widget.get("options") {
-            Some(Value::Array(options)) => options.iter().find_map(|o| {
-                let value = if o.is_object() { o.get("value").unwrap_or(&Value::Null) } else { o };
-                (option_text(value).as_deref() == Some(text)).then(|| value.clone())
+        // A divider is not a row a commit can match (SCHEMA.md, `options`).
+        "select" | "icon_select" => match widget.get("options").and_then(option_rows) {
+            Some(rows) => rows.into_iter().find_map(|r| {
+                (r["kind"] == "option" && option_text(&r["value"]).as_deref() == Some(text))
+                    .then(|| r["value"].clone())
             }),
             // Computed options: the shell offered what the expression produced.
-            _ => Some(json!(text)),
+            None => Some(json!(text)),
         },
         "combo_box" => {
             if text.trim().is_empty() {
