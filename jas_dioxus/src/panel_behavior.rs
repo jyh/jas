@@ -209,6 +209,11 @@ impl EffectHost for EngineHost {
             align_host::apply_align_operation(model, key, &input);
             return true;
         }
+        // W2b-13: the Boolean panel's 14 keys, with the options the store holds.
+        if crate::interpreter::boolean_host::BooleanKey::from_key(key).is_some() {
+            let options = crate::interpreter::boolean_host::options_from_store(store);
+            return crate::interpreter::boolean_host::run(model, key, &options);
+        }
         false
     }
 
@@ -599,45 +604,11 @@ fn press(
               host)
 }
 
-/// Document fixtures shared by this module's arms and the ABI's.
+/// Document fixtures shared by this module's arms and the ABI's. They live in
+/// `document::test_fixture`, which every build compiles, so arms in web-free
+/// modules outside this ffi-gated one can use them too (W2b-13).
 #[cfg(test)]
-pub(crate) mod test_fixture {
-    use crate::document::document::{Document, ElementSelection};
-    use crate::document::model::Model;
-    use crate::geometry::element::{Color, CommonProps, Element, Fill, LayerElem, RectElem};
-
-    pub(crate) fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
-        Element::Rect(RectElem {
-            x, y, width: w, height: h, rx: 0.0, ry: 0.0,
-            fill: Some(Fill::new(Color::BLACK)), stroke: None,
-            common: CommonProps::default(),
-            fill_gradient: None,
-            stroke_gradient: None,
-        })
-    }
-
-    /// One layer holding `rects`, with `selected` (child indices) selected.
-    /// Seeded unbracketed, so the model starts with nothing to undo.
-    pub(crate) fn model_with(rects: Vec<Element>, selected: &[usize]) -> Model {
-        let layer = Element::Layer(LayerElem {
-            children: rects.into_iter().map(std::rc::Rc::new).collect(),
-            isolated_blending: false,
-            knockout_group: false,
-            common: CommonProps { name: Some("L".into()), ..Default::default() },
-        });
-        let selection = selected.iter().map(|&i| ElementSelection::all(vec![0, i])).collect();
-        let doc = Document { layers: vec![layer], selected_layer: 0, selection,
-                             ..Document::default() };
-        let mut model = Model::default();
-        model.set_document_for_test(doc);
-        model
-    }
-
-    /// Two rects at different x and y, both selected unless told otherwise.
-    pub(crate) fn misaligned(selected: &[usize]) -> Model {
-        model_with(vec![rect(10.0, 0.0, 5.0, 5.0), rect(40.0, 20.0, 5.0, 5.0)], selected)
-    }
-}
+pub(crate) use crate::document::test_fixture;
 
 #[cfg(test)]
 mod tests {
@@ -728,42 +699,100 @@ mod tests {
         assert!(!model.in_txn(), "a batch left a transaction open");
     }
 
+    /// ⚠️ Until W2b-13 this arm used the Boolean panel's `boolean_union`, the
+    /// one real key that was unhosted. The engine hosts it now, so the arm
+    /// uses the synthetic panel's `clicks_only`, whose key no host claims.
     #[test]
     fn an_unhosted_key_is_refused_and_the_same_batch_runs_once_a_host_claims_it() {
-        let ev = click("boolean_union_button", false);
+        let ev = parse_event(&json!({"widget": "clicks_only", "event": "click"})).unwrap();
         let mut model = misaligned(&[0, 1]);
         let json = |m: &Model| crate::geometry::test_json::document_to_test_json(m.document());
         let before = json(&model);
-        let refused = run("boolean_panel_content", &ev, &mut model,
-                          &mut EngineHost { artboard_selection: vec![] });
+        let scope = json!({"state": {}, "panel": {}, "active_document": {"selection_count": 2}});
+        let mut run_with = |host: &mut dyn EffectHost, model: &mut Model| {
+            run_widget_behavior("zz_panel", &synthetic_panel(), &ev, &scope,
+                                &mut StateStore::new(), model, &synthetic_actions(),
+                                &json!({}), host)
+        };
+        let refused = run_with(&mut EngineHost { artboard_selection: vec![] }, &mut model);
         assert_eq!(refused, Err(Refusal { class: "PlatformEffect",
-                                          detail: "UnknownEffect:boolean_union".into() }));
+                                          detail: "UnknownEffect:zz_mark".into() }));
         assert_eq!(json(&model), before, "a refused batch changed the document");
         assert!(!model.in_txn(), "a refused batch left a transaction open");
 
         let mut plus = EnginePlus { engine: EngineHost { artboard_selection: vec![] },
-                                    extra: "boolean_union", ran_extra: 0 };
-        let ran = run("boolean_panel_content", &ev, &mut model, &mut plus);
+                                    extra: "zz_mark", ran_extra: 0 };
+        let ran = run_with(&mut plus, &mut model);
         assert!(ran.is_ok(), "the same batch with the key hosted must run: {ran:?}");
         // Once in the pre-flight and once for real.
         assert_eq!(plus.ran_extra, 2);
-        assert!(!model.in_txn(), "the hosted snapshot's transaction was left open");
+        assert!(!model.in_txn(), "the hosted batch left a transaction open");
     }
 
+    /// W2b-13. The ENGINE path reads the Boolean Options from the store. A host
+    /// that ignored them would pass every other arm, since no other arm sets
+    /// one (a mutant doing exactly that survived). The control proves the two
+    /// option settings give different documents, so the equality means
+    /// something.
+    #[test]
+    fn the_engine_host_applies_the_boolean_options_the_store_holds() {
+        use crate::document::controller::{BooleanOptions, Controller};
+        let two = || model_with(vec![rect(0.0, 0.0, 10.0, 10.0),
+                                     rect(5.0, 5.0, 10.0, 10.0)], &[0, 1]);
+        let shape = |m: &Model| {
+            let j = crate::geometry::test_json::document_to_test_json(m.document());
+            j.split("\"id\":\"").map(|p| p.split_once('"').map_or(p, |(_, r)| r)).collect::<Vec<_>>().join("|")
+        };
+        let oracle = |simplify: bool| {
+            let mut m = two();
+            let o = BooleanOptions { apply_simplify_after_op: simplify, simplify_precision: 5.0,
+                                     ..Default::default() };
+            m.with_txn(|m| {
+                Controller::apply_destructive_boolean(m, "union", &o);
+                if simplify { Controller::simplify_selection(m, o.simplify_precision); }
+            });
+            shape(&m)
+        };
+        assert_ne!(oracle(true), oracle(false), "the options would be unobservable");
+
+        let mut model = two();
+        let mut store = StateStore::new();
+        store.set("boolean_apply_simplify_after_op", json!(true));
+        store.set("boolean_simplify_precision", json!(5.0));
+        let mut host = EngineHost { artboard_selection: vec![] };
+        assert!(host.run("snapshot", &Value::Null, &mut store, Some(&mut model)));
+        assert!(host.run("boolean_union", &Value::Null, &mut store, Some(&mut model)));
+        model.commit_txn();
+        assert_eq!(shape(&model), oracle(true));
+    }
+
+    /// W2b-13. boolean.yaml gives the Union button two click behaviors split
+    /// on `event.alt`. The engine hosts both now, so the routing is witnessed
+    /// by WHAT HAPPENS: a plain click unions the two squares into one path,
+    /// and an alt click makes one live compound shape. A runner that ignored
+    /// `condition` would run both behaviors.
     #[test]
     fn a_behavior_condition_routes_on_the_event_modifiers() {
-        // boolean.yaml gives the Union button two click behaviors, split on
-        // `event.alt`. Both are unhosted, so the refusal NAMES the one that
-        // was chosen; a runner that ignored `condition` would run both and
-        // name the first.
-        let mut model = misaligned(&[0, 1]);
-        let host = &mut EngineHost { artboard_selection: vec![] };
-        let plain = run("boolean_panel_content", &click("boolean_union_button", false),
-                        &mut model, &mut *host);
-        let alt = run("boolean_panel_content", &click("boolean_union_button", true),
-                      &mut model, &mut *host);
-        assert_eq!(plain.unwrap_err().detail, "UnknownEffect:boolean_union");
-        assert_eq!(alt.unwrap_err().detail, "UnknownEffect:boolean_union_compound");
+        use crate::geometry::element::Element;
+        let kids = |m: &Model| match &m.document().layers[0] {
+            Element::Layer(l) => l.children.iter().map(|c| (**c).clone()).collect::<Vec<_>>(),
+            _ => vec![],
+        };
+        let overlapping = || model_with(vec![rect(0.0, 0.0, 10.0, 10.0),
+                                             rect(5.0, 5.0, 10.0, 10.0)], &[0, 1]);
+        for (alt, want_live) in [(false, 0usize), (true, 1)] {
+            let mut model = overlapping();
+            let r = run("boolean_panel_content", &click("boolean_union_button", alt),
+                        &mut model, &mut EngineHost { artboard_selection: vec![] });
+            assert!(r.is_ok(), "alt={alt}: {r:?}");
+            let k = kids(&model);
+            assert_eq!(k.len(), 1, "alt={alt}: two squares become one element: {k:?}");
+            let live = k.iter().filter(|e| matches!(e, Element::Live(_))).count();
+            assert_eq!(live, want_live, "alt={alt}: the wrong behavior ran");
+            assert!(!model.in_txn(), "alt={alt}: a transaction was left open");
+            model.undo();
+            assert_eq!(kids(&model).len(), 2, "alt={alt}: one undo restores both squares");
+        }
     }
 
     #[test]
@@ -793,7 +822,11 @@ mod tests {
         assert!(host.run("align_left", &json!(true), &mut store, Some(&mut model)));
         model.commit_txn();
         assert!(model.can_undo(), "the align move landed in the transaction");
-        for declined in ["boolean_union", "set", "doc.snapshot", "zz_planted"] {
+        // `boolean_union` sat in this list until W2b-13 hosted it (and the arm
+        // below shows it is claimed). `make_compound_shape` is a Boolean MENU
+        // key no button reaches, unhosted by design (census 2b-iii §3a).
+        assert!(host.run("boolean_union", &Value::Null, &mut store, Some(&mut model)));
+        for declined in ["make_compound_shape", "set", "doc.snapshot", "zz_planted"] {
             assert!(!host.run(declined, &Value::Null, &mut store, Some(&mut model)),
                     "the engine host claimed {declined}");
             assert_eq!(host.refuse(declined, &Value::Null), None,

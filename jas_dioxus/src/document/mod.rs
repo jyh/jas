@@ -21,3 +21,5 @@ pub mod print_preferences;
 // lib build its `wrap_at` is dead code and said so in two warnings.
 #[cfg(test)]
 pub mod selection_summary_seed_tests;
+#[cfg(test)]
+pub(crate) mod test_fixture;

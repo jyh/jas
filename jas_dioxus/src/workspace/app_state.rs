@@ -1720,18 +1720,21 @@ impl AppState {
         }
     }
 
-    /// Expand every selected compound shape to static polygons.
-    /// See `Controller::expand_compound_shape`.
+    /// Expand every selected compound shape to static polygons, through the
+    /// shared `boolean_host` the engine also calls (W2b-13).
     pub(crate) fn apply_expand_compound_shape(&mut self) {
         if let Some(tab) = self.tab_mut() {
-            crate::document::controller::Controller::expand_compound_shape(&mut tab.model);
+            crate::interpreter::boolean_host::run(
+                &mut tab.model, "expand_compound_shape",
+                &crate::document::controller::BooleanOptions::default(),
+            );
         }
     }
 
-    /// Apply one of the nine destructive boolean operations.
-    /// See `Controller::apply_destructive_boolean`. Reads options
-    /// from `self.boolean_panel` (edited by the Boolean Options
-    /// dialog).
+    /// Apply one of the nine destructive boolean operations, through the
+    /// shared `boolean_host` (W2b-13). Reads options from `self.boolean_panel`
+    /// (edited by the Boolean Options dialog); the engine reads the same five
+    /// from its store.
     pub(crate) fn apply_boolean_operation(&mut self, op: &str) {
         let options = crate::document::controller::BooleanOptions {
             precision: self.boolean_panel.precision,
@@ -1740,46 +1743,28 @@ impl AppState {
             apply_simplify_after_op: self.boolean_panel.apply_simplify_after_op,
             simplify_precision: self.boolean_panel.simplify_precision,
         };
-        let apply_simplify = options.apply_simplify_after_op;
-        let precision = options.simplify_precision;
+        let key = format!("boolean_{op}");
         if let Some(tab) = self.tab_mut() {
             // One transaction wraps the boolean op and its optional post-op
             // auto-simplify so the pair is a single undo entry — one journaled
-            // Transaction (OP_LOG.md §5). apply_destructive_boolean's
-            // edit_document and simplify_selection's edit_document both join
-            // this with_txn rather than self-bracketing.
+            // Transaction (OP_LOG.md §5). The host never brackets (S7), so both
+            // of its edits join this one.
             tab.model.with_txn(|m| {
-                crate::document::controller::Controller::apply_destructive_boolean(
-                    m, op, &options,
-                );
-                // Post-op auto-simplify — same code path as Object → Simplify.
-                // Runs on the new selection (boolean op leaves output paths
-                // selected) so curve recovery is consistent with the menu
-                // command. No-op when the boolean op left no selection.
-                if apply_simplify {
-                    crate::document::controller::Controller::simplify_selection(
-                        m, precision,
-                    );
-                }
+                crate::interpreter::boolean_host::run(m, &key, &options);
             });
         }
     }
 
     /// Create a compound shape from the current selection using the
     /// named operation (one of union / subtract_front / intersection
-    /// / exclude). Fired by Alt+click on the four Shape Mode buttons.
+    /// / exclude), through the shared `boolean_host` (W2b-13). Fired by
+    /// Alt+click on the four Shape Mode buttons.
     pub(crate) fn apply_compound_creation(&mut self, op_name: &str) {
-        use crate::geometry::live::CompoundOperation;
-        let op = match op_name {
-            "union" => CompoundOperation::Union,
-            "subtract_front" => CompoundOperation::SubtractFront,
-            "intersection" => CompoundOperation::Intersection,
-            "exclude" => CompoundOperation::Exclude,
-            _ => return,
-        };
+        let key = format!("boolean_{op_name}_compound");
         if let Some(tab) = self.tab_mut() {
-            crate::document::controller::Controller::make_compound_shape_with_op(
-                &mut tab.model, op,
+            crate::interpreter::boolean_host::run(
+                &mut tab.model, &key,
+                &crate::document::controller::BooleanOptions::default(),
             );
         }
     }

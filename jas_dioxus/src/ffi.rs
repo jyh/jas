@@ -3022,31 +3022,43 @@ mod tests {
     }
 
     /// **Q5.** A behavior that reaches an effect the engine cannot run is
-    /// refused by name, and NO effect of its batch ran: not the snapshot that
-    /// opens it, not the `set` that closes it.
+    /// refused by name, and NO effect of its batch ran.
+    ///
+    /// ⚠️ Until W2b-13 this arm used the Boolean panel's Union button, and it
+    /// also showed that the batch's `snapshot` and `set` never ran. The engine
+    /// hosts the Boolean keys now, so a real unhosted widget is Stroke's
+    /// `stk_swap_arrowheads`: `swap_panel_state` (unhosted) comes BEFORE two
+    /// `swap` writes to globals the engine store holds. The globals are seeded
+    /// DIFFERENT from each other, so a swap that ran would show. When
+    /// `swap_panel_state` is hosted, this arm must move again. The modifier
+    /// routing it also carried is `a_behavior_condition_routes_on_the_event_modifiers`.
     #[test]
     fn panel_behavior_refuses_an_unhosted_effect_before_any_effect_runs() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0, 1]));
-        let _ = plan_of(e, BOOLEAN, 228, 0);
+        let _ = plan_of(e, "stroke_panel_content", 228, 0);
+        {
+            let eng = engine_of(e);
+            let mut st = eng.store.borrow_mut();
+            st.set("stroke_start_arrowhead", serde_json::json!("simple_arrow"));
+            st.set("stroke_end_arrowhead", serde_json::json!("none"));
+        }
         let before = doc_json(e);
         let store_before = engine_of(e).store.borrow().eval_context();
-        let (reply, err) = behave(e, BOOLEAN,
-                                  r#"{"widget":"boolean_union_button","event":"click"}"#);
+        let (reply, err) = behave(e, "stroke_panel_content",
+                                  r#"{"widget":"stk_swap_arrowheads","event":"click"}"#);
         assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:boolean_union"));
+        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:swap_panel_state"));
         assert_eq!(doc_json(e), before);
         engine_of(e).with_model(|m| {
-            assert!(!m.in_txn(), "the refused batch's snapshot ran on the live model");
+            assert!(!m.in_txn(), "the refused batch left a transaction open");
             assert!(!m.can_undo());
         });
         assert_eq!(engine_of(e).store.borrow().eval_context(), store_before,
-                   "the refused batch's `set` ran on the live store");
-        // The modifier routes to the other declared behavior, and it is named.
-        let (_, err) = behave(e, BOOLEAN,
-            r#"{"widget":"boolean_union_button","event":"click","alt":true}"#);
-        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:boolean_union_compound"));
+                   "a `swap` of the refused batch ran on the live store");
+        assert_eq!(engine_of(e).store.borrow().get("stroke_end_arrowhead"),
+                   &serde_json::json!("none"), "the control: the seeded values differ");
         unsafe { jas_engine_free(e) };
     }
 
