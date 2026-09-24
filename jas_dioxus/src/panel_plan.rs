@@ -36,8 +36,13 @@
 //!          "values": {"<bind_values key>": "<resolved value>", ...},
 //!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
 //!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...},
-//!          "display": {"<bind key>": "<the core-formatted display string>", ...}}
+//!          "display": {"<bind key>": "<the core-formatted display string>", ...},
+//!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
+//!                             | {"kind": "separator"}, ...]}
 //! ```
+//!
+//! `options` is the node's declared list with its dividers told apart from its
+//! values (W-b, see [`options_of`]); `null` when the node declares none.
 //!
 //! # What a person reads (W2-5a)
 //!
@@ -185,6 +190,93 @@ fn display_of(node: &Value, values: &Map<String, Value>) -> Map<String, Value> {
     out
 }
 
+/// A node's declared `options`, as a shell may draw them (W-b), or `null`
+/// when the node declares no list.
+///
+/// ⛔ `options` IS A RENDERING SCRIPT, NOT A VALUE LIST. It interleaves what a
+/// person can pick with how the menu is grouped: `op_mode` puts five bare
+/// `separator` strings among its sixteen values. A shell handed the raw list
+/// would offer "separator" as a blend mode, and nothing in the shell can tell
+/// a divider from a value without a jas-specific rule. So each row says which
+/// it is, by `kind`, as `jas_menu_structure` already does for the menubar:
+///
+/// ```text
+/// {"kind": "option", "value": "<the text to commit>", "label": "...",
+///  "selected": <bool>[, "glyph": "..."]}
+/// {"kind": "separator"}
+/// ```
+///
+/// `value` is `widget_commit::option_text`, the text the engine's commit parse
+/// matches, so what a shell sends back is accepted by construction. `label` is
+/// the option's own, else its value text, as the web port shows it. `selected`
+/// is the core's answer to "which row is the bound value": the value and the
+/// bound row are compared as `bind_values` renders both, so a store holding
+/// `100` or `100.0` selects the same row. At most one row is selected, the
+/// first match, as the commit parse picks the first match. A bound value no row
+/// carries selects NOTHING: a free `combo_box` entry, or a dialog's
+/// display-only "Custom", is not shown as the first row.
+///
+/// ⚠️ An UNRESOLVED bind renders as `""`, so it selects an option whose value
+/// is `""` (`pg_bullets`' "None", `ch_language`'s "(none)"). The web port does
+/// the same (`render_select` shows any non-string as `""`), and it is the
+/// reading those rows were written for.
+///
+/// An item the engine could never accept back (no `value`, or a list or map
+/// value), or one carrying a template, is withheld as `options[<i>]` and not
+/// sent: a row a shell can show but never commit is a degenerate control.
+///
+/// ⚠️ Not carried: an option's `status` (`pending_stylus`, 18 rows in the
+/// brush dialogs). No port acts on it today.
+fn options_of(
+    node: &Value,
+    values: &Map<String, Value>,
+    path: &[i64],
+    withheld: &mut Vec<Value>,
+) -> Value {
+    use crate::interpreter::expr_types::Value as EVal;
+    use crate::interpreter::widget_commit::option_text;
+
+    let Some(list) = node.get("options").and_then(Value::as_array) else { return Value::Null };
+    let bound = values.get("bind.value").and_then(Value::as_str);
+    let mut picked = false;
+    let mut rows = vec![];
+    for (i, item) in list.iter().enumerate() {
+        if item.as_str() == Some("separator") {
+            rows.push(json!({"kind": "separator"}));
+            continue;
+        }
+        let (value, label, glyph) = match item.as_object() {
+            Some(o) => (
+                o.get("value").unwrap_or(&Value::Null),
+                o.get("label").and_then(Value::as_str),
+                o.get("glyph").and_then(Value::as_str),
+            ),
+            None => (item, None, None),
+        };
+        let text = match value {
+            Value::Array(_) | Value::Object(_) => None,
+            v => option_text(v),
+        };
+        let Some(text) = text else {
+            withheld.push(json!({"path": path, "key": format!("options[{i}]")}));
+            continue;
+        };
+        let label = label.map(str::to_string).unwrap_or_else(|| text.clone());
+        if [Some(text.as_str()), Some(label.as_str()), glyph].iter().flatten().any(|s| s.contains("{{")) {
+            withheld.push(json!({"path": path, "key": format!("options[{i}]")}));
+            continue;
+        }
+        let selected = !picked && bound == Some(EVal::from_json(value).to_string_coerce().as_str());
+        picked |= selected;
+        let mut row = json!({"kind": "option", "value": text, "label": label, "selected": selected});
+        if let Some(g) = glyph {
+            row["glyph"] = Value::String(g.to_string());
+        }
+        rows.push(row);
+    }
+    Value::Array(rows)
+}
+
 /// The icon names an entry displays: its static `icon`, an `icon` node's
 /// `name`, and the resolved `bind.icon` row.
 fn icon_names(entry: &Value, out: &mut Vec<String>) {
@@ -214,6 +306,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     let display = display_of(&item.node, &values);
+    let options = options_of(&item.node, &values, &item.path, withheld);
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
@@ -223,6 +316,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
         "static": st,
         "flags": flags_of(&item.node),
         "display": display,
+        "options": options,
     })
 }
 
@@ -1590,6 +1684,259 @@ mod tests {
         // The control: the same node DOES carry the resolved value, so the
         // empty display above is a scoping decision and not a dead walk.
         assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("12"), "{plan}");
+    }
+
+    // ── The options channel (W-b) ─────────────────────────────────────
+
+    /// Every entry the plan builds for `panel`, in all three arrays, paired
+    /// with the node it was built from.
+    fn entries_with_nodes(panel: &Value, ctx: &Value) -> Vec<(Value, Value)> {
+        let (plan, _) = panel_plan(panel, 228, 0, ctx, &Value::Null);
+        let mut out = vec![];
+        for list in checks::LISTS {
+            for e in plan[list].as_array().into_iter().flatten() {
+                let node = checks::node_at(panel, &e["path"]).cloned().unwrap_or(Value::Null);
+                out.push((e.clone(), node));
+            }
+        }
+        out
+    }
+
+    fn option_rows(e: &Value) -> Vec<&Value> {
+        e["options"].as_array().into_iter().flatten().filter(|r| r["kind"] == "option").collect()
+    }
+
+    /// ⛔ THE TRAP THIS CHANNEL EXISTS TO CLOSE: `options` is a RENDERING
+    /// SCRIPT. `op_mode` interleaves 16 values with bare `separator` strings,
+    /// and a shell handed the list verbatim puts "separator" on the blend-mode
+    /// menu, where picking it commits the string to `panel.blend_mode`.
+    ///
+    /// Both expectations are DERIVED from the node, by a route the channel does
+    /// not use (a Python-style `isinstance` split of the raw list), never typed.
+    /// The node's own description is the third witness: "grouped into six
+    /// sections by separator" is SIX SECTIONS, so FIVE dividers.
+    #[test]
+    fn op_mode_carries_its_values_and_its_dividers_as_different_kinds() {
+        let ws = Workspace::load().expect("workspace");
+        let mut found = 0usize;
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            for (e, node) in entries_with_nodes(spec, &engine_scope()) {
+                if e["id"] != "op_mode" {
+                    continue;
+                }
+                found += 1;
+                let raw = node["options"].as_array().expect("op_mode declares options");
+                let want_values = raw.iter().filter(|o| o.is_object()).count();
+                let want_dividers = raw.iter().filter(|o| o.as_str() == Some("separator")).count();
+                let rows = e["options"].as_array().unwrap_or_else(|| panic!("no options channel: {e}"));
+                assert_eq!(option_rows(&e).len(), want_values, "{e}");
+                assert_eq!(rows.iter().filter(|r| r["kind"] == "separator").count(), want_dividers, "{e}");
+                assert_eq!(rows.len(), raw.len(), "a row per declared item, in order: {e}");
+                assert!(
+                    option_rows(&e).iter().all(|r| r["value"] != "separator"),
+                    "a divider reached the shell as a value: {e}"
+                );
+                // The description's own count, read as SECTIONS.
+                let desc = node["description"].as_str().unwrap_or("");
+                assert!(desc.contains("six sections"), "the witness moved: {desc}");
+                assert_eq!(want_dividers + 1, 6, "six sections take five dividers");
+            }
+        }
+        assert!(found > 0, "vacuous: op_mode was not reached");
+    }
+
+    /// THE CONTRACT A SHELL RELIES ON: what it sends back is what the engine
+    /// accepts. For EVERY option row on EVERY panel, `parse_commit` on the
+    /// row's `value` returns the node's declared value (numbers compared as
+    /// numbers, since a `combo_box` parses to a float).
+    ///
+    /// The oracle is `widget_commit::parse_commit`, the engine's own door, not
+    /// anything in this module.
+    #[test]
+    fn every_option_value_round_trips_through_the_engines_commit_parse() {
+        use crate::interpreter::widget_commit::parse_commit;
+
+        let ws = Workspace::load().expect("workspace");
+        let (mut compared, mut declared) = (0usize, 0usize);
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            for (e, node) in entries_with_nodes(spec, &engine_scope()) {
+                let Some(raw) = node.get("options").and_then(Value::as_array) else {
+                    assert_eq!(e["options"], Value::Null, "no declared list, yet a channel: {e}");
+                    continue;
+                };
+                let decl: Vec<&Value> = raw
+                    .iter()
+                    .filter(|o| o.as_str() != Some("separator"))
+                    .map(|o| if o.is_object() { &o["value"] } else { o })
+                    .collect();
+                declared += decl.len();
+                let rows = option_rows(&e);
+                assert_eq!(rows.len(), decl.len(), "{panel} {}: {e}", e["id"]);
+                for (r, want) in rows.iter().zip(decl) {
+                    let text = r["value"].as_str().unwrap_or_else(|| panic!("value is a string: {r}"));
+                    let got = parse_commit(&node, text)
+                        .unwrap_or_else(|| panic!("{panel} {}: the engine REFUSES {text:?}", e["id"]));
+                    let same = match (got.as_f64(), want.as_f64()) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => &got == want,
+                    };
+                    assert!(same, "{panel} {}: {text:?} commits {got}, declared {want}", e["id"]);
+                    compared += 1;
+                }
+            }
+        }
+        // The population is DERIVED from the workspace, and must be the whole
+        // of it: a walk that skipped a list would pass the per-row check.
+        assert_eq!(compared, declared, "every declared option was compared");
+        assert!(compared > 100, "vacuous: only {compared} options compared");
+    }
+
+    /// `selected` is the CORE's answer to "which row is the bound value", so
+    /// the shell never compares strings. A store seeds a number as its
+    /// producer stores it (Int or Float), and both must select the same row.
+    #[test]
+    fn exactly_the_row_matching_the_bound_value_is_selected() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "select", "id": "mode", "bind": {"value": "panel.mode"},
+             "options": [{"value": "normal", "label": "Normal"}, "separator",
+                         {"value": "darken", "label": "Darken"}, {"value": "multiply", "label": "Multiply"}]},
+            {"type": "combo_box", "id": "scale", "bind": {"value": "panel.scale"},
+             "options": [{"value": 50, "label": "50%"}, {"value": 100, "label": "100%"}]},
+            {"type": "combo_box", "id": "angle", "bind": {"value": "panel.angle"}, "options": [-90, 0, 90]},
+        ]}});
+        let selected = |ctx: Value| -> Vec<(String, Vec<String>)> {
+            entries_with_nodes(&panel, &ctx)
+                .iter()
+                .map(|(e, _)| {
+                    let sel = option_rows(e)
+                        .iter()
+                        .filter(|r| r["selected"] == true)
+                        .map(|r| r["value"].as_str().unwrap_or("").to_string())
+                        .collect();
+                    (e["id"].as_str().unwrap_or("").to_string(), sel)
+                })
+                .collect()
+        };
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        for scale in [json!(100), json!(100.0)] {
+            let got = selected(json!({"panel": {"mode": "multiply", "scale": scale, "angle": -90}}));
+            assert_eq!(
+                got,
+                vec![("mode".into(), s(&["multiply"])), ("scale".into(), s(&["100"])), ("angle".into(), s(&["-90"]))],
+                "scale seeded as {scale}"
+            );
+        }
+        // A value no row carries selects NOTHING (a free combo entry, or the
+        // dialogs' display-only "Custom"): never the first row by default.
+        let got = selected(json!({"panel": {"mode": "overlay", "scale": 33, "angle": 45}}));
+        assert!(got.iter().all(|(_, v)| v.is_empty()), "{got:?}");
+        // Every option row carries the flag, false included, so a consumer
+        // reading it by name never throws.
+        for (e, _) in entries_with_nodes(&panel, &json!({"panel": {}})) {
+            for r in option_rows(&e) {
+                assert_eq!(r["selected"], false, "{r}");
+            }
+        }
+    }
+
+    /// The two shapes no shipped list has, so no workspace arm can see them.
+    ///
+    /// (1) An option DECLARED as a float with an integer value (`2.0`): its
+    /// commit text is `"2.0"` and the bound value renders `"2"`. Selection
+    /// compares the value as `bind_values` renders it, so the row is selected;
+    /// a comparison against the commit text would select nothing here and agree
+    /// with the correct one on every shipped option, all of them integers.
+    /// (2) Two rows with one value: only the FIRST is selected, as the commit
+    /// parse picks the first match.
+    #[test]
+    fn a_float_declared_option_selects_and_a_duplicate_selects_only_the_first() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "combo_box", "id": "f", "bind": {"value": "panel.f"}, "options": [1.0, 2.0]},
+            {"type": "select", "id": "d", "bind": {"value": "panel.d"},
+             "options": [{"value": "a", "label": "A"}, {"value": "a", "label": "A again"}]},
+        ]}});
+        let got: Vec<Vec<bool>> = entries_with_nodes(&panel, &json!({"panel": {"f": 2, "d": "a"}}))
+            .iter()
+            .map(|(e, _)| option_rows(e).iter().map(|r| r["selected"] == true).collect())
+            .collect();
+        assert_eq!(got, vec![vec![false, true], vec![true, false]]);
+        // The control: the float's commit text really does differ from the
+        // bound rendering, so (1) exercised the difference.
+        let (e, _) = &entries_with_nodes(&panel, &json!({"panel": {}}))[0];
+        assert_eq!(option_rows(e)[1]["value"], "2.0", "{e}");
+    }
+
+    /// Label, glyph and a bare value's fallback label, each as the web port
+    /// shows it (`render_select_option`: `label`, else the value).
+    #[test]
+    fn an_option_carries_its_label_and_glyph_and_a_bare_value_labels_itself() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "icon_select", "id": "bul", "bind": {"value": "panel.b"},
+             "options": [{"value": "", "glyph": "—", "label": "None"}, {"value": "disc", "glyph": "•", "label": "Disc"}]},
+            {"type": "combo_box", "id": "ang", "bind": {"value": "panel.a"}, "options": [-45, 0]},
+            {"type": "select", "id": "nolabel", "bind": {"value": "panel.n"}, "options": [{"value": "x"}]},
+        ]}});
+        let got: Vec<Value> = entries_with_nodes(&panel, &json!({"panel": {}}))
+            .into_iter()
+            .map(|(e, _)| e["options"].clone())
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                // Unbound renders as "", so the "" row IS selected, as on the web
+                // port (`render_select` shows a non-string as "").
+                json!([{"kind": "option", "value": "", "label": "None", "glyph": "—", "selected": true},
+                       {"kind": "option", "value": "disc", "label": "Disc", "glyph": "•", "selected": false}]),
+                json!([{"kind": "option", "value": "-45", "label": "-45", "selected": false},
+                       {"kind": "option", "value": "0", "label": "0", "selected": false}]),
+                json!([{"kind": "option", "value": "x", "label": "x", "selected": false}]),
+            ]
+        );
+    }
+
+    /// An item the engine could never accept back, or that carries a template,
+    /// is WITHHELD BY NAME and not sent: a row the shell could show but never
+    /// commit is the degenerate control this channel exists to prevent.
+    #[test]
+    fn an_uncommittable_or_templated_option_is_withheld_by_index() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "select", "id": "s", "bind": {"value": "panel.s"},
+             "options": [{"label": "no value"}, {"value": "a", "label": "{{panel.x}}"},
+                         {"value": {"nested": 1}, "label": "object"}, {"value": "ok", "label": "OK"}]},
+        ]}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null);
+        let e = &plan["leaves"][0];
+        assert_eq!(option_rows(e).len(), 1, "{e}");
+        assert_eq!(e["options"][0]["value"], "ok", "{e}");
+        let keys: Vec<&str> = plan["withheld"].as_array().unwrap().iter().filter_map(|w| w["key"].as_str()).collect();
+        assert_eq!(keys, vec!["options[0]", "options[1]", "options[2]"], "{plan}");
+        assert!(checks::nothing_interpretable(&plan.to_string()).is_ok(), "{plan}");
+    }
+
+    /// ⛔ `lp_filter_button` is a `dropdown` with `items` and a `behavior`: a
+    /// MENU BUTTON wearing a selector's kind name, and it declares no
+    /// `options`. The channel is `null` for it, never an empty list — an
+    /// empty list is the degenerate control one disguise further on.
+    #[test]
+    fn a_node_with_no_declared_options_carries_null_never_an_empty_list() {
+        let ws = Workspace::load().expect("workspace");
+        let mut reached = BTreeSet::new();
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            for (e, node) in entries_with_nodes(spec, &engine_scope()) {
+                assert!(e.get("options").is_some(), "{panel}: an entry lacks the key: {e}");
+                if node.get("options").is_none() {
+                    assert_eq!(e["options"], Value::Null, "{panel}: {e}");
+                }
+                if ["lp_filter_button", "grad_stop_location_combo"].contains(&e["id"].as_str().unwrap_or("")) {
+                    assert_eq!(e["options"], Value::Null, "{e}");
+                    reached.insert(e["id"].as_str().unwrap_or("").to_string());
+                }
+            }
+        }
+        assert_eq!(reached.len(), 2, "vacuous: reached {reached:?}");
     }
 
 }
