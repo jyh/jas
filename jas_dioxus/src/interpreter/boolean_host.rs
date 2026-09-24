@@ -104,9 +104,7 @@ pub fn run(model: &mut Model, key: &str, options: &BooleanOptions) -> bool {
     true
 }
 
-// The fixtures are `panel_behavior::test_fixture`'s, and that module is
-// ffi-gated, so these arms run in the web-free (CI's ffi) lane.
-#[cfg(all(test, feature = "ffi"))]
+#[cfg(test)]
 mod tests {
     use serde_json::json;
 
@@ -115,7 +113,7 @@ mod tests {
     use crate::document::model::Model;
     use crate::geometry::element::Element;
     use crate::interpreter::state_store::StateStore;
-    use crate::panel_behavior::test_fixture::{model_with, rect};
+    use crate::document::test_fixture::{model_with, rect};
 
     /// Two OVERLAPPING squares, both selected, so every operation has
     /// something to do.
