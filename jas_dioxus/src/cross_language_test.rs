@@ -754,6 +754,40 @@ mod tests {
         }
     }
 
+    /// The `options` corpus (SCHEMA.md, `options`): how a literal list reads
+    /// and what a commit of each text accepts. A bare `separator` is a divider
+    /// and NEVER a value. Authored from the schema text, because every reader
+    /// accepted `separator` as a committed value when it was written.
+    /// Mirrored by Swift's `algorithmOptionRowsVectors` and the reference's
+    /// `test_the_shared_option_rows_corpus`.
+    #[test]
+    fn algorithm_option_rows_vectors() {
+        use crate::interpreter::widget_commit::{option_rows, parse_commit};
+        let json_str = read_fixture("algorithms/option_rows.json");
+        let doc: serde_json::Value =
+            serde_json::from_str(&json_str).expect("Failed to parse option_rows.json");
+        let vectors = doc["vectors"].as_array().expect("option_rows.json has no vectors");
+        assert!(vectors.len() >= 8, "option_rows.json is short: {}", vectors.len());
+
+        let (mut commits, mut dividers) = (0usize, 0usize);
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            let rows = option_rows(&tc["options"]).unwrap_or_else(|| panic!("{name}: no rows"));
+            assert_eq!(serde_json::Value::Array(rows), tc["rows"], "option_rows '{name}'");
+            dividers += tc["rows"].as_array().unwrap().iter().filter(|r| r["kind"] == "separator").count();
+            let widget = serde_json::json!({"type": "select", "options": tc["options"]});
+            for c in tc["commits"].as_array().unwrap() {
+                let text = c["text"].as_str().unwrap();
+                let want = if c["accepted"] == true { Some(c["value"].clone()) } else { None };
+                assert_eq!(parse_commit(&widget, text), want, "option_rows '{name}': commit {text:?}");
+                commits += 1;
+            }
+        }
+        assert!(commits > 10 && dividers >= 3, "vacuous: {commits} commits, {dividers} dividers");
+        // Computed options have no declared rows.
+        assert_eq!(option_rows(&serde_json::json!("state.font_families")), None);
+    }
+
     /// The colour-conversion corpus: the four primitives every port's Color
     /// panel is built out of, goldens derived from the spec formulas rather than
     /// captured from a port.

@@ -1,0 +1,348 @@
+{
+  "_doc": [
+    "How a literal `options` list reads (SCHEMA.md, `options`), and what a",
+    "commit of each text accepts. Authored FROM THE SCHEMA TEXT, not by running",
+    "a reader: when this fixture was written the reference accepted the text",
+    "`separator` as a committed value, which is the defect it pins.",
+    "",
+    "rows: one per offered item, in order. An option row is",
+    "{kind: option, value: <the declared value, JSON-typed>, label: <string>}",
+    "plus `glyph` when the item declares one; a divider row is {kind: separator}.",
+    "A bare item's label is its value's text as the reference's str() writes it.",
+    "",
+    "commits: `parse_commit` on a `select` carrying these options:",
+    "{text, accepted, value}; `value` is null when refused."
+  ],
+  "vectors": [
+    {
+      "name": "dividers_between_values",
+      "options": [
+        {
+          "value": "normal",
+          "label": "Normal"
+        },
+        "separator",
+        {
+          "value": "darken",
+          "label": "Darken"
+        },
+        {
+          "value": "multiply",
+          "label": "Multiply"
+        },
+        "separator",
+        {
+          "value": "screen",
+          "label": "Screen"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "normal",
+          "label": "Normal"
+        },
+        {
+          "kind": "separator"
+        },
+        {
+          "kind": "option",
+          "value": "darken",
+          "label": "Darken"
+        },
+        {
+          "kind": "option",
+          "value": "multiply",
+          "label": "Multiply"
+        },
+        {
+          "kind": "separator"
+        },
+        {
+          "kind": "option",
+          "value": "screen",
+          "label": "Screen"
+        }
+      ],
+      "commits": [
+        {
+          "text": "multiply",
+          "accepted": true,
+          "value": "multiply"
+        },
+        {
+          "text": "separator",
+          "accepted": false,
+          "value": null
+        },
+        {
+          "text": "Normal",
+          "accepted": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "a_value_named_separator_is_written_as_a_map",
+      "options": [
+        {
+          "value": "separator",
+          "label": "Separator"
+        },
+        "separator",
+        {
+          "value": "other",
+          "label": "Other"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "separator",
+          "label": "Separator"
+        },
+        {
+          "kind": "separator"
+        },
+        {
+          "kind": "option",
+          "value": "other",
+          "label": "Other"
+        }
+      ],
+      "commits": [
+        {
+          "text": "separator",
+          "accepted": true,
+          "value": "separator"
+        }
+      ]
+    },
+    {
+      "name": "bare_numbers_label_themselves",
+      "options": [
+        -45,
+        0,
+        45
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": -45,
+          "label": "-45"
+        },
+        {
+          "kind": "option",
+          "value": 0,
+          "label": "0"
+        },
+        {
+          "kind": "option",
+          "value": 45,
+          "label": "45"
+        }
+      ],
+      "commits": [
+        {
+          "text": "-45",
+          "accepted": true,
+          "value": -45
+        },
+        {
+          "text": "90",
+          "accepted": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "a_number_with_a_label",
+      "options": [
+        {
+          "value": 50,
+          "label": "50%"
+        },
+        {
+          "value": 100,
+          "label": "100%"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": 50,
+          "label": "50%"
+        },
+        {
+          "kind": "option",
+          "value": 100,
+          "label": "100%"
+        }
+      ],
+      "commits": [
+        {
+          "text": "100",
+          "accepted": true,
+          "value": 100
+        },
+        {
+          "text": "100%",
+          "accepted": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "a_divider_after_numbers",
+      "options": [
+        {
+          "value": "small",
+          "label": "Small"
+        },
+        {
+          "value": "large",
+          "label": "Large"
+        },
+        "separator",
+        {
+          "value": "list",
+          "label": "List"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "small",
+          "label": "Small"
+        },
+        {
+          "kind": "option",
+          "value": "large",
+          "label": "Large"
+        },
+        {
+          "kind": "separator"
+        },
+        {
+          "kind": "option",
+          "value": "list",
+          "label": "List"
+        }
+      ],
+      "commits": [
+        {
+          "text": "list",
+          "accepted": true,
+          "value": "list"
+        },
+        {
+          "text": "separator",
+          "accepted": false,
+          "value": null
+        }
+      ]
+    },
+    {
+      "name": "a_bare_string_value",
+      "options": [
+        "a",
+        "b"
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "a",
+          "label": "a"
+        },
+        {
+          "kind": "option",
+          "value": "b",
+          "label": "b"
+        }
+      ],
+      "commits": [
+        {
+          "text": "b",
+          "accepted": true,
+          "value": "b"
+        }
+      ]
+    },
+    {
+      "name": "glyph_and_the_empty_value",
+      "options": [
+        {
+          "value": "",
+          "glyph": "—",
+          "label": "None"
+        },
+        {
+          "value": "disc",
+          "glyph": "•",
+          "label": "Disc"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "",
+          "label": "None",
+          "glyph": "—"
+        },
+        {
+          "kind": "option",
+          "value": "disc",
+          "label": "Disc",
+          "glyph": "•"
+        }
+      ],
+      "commits": [
+        {
+          "text": "",
+          "accepted": true,
+          "value": ""
+        },
+        {
+          "text": "disc",
+          "accepted": true,
+          "value": "disc"
+        }
+      ]
+    },
+    {
+      "name": "a_map_with_no_value_is_not_offered",
+      "options": [
+        {
+          "label": "Custom"
+        },
+        {
+          "value": "x"
+        }
+      ],
+      "rows": [
+        {
+          "kind": "option",
+          "value": "x",
+          "label": "x"
+        }
+      ],
+      "commits": [
+        {
+          "text": "x",
+          "accepted": true,
+          "value": "x"
+        },
+        {
+          "text": "Custom",
+          "accepted": false,
+          "value": null
+        },
+        {
+          "text": "",
+          "accepted": false,
+          "value": null
+        }
+      ]
+    }
+  ]
+}
