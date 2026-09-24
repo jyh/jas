@@ -6575,7 +6575,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
 fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
-    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let options_json = el.get("options").cloned().unwrap_or(serde_json::Value::Null);
 
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
     let current_value = if !bind_expr.is_empty() {
@@ -6629,36 +6629,29 @@ fn render_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                 }
                 revision += 1;
             },
-            for opt in options.iter() {
-                {render_select_option(opt, &cv)}
-            }
+            {render_select_options(&options_json, &cv)}
         }
     }
 }
 
-fn render_select_option(opt: &serde_json::Value, current_value: &str) -> Element {
-    if let Some(obj) = opt.as_object() {
-        let value = obj.get("value")
-            .and_then(|v| v.as_str())
-            .or_else(|| obj.get("id").and_then(|v| v.as_str()))
-            .unwrap_or("");
-        let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or(value);
-        let selected = value == current_value;
-        rsx! {
-            option {
-                value: "{value}",
-                selected: selected,
-                "{label}"
-            }
-        }
-    } else {
-        let value = opt.as_str().unwrap_or("");
-        let selected = value == current_value;
-        rsx! {
-            option {
-                value: "{value}",
-                selected: selected,
-                "{value}"
+/// A `select`'s (or `icon_select`'s) options as `<option>` elements, read by
+/// `widget_commit::option_rows` (SCHEMA.md, `options`). An option's `value`
+/// attribute is the text the commit parse matches; a bare `separator` is a
+/// disabled rule, never a pickable value.
+fn render_select_options(options: &serde_json::Value, current_value: &str) -> Element {
+    use crate::interpreter::widget_commit::{option_rows, option_text};
+    let rows = option_rows(options).unwrap_or_default();
+    rsx! {
+        for row in rows.iter() {
+            if row["kind"] == "separator" {
+                option { disabled: true, "────────" }
+            } else {
+                {
+                    let value = option_text(&row["value"]).unwrap_or_default();
+                    let label = row["label"].as_str().unwrap_or("").to_string();
+                    let selected = value == current_value;
+                    rsx! { option { value: "{value}", selected: selected, "{label}" } }
+                }
             }
         }
     }
@@ -6679,6 +6672,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
     let summary = el.get("summary").and_then(|s| s.as_str()).unwrap_or("");
     let style = build_style(el, ctx);
     let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let options_json = el.get("options").cloned().unwrap_or(serde_json::Value::Null);
 
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
     let current_value = if !bind_expr.is_empty() {
@@ -6775,9 +6769,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                     }
                     revision += 1;
                 },
-                for opt in options.iter() {
-                    {render_select_option(opt, &cv)}
-                }
+                {render_select_options(&options_json, &cv)}
             }
             // Visible face sits ABOVE the select; pointer-events:none
             // so clicks reach the select underneath. Two layouts:
@@ -6802,7 +6794,7 @@ fn render_icon_select(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     let id = get_id(el);
     let style = build_style(el, ctx);
-    let options = el.get("options").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let options_json = el.get("options").cloned().unwrap_or(serde_json::Value::Null);
     let list_id = format!("{id}_opts");
 
     let bind_expr = el.get("bind").and_then(|b| b.get("value")).and_then(|v| v.as_str()).unwrap_or("");
@@ -6919,31 +6911,26 @@ fn render_combo_box(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
             }
             datalist {
                 id: "{list_id}",
-                for opt in options.iter() {
-                    {render_combo_box_option(opt)}
-                }
+                {render_combo_box_options(&options_json)}
             }
         }
     }
 }
 
-fn render_combo_box_option(opt: &serde_json::Value) -> Element {
-    if let Some(obj) = opt.as_object() {
-        let value = obj.get("value")
-            .map(|v| if let Some(n) = v.as_f64() { n.to_string() } else { v.as_str().unwrap_or("").to_string() })
-            .unwrap_or_default();
-        let label = obj.get("label").and_then(|v| v.as_str()).unwrap_or(&value);
-        rsx! {
-            option {
-                value: "{value}",
-                "{label}"
-            }
-        }
-    } else {
-        let value = opt.as_str().unwrap_or("");
-        rsx! {
-            option {
-                value: "{value}",
+/// A `combo_box`'s presets as `<datalist>` entries, read by
+/// `widget_commit::option_rows`. A bare number is a preset labelled by its own
+/// text (it rendered as an EMPTY entry before, since only a string was read);
+/// a divider has no place in a datalist and is left out.
+fn render_combo_box_options(options: &serde_json::Value) -> Element {
+    use crate::interpreter::widget_commit::{option_rows, option_text};
+    let rows: Vec<serde_json::Value> =
+        option_rows(options).unwrap_or_default().into_iter().filter(|r| r["kind"] == "option").collect();
+    rsx! {
+        for row in rows.iter() {
+            {
+                let value = option_text(&row["value"]).unwrap_or_default();
+                let label = row["label"].as_str().unwrap_or("").to_string();
+                rsx! { option { value: "{value}", "{label}" } }
             }
         }
     }

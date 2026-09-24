@@ -140,8 +140,45 @@ def number_commit(text: str, lo, hi) -> float | None:
     return _clamp(float(text), _as_bound(lo), _as_bound(hi))
 
 
-def _option_value(option):
-    return option.get("value") if isinstance(option, dict) else option
+#: A bare list item that is a divider between groups, never a value
+#: (SCHEMA.md, `options`). The same token a menubar's `items` use.
+OPTION_DIVIDER = "separator"
+
+
+def option_rows(options) -> list[dict] | None:
+    """How a literal ``options`` list reads (SCHEMA.md, ``options``).
+
+    One row per offered item, in order: ``{"kind": "option", "value": v,
+    "label": s}`` (plus ``"glyph"`` when declared) or ``{"kind":
+    "separator"}``. A bare item is an option labelled by its own text; the
+    bare string ``separator`` is a divider; a map with no ``value`` cannot be
+    written and is not offered. ``None`` for computed options (an expression),
+    which have no declared rows.
+
+    Pinned for every reader by ``test_fixtures/algorithms/option_rows.json``.
+    """
+    if not isinstance(options, list):
+        return None
+    rows = []
+    for item in options:
+        if item == OPTION_DIVIDER:
+            rows.append({"kind": "separator"})
+            continue
+        if isinstance(item, dict):
+            if item.get("value") is None:
+                continue
+            value = item["value"]
+            label = item.get("label")
+            row = {"kind": "option", "value": value,
+                   "label": label if isinstance(label, str) else str(value)}
+            if isinstance(item.get("glyph"), str):
+                row["glyph"] = item["glyph"]
+            rows.append(row)
+            continue
+        if item is None:
+            continue
+        rows.append({"kind": "option", "value": item, "label": str(item)})
+    return rows
 
 
 def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
@@ -174,10 +211,10 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
             # Computed options: the shell offered what the expression
             # produced, so the text is the value.
             return (True, text)
-        for option in options:
-            value = _option_value(option)
-            if value is not None and str(value) == text:
-                return (True, value)
+        # A divider is not a row a commit can match (SCHEMA.md, `options`).
+        for row in option_rows(options):
+            if row["kind"] == "option" and str(row["value"]) == text:
+                return (True, row["value"])
         return refused
 
     if kind == "combo_box":

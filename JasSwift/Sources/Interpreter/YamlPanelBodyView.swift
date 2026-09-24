@@ -10,6 +10,21 @@ private struct PickerEntry: Identifiable {
     let id: Int
     let val: String
     let displayLabel: String
+    /// A divider between groups (SCHEMA.md `options`): drawn as a rule,
+    /// never a pickable value.
+    var isDivider: Bool = false
+}
+
+/// A literal `options` list as picker entries, read by
+/// `WidgetEvent.optionRows` (a bare item is an option, a bare `separator` is
+/// a divider). `val` is the text the commit parse matches.
+private func pickerEntries(_ options: Any?) -> [PickerEntry] {
+    (WidgetEvent.optionRows(options) ?? []).enumerated().map { i, row in
+        row.isDivider
+            ? PickerEntry(id: i, val: "", displayLabel: "", isDivider: true)
+            : PickerEntry(id: i, val: row.value.map { WidgetEvent.optionText($0) } ?? "",
+                          displayLabel: row.label)
+    }
 }
 
 /// Does a NULL from this colour bind mean "explicitly no paint", or "no such
@@ -2801,7 +2816,6 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderSelect() -> some View {
-        let options = element["options"] as? [[String: Any]] ?? []
         let bind = element["bind"] as? [String: Any]
         let valueExpr = bind?["value"] as? String
         let currentValue: String = {
@@ -2812,13 +2826,9 @@ struct YamlElementView: View {
             return ""
         }()
 
-        let entries = options.enumerated().map { i, opt -> PickerEntry in
-            // The reference's string form, so a pick commits text the
-            // parse matches to its option by construction.
-            let v = opt["value"].map { WidgetEvent.optionText($0) } ?? ""
-            let l = opt["label"] as? String ?? ""
-            return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
-        }
+        // The reference's string form, so a pick commits text the parse
+        // matches to its option by construction.
+        let entries = pickerEntries(element["options"])
         // When YAML declares ``style.width: "100%"`` (the convention for
         // panel rows where the select shares a col cell with sibling
         // inputs — Character panel font / language / anti-aliasing), fill
@@ -2831,7 +2841,11 @@ struct YamlElementView: View {
             set: { newVal in widgetEvents?.commit(element, text: newVal) }
         )) {
             ForEach(entries) { e in
-                SwiftUI.Text(e.displayLabel).tag(e.val)
+                if e.isDivider {
+                    Divider()
+                } else {
+                    SwiftUI.Text(e.displayLabel).tag(e.val)
+                }
             }
         }
         .labelsHidden()
@@ -2853,7 +2867,11 @@ struct YamlElementView: View {
     /// `jas_dioxus/src/interpreter/renderer.rs`.
     @ViewBuilder
     private func renderIconSelect() -> some View {
-        let options = element["options"] as? [[String: Any]] ?? []
+        // Read by `WidgetEvent.optionRows`, in the corpus's row form (the keys
+        // below are `value`/`label`/`glyph`); a divider has no place in a
+        // glyph flyout and is left out.
+        let options: [[String: Any]] = (WidgetEvent.optionRows(element["options"]) ?? [])
+            .filter { !$0.isDivider }.map { $0.asJSON() }
         let bind = element["bind"] as? [String: Any]
         let valueExpr = bind?["value"] as? String
         let currentValue: String = {
@@ -3050,7 +3068,6 @@ struct YamlElementView: View {
 
     @ViewBuilder
     private func renderComboBox() -> some View {
-        let options = element["options"] as? [[String: Any]] ?? []
         let bind = element["bind"] as? [String: Any]
         let valueExpr = bind?["value"] as? String
         let currentValue: String = {
@@ -3070,11 +3087,7 @@ struct YamlElementView: View {
 
         // SwiftUI doesn't have a native combo box with free entry;
         // use Picker as a dropdown with the current value displayed.
-        let entries = options.enumerated().map { i, opt -> PickerEntry in
-            let v = opt["value"].map { WidgetEvent.optionText($0) } ?? ""
-            let l = opt["label"] as? String ?? ""
-            return PickerEntry(id: i, val: v, displayLabel: l.isEmpty ? v : l)
-        }
+        let entries = pickerEntries(element["options"])
         // When the YAML declares style.width: "100%" (the convention for
         // panel rows where the dropdown shares a col cell with sibling
         // inputs), fill the parent column so widths line up. Otherwise
@@ -3089,13 +3102,17 @@ struct YamlElementView: View {
         let textColor: SwiftUI.Color = theme.map { SwiftUI.Color(nsColor: $0.text) } ?? .primary
         let menu = Menu {
             ForEach(entries) { e in
-                Button(e.displayLabel) {
-                    // WIDGET_EVENTS.md: a number by the number grammar,
-                    // clamped to the declared bounds, else the text; the
-                    // bind write first (panel or dialog), then every
-                    // `commit` / `change` behavior (Stroke's linked-scale
-                    // mirror, Gradient's render keys).
-                    widgetEvents?.commit(element, text: e.val)
+                if e.isDivider {
+                    Divider()
+                } else {
+                    Button(e.displayLabel) {
+                        // WIDGET_EVENTS.md: a number by the number grammar,
+                        // clamped to the declared bounds, else the text; the
+                        // bind write first (panel or dialog), then every
+                        // `commit` / `change` behavior (Stroke's linked-scale
+                        // mirror, Gradient's render keys).
+                        widgetEvents?.commit(element, text: e.val)
+                    }
                 }
             }
         } label: {
