@@ -27,6 +27,8 @@ from workspace_interpreter.state_store import StateStore
 REPO_ROOT = os.path.join(os.path.dirname(__file__), "..", "..")
 NUMBER_COMMIT = os.path.join(
     REPO_ROOT, "test_fixtures", "algorithms", "number_commit.json")
+OPTION_ROWS = os.path.join(
+    REPO_ROOT, "test_fixtures", "algorithms", "option_rows.json")
 
 
 def _panel_store(panel_id, panel_state, globals_=None):
@@ -170,6 +172,34 @@ class TestParseByKind:
         assert we.parse_commit(w, "") == (True, "")
         assert we.parse_commit(w, "bullet-disc") == (True, "bullet-disc")
         assert we.parse_commit(w, "bullet-square") == (False, None)
+
+    def test_the_shared_option_rows_corpus(self):
+        # SCHEMA.md `options`: a bare `separator` is a DIVIDER, never a value.
+        # The corpus was authored from that text, because the reference it
+        # now gates accepted the text `separator` as a commit.
+        with open(OPTION_ROWS, encoding="utf-8") as f:
+            vectors = json.load(f)["vectors"]
+        assert len(vectors) >= 8, "the shared corpus must not be empty"
+        rows_seen = commits_seen = dividers_seen = 0
+        for v in vectors:
+            assert we.option_rows(v["options"]) == v["rows"], v["name"]
+            rows_seen += len(v["rows"])
+            dividers_seen += sum(1 for r in v["rows"] if r["kind"] == "separator")
+            w = {"type": "select", "options": v["options"]}
+            for c in v["commits"]:
+                got = we.parse_commit(w, c["text"])
+                assert got == (c["accepted"], c["value"]), (v["name"], c["text"], got)
+                # A committed number keeps its declared type (int stays int).
+                if c["accepted"]:
+                    assert type(got[1]) is type(c["value"]), (v["name"], c["text"])
+                commits_seen += 1
+        # Floors on each population, and on the one the corpus exists for.
+        assert rows_seen > 20 and commits_seen > 10 and dividers_seen >= 3
+
+    def test_computed_options_have_no_rows(self):
+        # An expression is not a literal list: its values are what it
+        # yields, so there are no declared rows to read.
+        assert we.option_rows("state.font_families") is None
 
     def test_select_with_computed_options_takes_the_text(self):
         w = {"type": "select", "options": "state.font_families"}

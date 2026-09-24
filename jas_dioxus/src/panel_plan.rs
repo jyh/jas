@@ -234,34 +234,27 @@ fn options_of(
     withheld: &mut Vec<Value>,
 ) -> Value {
     use crate::interpreter::expr_types::Value as EVal;
-    use crate::interpreter::widget_commit::option_text;
+    use crate::interpreter::widget_commit::{option_item, option_text};
 
     let Some(list) = node.get("options").and_then(Value::as_array) else { return Value::Null };
     let bound = values.get("bind.value").and_then(Value::as_str);
     let mut picked = false;
     let mut rows = vec![];
     for (i, item) in list.iter().enumerate() {
-        if item.as_str() == Some("separator") {
+        // The divider rule and the item reading are `widget_commit`'s, the
+        // same reader the commit parse and every port's view use.
+        let Some(read) = option_item(item) else {
             rows.push(json!({"kind": "separator"}));
             continue;
-        }
-        let (value, label, glyph) = match item.as_object() {
-            Some(o) => (
-                o.get("value").unwrap_or(&Value::Null),
-                o.get("label").and_then(Value::as_str),
-                o.get("glyph").and_then(Value::as_str),
-            ),
-            None => (item, None, None),
         };
-        let text = match value {
-            Value::Array(_) | Value::Object(_) => None,
-            v => option_text(v),
-        };
-        let Some(text) = text else {
+        // A list or map value is withheld here although the schema allows it:
+        // its text is not a string a shell could show or send back sensibly.
+        let Some((value, label, glyph)) = read.filter(|(v, _, _)| !v.is_array() && !v.is_object())
+        else {
             withheld.push(json!({"path": path, "key": format!("options[{i}]")}));
             continue;
         };
-        let label = label.map(str::to_string).unwrap_or_else(|| text.clone());
+        let text = option_text(value).unwrap_or_default();
         if [Some(text.as_str()), Some(label.as_str()), glyph].iter().flatten().any(|s| s.contains("{{")) {
             withheld.push(json!({"path": path, "key": format!("options[{i}]")}));
             continue;
