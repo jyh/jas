@@ -137,37 +137,56 @@ pub(crate) fn option_text(value: &serde_json::Value) -> Option<String> {
 /// (SCHEMA.md, `options`). The same token a menubar's `items` use.
 pub const OPTION_DIVIDER: &str = "separator";
 
+/// One item of a literal `options` list, read by the rule SCHEMA.md states:
+/// `None` for a divider, `Some(None)` for an item that cannot be written (a map
+/// with no `value`), else `Some(Some((value, label, glyph)))`. A bare item is an
+/// option labelled by its own text.
+///
+/// ⛔ THE ONE HOME OF THE DIVIDER RULE. `option_rows` and the native panel
+/// plan's `options` channel both read items through it, so the three readers
+/// of one list cannot disagree about what a divider is.
+#[allow(clippy::type_complexity)]
+pub fn option_item(
+    item: &serde_json::Value,
+) -> Option<Option<(&serde_json::Value, String, Option<&str>)>> {
+    use serde_json::Value;
+    if item.as_str() == Some(OPTION_DIVIDER) {
+        return None;
+    }
+    let (value, label, glyph) = match item.as_object() {
+        Some(o) => (
+            o.get("value").unwrap_or(&Value::Null),
+            o.get("label").and_then(Value::as_str),
+            o.get("glyph").and_then(Value::as_str),
+        ),
+        None => (item, None, None),
+    };
+    Some(option_text(value).map(|text| (value, label.map_or(text, str::to_string), glyph)))
+}
+
 /// How a literal `options` list reads (SCHEMA.md, `options`), or `None` for
 /// computed options (an expression), which have no declared rows.
 ///
 /// One row per offered item, in order: `{"kind": "option", "value": v,
-/// "label": s}` (plus `"glyph"` when declared) or `{"kind": "separator"}`. A
-/// bare item is an option labelled by its own text; the bare string
-/// `separator` is a divider; a map with no `value` cannot be written and is
-/// not offered. Pinned by `test_fixtures/algorithms/option_rows.json`.
+/// "label": s}` (plus `"glyph"` when declared) or `{"kind": "separator"}`. An
+/// item [`option_item`] cannot write is not offered. Pinned by
+/// `test_fixtures/algorithms/option_rows.json`.
 pub fn option_rows(options: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
     use serde_json::{json, Value};
     let list = options.as_array()?;
     let mut rows = vec![];
     for item in list {
-        if item.as_str() == Some(OPTION_DIVIDER) {
-            rows.push(json!({"kind": "separator"}));
-            continue;
+        match option_item(item) {
+            None => rows.push(json!({"kind": "separator"})),
+            Some(None) => {}
+            Some(Some((value, label, glyph))) => {
+                let mut row = json!({"kind": "option", "value": value, "label": label});
+                if let Some(g) = glyph {
+                    row["glyph"] = Value::String(g.to_string());
+                }
+                rows.push(row);
+            }
         }
-        let (value, label, glyph) = match item.as_object() {
-            Some(o) => (
-                o.get("value").unwrap_or(&Value::Null),
-                o.get("label").and_then(Value::as_str),
-                o.get("glyph").and_then(Value::as_str),
-            ),
-            None => (item, None, None),
-        };
-        let Some(text) = option_text(value) else { continue };
-        let mut row = json!({"kind": "option", "value": value, "label": label.map_or(text, str::to_string)});
-        if let Some(g) = glyph {
-            row["glyph"] = Value::String(g.to_string());
-        }
-        rows.push(row);
     }
     Some(rows)
 }
