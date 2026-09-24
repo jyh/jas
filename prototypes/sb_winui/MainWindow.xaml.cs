@@ -1832,7 +1832,7 @@ public sealed partial class MainWindow : Window
     private sealed record PaneLeaf(
         string Path, string Type, string Id, double X, double Y, double W, double H,
         Dictionary<string, string> Values, Dictionary<string, string> Static,
-        Dictionary<string, string> Display)
+        Dictionary<string, string> Display, PaneOptions? Options)
     {
         internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
         internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -1902,7 +1902,11 @@ public sealed partial class MainWindow : Window
                 rect.GetProperty("h").GetInt64(),
                 Strings(e.GetProperty("values")),
                 Strings(e.GetProperty("static")),
-                Strings(e.GetProperty("display"))));
+                Strings(e.GetProperty("display")),
+                // W-b: null when the core sent `null` (no declared list) or an
+                // older core sent no key at all. The two read the same here:
+                // either way there is no list to offer.
+                PanelWire.ReadOptions(e.TryGetProperty("options", out var opts) ? opts.GetRawText() : null)));
         }
         var icons = new Dictionary<string, (string Viewbox, string Svg)>();
         foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -1917,7 +1921,11 @@ public sealed partial class MainWindow : Window
         var signature = snap.PanelId + "\n" + string.Join("\n", leaves.Select(l =>
             $"{l.Path}|{l.Type}|{l.Id}|{l.X},{l.Y},{l.W},{l.H}|{l.IconName}|"
             + string.Join(";", l.Static.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                                       .Select(kv => $"{kv.Key}={kv.Value}"))));
+                                       .Select(kv => $"{kv.Key}={kv.Value}"))
+            // W-b: a list control's ITEMS are built once, so a changed list
+            // must rebuild. The selection is not in it: it moves every tick
+            // and is applied in place.
+            + "|" + (l.Options?.Signature ?? "")));
         var rebuilt = signature != _paneSignature;
         _paneDrawnPanel = snap.PanelId;
         if (rebuilt) { BuildPane(leaves, icons, height); }
@@ -1985,10 +1993,13 @@ public sealed partial class MainWindow : Window
         // a synthetic fixture string in `harness_selftest.ps1` carries them), the
         // vocabulary is read by eye on kenai, and `BOOLEAN_KINDS` is COMPLETE at
         // {toggle, checkbox} -- so the field can never drift further from its name.
-        // `inputs` is in the same position for {number_input, length_input}, and
-        // that set is NOT complete: select/combo_box/icon_select join it when the
-        // plan gains an options channel.
+        // `inputs` is in the same position: since W-b it counts the text inputs
+        // {number_input, length_input} AND the list kinds {select, combo_box,
+        // icon_select}, which are INPUT_KINDS in the same contract (a `commit`
+        // carrying text). `optionsRefused` counts option rows this shell could
+        // not read, so a list shown short is never shown silently.
         var (texts, buttons, inputs, toggles, glyphs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0, 0);
+        var optionsRefused = 0;
         foreach (var leaf in leaves)
         {
             FrameworkElement el;
@@ -2041,14 +2052,36 @@ public sealed partial class MainWindow : Window
                     el = BuildToggle(leaf);
                     break;
 
+                // W-b: the three list kinds, from the plan's `options` channel.
+                // ⛔ ONLY WHEN THE CORE SENT A LIST, or `combo_box`'s free entry
+                // (`grad_stop_location_combo` declares no options and is typed
+                // into). A `select` with no list is a counted placeholder: a
+                // ComboBox built from the resolved value alone draws, counts
+                // as built, and cannot select anything.
+                // ⛔ PLAIN LABELS, NOT `case "select" when …`: the kind-label
+                // gate reads a bare quoted case label, and a guarded one is invisible
+                // to it (measured: 8 labels read of 10).
+                // ⛔ `dropdown` IS NOT HERE ON PURPOSE. `lp_filter_button` is a
+                // MENU BUTTON (`items` + a `behavior`) wearing a selector's
+                // kind name; it stays a counted `[dropdown]` placeholder.
+                case "select":
+                case "icon_select":
+                case "combo_box":
+                    if (leaf.Options is null && leaf.Type != "combo_box")
+                    {
+                        unmaterialized++;
+                        el = Placeholder(leaf.Type);
+                        break;
+                    }
+                    inputs++;
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    optionsRefused += leaf.Options?.Refused ?? 0;
+                    el = BuildChoice(leaf);
+                    break;
+
                 default:
                     unmaterialized++;
-                    el = new TextBlock
-                    {
-                        Text = $"[{leaf.Type}]",
-                        FontSize = 10,
-                        Foreground = _paneMutedBrush,
-                    };
+                    el = Placeholder(leaf.Type);
                     break;
             }
             el.Width = leaf.W;
@@ -2066,9 +2099,18 @@ public sealed partial class MainWindow : Window
         // counters, and the self-test's row is an INPUT to that parser.
         Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
              + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} unmaterialized={unmaterialized} "
-             + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText}");
+             + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
+             + $"options-refused={optionsRefused}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
     }
+
+    /// <summary>A kind this shell does not draw: a muted `[type]`, COUNTED by the caller, never dropped.</summary>
+    private TextBlock Placeholder(string type) => new()
+    {
+        Text = $"[{type}]",
+        FontSize = 10,
+        Foreground = _paneMutedBrush,
+    };
 
     /// <summary>
     /// An `icon_button`: its tooltip is the core's `summary`, its click is the
@@ -2309,6 +2351,37 @@ public sealed partial class MainWindow : Window
                 box.IsEnabled = !off;
                 break;
 
+            // W-b: the CORE says which item is the bound value (`selected`);
+            // nothing here compares values to find it. The state records what
+            // the core showed, so the selection event this raises is
+            // recognised by `PanelWire.ChoiceCommit` and sends nothing.
+            case ComboBox combo:
+            {
+                var index = leaf.Options?.SelectedIndex ?? -1;
+                var items = leaf.Options?.Items;
+                var shownValue = index >= 0 && items is not null
+                    ? items[index].Value
+                    : PanelWire.DisplayText(leaf.Shown("bind.value"), leaf.Value("bind.value"));
+                var shownText = index >= 0 && items is not null ? PanelWire.ChoiceText(items[index]) : shownValue;
+                // An editable combo a person is TYPING into keeps its text: focused
+                // AND holding text other than what the core last showed. Focus
+                // alone is not typing -- a pick leaves the combo focused, and a
+                // focus-only rule would then never show the core's re-read.
+                var before = combo.Tag as ChoiceState;
+                typing = combo.IsEditable && combo.FocusState != FocusState.Unfocused
+                         && !string.Equals(combo.Text, before?.Text ?? "", StringComparison.Ordinal);
+                combo.Tag = new ChoiceState(shownValue, index, shownText);
+                if (!typing)
+                {
+                    combo.SelectedIndex = index;
+                    // A value no item carries (a free entry) is shown as text.
+                    if (combo.IsEditable && index < 0) { combo.Text = shownText; }
+                }
+                off = off || leaf.Id.Length == 0;
+                combo.IsEnabled = !off;
+                break;
+            }
+
             case CheckBox toggle:
                 off = off || leaf.Id.Length == 0;
                 toggle.Tag = on;
@@ -2424,6 +2497,69 @@ public sealed partial class MainWindow : Window
             if (id.Length > 0) { SendPane(id, "click", null); }
         };
         return box;
+    }
+
+    /// <summary>
+    /// What a list control last showed: the core's value, its item index (-1:
+    /// none), and the text on the control's face for it.
+    /// </summary>
+    private sealed record ChoiceState(string Shown, int Index, string Text);
+
+    /// <summary>
+    /// W-b: a `select`, `combo_box` or `icon_select`, as one ComboBox over the
+    /// plan's `options` VALUES (dividers are never items: see
+    /// `PaneOptions.Items`). A `combo_box` is editable, since its contract
+    /// accepts free text; an `icon_select` item shows its glyph beside its
+    /// label (`PanelWire.ChoiceText`).
+    ///
+    /// ⛔ A PICK SENDS THE ROW'S `value`, NEVER ITS LABEL, as a `commit` -- the
+    /// INPUT_KINDS contract a number box already uses, and the text the core's
+    /// commit parse matches. Then the control is put back to the core's value
+    /// AS IT SENDS, exactly as a number box is, so a refused pick leaves the
+    /// core's value on screen and an accepted one is shown by the re-read.
+    /// </summary>
+    private ComboBox BuildChoice(PaneLeaf leaf)
+    {
+        var items = leaf.Options?.Items ?? new List<PaneOption>();
+        var combo = new ComboBox
+        {
+            FontSize = 12,
+            MinWidth = 0,
+            MinHeight = 0,
+            Padding = new Thickness(4, 0, 4, 0),
+            IsEditable = leaf.Type == "combo_box",
+        };
+        foreach (var row in items) { combo.Items.Add(PanelWire.ChoiceText(row)); }
+        var summary = leaf.Literal("summary");
+        if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(combo, summary); }
+        if (leaf.Id.Length == 0) { return combo; }
+
+        var id = leaf.Id;
+        combo.SelectionChanged += (_, _) =>
+        {
+            var state = combo.Tag as ChoiceState;
+            var send = PanelWire.ChoiceCommit(combo.SelectedIndex, items, state?.Shown);
+            if (send is null) { return; }
+            // Put back first: this raises SelectionChanged again, at the core's
+            // own index, and `ChoiceCommit` sends nothing for that.
+            combo.SelectedIndex = state?.Index ?? -1;
+            if (combo.IsEditable && (state?.Index ?? -1) < 0) { combo.Text = state?.Text ?? ""; }
+            SendPane(id, "commit", send);
+        };
+        if (combo.IsEditable)
+        {
+            // Typed text crosses as TEXT; the core parses it by the kind. Text
+            // that names an item is left to SelectionChanged above.
+            combo.TextSubmitted += (_, e) =>
+            {
+                var state = combo.Tag as ChoiceState;
+                if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
+                e.Handled = true;
+                if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text); }
+                combo.Text = state?.Text ?? "";
+            };
+        }
+        return combo;
     }
 
     /// <summary>

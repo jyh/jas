@@ -155,6 +155,91 @@ internal static class PanelWire
     internal static string? IconName(string? boundIcon, string? literalIcon, string? literalName, string type)
         => boundIcon ?? literalIcon ?? (type == "icon" ? literalName : null);
 
+    /// <summary>
+    /// W-b: a plan entry's `options` from its raw JSON (`panel_plan.rs::options_of`).
+    ///
+    /// Null when the core sent `null` (the node declares no list), when the key
+    /// is absent, or when the bytes are not an array: a list control built from
+    /// no list is the degenerate control this channel exists to prevent, so the
+    /// caller must be able to tell "no list" from "an empty one".
+    ///
+    /// ⛔ THE SHELL DECIDES NOTHING ABOUT A ROW. A divider is a row whose `kind`
+    /// is `separator`, and the core says so; an option's `value` is the text to
+    /// commit, and `selected` is the core's answer to which row is the bound
+    /// value. Any other `kind`, or an option missing its `value` or `label`
+    /// string, is COUNTED in `Refused` and not offered.
+    /// </summary>
+    internal static PaneOptions? ReadOptions(string? json)
+    {
+        if (json is null) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            var rows = new List<PaneOption>();
+            var refused = 0;
+            foreach (var row in root.EnumerateArray())
+            {
+                var kind = Str(row, "kind");
+                if (kind == "separator")
+                {
+                    rows.Add(new PaneOption(true, "", "", null, false));
+                    continue;
+                }
+                if (kind != "option" || Str(row, "value") is not { } value || Str(row, "label") is not { } label)
+                {
+                    refused++;
+                    continue;
+                }
+                var selected = row.TryGetProperty("selected", out var sel)
+                               && sel.ValueKind == System.Text.Json.JsonValueKind.True;
+                rows.Add(new PaneOption(false, value, label, Str(row, "glyph"), selected));
+            }
+            return new PaneOptions(rows, refused);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string? Str(System.Text.Json.JsonElement row, string key) =>
+        row.ValueKind == System.Text.Json.JsonValueKind.Object
+        && row.TryGetProperty(key, out var v)
+        && v.ValueKind == System.Text.Json.JsonValueKind.String
+            ? v.GetString()
+            : null;
+
+    /// <summary>
+    /// W-b: what picking item <paramref name="picked"/> sends: its `value` text,
+    /// or null when nothing is to be sent -- no item (-1, or out of range), or
+    /// the item whose value the core already shows (<paramref name="shown"/>).
+    ///
+    /// ⛔ THE SECOND NULL IS THE ONE THAT MATTERS. Putting a list control back
+    /// to the core's value raises the same selection-changed event a person's
+    /// pick does, so without it every plan the core publishes would commit its
+    /// own value back and run the widget's behaviors -- `CommitOnBlur`'s rule,
+    /// for a list.
+    ///
+    /// ⛔ AND IT SENDS THE VALUE, NEVER THE LABEL: `stk_start_arrowhead_scale`
+    /// labels 100 as "100%", and the core's commit parse accepts `100`.
+    /// </summary>
+    internal static string? ChoiceCommit(int picked, List<PaneOption> items, string? shown)
+    {
+        if (picked < 0 || picked >= items.Count) { return null; }
+        var value = items[picked].Value;
+        return string.Equals(value, shown, StringComparison.Ordinal) ? null : value;
+    }
+
+    /// <summary>
+    /// W-b: the text an item shows in the list. An `icon_select` row carries a
+    /// `glyph` (a single mark, "•") beside its label, and both are shown; any
+    /// other row shows its label.
+    /// </summary>
+    internal static string ChoiceText(PaneOption row) =>
+        row.Glyph is { Length: > 0 } g ? $"{g}  {row.Label}" : row.Label;
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
@@ -233,6 +318,41 @@ internal static class PanelWire
         if (string.IsNullOrWhiteSpace(widget)) { return null; }
         return (widget, knob[(colon + 1)..]);
     }
+}
+
+/// <summary>
+/// W-b: one row of a plan entry's `options` channel. A separator carries no
+/// value and is never offered; see <see cref="PanelWire.ReadOptions"/>.
+/// </summary>
+internal sealed record PaneOption(bool Separator, string Value, string Label, string? Glyph, bool Selected);
+
+/// <summary>
+/// W-b: a leaf's options as the core sent them, and how many rows this shell
+/// could not read (an unknown `kind`, or an option row missing a string). A
+/// refused row is COUNTED, never guessed at.
+/// </summary>
+internal sealed record PaneOptions(List<PaneOption> Rows, int Refused)
+{
+    /// <summary>
+    /// The rows a list control holds: the VALUES, in order, separators dropped.
+    /// ⛔ A ComboBox item is selectable, so a divider placed among the items
+    /// would be a value a person can pick. The grouping is lost, knowingly;
+    /// what is never lost is the difference between a divider and a value.
+    /// </summary>
+    internal List<PaneOption> Items => Rows.Where(r => !r.Separator).ToList();
+
+    /// <summary>
+    /// The index into <see cref="Items"/> of the row the core marked
+    /// `selected`, or -1 when it marked none (a free combo entry, a dialog's
+    /// display-only "Custom"). The shell compares no values to find it.
+    /// </summary>
+    internal int SelectedIndex => Items.FindIndex(r => r.Selected);
+
+    /// <summary>What a rebuild keys on: the list, never the selection, which moves.</summary>
+    internal string Signature => string.Join(";", Rows.Select(r =>
+        r.Separator ? "-" : $"{RowToken(r.Value)}={RowToken(r.Label)}={RowToken(r.Glyph ?? "")}"));
+
+    private static string RowToken(string s) => System.Text.Json.JsonSerializer.Serialize(s);
 }
 
 /// <summary>The panels the pane can show, in the core's order, and how many rows could not be offered.</summary>

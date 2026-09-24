@@ -486,6 +486,94 @@ static class Program
             && PanelWire.IconName(null, null, "named", "icon") == "named",
             "the three sources must be separable");
 
+        // ─────────────────────────────────────────────────────────────
+        // W-b: the options channel, read from the core's OWN bytes.
+        //
+        // Each fixture below is a `panel_plan` entry's `options`, printed by
+        // the Rust core at `jas/panel-plan-options-channel` with op_mode bound
+        // to "multiply", the arrowhead scale to 100.0 and the bullets to
+        // "bullet-disc" -- copied, never typed from the shape.
+        // ─────────────────────────────────────────────────────────────
+        const string OpMode = """
+            [{"kind":"option","label":"Normal","selected":false,"value":"normal"},{"kind":"separator"},{"kind":"option","label":"Darken","selected":false,"value":"darken"},{"kind":"option","label":"Multiply","selected":true,"value":"multiply"},{"kind":"option","label":"Color Burn","selected":false,"value":"color_burn"},{"kind":"separator"},{"kind":"option","label":"Lighten","selected":false,"value":"lighten"},{"kind":"option","label":"Screen","selected":false,"value":"screen"},{"kind":"option","label":"Color Dodge","selected":false,"value":"color_dodge"},{"kind":"separator"},{"kind":"option","label":"Overlay","selected":false,"value":"overlay"},{"kind":"option","label":"Soft Light","selected":false,"value":"soft_light"},{"kind":"option","label":"Hard Light","selected":false,"value":"hard_light"},{"kind":"separator"},{"kind":"option","label":"Difference","selected":false,"value":"difference"},{"kind":"option","label":"Exclusion","selected":false,"value":"exclusion"},{"kind":"separator"},{"kind":"option","label":"Hue","selected":false,"value":"hue"},{"kind":"option","label":"Saturation","selected":false,"value":"saturation"},{"kind":"option","label":"Color","selected":false,"value":"color"},{"kind":"option","label":"Luminosity","selected":false,"value":"luminosity"}]
+            """;
+        const string ArrowScale = """
+            [{"kind":"option","label":"50%","selected":false,"value":"50"},{"kind":"option","label":"75%","selected":false,"value":"75"},{"kind":"option","label":"100%","selected":true,"value":"100"},{"kind":"option","label":"150%","selected":false,"value":"150"},{"kind":"option","label":"200%","selected":false,"value":"200"},{"kind":"option","label":"300%","selected":false,"value":"300"},{"kind":"option","label":"400%","selected":false,"value":"400"}]
+            """;
+        const string Bullets = """
+            [{"glyph":"—","kind":"option","label":"None","selected":false,"value":""},{"glyph":"•","kind":"option","label":"Disc","selected":true,"value":"bullet-disc"},{"glyph":"○","kind":"option","label":"Open Circle","selected":false,"value":"bullet-open-circle"},{"glyph":"■","kind":"option","label":"Square","selected":false,"value":"bullet-square"},{"glyph":"□","kind":"option","label":"Open Square","selected":false,"value":"bullet-open-square"},{"glyph":"–","kind":"option","label":"Dash","selected":false,"value":"bullet-dash"},{"glyph":"✓","kind":"option","label":"Check","selected":false,"value":"bullet-check"}]
+            """;
+        var op = PanelWire.ReadOptions(OpMode);
+        Check("W-b: op_mode's channel reads", op is not null && op.Refused == 0, $"refused={op?.Refused}");
+        // The counts are DERIVED from the fixture's own rows, by a route the
+        // reader does not use (a substring count), never typed.
+        var wantValues = OpMode.Split("\"kind\":\"option\"").Length - 1;
+        var wantDividers = OpMode.Split("\"kind\":\"separator\"").Length - 1;
+        Eq("W-b: every value is an item", wantValues.ToString(), (op?.Items.Count ?? -1).ToString());
+        Eq("W-b: every divider is a row and NOT an item",
+            (wantValues + wantDividers).ToString(), (op?.Rows.Count ?? -1).ToString());
+        // ⛔ THE TRAP: a shell that looped the raw list put "separator" on the
+        //    blend-mode menu, where picking it commits that string.
+        Check("W-b: no item is a divider, and no item's value is \"separator\"",
+            op is not null && op.Items.All(r => !r.Separator && r.Value != "separator"),
+            "a divider reached the list as a value");
+        Check("W-b: CONTROL: the fixture really carries dividers",
+            wantDividers > 0, "the arm above would pass on a list with none");
+        // The CORE marked the row; the shell compares nothing to find it.
+        Eq("W-b: the selected index is the row the core marked",
+            "multiply", op is not null && op.SelectedIndex >= 0 ? op.Items[op.SelectedIndex].Value : "(none)");
+        // Dropping the dividers SHIFTS indices, so an index read off the raw
+        // rows would land one row early here: "multiply" follows a divider.
+        Check("W-b: CONTROL: the selected row sits after a divider (the shift is exercised)",
+            op is not null && op.Rows.FindIndex(r => r.Selected) != op.SelectedIndex,
+            "the raw-row index and the item index agree, so the shift is untested");
+
+        var scale = PanelWire.ReadOptions(ArrowScale);
+        // ⛔ IT SENDS THE VALUE, NEVER THE LABEL: "150%" would be refused.
+        Eq("W-b: a pick sends the row's value, not its label",
+            "150", Show(scale is null ? null : PanelWire.ChoiceCommit(3, scale.Items, "100")));
+        Check("W-b: CONTROL: label and value differ on that row",
+            scale is not null && scale.Items[3].Label != scale.Items[3].Value, "the arm above cannot tell them apart");
+        // ⛔ Putting the control back to the core's value fires the same
+        //    selection event a person's pick does; it must send NOTHING.
+        Eq("W-b: re-selecting the value the core shows sends nothing",
+            "(null)", Show(scale is null ? null : PanelWire.ChoiceCommit(scale.SelectedIndex, scale.Items, "100")));
+        Eq("W-b: no item picked sends nothing",
+            "(null)", Show(scale is null ? null : PanelWire.ChoiceCommit(-1, scale.Items, "100")));
+        Eq("W-b: an index past the list sends nothing",
+            "(null)", Show(scale is null ? null : PanelWire.ChoiceCommit(scale.Items.Count, scale.Items, "100")));
+
+        var bullets = PanelWire.ReadOptions(Bullets);
+        Eq("W-b: an icon_select item shows its glyph beside its label",
+            "\u2022  Disc", bullets is null ? "(null)" : PanelWire.ChoiceText(bullets.Items[1]));
+        Eq("W-b: a row with no glyph shows its label alone",
+            "150%", scale is null ? "(null)" : PanelWire.ChoiceText(scale.Items[3]));
+        // An EMPTY value is a value ("None"), and it is sent as one.
+        Eq("W-b: the empty value is committable",
+            "", Show(bullets is null ? null : PanelWire.ChoiceCommit(0, bullets.Items, "bullet-disc")));
+
+        // NULL MEANS NO LIST, AND IS NOT AN EMPTY ONE.
+        Eq("W-b: the core's null is no list", "(null)", PanelWire.ReadOptions("null") is null ? "(null)" : "list");
+        Eq("W-b: an absent key is no list", "(null)", PanelWire.ReadOptions(null) is null ? "(null)" : "list");
+        Eq("W-b: unreadable bytes are no list", "(null)", PanelWire.ReadOptions("{not json") is null ? "(null)" : "list");
+        Eq("W-b: CONTROL: an empty array IS a list, of nothing",
+            "0", (PanelWire.ReadOptions("[]")?.Rows.Count ?? -1).ToString());
+        // An unknown kind, or an option missing a string, is COUNTED.
+        var odd = PanelWire.ReadOptions("""
+            [{"kind":"heading","label":"x"},{"kind":"option","label":"no value","selected":false},
+             {"kind":"option","value":"ok","label":"OK","selected":false}]
+            """);
+        Eq("W-b: an unreadable row is refused and counted", "2", (odd?.Refused ?? -1).ToString());
+        Eq("W-b: ...and the readable one is still offered", "ok", odd is null || odd.Items.Count != 1 ? "(wrong)" : odd.Items[0].Value);
+        Eq("W-b: nothing marked is index -1, never 0", "-1", (odd?.SelectedIndex ?? 99).ToString());
+
+        // A rebuild keys on the LIST and not the selection, which moves every tick.
+        var moved = PanelWire.ReadOptions(OpMode.Replace("\"selected\":true", "\"selected\":false"));
+        Eq("W-b: a moved selection keeps the signature", op?.Signature ?? "a", moved?.Signature ?? "b");
+        var relabeled = PanelWire.ReadOptions(OpMode.Replace("\"Darken\"", "\"Darker\""));
+        Check("W-b: a changed label changes the signature",
+            relabeled is not null && op is not null && relabeled.Signature != op.Signature, "a relabel would not rebuild");
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
