@@ -514,7 +514,7 @@ static class Program
             (wantValues + wantDividers).ToString(), (op?.Rows.Count ?? -1).ToString());
         // ⛔ THE TRAP: a shell that looped the raw list put "separator" on the
         //    blend-mode menu, where picking it commits that string.
-        Check("W-b: no item is a divider, and no item's value is \"separator\"",
+        Check("W-b: no item is a divider, and no item's value is the divider token",
             op is not null && op.Items.All(r => !r.Separator && r.Value != "separator"),
             "a divider reached the list as a value");
         Check("W-b: CONTROL: the fixture really carries dividers",
