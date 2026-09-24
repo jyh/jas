@@ -308,7 +308,7 @@ fn collapse_collinear_points(ring: Vec<(f64, f64)>, tol: f64) -> Vec<(f64, f64)>
 /// Options for destructive boolean operations, read from the Boolean
 /// Options dialog and mirrored in `AppState.boolean_panel`. See
 /// BOOLEAN.md §Boolean Options dialog.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BooleanOptions {
     pub precision: f64,
     pub remove_redundant_points: bool,

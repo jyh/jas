@@ -24,6 +24,7 @@ pub mod widget_tree;
 pub mod bind_values;
 pub mod widget_commit;
 pub mod artboard_effects;
+pub mod boolean_host;
 pub mod align_host;
 pub mod stroke_host;
 pub mod character_host;
