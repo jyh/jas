@@ -151,7 +151,7 @@ scene leaves it collapsed and keeps the surface it always had.
 | `PANEL OPEN` | render thread, per open | `via` (`app` for the first open, `hand` for the selector), the plan's list counts, `crossings` (the core's own count across the open, 2 when healthy) and `bytes` |
 | `PANEL LIST` | UI thread, once | `panels`, `skipped` (a row with no string id, never offered), `bytes`, and `first` (the first panel's id, or `ABSENT` if the list does not hold it) |
 | `PANEL SWITCH REQUESTED` | UI thread, per choice | `from` and `to`; the `PANEL OPEN via=hand` row that follows is the answer |
-| `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs`, `toggles`); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled) |
+| `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs` (text and list inputs), `toggles`, `glyphs`); `options-refused` (option rows the shell could not read, never offered); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled) |
 | `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
 | `PANEL DRAWN` | UI thread, per published plan | `seq`, `cause` (`open`, `click`, `commit`, ...), `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, `editing` (a focused number box holding an uncommitted edit, whose text was left alone), pane and canvas sizes |
 | `PANEL CLICK` | render thread, per press or commit | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH` or the value replay), `event` (`click` or `commit`), `value` (a commit's text as one JSON-string token with each space written `\u0020`, or `-` for a press), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
@@ -199,11 +199,19 @@ which is why the pane is light and the ink is substituted. From W2b-2, narrowed 
 W2b-9: `length_input` is now materialized (it is `number_input`'s control
 showing the core's formatted `display` string) and so is `checkbox` (the
 spec puts it and `toggle` in one contract, `BOOLEAN_KINDS`, and the plan
-carries the same keys for each). ⛔ The remaining value kinds are still
-`[type]` placeholders and three of them are BLOCKED rather than merely
-unbuilt: `select`, `combo_box` and `icon_select` need a plan-side OPTIONS
-channel the plan does not have -- built from `bind.value` alone each one is a
-control that draws, counts as materialized, and cannot select anything.
+carries the same keys for each). From W-b, `select`, `combo_box` and
+`icon_select` are materialized as one `ComboBox` over the plan's `options`
+channel: the items are the VALUES (the core marks dividers as `separator`
+rows, and they are never items, since a ComboBox item is selectable), the
+core's `selected` flag sets the index, and a pick sends the row's `value` as a
+`commit` (never its label: `100%` is labelled, `100` is committed). A
+`combo_box` is editable; an `icon_select` item shows its glyph beside its
+label. A `select` with no list stays a counted `[select]` placeholder, and
+`dropdown` (`lp_filter_button`, a menu button wearing a selector's kind name)
+stays `[dropdown]`. Not shown: the grouping the dividers express, and an
+option's `status`. Whether an editable `ComboBox` raises `TextSubmitted` on
+focus loss, and whether putting its index back raises `SelectionChanged`
+re-entrantly, are read, not measured.
 `icon` is now materialized too: it reuses `LoadIcon` (widened from `Button` to
 `ContentControl`) and, when the SVG does not load, shows the icon's own `name`
 as text and counts an `icon-text`, exactly as `icon_button` does -- an `icon`
