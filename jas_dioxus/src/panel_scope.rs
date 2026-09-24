@@ -299,6 +299,7 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));
+        doc.extend(artboard_facts(store, model.document()));
     }
     // W2b-8: the five selection-level predicates the YAML binds by BARE NAME
     // (`selection_has_mask`, the mask clip/invert/linked triple, and
@@ -311,6 +312,53 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
         root.extend(crate::interpreter::mask_facts::selection_predicates(model));
     }
     scope
+}
+
+/// W2b-14. The artboard facts the artboards panel and its actions read, from
+/// the STORE's `artboards_panel_selection`, as `state_store.py` derives them:
+///
+/// * `artboards_panel_selection_ids`: the selection's STRING entries, in order;
+/// * `current_artboard` / `current_artboard_id`: the first SELECTED artboard in
+///   DOCUMENT order, else the first artboard; `{}` and `null` when there is none,
+///   so `current_artboard.width` does not null-deref;
+/// * `next_artboard_name`: the smallest unused "Artboard N".
+///
+/// Before it the scope stated the selection as a hard-coded `[]` and carried no
+/// `current_artboard`, so `ap_new` created a default-sized artboard where the
+/// action says "the current artboard's size".
+fn artboard_facts(store: &StateStore, doc: &Document) -> Map<String, Value> {
+    let selected: Vec<String> = store
+        .panel_scope("artboards")
+        .and_then(|p| p.get("artboards_panel_selection"))
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    let current = doc
+        .artboards
+        .iter()
+        .find(|a| selected.contains(&a.id))
+        .or_else(|| doc.artboards.first());
+    let mut m = Map::new();
+    m.insert("artboards_panel_selection_ids".into(), json!(selected));
+    m.insert("current_artboard_id".into(), current.map_or(Value::Null, |a| json!(a.id)));
+    m.insert(
+        "current_artboard".into(),
+        // The artboard's fields under the canonical form's names
+        // (`test_json::artboard_json`), as the reference's raw dict carries them.
+        current.map_or_else(|| json!({}), |a| json!({
+            "id": a.id, "name": a.name, "x": a.x, "y": a.y,
+            "width": a.width, "height": a.height, "fill": a.fill.as_canonical(),
+            "show_center_mark": a.show_center_mark,
+            "show_cross_hairs": a.show_cross_hairs,
+            "show_video_safe_areas": a.show_video_safe_areas,
+            "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
+        })),
+    );
+    m.insert(
+        "next_artboard_name".into(),
+        json!(crate::document::artboard::next_artboard_name(&doc.artboards)),
+    );
+    m
 }
 
 fn sorted(m: &std::collections::HashMap<String, Value>) -> Map<String, Value> {
@@ -824,5 +872,53 @@ mod tests {
             "the engine's work MUST grow, or the two arms were never different: \
              {e_small} vs {e_large}"
         );
+    }
+
+    /// W2b-14. The four artboard facts come from the STORE's
+    /// `artboards_panel_selection`, as `state_store.py` derives them, and not
+    /// from a hard-coded `[]`. `current_artboard` is the first SELECTED
+    /// artboard in DOCUMENT order (not selection order), else the first one.
+    #[test]
+    fn the_engine_scope_derives_the_artboard_facts_from_the_store() {
+        use crate::document::artboard::{next_artboard_name, Artboard};
+        use crate::interpreter::state_store::StateStore;
+        let mut doc = Document::default();
+        doc.artboards = ["a", "b", "c"]
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let mut ab = Artboard::default_with_id(id.to_string());
+                ab.name = format!("Artboard {}", i + 1);
+                ab.width = 100.0 * (i + 1) as f64;
+                ab
+            })
+            .collect();
+        let model = Model::new(doc, None);
+        let slice = PanelState::default();
+        let panel = "artboards_panel_content";
+
+        let mut store = StateStore::new();
+        store.init_panel("artboards", std::collections::HashMap::from([(
+            "artboards_panel_selection".to_string(),
+            json!(["c", 7, "b"]),
+        )]));
+        let ad = engine_scope(&slice, &store, &model, panel)["active_document"].clone();
+        // Only strings are ids (the reference filters the same way).
+        assert_eq!(ad["artboards_panel_selection_ids"], json!(["c", "b"]), "{ad}");
+        // DOCUMENT order: "b" precedes "c" in the list, though "c" was selected first.
+        assert_eq!(ad["current_artboard_id"], json!("b"), "{ad}");
+        assert_eq!(ad["current_artboard"]["width"], json!(200.0), "{ad}");
+        assert_eq!(
+            ad["next_artboard_name"],
+            json!(next_artboard_name(&model.document().artboards)),
+            "{ad}"
+        );
+        assert_ne!(ad["next_artboard_name"], json!(""), "a derived name, not an empty one");
+
+        // No selection: the FIRST artboard is current.
+        let empty = engine_scope(&slice, &StateStore::new(), &model, panel)["active_document"].clone();
+        assert_eq!(empty["artboards_panel_selection_ids"], json!([]), "{empty}");
+        assert_eq!(empty["current_artboard_id"], json!("a"), "{empty}");
+        assert_eq!(empty["current_artboard"]["width"], json!(100.0), "{empty}");
     }
 }

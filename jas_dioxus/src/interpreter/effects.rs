@@ -314,7 +314,7 @@ fn report_writes<'h>(
     }
 }
 
-fn eval_expr(expr: &str, store: &StateStore, ctx: &serde_json::Value) -> Value {
+pub(crate) fn eval_expr(expr: &str, store: &StateStore, ctx: &serde_json::Value) -> Value {
     let mut eval_ctx = store.eval_context();
     // Merge extra context (param, event, etc.)
     if let (serde_json::Value::Object(base), serde_json::Value::Object(extra)) =
@@ -2356,6 +2356,11 @@ fn run_doc_effect(
                 let rh = (y2 - y1).abs();
                 Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
             }
+        }
+        // W2b-14: the seven artboard keys, web-free, so the engine hosts them
+        // and the web reaches them through its `doc.*` fallback.
+        n if super::artboard_effects::KEYS.contains(&n) => {
+            super::artboard_effects::run(n, spec, ctx, store, model);
         }
         _ => {
             // Effects not implemented in this phase change nothing, and are
