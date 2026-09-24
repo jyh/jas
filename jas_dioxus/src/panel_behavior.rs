@@ -685,6 +685,49 @@ mod tests {
         }
     }
 
+    /// W2b-14. `ap_new` on the ENGINE path, over the real compiled panel and
+    /// the engine's own scope. Before it the batch refused with
+    /// `UnknownDocEffect:doc.create_artboard`: the key lived only in the web's
+    /// renderer. The new artboard takes the CURRENT artboard's size, which is
+    /// the action's own `width: active_document.current_artboard.width`, so
+    /// the arm also needs the scope to carry `current_artboard`.
+    #[test]
+    fn ap_new_on_the_engine_path_appends_an_artboard_sized_like_the_current_one() {
+        let ws = Workspace::load().expect("workspace loads");
+        let panel = "artboards_panel_content";
+        let spec = ws.panel(panel).expect("the artboards panel");
+        // A NON-default size, so a new artboard that fell back to the default
+        // could not pass the size check by coincidence.
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards[0].width = 333.0;
+        doc.artboards[0].height = 222.0;
+        let mut model = Model::new(doc, None);
+        let (w0, h0, id0) = {
+            let a = &model.document().artboards[0];
+            (a.width, a.height, a.id.clone())
+        };
+        let control = crate::document::artboard::Artboard::default_with_id("x".into());
+        assert_ne!((control.width, control.height), (w0, h0), "the size check would be vacuous");
+
+        let mut store = StateStore::new();
+        let slice = crate::panel_scope::PanelState::default();
+        for want in [2usize, 3] {
+            let scope = crate::panel_scope::engine_scope(&slice, &store, &model, panel);
+            let r = run_widget_behavior(panel, spec, &click("ap_new", false), &scope, &mut store,
+                                        &mut model, ws.actions(), ws.dialogs(),
+                                        &mut EngineHost { artboard_selection: vec![] });
+            assert!(r.is_ok(), "ap_new #{want}: {r:?}");
+            assert_eq!(model.document().artboards.len(), want, "ap_new #{want}");
+            let last = model.document().artboards.last().expect("an artboard");
+            assert_eq!((last.width, last.height), (w0, h0), "ap_new #{want} took another size");
+            assert_ne!(last.id, id0, "ap_new #{want} reused an id");
+        }
+        let names: std::collections::BTreeSet<&str> =
+            model.document().artboards.iter().map(|a| a.name.as_str()).collect();
+        assert_eq!(names.len(), 3, "three artboards, three names");
+        assert!(!model.in_txn(), "a batch left a transaction open");
+    }
+
     #[test]
     fn an_unhosted_key_is_refused_and_the_same_batch_runs_once_a_host_claims_it() {
         let ev = click("boolean_union_button", false);
