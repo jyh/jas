@@ -1901,6 +1901,60 @@ mod tests {
         e
     }
 
+    /// **W2b-16 (A13, D12): a `foreach` row is addressed by its plan PATH.**
+    /// The engine re-expands the foreach from the same scope the plan used,
+    /// binds the row's loop variable, and runs the widget's behavior for THAT
+    /// row. Row 1's `ap_number` selects artboard 1, and the plan's label on
+    /// that row names the same artboard (S8). A path past the last row is
+    /// refused by name, and so is a path into nothing.
+    #[test]
+    fn a_foreach_row_is_addressed_by_its_plan_path() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards = (0..3).map(|i| {
+            let mut a = Artboard::default_with_id(format!("ab{i:04}"));
+            a.name = format!("Board {}", i + 1);
+            a
+        }).collect();
+        let e = engine_with(Model::new(doc, None));
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "artboards_panel_content", 228, 600)).expect("plan JSON");
+        let rows: Vec<serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "ap_number").map(|r| r["path"].clone()).collect();
+        assert_eq!(rows.len(), 3, "one ap_number per artboard: {plan}");
+        // S8: the row the plan LABELS "Board 2" is the row path rows[1] names.
+        let name_row: Vec<String> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten()
+            .filter(|r| r["id"] == "ap_name" && r["path"][1] == rows[1][1])
+            .map(|r| r.to_string()).collect();
+        assert_eq!(name_row.len(), 1, "{plan}");
+        assert!(name_row[0].contains("Board 2"), "row 1's label: {}", name_row[0]);
+
+        let ev = format!(r#"{{"path":{},"event":"click"}}"#, rows[1]);
+        let (reply, err) = behave(e, "artboards_panel_content", &ev);
+        assert!(!reply.is_empty(), "row 1 refused: {err}");
+        let scope = {
+            let en = unsafe { e.as_ref() }.unwrap();
+            crate::panel_scope::engine_scope(&en.panel.borrow(), &en.store.borrow(),
+                                             &en.model.borrow(), "artboards_panel_content")
+        };
+        assert_eq!(scope["active_document"]["artboards_panel_selection_ids"],
+                   serde_json::json!(["ab0001"]), "row 1 acts on artboard 1");
+
+        let mut past = rows[1].clone();
+        past.as_array_mut().unwrap()[1] = serde_json::json!(9);
+        let (reply, err) = behave(e, "artboards_panel_content",
+                                  &format!(r#"{{"path":{past},"event":"click"}}"#));
+        assert_eq!(reply, "", "a row that does not exist");
+        assert!(err.contains(r#""panel_event":"NoRow""#), "{err}");
+        let (reply, err) = behave(e, "artboards_panel_content", r#"{"path":[7,7],"event":"click"}"#);
+        assert_eq!(reply, "");
+        assert!(err.contains(r#""panel_event":"MissingTarget""#), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// (reply, error channel) for one behavior crossing.
     fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
         let reply = take(unsafe {

@@ -137,7 +137,12 @@ pub struct Ran {
 /// The shell's report of one act on one control.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UserEvent {
+    /// The widget's id. For an event addressed by `path` it is the addressed
+    /// node's id once resolved, or the path's JSON when the node has none.
     pub widget: String,
+    /// W2b-16: the widget's PLAN path (`[i, j, ...]`), which is how a row under a
+    /// `foreach` is addressed. `None` for an event addressed by id.
+    pub path: Option<Vec<usize>>,
     pub event: String,
     /// `event.alt` / `event.shift` / `event.meta` / `event.ctrl`, the names the
     /// web click handler gives a behavior's `condition`.
@@ -155,13 +160,27 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
         return Err(Refusal::new("BadJson", ""));
     };
     let widget = obj.get("widget").and_then(Value::as_str).unwrap_or("");
-    if widget.is_empty() {
+    // W2b-16: `path` addresses a node by the plan's path scheme. A path that is
+    // not a list of non-negative integers addresses nothing.
+    let path = match obj.get("path") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(a)) => Some(
+            a.iter().map(|v| v.as_u64().map(|n| n as usize)).collect::<Option<Vec<_>>>()
+                .ok_or_else(|| Refusal::new("MissingTarget", obj["path"].to_string()))?,
+        ),
+        Some(other) => return Err(Refusal::new("MissingTarget", other.to_string())),
+    };
+    if widget.is_empty() && path.is_none() {
         return Err(Refusal::new("MissingTarget", ""));
     }
     let event = obj.get("event").and_then(Value::as_str).unwrap_or("click");
     let flag = |k: &str| Value::Bool(obj.get(k).and_then(Value::as_bool).unwrap_or(false));
     Ok(UserEvent {
-        widget: widget.to_string(),
+        widget: match &path {
+            Some(p) if widget.is_empty() => serde_json::to_string(p).unwrap_or_default(),
+            _ => widget.to_string(),
+        },
+        path,
         event: event.to_string(),
         modifiers: json!({"alt": flag("alt"), "shift": flag("shift"),
                           "meta": flag("meta"), "ctrl": flag("ctrl")}),
@@ -320,6 +339,44 @@ fn unhandled_detail(u: &Unhandled) -> String {
     format!("{kind}:{payload}")
 }
 
+/// The key under which a resolved row scope records the loop variables its
+/// path bound (`{"ab": {...}}`), for [`run_batch`]'s context.
+const ROW_BINDINGS: &str = "__row_bindings";
+
+/// W2b-16 (A13, D12). The node a plan `path` names, and the scope its behavior
+/// runs in, walked from the panel's `content` by the plan's own scheme: a
+/// declared child is `children[i]`; at a `foreach`, index `i` is row `i`, whose
+/// scope is [`crate::interpreter::foreach::row_scopes`]'s, the one expansion the
+/// plan uses (S8), and the walk continues into the `do` template.
+///
+/// A row index past the rows the foreach expands to is refused `NoRow`; a
+/// declared index with no child is `MissingTarget`.
+fn resolve_path(content: &Value, path: &[usize], scope: &Value) -> Result<(Value, Value), Refusal> {
+    let mut cur = content.clone();
+    let mut sc = scope.clone();
+    for (depth, &i) in path.iter().enumerate() {
+        if let Some(rows) = crate::interpreter::foreach::row_scopes(&cur, &sc) {
+            let Some(row) = rows.into_iter().nth(i) else {
+                return Err(Refusal::new("NoRow", format!("{:?}", &path[..=depth])));
+            };
+            // The loop variable this row binds, recorded so the effects runner,
+            // whose context is deliberately narrower than the scope, gets it.
+            let var = cur["foreach"].get("as").and_then(Value::as_str).unwrap_or("item").to_string();
+            let mut bindings = sc.get(ROW_BINDINGS).cloned().unwrap_or_else(|| json!({}));
+            bindings[&var] = row[&var].clone();
+            sc = row;
+            sc[ROW_BINDINGS] = bindings;
+            cur = cur["do"].clone();
+        } else {
+            let Some(child) = cur.get("children").and_then(|c| c.get(i)).cloned() else {
+                return Err(Refusal::new("MissingTarget", format!("{:?}", &path[..=depth])));
+            };
+            cur = child;
+        }
+    }
+    Ok((cur, sc))
+}
+
 /// The first node with id `widget` under `node`, and whether it sits under a
 /// `foreach`. First wins, as `panel_scope::binding_of` has it.
 fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&'a Value, bool)> {
@@ -366,12 +423,30 @@ pub fn run_widget_behavior(
         return Err(Refusal::new("PanelNotHosted", panel_id));
     }
     let content = spec.get("content").unwrap_or(&Value::Null);
-    let Some((node, in_foreach)) = find_widget(content, &ev.widget, false) else {
-        return Err(Refusal::new("MissingTarget", ev.widget.clone()));
+    // W2b-16: an event addressed by `path` resolves the node AND the row scope
+    // it runs in; one addressed by id finds the first node with that id, which
+    // under a `foreach` names a template, not a row.
+    let resolved: (Value, Value);
+    let (node, scope, ev): (&Value, &Value, std::borrow::Cow<UserEvent>) = match &ev.path {
+        Some(path) => {
+            resolved = resolve_path(content, path, scope)?;
+            let mut named = ev.clone();
+            if let Some(id) = resolved.0.get("id").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+                named.widget = id.to_string();
+            }
+            (&resolved.0, &resolved.1, std::borrow::Cow::Owned(named))
+        }
+        None => {
+            let Some((node, in_foreach)) = find_widget(content, &ev.widget, false) else {
+                return Err(Refusal::new("MissingTarget", ev.widget.clone()));
+            };
+            if in_foreach {
+                return Err(Refusal::new("NotAddressable", ev.widget.clone()));
+            }
+            (node, scope, std::borrow::Cow::Borrowed(ev))
+        }
     };
-    if in_foreach {
-        return Err(Refusal::new("NotAddressable", ev.widget.clone()));
-    }
+    let ev: &UserEvent = &ev;
     if let Some(expr) = node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str) {
         if eval(expr, scope).to_bool() {
             return Err(Refusal::new("Disabled", ev.widget.clone()));
@@ -445,10 +520,17 @@ fn run_batch(
     // The runner reads `state` and `panel` from the STORE, live, so a `set`
     // early in the batch is seen by an expression later in it. The context
     // carries only what the store does not hold.
-    let ctx = json!({
+    let mut ctx = json!({
         "active_document": scope.get("active_document").cloned().unwrap_or(Value::Null),
         "event": event,
     });
+    // W2b-16: a row addressed by path carries its loop variables (`ab`,
+    // `brush`, ...), which a behavior's params read (`artboard_id: "ab.id"`).
+    if let Some(Value::Object(bound)) = scope.get(ROW_BINDINGS) {
+        for (k, v) in bound {
+            ctx[k] = v.clone();
+        }
+    }
     // `set_panel_state` writes the ACTIVE panel. It is set on the copy for the
     // pre-flight and on the live store only once the pre-flight passes: a
     // refusal changes nothing, not even which panel is active.
