@@ -300,6 +300,11 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));
         doc.extend(artboard_facts(store, model.document()));
+        // W2b-15: the symbols list and the Concepts panel's PARAMS mode.
+        doc.insert("symbols".into(),
+                   crate::interpreter::document_views::symbols_view(model.document()));
+        doc.insert("selected_concept".into(),
+                   crate::interpreter::document_views::selected_concept_view(model.document()));
     }
     // W2b-8: the five selection-level predicates the YAML binds by BARE NAME
     // (`selection_has_mask`, the mask clip/invert/linked triple, and
@@ -577,6 +582,38 @@ mod tests {
         let ids: Vec<&str> = s["data"]["concepts"].as_array().expect("data.concepts is a list")
             .iter().filter_map(|c| c["id"].as_str()).collect();
         assert_eq!(ids, vec!["gear", "regular_polygon", "spiral", "star"]);
+    }
+
+    /// W2b-15. The Symbols panel lists `active_document.symbols`, one row per
+    /// master, and the Concepts panel switches to PARAMS mode on
+    /// `active_document.selected_concept`. Both come from the ONE web-free
+    /// builder the web view also calls. Before it the engine's scope had
+    /// neither, so the symbols list drew 0 rows and PARAMS mode never opened.
+    #[test]
+    fn the_engine_scope_carries_the_symbols_and_the_selected_concept() {
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::geometry::element::{CommonProps, Element};
+        use crate::geometry::live::{GeneratedElem, LiveVariant};
+        let read = |m: &Model| {
+            engine_scope(&PanelState::default(), &StateStore::new(), m, "symbols_panel_content")
+                ["active_document"].clone()
+        };
+        let mut m = model_with(vec![rect(0.0, 0.0, 1.0, 1.0)], &[0]);
+        let mut doc = m.document().clone();
+        doc.symbols = vec![rect(0.0, 0.0, 5.0, 5.0)];
+        m.set_document_for_test(doc);
+        let ad = read(&m);
+        assert_eq!(ad["symbols"].as_array().map(|a| a.len()), Some(1), "{ad}");
+        assert_eq!(ad["symbols"][0]["name"], "Symbol 1", "the positional fallback");
+        assert_eq!(ad["selected_concept"], Value::Null, "a rect is not a concept instance");
+
+        let gear = Element::Live(LiveVariant::Generated(
+            GeneratedElem::new("gear".into(), serde_json::json!({}), CommonProps::default())));
+        let g = model_with(vec![gear], &[0]);
+        let sc = read(&g)["selected_concept"].clone();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        assert_eq!(sc["concept_id"], "gear", "{sc}");
+        assert_eq!(sc["name"], ws.concept("gear").unwrap()["name"], "{sc}");
     }
 
     // -- the scope --------------------------------------------------------
