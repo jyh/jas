@@ -2478,17 +2478,10 @@ pub(crate) fn build_active_document_view(
             serde_json::json!({"__path__": path_ints})
         })
         .collect();
-    // True if any selected element is an Element::Live (currently
-    // only compound shapes). Consumed by the Boolean panel's Expand
-    // button and Release/Expand Compound Shape menu items.
-    let selection_has_compound_shape = canvas_selection
-        .iter()
-        .any(|es| {
-            matches!(
-                tab.model.document().get_element(&es.path),
-                Some(Element::Live(_))
-            )
-        });
+    // Consumed by the Boolean panel's Expand button. The one definition
+    // lives in `boolean_host`, which the engine's scope also calls.
+    let selection_has_compound_shape =
+        crate::interpreter::boolean_host::selection_has_compound_shape(tab.model.document());
     // Concepts panel (Slice 2): when exactly one generated concept instance is
     // selected, expose its concept id + param schema merged with current values
     // so the panel switches to PARAMS mode; null otherwise.
@@ -13597,6 +13590,23 @@ mod tests {
         let view = build_active_document_view(&st);
         assert_eq!(view["has_selection"], serde_json::json!(true));
         assert_eq!(view["selection_count"], serde_json::json!(3));
+    }
+
+    /// W2b-13b, fork F-I. A selected symbol REFERENCE is `Element::Live` and is
+    /// not a compound shape, so the web view does not enable Expand for it. The
+    /// view reads `boolean_host::selection_has_compound_shape`, the one definition.
+    #[test]
+    fn active_document_view_compound_predicate_is_false_for_a_reference() {
+        use crate::geometry::element::CommonProps;
+        use crate::geometry::live::{ElementRef, LiveVariant, ReferenceElem};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let reference = Element::Live(LiveVariant::Reference(
+            ReferenceElem::new(ElementRef("r1".into()), CommonProps::default())));
+        let m = crate::document::test_fixture::model_with(vec![reference], &[0]);
+        st.tabs[st.active_tab].model.set_document_for_test(m.document().clone());
+        let view = build_active_document_view(&st);
+        assert_eq!(view["selection_count"], serde_json::json!(1), "the fixture selected nothing");
+        assert_eq!(view["selection_has_compound_shape"], serde_json::json!(false));
     }
 
     #[test]
