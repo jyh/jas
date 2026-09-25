@@ -154,3 +154,34 @@ import Foundation
     )
     #expect(view["new_layer_insert_index"] as? Int == 2)
 }
+
+// W2b-13b, fork F-I. Expand's predicate holds for a COMPOUND SHAPE and for no
+// other Live kind. A symbol reference, a recorded element and a generated
+// element are `.live` too, and the old predicate enabled Expand for all of
+// them. Mirrors Rust's `boolean_host::selection_has_compound_shape`.
+@Test func activeDocumentCompoundPredicateHoldsForACompoundShapeOnly() {
+    func predicate(_ child: Element, selecting path: [Int] = [0, 0]) -> Bool? {
+        let model = Model(document: Document(
+            layers: [Layer(children: [child])],
+            selection: [ElementSelection.all(path)]
+        ))
+        return buildActiveDocumentView(model: model)["selection_has_compound_shape"] as? Bool
+    }
+    let compound = Element.live(.compoundShape(CompoundShape(
+        operation: .union,
+        operands: [.rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+                   .rect(Rect(x: 5, y: 0, width: 10, height: 10))],
+        name: "cs", id: "cs-1")))
+    #expect(predicate(compound) == true)
+    let others: [(String, Element)] = [
+        ("reference", .live(.reference(ReferenceElem(target: ElementRef("r1"), name: "ref", id: "ref-1")))),
+        ("recorded", .live(.recorded(RecordedElem(ops: [], inputs: [], name: "rec", id: "rec-1")))),
+        ("generated", .live(.generated(GeneratedElem(conceptId: "c1", params: [:], name: "gen", id: "gen-1")))),
+    ]
+    for (name, element) in others {
+        #expect(predicate(element) == false, "\(name) is not a compound shape")
+    }
+    #expect(predicate(.rect(Rect(x: 0, y: 0, width: 1, height: 1))) == false)
+    // A stale selection path is false, never a crash.
+    #expect(predicate(compound, selecting: [0, 7]) == false)
+}

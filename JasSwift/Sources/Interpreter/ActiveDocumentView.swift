@@ -183,15 +183,16 @@ public func buildActiveDocumentView(
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         "element_selection": elementSelection,
-        // Drives the Boolean panel's Expand button + the Release/
-        // Expand Compound Shape menu items: enabled only when at
-        // least one selected element is a compound shape.
+        // Drives the Boolean panel's Expand button: enabled only when at
+        // least one selected element is a COMPOUND SHAPE. Not any `.live`:
+        // a reference, a recorded and a generated element are live too, and
+        // Expand expands none of them (W2b-13b, fork F-I).
         "selection_has_compound_shape": m.document.selection.contains {
             // Use the bounds-checked lookup: a selection may carry a
             // stale path into a since-mutated document. Mirrors Rust's
-            // matches!(get_element(...), Some(Element::Live(_))) which
-            // is false for a missing element rather than a crash.
-            if case .live = m.document.tryGetElement($0.path) { return true }
+            // `boolean_host::selection_has_compound_shape`, which is false
+            // for a missing element rather than a crash.
+            if case .live(.compoundShape) = m.document.tryGetElement($0.path) { return true }
             return false
         },
         "artboards": artboardsView,
