@@ -305,12 +305,19 @@ static class Program
             rowed is not null && rowed.RootElement.TryGetProperty("path", out var rp)
             && rp.ValueKind == System.Text.Json.JsonValueKind.Array
             && string.Join(",", rp.EnumerateArray().Select(x => x.GetInt32())) == "0,1,0", Show(rowed));
-        foreach (var bad in new[] { "", "[]", "[0,-1]", "{\"a\":1}", "[0,1", "0" })
+        // One literal case per shape: check_title_oracle_ran reads case names
+        // from the source, and a name built inside a loop is one it cannot size.
+        bool NoPath(string bad)
         {
             var ev = Parse(PanelWire.EventJson("w", "click", null, false, false, false, false, bad));
-            Check($"W2b-19: an unusable path ({bad}) is left out",
-                ev is not null && !ev.RootElement.TryGetProperty("path", out _), Show(ev));
+            return ev is not null && !ev.RootElement.TryGetProperty("path", out _);
         }
+        Check("W2b-19: an empty path is left out", NoPath(""), "");
+        Check("W2b-19: an empty array is left out", NoPath("[]"), "[]");
+        Check("W2b-19: a negative index is left out", NoPath("[0,-1]"), "[0,-1]");
+        Check("W2b-19: an object is left out", NoPath("{\"a\":1}"), "{\"a\":1}");
+        Check("W2b-19: unparseable text is left out", NoPath("[0,1"), "[0,1");
+        Check("W2b-19: a bare number is left out", NoPath("0"), "0");
         Check("W2b-19: no path given means no path key",
             press is not null && !press.RootElement.TryGetProperty("path", out _), Show(press));
 
