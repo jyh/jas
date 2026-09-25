@@ -311,6 +311,10 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(root) = scope.as_object_mut() {
         root.extend(crate::interpreter::mask_facts::selection_predicates(model));
     }
+    // W2b-15: the list sources a `foreach source: "data.*"` reads.
+    scope["data"] = serde_json::json!({
+        "concepts": crate::interpreter::workspace::concepts_list(),
+    });
     scope
 }
 
@@ -545,6 +549,19 @@ mod tests {
             })
             .collect();
         d
+    }
+
+    /// W2b-15. The Concepts panel's `foreach source: "data.concepts"` reads the
+    /// workspace's concept registry, as the web's `data` does. Before it the
+    /// engine's scope carried no `data`, so the plan drew 0 rows where the
+    /// web draws 4.
+    #[test]
+    fn the_engine_scope_carries_the_concept_registry_as_data() {
+        let m = crate::document::test_fixture::model_with(vec![], &[]);
+        let s = engine_scope(&PanelState::default(), &StateStore::new(), &m, "concepts_panel_content");
+        let ids: Vec<&str> = s["data"]["concepts"].as_array().expect("data.concepts is a list")
+            .iter().filter_map(|c| c["id"].as_str()).collect();
+        assert_eq!(ids, vec!["gear", "regular_polygon", "spiral", "star"]);
     }
 
     // -- the scope --------------------------------------------------------

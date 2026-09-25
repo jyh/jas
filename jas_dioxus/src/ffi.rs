@@ -1817,6 +1817,25 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **W2b-15 through the ABI.** The Concepts panel's list is a `foreach` over
+    /// `data.concepts`, so its plan draws one row per registered concept, with
+    /// the concept's name. Before it the engine's scope had no `data` and the
+    /// list drew 0 rows. The names come from the registry, never typed here.
+    #[test]
+    fn the_concepts_plan_draws_a_row_per_registered_concept() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan = plan_of(e, "concepts_panel_content", 228, 600);
+        let registry = crate::interpreter::workspace::concepts_list();
+        let names: Vec<&str> = registry.as_array().expect("a list")
+            .iter().filter_map(|c| c["name"].as_str()).collect();
+        assert_eq!(names.len(), 4, "the registry changed: {names:?}");
+        for name in &names {
+            assert!(plan.contains(&format!("\"{name}\"")), "{name} is not in the plan: {plan}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2-5a through the ABI.** The export hands the plan the workspace's own
     /// icon definitions, so the align plan names `align_left` and carries its
     /// definition; the pure arms in `panel_plan` cover the rest.
