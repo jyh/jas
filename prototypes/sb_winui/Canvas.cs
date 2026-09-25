@@ -247,6 +247,8 @@ internal sealed class PanelClickCmd : Cmd
 {
     internal string PanelId = "";
     internal string Widget = "";
+    /// <summary>W2b-19: the leaf's plan path, as the plan printed it, or null.</summary>
+    internal string? Path;
     internal bool Alt;
     internal bool Shift;
     internal bool Ctrl;
@@ -4414,7 +4416,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private static byte[] PanelEventJson(PanelClickCmd click) =>
         PanelWire.EventJson(click.Widget, click.Event, click.Value,
-                            click.Alt, click.Shift, click.Ctrl, click.Meta);
+                            click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path);
 
     /// <summary>
     /// The fields every click row opens with. `event=` and `value=` come AFTER

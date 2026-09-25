@@ -2139,7 +2139,8 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(btn, summary); }
 
         var id = leaf.Id;
-        btn.Click += (_, _) => OnPaneClick(id);
+        var path = leaf.Path;
+        btn.Click += (_, _) => OnPaneClick(id, path);
 
         var name = leaf.IconName;
         if (name is not null && icons.TryGetValue(name, out var def))
@@ -2397,19 +2398,20 @@ public sealed partial class MainWindow : Window
     /// What the click does is the core's (`jas_panel_behavior`); the row it
     /// writes is the receipt.
     /// </summary>
-    private void OnPaneClick(string widget) => SendPane(widget, "click", null);
+    private void OnPaneClick(string widget, string? path = null) => SendPane(widget, "click", null, path);
 
     /// <summary>
     /// Send one act on a pane control to the core, addressed to the panel the
     /// control was built from. A press is `click` with no value; a commit is
     /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
     /// </summary>
-    private void SendPane(string widget, string eventName, string? value)
+    private void SendPane(string widget, string eventName, string? value, string? path = null)
     {
         _canvas.PanelClick(new PanelClickCmd
         {
             PanelId = _paneDrawnPanel,
             Widget = widget,
+            Path = path,
             Via = "hand",
             Event = eventName,
             Value = value,
@@ -2459,20 +2461,20 @@ public sealed partial class MainWindow : Window
         {
             if (e.Key != Windows.System.VirtualKey.Enter) { return; }
             e.Handled = true;
-            CommitBox(box, id);
+            CommitBox(box, id, leaf.Path);
         };
         box.LostFocus += (_, _) =>
         {
-            if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id); }
+            if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
         };
         return box;
     }
 
-    private void CommitBox(TextBox box, string widget)
+    private void CommitBox(TextBox box, string widget, string? path = null)
     {
         var text = box.Text;
         box.Text = box.Tag as string ?? "";
-        SendPane(widget, "commit", text);
+        SendPane(widget, "commit", text, path);
     }
 
     /// <summary>
@@ -2494,7 +2496,7 @@ public sealed partial class MainWindow : Window
         box.Click += (_, _) =>
         {
             box.IsChecked = box.Tag is true;
-            if (id.Length > 0) { SendPane(id, "click", null); }
+            SendPane(id, "click", null, leaf.Path);
         };
         return box;
     }
@@ -2544,7 +2546,7 @@ public sealed partial class MainWindow : Window
             // own index, and `ChoiceCommit` sends nothing for that.
             combo.SelectedIndex = state?.Index ?? -1;
             if (combo.IsEditable && (state?.Index ?? -1) < 0) { combo.Text = state?.Text ?? ""; }
-            SendPane(id, "commit", send);
+            SendPane(id, "commit", send, leaf.Path);
         };
         if (combo.IsEditable)
         {
@@ -2555,7 +2557,7 @@ public sealed partial class MainWindow : Window
                 var state = combo.Tag as ChoiceState;
                 if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
                 e.Handled = true;
-                if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text); }
+                if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text, leaf.Path); }
                 combo.Text = state?.Text ?? "";
             };
         }

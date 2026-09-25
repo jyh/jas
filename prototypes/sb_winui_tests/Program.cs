@@ -298,6 +298,22 @@ static class Program
             press is not null
             && Str(press, "widget") == "mwp_fill_color" && Str(press, "event") == "click", Show(press));
 
+        // W2b-19: a leaf's plan path crosses as an int array, and a path that is
+        // not one is left out rather than sent.
+        var rowed = Parse(PanelWire.EventJson("ap_number", "click", null, false, false, false, false, "[0,1,0]"));
+        Check("W2b-19: a press carries its plan path as integers",
+            rowed is not null && rowed.RootElement.TryGetProperty("path", out var rp)
+            && rp.ValueKind == System.Text.Json.JsonValueKind.Array
+            && string.Join(",", rp.EnumerateArray().Select(x => x.GetInt32())) == "0,1,0", Show(rowed));
+        foreach (var bad in new[] { "", "[]", "[0,-1]", "{\"a\":1}", "[0,1", "0" })
+        {
+            var ev = Parse(PanelWire.EventJson("w", "click", null, false, false, false, false, bad));
+            Check($"W2b-19: an unusable path ({bad}) is left out",
+                ev is not null && !ev.RootElement.TryGetProperty("path", out _), Show(ev));
+        }
+        Check("W2b-19: no path given means no path key",
+            press is not null && !press.RootElement.TryGetProperty("path", out _), Show(press));
+
         var commit = Parse(PanelWire.EventJson("mwp_fill_tolerance", "commit", "40", false, false, false, false));
         Check("W2b-2: a commit carries its text as a JSON STRING, never a number",
             commit is not null
