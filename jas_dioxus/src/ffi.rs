@@ -250,6 +250,7 @@ impl JasEngine {
             }
         }
         crate::panel_scope::sync_colour_state(&mut store, &panel);
+        crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
             model: RefCell::new(Model::default()),
             last_error: RefCell::new(None),
@@ -1814,6 +1815,56 @@ mod tests {
         assert!(b.ptr.is_null() && b.len == 0, "bad UTF-8");
         // The control: the same engine answers a real panel.
         assert!(plan_of(e, id, 228, 0).contains("\"leaves\""));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2b-15 through the ABI.** The Brushes and Swatches panels draw their
+    /// open libraries from `data.brush_libraries` / `data.swatch_libraries`,
+    /// which the web loads from the workspace bundle. Before it the engine's
+    /// store held no data, so a library header's label resolved to `""` and it
+    /// drew no tiles. The expected names come from the bundle, never typed here.
+    #[test]
+    fn the_library_panels_draw_the_bundles_libraries() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let e = jas_engine_new();
+        for (panel, key, items) in [("brushes_panel_content", "brush_libraries", "brushes"),
+                                    ("swatches_panel_content", "swatch_libraries", "swatches")] {
+            let plan = plan_of(e, panel, 228, 600);
+            let libs = ws.data()[key].as_object().expect("the bundle has libraries");
+            let lib = libs.values().next().expect("at least one library");
+            let lib_name = lib["name"].as_str().expect("a library name");
+            assert!(plan.contains(&format!("\"{lib_name}\"")), "{panel}: no {lib_name}: {plan}");
+            // A tile is a thumbnail with a templated id and no text, so count
+            // the records that carry the tile's own binding, one per item.
+            let v: serde_json::Value = serde_json::from_str(&plan).expect("plan JSON");
+            let tiles = ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| v[*k].as_array()).flatten()
+                .filter(|r| r["values"].get("bind.selected_in").is_some())
+                .count();
+            let want = lib[items].as_array().expect("an item list").len();
+            assert!(want > 1, "{panel}: a one-item library cannot tell one tile from many");
+            assert_eq!(tiles, want, "{panel}: {tiles} tiles for {want} items");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// **W2b-15 through the ABI.** The Concepts panel's list is a `foreach` over
+    /// `data.concepts`, so its plan draws one row per registered concept, with
+    /// the concept's name. Before it the engine's scope had no `data` and the
+    /// list drew 0 rows. The names come from the registry, never typed here.
+    #[test]
+    fn the_concepts_plan_draws_a_row_per_registered_concept() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan = plan_of(e, "concepts_panel_content", 228, 600);
+        let registry = crate::interpreter::workspace::concepts_list();
+        let names: Vec<&str> = registry.as_array().expect("a list")
+            .iter().filter_map(|c| c["name"].as_str()).collect();
+        assert_eq!(names.len(), 4, "the registry changed: {names:?}");
+        for name in &names {
+            assert!(plan.contains(&format!("\"{name}\"")), "{name} is not in the plan: {plan}");
+        }
         unsafe { jas_engine_free(e) };
     }
 
