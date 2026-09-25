@@ -130,33 +130,15 @@ fn walk(node: &Json, path: &[i64], ctx: &Json, out: &mut Vec<Json>) {
     // A foreach container expands its `do` template once per item of
     // eval(foreach.source, ctx) — the same expansion widget_tree performs, so a
     // path here names the same node it names there.
-    let foreach = node.get("foreach").filter(|v| v.is_object());
     let do_template = node.get("do").filter(|v| !v.is_null());
-    if let (Some(spec), Some(template)) = (foreach, do_template) {
-        let src = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
-        let var = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
-        let items: Vec<Json> = match eval(src, ctx) {
-            EVal::List(v) => v,
-            _ => vec![],
-        };
-        let base_obj = ctx.as_object().cloned().unwrap_or_default();
-        for (i, item) in items.into_iter().enumerate() {
-            let mut item_data = match item {
-                Json::Object(m) => m,
-                other => {
-                    let mut m = serde_json::Map::new();
-                    m.insert("_value".to_string(), other);
-                    m
-                }
-            };
-            item_data.insert("_index".to_string(), json!(i));
-            let mut child = base_obj.clone();
-            child.insert(var.to_string(), Json::Object(item_data));
-            let child_ctx = Json::Object(child);
+    if let (Some(rows), Some(template)) =
+        (crate::interpreter::foreach::row_scopes(node, ctx), do_template)
+    {
+        for (i, child_ctx) in rows.iter().enumerate() {
             let mut cp = path.to_vec();
             cp.push(i as i64);
             if template.is_object() {
-                walk(template, &cp, &child_ctx, out);
+                walk(template, &cp, child_ctx, out);
             }
         }
         return;

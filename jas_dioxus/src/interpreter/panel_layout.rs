@@ -17,10 +17,9 @@
 //! `eval(foreach.source, ctx)`; a column distributes `avail_h` leftover to
 //! `flex`-weighted children (vertical flex).
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 
-use super::expr::{eval, eval_text};
-use super::expr_types::Value as EVal;
+use super::expr::eval_text;
 
 pub const CHAR_WIDTH: i64 = 10;
 
@@ -824,37 +823,16 @@ fn foreach(
     gap: i64,
     ctx: &Value,
 ) -> (Vec<MItem>, i64) {
-    let spec = st_foreach(n).cloned().unwrap_or(Value::Null);
-    let src = spec.get("source").and_then(|v| v.as_str()).unwrap_or("");
-    let var = spec.get("as").and_then(|v| v.as_str()).unwrap_or("item");
     let template = n.get("do").cloned().unwrap_or(Value::Null);
     // Dispatch on the raw `layout` field (not resolved_layout): default column.
     let lay = n.get("layout").and_then(|v| v.as_str()).unwrap_or("column");
-
-    let items: Vec<Value> = match eval(src, ctx) {
-        EVal::List(v) => v,
-        _ => vec![],
-    };
-
-    let base_obj: Map<String, Value> = ctx.as_object().cloned().unwrap_or_default();
+    // The rows, bound by the ONE expansion the engine's path resolver also uses.
+    let rows = crate::interpreter::foreach::row_scopes(n, ctx).unwrap_or_default();
 
     // Measure every expansion (column fills inner_w; row/wrap are intrinsic).
     let avail = if lay == "column" { inner_w } else { -1 };
     let mut measured: Vec<(i64, i64, Vec<MItem>)> = vec![]; // (item_w, item_h, items)
-    for (i, item) in items.into_iter().enumerate() {
-        let mut item_data: Map<String, Value> = match item {
-            Value::Object(m) => m,
-            other => {
-                let mut m = Map::new();
-                m.insert("_value".to_string(), other);
-                m
-            }
-        };
-        item_data.insert("_index".to_string(), json!(i));
-        let mut child = base_obj.clone();
-        child.insert(var.to_string(), Value::Object(item_data));
-        let child_ctx = Value::Object(child);
-
+    for (i, child_ctx) in rows.iter().enumerate() {
         let mut cp = path.to_vec();
         cp.push(i as i64);
         let (mut w, h, mut cit) = measure(&template, &cp, avail, 0, &child_ctx);
