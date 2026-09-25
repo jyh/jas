@@ -642,35 +642,6 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     m
 }
 
-/// The concept-pack registry as a sorted list of `{id, name, description}` for
-/// the Concepts panel's `foreach source: "data.concepts"` (CONCEPTS.md §6).
-/// Derived from the compiled workspace `concepts` registry; `Workspace::load`
-/// is cached, so this is cheap.
-fn workspace_concepts_list() -> serde_json::Value {
-    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
-        return serde_json::Value::Array(Vec::new());
-    };
-    let Some(map) = ws.data().get("concepts").and_then(|c| c.as_object()) else {
-        return serde_json::Value::Array(Vec::new());
-    };
-    let mut ids: Vec<&String> = map.keys().collect();
-    ids.sort();
-    let list: Vec<serde_json::Value> = ids
-        .into_iter()
-        .map(|id| {
-            let c = &map[id];
-            serde_json::json!({
-                "id": id,
-                "name": c.get("name").cloned()
-                    .unwrap_or_else(|| serde_json::Value::String(id.clone())),
-                "description": c.get("description").cloned()
-                    .unwrap_or(serde_json::Value::Null),
-            })
-        })
-        .collect();
-    serde_json::Value::Array(list)
-}
-
 /// Build a live state map from AppState for the YAML eval context.
 /// Includes fill_color, stroke_color, fill_on_top, and other state fields.
 pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, serde_json::Value> {
@@ -1336,7 +1307,7 @@ pub(crate) fn build_dock_groups(
                                     .cloned().unwrap_or(serde_json::Value::Null),
                                 "brush_libraries": live_state_map.get("_brush_libraries")
                                     .cloned().unwrap_or(serde_json::Value::Null),
-                                "concepts": workspace_concepts_list(),
+                                "concepts": crate::interpreter::workspace::concepts_list(),
                                 "_doc_generation": live_state_map.get("_doc_generation")
                                     .cloned().unwrap_or(serde_json::Value::Null)
                             }));
@@ -1877,7 +1848,7 @@ mod concept_tests {
     fn workspace_concepts_list_exposes_sorted_registry() {
         // data.concepts for the Concepts panel: the registered packs as a
         // sorted [{id,name,description}] list (CONCEPTS.md §6 / 3a).
-        let v = workspace_concepts_list();
+        let v = crate::interpreter::workspace::concepts_list();
         let arr = v.as_array().expect("a list");
         let ids: Vec<&str> = arr.iter()
             .filter_map(|c| c.get("id").and_then(|i| i.as_str()))
