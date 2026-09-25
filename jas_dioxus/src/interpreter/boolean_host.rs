@@ -104,6 +104,23 @@ pub fn run(model: &mut Model, key: &str, options: &BooleanOptions) -> bool {
     true
 }
 
+/// Expand's predicate, `active_document.selection_has_compound_shape`: is any
+/// selected element a COMPOUND SHAPE? It is the ONE definition. The web view
+/// (`build_active_document_view`) and the engine's scope
+/// (`panel_scope::document_facts`) both call it.
+///
+/// ⛔ Not "any `Element::Live`". A symbol reference, a recorded element and a
+/// generated element are `Live` too, and `expand_compound_shape` expands none of
+/// them (W2b-13b, fork F-I; the spec, `transcripts/BOOLEAN.md:497`, says "a
+/// compound shape"). A stale selection path is `false`, never a panic.
+pub fn selection_has_compound_shape(doc: &crate::document::document::Document) -> bool {
+    use crate::geometry::element::Element;
+    use crate::geometry::live::LiveVariant;
+    doc.selection.iter().any(|es| {
+        matches!(doc.get_element(&es.path), Some(Element::Live(LiveVariant::CompoundShape(_))))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -223,6 +240,39 @@ mod tests {
             assert!(m.in_txn(), "{key} closed its caller's transaction");
             m.commit_txn();
         }
+    }
+
+    /// W2b-13b, fork F-I. Expand is enabled for a COMPOUND SHAPE and for no
+    /// other kind of `Live` element. The spec says "a compound shape"
+    /// (`transcripts/BOOLEAN.md:497`), and `expand_compound_shape` expands only
+    /// that variant. A symbol reference, a recorded element and a generated
+    /// element are `Element::Live` too, and the old predicate enabled Expand
+    /// for every one of them.
+    #[test]
+    fn the_expand_predicate_holds_for_a_compound_shape_and_no_other_live_kind() {
+        use crate::geometry::element::CommonProps;
+        use crate::geometry::live::{ElementRef, GeneratedElem, LiveVariant, RecordedElem,
+                                    ReferenceElem};
+        let mut m = overlapping();
+        assert!(!selection_has_compound_shape(m.document()), "two plain rects");
+        assert!(run(&mut m, "boolean_union_compound", &BooleanOptions::default()));
+        assert!(selection_has_compound_shape(m.document()), "the compound shape just made");
+        let others = [
+            ("reference", LiveVariant::Reference(
+                ReferenceElem::new(ElementRef("r1".into()), CommonProps::default()))),
+            ("recorded", LiveVariant::Recorded(
+                RecordedElem::new(vec![], vec![], CommonProps::default()))),
+            ("generated", LiveVariant::Generated(
+                GeneratedElem::new("c1".into(), json!({}), CommonProps::default()))),
+        ];
+        for (name, live) in others {
+            let m = model_with(vec![Element::Live(live)], &[0]);
+            assert_eq!(m.document().selection.len(), 1, "{name}: the fixture selected nothing");
+            assert!(!selection_has_compound_shape(m.document()), "{name} is not a compound shape");
+        }
+        // A stale path is false, never a panic (Swift's comment names this case).
+        let stale = model_with(vec![rect(0.0, 0.0, 1.0, 1.0)], &[7]);
+        assert!(!selection_has_compound_shape(stale.document()), "a stale selection path");
     }
 
     #[test]
