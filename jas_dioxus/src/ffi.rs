@@ -1850,6 +1850,46 @@ mod tests {
         e
     }
 
+    /// **W2b-17 (F-J).** The Symbols panel's verbs run in the engine through
+    /// `symbols_host`, the web's own implementation, instead of reporting their
+    /// `log` stubs. New Symbol promotes the selection and panel-selects the new
+    /// master in the STORE; Place Instance places the store-selected master;
+    /// Delete on a master that still has instances would open the orphan
+    /// confirm, which the engine refuses by the dialog's name, changing nothing.
+    #[test]
+    fn the_symbol_verbs_run_in_the_engine_and_the_orphan_confirm_is_refused() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const SYMBOLS: &str = "symbols_panel_content";
+        use crate::document::test_fixture::{model_with, rect};
+        let e = engine_with(model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[0]));
+        let state = |e: *mut JasEngine| {
+            let en = unsafe { e.as_ref() }.unwrap();
+            let doc = en.model.borrow().document().clone();
+            let sel = en.store.borrow().panel_scope("symbols")
+                .and_then(|p| p.get("selected_symbol")).cloned();
+            (doc, sel)
+        };
+        let (reply, err) = behave(e, SYMBOLS, r#"{"widget":"sym_new","event":"click"}"#);
+        assert!(reply.contains(r#""doc_changed":true"#), "new symbol: {reply} {err}");
+        let (doc, sel) = state(e);
+        assert_eq!(doc.symbols.len(), 1, "one master");
+        let master = doc.symbols[0].common().id.clone().expect("the master has an id");
+        assert_eq!(sel, Some(serde_json::Value::String(master.clone())), "the new master is panel-selected");
+
+        let (reply, err) = behave(e, SYMBOLS, r#"{"widget":"sym_place","event":"click"}"#);
+        assert!(reply.contains(r#""doc_changed":true"#), "place: {reply} {err}");
+        let rdeps = crate::document::dependency_index::dependency_index(&state(e).0)
+            .rdeps.get(&master).map(|v| v.len()).unwrap_or(0);
+        assert_eq!(rdeps, 2, "the promoted instance and the placed one");
+
+        let before = doc_json(e);
+        let (reply, err) = behave(e, SYMBOLS, r#"{"widget":"sym_delete","event":"click"}"#);
+        assert_eq!(reply, "", "delete with instances is refused");
+        assert_eq!(err, refusal("PlatformEffect", "Dialog:delete_symbol_orphan_confirm"));
+        assert_eq!(doc_json(e), before, "a refusal changes nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// (reply, error channel) for one behavior crossing.
     fn behave(e: *mut JasEngine, panel: &str, event: &str) -> (String, String) {
         let reply = take(unsafe {
@@ -3063,16 +3103,17 @@ mod tests {
     }
 
     /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
-    /// it is refused as one.
+    /// it is refused as one. (Its example was `sym_new` until W2b-17 hosted the
+    /// Symbols verbs; `open_brush_libraries_menu` is still a stub.)
     #[test]
     fn panel_behavior_refuses_a_log_only_action_by_name() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0]));
-        let (reply, err) = behave(e, "symbols_panel_content",
-                                  r#"{"widget":"sym_new","event":"click"}"#);
+        let (reply, err) = behave(e, "brushes_panel_content",
+                                  r#"{"widget":"bp_libraries_menu_btn","event":"click"}"#);
         assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "Logged:new_symbol"));
+        assert_eq!(err, refusal("PlatformEffect", "Logged:open_brush_libraries_menu"));
         unsafe { jas_engine_free(e) };
     }
 

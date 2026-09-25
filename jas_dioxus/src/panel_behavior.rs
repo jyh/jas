@@ -217,6 +217,43 @@ impl EffectHost for EngineHost {
         false
     }
 
+    /// W2b-17: the Symbols and Concepts panels' native verbs, through
+    /// `symbols_host`, the one implementation the web calls too. The panel
+    /// selection is read from the STORE, where the YAML's `set_panel_state`
+    /// writes it. The orphan-confirm dialog is refused by name (A12).
+    fn run_action(
+        &mut self,
+        action: &str,
+        params: &Value,
+        store: &mut StateStore,
+        model: Option<&mut Model>,
+    ) -> Option<Option<Unhandled>> {
+        use crate::interpreter::symbols_host::{run, Outcome, ACTIONS};
+        if !ACTIONS.contains(&action) {
+            return None;
+        }
+        let Some(model) = model else { return Some(Some(Unhandled::NoModel(action.into()))) };
+        let read = |panel: &str, key: &str| {
+            store.panel_scope(panel).and_then(|p| p.get(key)).and_then(Value::as_str)
+                .map(str::to_string)
+        };
+        let (sym, con) = (read("symbols", "selected_symbol"), read("concepts", "selected_concept"));
+        match run(model, action, params, sym.as_deref(), con.as_deref()) {
+            Some(Outcome::Dialog { id, .. }) => Some(Some(Unhandled::Dialog(id))),
+            Some(Outcome::SelectSymbol(id)) => {
+                store.set_panel("symbols", "selected_symbol", id.map(Value::String).unwrap_or(Value::Null));
+                Some(None)
+            }
+            Some(Outcome::CloseDialog { cleared_selection }) => {
+                if cleared_selection {
+                    store.set_panel("symbols", "selected_symbol", Value::Null);
+                }
+                Some(None)
+            }
+            Some(Outcome::Done) | None => Some(None),
+        }
+    }
+
     fn refuse(&mut self, key: &str, arg: &Value) -> Option<Unhandled> {
         (key == "open_dialog").then(|| Unhandled::Dialog(dialog_id(arg).to_string()))
     }
