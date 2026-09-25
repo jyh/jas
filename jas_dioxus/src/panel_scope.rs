@@ -230,11 +230,13 @@ fn as_number(v: &Value) -> Option<f64> {
     v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))
 }
 
-/// The five `active_document.*` facts the ENGINE owns, as a JSON object.
+/// The `active_document.*` facts the ENGINE owns, as a JSON object: the five
+/// that `menu_state.rs:19-25` also names, plus `selection_has_compound_shape`
+/// (W2b-13b), which the Boolean panel's Expand button binds.
 ///
 /// ⛔ THE LIST IS EXHAUSTIVE ON PURPOSE AND IT IS SHORTER THAN THE NAMESPACE.
 /// `menu_state.rs:19-25` names six `active_document` fields; the engine can
-/// answer five. `has_filename` is NOT here because `jas_load_svg` takes BYTES —
+/// answer five of those. `has_filename` is NOT here because `jas_load_svg` takes BYTES —
 /// the engine has never seen a path and inventing `false` for it would be the
 /// shell's answer wearing the engine's authority.
 ///
@@ -249,6 +251,8 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
     m.insert("can_undo".into(), model.can_undo().into());
     m.insert("can_redo".into(), model.can_redo().into());
     m.insert("is_modified".into(), model.is_modified().into());
+    m.insert("selection_has_compound_shape".into(),
+             crate::interpreter::boolean_host::selection_has_compound_shape(model.document()).into());
     m
 }
 
@@ -545,6 +549,25 @@ mod tests {
             })
             .collect();
         d
+    }
+
+    /// W2b-13b, fork F-I. The engine's scope answers Expand's predicate, from
+    /// the ONE definition the web view also calls. Before it the engine
+    /// supplied no predicate, so `not active_document.selection_has_compound_shape`
+    /// resolved against a missing key and Expand was disabled on the engine path.
+    #[test]
+    fn the_engine_scope_answers_the_compound_shape_predicate() {
+        use crate::document::controller::BooleanOptions;
+        use crate::document::test_fixture::{model_with, rect};
+        let read = |m: &Model| {
+            engine_scope(&PanelState::default(), &StateStore::new(), m, "boolean_panel_content")
+                ["active_document"]["selection_has_compound_shape"].clone()
+        };
+        let mut m = model_with(vec![rect(0.0, 0.0, 10.0, 10.0), rect(5.0, 5.0, 10.0, 10.0)], &[0, 1]);
+        assert_eq!(read(&m), Value::Bool(false), "two plain rects");
+        assert!(crate::interpreter::boolean_host::run(
+            &mut m, "boolean_union_compound", &BooleanOptions::default()));
+        assert_eq!(read(&m), Value::Bool(true), "a compound shape is selected");
     }
 
     // -- the scope --------------------------------------------------------
