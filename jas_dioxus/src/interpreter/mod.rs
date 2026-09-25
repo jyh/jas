@@ -20,6 +20,7 @@ pub mod scope;
 pub mod length;
 pub mod document_views;
 pub mod foreach;
+pub mod symbols_host;
 pub mod workspace;
 pub mod panel_layout;
 pub mod widget_tree;

@@ -125,6 +125,21 @@ pub trait EffectHost {
         model: Option<&mut Model>,
     ) -> bool;
 
+    /// Run the dispatched ACTION `action` natively (W2b-17, fork F-J), with its
+    /// params already resolved. The runner asks this before it expands the
+    /// action's YAML effects. `Some(None)` means the host ran it and the YAML
+    /// is skipped; `Some(Some(u))` means the host refuses it by name and nothing
+    /// runs; `None` (the default) declines, and the YAML runs as always.
+    fn run_action(
+        &mut self,
+        _action: &str,
+        _params: &serde_json::Value,
+        _store: &mut StateStore,
+        _model: Option<&mut Model>,
+    ) -> Option<Option<Unhandled>> {
+        None
+    }
+
     /// Refuse the effect `key` by name (FB wave 2b, A12). The runner asks
     /// this before [`EffectHost::run`] and before any built-in arm. A refused
     /// key is reported as the returned item, and nothing runs for it. The
@@ -649,6 +664,18 @@ fn run_one<'h>(
                             }
                         }
                         c.insert("param".to_string(), serde_json::Value::Object(resolved));
+                    }
+                }
+                // W2b-17: a host may run the action natively, or refuse it.
+                if let Some(h) = host.as_deref_mut() {
+                    let resolved = dispatch_ctx.get("param").cloned().unwrap_or(serde_json::Value::Null);
+                    match h.run_action(action_name, &resolved, store, model.as_deref_mut()) {
+                        Some(None) => return,
+                        Some(Some(u)) => {
+                            report.unhandled.push(u);
+                            return;
+                        }
+                        None => {}
                     }
                 }
                 // OP_LOG.md §9: name the transaction with the dispatched

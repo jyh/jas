@@ -112,6 +112,16 @@ SWIFT_DISPATCH = [
 RUST_INTERCEPTS = REPO / "jas_dioxus" / "src" / "interpreter" / "renderer.rs"
 RUST_INTERCEPT_RE = re.compile(r'action == "([a-z_0-9]+)"')
 
+# A HOST MODULE'S DECLARED ACTION LIST (W2b-17). A native intercept can live in
+# a web-free host that both the renderer and the Windows engine call; the
+# renderer then tests membership in its `pub const ACTIONS` list, and the verb
+# names appear only there. The literal scan above cannot see them, and it read
+# `new_symbol` and `place_instance` as DIVERGENT:swift the moment they moved:
+# the self-test's anchors caught it. So every `interpreter/*_host.rs` declaring
+# `pub const ACTIONS` is read as intercepts too.
+RUST_HOST_DIR = REPO / "jas_dioxus" / "src" / "interpreter"
+RUST_HOST_ACTIONS_RE = re.compile(r'pub const ACTIONS: \[&str; \d+\] = \[(.*?)\];', re.S)
+
 # Guard arms: `c if c.starts_with("toggle_panel_") => {...}`. A pattern guard,
 # invisible to a string-literal scan, and jas_dioxus routes every panel toggle
 # through one.
@@ -294,6 +304,14 @@ def rust_extra_handlers() -> dict[str, bool]:
         return out
     for name in RUST_INTERCEPT_RE.findall(src):
         out[name] = True
+    for host in sorted(RUST_HOST_DIR.glob("*_host.rs")):
+        try:
+            text = host.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for body in RUST_HOST_ACTIONS_RE.findall(text):
+            for name in re.findall(r'"([a-z_0-9]+)"', body):
+                out[name] = True
     try:
         menu = (REPO / "jas_dioxus" / "src" / "workspace" / "menu_bar.rs").read_text(
             encoding="utf-8")
@@ -439,7 +457,9 @@ def self_test() -> int:
         #   string-literal scan
         "toggle_panel": "native_both",
         #   native intercept -- symbols_panel.rs's arm deliberately routes to
-        #   `dispatch_action`, where `if action == "new_symbol"` does the work
+        #   `dispatch_action`, where the work is done. Since W2b-17 the verbs
+        #   live in `symbols_host.rs`'s `pub const ACTIONS`, and these two
+        #   anchors are what caught the literal scan going blind to them.
         "new_symbol": "native_both",
         "place_instance": "native_both",
     }
