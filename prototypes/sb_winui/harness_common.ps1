@@ -1999,6 +1999,20 @@ function Add-SbSynthVerdicts($Out, $Rows, [string]$Synth, [bool]$Asked) {
         }
         return
     }
+    # ⛔ THE FOUR REPLAY CLAUSES ARE THE ALIGN PANEL'S CONTRACT: a click on a
+    # selection moves, an empty click is Disabled, a repeat is Unchanged. A
+    # replay on ANOTHER panel's widget (flask, 2026-09-25: `ap_new` needs no
+    # selection, and a Boolean result disables its own button) reds them by
+    # construction. So they are asked only of a replay on the Align panel, read
+    # from the replay's own DONE row; any other panel's outcome is its rows.
+    $done = Select-SbRow $Rows 'PANEL SYNTH DONE '
+    if ($null -ne $done -and $done -match ' panel=(\S+)' -and $Matches[1] -ne 'align_panel_content') {
+        $other = $Matches[1]
+        foreach ($k in $four) {
+            $Out.Add((New-SbVerdict $n[$k] 'NOT RUN' "the replay ran on panel $other (widget $Synth), and these clauses are the Align panel's contract; read its PANEL CLICK rows instead" $done))
+        }
+        return
+    }
     $done = Select-SbRow $Rows (Get-SbRowPattern 'PANEL SYNTH DONE' ' panel=')
     if ($null -eq $done) {
         foreach ($k in $four) {
