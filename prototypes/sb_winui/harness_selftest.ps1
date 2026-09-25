@@ -1089,6 +1089,11 @@ Test-Case 'Q6: app without the replay asserts the open and names the replay NOT 
     { Get-SbQ6Summary $q6NoSynth 'app' '' } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
 # ⛔ THE KNOB ON A SCENE WITH NO PANE IS A FAILURE, NEVER A QUIET NOT RUN: the
 # run was asked for a replay and the shell refused it.
+# flask, 2026-09-25: a replay on a NON-Align panel is not judged by Align's
+# contract. The one-key mutation is the DONE row's panel; the healthy Align
+# fixture above stays all-PASS, which is this case's control.
+Test-Case 'Q6: a replay on another panel leaves the four Align clauses NOT RUN' `
+    { Get-SbQ6Summary @{ done = ((New-SbQ6Done "$q6DocA/$q6DocA/$q6DocS/$q6DocM/$q6DocM/$q6DocS") -replace 'panel=align_panel_content', 'panel=artboards_panel_content') } 'app' 'ap_new' } 'Q6.1=PASS Q6.2=PASS Q6.3=PASS Q6.4=NOT RUN Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
 Test-Case 'Q6: the replay asked on a scene with no pane FAILS Q6.4' `
     { Get-SbQ6Summary @{} 'retained' 'align_left_button' } 'Q6.1=NOT RUN Q6.2=NOT RUN Q6.3=NOT RUN Q6.4=FAIL Q6.5=NOT RUN Q6.C1=NOT RUN Q6.C2=NOT RUN'
 
