@@ -311,11 +311,26 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(root) = scope.as_object_mut() {
         root.extend(crate::interpreter::mask_facts::selection_predicates(model));
     }
-    // W2b-15: the list sources a `foreach source: "data.*"` reads.
-    scope["data"] = serde_json::json!({
-        "concepts": crate::interpreter::workspace::concepts_list(),
-    });
+    // W2b-15: the list sources a `foreach source: "data.*"` reads. The store's
+    // data (the libraries, seeded by [`seed_library_data`] and written by the
+    // library effects) plus the concept registry, which is read-only.
+    let mut data = store.data().as_object().cloned().unwrap_or_default();
+    data.insert("concepts".into(), crate::interpreter::workspace::concepts_list());
+    scope["data"] = Value::Object(data);
     scope
+}
+
+/// W2b-15. Seed the store's `data` with the workspace bundle's brush and swatch
+/// libraries, the values the web's `AppState` starts from. They live in the
+/// STORE, not in a view, because the library effects write them there
+/// (`set_data_path`), so an edit and the next plan read the same copy.
+pub fn seed_library_data(store: &mut StateStore) {
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else { return };
+    let mut data = Map::new();
+    for key in ["brush_libraries", "swatch_libraries"] {
+        data.insert(key.into(), ws.data().get(key).cloned().unwrap_or_else(|| serde_json::json!({})));
+    }
+    store.set_data(Value::Object(data));
 }
 
 /// W2b-14. The artboard facts the artboards panel and its actions read, from
