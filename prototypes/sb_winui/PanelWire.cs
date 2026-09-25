@@ -27,8 +27,14 @@ internal static class PanelWire
     /// that is not a string as `BadValue`, so a shell that sent `40` as a
     /// number would have every commit refused.
     /// </summary>
+    /// W2b-19: `path` is the leaf's PLAN path as the plan printed it (`[0,1,2]`).
+    /// The core resolves a path to the row it names, which is the only way a row
+    /// a `foreach` stamped out can be addressed (its id names a template). A
+    /// path that is not a JSON array of non-negative integers is left out, so
+    /// the event falls back to the widget id rather than carrying garbage.
     internal static byte[] EventJson(string widget, string eventName, string? value,
-                                     bool alt, bool shift, bool ctrl, bool meta)
+                                     bool alt, bool shift, bool ctrl, bool meta,
+                                     string? path = null)
     {
         var ev = new Dictionary<string, object>
         {
@@ -40,7 +46,23 @@ internal static class PanelWire
             ["meta"] = meta,
         };
         if (value is not null) { ev["value"] = value; }
+        if (PlanPath(path) is { } p) { ev["path"] = p; }
         return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
+    }
+
+    /// <summary>A plan path's text as integers, or null when it is not one.</summary>
+    internal static int[]? PlanPath(string? path)
+    {
+        if (string.IsNullOrEmpty(path)) { return null; }
+        try
+        {
+            var p = System.Text.Json.JsonSerializer.Deserialize<int[]>(path);
+            return p is { Length: > 0 } && p.All(i => i >= 0) ? p : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
