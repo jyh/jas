@@ -304,6 +304,11 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(doc) = scope["active_document"].as_object_mut() {
         doc.extend(document_facts(model));
         doc.extend(artboard_facts(store, model.document()));
+        // W2b-15: the symbols list and the Concepts panel's PARAMS mode.
+        doc.insert("symbols".into(),
+                   crate::interpreter::document_views::symbols_view(model.document()));
+        doc.insert("selected_concept".into(),
+                   crate::interpreter::document_views::selected_concept_view(model.document()));
     }
     // W2b-8: the five selection-level predicates the YAML binds by BARE NAME
     // (`selection_has_mask`, the mask clip/invert/linked triple, and
@@ -315,7 +320,26 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     if let Some(root) = scope.as_object_mut() {
         root.extend(crate::interpreter::mask_facts::selection_predicates(model));
     }
+    // W2b-15: the list sources a `foreach source: "data.*"` reads. The store's
+    // data (the libraries, seeded by [`seed_library_data`] and written by the
+    // library effects) plus the concept registry, which is read-only.
+    let mut data = store.data().as_object().cloned().unwrap_or_default();
+    data.insert("concepts".into(), crate::interpreter::workspace::concepts_list());
+    scope["data"] = Value::Object(data);
     scope
+}
+
+/// W2b-15. Seed the store's `data` with the workspace bundle's brush and swatch
+/// libraries, the values the web's `AppState` starts from. They live in the
+/// STORE, not in a view, because the library effects write them there
+/// (`set_data_path`), so an edit and the next plan read the same copy.
+pub fn seed_library_data(store: &mut StateStore) {
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else { return };
+    let mut data = Map::new();
+    for key in ["brush_libraries", "swatch_libraries"] {
+        data.insert(key.into(), ws.data().get(key).cloned().unwrap_or_else(|| serde_json::json!({})));
+    }
+    store.set_data(Value::Object(data));
 }
 
 /// W2b-14. The artboard facts the artboards panel and its actions read, from
@@ -549,6 +573,51 @@ mod tests {
             })
             .collect();
         d
+    }
+
+    /// W2b-15. The Concepts panel's `foreach source: "data.concepts"` reads the
+    /// workspace's concept registry, as the web's `data` does. Before it the
+    /// engine's scope carried no `data`, so the plan drew 0 rows where the
+    /// web draws 4.
+    #[test]
+    fn the_engine_scope_carries_the_concept_registry_as_data() {
+        let m = crate::document::test_fixture::model_with(vec![], &[]);
+        let s = engine_scope(&PanelState::default(), &StateStore::new(), &m, "concepts_panel_content");
+        let ids: Vec<&str> = s["data"]["concepts"].as_array().expect("data.concepts is a list")
+            .iter().filter_map(|c| c["id"].as_str()).collect();
+        assert_eq!(ids, vec!["gear", "regular_polygon", "spiral", "star"]);
+    }
+
+    /// W2b-15. The Symbols panel lists `active_document.symbols`, one row per
+    /// master, and the Concepts panel switches to PARAMS mode on
+    /// `active_document.selected_concept`. Both come from the ONE web-free
+    /// builder the web view also calls. Before it the engine's scope had
+    /// neither, so the symbols list drew 0 rows and PARAMS mode never opened.
+    #[test]
+    fn the_engine_scope_carries_the_symbols_and_the_selected_concept() {
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::geometry::element::{CommonProps, Element};
+        use crate::geometry::live::{GeneratedElem, LiveVariant};
+        let read = |m: &Model| {
+            engine_scope(&PanelState::default(), &StateStore::new(), m, "symbols_panel_content")
+                ["active_document"].clone()
+        };
+        let mut m = model_with(vec![rect(0.0, 0.0, 1.0, 1.0)], &[0]);
+        let mut doc = m.document().clone();
+        doc.symbols = vec![rect(0.0, 0.0, 5.0, 5.0)];
+        m.set_document_for_test(doc);
+        let ad = read(&m);
+        assert_eq!(ad["symbols"].as_array().map(|a| a.len()), Some(1), "{ad}");
+        assert_eq!(ad["symbols"][0]["name"], "Symbol 1", "the positional fallback");
+        assert_eq!(ad["selected_concept"], Value::Null, "a rect is not a concept instance");
+
+        let gear = Element::Live(LiveVariant::Generated(
+            GeneratedElem::new("gear".into(), serde_json::json!({}), CommonProps::default())));
+        let g = model_with(vec![gear], &[0]);
+        let sc = read(&g)["selected_concept"].clone();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        assert_eq!(sc["concept_id"], "gear", "{sc}");
+        assert_eq!(sc["name"], ws.concept("gear").unwrap()["name"], "{sc}");
     }
 
     /// W2b-13b, fork F-I. The engine's scope answers Expand's predicate, from

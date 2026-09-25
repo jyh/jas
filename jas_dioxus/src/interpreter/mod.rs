@@ -18,6 +18,7 @@ pub mod anchor_buffers;
 pub mod schema;
 pub mod scope;
 pub mod length;
+pub mod document_views;
 pub mod workspace;
 pub mod panel_layout;
 pub mod widget_tree;

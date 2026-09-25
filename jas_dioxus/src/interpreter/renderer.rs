@@ -2221,94 +2221,6 @@ fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json
     })
 }
 
-/// Build `active_document.selected_concept` for a selected `Generated` instance:
-/// the concept's display name + its declared param schema (name/min/max) merged
-/// with the instance's current values (CONCEPTS.md §6.4, Slice 2). Null if the
-/// concept is not registered.
-fn build_selected_concept_view(
-    concept_id: &str,
-    instance_params: &serde_json::Value,
-) -> serde_json::Value {
-    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
-        return serde_json::Value::Null;
-    };
-    let Some(concept) = ws.concept(concept_id) else {
-        return serde_json::Value::Null;
-    };
-    let name = concept
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or(concept_id);
-    let mut params_out: Vec<serde_json::Value> = Vec::new();
-    if let Some(schema) = concept.get("params").and_then(|v| v.as_array()) {
-        for p in schema {
-            let Some(pname) = p.get("name").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let value = instance_params
-                .get(pname)
-                .cloned()
-                .or_else(|| p.get("default").cloned())
-                .unwrap_or(serde_json::Value::Null);
-            let mut entry = serde_json::json!({ "name": pname, "value": value });
-            if let Some(min) = p.get("min") {
-                entry["min"] = min.clone();
-            }
-            if let Some(max) = p.get("max") {
-                entry["max"] = max.clone();
-            }
-            params_out.push(entry);
-        }
-    }
-    // The concept's named operations (CONCEPTS.md §9): id + label + description,
-    // so the panel can render a button per operation. Empty when the concept
-    // declares no `operations:`.
-    let mut operations_out: Vec<serde_json::Value> = Vec::new();
-    if let Some(ops) = concept.get("operations").and_then(|v| v.as_array()) {
-        for o in ops {
-            let Some(oid) = o.get("id").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            operations_out.push(serde_json::json!({
-                "id": oid,
-                "label": o.get("label").and_then(|v| v.as_str()).unwrap_or(oid),
-                "description": o.get("description").and_then(|v| v.as_str()).unwrap_or(""),
-            }));
-        }
-    }
-    // The concept's VIOLATED constraints (CONCEPTS.md §11): evaluate each
-    // constraint's `check` over the instance's params; collect the ones that are
-    // NOT truthy (`to_bool`, the same truthiness `if` uses), in declared order.
-    // Advisory + read-only — the panel surfaces these as a warning. Empty when
-    // the concept declares no `constraints:` or all hold.
-    let mut violations_out: Vec<serde_json::Value> = Vec::new();
-    if let Some(cons) = concept.get("constraints").and_then(|v| v.as_array()) {
-        let mut ctx = serde_json::Map::new();
-        ctx.insert("param".to_string(), instance_params.clone());
-        let ctx = serde_json::Value::Object(ctx);
-        for c in cons {
-            let Some(cid) = c.get("id").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let Some(check) = c.get("check").and_then(|v| v.as_str()) else {
-                continue;
-            };
-            if !super::expr::eval(check, &ctx).to_bool() {
-                violations_out.push(serde_json::json!({
-                    "id": cid,
-                    "message": c.get("message").and_then(|v| v.as_str()).unwrap_or(""),
-                }));
-            }
-        }
-    }
-    serde_json::json!({
-        "concept_id": concept_id,
-        "name": name,
-        "params": params_out,
-        "operations": operations_out,
-        "violations": violations_out,
-    })
-}
 
 pub(crate) fn build_active_document_view(
     st: &crate::workspace::app_state::AppState,
@@ -2485,16 +2397,8 @@ pub(crate) fn build_active_document_view(
     // Concepts panel (Slice 2): when exactly one generated concept instance is
     // selected, expose its concept id + param schema merged with current values
     // so the panel switches to PARAMS mode; null otherwise.
-    let selected_concept: serde_json::Value = if canvas_selection.len() == 1 {
-        match tab.model.document().get_element(&canvas_selection[0].path) {
-            Some(Element::Live(crate::geometry::live::LiveVariant::Generated(ge))) => {
-                build_selected_concept_view(&ge.concept_id, &ge.params)
-            }
-            _ => serde_json::Value::Null,
-        }
-    } else {
-        serde_json::Value::Null
-    };
+    let selected_concept =
+        crate::interpreter::document_views::selected_concept_view(tab.model.document());
     // Artboard view (ARTBOARDS.md §Artboard data model).
     let doc = tab.model.document();
     let artboards_json: Vec<serde_json::Value> = doc
@@ -2540,35 +2444,7 @@ pub(crate) fn build_active_document_view(
     let current_id = current.map(|a| serde_json::Value::String(a.id.clone())).unwrap_or(serde_json::Value::Null);
     // next_artboard_name: smallest N not used by any "Artboard N" pattern name.
     let next_artboard_name = crate::document::artboard::next_artboard_name(&doc.artboards);
-    // Symbols view (SYMBOLS.md §8). One row per master in the off-canvas
-    // store. `name` is the master's common.name, falling back to a
-    // positional "Symbol N" label so every row shows something readable.
-    // `usage_count` is the number of live instances of the master — the
-    // length of its reverse-dependency list (rdeps) in the dependency
-    // index, the same signal that gates the reference-aware delete.
-    let dep_index = crate::document::dependency_index::dependency_index(&doc);
-    let symbols_json: Vec<serde_json::Value> = doc
-        .symbols
-        .iter()
-        .enumerate()
-        .map(|(i, m)| {
-            let id = m.common().id.clone().unwrap_or_default();
-            let name = match m.common().name.as_deref() {
-                Some(n) if !n.is_empty() => n.to_string(),
-                _ => format!("Symbol {}", i + 1),
-            };
-            let usage_count = dep_index
-                .rdeps
-                .get(&id)
-                .map(|v| v.len())
-                .unwrap_or(0);
-            serde_json::json!({
-                "id": id,
-                "name": name,
-                "usage_count": usage_count,
-            })
-        })
-        .collect();
+    let symbols_json = crate::interpreter::document_views::symbols_view(&doc);
     let mut view = serde_json::json!({
         "top_level_layers": top_level_layers,
         "top_level_layer_paths": top_level_layer_paths,
@@ -2655,7 +2531,7 @@ pub(crate) fn build_active_document_view(
     // object is already at the macro recursion ceiling, so the symbols
     // list is attached here (SYMBOLS.md §8).
     if let serde_json::Value::Object(m) = &mut view {
-        m.insert("symbols".to_string(), serde_json::Value::Array(symbols_json));
+        m.insert("symbols".to_string(), symbols_json);
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);
         // The ids `delete_empty_artboards` may remove — already filtered by the
