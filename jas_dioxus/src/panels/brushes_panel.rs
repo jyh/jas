@@ -57,7 +57,11 @@ pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
             let (action, params) =
                 super::panel_menu::action_and_params("brushes_panel_content", cmd)
                     .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
-            crate::interpreter::renderer::dispatch_action(&action, &params, state);
+            // The action evaluates with this panel's scope (selected_library,
+            // selected_brushes), which the app scope alone does not carry.
+            let scope = super::panel_menu::panel_menu_ctx("brushes_panel_content", state)
+                .get("panel").cloned().unwrap_or(serde_json::Value::Null);
+            crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
         }
     }
 }
