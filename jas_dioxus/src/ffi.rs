@@ -3613,4 +3613,44 @@ mod tests {
         assert!(failures.is_empty(), "{} of {} cases:\n{}", failures.len(), cases.len(),
                 failures.join("\n"));
     }
+
+    /// THE BRUSHES PANEL'S PREVIEWS REACH THE SHELL. Until this arm every
+    /// `brush_preview` leaf was sent as `values: {}` and `w: 0`: the drawing
+    /// lived only in the web view, and the layout pass sized the leaf at the
+    /// kind's intrinsic width, which is 0.
+    ///
+    /// The expectation is derived by a DIFFERENT ROUTE from the plan's: the
+    /// plan reads each leaf's foreach scope; this arm walks the engine's own
+    /// `panel.open_libraries` and `data.brush_libraries` in order and draws
+    /// each brush with `preview_svg`. Two routes, one sequence.
+    #[test]
+    fn every_brush_preview_leaf_carries_its_brush_drawing_and_a_real_rect() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "brushes_panel_content", 228, 0)).expect("plan JSON");
+        let ctx = panel_ctx(unsafe { &*e }, &ws, "brushes_panel_content");
+        let mut want = vec![];
+        for lib in ctx["panel"]["open_libraries"].as_array().into_iter().flatten() {
+            let id = lib["id"].as_str().unwrap_or("");
+            for b in ctx["data"]["brush_libraries"][id]["brushes"].as_array().into_iter().flatten() {
+                want.push(crate::brush_preview::preview_svg(b));
+            }
+        }
+        let leaves: Vec<&serde_json::Value> = plan["leaves"].as_array().expect("leaves").iter()
+            .filter(|l| l["type"] == "brush_preview").collect();
+        assert!(!leaves.is_empty(), "no brush_preview leaf in the plan -- the arm is vacuous");
+        assert_eq!(leaves.len(), want.len(), "one preview per brush in the open libraries");
+        assert!(want.iter().any(Option::is_some), "no brush has a preview -- the display half is vacuous");
+        for (i, (l, w)) in leaves.iter().zip(&want).enumerate() {
+            assert_eq!(l["rect"]["w"], 38, "leaf {i}: {}", l["rect"]);
+            assert_eq!(l["rect"]["h"], 38, "leaf {i}: {}", l["rect"]);
+            let got = l["display"]["preview.svg"].as_str().map(String::from);
+            assert_eq!(&got, w, "leaf {i}");
+            let vb = l["display"]["preview.viewbox"].as_str();
+            assert_eq!(vb, w.as_ref().map(|_| crate::brush_preview::VIEWBOX), "leaf {i}");
+        }
+        unsafe { jas_engine_free(e) };
+    }
 }

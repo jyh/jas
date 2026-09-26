@@ -260,8 +260,13 @@ content:
                 # sized by `size`, flattened by `roundness`, rotated by
                 # `angle`; other types grow a stroke-sample preview as their
                 # renderers land. Falls back to an empty box where unimplemented.
+                # Sized on the LEAF: the layout pass honours a leaf's
+                # style width/height, but not a container's, so the tile's
+                # 40x40 alone left this leaf 0 wide in every port's rects.
+                # 38 = the tile less its 1px border on each side.
                 - type: brush_preview
                   summary: "Preview of {{brush.name}}"
+                  style: { width: 38, height: 38 }
                   description: >
                     Visual preview of the brush tip / stroke, read from the
                     enclosing tile's `brush` loop variable.
