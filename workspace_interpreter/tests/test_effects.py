@@ -427,6 +427,57 @@ class TestListPushEffect:
         assert store.get_panel("color", "recent") == ["c", "a", "b"]
 
 
+class TestListToggleEffect:
+    """`list_toggle: { target, value }` -- set membership, the checkbox primitive
+    (council Q3.2). It had NO test in this reference until the engine door
+    needed the Layers type filter to run, so these arms are its spec.
+    Each arm uses its own store: toggling twice in one fixture is the
+    identity, which a no-op also satisfies.
+    """
+
+    @staticmethod
+    def _toggle(initial, value, active="layers", target="panel.type_filter"):
+        store = StateStore()
+        store.init_panel("layers", {} if initial is None else {"type_filter": initial})
+        if active:
+            store.set_active_panel(active)
+        run_effects([{"list_toggle": {"target": target, "value": value}}], {}, store)
+        return store.get_panel("layers", "type_filter")
+
+    def test_an_absent_value_is_appended_at_the_end(self):
+        # A set, not a most-recently-used list: `list_push` prepends; this
+        # appends, so the order is stable.
+        assert self._toggle(["path", "rect"], '"text"') == ["path", "rect", "text"]
+
+    def test_a_present_value_is_removed_and_the_rest_keep_their_order(self):
+        assert self._toggle(["path", "rect", "text"], '"rect"') == ["path", "text"]
+
+    def test_only_the_first_occurrence_is_removed(self):
+        # Python's list.remove. A port that removes EVERY occurrence agrees
+        # with this on every list the UI can build, and differs here.
+        assert self._toggle(["path", "rect", "path"], '"path"') == ["rect", "path"]
+
+    def test_a_missing_key_starts_an_empty_list(self):
+        assert self._toggle(None, '"path"') == ["path"]
+
+    def test_a_non_list_value_is_replaced_by_a_one_item_list(self):
+        assert self._toggle("path", '"rect"') == ["rect"]
+
+    def test_the_value_is_an_expression(self):
+        store = StateStore()
+        store.init_panel("layers", {"type_filter": []})
+        store.set_active_panel("layers")
+        run_effects([{"list_toggle": {"target": "panel.type_filter", "value": "param.t"}}],
+                    {"param": {"t": "group"}}, store)
+        assert store.get_panel("layers", "type_filter") == ["group"]
+
+    def test_no_active_panel_is_a_no_op(self):
+        assert self._toggle(["path"], '"rect"', active=None) == ["path"]
+
+    def test_a_target_outside_panel_is_a_no_op(self):
+        assert self._toggle(["path"], '"rect"', target="state.type_filter") == ["path"]
+
+
 class TestListPopEffect:
     def test_pop_removes_last_element(self):
         store = StateStore()
