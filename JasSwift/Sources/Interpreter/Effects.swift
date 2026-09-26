@@ -2816,7 +2816,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
     // THE BRUSHES PANEL'S LIBRARY EDITS, and they were NEVER REGISTERED here
-    // (W2b-18). The five `brush.*` handlers live in the tool table
+    // (W2b-18). The `brush.*` handlers live in the tool table
     // (``buildYamlToolEffects``), and no production panel dispatcher built its
     // map from that table, so `delete_brush` and `duplicate_brush` from the
     // panel menu were skipped by `runEffects` without a word. Rust had the
@@ -2825,7 +2825,7 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
     // effect joins the panel path by accident.
     let toolEffects = buildYamlToolEffects(model: model)
     for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
-                "brush.append", "brush.update"] {
+                "brush.append", "brush.update", "brush.sort_by_name", "brush.select_unused"] {
         guard let handler = toolEffects[key] else {
             assertionFailure("brush effect '\(key)' vanished from the tool table")
             continue
