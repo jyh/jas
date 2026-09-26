@@ -876,6 +876,25 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_panel(panel_id, key, value)
         return
 
+    # swap_panel_state: [a, b] (the ACTIVE panel) or
+    # { panel: <id>, keys: [a, b] } (the named panel). Exchanges the two
+    # keys' values in that panel's state. Anything but exactly two key names
+    # is a no-op. Stroke's Swap Arrowheads uses both forms (its widget the
+    # first, its action the second).
+    if "swap_panel_state" in effect:
+        spec = effect["swap_panel_state"]
+        if isinstance(spec, dict):
+            keys, panel_id = spec.get("keys"), spec.get("panel") or store.get_active_panel_id()
+        else:
+            keys, panel_id = spec, store.get_active_panel_id()
+        if (panel_id and isinstance(keys, list) and len(keys) == 2
+                and all(isinstance(k, str) for k in keys)):
+            a, b = keys
+            va, vb = store.get_panel(panel_id, a), store.get_panel(panel_id, b)
+            store.set_panel(panel_id, a, vb)
+            store.set_panel(panel_id, b, va)
+        return
+
     # select: { target, list, scope, scope_value, mode } — generic
     # tile-selection effect. Plain click replaces panel.{list} with
     # [target] and resets panel.{scope} to scope_value. Mode "auto"
