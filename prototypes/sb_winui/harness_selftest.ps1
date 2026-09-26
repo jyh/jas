@@ -1119,6 +1119,25 @@ Test-Case 'Q6.3: a pane never drawn FAILS' `
     { Get-SbQ6Summary @{ drawn = $null } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
 Test-Case 'Q6.3: a draw that threw FAILS' `
     { Get-SbQ6Summary @{ drawn = 'RUSTFAIL PANEL DRAW threw KeyNotFoundException: The given key was not present in the dictionary.' } } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+# ---- Q6.3 on a list that GROWS: each draw is judged against the plan its
+# build drew from (flask §110: `ap_new` grows 7 -> 8 and every correct rebuild
+# read as "a control missing"). The open still judges the FIRST build.
+$q6Grow = @(New-SbQ6Fixture) + @(
+    (New-SbQ6Row 'PANEL BUILT panel=align_panel_content build=2 leaves=23 texts=4 buttons=18 inputs=1 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0'),
+    (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=2 cause=click missed=0 rebuilt=true controls=23 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'))
+Test-Case 'Q6.3: a rebuild that GROWS the plan, drawn whole, PASSES' `
+    { Format-SbQ6 (Get-SbPaneVerdicts $q6Grow 'app' 'align_left_button') } $q6AllPass
+$q6GrowShort = @(New-SbQ6Fixture) + @(
+    (New-SbQ6Row 'PANEL BUILT panel=align_panel_content build=2 leaves=23 texts=4 buttons=18 inputs=1 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0'),
+    (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=2 cause=click missed=0 rebuilt=true controls=22 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'))
+Test-Case 'Q6.3: a grown rebuild drawn one control short FAILS' `
+    { Format-SbQ6 (Get-SbPaneVerdicts $q6GrowShort 'app' 'align_left_button') } 'Q6.1=PASS Q6.2=PASS Q6.3=FAIL Q6.4=PASS Q6.5=PASS Q6.C1=PASS Q6.C2=PASS'
+$q6Shrink = @(New-SbQ6Fixture) + @(
+    (New-SbQ6Row 'PANEL BUILT panel=align_panel_content build=2 leaves=21 texts=4 buttons=16 inputs=1 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0'),
+    (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=2 cause=click missed=0 rebuilt=true controls=21 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'),
+    (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=3 cause=click missed=0 rebuilt=false controls=21 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'))
+Test-Case 'Q6.3: a rebuild that SHRINKS the plan, and a later draw without a rebuild, PASS' `
+    { Format-SbQ6 (Get-SbPaneVerdicts $q6Shrink 'app' 'align_left_button') } $q6AllPass
 
 # The replay.
 Test-Case 'Q6: a replay that never finished reads NOT RUN, never PASS' `
