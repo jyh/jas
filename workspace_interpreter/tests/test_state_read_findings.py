@@ -414,16 +414,18 @@ class TestNoDynamicDataPaths:
         assert offenders == [], f"${{...}} never runs on an effect payload: {offenders}"
 
     def test_sort_brushes_by_name_declares_no_effect_it_cannot_perform(self, ws):
-        """The decision recorded as a test: the action is a LOG-ONLY stub, in the
-        same shape as its four sibling unimplemented brushes actions
-        (``select_all_unused_brushes``, ``toggle_brush_category``,
-        ``toggle_brush_library_persistent``, ``save_brush_library``), because no
-        port can address ``panel.selected_library``'s brush list from an effect
-        payload. Its ``description`` carries the intended behaviour and says so.
+        """The decision recorded as a test. From the state-read repair until the
+        Brushes-menu node this action was a LOG-ONLY stub, because no port could
+        address ``panel.selected_library``'s brush list from an effect payload.
+        The fix its description named is the one taken: a ``brush.sort_by_name``
+        shortcut taking ``library:`` as an EXPRESSION, the shape of
+        ``brush.delete_selected``. Its behaviour is pinned in
+        ``test_brush_panel_spec.py``; this arm pins that the dynamic data path
+        does not come back.
         """
         action = ws["actions"]["sort_brushes_by_name"]
-        assert action["effects"] == [{"log": "sort_brushes_by_name"}]
-        assert "not yet implemented" in action["description"].lower()
+        assert action["effects"] == [{"brush.sort_by_name": {"library": "panel.selected_library"}}]
+        assert "data.list_sort" not in str(action["effects"])
 
 
 # ══════════════════════════════════════════════════════════════════

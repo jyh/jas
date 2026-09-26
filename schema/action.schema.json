@@ -140,6 +140,8 @@
             "brush.delete_selected": {},
             "brush.duplicate_selected": {},
             "brush.options_confirm": {},
+            "brush.select_unused": {},
+            "brush.sort_by_name": {},
             "clear_dialog_snapshot": {},
             "close_dialog": {},
             "close_panel": {},
