@@ -151,6 +151,30 @@ internal static class PanelWire
     internal static string DisplayText(string? display, string? value) => display ?? value ?? "";
 
     /// <summary>
+    /// A `color_swatch` leaf's fill, from the `bind.color` string the core
+    /// sends: `#rrggbb` (either case) and nothing else, or null. A null is
+    /// drawn as an EMPTY swatch (a recent-colour slot with no colour yet),
+    /// never as black, because black is a colour a swatch can hold.
+    ///
+    /// ⛔ `AllowHexSpecifier` ALONE, never `NumberStyles.HexNumber`: that one
+    /// also allows leading and trailing white space, so "# 12345" would read
+    /// its first channel as 0x01 and pass as a colour.
+    /// </summary>
+    internal static (byte R, byte G, byte B)? SwatchColor(string? hex)
+    {
+        if (hex is null || hex.Length != 7 || hex[0] != '#') { return null; }
+        const System.Globalization.NumberStyles Hex = System.Globalization.NumberStyles.AllowHexSpecifier;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (byte.TryParse(hex.AsSpan(1, 2), Hex, inv, out var r)
+            && byte.TryParse(hex.AsSpan(3, 2), Hex, inv, out var g)
+            && byte.TryParse(hex.AsSpan(5, 2), Hex, inv, out var b))
+        {
+            return (r, g, b);
+        }
+        return null;
+    }
+
+    /// <summary>
     /// W2b-9: which name a leaf's glyph is looked up under.
     ///
     /// ⛔ AN `icon` NODE NAMES ITS GLYPH UNDER `name`, NOT `icon`, AND NOTHING

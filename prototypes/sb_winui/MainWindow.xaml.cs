@@ -2000,6 +2000,7 @@ public sealed partial class MainWindow : Window
         // not read, so a list shown short is never shown silently.
         var (texts, buttons, inputs, toggles, glyphs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0, 0);
         var optionsRefused = 0;
+        var swatches = 0;
         foreach (var leaf in leaves)
         {
             FrameworkElement el;
@@ -2028,6 +2029,16 @@ public sealed partial class MainWindow : Window
                     buttons++;
                     if (leaf.Id.Length == 0) { unaddressable++; }
                     el = BuildIconButton(leaf, icons);
+                    break;
+
+                // A swatch is a filled square whose colour the core sends as
+                // `bind.color` (STATUS-flask §110: 228 of Swatches' 234 leaves
+                // were placeholders). NOT a Button: ApplyLeafValues' Button arm
+                // clears Background on every draw, which would wipe the colour.
+                case "color_swatch":
+                    swatches++;
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    el = BuildSwatch(leaf);
                     break;
 
                 // A `length_input` is this control too: the person types TEXT
@@ -2098,7 +2109,7 @@ public sealed partial class MainWindow : Window
         // and asserts only `leaves` and `controls`; nothing sums the category
         // counters, and the self-test's row is an INPUT to that parser.
         Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-             + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} unmaterialized={unmaterialized} "
+             + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} unmaterialized={unmaterialized} "
              + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
              + $"options-refused={optionsRefused}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
@@ -2118,6 +2129,30 @@ public sealed partial class MainWindow : Window
     /// button's own label or summary text, COUNTED as `icon-text`. Never blank:
     /// the text face is shown first and replaced only by an icon that loaded.
     /// </summary>
+    /// <summary>
+    /// A `color_swatch`: a bordered square, filled on every draw by
+    /// ApplyLeafValues from `bind.color`. A tap sends the leaf's `click` by its
+    /// plan path, like every other control; a leaf with no id is counted
+    /// unaddressable and sends nothing. Double-click is not routed here.
+    /// </summary>
+    private Border BuildSwatch(PaneLeaf leaf)
+    {
+        var swatch = new Border { BorderBrush = _paneMutedBrush, BorderThickness = new Thickness(1) };
+        var summary = leaf.Literal("summary");
+        if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(swatch, summary); }
+        var id = leaf.Id;
+        var path = leaf.Path;
+        if (id.Length > 0) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
+        return swatch;
+    }
+
+    /// <summary>The fill for a swatch: its colour, or TRANSPARENT when the core
+    /// sent none (an empty slot), never black -- see PanelWire.SwatchColor.</summary>
+    private static Microsoft.UI.Xaml.Media.SolidColorBrush SwatchBrush(string? hex) =>
+        PanelWire.SwatchColor(hex) is { } c
+            ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
+            : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00));
+
     private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
     {
         var label = leaf.Literal("label") ?? leaf.Literal("summary") ?? leaf.Id;
@@ -2304,6 +2339,10 @@ public sealed partial class MainWindow : Window
 
         switch (el)
         {
+            case Border swatch when leaf.Type == "color_swatch":
+                swatch.Background = SwatchBrush(leaf.Value("bind.color"));
+                break;
+
             case TextBlock tb when leaf.Type == "text":
                 tb.Text = leaf.Value("content") ?? leaf.Literal("content") ?? "";
                 break;
