@@ -1894,12 +1894,13 @@ actions:
 
   toggle_layers_type_filter:
     description: >
-      Toggle an element type in the layers panel type filter. The filter
-      dropdown has checkboxes for each element type (Layer, Group, Path,
-      Rectangle, Circle, Ellipse, Polyline, Polygon, Text, Text Path,
-      Line). Unchecking a type hides all elements of that type.
-      Filtering composes with the search field. Ancestor nodes are
-      still shown for context.
+      Check or uncheck one element type in the Layers panel's type
+      filter: the type is added to the CHECKED set if absent and removed
+      if present. Under CHECKED semantics (layers.yaml, lp_filter_button)
+      a checked type lists its elements and the ancestors that carry
+      them, and nothing checked lists everything. Bound to a plain click
+      on a type in the filter dropdown. Filtering composes with the
+      search field.
     category: layers
     tier: 3
     params:

@@ -177,11 +177,12 @@ description: >
   matches. Clearing the field restores the full tree.
 
   A filter button to the right of the search field opens a dropdown
-  with checkboxes for each element type: Layer, Group, Path, Rectangle,
-  Circle, Ellipse, Polyline, Polygon, Text, Text Path, Line. By
-  default all types are checked. Unchecking a type hides all elements
-  of that type. Filtering composes with the search field — both must
-  match for an element to appear.
+  with an "All" item and one checkable item per element type (the
+  filter button's own description, below, is the full rule). A
+  checked type lists its elements and the ancestors that carry them;
+  nothing checked, the default, lists everything. Alt-click solos a
+  type. Filtering composes with the search field — both must match
+  for an element to appear.
 
   Collapsed nodes are searched; if a match is inside a collapsed group,
   the group is auto-expanded to reveal it. Panel selection and element
