@@ -52,6 +52,8 @@ static class Program
     /// and not an empty string that an absent value would also produce.</summary>
     static string Show(string? v) => v ?? "(null)";
 
+    static string ShowRgb((byte R, byte G, byte B)? c) => c is { } v ? $"{v.R},{v.G},{v.B}" : "(null)";
+
     static void Eq(string name, string expected, string actual) =>
         Check(name, expected == actual, $"expected '{expected}', got '{actual}'");
 
@@ -475,6 +477,24 @@ static class Program
         Check("W2b-9: CONTROL: display and value differ in the winning case",
             PanelWire.DisplayText("12 pt", "12") != "12",
             "the preference cannot be observed if the two agree");
+
+        // ─────────────────────────────────────────────────────────────
+        // A `color_swatch`'s fill (STATUS-flask §110: 228 of the Swatches
+        // panel's 234 leaves were `[color_swatch]` placeholders). The core
+        // sends `bind.color` as `#rrggbb`; the shell parses and computes
+        // nothing else. A null is an EMPTY swatch, never black.
+        // ─────────────────────────────────────────────────────────────
+        Eq("swatch: #rrggbb is its three channels", "102,64,64", ShowRgb(PanelWire.SwatchColor("#664040")));
+        Eq("swatch: either case", "255,255,255", ShowRgb(PanelWire.SwatchColor("#FFfFff")));
+        Eq("swatch: black is a colour, not a failure", "0,0,0", ShowRgb(PanelWire.SwatchColor("#000000")));
+        foreach (var bad in new[] { "664040", "#66404", "#6640400", "#gg0000", "", "null", " #664040" })
+        {
+            Eq($"swatch: '{bad}' is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(bad)));
+        }
+        Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
+        Check("swatch: CONTROL: two colours read differently",
+            ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
+            "a parser that ignores its input would pass every case above but the null ones");
 
         // ─────────────────────────────────────────────────────────────
         // W2b-9: which name a glyph is looked up under.

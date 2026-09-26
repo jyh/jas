@@ -151,6 +151,15 @@ internal static class PanelWire
     internal static string DisplayText(string? display, string? value) => display ?? value ?? "";
 
     /// <summary>
+    /// A `color_swatch` leaf's fill, from the `bind.color` string the core
+    /// sends: `#rrggbb` (either case) and nothing else, or null. A null is
+    /// drawn as an EMPTY swatch (a recent-colour slot with no colour yet),
+    /// never as black, because black is a colour a swatch can hold.
+    /// STUB (red-first): returns null for every input.
+    /// </summary>
+    internal static (byte R, byte G, byte B)? SwatchColor(string? hex) => null;
+
+    /// <summary>
     /// W2b-9: which name a leaf's glyph is looked up under.
     ///
     /// ⛔ AN `icon` NODE NAMES ITS GLYPH UNDER `name`, NOT `icon`, AND NOTHING
