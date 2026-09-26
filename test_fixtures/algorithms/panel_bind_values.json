@@ -3452,6 +3452,16 @@
       },
       {
         "path": [
+          1,
+          2
+        ],
+        "id": "lp_filter_button",
+        "key": "bind.checked_in",
+        "type": "list",
+        "value": "[path,text]"
+      },
+      {
+        "path": [
           3
         ],
         "id": "lp_tree",

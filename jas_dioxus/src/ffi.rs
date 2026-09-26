@@ -1899,6 +1899,58 @@ mod tests {
     const ALIGN: &str = "align_panel_content";
     const BOOLEAN: &str = "boolean_panel_content";
 
+    /// The first node with id `id` in a panel spec, pre-order.
+    fn checks_node<'a>(node: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+        fn walk<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) {
+                return Some(n);
+            }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(|c| walk(c, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|c| walk(c, id)),
+                _ => None,
+            }
+        }
+        walk(node, id).unwrap_or_else(|| panic!("no node {id}"))
+    }
+
+    /// **§1.2 (a) through the ABI.** The Layers type filter's plan leaf carries
+    /// its declared items in order, and a toggle item's `checked` follows
+    /// `panel.type_filter` through a real pick at the engine door. The labels,
+    /// values and order are read from the compiled workspace, never typed.
+    #[test]
+    fn the_layers_filter_plan_carries_its_items_and_their_checks() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const P: &str = "layers_panel_content";
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let declared: Vec<serde_json::Value> = checks_node(ws.panel(P).unwrap(), "lp_filter_button")["items"]
+            .as_array().expect("the filter declares items").clone();
+        let e = jas_engine_new();
+        let items = |e| leaf(e, P, "lp_filter_button")["items"].as_array().cloned().expect("items");
+        let before = items(e);
+        assert_eq!(before.len(), declared.len(), "one row per declared item: {before:?}");
+        for (row, item) in before.iter().zip(&declared) {
+            assert_eq!(row["kind"], item["type"], "{row}");
+            assert_eq!(row["value"], item["value"]);
+            assert_eq!(row["label"], item["label"]);
+        }
+        let toggles: Vec<&serde_json::Value> = before.iter().filter(|r| r["kind"] == "toggle").collect();
+        assert!(toggles.len() > 2, "fixture: {toggles:?}");
+        assert!(toggles.iter().all(|r| r["checked"] == false), "the default filter checks nothing: {toggles:?}");
+        assert!(before.iter().filter(|r| r["kind"] == "action").all(|r| r.get("checked").is_none()));
+
+        let pick = toggles[2]["value"].as_str().unwrap().to_string();
+        let ev = format!(r#"{{"widget":"lp_filter_button","event":"toggle","value":"{pick}"}}"#);
+        let (reply, err) = behave(e, P, &ev);
+        assert!(!reply.is_empty(), "the pick was refused: {err}");
+        let after = items(e);
+        let checked: Vec<&str> = after.iter().filter(|r| r["checked"] == true)
+            .map(|r| r["value"].as_str().unwrap()).collect();
+        assert_eq!(checked, vec![pick.as_str()]);
+        assert_eq!(engine_of(e).store.borrow().get_panel(P, "type_filter"), &serde_json::json!([pick]));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **A library swatch is tapped by its plan path** (STATUS-flask §114: 216
     /// of 228 tiles drew and sent nothing, because the library template has no
     /// id). The door ran the tile's `select` and refused it `UnknownEffect`;

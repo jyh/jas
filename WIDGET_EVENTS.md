@@ -111,6 +111,25 @@ reached around the declared route to its own native state, and the
 engine's panel door, which runs the declared route, would have written
 `null` into the filter.
 
+### Showing an item's check
+
+A dropdown binds no value, so a `toggle` item's check is declared on the
+dropdown by `bind.checked_in`: an expression that resolves to a LIST. A
+`toggle` item is checked exactly when its `value` is an element of that
+list, compared as JSON values. Nothing else is decided here:
+
+- An `action` item carries no check. Whether its action is already in
+  force (the Layers filter's "All" with nothing checked) is not declared,
+  and each app answers it natively.
+- With no `bind.checked_in`, or one that does not resolve to a list, no
+  item's check is known. That is its own state, not "unchecked": the
+  engine's panel plan sends `checked: null` for it, never `false`.
+
+The Layers type filter declares `checked_in: "panel.type_filter"`, the
+CHECKED types. The empty list, its default, checks no type item. That the
+empty list also means "every type is listed" is the filter's own rule
+(`layers.yaml`), not this section's.
+
 ## Committing a value (input kinds)
 
 A commit carries the text the person entered: the field's contents on

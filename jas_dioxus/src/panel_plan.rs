@@ -287,6 +287,57 @@ fn options_of(
     Value::Array(rows)
 }
 
+/// A dropdown's `items`, as rows a shell draws without reading the YAML
+/// (§1.2 (a)), in declaration order:
+///
+/// ```text
+/// {"kind": "action", "value": <the item's value>, "label": "..."}
+/// {"kind": "toggle", "value": <the item's value>, "label": "...", "checked": <bool|null>}
+/// {"kind": "separator"}
+/// ```
+///
+/// `value` is the declared JSON value, the one a pick sends back
+/// (WIDGET_EVENTS.md, "Picking a dropdown item"). `checked` is the core's
+/// answer from the dropdown's `bind.checked_in` ("Showing an item's check"):
+/// the item's value is an element of that list, compared as JSON, so `"1"` is
+/// not `1`. When `checked_in` is absent or does not resolve to a list it is
+/// `null`, never `false`. An action item carries no `checked`.
+///
+/// An item of any other type (no port draws one), one whose value is not a
+/// string (a pick is matched by a string value, so it could never be sent
+/// back), or one whose label or value carries a template, is withheld as
+/// `items[<i>]` and not sent. A node with no
+/// `items` list carries `null`.
+fn items_of(node: &Value, ctx: &Value, path: &[i64], withheld: &mut Vec<Value>) -> Value {
+    let Some(list) = node.get("items").and_then(Value::as_array) else { return Value::Null };
+    let checked_in = node.get("bind").and_then(|b| b.get("checked_in")).and_then(Value::as_str)
+        .map(|expr| crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(expr, ctx)))
+        .and_then(|v| v.as_array().cloned());
+    let mut rows = vec![];
+    for (i, item) in list.iter().enumerate() {
+        if item.as_str() == Some("separator") {
+            rows.push(json!({"kind": "separator"}));
+            continue;
+        }
+        let kind = item.get("type").and_then(Value::as_str).unwrap_or("");
+        let value = item.get("value").cloned().unwrap_or(Value::Null);
+        let label = item.get("label").and_then(Value::as_str).unwrap_or("");
+        // The door matches a pick by a STRING value, so any other value could
+        // never be sent back.
+        let sendable = value.as_str().is_some_and(|v| !v.contains("{{"));
+        if !matches!(kind, "action" | "toggle") || !sendable || label.contains("{{") {
+            withheld.push(json!({"path": path, "key": format!("items[{i}]")}));
+            continue;
+        }
+        let mut row = json!({"kind": kind, "value": value, "label": label});
+        if kind == "toggle" {
+            row["checked"] = checked_in.as_ref().map_or(Value::Null, |l| Value::Bool(l.contains(&value)));
+        }
+        rows.push(row);
+    }
+    Value::Array(rows)
+}
+
 /// The icon names an entry displays: its static `icon`, an `icon` node's
 /// `name`, and the resolved `bind.icon` row.
 fn icon_names(entry: &Value, out: &mut Vec<String>) {
@@ -317,6 +368,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     let display = display_of(&item.node, &values, &item.ctx);
     let options = options_of(&item.node, &values, &item.path, withheld);
+    let items = items_of(&item.node, &item.ctx, &item.path, withheld);
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
@@ -327,6 +379,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
         "flags": flags_of(&item.node),
         "display": display,
         "options": options,
+        "items": items,
     })
 }
 
@@ -1801,6 +1854,61 @@ mod tests {
         // of it: a walk that skipped a list would pass the per-row check.
         assert_eq!(compared, declared, "every declared option was compared");
         assert!(compared > 100, "vacuous: only {compared} options compared");
+    }
+
+    /// §1.2 (a): a dropdown's `items` reach the shell as KINDS, as `options`
+    /// do, so a shell can draw the menu without reading the YAML. A `toggle`
+    /// item's `checked` is the core's answer from `bind.checked_in`
+    /// (WIDGET_EVENTS.md, "Showing an item's check"): a JSON-value membership
+    /// test, so `"1"` is not `1`. With no list to test against it is `null`,
+    /// never `false`. An item a shell could not draw or send back (another
+    /// type, a template, a value that is not a string) is withheld by name.
+    #[test]
+    fn a_dropdowns_items_carry_their_kind_and_the_cores_check() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "dropdown", "id": "dd", "bind": {"checked_in": "panel.on"},
+             "items": [
+                 {"label": "All", "value": "__all__", "type": "action", "action": "act_all"},
+                 "separator",
+                 {"label": "A", "value": "a", "type": "toggle"},
+                 {"label": "B", "value": "b", "type": "toggle"},
+                 {"label": "One", "value": 1, "type": "toggle"},
+                 {"label": "One as text", "value": "1", "type": "toggle"},
+                 {"label": "Someday", "value": "s", "type": "submenu"},
+                 {"label": "{{x}}", "value": "t", "type": "toggle"},
+                 {"label": "Tv", "value": "{{y}}", "type": "toggle"},
+             ]},
+            {"type": "select", "id": "sel", "bind": {"value": "panel.v"}, "options": ["x"]},
+        ]}});
+        let run = |ctx: Value| -> (Value, Value, Value) {
+            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+            let entries: Vec<Value> = checks::LISTS.iter()
+                .flat_map(|l| plan[*l].as_array().cloned().unwrap_or_default()).collect();
+            let of = |id: &str| entries.iter().find(|e| e["id"] == id).cloned().unwrap_or(Value::Null);
+            (of("dd")["items"].clone(), of("sel")["items"].clone(), plan["withheld"].clone())
+        };
+        let (items, sel_items, withheld) = run(json!({"panel": {"on": ["b", 1]}}));
+        assert_eq!(items, json!([
+            {"kind": "action", "value": "__all__", "label": "All"},
+            {"kind": "separator"},
+            {"kind": "toggle", "value": "a", "label": "A", "checked": false},
+            {"kind": "toggle", "value": "b", "label": "B", "checked": true},
+            {"kind": "toggle", "value": "1", "label": "One as text", "checked": false},
+        ]));
+        assert_eq!(sel_items, Value::Null, "a node with no `items` carries none");
+        let held: Vec<&Value> = withheld.as_array().unwrap().iter().filter(|w| w["path"] == json!([0])).collect();
+        // `One`'s value is a number, which a pick can never send back (the
+        // door matches a STRING value), so it is withheld with the others.
+        assert_eq!(held, vec![&json!({"path": [0], "key": "items[4]"}), &json!({"path": [0], "key": "items[6]"}),
+                              &json!({"path": [0], "key": "items[7]"}), &json!({"path": [0], "key": "items[8]"})]);
+
+        // No list to test against: every check is UNKNOWN, not unchecked.
+        for ctx in [json!({"panel": {}}), json!({"panel": {"on": "b"}})] {
+            let (items, _, _) = run(ctx.clone());
+            let checks: Vec<&Value> = items.as_array().unwrap().iter()
+                .filter(|r| r["kind"] == "toggle").map(|r| &r["checked"]).collect();
+            assert_eq!(checks, vec![&Value::Null; 3], "{ctx}");
+        }
     }
 
     /// `selected` is the CORE's answer to "which row is the bound value", so
