@@ -151,7 +151,7 @@ scene leaves it collapsed and keeps the surface it always had.
 | `PANEL OPEN` | render thread, per open | `via` (`app` for the first open, `hand` for the selector), the plan's list counts, `crossings` (the core's own count across the open, 2 when healthy) and `bytes` |
 | `PANEL LIST` | UI thread, once | `panels`, `skipped` (a row with no string id, never offered), `bytes`, and `first` (the first panel's id, or `ABSENT` if the list does not hold it) |
 | `PANEL SWITCH REQUESTED` | UI thread, per choice | `from` and `to`; the `PANEL OPEN via=hand` row that follows is the answer |
-| `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs` (text and list inputs), `toggles`, `glyphs`); `options-refused` (option rows the shell could not read, never offered); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled; a `color_swatch` counts only when it has neither an id nor a plan path, which is the predicate its tap uses) |
+| `PANEL BUILT` | UI thread, per rebuild | controls by kind (`texts`, `buttons`, `inputs` (text and list inputs), `toggles`, `glyphs`); `options-refused` (option rows the shell could not read, never offered); `menus` (dropdowns drawn as a menu button) and `items-refused` (item rows the shell could not read, never offered); `unmaterialized` (a leaf type with no control, drawn as `[type]`) and `unaddressable` (a control with no id, never enabled; a `color_swatch` counts only when it has neither an id nor a plan path, which is the predicate its tap uses) |
 | `PANEL ICONS` | UI thread, when every icon load has settled | `svg` / `text` / `failed`, and `icon=SVG` only when every face is an icon; otherwise `icon=TEXT` (stop 4) |
 | `PANEL DRAWN` | UI thread, per published plan | `seq`, `cause` (`open`, `click`, `commit`, ...), `missed`, `rebuilt`, `disabled` / `checked` / `hidden` counts, `editing` (a focused number box holding an uncommitted edit, whose text was left alone), pane and canvas sizes |
 | `PANEL CLICK` | render thread, per press or commit | `via` (`hand`, or `synth:<step>` under `SB_PANEL_SYNTH` or the value replay), `event` (`click` or `commit`), `value` (a commit's text as one JSON-string token with each space written `\u0020`, or `-` for a press), `outcome`, `changed-rows`, `doc-changed`, `delta-mismatch`, and the error channel |
@@ -206,10 +206,16 @@ rows, and they are never items, since a ComboBox item is selectable), the
 core's `selected` flag sets the index, and a pick sends the row's `value` as a
 `commit` (never its label: `100%` is labelled, `100` is committed). A
 `combo_box` is editable; an `icon_select` item shows its glyph beside its
-label. A `select` with no list stays a counted `[select]` placeholder, and
-`dropdown` (`lp_filter_button`, a menu button wearing a selector's kind name)
-stays `[dropdown]`. Not shown: the grouping the dividers express, and an
-option's `status`. Whether an editable `ComboBox` raises `TextSubmitted` on
+label. A `select` with no list stays a counted `[select]` placeholder. Not
+shown: the grouping the dividers express, and an option's `status`.
+A `dropdown` (`lp_filter_button`, a menu button wearing a selector's kind
+name) is its icon button with a `MenuFlyout`, built at every open from the
+newest plan's `items` channel: an `action` row, a `toggle` row showing the
+core's `checked`, and a separator. A row sends a pick of its `value` as
+`toggle`, or `alt_toggle` with Alt held; the button itself sends nothing. With
+no `items` channel it stays `[dropdown]`. Whether Alt held over an open
+flyout reaches `IsKeyDown` as held, rather than moving focus, is read, not
+measured. Whether an editable `ComboBox` raises `TextSubmitted` on
 focus loss, and whether putting its index back raises `SelectionChanged`
 re-entrantly, are read, not measured.
 `icon` is now materialized too: it reuses `LoadIcon` (widened from `Button` to

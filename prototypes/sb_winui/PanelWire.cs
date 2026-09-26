@@ -51,6 +51,68 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// §1.2: a dropdown entry's `items` from its raw JSON
+    /// (`panel_plan.rs::items_of`). Null when the core sent `null` (no `items`
+    /// list), when the key is absent, or when the bytes are not an array.
+    ///
+    /// ⛔ THE SHELL DECIDES NOTHING ABOUT A ROW. A divider is `kind: separator`;
+    /// an `action` or `toggle` row carries a `value` string (what a pick sends
+    /// back) and a `label` string; a toggle's `checked` is `true`, `false`, or
+    /// null (unknown), as the core sent it. Any other `kind`, a row missing a
+    /// string, or a `checked` that is not a boolean or null is COUNTED in
+    /// `Refused` and not offered.
+    /// </summary>
+    internal static PaneItems? ReadItems(string? json)
+    {
+        if (json is null) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            var rows = new List<PaneItem>();
+            var refused = 0;
+            foreach (var row in root.EnumerateArray())
+            {
+                var kind = Str(row, "kind");
+                if (kind == "separator")
+                {
+                    rows.Add(new PaneItem(true, "separator", "", "", null));
+                    continue;
+                }
+                if ((kind != "action" && kind != "toggle")
+                    || Str(row, "value") is not { } value || Str(row, "label") is not { } label)
+                {
+                    refused++;
+                    continue;
+                }
+                bool? isChecked = null;
+                if (kind == "toggle" && row.TryGetProperty("checked", out var c))
+                {
+                    switch (c.ValueKind)
+                    {
+                        case System.Text.Json.JsonValueKind.True: isChecked = true; break;
+                        case System.Text.Json.JsonValueKind.False: isChecked = false; break;
+                        case System.Text.Json.JsonValueKind.Null: break;
+                        default: refused++; continue;
+                    }
+                }
+                rows.Add(new PaneItem(false, kind, value, label, isChecked));
+            }
+            return new PaneItems(rows, refused);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>§1.2: the event a pick sends (WIDGET_EVENTS.md): `toggle`, or
+    /// `alt_toggle` with Alt held. They are not synonyms; each runs only its
+    /// own behaviors.</summary>
+    internal static string PickEvent(bool alt) => alt ? "alt_toggle" : "toggle";
+
+    /// <summary>
     /// Whether a tap on a control can reach the core: by its id, or by its
     /// plan path (<see cref="PlanPath"/>), which is how a row a `foreach`
     /// stamped out is addressed (a library swatch has no id at all;
@@ -385,6 +447,19 @@ internal static class PanelWire
         return (widget, knob[(colon + 1)..]);
     }
 }
+
+/// <summary>
+/// §1.2: one row of a dropdown's `items` channel. `Kind` is `action` or
+/// `toggle` (a separator carries neither value nor label). `Checked` is the
+/// core's answer for a toggle, and null when the core does not know it (no
+/// `bind.checked_in`) or the row is an action: never read as false by the
+/// reader. See <see cref="PanelWire.ReadItems"/>.
+/// </summary>
+internal sealed record PaneItem(bool Separator, string Kind, string Value, string Label, bool? Checked);
+
+/// <summary>§1.2: a dropdown's items as the core sent them, and how many rows
+/// this shell could not read (COUNTED, never guessed at).</summary>
+internal sealed record PaneItems(List<PaneItem> Rows, int Refused);
 
 /// <summary>
 /// W-b: one row of a plan entry's `options` channel. A separator carries no
