@@ -6264,6 +6264,35 @@ mod tests {
         }
     }
 
+    /// Whether a dropdown action item is already in force (WIDGET_EVENTS.md,
+    /// "Showing an item's check"), from the shared corpus Swift also drives.
+    /// The rule lives in the panel plan, which only the `ffi` build has.
+    #[cfg(feature = "ffi")]
+    #[test]
+    fn algorithm_dropdown_action_in_force_vectors() {
+        use crate::panel_plan::action_in_force;
+        let json_str = read_fixture("algorithms/dropdown_action_in_force.json");
+        let doc: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let vectors = doc["vectors"].as_array().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for tc in vectors {
+            let name = tc["name"].as_str().unwrap();
+            let actions = match tc["actions"].as_str().unwrap() {
+                "fixture" => &doc["actions"],
+                "workspace" => &bundle["actions"],
+                other => panic!("{name}: unknown actions source {other}"),
+            };
+            let got = action_in_force(&tc["item"], tc["panel_id"].as_str().unwrap(), actions, &tc["scope"]);
+            assert_eq!(got, tc["expected"], "dropdown action in force '{name}'");
+            seen.insert(got.to_string());
+        }
+        // Every one of the three answers is exercised, or an arm is vacuous.
+        assert_eq!(seen.len(), 3, "answers exercised: {seen:?}");
+    }
+
     /// The census 5.8 claim, in this port: two data scopes differing only in
     /// `panel.hex` — "664040" vs "664141", the colour divergence's byte pattern
     /// — are INDISTINGUISHABLE to `widget_tree` (key names only) and to

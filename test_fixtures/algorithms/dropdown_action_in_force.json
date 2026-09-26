@@ -1,0 +1,410 @@
+{
+  "doc": [
+    "Whether a dropdown ACTION item is already in force (WIDGET_EVENTS.md, \"Showing an item's check\"):",
+    "running its action now would change nothing. Known only when the item has no `params` and every effect of",
+    "its (defined, non-empty) action is a `set_panel_state` that NAMES the dropdown's own panel; then it is",
+    "`true` exactly when each effect's `value`, evaluated in `scope`, equals `scope.panel[key]` (numbers by value).",
+    "Every other case is `null`, never `false`.",
+    "`actions: \"fixture\"` reads the `actions` map below; `\"workspace\"` reads the compiled workspace's own."
+  ],
+  "actions": {
+    "reset": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "p",
+            "key": "f",
+            "value": "[]"
+          }
+        }
+      ]
+    },
+    "two": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "p_panel_content",
+            "key": "f",
+            "value": "[]"
+          }
+        },
+        {
+          "set_panel_state": {
+            "panel": "p",
+            "key": "n",
+            "value": "45"
+          }
+        }
+      ]
+    },
+    "mixed": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "p",
+            "key": "f",
+            "value": "[]"
+          }
+        },
+        {
+          "log": "x"
+        }
+      ]
+    },
+    "unnamed": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "key": "f",
+            "value": "[]"
+          }
+        }
+      ]
+    },
+    "elsewhere": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "q",
+            "key": "f",
+            "value": "[]"
+          }
+        }
+      ]
+    },
+    "empty": {
+      "effects": []
+    },
+    "flag": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "p",
+            "key": "b",
+            "value": "true"
+          }
+        }
+      ]
+    },
+    "only_a": {
+      "effects": [
+        {
+          "set_panel_state": {
+            "panel": "p",
+            "key": "f",
+            "value": "[\"a\"]"
+          }
+        }
+      ]
+    }
+  },
+  "vectors": [
+    {
+      "name": "in_force_when_the_value_already_holds",
+      "doc": "The effect names its panel by the short id `p`; it is this panel (`p_panel_content`).",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "reset",
+        "value": "reset",
+        "type": "action",
+        "action": "reset"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "not_in_force_when_running_would_change_it",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "reset",
+        "value": "reset",
+        "type": "action",
+        "action": "reset"
+      },
+      "scope": {
+        "panel": {
+          "f": [
+            "a"
+          ]
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "an_absent_key_is_null_and_the_empty_list_is_not",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "reset",
+        "value": "reset",
+        "type": "action",
+        "action": "reset"
+      },
+      "scope": {
+        "panel": {}
+      },
+      "expected": false
+    },
+    {
+      "name": "every_effect_must_hold_numbers_by_value",
+      "doc": "`n` is stored as 45.0 and the effect evaluates 45: numbers compare by value.",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "two",
+        "value": "two",
+        "type": "action",
+        "action": "two"
+      },
+      "scope": {
+        "panel": {
+          "f": [],
+          "n": 45.0
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "one_effect_that_would_change_something_is_enough",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "two",
+        "value": "two",
+        "type": "action",
+        "action": "two"
+      },
+      "scope": {
+        "panel": {
+          "f": [],
+          "n": 7
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "a_boolean_is_not_the_number_one",
+      "doc": "The store holds the NUMBER 1 and the effect evaluates the BOOLEAN true: they differ, so running it would change the value.",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "flag",
+        "value": "flag",
+        "type": "action",
+        "action": "flag"
+      },
+      "scope": {
+        "panel": {
+          "b": 1
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "a_boolean_already_held_is_in_force",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "flag",
+        "value": "flag",
+        "type": "action",
+        "action": "flag"
+      },
+      "scope": {
+        "panel": {
+          "b": true
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "a_list_of_the_same_length_can_still_differ",
+      "doc": "Both lists have one element; they differ in it, so running the action would change the value.",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "only_a",
+        "value": "only_a",
+        "type": "action",
+        "action": "only_a"
+      },
+      "scope": {
+        "panel": {
+          "f": [
+            "b"
+          ]
+        }
+      },
+      "expected": false
+    },
+    {
+      "name": "the_same_list_is_in_force",
+      "doc": "The same one-element list: nothing would change.",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "only_a",
+        "value": "only_a",
+        "type": "action",
+        "action": "only_a"
+      },
+      "scope": {
+        "panel": {
+          "f": [
+            "a"
+          ]
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "another_effect_kind_is_unknown",
+      "doc": "In force on its set_panel_state half, and still unknown: the other effect could change something this test cannot see.",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "mixed",
+        "value": "mixed",
+        "type": "action",
+        "action": "mixed"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "an_unnamed_panel_is_unknown",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "unnamed",
+        "value": "unnamed",
+        "type": "action",
+        "action": "unnamed"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "a_foreign_panel_is_unknown",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "elsewhere",
+        "value": "elsewhere",
+        "type": "action",
+        "action": "elsewhere"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "no_effects_is_unknown",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "empty",
+        "value": "empty",
+        "type": "action",
+        "action": "empty"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "an_undefined_action_is_unknown",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "undefined",
+        "value": "undefined",
+        "type": "action",
+        "action": "undefined"
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "an_item_with_params_is_unknown",
+      "panel_id": "p_panel_content",
+      "actions": "fixture",
+      "item": {
+        "label": "reset",
+        "value": "reset",
+        "type": "action",
+        "action": "reset",
+        "params": {
+          "k": 1
+        }
+      },
+      "scope": {
+        "panel": {
+          "f": []
+        }
+      },
+      "expected": null
+    },
+    {
+      "name": "layers_all_in_force_with_nothing_checked",
+      "doc": "The shipping row, against the workspace's own action.",
+      "panel_id": "layers_panel_content",
+      "actions": "workspace",
+      "item": {
+        "label": "All",
+        "value": "__all__",
+        "type": "action",
+        "action": "clear_layers_type_filter"
+      },
+      "scope": {
+        "panel": {
+          "type_filter": []
+        }
+      },
+      "expected": true
+    },
+    {
+      "name": "layers_all_not_in_force_with_a_type_checked",
+      "panel_id": "layers_panel_content",
+      "actions": "workspace",
+      "item": {
+        "label": "All",
+        "value": "__all__",
+        "type": "action",
+        "action": "clear_layers_type_filter"
+      },
+      "scope": {
+        "panel": {
+          "type_filter": [
+            "circle"
+          ]
+        }
+      },
+      "expected": false
+    }
+  ]
+}

@@ -2629,11 +2629,9 @@ struct YamlElementView: View {
     /// Option-click solo on the eye button in this same panel.
     private func renderDropdown() -> AnyView {
         let items = (element["items"] as? [[String: Any]]) ?? []
-        let bindKey = "type_filter"
         let panelId = "layers_panel_content"
         guard let model = model else { return AnyView(EmptyView()) }
-        let store = model.stateStore
-        let checked = Set((store.getPanel(panelId, bindKey) as? [String]) ?? [])
+        let actions = WorkspaceData.load()?.actions() ?? [:]
         // ONE LOOP, IN DECLARATION ORDER, each row rendered as the KIND its
         // `type` declares. The "All" row is the menu's own first item rather
         // than a hand-written twin of it, so its behaviour is the one
@@ -2656,11 +2654,15 @@ struct YamlElementView: View {
                 // not "checked": with an empty filter All is ticked, which is
                 // what stops CHECKED semantics reading as twelve switched-off
                 // boxes over a full tree.
-                case .action(let action):
+                // The tick is the declared one too: a dry run of the item's
+                // own action (WIDGET_EVENTS.md, "Showing an item's check").
+                case .action:
                     Button(action: {
                         route.pick(element, value: row.value, alt: false)
                     }) {
-                        SwiftUI.Text(layersActionIsInForce(action, checked)
+                        SwiftUI.Text(WidgetEvent.itemInForce(
+                                        item: items.first { $0["value"] as? String == row.value } ?? [:],
+                                        panelId: panelId, actions: actions, scope: context) == true
                                      ? "✓ \(row.label)" : row.label)
                     }
                     SwiftUI.Divider()
@@ -3708,17 +3710,6 @@ func layersCheckedAfterAction(_ action: String, _ checked: Set<String>) -> Set<S
     case "clear_layers_type_filter": return []
     default: return nil
     }
-}
-
-/// Whether an action's effect is ALREADY IN FORCE — what the tick on an action
-/// row means, as against a toggle's tick, which means "this type is checked".
-///
-/// Stated as *invoking it would change nothing* rather than as a hand-written
-/// per-action predicate, so a new action cannot arrive with a tick rule that
-/// contradicts what its own invocation does. An unknown action is never in
-/// force: it is inert, not satisfied.
-func layersActionIsInForce(_ action: String, _ checked: Set<String>) -> Bool {
-    layersCheckedAfterAction(action, checked) == checked
 }
 
 private func visIcon(_ vis: Visibility) -> String {

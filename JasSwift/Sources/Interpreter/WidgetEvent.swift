@@ -156,6 +156,35 @@ enum WidgetEvent {
         return list.contains { ($0.value as? String) == value }
     }
 
+    /// Whether a dropdown's `action` item is already IN FORCE: running its
+    /// action now would change nothing (WIDGET_EVENTS.md, "Showing an item's
+    /// check"). A dry run of the action's OWN effects, so the tick cannot
+    /// disagree with what a pick does. Known only when the item has no
+    /// `params` and every effect is a `set_panel_state` NAMING `panelId`; then
+    /// true exactly when each value, evaluated in `scope`, equals
+    /// `scope.panel[key]`, numbers by value. Nil otherwise, never false: an
+    /// unseen effect could change something. Rust's `panel_plan::action_in_force`.
+    static func itemInForce(item: [String: Any], panelId: String, actions: [String: Any],
+                            scope: [String: Any]) -> Bool? {
+        guard item["params"] == nil, !panelId.isEmpty,
+              let name = item["action"] as? String,
+              let effects = (actions[name] as? [String: Any])?["effects"] as? [Any],
+              !effects.isEmpty else { return nil }
+        let own = StateStore.panelContentId(panelId)
+        let panel = scope["panel"] as? [String: Any] ?? [:]
+        var inForce = true
+        for effect in effects {
+            guard let sps = (effect as? [String: Any])?["set_panel_state"] as? [String: Any],
+                  let named = sps["panel"] as? String,
+                  let key = sps["key"] as? String else { return nil }
+            guard StateStore.panelContentId(named) == own else { return nil }
+            // "null" is the runner's own default for an absent value.
+            let next = evaluate(sps["value"] as? String ?? "null", context: scope).toAny()
+            inForce = inForce && jsonValueEqual(next, panel[key])
+        }
+        return inForce
+    }
+
     /// Pick one declared item of an item kind (`dropdown`), named by its
     /// `value` (WIDGET_EVENTS.md, "Picking a dropdown item"). An `action` item
     /// runs its own action; any other item runs the behaviors declared for
@@ -469,4 +498,29 @@ enum WidgetEvent {
         }
         return nil
     }
+}
+
+/// JSON equality with numbers compared by value, so a store holding `45.0`
+/// equals an expression's `45`. A JSON boolean is not a number.
+private func jsonValueEqual(_ a: Any?, _ b: Any?) -> Bool {
+    let a = a is NSNull ? nil : a, b = b is NSNull ? nil : b
+    switch (a, b) {
+    case (nil, nil): return true
+    case (nil, _), (_, nil): return false
+    default: break
+    }
+    if let x = a as? NSNumber, let y = b as? NSNumber {
+        let isBool = { (n: NSNumber) in ["c", "B"].contains(String(cString: n.objCType)) }
+        if isBool(x) != isBool(y) { return false }
+        return isBool(x) ? x.boolValue == y.boolValue : x.doubleValue == y.doubleValue
+    }
+    if a is NSNumber || b is NSNumber { return false }
+    if let x = a as? String, let y = b as? String { return x == y }
+    if let x = a as? [Any], let y = b as? [Any] {
+        return x.count == y.count && zip(x, y).allSatisfy { jsonValueEqual($0, $1) }
+    }
+    if let x = a as? [String: Any], let y = b as? [String: Any] {
+        return x.count == y.count && x.allSatisfy { k, v in y[k].map { jsonValueEqual(v, $0) } ?? false }
+    }
+    return false
 }

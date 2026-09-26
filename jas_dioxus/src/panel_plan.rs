@@ -335,7 +335,7 @@ fn items_of(node: &Value, ctx: &Value, path: &[i64], acts: &PanelActions, withhe
         row["checked"] = if kind == "toggle" {
             checked_in.as_ref().map_or(Value::Null, |l| Value::Bool(l.contains(&value)))
         } else {
-            action_in_force(item, acts, ctx)
+            action_in_force(item, acts.panel_id, acts.actions, ctx)
         };
         rows.push(row);
     }
@@ -360,16 +360,16 @@ struct PanelActions<'a> {
 /// Anything else (another effect kind, an unnamed or foreign panel, `params`
 /// on the item, no effects, an undefined action) is `null`, never `false`,
 /// because an unseen effect could change something.
-fn action_in_force(item: &Value, acts: &PanelActions, ctx: &Value) -> Value {
-    if item.get("params").is_some() || acts.panel_id.is_empty() {
+pub(crate) fn action_in_force(item: &Value, panel_id: &str, actions: &Value, ctx: &Value) -> Value {
+    if item.get("params").is_some() || panel_id.is_empty() {
         return Value::Null;
     }
     let effects = item.get("action").and_then(Value::as_str)
-        .and_then(|a| acts.actions.get(a))
+        .and_then(|a| actions.get(a))
         .and_then(|a| a.get("effects"))
         .and_then(Value::as_array);
     let Some(effects) = effects.filter(|e| !e.is_empty()) else { return Value::Null };
-    let own = panel_content_id(acts.panel_id);
+    let own = panel_content_id(panel_id);
     let mut in_force = true;
     for effect in effects {
         let sps = effect.get("set_panel_state").and_then(Value::as_object);

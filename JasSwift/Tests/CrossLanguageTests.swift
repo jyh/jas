@@ -2559,6 +2559,40 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Dropdown action item in force (WIDGET_EVENTS.md, "Showing an item's check")
+
+@Test func testAlgorithmDropdownActionInForce() throws {
+    let json = readFixture("algorithms/dropdown_action_in_force.json")
+    let doc = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    var seen = Set<String>()
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let source = tc["actions"] as! String
+        let actions: [String: Any]
+        switch source {
+        case "fixture": actions = doc["actions"] as! [String: Any]
+        case "workspace": actions = bundle["actions"] as! [String: Any]
+        default: Issue.record("\(name): unknown actions source \(source)"); continue
+        }
+        let got = WidgetEvent.itemInForce(
+            item: tc["item"] as! [String: Any], panelId: tc["panel_id"] as! String,
+            actions: actions, scope: tc["scope"] as! [String: Any])
+        let expected: Bool? = tc["expected"] is NSNull ? nil : (tc["expected"] as! Bool)
+        #expect(got == expected, "dropdown action in force '\(name)': got \(String(describing: got))")
+        seen.insert(String(describing: got))
+    }
+    // Every one of the three answers is exercised, or an arm is vacuous.
+    #expect(seen.count == 3, "answers exercised: \(seen)")
+}
+
 // MARK: - Panel bind-VALUE (resolved snapshot) algorithm vectors
 
 @Test func testAlgorithmBindValues() throws {
