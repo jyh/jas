@@ -2795,5 +2795,22 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         }
         return nil
     }
+    // THE BRUSHES PANEL'S LIBRARY EDITS, and they were NEVER REGISTERED here
+    // (W2b-18). The five `brush.*` handlers live in the tool table
+    // (``buildYamlToolEffects``), and no production panel dispatcher built its
+    // map from that table, so `delete_brush` and `duplicate_brush` from the
+    // panel menu were skipped by `runEffects` without a word. Rust had the
+    // same defect in another shape (its arms sat behind the `doc.*` route).
+    // Lifted by key, as `LayersPanel` lifts the view keys, so no other tool
+    // effect joins the panel path by accident.
+    let toolEffects = buildYamlToolEffects(model: model)
+    for key in ["brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
+                "brush.append", "brush.update"] {
+        guard let handler = toolEffects[key] else {
+            assertionFailure("brush effect '\(key)' vanished from the tool table")
+            continue
+        }
+        effects[key] = handler
+    }
     return effects
 }

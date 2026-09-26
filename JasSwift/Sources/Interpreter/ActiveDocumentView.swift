@@ -28,6 +28,8 @@ public func buildActiveDocumentView(
             "layers_panel_selection_count": layersPanelSelection.count,
             "layers_panel_selection_is_container": false,
             "layers_panel_selection_has_group": false,
+            "selection_has_brushed_stroke": false,
+            "selection_is_single_brushed_stroke": false,
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
@@ -172,6 +174,11 @@ public func buildActiveDocumentView(
             "usage_count": usageCount,
         ]
     }
+    let brushedCount = m.document.selection.filter {
+        if case .path(let p) = m.document.tryGetElement($0.path),
+           let brush = p.strokeBrush, !brush.isEmpty { return true }
+        return false
+    }.count
     return [
         "top_level_layers": topLevelLayers,
         "top_level_layer_paths": topLevelLayerPaths,
@@ -195,6 +202,12 @@ public func buildActiveDocumentView(
             if case .live(.compoundShape) = m.document.tryGetElement($0.path) { return true }
             return false
         },
+        // The Brushes panel's two gates (W2b-18; BRUSHES.md § Bottom toolbar):
+        // a selected element is a brushed stroke when it is a path carrying a
+        // non-empty stroke_brush. Only the selected elements are read. Mirrors
+        // Rust's `document_views::brushed_stroke_facts`.
+        "selection_has_brushed_stroke": brushedCount > 0,
+        "selection_is_single_brushed_stroke": m.document.selection.count == 1 && brushedCount == 1,
         "artboards": artboardsView,
         "artboard_options": [
             "fade_region_outside_artboard": m.document.artboardOptions.fadeRegionOutsideArtboard,

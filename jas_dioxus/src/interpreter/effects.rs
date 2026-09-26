@@ -391,6 +391,13 @@ fn run_one<'h>(
         }
     }
 
+    // ── Brush library edits (brush.*) — their own function, because only
+    // `options_confirm` needs the document (W2b-18).
+    if let Some((name, spec)) = effect.iter().find(|(k, _)| k.starts_with("brush.")) {
+        run_brush_effect(name, spec, ctx, store, model.as_deref_mut(), report);
+        return;
+    }
+
     // ── Document mutations (doc.*) — dispatched before generic effects
     // so a stray `doc.` key in an effect object doesn't silently fall
     // through to "unknown".
@@ -969,6 +976,84 @@ fn set_by_scoped_target(
 /// "Duplicate" / "Duplicate Artboard" gestures live in the OTHER runner
 /// (`renderer.rs::run_yaml_effect`, AppState-level) and journal nothing here in
 /// v1 — also deferred. See OP_LOG.md §9 for the full deferred list.
+/// The `brush.*` keys (BRUSHES.md): library edits on the store's
+/// `brush_libraries` data, and `options_confirm`, which also writes the
+/// document. They were arms of `run_doc_effect`, which `run_one` enters only
+/// for `doc.*` keys, so until W2b-18 every one of them was reported as
+/// `UnknownEffect` before any arm could see it.
+fn run_brush_effect(
+    name: &str,
+    spec: &serde_json::Value,
+    ctx: &serde_json::Value,
+    store: &mut StateStore,
+    model: Option<&mut Model>,
+    report: &mut EffectsReport,
+) {
+    match name {
+        "brush.options_confirm" => {
+            // Per-mode dispatch reading dialog state. Phase 1
+            // Calligraphic only. Mirrors the Swift / OCaml / Python
+            // brush.options_confirm handlers.
+            match model {
+                Some(m) => brush_options_confirm_dispatch(store, m),
+                None => report.unhandled.push(Unhandled::NoModel(name.to_string())),
+            }
+        }
+        "brush.delete_selected" => {
+            // Spec: { library, slugs } — filter library.brushes
+            // against the selected slug list, clear panel selection.
+            // After mutation, sync the canvas brush registry.
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slugs = eval_string_list(args.get("slugs"), store, ctx);
+                if !lib_id.is_empty() && !slugs.is_empty() {
+                    brush_filter_library_by_slug(store, &lib_id, &slugs, /*keep_unmatched*/ true);
+                    store.set_panel("brushes", "selected_brushes",
+                                    serde_json::Value::Array(vec![]));
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.duplicate_selected" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slugs = eval_string_list(args.get("slugs"), store, ctx);
+                if !lib_id.is_empty() && !slugs.is_empty() {
+                    let new_slugs = brush_duplicate_in_library(store, &lib_id, &slugs);
+                    store.set_panel("brushes", "selected_brushes",
+                                    serde_json::Value::Array(
+                                        new_slugs.into_iter()
+                                            .map(serde_json::Value::String)
+                                            .collect()));
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.append" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let brush = resolve_value_or_expr(args.get("brush"), store, ctx);
+                if !lib_id.is_empty() && brush.is_object() {
+                    brush_append_to_library(store, &lib_id, brush);
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.update" => {
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let slug = eval_string(args.get("slug"), store, ctx);
+                let patch = resolve_value_or_expr(args.get("patch"), store, ctx);
+                if !lib_id.is_empty() && !slug.is_empty() && patch.is_object() {
+                    brush_update_in_library(store, &lib_id, &slug, patch);
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        _ => report.unhandled.push(Unhandled::UnknownEffect(name.to_string())),
+    }
+}
+
 fn run_doc_effect(
     name: &str,
     spec: &serde_json::Value,
@@ -1129,63 +1214,6 @@ fn run_doc_effect(
                     let i = index.min(arr.len());
                     arr.insert(i, value);
                     store.set_data_path(path, serde_json::Value::Array(arr));
-                }
-            }
-        }
-        "brush.options_confirm" => {
-            // Per-mode dispatch reading dialog state. Phase 1
-            // Calligraphic only. Mirrors the Swift / OCaml / Python
-            // brush.options_confirm handlers.
-            brush_options_confirm_dispatch(store, model);
-        }
-        "brush.delete_selected" => {
-            // Spec: { library, slugs } — filter library.brushes
-            // against the selected slug list, clear panel selection.
-            // After mutation, sync the canvas brush registry.
-            if let serde_json::Value::Object(args) = spec {
-                let lib_id = eval_string(args.get("library"), store, ctx);
-                let slugs = eval_string_list(args.get("slugs"), store, ctx);
-                if !lib_id.is_empty() && !slugs.is_empty() {
-                    brush_filter_library_by_slug(store, &lib_id, &slugs, /*keep_unmatched*/ true);
-                    store.set_panel("brushes", "selected_brushes",
-                                    serde_json::Value::Array(vec![]));
-                    sync_canvas_brushes(store);
-                }
-            }
-        }
-        "brush.duplicate_selected" => {
-            if let serde_json::Value::Object(args) = spec {
-                let lib_id = eval_string(args.get("library"), store, ctx);
-                let slugs = eval_string_list(args.get("slugs"), store, ctx);
-                if !lib_id.is_empty() && !slugs.is_empty() {
-                    let new_slugs = brush_duplicate_in_library(store, &lib_id, &slugs);
-                    store.set_panel("brushes", "selected_brushes",
-                                    serde_json::Value::Array(
-                                        new_slugs.into_iter()
-                                            .map(serde_json::Value::String)
-                                            .collect()));
-                    sync_canvas_brushes(store);
-                }
-            }
-        }
-        "brush.append" => {
-            if let serde_json::Value::Object(args) = spec {
-                let lib_id = eval_string(args.get("library"), store, ctx);
-                let brush = resolve_value_or_expr(args.get("brush"), store, ctx);
-                if !lib_id.is_empty() && brush.is_object() {
-                    brush_append_to_library(store, &lib_id, brush);
-                    sync_canvas_brushes(store);
-                }
-            }
-        }
-        "brush.update" => {
-            if let serde_json::Value::Object(args) = spec {
-                let lib_id = eval_string(args.get("library"), store, ctx);
-                let slug = eval_string(args.get("slug"), store, ctx);
-                let patch = resolve_value_or_expr(args.get("patch"), store, ctx);
-                if !lib_id.is_empty() && !slug.is_empty() && patch.is_object() {
-                    brush_update_in_library(store, &lib_id, &slug, patch);
-                    sync_canvas_brushes(store);
                 }
             }
         }
@@ -12870,6 +12898,80 @@ mod tests {
             Unhandled::BareString("snapshot".into()),
             Unhandled::UnknownEffect("align_left".into()),
         ]);
+    }
+
+    /// W2b-18: the brushes panel's library, as the reference test builds it
+    /// (`test_brush_panel_spec.py::_brush_store`), with `selected` chosen.
+    fn brush_store(selected: &[&str]) -> StateStore {
+        let mut store = StateStore::new();
+        store.set_data(serde_json::json!({"brush_libraries": {
+            "lib_a": {"name": "A", "brushes": [
+                {"slug": "a", "name": "Alpha", "type": "calligraphic"},
+                {"slug": "b", "name": "Beta", "type": "calligraphic"},
+                {"slug": "c", "name": "Gamma", "type": "calligraphic"},
+                {"slug": "a_copy", "name": "Alpha copy", "type": "calligraphic"}]},
+            "lib_b": {"name": "B", "brushes": [
+                {"slug": "a", "name": "Other alpha", "type": "art"}]}}}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), serde_json::json!("lib_a"));
+        defaults.insert("selected_brushes".to_string(), serde_json::json!(selected));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        store
+    }
+
+    fn brush_slugs(store: &StateStore, lib: &str) -> Vec<String> {
+        match store.get_data_path(&format!("brush_libraries.{lib}.brushes")) {
+            serde_json::Value::Array(a) => a.iter()
+                .map(|b| b["slug"].as_str().unwrap_or("").to_string()).collect(),
+            other => panic!("{lib}: not a brush list: {other}"),
+        }
+    }
+
+    /// Dispatch a REAL workspace action against `store`, with no document:
+    /// the brush library is store data, and no brush effect but
+    /// `options_confirm` touches the document.
+    fn run_real_brush_action(store: &mut StateStore, name: &str) -> Vec<Unhandled> {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        run_effects(&[serde_json::json!({"dispatch": name})], &serde_json::json!({}), store,
+                    None, Some(ws.actions()), Some(ws.dialogs()), None).unhandled
+    }
+
+    /// W2b-18. Delete Brush was a no-op in this port twice over: the action
+    /// passed `{}` (fixed in the spec), and `run_one` sent only `doc.*` keys to
+    /// the function holding every `brush.*` arm, so the key was reported as
+    /// `UnknownEffect` before any arm could see it.
+    #[test]
+    fn the_real_delete_brush_action_removes_the_panel_selection() {
+        let mut store = brush_store(&["a", "c"]);
+        assert_eq!(run_real_brush_action(&mut store, "delete_brush"), vec![]);
+        assert_eq!(brush_slugs(&store, "lib_a"), ["b", "a_copy"]);
+        assert_eq!(brush_slugs(&store, "lib_b"), ["a"], "the same slug in another library");
+        assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!([]));
+    }
+
+    #[test]
+    fn the_real_duplicate_brush_action_copies_after_each_original() {
+        let mut store = brush_store(&["a", "b"]);
+        assert_eq!(run_real_brush_action(&mut store, "duplicate_brush"), vec![]);
+        assert_eq!(brush_slugs(&store, "lib_a"), ["a", "a_copy_2", "b", "b_copy", "c", "a_copy"]);
+        assert_eq!(store.get_panel("brushes", "selected_brushes"),
+                   &serde_json::json!(["a_copy_2", "b_copy"]));
+        assert_eq!(brush_slugs(&store, "lib_b"), ["a"]);
+    }
+
+    /// The four store-only `brush.*` keys run with no document; the one that
+    /// reads the document says so, as every `doc.*` key does.
+    #[test]
+    fn brush_keys_route_to_their_arms_and_options_confirm_needs_a_model() {
+        let mut store = brush_store(&[]);
+        let report = run_effects(&[serde_json::json!({"brush.append": {
+            "library": "'lib_a'", "brush": {"slug": "d", "name": "Delta"}}})],
+            &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(report.unhandled, vec![]);
+        assert_eq!(brush_slugs(&store, "lib_a"), ["a", "b", "c", "a_copy", "d"]);
+        assert_eq!(report_of(vec![serde_json::json!({"brush.options_confirm": {}})], None, None, None),
+                   vec![Unhandled::NoModel("brush.options_confirm".into())]);
     }
 
     #[test]

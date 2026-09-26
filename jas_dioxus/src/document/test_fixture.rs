@@ -15,6 +15,24 @@ pub(crate) fn rect(x: f64, y: f64, w: f64, h: f64) -> Element {
     })
 }
 
+/// A stroked two-point path carrying `brush` as its `stroke_brush` (W2b-18's
+/// brushed stroke when the id is non-empty).
+pub(crate) fn brushed_path(x: f64, brush: Option<&str>) -> Element {
+    use crate::geometry::element::{FillRule, PathCommand, PathElem, Stroke};
+    Element::Path(PathElem {
+        d: vec![PathCommand::MoveTo { x, y: 0.0 }, PathCommand::LineTo { x: x + 50.0, y: 40.0 }],
+        fill: None,
+        stroke: Some(Stroke::new(Color::BLACK, 2.0)),
+        width_points: vec![],
+        common: CommonProps::default(),
+        fill_gradient: None,
+        stroke_gradient: None,
+        stroke_brush: brush.map(String::from),
+        stroke_brush_overrides: None,
+        fill_rule: FillRule::NonZero,
+    })
+}
+
 /// One layer holding `rects`, with `selected` (child indices) selected.
 /// Seeded unbracketed, so the model starts with nothing to undo.
 pub(crate) fn model_with(rects: Vec<Element>, selected: &[usize]) -> Model {
