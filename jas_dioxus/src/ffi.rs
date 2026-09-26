@@ -3222,6 +3222,50 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// **The Layers type filter through the door** (WIDGET_EVENTS.md, "Picking
+    /// a dropdown item"). A pick names the item by its `value`, and the batch
+    /// reads `item.value`. Before the item kinds joined the contract the door
+    /// bound no `item`, so the filter's `list_toggle`, once hosted, wrote
+    /// `[null]` (measured) where it had refused by name.
+    #[test]
+    fn the_layers_type_filter_picks_through_the_door() {
+        use crate::panel_behavior::test_fixture::misaligned;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_with(misaligned(&[0]));
+        let _ = plan_of(e, "layers_panel_content", 228, 0);
+        let filter = |e: *mut JasEngine| engine_of(e).store.borrow()
+            .get_panel("layers_panel_content", "type_filter").clone();
+        let pick = |e: *mut JasEngine, event: &str, value: &str| behave(e, "layers_panel_content",
+            &format!(r#"{{"widget":"lp_filter_button","event":"{event}","value":"{value}"}}"#));
+
+        let (_r, err) = pick(e, "toggle", "path");
+        assert_eq!(err, "", "a pick of a declared type runs");
+        assert_eq!(filter(e), serde_json::json!(["path"]), "the TYPE, never null");
+        let (_r, err) = pick(e, "toggle", "text");
+        assert_eq!(err, "");
+        assert_eq!(filter(e), serde_json::json!(["path", "text"]));
+        let (_r, err) = pick(e, "toggle", "path");
+        assert_eq!(err, "");
+        assert_eq!(filter(e), serde_json::json!(["text"]), "a second pick toggles it out");
+        let (_r, err) = pick(e, "alt_toggle", "circle");
+        assert_eq!(err, "");
+        assert_eq!(filter(e), serde_json::json!(["circle"]), "an Alt pick solos");
+        let (_r, err) = pick(e, "toggle", "__all__");
+        assert_eq!(err, "");
+        assert_eq!(filter(e), serde_json::json!([]), "All runs its own action");
+
+        let (_r, err) = behave(e, "layers_panel_content", r#"{"widget":"lp_filter_button","event":"toggle"}"#);
+        assert_eq!(err, refusal("MissingValue", "lp_filter_button"));
+        let (_r, err) = pick(e, "toggle", "nope");
+        assert_eq!(err, refusal("BadValue", "lp_filter_button"));
+        let (_r, err) = pick(e, "toggle", "separator");
+        assert_eq!(err, refusal("BadValue", "lp_filter_button"), "a separator is not an item");
+        let (_r, err) = pick(e, "click", "path");
+        assert_eq!(err, refusal("WrongEvent", "lp_filter_button"));
+        assert_eq!(filter(e), serde_json::json!([]), "no refusal wrote anything");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **D6/D7.** A log-only action is a stub for work a platform supplies, and
     /// it is refused as one. (Its example was `sym_new` until W2b-17 hosted the
     /// Symbols verbs; `open_brush_libraries_menu` is still a stub.)

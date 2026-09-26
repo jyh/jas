@@ -661,6 +661,21 @@ fn run_one<'h>(
         return;
     }
 
+    // list_toggle: { target, value } — set membership (the Layers type
+    // filter). Same target law as list_push: `panel.<key>` on the active panel.
+    if let Some(serde_json::Value::Object(lt)) = effect.get("list_toggle") {
+        let target = lt.get("target").and_then(|v| v.as_str()).unwrap_or("");
+        let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+        let value = eval_expr(value_expr, store, ctx);
+        let parts: Vec<&str> = target.splitn(2, '.').collect();
+        if parts.len() == 2 && parts[0] == "panel" {
+            if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
+                store.list_toggle(&active, parts[1], value_to_json(&value));
+            }
+        }
+        return;
+    }
+
     // dispatch: action_name or { action, params }
     if let Some(dispatch) = effect.get("dispatch") {
         let (action_name, params) = match dispatch {
@@ -13187,6 +13202,52 @@ mod tests {
         assert_eq!(run_real_brush_action(&mut store, "select_all_unused_brushes"),
                    vec![Unhandled::NoModel("brush.select_unused".into())]);
         assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["b"]));
+    }
+
+    /// `list_toggle`, row for row with the reference's `TestListToggleEffect`.
+    /// It was the engine door's last real `UnknownEffect` (the Layers type
+    /// filter). Each row has its own store: toggling twice is the identity,
+    /// which a no-op also satisfies.
+    fn toggled(initial: Option<serde_json::Value>, value: &str, active: bool, target: &str,
+               ctx: serde_json::Value) -> (serde_json::Value, Vec<Unhandled>) {
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        if let Some(v) = initial {
+            defaults.insert("type_filter".to_string(), v);
+        }
+        store.init_panel("layers", defaults);
+        if active {
+            store.set_active_panel(Some("layers"));
+        }
+        let report = run_effects(&[serde_json::json!({"list_toggle": {"target": target, "value": value}})],
+                                 &ctx, &mut store, None, None, None, None);
+        (store.get_panel("layers", "type_filter").clone(), report.unhandled)
+    }
+
+    #[test]
+    fn list_toggle_matches_the_reference_row_for_row() {
+        use serde_json::json;
+        let t = "panel.type_filter";
+        let rows: Vec<(&str, Option<serde_json::Value>, &str, bool, &str, serde_json::Value, serde_json::Value)> = vec![
+            ("absent: appended at the end", Some(json!(["path", "rect"])), "\"text\"", true, t, json!({}),
+             json!(["path", "rect", "text"])),
+            ("present: removed, order kept", Some(json!(["path", "rect", "text"])), "\"rect\"", true, t, json!({}),
+             json!(["path", "text"])),
+            ("only the FIRST occurrence is removed", Some(json!(["path", "rect", "path"])), "\"path\"", true, t,
+             json!({}), json!(["rect", "path"])),
+            ("a missing key starts an empty list", None, "\"path\"", true, t, json!({}), json!(["path"])),
+            ("a non-list value is replaced", Some(json!("path")), "\"rect\"", true, t, json!({}), json!(["rect"])),
+            ("the value is an expression", Some(json!([])), "param.t", true, t, json!({"param": {"t": "group"}}),
+             json!(["group"])),
+            ("no active panel: no-op", Some(json!(["path"])), "\"rect\"", false, t, json!({}), json!(["path"])),
+            ("a target outside panel: no-op", Some(json!(["path"])), "\"rect\"", true, "state.type_filter",
+             json!({}), json!(["path"])),
+        ];
+        for (name, initial, value, active, target, ctx, want) in rows {
+            let (got, unhandled) = toggled(initial, value, active, target, ctx);
+            assert_eq!(got, want, "{name}");
+            assert_eq!(unhandled, vec![], "{name}: reported {unhandled:?}");
+        }
     }
 
     /// swap_panel_state, both forms, as the reference's

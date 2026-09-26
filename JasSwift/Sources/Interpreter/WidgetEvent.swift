@@ -36,11 +36,15 @@ enum WidgetEvent {
         "select", "icon_select", "combo_box",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
+    /// A plain pick and an Alt pick of one declared item. NOT synonyms.
+    static let pickEvents = ["toggle", "alt_toggle"]
+    static let itemKinds: Set<String> = ["dropdown"]
 
     static let badValue = "BadValue"
     static let missingValue = "MissingValue"
     static let disabled = "Disabled"
     static let wrongKind = "WrongKind"
+    static let wrongEvent = "WrongEvent"
 
     /// What one event did. `outcome` is `committed`, `refused` (with
     /// `reason`) or `inert`. `value` is the parsed value, `nil` when there is
@@ -140,6 +144,53 @@ enum WidgetEvent {
         }
         writeBind(target, value: value, store: store, panel: panel, host: host)
         return Result(outcome: "committed", value: value, bindWritten: true)
+    }
+
+    /// Pick one declared item of an item kind (`dropdown`), named by its
+    /// `value` (WIDGET_EVENTS.md, "Picking a dropdown item"). An `action` item
+    /// runs its own action; any other item runs the behaviors declared for
+    /// `event` with `item` bound to the whole item. Nothing is bound or
+    /// written by the pick itself.
+    static func pick(
+        widget: [String: Any], itemValue: String?, event: String, store: StateStore,
+        panel: [String: Any]?,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let kind = widget["type"] as? String, itemKinds.contains(kind) else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        guard pickEvents.contains(event) else {
+            return Result(outcome: "refused", reason: wrongEvent)
+        }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        guard let itemValue = itemValue else {
+            return Result(outcome: "refused", reason: missingValue)
+        }
+        let items = (widget["items"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        guard let item = items.first(where: { $0["value"] as? String == itemValue }) else {
+            return Result(outcome: "refused", reason: badValue)
+        }
+        if item["type"] as? String == "action" {
+            guard let action = item["action"] as? String else {
+                return Result(outcome: "inert", value: itemValue)
+            }
+            let dispatch: [String: Any] = ["action": action,
+                                           "params": item["params"] as? [String: Any] ?? [:]]
+            runEffects([["dispatch": dispatch]], ctx: ["item": item], store: store,
+                       actions: actions, dialogs: dialogs, platformEffects: platformEffects,
+                       model: model)
+            return Result(outcome: "committed", value: itemValue)
+        }
+        let ran = runBehaviors(declared(widget, events: [event]), value: itemValue, store: store,
+                               actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model, host: host,
+                               extra: ["item": item])
+        return Result(outcome: ran > 0 ? "committed" : "inert", value: itemValue,
+                      behaviorsRun: ran)
     }
 
     // MARK: - Parsing
@@ -353,9 +404,10 @@ enum WidgetEvent {
     private static func runBehaviors(
         _ behaviors: [[String: Any]], value: Any?, store: StateStore,
         actions: [String: Any]?, dialogs: [String: Any]?,
-        platformEffects: [String: PlatformEffect], model: Model?, host: Host
+        platformEffects: [String: PlatformEffect], model: Model?, host: Host,
+        extra: [String: Any] = [:]
     ) -> Int {
-        let locals = scopeLocals(host.scope, store: store)
+        let locals = scopeLocals(host.scope, store: store).merging(extra) { _, new in new }
         var ran = 0
         for b in behaviors {
             var ctx = locals

@@ -101,7 +101,7 @@ fn opacity_prop_key(key: &str) -> Option<&'static str> {
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
-    self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, PRESS_EVENTS,
+    self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, ITEM_KINDS, PICK_EVENTS, PRESS_EVENTS,
 };
 pub use crate::panel_scope::COLOUR_PANEL;
 
@@ -501,6 +501,11 @@ pub fn run_widget_behavior(
     if BOOLEAN_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()) {
         return press(panel_id, spec, node, ev, scope, store, model, actions, dialogs, host);
     }
+    // EVERY event on an item kind is a pick or a refusal: a dropdown's
+    // behaviors read `item`, which only a pick binds.
+    if ITEM_KINDS.contains(&kind) {
+        return pick(panel_id, node, ev, scope, store, model, actions, dialogs, host);
+    }
 
     let mut cond_scope = scope.clone();
     if let Some(m) = cond_scope.as_object_mut() {
@@ -721,6 +726,67 @@ fn press(
     }
     run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
+}
+
+/// A pick on an item kind (WIDGET_EVENTS.md, "Picking a dropdown item"). The
+/// disabled refusal has already run. `WrongEvent` for an event the item kinds
+/// do not raise; `MissingValue` for no item named; `BadValue` for a value no
+/// declared item carries (a `separator` is not an item) or one that is not
+/// text. An `action` item runs its own action; any other item runs the
+/// behaviors declared for the event, with `item` bound to the whole declared
+/// item and `event.value` to its value. Nothing runs is `EmptyBehavior`.
+#[allow(clippy::too_many_arguments)]
+fn pick(
+    panel_id: &str,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    if !PICK_EVENTS.contains(&ev.event.as_str()) {
+        return Err(Refusal::new("WrongEvent", ev.widget.clone()));
+    }
+    let named = match &ev.value {
+        None | Some(Value::Null) => return Err(Refusal::new("MissingValue", ev.widget.clone())),
+        Some(Value::String(t)) => t,
+        Some(_) => return Err(Refusal::new("BadValue", ev.widget.clone())),
+    };
+    let Some(item) = node.get("items").and_then(Value::as_array).into_iter().flatten()
+        .find(|i| i.is_object() && i.get("value").and_then(Value::as_str) == Some(named.as_str()))
+    else {
+        return Err(Refusal::new("BadValue", ev.widget.clone()));
+    };
+    let batch = if item.get("type").and_then(Value::as_str) == Some("action") {
+        let Some(action) = item.get("action").and_then(Value::as_str) else {
+            return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+        };
+        let mut d = Map::new();
+        d.insert("action".into(), Value::String(action.to_string()));
+        if let Some(params) = item.get("params") {
+            d.insert("params".into(), params.clone());
+        }
+        vec![json!({"dispatch": Value::Object(d)})]
+    } else {
+        value_behaviors(node, &[ev.event.as_str()], &ev.widget)?.0
+    };
+    if batch.is_empty() {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+    // Bound as a loop variable is (W2b-16's ROW_BINDINGS), so the batch's
+    // params read `item.value` exactly as a row's read `ab.id`.
+    let mut item_scope = scope.clone();
+    if let Some(m) = item_scope.as_object_mut() {
+        let rows = m.entry(ROW_BINDINGS).or_insert_with(|| json!({}));
+        if let Some(r) = rows.as_object_mut() {
+            r.insert("item".into(), item.clone());
+        }
+    }
+    run_batch(panel_id, &batch, value_event(ev, Value::String(named.clone())), &item_scope,
+              store, model, actions, dialogs, host)
 }
 
 /// Document fixtures shared by this module's arms and the ABI's. They live in
@@ -1063,6 +1129,30 @@ mod tests {
                             &synthetic_actions(), &json!({}), host)
     }
 
+    /// A pick's item list may carry bare `separator` strings, as `options`
+    /// do, and one is never an item. The shipped filter declares none, so
+    /// the door test's separator row cannot witness this: it is `BadValue`
+    /// there because no item has that value at all.
+    #[test]
+    fn a_separator_in_a_dropdowns_items_is_never_picked() {
+        let spec = json!({"content": {"type": "container", "id": "root", "children": [
+            {"id": "dd", "type": "dropdown",
+             "items": ["separator", {"label": "A", "value": "a", "type": "toggle"}],
+             "behavior": [{"event": "toggle", "effects": [{"set_panel_state": {"key": "x", "value": "item.value"}}]}]}
+        ]}});
+        let run = |value: &str, store: &mut StateStore| {
+            let ev = parse_event(&json!({"widget": "dd", "event": "toggle", "value": value})).unwrap();
+            let mut model = Model::default();
+            run_widget_behavior("zz_panel", &spec, &ev, &json!({"state": {}, "panel": {}}), store,
+                                &mut model, &json!({}), &json!({}), &mut EngineHost { artboard_selection: vec![] })
+        };
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", std::collections::HashMap::new());
+        assert_eq!(run("separator", &mut store).unwrap_err(), Refusal::new("BadValue", "dd"));
+        assert!(run("a", &mut store).is_ok(), "the control: a declared item IS picked");
+        assert_eq!(store.get_panel("zz_panel", "x"), &json!("a"));
+    }
+
     /// Q5 where it is hardest: the batch EDITS the document before the effect
     /// the engine cannot run. Nothing reaches the live model, and the refusal
     /// names the FIRST unhosted effect.
@@ -1316,8 +1406,12 @@ mod tests {
                 effect_keys(effects, actions, &mut seen, &mut found, &mut walked);
             }
         }
-        // Anti-vacuity: the census W2-0 ran walked 177 behaviors.
-        assert!(bs.len() >= 177, "the walk found only {} behaviors", bs.len());
+        // Anti-vacuity: the census W2-0 ran walked 177 behaviors; 176 since
+        // the Layers filter's `select_all_types` behavior was removed (no
+        // port raised it; its "All" item runs its own action, WIDGET_EVENTS.md
+        // "Picking a dropdown item"). A floor is a minimum, lowered only by a
+        // removal that is named.
+        assert!(bs.len() >= 176, "the walk found only {} behaviors", bs.len());
         assert!(walked > bs.len(), "the walk read no effect keys ({walked})");
         assert!(seen.len() > 10, "the walk followed only {} dispatches", seen.len());
         assert_eq!(found, Vec::<String>::new(),

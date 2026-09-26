@@ -50,10 +50,15 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_eight_kinds_and_nothing_else(self):
-        assert set(we.ALLOWED_EVENTS) == we.INPUT_KINDS | we.BOOLEAN_KINDS
+    def test_the_nine_kinds_and_nothing_else(self):
+        assert set(we.ALLOWED_EVENTS) == we.INPUT_KINDS | we.BOOLEAN_KINDS | we.ITEM_KINDS
         assert len(we.INPUT_KINDS) == 6 and len(we.BOOLEAN_KINDS) == 2
+        assert we.ITEM_KINDS == {"dropdown"}
         assert not (we.INPUT_KINDS & we.BOOLEAN_KINDS)
+        assert not ((we.INPUT_KINDS | we.BOOLEAN_KINDS) & we.ITEM_KINDS)
+
+    def test_a_dropdown_picks_on_toggle_or_alt_toggle(self):
+        assert we.ALLOWED_EVENTS["dropdown"] == ("toggle", "alt_toggle")
 
     def test_event_roots_are_the_store_context_plus_event(self):
         # Derived from the store, so a namespace added to eval_context
@@ -733,3 +738,127 @@ class TestShippedGradient(_Shipped):
                                        bind_written=False, behaviors_run=1)
             assert store.get_panel(self.PANEL, "dither") is expected
             assert store.get("gradient_dither") is expected
+
+
+# ── Picking a dropdown item ────────────────────────────────────
+#
+# `dropdown` was outside the contract until the engine door needed the
+# Layers type filter: its behaviors read `item.value`, and nothing bound
+# `item`, so the door's `list_toggle` would have written null.
+
+
+def _dropdown(**extra):
+    w = {
+        "type": "dropdown", "id": "dd",
+        "items": [
+            {"label": "All", "value": "__all__", "type": "action", "action": "act_all"},
+            "separator",
+            {"label": "A", "value": "a", "type": "toggle"},
+            {"label": "B", "value": "b", "type": "toggle"},
+        ],
+        "behavior": [
+            {"event": "toggle",
+             "effects": [{"set": {"picked": "item.value"}}, {"set": {"ev": "event.value"}}]},
+            {"event": "alt_toggle", "effects": [{"set": {"alt_picked": "item.label"}}]},
+        ],
+    }
+    w.update(extra)
+    return w
+
+
+_ACTIONS = {"act_all": {"effects": [{"set": {"all_ran": "true"}}]}}
+
+
+class TestPickSynthetic:
+    def test_a_toggle_item_runs_the_events_behaviors_with_item_bound(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "b", "toggle", store, panel=None, actions=_ACTIONS)
+        assert r == we.EventResult("committed", value="b", behaviors_run=1)
+        assert store.get("picked") == "b"
+        assert store.get("ev") == "b", "event.value is the item's value"
+        assert store.get("alt_picked") is None, "only the requested event runs"
+
+    def test_alt_toggle_runs_only_its_own_behaviors(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "a", "alt_toggle", store, panel=None, actions=_ACTIONS)
+        assert r.behaviors_run == 1
+        assert store.get("alt_picked") == "A", "the WHOLE item is bound, not only its value"
+        assert store.get("picked") is None
+
+    def test_an_action_item_runs_its_own_action_and_no_behavior(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "__all__", "toggle", store, panel=None, actions=_ACTIONS)
+        assert r == we.EventResult("committed", value="__all__", behaviors_run=0)
+        assert store.get("all_ran") is True
+        assert store.get("picked") is None
+
+    def test_no_item_named_is_missing_value(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), None, "toggle", store, panel=None, actions=_ACTIONS)
+        assert r == we.EventResult("refused", reason=we.MISSING_VALUE)
+        assert store.get("picked") is None
+
+    def test_an_undeclared_item_is_bad_value(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "c", "toggle", store, panel=None, actions=_ACTIONS)
+        assert r == we.EventResult("refused", reason=we.BAD_VALUE)
+        assert store.get("picked") is None
+
+    def test_a_separator_is_not_an_item(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "separator", "toggle", store, panel=None, actions=_ACTIONS)
+        assert r.reason == we.BAD_VALUE
+
+    def test_an_event_outside_the_table_is_wrong_event(self):
+        store = StateStore()
+        r = we.pick(_dropdown(), "a", "click", store, panel=None, actions=_ACTIONS)
+        assert r == we.EventResult("refused", reason=we.WRONG_EVENT)
+        assert store.get("picked") is None
+
+    def test_a_non_dropdown_is_wrong_kind(self):
+        store = StateStore()
+        r = we.pick({"type": "select", "items": []}, "a", "toggle", store, panel=None)
+        assert r.reason == we.WRONG_KIND
+
+    def test_a_disabled_dropdown_refuses(self):
+        store = StateStore({"off": True})
+        r = we.pick(_dropdown(bind={"disabled": "state.off"}), "a", "toggle", store,
+                    panel=None, actions=_ACTIONS)
+        assert r.reason == we.DISABLED
+        assert store.get("picked") is None
+
+    def test_an_item_with_no_declared_behavior_is_inert(self):
+        store = StateStore()
+        w = _dropdown(behavior=[])
+        assert we.pick(w, "a", "toggle", store, panel=None).outcome == "inert"
+
+
+class TestShippedLayersFilter(_Shipped):
+    PANEL = "layers_panel_content"
+
+    def _run(self, workspace_path, value, event="toggle", initial=None):
+        data = load_workspace(workspace_path)
+        panel, store = self._setup(workspace_path)
+        if initial is not None:
+            store.set_panel(self.PANEL, "type_filter", list(initial))
+        w = find_element_by_id(panel, "lp_filter_button")
+        r = we.pick(w, value, event, store, panel=panel, actions=data["actions"])
+        return r, store.get_panel(self.PANEL, "type_filter")
+
+    def test_a_pick_toggles_that_type_into_the_filter(self, workspace_path):
+        r, tf = self._run(workspace_path, "path")
+        assert r.outcome == "committed"
+        assert tf == ["path"], "the TYPE, never null"
+
+    def test_a_second_pick_toggles_it_out(self, workspace_path):
+        r, tf = self._run(workspace_path, "path", initial=["path", "text"])
+        assert tf == ["text"]
+
+    def test_an_alt_pick_solos_the_type(self, workspace_path):
+        r, tf = self._run(workspace_path, "circle", event="alt_toggle", initial=["path", "text"])
+        assert tf == ["circle"]
+
+    def test_all_clears_the_filter(self, workspace_path):
+        r, tf = self._run(workspace_path, "__all__", initial=["path", "text"])
+        assert r.outcome == "committed"
+        assert tf == []

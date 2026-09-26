@@ -87,7 +87,7 @@ from workspace_interpreter.expr_parser import (  # noqa: E402
 )
 from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
 from workspace_interpreter.widget_event import (  # noqa: E402
-    ALLOWED_EVENTS, EVENT_ROOTS,
+    ALLOWED_EVENTS, BOOLEAN_KINDS, EVENT_ROOTS, INPUT_KINDS, ITEM_KINDS,
 )
 
 # A `foreach` without `as:` names its item this (every renderer agrees).
@@ -256,7 +256,10 @@ def census(docs: list, table: dict, roots: frozenset = EVENT_ROOTS):
             if isinstance(kind, str) and kind in table:
                 widgets[kind] += 1
                 if "behavior" in node:
-                    check(node, kind, rel, items)
+                    # A pick binds `item` to the picked item (the module's
+                    # `pick`); no other event does.
+                    check(node, kind, rel,
+                          items | {"item"} if kind in ITEM_KINDS else items)
             spec = node.get("foreach")
             item = None
             if isinstance(spec, dict) and "do" in node:
@@ -452,7 +455,8 @@ def self_test() -> int:
             print(f"  FAILED: {name}")
 
     table = {k: tuple(v) for k, v in ALLOWED_EVENTS.items()}
-    arm("the module table is not empty", len(table) == 8)
+    arm("the module table is every value, boolean and item kind",
+        len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS) == 9)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [
@@ -634,6 +638,17 @@ def self_test() -> int:
         arm(f"a gate without the root '{r}' reds on it, so the set is what "
             "is consulted",
             len(mine) == 1 and f"reads '{r}'" in mine[0][3])
+
+    # `item` is bound by a pick, and only by a pick: the same read on a
+    # boolean kind is RED, so the binding is scoped to the item kinds.
+    def reads_item(kind, event):
+        return clean + [{"type": kind, "id": "item_reader", "behavior": [
+            {"event": event, "effects": [{"set": {"x": "item.value"}}]}]}]
+    f, _ = gate(reads_item("dropdown", "toggle"))
+    arm("a dropdown behavior reading `item` is GREEN", f == [])
+    f, _ = gate(reads_item("toggle", "click"))
+    arm("a toggle behavior reading `item` is RED",
+        len(f) == 1 and "reads 'item'" in f[0][3])
 
     def looped(spec, reader, wid="row_reader"):
         return clean + [{"type": "container", "children": [

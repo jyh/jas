@@ -101,6 +101,10 @@ pub const COMMIT_EVENTS: [&str; 2] = ["commit", "change"];
 pub const PRESS_EVENTS: [&str; 2] = ["click", "change"];
 /// Declared on `text_input`, and never a commit.
 pub const TEXT_ENTRY_EVENTS: [&str; 3] = ["input", "blur", "keydown"];
+/// The item kinds: a pick names one declared item by its `value`.
+pub const ITEM_KINDS: [&str; 1] = ["dropdown"];
+/// A plain pick and an Alt pick. NOT synonyms: each runs its own behaviors.
+pub const PICK_EVENTS: [&str; 2] = ["toggle", "alt_toggle"];
 
 /// The events `kind` may declare, in the contract's order; empty for a kind
 /// outside the contract.
@@ -111,6 +115,8 @@ pub fn allowed_events(kind: &str) -> Vec<&'static str> {
         COMMIT_EVENTS.to_vec()
     } else if BOOLEAN_KINDS.contains(&kind) {
         PRESS_EVENTS.to_vec()
+    } else if ITEM_KINDS.contains(&kind) {
+        PICK_EVENTS.to_vec()
     } else {
         vec![]
     }
@@ -304,7 +310,7 @@ mod tests {
             assert_eq!(allowed_events(kind.trim()), events, "{kind}");
             seen += 1;
         }
-        assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len());
+        assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len());
         assert!(allowed_events("slider").is_empty());
     }
 

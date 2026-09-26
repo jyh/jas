@@ -16183,10 +16183,6 @@
                     "params": {
                       "element_type": "item.value"
                     }
-                  },
-                  {
-                    "event": "select_all_types",
-                    "action": "clear_layers_type_filter"
                   }
                 ]
               }

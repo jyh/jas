@@ -550,9 +550,10 @@ content:
             - event: alt_toggle
               action: solo_layers_type_filter
               params: { element_type: "item.value" }
-            # The "All" item restores the default.
-            - event: select_all_types
-              action: clear_layers_type_filter
+            # The "All" item restores the default through its OWN `action:`
+            # (WIDGET_EVENTS.md §Picking a dropdown item). This list once
+            # also declared a `select_all_types` behavior for it, which no
+            # port ever raised; the item's action is the one route.
 
     # ── Separator ──
 
