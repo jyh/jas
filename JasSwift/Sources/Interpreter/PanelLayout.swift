@@ -401,6 +401,9 @@ public enum PanelLayout {
             return leafSize(node, availW: -1, ctx: ctx).0
         }
         let st = style(node)
+        // B.5: a declared width is the container's natural width. A percentage
+        // has nothing to resolve against here and is ignored, as a leaf's is.
+        if let declared = resolveDim(st["width"], -1) { return declared }
         let (_, pr, _, pl) = parsePadding(st["padding"])
         let gap = styleI(node, "gap") ?? 0
         if nodeType(node) == "disclosure" {
@@ -438,6 +441,13 @@ public enum PanelLayout {
         let st = style(n)
         let (pt, pr, pb, pl) = parsePadding(st["padding"])
         let gap = styleI(n, "gap") ?? 0
+        // B.5: a container's declared width is honoured as its height is (B.4),
+        // clamped to the width it is given; its children are laid out in it.
+        var availW = availW
+        if isContainer(n) || nodeType(n) == "disclosure",
+           let declared = resolveDim(st["width"], availW) {
+            availW = availW > 0 ? min(declared, availW) : declared
+        }
         let innerW = availW - pl - pr
         let innerH = availH > 0 ? (availH - pt - pb) : 0
 

@@ -452,8 +452,8 @@ fn grid_lines<'a>(children: &[(i64, &'a Value)]) -> Vec<Vec<(i64, &'a Value, i64
 
 /// Min-content width a node wants, ignoring the width available to it.
 ///
-/// A leaf reports its own intrinsic width; a container reports the width its
-/// content needs (row = sum of children + gaps, column = widest child, grid =
+/// A leaf reports its own intrinsic width; a container reports its declared
+/// `style.width` when it has one (B.5), else the width its content needs (row = sum of children + gaps, column = widest child, grid =
 /// widest 12-col line). Used so a row can grow cells / columns to fit nested
 /// content and shrink-to-fit deterministically when over-subscribed, instead of
 /// letting a wide label or input overrun its neighbour.
@@ -462,6 +462,11 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
         return leaf_size(n, -1, ctx).0;
     }
     let st = style(n);
+    // B.5: a declared width is the container's natural width. A percentage has
+    // nothing to resolve against here and is ignored, as a leaf's is.
+    if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), -1) {
+        return declared;
+    }
     let (_pt, pr, _pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
     let gap = style_i(n, "gap").unwrap_or(0);
     if node_type(n) == "disclosure" {
@@ -507,6 +512,14 @@ fn measure(
     let st = style(n);
     let (pt, pr, pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
     let gap = style_i(n, "gap").unwrap_or(0);
+    // B.5: a container's declared width is honoured as its height is (B.4),
+    // clamped to the width it is given; its children are laid out in it.
+    let mut avail_w = avail_w;
+    if is_container(n) || node_type(n) == "disclosure" {
+        if let Some(declared) = resolve_dim(st.get("width").unwrap_or(&Value::Null), avail_w) {
+            avail_w = if avail_w > 0 { declared.min(avail_w) } else { declared };
+        }
+    }
     let inner_w = avail_w - pl - pr;
     let inner_h = if avail_h > 0 { avail_h - pt - pb } else { 0 };
 
@@ -893,4 +906,49 @@ fn foreach(
         cy += h + gap;
     }
     (out, if empty { 0 } else { cy - gap })
+}
+
+/// PATH_B_DESIGN B.5, the reference's synthetic arms
+/// (`test_panel_layout_container_width.py`), one for one: the shipped panels
+/// the corpus replays never clamp, take a percentage, or size a container in a
+/// row, so only these witness those shapes here.
+#[cfg(test)]
+mod container_width_tests {
+    use super::layout_panel;
+    use serde_json::{json, Value};
+
+    /// (x, w, h) of the rect at `path`, laid out at width 200.
+    fn rect(content: Value, path: Value) -> (i64, i64, i64) {
+        let rects = layout_panel(&json!({"content": content}), 200, 0, &json!({}));
+        let r = rects.as_array().unwrap().iter().find(|r| r["path"] == path)
+            .unwrap_or_else(|| panic!("no rect at {path}: {rects}"));
+        let n = |k: &str| r["rect"][k].as_i64().unwrap();
+        (n("x"), n("w"), n("h"))
+    }
+
+    fn col(child: Value) -> Value {
+        json!({"type": "container", "children": [child]})
+    }
+
+    fn boxed(style: Value) -> Value {
+        json!({"type": "container", "style": style, "children": [{"type": "separator"}]})
+    }
+
+    #[test]
+    fn a_containers_declared_width_is_honoured_row_for_row_with_the_reference() {
+        let plain = json!({"type": "container", "children": [{"type": "separator"}]});
+        assert_eq!(rect(col(plain), json!([0])).1, 200, "the control: no width fills");
+        assert_eq!(rect(col(boxed(json!({"width": 40}))), json!([0])).1, 40);
+        assert_eq!(rect(col(boxed(json!({"width": 40, "padding": 4}))), json!([0, 0])).1, 32,
+                   "children are laid out in the declared width");
+        assert_eq!(rect(col(boxed(json!({"width": 500}))), json!([0])).1, 200, "clamped");
+        assert_eq!(rect(col(boxed(json!({"width": "25%"}))), json!([0])).1, 50);
+        assert_eq!(rect(col(boxed(json!({"width": "auto"}))), json!([0])).1, 200, "unreadable is ignored");
+        let row = json!({"type": "container", "layout": "row",
+                         "children": [boxed(json!({"width": 30})), {"type": "text", "content": "ab"}]});
+        assert_eq!(rect(row.clone(), json!([0])).1, 30);
+        assert_eq!(rect(row, json!([1])).0, 30, "the next cell starts after the declared width");
+        let r = rect(col(boxed(json!({"width": 40, "height": 24}))), json!([0]));
+        assert_eq!((r.1, r.2), (40, 24), "the height rule is unchanged");
+    }
 }
