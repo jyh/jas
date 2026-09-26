@@ -3,6 +3,7 @@ mod algorithms;
 // the two non-web-gated leaves that `tools` re-exports must be declared here too.
 mod text_measure;
 mod surface;
+mod brush_preview;
 mod tool_consts;
 mod canvas;
 #[cfg(test)]
