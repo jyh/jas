@@ -295,7 +295,8 @@ for each visible child c at path+[i]:
     cy += ch + gap
 content_h = cy - gap - inner_y   (if any child else 0)
 ```
-A child's rect width = the avail it was given (`inner_w`) for containers and
+A child's rect width = the avail it was given (`inner_w`) for containers (unless it
+declares a `style.width`, B.5) and
 **fill-leaves** (separator, placeholder, slider, inputs); intrinsic width for
 **inline-leaves** (text, button, icon, icon_button, checkbox), left-aligned at
 `inner_x`. (See A.5 `fill` column.)
@@ -455,40 +456,26 @@ floor + earliest-child remainder), bumping the flex child's rect height; a
 `spacer` gets an implicit `flex` weight of 1. This makes a `foreach` list
 (`flex: 1`) grow to fill and pins a trailing footer to the bottom.
 
-### B.5 Open question — a container's `style.width` (2026-09-26, not ruled)
+### B.5 A container's `style.width` (ruled 2026-09-26, arm A)
 
-⚠️ **This section records a question. It changes no rule above.** B.4 honours a
-container's `style.height`; the column rule (A.5) gives a container the width it is
-handed. So `style.width` on a container is read by NO layout pass: the reference sets
-`w = avail_w if avail_w > 0 else _natural_w(...)` (`workspace_interpreter/panel_layout.py:362`)
-beside `exp_h = _resolve_dim(st.get("height"), 0)` (`:359`). The active ports do the
-same (`jas_dioxus/src/interpreter/panel_layout.rs:533`,
-`JasSwift/Sources/Interpreter/PanelLayout.swift:467`); the frozen ports were not re-read. Nothing in this document gives a reason for the
-asymmetry.
+A container's `style.width` is honoured as its `style.height` is (B.4). It resolves
+via `resolve_dim` against the width the container is given (a percentage included),
+is clamped to that width, and the container's children are laid out in it. In a row,
+a declared width is the container's natural width (a percentage has nothing to
+resolve against there and is ignored, as a leaf's is). A container with no width
+still takes the width it is given (A.5).
 
-**Measured over the compiled bundle's panels (dialogs not counted):** 4 of 696
-containers declare a width, against 9 that declare a height.
+**Why:** until this ruling no layout pass read it, while the web DOM applied it
+through CSS (`render_container` → `build_style`), so the four shipped containers that
+declare one (a brush tile, the Layers select square, the Color and Swatches
+fill/stroke widgets) drew one width on the web and another in every port's rects. The
+question and its measurement were recorded here first (#247); the other arm, refusing
+the key by lint, was not taken.
 
-| container | declared | where |
-|---|---|---|
-| a brush tile (`bp_tile_…`) | `width: 40` | `workspace/panels/brushes.yaml`; its leaf carries the size instead (comment at `:263`) |
-| the Layers row's select square | `width: 12` | `workspace/panels/layers.yaml:688` (`lp_select`) |
-| the fill/stroke widget (Color) | `width: 48` | `fill_stroke_widget` instance, `workspace/panels/color.yaml:363` |
-| the fill/stroke widget (Swatches) | `width: 50` | `fill_stroke_widget` instance, `workspace/panels/swatches.yaml:214` |
-
-**Why it is more than tidiness:** the web app's DOM DOES honour it. `render_container`
-builds its CSS from `build_style` (`jas_dioxus/src/interpreter/renderer.rs:3935`),
-which emits `width:` (`:3793`). So on these four containers the web app's picture and
-every port's plan rect disagree, and the WinUI shell draws from the rects.
-
-**The two arms, for a ruling:**
-- **(A) honour it, as height is:** `resolve_dim(style.width, avail_w)`, clamped to
-  `avail_w`, then the reference, the goldens and every active port follow. It matches
-  the author's intent in 4 of 4 cases and the web's picture.
-- **(B) refuse it:** a lint rejects `style.width` on a container, and the four move
-  their size onto a leaf, as the brush tile already did.
-
-Neither arm is taken here. Whichever is ruled replaces this section.
+**Where it lives:** `_natural_w` and `_measure` in `workspace_interpreter/panel_layout.py`,
+their Rust and Swift twins, the `panel_layout.json` goldens, and synthetic arms in all
+three (`test_panel_layout_container_width.py` and its ports), because no shipped
+container clamps, takes a percentage, or sits sized in a row.
 
 ### A.6 Deferred in v1 — status updated 2026-06-29
 

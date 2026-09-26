@@ -299,8 +299,8 @@ def _grid_lines(children: list) -> list[list]:
 def _natural_w(node: dict, ctx: dict) -> int:
     """Min-content width a node wants, ignoring the width available to it.
 
-    A leaf reports its own intrinsic width; a container reports the width its
-    content needs (row = sum of children + gaps, column = widest child, grid =
+    A leaf reports its own intrinsic width; a container reports its declared
+    ``style.width`` when it has one (B.5), else the width its content needs (row = sum of children + gaps, column = widest child, grid =
     widest 12-col line). Used so a row can grow cells / columns to fit nested
     content and shrink-to-fit deterministically when over-subscribed, instead
     of letting a wide label or input overrun its neighbour.
@@ -308,6 +308,11 @@ def _natural_w(node: dict, ctx: dict) -> int:
     if not (_is_container(node) or node.get("type") == "disclosure"):
         return _leaf_size(node, -1, ctx)
     st = _style(node)
+    # B.5: a declared width is the container's natural width. A percentage has
+    # nothing to resolve against here and is ignored, as a leaf's is.
+    declared = _resolve_dim(st.get("width"), -1)
+    if declared is not None:
+        return declared
     _pt, pr, _pb, pl = _parse_padding(st.get("padding"))
     gap = _gap(node)
     if node.get("type") == "disclosure":
@@ -339,6 +344,12 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
     st = _style(node)
     pt, pr, pb, pl = _parse_padding(st.get("padding"))
     gap = _gap(node)
+    if _is_container(node) or node.get("type") == "disclosure":
+        # B.5: a container's declared width is honoured as its height is (B.4),
+        # clamped to the width it is given; its children are laid out in it.
+        declared = _resolve_dim(st.get("width"), avail_w)
+        if declared is not None:
+            avail_w = min(declared, avail_w) if avail_w > 0 else declared
     inner_w = avail_w - pl - pr
     inner_h = (avail_h - pt - pb) if avail_h > 0 else 0
 
