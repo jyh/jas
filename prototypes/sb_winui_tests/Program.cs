@@ -514,6 +514,14 @@ static class Program
         Eq("preview: an empty svg is no drawing", "(null)", ShowPreview(PanelWire.Preview("0 0 40 40", "")));
         Eq("preview: a blank viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview("  ", "<ellipse/>")));
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
+        // A swatch's tap reaches the core by its id OR its plan path
+        // (STATUS-flask §114: a library tile has no id, only a path).
+        Eq("addressable: an id alone", "True", PanelWire.Addressable("sp_recent_0", null).ToString());
+        Eq("addressable: a plan path alone, a library swatch", "True", PanelWire.Addressable("", "[3,0,0,3]").ToString());
+        Eq("addressable: neither an id nor a path", "False", PanelWire.Addressable("", null).ToString());
+        Eq("addressable: a negative index is no plan path", "False", PanelWire.Addressable("", "[3,-1]").ToString());
+        Eq("addressable: an empty array is no plan path", "False", PanelWire.Addressable("", "[]").ToString());
+        Eq("addressable: text that is not JSON is no plan path", "False", PanelWire.Addressable("", "row 3").ToString());
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
             "a parser that ignores its input would pass every case above but the null ones");

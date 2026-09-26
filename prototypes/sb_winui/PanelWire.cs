@@ -50,6 +50,16 @@ internal static class PanelWire
         return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
     }
 
+    /// <summary>
+    /// Whether a tap on a control can reach the core: by its id, or by its
+    /// plan path (<see cref="PlanPath"/>), which is how a row a `foreach`
+    /// stamped out is addressed (a library swatch has no id at all;
+    /// STATUS-flask §114). The swatch's gate and its `unaddressable` count
+    /// both read this, so the two cannot disagree.
+    /// </summary>
+    internal static bool Addressable(string id, string? path) =>
+        id.Length > 0 || PlanPath(path) is not null;
+
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
     {

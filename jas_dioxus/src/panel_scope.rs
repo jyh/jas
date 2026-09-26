@@ -162,6 +162,39 @@ impl PanelState {
         m
     }
 
+    /// Carry into the slice any of its three `state.*` keys that a behavior
+    /// wrote into the STORE's copy ([`sync_colour_state`] writes that copy;
+    /// this is the other direction). A behavior the engine door runs writes
+    /// the store (Swatches' `set_active_color`), while every scope reads the
+    /// slice, so without this the write is a success that shows nothing.
+    ///
+    /// A key is adopted only where the store's copy DIFFERS from the slice's
+    /// own rendering of it, so an untouched copy adopts nothing. A colour key
+    /// that is not a string is NOT adopted: the slice has no "none", and
+    /// `parse_hex` would read it as black. Returns whether anything moved.
+    pub fn adopt_store_state(&mut self, store: &StateStore) -> bool {
+        let mine = self.state_keys();
+        let written = |k: &str| Some(store.get(k)).filter(|v| Some(*v) != mine.get(k));
+        let rgb = |v: &Value| v.as_str().map(|s| {
+            let (r, g, b) = parse_hex(s);
+            (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
+        });
+        let mut moved = false;
+        if let Some(c) = written("fill_color").and_then(rgb) {
+            self.fill = c;
+            moved = true;
+        }
+        if let Some(c) = written("stroke_color").and_then(rgb) {
+            self.stroke = c;
+            moved = true;
+        }
+        if let Some(b) = written("fill_on_top").and_then(Value::as_bool) {
+            self.fill_on_top = b;
+            moved = true;
+        }
+        moved
+    }
+
     /// Apply one control's new value, addressed by the BINDING EXPRESSION the
     /// panel spec declares for it (`"panel.h"`, `"panel.hex"`, …).
     ///
@@ -762,6 +795,52 @@ mod tests {
         assert_eq!(st.apply_edit("state.fill_on_top", &json!(false)), EditOutcome::Changed);
         // Stroke is black, so the active colour follows the flag, not the fill.
         assert_eq!(st.scope(&doc_with(0))["panel"]["hex"], "000000");
+    }
+
+    /// A behavior run by the engine door writes `state.fill_color` (Swatches'
+    /// `set_active_color`) into the STORE's copy, while every scope reads the
+    /// SLICE. `adopt_store_state` carries such a write into the slice, so the
+    /// tap is not a success that shows nothing. Each key is adopted only when
+    /// the store's copy DIFFERS from the slice's own rendering of it.
+    #[test]
+    fn the_slice_adopts_a_colour_the_store_copy_was_given() {
+        let slice = PanelState::default();
+        let mut store = StateStore::new();
+        sync_colour_state(&mut store, &slice);
+
+        // The control: an untouched copy adopts nothing.
+        let mut st = slice.clone();
+        assert!(!st.adopt_store_state(&store));
+        assert_eq!(st.state_keys(), slice.state_keys());
+
+        // fill_color written: the fill moves, the stroke and the flag do not.
+        let mut s = store.clone();
+        s.set("fill_color", json!("#000099"));
+        let mut st = slice.clone();
+        assert!(st.adopt_store_state(&s));
+        assert_eq!(st.state_keys()["fill_color"], "#000099");
+        assert_eq!(st.state_keys()["stroke_color"], slice.state_keys()["stroke_color"]);
+        assert_eq!(st.fill_on_top, slice.fill_on_top);
+
+        // stroke_color and the flag, together.
+        let mut s = store.clone();
+        s.set("stroke_color", json!("#12ab34"));
+        s.set("fill_on_top", json!(false));
+        let mut st = slice.clone();
+        assert!(st.adopt_store_state(&s));
+        assert_eq!(st.state_keys()["stroke_color"], "#12ab34");
+        assert_eq!(st.state_keys()["fill_color"], slice.state_keys()["fill_color"]);
+        assert!(!st.fill_on_top);
+
+        // A value the slice cannot hold (no colour) is NOT adopted: the slice
+        // has no "none", and a parse of null is black, which would be a wrong
+        // colour shown as a success. Only `color.yaml` writes one, and the
+        // door does not host that panel.
+        let mut s = store.clone();
+        s.set("fill_color", serde_json::Value::Null);
+        let mut st = slice.clone();
+        assert!(!st.adopt_store_state(&s));
+        assert_eq!(st.state_keys(), slice.state_keys());
     }
 
     /// ⛔ THE NEGATIVE CONTROL. Without an arm that MUST refuse, "every edit is

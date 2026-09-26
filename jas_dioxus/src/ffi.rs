@@ -872,6 +872,12 @@ pub unsafe extern "C" fn jas_panel_behavior(
         Ok(ran) => ran,
         Err(r) => return refuse(r),
     };
+    // A behavior writes the store's copy of the colour slice's three
+    // `state.*` keys (Swatches' `set_active_color`); every scope reads the
+    // slice, so the slice adopts the write and the copy is re-synced from it.
+    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow()) {
+        crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+    }
 
     let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
@@ -1892,6 +1898,68 @@ mod tests {
 
     const ALIGN: &str = "align_panel_content";
     const BOOLEAN: &str = "boolean_panel_content";
+
+    /// **A library swatch is tapped by its plan path** (STATUS-flask §114: 216
+    /// of 228 tiles drew and sent nothing, because the library template has no
+    /// id). The door ran the tile's `select` and refused it `UnknownEffect`;
+    /// with `select` hosted, the click's action `set_active_color` wrote the
+    /// STORE's copy of `state.fill_color` while every scope reads the colour
+    /// SLICE, so the tap reported success and the active colour did not move.
+    /// Every expectation is read from the plan or the store, never typed.
+    #[test]
+    fn a_library_swatch_tap_selects_it_and_makes_its_colour_active() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const P: &str = "swatches_panel_content";
+        let e = jas_engine_new();
+        let tiles = |e| -> Vec<serde_json::Value> {
+            let plan: serde_json::Value = serde_json::from_str(&plan_of(e, P, 228, 600)).unwrap();
+            ["chrome", "containers", "leaves"].iter()
+                .filter_map(|k| plan[*k].as_array()).flatten()
+                .filter(|r| r["type"] == "color_swatch" && r["values"].get("bind.selected_in").is_some())
+                .cloned().collect()
+        };
+        let before = tiles(e);
+        assert!(before.len() > 4, "fixture: too few library tiles: {}", before.len());
+        let k = 3usize;
+        let tile = &before[k];
+        assert_eq!(tile["id"], "", "fixture: a library tile has no id, which is the point");
+        assert_eq!(tile["path"].as_array().and_then(|p| p.last()), Some(&serde_json::json!(k)),
+                   "fixture: the tile's last path index is its row: {tile}");
+        let colour = tile["values"]["bind.color"].as_str().expect("the tile's colour").to_string();
+        let slice_before = engine_of(e).panel.borrow().state_keys();
+        assert_ne!(slice_before["fill_color"], colour.as_str(), "fixture: the tap must be able to move the fill");
+        let lib = engine_of(e).store.borrow().get_panel(P, "open_libraries")[0]["id"].clone();
+        assert!(lib.is_string(), "fixture: an open library: {lib}");
+
+        let ev = format!(r#"{{"widget":"","path":{},"event":"click"}}"#, tile["path"]);
+        let (reply, err) = behave(e, P, &ev);
+        assert!(!reply.is_empty(), "the tap was refused: {err}");
+        {
+            let store = engine_of(e).store.borrow();
+            assert_eq!(store.get_panel(P, "selected_swatches"), &serde_json::json!([k]));
+            assert_eq!(store.get_panel(P, "selected_library"), &lib);
+            assert_eq!(store.get_panel(P, "recent_colors")[0], colour.as_str());
+        }
+        // The SLICE, which every scope reads, and the store's copy agree on it.
+        let slice_after = engine_of(e).panel.borrow().state_keys();
+        assert_eq!(slice_after["fill_color"], colour.as_str(), "the active colour did not move");
+        assert_eq!(slice_after["stroke_color"], slice_before["stroke_color"]);
+        assert_eq!(engine_of(e).store.borrow().get("fill_color"), &slice_after["fill_color"]);
+        // And the next plan shows it: the tile is selected, the first recent is it.
+        let after = tiles(e);
+        assert!(after[k]["values"]["bind.selected_in"].as_str().unwrap_or("").contains(&k.to_string()),
+                "{}", after[k]);
+        assert_eq!(leaf(e, P, "sp_recent_0")["values"]["bind.color"], colour.as_str());
+
+        // The negative control: a row past the library's end is refused by name.
+        let mut past = tile["path"].clone();
+        let last = past.as_array().unwrap().len() - 1;
+        past[last] = serde_json::json!(before.len() + 100);
+        let (reply, err) = behave(e, P, &format!(r#"{{"widget":"","path":{past},"event":"click"}}"#));
+        assert!(reply.is_empty() && err.contains("NoRow"), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     const LEFT: &str = r#"{"widget":"align_left_button","event":"click"}"#;
 
     /// An engine whose document is `model`.
