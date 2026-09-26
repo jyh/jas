@@ -1966,13 +1966,31 @@ function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth) {
         } elseif ($drawn.Count -eq 0) {
             $out.Add((New-SbVerdict $n.Drawn 'FAIL' "no PANEL DRAWN row: the pane never drew a plan ($($built.Count) build(s))" $built[-1]))
         } else {
-            $badBuilt = @($built | Where-Object { (Get-SbField $_ 'leaves') -ne [string]$leaves })
-            $badDrawn = @($drawn | Where-Object { (Get-SbField $_ 'controls') -ne [string]$leaves })
-            if ($badBuilt.Count -eq 0 -and $badDrawn.Count -eq 0) {
-                $out.Add((New-SbVerdict $n.Drawn 'PASS' "all $($built.Count) build(s) placed $leaves leaves and all $($drawn.Count) draw(s) show $leaves controls, the plan's own count; $iconText" $drawn[-1]))
+            # ⛔ EACH DRAW IS JUDGED AGAINST THE PLAN ITS BUILD DREW FROM, not
+            # against the open's. A click that grows a list (`ap_new`: 7 -> 8,
+            # flask §110) rebuilds on a bigger plan, and judging that rebuild
+            # against the open read every correct draw as a missing control.
+            # The FIRST build is still held to the open's count, and a draw with
+            # no build before it has nothing to be judged by (a FAIL).
+            $firstBuild = Get-SbField $built[0] 'leaves'
+            $bad = New-Object System.Collections.Generic.List[string]
+            if ($firstBuild -ne [string]$leaves) { $bad.Add("build 1 placed $firstBuild of the open's $leaves") }
+            $current = $null
+            $paneRows = @(Select-SbRows $Rows ('(?:' + (Get-SbRowPattern 'PANEL BUILT' ' panel=') + ')|(?:' +
+                                               (Get-SbRowPattern 'PANEL DRAWN' ' panel=') + ')'))
+            foreach ($r in $paneRows) {
+                if ($r -match (Get-SbRowPattern 'PANEL BUILT' ' panel=')) {
+                    $current = Get-SbField $r 'leaves'
+                } elseif ($null -eq $current) {
+                    $bad.Add("draw seq=$(Get-SbField $r 'seq') came before any build")
+                } elseif ((Get-SbField $r 'controls') -ne $current) {
+                    $bad.Add("draw seq=$(Get-SbField $r 'seq') shows $(Get-SbField $r 'controls') controls of its build's $current")
+                }
+            }
+            if ($bad.Count -eq 0) {
+                $out.Add((New-SbVerdict $n.Drawn 'PASS' "build 1 placed the open's $leaves leaves, and all $($drawn.Count) draw(s) show their own build's count ($($built.Count) build(s)); $iconText" $drawn[-1]))
             } else {
-                $first = if ($badBuilt.Count -gt 0) { $badBuilt[0] } else { $badDrawn[0] }
-                $out.Add((New-SbVerdict $n.Drawn 'FAIL' "the plan has $leaves leaves; $($badBuilt.Count) of $($built.Count) build(s) and $($badDrawn.Count) of $($drawn.Count) draw(s) disagree -- a control missing from the pane is the silent failure this clause exists for" $first))
+                $out.Add((New-SbVerdict $n.Drawn 'FAIL' "$($bad -join '; ') -- a control missing from the pane is the silent failure this clause exists for" $drawn[-1]))
             }
         }
     }
