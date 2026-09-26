@@ -147,7 +147,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 63
+MIN_LOG_ONLY = 61
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -489,6 +489,12 @@ def self_test() -> int:
     # effect declaration hides in the classified bucket rather than the
     # unclassified one. Declaring it log-only moves it into the bucket that
     # says "no port does this", which is true. See VISION.md section 11.
+    #
+    # 61 when the Brushes menu's two stubs left TOGETHER: `sort_brushes_by_name`
+    # took the fix its own description named (a `brush.sort_by_name` shortcut
+    # with `library:` as an expression), and `select_all_unused_brushes` the
+    # same shape (`brush.select_unused`). Two leaving at once is why the delta
+    # is 2 -- a delta of 1 here would mean one of them is still a stub.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")

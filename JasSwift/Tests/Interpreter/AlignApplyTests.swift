@@ -147,6 +147,9 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // were skipped by `runEffects` without a word.
         "brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
         "brush.append", "brush.update",
+        // The Brushes menu's Sort by Name and Select All Unused (log-only stubs
+        // until they took `library:` as an expression, as delete does).
+        "brush.sort_by_name", "brush.select_unused",
     ]
     // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
     // It compares the built map against a HAND-MAINTAINED literal, which catches

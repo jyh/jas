@@ -1055,6 +1055,50 @@ fn run_brush_effect(
                 }
             }
         }
+        "brush.sort_by_name" => {
+            // Spec: { library } — stable sort by name in CODE-POINT order
+            // (`str`'s `Ord` compares UTF-8 bytes, which is code-point order,
+            // as the reference's Python `str` does); a missing name is "".
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let path = format!("brush_libraries.{}.brushes", lib_id);
+                if let (false, serde_json::Value::Array(mut brushes)) =
+                    (lib_id.is_empty(), store.get_data_path(&path))
+                {
+                    brushes.sort_by(|a, b| {
+                        let name = |v: &serde_json::Value| v.get("name")
+                            .and_then(|n| n.as_str()).unwrap_or("").to_string();
+                        name(a).cmp(&name(b))
+                    });
+                    store.set_data_path(&path, serde_json::Value::Array(brushes));
+                    sync_canvas_brushes(store);
+                }
+            }
+        }
+        "brush.select_unused" => {
+            // Spec: { library } — replace the panel's brush selection with
+            // every slug of that library, in library order, that no element
+            // in the document carries as `stroke_brush == "<library>/<slug>"`.
+            let Some(m) = model else {
+                report.unhandled.push(Unhandled::NoModel(name.to_string()));
+                return;
+            };
+            if let serde_json::Value::Object(args) = spec {
+                let lib_id = eval_string(args.get("library"), store, ctx);
+                let path = format!("brush_libraries.{}.brushes", lib_id);
+                if let (false, serde_json::Value::Array(brushes)) =
+                    (lib_id.is_empty(), store.get_data_path(&path))
+                {
+                    let used = used_stroke_brushes(m.document());
+                    let unused: Vec<serde_json::Value> = brushes.iter()
+                        .filter_map(|b| b.get("slug").and_then(|s| s.as_str()))
+                        .filter(|slug| !used.contains(&format!("{lib_id}/{slug}")))
+                        .map(|slug| serde_json::Value::String(slug.to_string()))
+                        .collect();
+                    store.set_panel("brushes", "selected_brushes", serde_json::Value::Array(unused));
+                }
+            }
+        }
         "brush.append" => {
             if let serde_json::Value::Object(args) = spec {
                 let lib_id = eval_string(args.get("library"), store, ctx);
@@ -2632,6 +2676,29 @@ fn brush_duplicate_in_library(
     }
     store.set_data_path(&path, serde_json::Value::Array(next));
     new_slugs
+}
+
+/// Every non-empty `stroke_brush` id on any element of `doc`, at any depth,
+/// selected or not. Only paths carry one (a brush applied to a line or open
+/// polyline promotes it to a path first).
+fn used_stroke_brushes(doc: &crate::document::document::Document)
+    -> std::collections::HashSet<String>
+{
+    fn walk(e: &Element, used: &mut std::collections::HashSet<String>) {
+        if let Element::Path(p) = e {
+            if let Some(b) = p.stroke_brush.as_deref().filter(|b| !b.is_empty()) {
+                used.insert(b.to_string());
+            }
+        }
+        for child in e.children().unwrap_or(&[]) {
+            walk(child, used);
+        }
+    }
+    let mut used = std::collections::HashSet::new();
+    for layer in &doc.layers {
+        walk(layer, &mut used);
+    }
+    used
 }
 
 /// Append a new brush to the named library.
@@ -12998,6 +13065,128 @@ mod tests {
         assert_eq!(brush_slugs(&store, "lib_a"), ["a", "b", "c", "a_copy", "d"]);
         assert_eq!(report_of(vec![serde_json::json!({"brush.options_confirm": {}})], None, None, None),
                    vec![Unhandled::NoModel("brush.options_confirm".into())]);
+    }
+
+    /// The Brushes menu's Sort by Name and Select All Unused, row for row with
+    /// the reference's `TestSortBrushesByName` / `TestSelectAllUnusedBrushes`.
+    /// Both were log-only stubs in every port.
+    fn named_brush_store(names: &[&str]) -> StateStore {
+        let mut store = StateStore::new();
+        let brushes: Vec<serde_json::Value> = names.iter().enumerate()
+            .map(|(i, n)| serde_json::json!({"slug": format!("s{i}"), "name": n, "type": "calligraphic"}))
+            .collect();
+        store.set_data(serde_json::json!({"brush_libraries": {
+            "lib_a": {"name": "A", "brushes": brushes},
+            "lib_b": {"name": "B", "brushes": [
+                {"slug": "z", "name": "Zed", "type": "art"},
+                {"slug": "a", "name": "Ay", "type": "art"}]}}}));
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("selected_library".to_string(), serde_json::json!("lib_a"));
+        defaults.insert("selected_brushes".to_string(), serde_json::json!(["s2"]));
+        store.init_panel("brushes", defaults);
+        store.set_active_panel(Some("brushes"));
+        store
+    }
+
+    fn brush_names(store: &StateStore, lib: &str) -> Vec<String> {
+        match store.get_data_path(&format!("brush_libraries.{lib}.brushes")) {
+            serde_json::Value::Array(a) => a.iter()
+                .map(|b| b["name"].as_str().unwrap_or("").to_string()).collect(),
+            other => panic!("{lib}: not a brush list: {other}"),
+        }
+    }
+
+    #[test]
+    fn the_real_sort_brushes_by_name_action_sorts_case_sensitively_and_keeps_the_selection() {
+        let mut store = named_brush_store(&["Zebra", "Apple", "mango", "Mango"]);
+        assert_eq!(run_real_brush_action(&mut store, "sort_brushes_by_name"), vec![]);
+        assert_eq!(brush_names(&store, "lib_a"), ["Apple", "Mango", "Zebra", "mango"]);
+        assert_eq!(brush_slugs(&store, "lib_a"), ["s1", "s3", "s0", "s2"]);
+        assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["s2"]));
+        assert_eq!(brush_names(&store, "lib_b"), ["Zed", "Ay"], "only the selected library moves");
+    }
+
+    /// Code-point order, never canonical equivalence: the decomposed "e" +
+    /// U+0301 sorts after "ezra" (U+0301 > 'z'), the precomposed U+00E9 after
+    /// that. Built with `from_u32` so no combining mark sits in the source.
+    #[test]
+    fn sort_by_name_orders_by_code_point() {
+        let acute = char::from_u32(0x301).unwrap();
+        let e_acute = char::from_u32(0xE9).unwrap();
+        let pre = format!("{e_acute}clair");
+        let dec = format!("e{acute}clair");
+        let mut store = named_brush_store(&[&pre, "eclair", &dec, "Zed", "ezra"]);
+        run_real_brush_action(&mut store, "sort_brushes_by_name");
+        assert_eq!(brush_names(&store, "lib_a"), ["Zed", "eclair", "ezra", dec.as_str(), pre.as_str()]);
+    }
+
+    #[test]
+    fn sort_by_name_is_stable_and_a_nameless_brush_sorts_first() {
+        let mut store = named_brush_store(&["B", "A", "B", "A"]);
+        run_real_brush_action(&mut store, "sort_brushes_by_name");
+        assert_eq!(brush_slugs(&store, "lib_a"), ["s1", "s3", "s0", "s2"]);
+
+        let mut store = named_brush_store(&["B", "A"]);
+        let mut brushes = store.get_data_path("brush_libraries.lib_a.brushes");
+        brushes.as_array_mut().unwrap().push(serde_json::json!({"slug": "nameless", "type": "art"}));
+        store.set_data_path("brush_libraries.lib_a.brushes", brushes);
+        run_real_brush_action(&mut store, "sort_brushes_by_name");
+        assert_eq!(brush_slugs(&store, "lib_a"), ["nameless", "s1", "s0"]);
+    }
+
+    #[test]
+    fn sort_by_name_with_no_or_an_unknown_library_is_a_no_op() {
+        for lib in [serde_json::Value::Null, serde_json::json!("no_such_lib")] {
+            let mut store = named_brush_store(&["B", "A"]);
+            store.set_panel("brushes", "selected_library", lib.clone());
+            assert_eq!(run_real_brush_action(&mut store, "sort_brushes_by_name"), vec![], "{lib}");
+            assert_eq!(brush_names(&store, "lib_a"), ["B", "A"], "{lib}");
+        }
+    }
+
+    fn select_unused(children: Vec<Element>, selected: &[&str]) -> (StateStore, Vec<Unhandled>) {
+        let mut store = brush_store(selected);
+        let mut model = crate::document::test_fixture::model_with(children, &[]);
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let report = run_effects(&[serde_json::json!({"dispatch": "select_all_unused_brushes"})],
+                                 &serde_json::json!({}), &mut store, Some(&mut model),
+                                 Some(ws.actions()), Some(ws.dialogs()), None);
+        (store, report.unhandled)
+    }
+
+    #[test]
+    fn the_real_select_all_unused_action_selects_what_no_element_uses() {
+        use crate::document::test_fixture::{brushed_path as path, group};
+        let sel = |s: &StateStore| s.get_panel("brushes", "selected_brushes").clone();
+        let rows: Vec<(&str, Vec<Element>, &[&str], serde_json::Value)> = vec![
+            ("nothing used", vec![path(0.0, None)], &[], serde_json::json!(["a", "b", "c", "a_copy"])),
+            ("b used, selection replaced", vec![path(0.0, Some("lib_a/b"))], &["b"],
+             serde_json::json!(["a", "c", "a_copy"])),
+            ("use is library-qualified", vec![path(0.0, Some("lib_b/a"))], &[],
+             serde_json::json!(["a", "b", "c", "a_copy"])),
+            ("inside nested groups", vec![group(vec![group(vec![path(0.0, Some("lib_a/c"))])]),
+                                          path(60.0, Some("lib_a/a"))], &[],
+             serde_json::json!(["b", "a_copy"])),
+            ("every brush used", vec![path(0.0, Some("lib_a/a")), path(10.0, Some("lib_a/b")),
+                                      path(20.0, Some("lib_a/c")), path(30.0, Some("lib_a/a_copy"))],
+             &["a"], serde_json::json!([])),
+        ];
+        for (name, children, selected, want) in rows {
+            let (store, unhandled) = select_unused(children, selected);
+            assert_eq!(unhandled, vec![], "{name}");
+            assert_eq!(sel(&store), want, "{name}");
+            assert_eq!(brush_slugs(&store, "lib_a"), ["a", "b", "c", "a_copy"], "{name}: library untouched");
+        }
+    }
+
+    /// Select All Unused reads the document, so with no model it says so,
+    /// as `brush.options_confirm` and every `doc.*` key do, and writes nothing.
+    #[test]
+    fn select_all_unused_without_a_model_reports_no_model() {
+        let mut store = brush_store(&["b"]);
+        assert_eq!(run_real_brush_action(&mut store, "select_all_unused_brushes"),
+                   vec![Unhandled::NoModel("brush.select_unused".into())]);
+        assert_eq!(store.get_panel("brushes", "selected_brushes"), &serde_json::json!(["b"]));
     }
 
     /// swap_panel_state, both forms, as the reference's

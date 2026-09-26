@@ -315,6 +315,57 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         return nil
     }
 
+    // brush.sort_by_name — { library }: stable sort by name in CODE-POINT
+    // order, as the reference's Python `str` and Rust's `str` compare. NOT
+    // String `<`, which is canonical-equivalence aware and reads a decomposed
+    // and a precomposed "é" as equal. A missing name is "".
+    effects["brush.sort_by_name"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let path = "brush_libraries.\(libId).brushes"
+        guard !libId.isEmpty, let brushes = store.getDataPath(path) as? [[String: Any]] else { return nil }
+        func name(_ b: [String: Any]) -> String.UnicodeScalarView {
+            ((b["name"] as? String) ?? "").unicodeScalars
+        }
+        let sorted = brushes.enumerated().sorted { x, y in
+            let (a, b) = (name(x.element), name(y.element))
+            if a.elementsEqual(b) { return x.offset < y.offset }
+            return a.lexicographicallyPrecedes(b)
+        }.map(\.element)
+        store.setDataPath(path, sorted)
+        syncCanvasBrushes(store: store)
+        return nil
+    }
+
+    // brush.select_unused — { library }: replace the panel's brush selection
+    // with every slug of that library, in library order, that no element in
+    // the document carries as `strokeBrush == "<library>/<slug>"` (at any
+    // depth, selected or not; only paths carry one).
+    effects["brush.select_unused"] = { spec, ctx, store in
+        guard let args = spec as? [String: Any] else { return nil }
+        let libId = evalStringValue(args["library"], store: store, ctx: ctx)
+        let path = "brush_libraries.\(libId).brushes"
+        guard !libId.isEmpty, let brushes = store.getDataPath(path) as? [[String: Any]] else { return nil }
+        var used = Set<String>()
+        func walk(_ e: Element) {
+            switch e {
+            case .path(let p):
+                if let b = p.strokeBrush, !b.isEmpty { used.insert(b) }
+            case .group(let g):
+                g.children.forEach(walk)
+            case .layer(let l):
+                l.children.forEach(walk)
+            default:
+                break
+            }
+        }
+        model.document.layers.forEach { walk(.layer($0)) }
+        let unused = brushes.compactMap { $0["slug"] as? String }
+            .filter { !used.contains("\(libId)/\($0)") }
+        store.setPanel("brushes", "selected_brushes", unused)
+        return nil
+    }
+
     // brush.append — append a new brush to a library. Used by
     // brush_options_confirm in create mode.
     effects["brush.append"] = { spec, ctx, store in
