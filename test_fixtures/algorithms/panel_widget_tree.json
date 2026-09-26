@@ -2203,7 +2203,10 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [],
-        "style": []
+        "style": [
+          "height",
+          "width"
+        ]
       },
       {
         "path": [
@@ -2242,7 +2245,10 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [],
-        "style": []
+        "style": [
+          "height",
+          "width"
+        ]
       },
       {
         "path": [
@@ -2281,7 +2287,10 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [],
-        "style": []
+        "style": [
+          "height",
+          "width"
+        ]
       },
       {
         "path": [
