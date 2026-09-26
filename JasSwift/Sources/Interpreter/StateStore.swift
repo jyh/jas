@@ -390,6 +390,23 @@ public class StateStore {
         panels[panelId]?[key] = lst
     }
 
+    /// Add `value` to a panel-state list, or remove its FIRST occurrence if
+    /// present: set membership, the checkbox primitive (council Q3.2).
+    /// Appends, never prepends. A key holding no list starts from an empty
+    /// one. Mirrors the reference's `StateStore.list_toggle` (Python's
+    /// `list.remove`: the first occurrence only).
+    public func listToggle(_ panelId: String, _ key: String, _ value: Any) {
+        let panelId = Self.panelContentId(panelId)
+        guard panels[panelId] != nil else { return }
+        var lst = (panels[panelId]?[key] as? [Any]) ?? []
+        if let i = lst.firstIndex(where: { ($0 as? NSObject)?.isEqual(value) ?? false }) {
+            lst.remove(at: i)
+        } else {
+            lst.append(value)
+        }
+        panels[panelId]?[key] = lst
+    }
+
     // MARK: - Context for expression evaluation
 
     /// Build an evaluation context dict for the expression evaluator.
