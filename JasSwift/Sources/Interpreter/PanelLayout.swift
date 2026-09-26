@@ -475,7 +475,9 @@ public enum PanelLayout {
             // Fill the width given; with no constraint (availW <= 0) report the
             // container's natural content width so a parent row can size it.
             let w = availW > 0 ? availW : naturalW(n, ctx)
-            let h = expH ?? (contentH + pt + pb)
+            var h = expH ?? (contentH + pt + pb)
+            // B.6: a declared min_height floors the height, declared or content.
+            if let m = resolveDim(st["min_height"], 0) { h = max(h, m) }
             var items = [MItem(path: path, x: 0, y: 0, w: w, h: h, node: n, ctx: ctx)]
             for var it in chItems {
                 it.x += pl

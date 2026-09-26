@@ -372,6 +372,10 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
         # container's natural content width so a parent row can size it.
         w = avail_w if avail_w > 0 else _natural_w(node, ctx)
         h = exp_h if exp_h is not None else content_h + pt + pb
+        # B.6: a declared min_height floors the height, declared or content.
+        min_h = _resolve_dim(st.get("min_height"), 0)
+        if min_h is not None:
+            h = max(h, min_h)
         items = [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}]
         for it in ch_items:
             it["x"] += pl
