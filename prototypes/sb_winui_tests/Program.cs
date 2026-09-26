@@ -52,6 +52,9 @@ static class Program
     /// and not an empty string that an absent value would also produce.</summary>
     static string Show(string? v) => v ?? "(null)";
 
+    static string ShowPreview((string Viewbox, string Svg)? p) =>
+        p is { } v ? v.Viewbox + "|" + v.Svg : "(null)";
+
     static string ShowRgb((byte R, byte G, byte B)? c) => c is { } v ? $"{v.R},{v.G},{v.B}" : "(null)";
 
     static void Eq(string name, string expected, string actual) =>
@@ -498,6 +501,18 @@ static class Program
         Eq("swatch: the word null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("null")));
         Eq("swatch: a leading space is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(" #664040")));
         Eq("swatch: a space inside, which HexNumber would accept is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("# 12345")));
+
+        // ─────────────────────────────────────────────────────────────
+        // A `brush_preview`'s drawing (STATUS-flask §112: every preview was
+        // an empty box, `values: {}`). The core sends `display["preview.svg"]`
+        // and `display["preview.viewbox"]`, the pair an icon is drawn from;
+        // the shell draws them or draws nothing. Both, or neither.
+        // ─────────────────────────────────────────────────────────────
+        Eq("preview: both halves draw", "0 0 40 40|<ellipse/>", ShowPreview(PanelWire.Preview("0 0 40 40", "<ellipse/>")));
+        Eq("preview: no svg is no drawing", "(null)", ShowPreview(PanelWire.Preview("0 0 40 40", null)));
+        Eq("preview: no viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview(null, "<ellipse/>")));
+        Eq("preview: an empty svg is no drawing", "(null)", ShowPreview(PanelWire.Preview("0 0 40 40", "")));
+        Eq("preview: a blank viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview("  ", "<ellipse/>")));
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
