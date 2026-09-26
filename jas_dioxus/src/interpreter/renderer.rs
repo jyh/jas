@@ -3682,35 +3682,90 @@ fn build_dblclick_handler(
 /// `click_and_wait` is treated as an alias for `double_click` here.
 /// The Artboards panel uses click-and-hold semantics in spec, but we
 /// route it through double-click for now (rename UX matches Finder).
+/// One behavior of a click, resolved at render time: its action, its params
+/// (evaluated against the render context), its inline effects, and its
+/// condition (evaluated at click time).
+pub(crate) type ResolvedBehavior = (
+    Option<String>,
+    serde_json::Map<String, serde_json::Value>,
+    Vec<serde_json::Value>,
+    Option<String>,
+);
+
+/// The behaviors of `el` that answer `event_name`, with their params resolved
+/// against `ctx`. A `click_and_wait` behavior also answers `double_click`.
+pub(crate) fn resolve_click_behaviors(
+    el: &serde_json::Value,
+    ctx: &serde_json::Value,
+    event_name: &str,
+) -> Vec<ResolvedBehavior> {
+    let Some(behaviors) = el.get("behavior").and_then(|b| b.as_array()) else { return Vec::new() };
+    behaviors.iter()
+        .filter(|b| {
+            let evt = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
+            evt == event_name
+                || (event_name == "double_click" && evt == "click_and_wait")
+        })
+        .map(|b| {
+            let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
+            let condition = b.get("condition").and_then(|c| c.as_str()).map(|s| s.to_string());
+            let effects = b.get("effects").and_then(|e| e.as_array()).cloned().unwrap_or_default();
+            let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+            (action, resolve_behavior_params(&raw_params, ctx), effects, condition)
+        })
+        .collect()
+}
+
+/// Run a click's resolved behaviors in order and return the deferred dialog
+/// effects. Each behavior whose condition holds runs its inline effects, then
+/// dispatches its action with the panel scope from `ctx` (the context the
+/// panel body rendered with), so the action reads that panel's own keys.
+/// Extracted 2026-09-26 from the click closure, where no test could reach it.
+pub(crate) fn run_click_behaviors(
+    actions: &[ResolvedBehavior],
+    ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) -> Vec<serde_json::Value> {
+    let mut deferred = Vec::new();
+    for (action, params, effects, condition) in actions {
+        if let Some(cond_expr) = condition {
+            if !expr::eval(cond_expr, ctx).to_bool() {
+                continue;
+            }
+        }
+        // Run effects through the unified runner (returns deferred
+        // dialog effects). Pass the click-time ctx so foreach
+        // iterator vars (e.g. `swatch._index`) resolve in select
+        // targets / scope_value / set: expressions. Uses
+        // run_yaml_effects (the full dispatch) rather than the old
+        // panel-only run_effects_with_ctx, so panel/menu clicks can
+        // also foreach / doc.* / snapshot like every other surface
+        // (finding #26 — the panel path previously silently dropped
+        // those keys). No multi-key effect objects exist in the
+        // bundle, so first-match dispatch is behavior-equivalent.
+        if !effects.is_empty() {
+            deferred.extend(run_yaml_effects(effects, ctx, st));
+        }
+        if let Some(action_name) = action {
+            if action_name == "dismiss_dialog" {
+                deferred.push(serde_json::json!({"close_dialog": null}));
+            } else {
+                deferred.extend(dispatch_action_in(action_name, params, ctx.get("panel"), st));
+            }
+        }
+    }
+    deferred
+}
+
 fn build_mouse_event_handler(
     el: &serde_json::Value,
     ctx: &serde_json::Value,
     rctx: &RenderCtx,
     event_name: &str,
 ) -> Option<EventHandler<Event<MouseData>>> {
-    let behaviors = el.get("behavior").and_then(|b| b.as_array())?;
-    let click_behaviors: Vec<&serde_json::Value> = behaviors.iter()
-        .filter(|b| {
-            let evt = b.get("event").and_then(|e| e.as_str()).unwrap_or("click");
-            evt == event_name
-                || (event_name == "double_click" && evt == "click_and_wait")
-        })
-        .collect();
-    if click_behaviors.is_empty() {
+    let resolved_actions = resolve_click_behaviors(el, ctx, event_name);
+    if resolved_actions.is_empty() {
         return None;
-    }
-
-    // Pre-resolve params and snapshot what we need for the closure
-    let mut resolved_actions: Vec<(Option<String>, serde_json::Map<String, serde_json::Value>, Vec<serde_json::Value>, Option<String>)> = Vec::new();
-    for b in &click_behaviors {
-        let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
-        let condition = b.get("condition").and_then(|c| c.as_str()).map(|s| s.to_string());
-        let effects = b.get("effects").and_then(|e| e.as_array()).cloned().unwrap_or_default();
-
-        // Resolve params against context
-        let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-        let resolved_params = resolve_behavior_params(&raw_params, ctx);
-        resolved_actions.push((action, resolved_params, effects, condition));
     }
 
     let app = rctx.app.clone();
@@ -3740,38 +3795,7 @@ fn build_mouse_event_handler(
             let mut deferred_dialog_effects = Vec::new();
             {
                 let mut st = app.borrow_mut();
-                for (action, params, effects, condition) in &actions {
-                    // Check condition
-                    if let Some(cond_expr) = condition {
-                        let result = expr::eval(cond_expr, &ctx_snap);
-                        if !result.to_bool() {
-                            continue;
-                        }
-                    }
-                    // Run effects through the unified runner (returns deferred
-                    // dialog effects). Pass the click-time ctx so foreach
-                    // iterator vars (e.g. `swatch._index`) resolve in select
-                    // targets / scope_value / set: expressions. Uses
-                    // run_yaml_effects (the full dispatch) rather than the old
-                    // panel-only run_effects_with_ctx, so panel/menu clicks can
-                    // also foreach / doc.* / snapshot like every other surface
-                    // (finding #26 — the panel path previously silently dropped
-                    // those keys). No multi-key effect objects exist in the
-                    // bundle, so first-match dispatch is behavior-equivalent.
-                    if !effects.is_empty() {
-                        let dialog_effs = run_yaml_effects(effects, &ctx_snap, &mut st);
-                        deferred_dialog_effects.extend(dialog_effs);
-                    }
-                    // Dispatch action
-                    if let Some(action_name) = action {
-                        if action_name == "dismiss_dialog" {
-                            deferred_dialog_effects.push(serde_json::json!({"close_dialog": null}));
-                        } else {
-                            let action_deferred = dispatch_action_in(action_name, params, ctx_snap.get("panel"), &mut st);
-                            deferred_dialog_effects.extend(action_deferred);
-                        }
-                    }
-                }
+                deferred_dialog_effects.extend(run_click_behaviors(&actions, &ctx_snap, &mut st));
             } // drop st borrow
 
             // Apply deferred dialog effects (outside AppState borrow)
@@ -14218,6 +14242,41 @@ mod tests {
     fn brushes_panel_key(st: &AppState, key: &str) -> serde_json::Value {
         st.panel_state.get("brushes_panel_content").and_then(|m| m.get(key)).cloned()
             .unwrap_or(serde_json::Value::Null)
+    }
+
+    /// The Delete Brush BODY button, driven the way a click drives it: the
+    /// panel body's own context (`panel_body_eval_ctx_for`, the builder the dock
+    /// renders with), the button's behaviors resolved from the bundle, then the
+    /// click loop. Until 2026-09-26 this path sat inside a render closure and no
+    /// test reached it; only the menu path and the runner were driven (#257).
+    #[test]
+    fn the_delete_brush_body_button_deletes_the_selection() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b", "c"]);
+        let sel = st.panel_state.entry("brushes_panel_content".into()).or_default();
+        sel.insert("selected_library".into(), serde_json::json!("lib"));
+        sel.insert("selected_brushes".into(), serde_json::json!(["b"]));
+
+        let ctx = crate::workspace::dock_panel::panel_body_eval_ctx_for(&st, "brushes_panel_content")
+            .expect("the body context");
+        fn find<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            match node {
+                serde_json::Value::Object(m) if m.get("id").and_then(|v| v.as_str()) == Some(id) => Some(node),
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let button = find(ws.panel("brushes_panel_content").expect("brushes"), "bp_delete_brush_btn")
+            .expect("the Delete Brush button");
+        let disabled = button["bind"]["disabled"].as_str().expect("a disabled bind");
+        assert!(!expr::eval(disabled, &ctx).to_bool(), "the button is enabled with a brush selected");
+
+        let actions = super::resolve_click_behaviors(button, &ctx, "click");
+        assert_eq!(actions.len(), 1, "one click behavior");
+        super::run_click_behaviors(&actions, &ctx, &mut st);
+        assert_eq!(brush_names(&st), vec!["a", "c"]);
     }
 
     #[test]

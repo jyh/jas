@@ -892,6 +892,111 @@ pub(crate) struct DragState {
     pub title_drag: Signal<Option<(DockId, f64, f64)>>,
 }
 
+/// The evaluation context a panel BODY renders with, and so the one its click
+/// handlers capture: the panel's declared defaults, the live overrides that
+/// belong to it, then the generic per-panel table (freshest), plus the state
+/// subset, the active document, theme colours, the data lists and the
+/// selection predicates. Extracted 2026-09-26 from `build_dock_groups` so a
+/// test can drive a body click with the context the app really builds, rather
+/// than a hand-kept copy of it.
+pub(crate) fn panel_body_eval_ctx(
+    content_id: &str,
+    ws: &Workspace,
+    live_panel_overrides: &serde_json::Map<String, serde_json::Value>,
+    panel_state_table: &std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>>,
+    live_state_map: &serde_json::Map<String, serde_json::Value>,
+    selection_preds: &serde_json::Map<String, serde_json::Value>,
+    active_doc_view: &serde_json::Value,
+) -> serde_json::Value {
+    let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
+    // Apply live overrides only for relevant panels
+    let panel_name = content_id.strip_suffix("_panel_content").unwrap_or("");
+    // SwatchesPanelState mirror keys (build_live_panel_overrides)
+    // use bare names that collide with the Brushes panel's own
+    // state (selected_library / open_libraries / thumbnail_size).
+    // They reflect the live SWATCHES state, so applying them to
+    // any other panel clobbers its defaults — e.g. Brushes'
+    // open_libraries becomes the swatches' web_colors library,
+    // which is absent from data.brush_libraries and blanks the
+    // panel. Scope them to the swatches panel.
+    const SWATCHES_OWNED: &[&str] = &[
+        "selected_swatches", "selected_library",
+        "open_libraries", "thumbnail_size",
+    ];
+    for (k, v) in live_panel_overrides {
+        // Color overrides: mode, h, s, b, r, g, bl, c, m, y, k, hex
+        // Stroke overrides: weight, cap, join, miter_limit, etc.
+        if panel_name != "swatches" && SWATCHES_OWNED.contains(&k.as_str()) {
+            continue;
+        }
+        // Only apply if key exists in this panel's state defaults
+        if panel_map.contains_key(k) {
+            panel_map.insert(k.clone(), v.clone());
+        }
+    }
+    // The GENERIC per-panel table, last: it is keyed by
+    // this panel's own content id and holds only keys a
+    // `set_panel_state` naming this panel has written,
+    // so it is the freshest answer for every key it
+    // carries. Without this the Brushes menu's check
+    // marks would follow the user while the panel BODY
+    // they describe kept rendering the declared default
+    // — the same divergence, one layer down.
+    if let Some(stored) = panel_state_table.get(content_id) {
+        for (k, v) in stored {
+            panel_map.insert(k.clone(), v.clone());
+        }
+    }
+    // Build a minimal state map containing only the keys this
+    // panel references. This prevents unrelated state changes
+    // (e.g. active_tool) from invalidating the panel memo cache.
+    let panel_state = build_panel_state_subset(panel_name, live_state_map);
+    let mut eval_map = serde_json::Map::new();
+    eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
+    eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
+    eval_map.insert("active_document".into(), active_doc_view.clone());
+    // Expose the active theme's colors as theme.colors
+    // so YAML expressions like {{theme.colors.selection}}
+    // resolve in panel bindings.
+    let theme_colors = ws.theme()
+        .get("base").and_then(|b| b.get("colors"))
+        .cloned().unwrap_or(serde_json::Value::Null);
+    eval_map.insert("theme".into(), serde_json::json!({"colors": theme_colors}));
+    eval_map.insert("icons".into(), serde_json::json!({}));
+    eval_map.insert("data".into(), serde_json::json!({
+        "swatch_libraries": live_state_map.get("_swatch_libraries")
+            .cloned().unwrap_or(serde_json::Value::Null),
+        "brush_libraries": live_state_map.get("_brush_libraries")
+            .cloned().unwrap_or(serde_json::Value::Null),
+        "concepts": crate::interpreter::workspace::concepts_list(),
+        "_doc_generation": live_state_map.get("_doc_generation")
+            .cloned().unwrap_or(serde_json::Value::Null)
+    }));
+    // OPACITY.md § States predicates at top level so
+    // yaml expressions like `enabled_when:
+    // "selection_has_mask"` and `bind.disabled:
+    // "!selection_has_mask"` resolve uniformly.
+    for (k, v) in selection_preds {
+        eval_map.insert(k.clone(), v.clone());
+    }
+    serde_json::Value::Object(eval_map)
+}
+
+/// [`panel_body_eval_ctx`] with its inputs read from `st`, as the dock reads
+/// them before rendering.
+pub(crate) fn panel_body_eval_ctx_for(st: &AppState, content_id: &str) -> Option<serde_json::Value> {
+    let ws = Workspace::load()?;
+    Some(panel_body_eval_ctx(
+        content_id,
+        &ws,
+        &build_live_panel_overrides(st),
+        &st.panel_state,
+        &build_live_state_map(st),
+        &build_selection_predicates(st),
+        &crate::interpreter::renderer::build_active_document_view(st),
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // build_dock_groups — reusable renderer for a list of PanelGroups
 // ---------------------------------------------------------------------------
@@ -1247,78 +1352,9 @@ pub(crate) fn build_dock_groups(
                             // Stroke/None branch (stroke state writes silently
                             // discard non-stroke fields like font_family).
                             let content = ws.panel(content_id)?.clone();
-                            let mut panel_map: serde_json::Map<String, serde_json::Value> = ws.panel_state_defaults(content_id).into_iter().collect();
-                            // Apply live overrides only for relevant panels
-                            let panel_name = content_id.strip_suffix("_panel_content").unwrap_or("");
-                            // SwatchesPanelState mirror keys (build_live_panel_overrides)
-                            // use bare names that collide with the Brushes panel's own
-                            // state (selected_library / open_libraries / thumbnail_size).
-                            // They reflect the live SWATCHES state, so applying them to
-                            // any other panel clobbers its defaults — e.g. Brushes'
-                            // open_libraries becomes the swatches' web_colors library,
-                            // which is absent from data.brush_libraries and blanks the
-                            // panel. Scope them to the swatches panel.
-                            const SWATCHES_OWNED: &[&str] = &[
-                                "selected_swatches", "selected_library",
-                                "open_libraries", "thumbnail_size",
-                            ];
-                            for (k, v) in live_panel_overrides {
-                                // Color overrides: mode, h, s, b, r, g, bl, c, m, y, k, hex
-                                // Stroke overrides: weight, cap, join, miter_limit, etc.
-                                if panel_name != "swatches" && SWATCHES_OWNED.contains(&k.as_str()) {
-                                    continue;
-                                }
-                                // Only apply if key exists in this panel's state defaults
-                                if panel_map.contains_key(k) {
-                                    panel_map.insert(k.clone(), v.clone());
-                                }
-                            }
-                            // The GENERIC per-panel table, last: it is keyed by
-                            // this panel's own content id and holds only keys a
-                            // `set_panel_state` naming this panel has written,
-                            // so it is the freshest answer for every key it
-                            // carries. Without this the Brushes menu's check
-                            // marks would follow the user while the panel BODY
-                            // they describe kept rendering the declared default
-                            // — the same divergence, one layer down.
-                            if let Some(stored) = panel_state_table.get(content_id) {
-                                for (k, v) in stored {
-                                    panel_map.insert(k.clone(), v.clone());
-                                }
-                            }
-                            // Build a minimal state map containing only the keys this
-                            // panel references. This prevents unrelated state changes
-                            // (e.g. active_tool) from invalidating the panel memo cache.
-                            let panel_state = build_panel_state_subset(panel_name, live_state_map);
-                            let mut eval_map = serde_json::Map::new();
-                            eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
-                            eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
-                            eval_map.insert("active_document".into(), active_doc_view.clone());
-                            // Expose the active theme's colors as theme.colors
-                            // so YAML expressions like {{theme.colors.selection}}
-                            // resolve in panel bindings.
-                            let theme_colors = ws.theme()
-                                .get("base").and_then(|b| b.get("colors"))
-                                .cloned().unwrap_or(serde_json::Value::Null);
-                            eval_map.insert("theme".into(), serde_json::json!({"colors": theme_colors}));
-                            eval_map.insert("icons".into(), serde_json::json!({}));
-                            eval_map.insert("data".into(), serde_json::json!({
-                                "swatch_libraries": live_state_map.get("_swatch_libraries")
-                                    .cloned().unwrap_or(serde_json::Value::Null),
-                                "brush_libraries": live_state_map.get("_brush_libraries")
-                                    .cloned().unwrap_or(serde_json::Value::Null),
-                                "concepts": crate::interpreter::workspace::concepts_list(),
-                                "_doc_generation": live_state_map.get("_doc_generation")
-                                    .cloned().unwrap_or(serde_json::Value::Null)
-                            }));
-                            // OPACITY.md § States predicates at top level so
-                            // yaml expressions like `enabled_when:
-                            // "selection_has_mask"` and `bind.disabled:
-                            // "!selection_has_mask"` resolve uniformly.
-                            for (k, v) in selection_preds {
-                                eval_map.insert(k.clone(), v.clone());
-                            }
-                            let eval_ctx = serde_json::Value::Object(eval_map);
+                            let eval_ctx = panel_body_eval_ctx(
+                                content_id, &ws, live_panel_overrides, panel_state_table,
+                                live_state_map, selection_preds, active_doc_view);
                             Some((content, eval_ctx))
                         });
                         if let Some((content, eval_ctx)) = panel_body {
@@ -1624,28 +1660,18 @@ mod stroke_panel_override_tests {
         assert_eq!(name, Some("Default Brushes"));
     }
 
-    // End-to-end render-context check for the Brushes panel body: replicate
-    // the eval_map the dock builds (lines ~1244-1274) and evaluate the real
-    // disclosure-label / tile-foreach expressions from brushes.yaml.
+    // End-to-end render-context check for the Brushes panel body: build the
+    // context the dock renders with (`panel_body_eval_ctx_for`) and evaluate
+    // the real disclosure-label / tile-foreach expressions from brushes.yaml.
     #[test]
     fn brushes_panel_body_expressions_resolve() {
-        use crate::interpreter::workspace::Workspace;
         use crate::interpreter::expr;
         let st = AppState::new();
-        let ws = Workspace::load().expect("workspace");
         let content_id = "brushes_panel_content";
-        let panel_name = "brushes";
-        let live_state_map = build_live_state_map(&st);
-
-        let mut panel_map: serde_json::Map<String, serde_json::Value> =
-            ws.panel_state_defaults(content_id).into_iter().collect();
-        // Replicate the dock's override application (incl. the swatches-owned
-        // scoping): the live SWATCHES open_libraries (web_colors) must NOT
-        // clobber the Brushes panel's own open_libraries default.
+        // The collision the body builder must scope away: the live SWATCHES
+        // open_libraries (web_colors) is in the flat override map, and it must
+        // NOT clobber the Brushes panel's own open_libraries default below.
         let overrides = build_live_panel_overrides(&st);
-        // Confirm the collision exists: the override map carries the swatches
-        // open_libraries (web_colors), which without scoping would clobber
-        // the brushes default below.
         assert_eq!(
             overrides.get("open_libraries")
                 .and_then(|v| v.as_array())
@@ -1654,26 +1680,8 @@ mod stroke_panel_override_tests {
                 .and_then(|v| v.as_str()),
             Some("web_colors"),
             "swatches override open_libraries present (the collision source)");
-        const SWATCHES_OWNED: &[&str] = &[
-            "selected_swatches", "selected_library", "open_libraries", "thumbnail_size",
-        ];
-        for (k, v) in &overrides {
-            if panel_name != "swatches" && SWATCHES_OWNED.contains(&k.as_str()) {
-                continue;
-            }
-            if panel_map.contains_key(k) {
-                panel_map.insert(k.clone(), v.clone());
-            }
-        }
-        let panel_state = build_panel_state_subset(panel_name, &live_state_map);
-        let mut eval_map = serde_json::Map::new();
-        eval_map.insert("state".into(), serde_json::Value::Object(panel_state));
-        eval_map.insert("panel".into(), serde_json::Value::Object(panel_map));
-        eval_map.insert("data".into(), serde_json::json!({
-            "brush_libraries": live_state_map.get("_brush_libraries")
-                .cloned().unwrap_or(serde_json::Value::Null),
-        }));
-        let ctx = serde_json::Value::Object(eval_map);
+        // The builder the dock renders with (this test used to keep a copy).
+        let ctx = panel_body_eval_ctx_for(&st, content_id).expect("the body context");
 
         // Outer foreach source.
         use crate::interpreter::expr_types::Value;
