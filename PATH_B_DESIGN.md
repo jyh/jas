@@ -477,6 +477,37 @@ their Rust and Swift twins, the `panel_layout.json` goldens, and synthetic arms 
 three (`test_panel_layout_container_width.py` and its ports), because no shipped
 container clamps, takes a percentage, or sits sized in a row.
 
+### B.6 A container's `style.min_height` (ruled 2026-09-26, arm A)
+
+A container's `style.min_height` floors its height: the height is the larger of the
+floor and the height B.4 gives it (declared, or content plus padding). It resolves via
+`resolve_dim` against nothing, as a height does, so a percentage is ignored. It is a
+floor, never a size: a floor below the content changes nothing.
+
+**Why:** the web DOM applied it through CSS (`build_style` → `min-height`), and no layout
+pass read it. The one shipped case is the Color panel's fill/stroke container, which
+declares `height: 59.52` beside `min_height: 60`. A dimension resolves by truncation,
+so every port laid it out 59 high while the web drew 60. It is the B.5 divergence on
+the other axis. With the floor, that one rect moves (`color@228` `[1,0]`, `h` 59 → 60),
+and no other golden rect does.
+
+**The census, 2026-09-26, over the compiled bundle:** `max_width` and `max_height` have
+0 uses anywhere. A container's `min_width` has 1 use, the `color_picker` DIALOG's root,
+and dialogs are outside panel layout. A leaf's `min_height` has 2 uses, both in that
+dialog. A leaf's `min_width` is honoured (§3). §3's wider sentence, that a leaf honours
+`min/max`, is NOT implemented beyond `min_width`. Nothing here is missing for a reason
+other than that no panel declares it.
+
+**The gate that keeps that deferral honest:** `unread_size_keys` in
+`test_panel_layout_container_min_height.py` reds when a PANEL node declares a min/max
+key its node class has no layout rule for, which is the moment the deferral stops being
+free. It has a positive control.
+
+**Where it lives:** `_measure` in `workspace_interpreter/panel_layout.py`, its Rust and
+Swift twins, the `panel_layout.json` golden, and synthetic arms in all three
+(`test_panel_layout_container_min_height.py`, `container_min_height_tests`,
+`ContainerMinHeightLayoutTests.swift`).
+
 ### A.6 Deferred in v1 — status updated 2026-06-29
 
 **Now implemented** (were deferred when this section was written): `foreach` row/wrap layout
@@ -484,7 +515,7 @@ container clamps, takes a percentage, or sits sized in a row.
 flex-weighted children when `avail_h > 0`).
 
 **Still deferred:** `visible_when`/`bind.visible`/`enabled_when` expression evaluation
-(`_visible_children` honors only a literal `visible: false`); `max_width`/`max_height` clamps;
+(`_visible_children` honors only a literal `visible: false`); `max_width`/`max_height` clamps (0 uses, gated: B.6);
 2-D `grid` (`type:"grid"` with `cols`, distinct from the Bootstrap col-span the row grid
 already handles). Of these, only `visible_when` is **in-scope** — it is used by the rendered
 opacity/artboards/concepts panels (see Status); `max_*` and 2-D grid are needed only by the

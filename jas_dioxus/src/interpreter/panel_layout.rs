@@ -544,7 +544,11 @@ fn measure(
         // Fill the width given; with no constraint (avail_w <= 0) report the
         // container's natural content width so a parent row can size it.
         let w = if avail_w > 0 { avail_w } else { natural_w(n, ctx) };
-        let h = exp_h.unwrap_or(content_h + pt + pb);
+        let mut h = exp_h.unwrap_or(content_h + pt + pb);
+        // B.6: a declared min_height floors the height, declared or content.
+        if let Some(m) = resolve_dim(st.get("min_height").unwrap_or(&Value::Null), 0) {
+            h = h.max(m);
+        }
         let mut items = vec![MItem {
             path: path.to_vec(),
             x: 0,
@@ -950,5 +954,50 @@ mod container_width_tests {
         assert_eq!(rect(row, json!([1])).0, 30, "the next cell starts after the declared width");
         let r = rect(col(boxed(json!({"width": 40, "height": 24}))), json!([0]));
         assert_eq!((r.1, r.2), (40, 24), "the height rule is unchanged");
+    }
+}
+
+/// PATH_B_DESIGN B.6, the reference's synthetic arms
+/// (`test_panel_layout_container_min_height.py`), one for one: a container's
+/// `style.min_height` floors its height, declared or content. The shipped case
+/// (Color's fill/stroke container) is pinned by the `panel_layout.json` golden.
+#[cfg(test)]
+mod container_min_height_tests {
+    use super::layout_panel;
+    use serde_json::{json, Value};
+
+    /// (y, h) of the rect at `path`, laid out at width 200.
+    fn yh(content: Value, path: Value) -> (i64, i64) {
+        let rects = layout_panel(&json!({"content": content}), 200, 0, &json!({}));
+        let r = rects.as_array().unwrap().iter().find(|r| r["path"] == path)
+            .unwrap_or_else(|| panic!("no rect at {path}: {rects}"));
+        (r["rect"]["y"].as_i64().unwrap(), r["rect"]["h"].as_i64().unwrap())
+    }
+
+    fn boxed(style: Value) -> Value {
+        json!({"type": "container", "style": style, "children": [{"type": "text", "content": "x"}]})
+    }
+
+    fn col(children: Value) -> Value {
+        json!({"type": "container", "style": {"gap": 0}, "children": children})
+    }
+
+    #[test]
+    fn a_containers_min_height_floors_its_height_row_for_row_with_the_reference() {
+        let content_h = yh(col(json!([boxed(json!({}))])), json!([0])).1;
+        assert!(content_h > 0, "the control");
+        assert!(60 > content_h);
+        assert_eq!(yh(col(json!([boxed(json!({"min_height": 60}))])), json!([0])).1, 60);
+        assert_eq!(yh(col(json!([boxed(json!({"min_height": 1}))])), json!([0])).1, content_h,
+                   "a floor, never a size");
+        assert_eq!(yh(col(json!([boxed(json!({"height": 59.52, "min_height": 60}))])), json!([0])).1, 60,
+                   "the shipped shape: a truncated 59 is floored to 60");
+        assert_eq!(yh(col(json!([boxed(json!({"height": 80, "min_height": 60}))])), json!([0])).1, 80);
+        let (y0, _) = yh(col(json!([boxed(json!({"min_height": 60})), boxed(json!({}))])), json!([0]));
+        let (y1, _) = yh(col(json!([boxed(json!({"min_height": 60})), boxed(json!({}))])), json!([1]));
+        assert_eq!(y1, y0 + 60, "the next sibling starts below the floor");
+        for v in ["50%", "auto"] {
+            assert_eq!(yh(col(json!([boxed(json!({"min_height": v}))])), json!([0])).1, content_h, "{v}");
+        }
     }
 }
