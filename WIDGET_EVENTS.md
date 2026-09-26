@@ -63,6 +63,7 @@ icon_select: commit, change
 combo_box: commit, change
 toggle: click, change
 checkbox: click, change
+dropdown: toggle, alt_toggle
 ```
 <!-- widget-event-table:end -->
 
@@ -75,13 +76,40 @@ checkbox: click, change
   beyond naming them.
 - **Boolean kinds** are `toggle` and `checkbox`. `click` and `change` are
   synonyms on these kinds: both name "the widget was pressed".
+- **Item kinds** are `dropdown`. `toggle` is a plain pick of one declared
+  item and `alt_toggle` an Alt pick. They are NOT synonyms: each runs only
+  the behaviors declared for itself (see §Picking a dropdown item).
 
 **Outside this contract, deliberately:** every other widget kind. That
-includes `dropdown`, `icon_button_group`, `reference_point_widget`,
+includes `icon_button_group`, `reference_point_widget`,
 `slider`, `radio_group` and the color widgets. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
+
+## Picking a dropdown item (item kinds)
+
+A pick names ONE declared item, by that item's `value`. It carries no
+text and parses nothing. The procedure has three steps.
+
+1. **Refuse, and do nothing at all, when any of these holds:**
+   - the event is not `toggle` or `alt_toggle` (`WrongEvent`);
+   - the widget's `bind.disabled` expression is true (`Disabled`);
+   - the pick names no item (`MissingValue`);
+   - no declared item has that `value` (`BadValue`). A `separator` entry
+     is not an item.
+2. **An `action` item runs its own `action`** (with its `params`, if any)
+   and no behavior runs. That is how the Layers filter's "All" works.
+3. **Any other item runs every behavior declared for the pick's event**, in
+   declaration order, with `item` bound to the WHOLE declared item and
+   `event.value` to its value. A dropdown binds no value, so nothing is
+   written except what those behaviors write.
+
+Before this section, the one shipped dropdown (the Layers type filter)
+read `item.value` in its behaviors while nothing bound `item`. Every port
+reached around the declared route to its own native state, and the
+engine's panel door, which runs the declared route, would have written
+`null` into the filter.
 
 ## Committing a value (input kinds)
 

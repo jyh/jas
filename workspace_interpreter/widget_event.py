@@ -7,7 +7,7 @@ written, in what order, and which declared behaviors run with what
 ``scripts/check_widget_event_contract.py`` holds the workspace YAML to the
 event table below and the document's copy of it.
 
-Two procedures, one per family of kinds:
+Three procedures, one per family of kinds:
 
 ``commit(widget, text, store, panel=...)`` — the INPUT kinds.
     1. Refuse a disabled widget, a missing value, and text the kind's parse
@@ -30,6 +30,12 @@ Two procedures, one per family of kinds:
     bind write is skipped (the shipped YAML flips its own field, and a
     prior write would flip it back). Otherwise the new value is written,
     with the same two-way bind.
+
+``pick(widget, item_value, event, store, panel=...)`` — the ITEM kinds
+    (``dropdown``). The pick names one declared item by its ``value``; an
+    ``action`` item runs its own action, any other item runs the behaviors
+    declared for ``event`` with ``item`` bound. Nothing is bound or written
+    by the pick itself.
 
 ``panel`` is the spec of the panel the widget belongs to, or ``None`` for a
 widget with no panel (a dialog). It is required, because forgetting it
@@ -67,11 +73,16 @@ INPUT_KINDS = frozenset({
     "select", "icon_select", "combo_box",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
+# A plain pick and an Alt pick of one declared item. They carry the ITEM,
+# not text: see `pick`.
+PICK_EVENTS = ("toggle", "alt_toggle")
+ITEM_KINDS = frozenset({"dropdown"})
 
 ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: COMMIT_EVENTS for kind in INPUT_KINDS},
     "text_input": COMMIT_EVENTS + TEXT_ENTRY_EVENTS,
     **{kind: PRESS_EVENTS for kind in BOOLEAN_KINDS},
+    **{kind: PICK_EVENTS for kind in ITEM_KINDS},
 }
 
 # The names a behavior's expressions can start from: the store's evaluation
@@ -88,6 +99,7 @@ BAD_VALUE = "BadValue"          # the kind's parse refused the text
 MISSING_VALUE = "MissingValue"  # a commit carried no text at all
 DISABLED = "Disabled"           # bind.disabled is true
 WRONG_KIND = "WrongKind"        # commit on a non-input kind, press on a non-boolean
+WRONG_EVENT = "WrongEvent"      # a pick whose event the item kinds do not raise
 
 
 @dataclass(frozen=True)
@@ -302,11 +314,13 @@ def _declared(widget: dict, events: tuple[str, ...]) -> list[dict]:
             if isinstance(b, dict) and b.get("event") in events]
 
 
-def _run_behaviors(behaviors: list[dict], value, store, run_kwargs: dict) -> int:
-    """Run ``behaviors`` in order; the count excludes a false ``condition``."""
+def _run_behaviors(behaviors: list[dict], value, store, run_kwargs: dict,
+                   scope: dict | None = None) -> int:
+    """Run ``behaviors`` in order; the count excludes a false ``condition``.
+    ``scope`` adds names beside ``event`` (a pick's ``item``)."""
     ran = 0
     for b in behaviors:
-        ctx = {"event": {"value": value}}
+        ctx = {**(scope or {}), "event": {"value": value}}
         condition = b.get("condition")
         if isinstance(condition, str) and not evaluate(
                 condition, store.eval_context(ctx)).to_bool():
@@ -374,3 +388,43 @@ def press(widget: dict, store: StateStore, *, panel: dict | None,
         return EventResult("inert", value=value)
     _write_bind(target, value, store, panel)
     return EventResult("committed", value=value, bind_written=True)
+
+
+def pick(widget: dict, item_value, event: str, store: StateStore, *,
+         panel: dict | None, **run_kwargs) -> EventResult:
+    """Pick one declared item of an ITEM kind (``dropdown``).
+
+    The pick names its item by the item's ``value``. Refuse a wrong kind, an
+    event the item kinds do not raise, a disabled widget, a pick that names
+    no item (``MissingValue``), and one naming an item the widget does not
+    declare (``BadValue``; a ``separator`` is not an item). An ``action``
+    item runs its own ``action`` and no behavior. Any other item runs every
+    behavior declared for ``event``, in order, with ``item`` bound to the
+    declared item and ``event.value`` to its value. A dropdown binds no
+    value, so nothing is written but what the behaviors write.
+    """
+    del panel  # no bind write: accepted for the procedures' common signature
+    if widget.get("type") not in ITEM_KINDS:
+        return EventResult("refused", reason=WRONG_KIND)
+    if event not in PICK_EVENTS:
+        return EventResult("refused", reason=WRONG_EVENT)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    if item_value is None:
+        return EventResult("refused", reason=MISSING_VALUE)
+    items = widget.get("items") if isinstance(widget.get("items"), list) else []
+    item = next((i for i in items
+                 if isinstance(i, dict) and i.get("value") == item_value), None)
+    if item is None:
+        return EventResult("refused", reason=BAD_VALUE)
+    if item.get("type") == "action":
+        action = item.get("action")
+        if not isinstance(action, str):
+            return EventResult("inert", value=item_value)
+        dispatch = {"action": action, "params": item.get("params") or {}}
+        run_effects([{"dispatch": dispatch}], {"item": item}, store, **run_kwargs)
+        return EventResult("committed", value=item_value)
+    ran = _run_behaviors(_declared(widget, (event,)), item_value, store,
+                         run_kwargs, scope={"item": item})
+    return EventResult("committed" if ran else "inert", value=item_value,
+                       behaviors_run=ran)
