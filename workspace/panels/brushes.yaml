@@ -317,7 +317,7 @@ content:
           icon: remove_brush_stroke
           style: { size: 18 }
           bind:
-            disabled: "not canvas_selection_has_brushed_stroke"
+            disabled: "not active_document.selection_has_brushed_stroke"
           behavior:
             - event: click
               effects:
@@ -334,7 +334,7 @@ content:
           icon: brush_options_for_selection
           style: { size: 18 }
           bind:
-            disabled: "not canvas_selection_is_single_brushed_stroke"
+            disabled: "not active_document.selection_is_single_brushed_stroke"
           behavior:
             - event: click
               action: open_brush_options

@@ -716,6 +716,50 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             store.set_element_field(path, attr, resolved)
         return None
 
+    # brush.delete_selected / brush.duplicate_selected: { library, slugs } —
+    # BRUSHES.md § Panel menu. Both operands are EXPRESSIONS (the actions pass
+    # panel.selected_library and panel.selected_brushes). Delete removes every
+    # brush whose slug is in `slugs` from that one library; duplicate inserts
+    # each copy right after its original, named "<name> copy" with the first
+    # free slug of <slug>_copy, <slug>_copy_2, ... . Either one then sets
+    # the panel's brush selection: empty after a delete, the copies after a
+    # duplicate. A missing library, or no slugs, is a no-op. Mirrors the
+    # jas_dioxus and JasSwift arms (W2b-18: before it this reference had none,
+    # and the actions passed `{}`, which both active ports' arms ignore).
+    for key in ("brush.delete_selected", "brush.duplicate_selected"):
+        if key in effect:
+            spec = effect[key] if isinstance(effect[key], dict) else {}
+            lib = _eval(spec.get("library"), store, ctx)
+            slugs = _eval(spec.get("slugs"), store, ctx)
+            if not isinstance(lib, str) or not lib or not isinstance(slugs, list) or not slugs:
+                return None
+            wanted = {s for s in slugs if isinstance(s, str)}
+            path = f"brush_libraries.{lib}.brushes"
+            brushes = store.get_data_path(path)
+            if not isinstance(brushes, list):
+                return None
+            if key == "brush.delete_selected":
+                store.set_data_path(path, [b for b in brushes
+                                           if not (isinstance(b, dict) and b.get("slug") in wanted)])
+                store.set_panel("brushes", "selected_brushes", [])
+                return None
+            taken = {b.get("slug") for b in brushes if isinstance(b, dict)}
+            out, copies = [], []
+            for b in brushes:
+                out.append(b)
+                if not (isinstance(b, dict) and b.get("slug") in wanted):
+                    continue
+                slug = b["slug"]
+                new, n = f"{slug}_copy", 2
+                while new in taken:
+                    new, n = f"{slug}_copy_{n}", n + 1
+                taken.add(new)
+                out.append({**b, "slug": new, "name": f"{b.get('name', 'Brush')} copy"})
+                copies.append(new)
+            store.set_data_path(path, out)
+            store.set_panel("brushes", "selected_brushes", copies)
+            return None
+
     # foreach: { source, as } do: [...] — PHASE3 §5.3
     # Evaluates source once; each iteration runs do: in a fresh scope
     # with `as:` bound to the item. Bindings inside do: do not leak

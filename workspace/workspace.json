@@ -5637,7 +5637,10 @@
       "category": "brushes",
       "effects": [
         {
-          "brush.duplicate_selected": {}
+          "brush.duplicate_selected": {
+            "library": "panel.selected_library",
+            "slugs": "panel.selected_brushes"
+          }
         }
       ]
     },
@@ -5646,7 +5649,10 @@
       "category": "brushes",
       "effects": [
         {
-          "brush.delete_selected": {}
+          "brush.delete_selected": {
+            "library": "panel.selected_library",
+            "slugs": "panel.selected_brushes"
+          }
         }
       ]
     },
@@ -8737,6 +8743,8 @@
         "layers_panel_selection_count": 0,
         "layers_panel_selection_is_container": false,
         "layers_panel_selection_has_group": false,
+        "selection_has_brushed_stroke": false,
+        "selection_is_single_brushed_stroke": false,
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": null,
@@ -8798,6 +8806,14 @@
         "layers_panel_selection_has_group": {
           "type": "bool",
           "description": "True when at least one selected layer item is a group"
+        },
+        "selection_has_brushed_stroke": {
+          "type": "bool",
+          "description": "True when at least one canvas-selected element carries a non-empty stroke_brush (a brush id). Only the selected elements themselves are read: a group is not searched for brushed descendants.\n"
+        },
+        "selection_is_single_brushed_stroke": {
+          "type": "bool",
+          "description": "True when exactly one element is canvas-selected and it carries a non-empty stroke_brush. Brush Options for Selection edits that one stroke's per-instance overrides, so a selection that also holds other elements does not qualify.\n"
         },
         "artboards_count": {
           "type": "number",
@@ -12092,7 +12108,7 @@
                   "size": 18
                 },
                 "bind": {
-                  "disabled": "not canvas_selection_has_brushed_stroke"
+                  "disabled": "not active_document.selection_has_brushed_stroke"
                 },
                 "behavior": [
                   {
@@ -12123,7 +12139,7 @@
                   "size": 18
                 },
                 "bind": {
-                  "disabled": "not canvas_selection_is_single_brushed_stroke"
+                  "disabled": "not active_document.selection_is_single_brushed_stroke"
                 },
                 "behavior": [
                   {
