@@ -91,7 +91,9 @@ working at all.
 
 ## What does not wait on the ruling
 
-The web app's library edits are inert under every arm, so making them run (a panel
-scope for Brushes, and the `brush.*` keys routed to the shared runner) is lane work
-whatever he rules.
-
+The web app's library edits were inert under every arm, so making them run was lane
+work whatever he rules. **It landed the same day:** #256 hands the `brush.*` library
+edits to the shared runner, and #257 gives a panel's actions that panel's scope and
+routes a Brushes tile's `select` there too. Delete, Duplicate and Sort Brush now run in
+the web app as they do in the engine and Swift. Undo for them is still this record's
+open question.
