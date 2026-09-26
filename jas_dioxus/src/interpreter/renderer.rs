@@ -546,7 +546,30 @@ pub(crate) fn cycle_element_visibility_at(
     new_doc
 }
 
+/// Fill `ctx.panel` with the keys of a panel's `scope` that it LACKS. A key the
+/// app scope already defines is never overridden, so passing a scope can only
+/// turn a null read into a value: an action that resolves today resolves the
+/// same way.
+fn merge_panel_scope(ctx: &mut serde_json::Value, scope: &serde_json::Value) {
+    let (Some(root), Some(scope)) = (ctx.as_object_mut(), scope.as_object()) else { return };
+    let panel = root.entry("panel").or_insert_with(|| serde_json::json!({}));
+    if let Some(panel) = panel.as_object_mut() {
+        for (k, v) in scope {
+            panel.entry(k.clone()).or_insert_with(|| v.clone());
+        }
+    }
+}
+
+/// `dispatch_action` with no panel scope: the app scope alone.
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
+    dispatch_action_in(action, params, None, st)
+}
+
+/// Dispatch `action`. An action dispatched FROM a panel passes that panel's
+/// scope, which fills the keys the app scope lacks ([`merge_panel_scope`]).
+/// Until 2026-09-26 every action evaluated in the app scope alone, so a
+/// panel's own keys (`panel.selected_library` for Brushes) read as null.
+pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, serde_json::Value>, panel_scope: Option<&serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     // Recorder seam hook (Arc 1 S2, dormant unless armed): records
     // depth-0 dispatches on the action seam / segments an open gesture
     // case. RAII so every early return below unwinds the depth.
@@ -723,7 +746,10 @@ pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, ser
                         }
                     }
                 }
-                let eval_ctx = build_appstate_ctx(&merged, st);
+                let mut eval_ctx = build_appstate_ctx(&merged, st);
+                if let Some(scope) = panel_scope {
+                    merge_panel_scope(&mut eval_ctx, scope);
+                }
                 // OP_LOG.md §9: name the transaction with the dispatched action
                 // verb so every menu/keyboard/panel-driven undoable txn is
                 // legible (closes the name=None hole on the primary action
@@ -3097,7 +3123,13 @@ fn run_yaml_effect(
     // behaviors. The scope changes (panel.scope_field) reset the
     // selection when the user clicks into a different scope.
     if let Some(spec) = eff.get("select").and_then(|v| v.as_object()) {
-        apply_select_effect(spec, eval_ctx, st);
+        // A Brushes tile selects in the Brushes panel's generic state, by the
+        // shared runner's `select` (which the engine also hosts).
+        if spec.get("list").and_then(|v| v.as_str()) == Some("selected_brushes") {
+            run_in_brushes_store(eff, eval_ctx, st);
+        } else {
+            apply_select_effect(spec, eval_ctx, st);
+        }
         return deferred;
     }
 
@@ -3217,35 +3249,12 @@ fn run_yaml_effect(
         deferred.push(resolved);
     }
 
-    // Brush-library edits (BRUSH_LIBRARY_UNDO.md): the shared runner owns
-    // them, on a StateStore. This app keeps the libraries in
-    // `st.brush_libraries` and the Brushes panel in the generic `panel_state`,
-    // so both are carried into a store, the effect runs there, and both are
-    // carried back. Until 2026-09-26 these keys were dropped here, and Delete,
-    // Duplicate and Sort Brush did nothing in this app.
+    // Brush-library edits (BRUSH_LIBRARY_UNDO.md) run in the shared runner.
     const BRUSH_LIBRARY_KEYS: [&str; 4] = [
         "brush.delete_selected", "brush.duplicate_selected", "brush.sort_by_name", "brush.select_unused",
     ];
-    let brush_key = eff.as_object()
-        .and_then(|m| m.keys().find(|k| BRUSH_LIBRARY_KEYS.contains(&k.as_str())).cloned());
-    if brush_key.is_some() {
-        const BRUSHES: &str = "brushes_panel_content";
-        let mut store = super::state_store::StateStore::new();
-        store.set_data_path("brush_libraries", st.brush_libraries.clone());
-        let scope: std::collections::HashMap<String, serde_json::Value> = st.panel_state
-            .get(BRUSHES).map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default();
-        store.init_panel(BRUSHES, scope);
-        let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
-        super::effects::run_effects(
-            std::slice::from_ref(eff), &*eval_ctx, &mut store, model, None, None, None);
-        st.brush_libraries = store.get_data_path("brush_libraries");
-        if let Some(out) = store.panel_scope(BRUSHES) {
-            let entry = st.panel_state.entry(BRUSHES.to_string()).or_default();
-            for (k, v) in out {
-                entry.insert(k.clone(), v.clone());
-            }
-        }
+    if eff.as_object().is_some_and(|m| m.keys().any(|k| BRUSH_LIBRARY_KEYS.contains(&k.as_str()))) {
+        run_in_brushes_store(eff, eval_ctx, st);
         return deferred;
     }
 
@@ -3283,6 +3292,37 @@ fn run_yaml_effect(
     }
 
     deferred
+}
+
+/// Run one effect in the shared runner on a `StateStore` that holds this app's
+/// brush libraries and the Brushes panel's generic `panel_state`, then carry
+/// both back. This app keeps the libraries in `st.brush_libraries` and the
+/// panel in `panel_state`, so both are carried in and out around the run.
+/// Until 2026-09-26 the `brush.*` library edits and the Brushes tile
+/// `select` were dropped in this app (BRUSH_LIBRARY_UNDO.md).
+fn run_in_brushes_store(
+    eff: &serde_json::Value,
+    eval_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) {
+    const BRUSHES: &str = "brushes_panel_content";
+    let mut store = super::state_store::StateStore::new();
+    store.set_data_path("brush_libraries", st.brush_libraries.clone());
+    let scope: std::collections::HashMap<String, serde_json::Value> = st.panel_state
+        .get(BRUSHES).map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+        .unwrap_or_default();
+    store.init_panel(BRUSHES, scope);
+    // The shared `select` writes the ACTIVE panel.
+    store.set_active_panel(Some(BRUSHES));
+    let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+    super::effects::run_effects(std::slice::from_ref(eff), eval_ctx, &mut store, model, None, None, None);
+    st.brush_libraries = store.get_data_path("brush_libraries");
+    if let Some(out) = store.panel_scope(BRUSHES) {
+        let entry = st.panel_state.entry(BRUSHES.to_string()).or_default();
+        for (k, v) in out {
+            entry.insert(k.clone(), v.clone());
+        }
+    }
 }
 
 /// Resolve a doc.* effect's `element:` argument to an Element.
@@ -3727,7 +3767,7 @@ fn build_mouse_event_handler(
                         if action_name == "dismiss_dialog" {
                             deferred_dialog_effects.push(serde_json::json!({"close_dialog": null}));
                         } else {
-                            let action_deferred = dispatch_action(action_name, params, &mut st);
+                            let action_deferred = dispatch_action_in(action_name, params, ctx_snap.get("panel"), &mut st);
                             deferred_dialog_effects.extend(action_deferred);
                         }
                     }
@@ -14186,6 +14226,60 @@ mod tests {
         let selected = brushes_panel_key(&st, "selected_brushes");
         let copy_slug = st.brush_libraries["lib"]["brushes"][1]["slug"].clone();
         assert_eq!(selected, serde_json::json!([copy_slug]), "the copies become the selection");
+    }
+
+    // ── A panel's actions see that panel's scope (BRUSH_LIBRARY_UNDO.md) ──
+    //
+    // An action dispatched from a panel evaluated in `build_appstate_ctx`,
+    // which carries no panel scope, so `panel.selected_library` was null for
+    // every Brushes action. The panel's scope now fills the keys the app scope
+    // lacks, and only those: a key the app scope defines is never overridden.
+
+    #[test]
+    fn a_brush_tile_click_selects_it_in_the_web_app() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b"]);
+        let eff = serde_json::json!({"select": {"target": "brush.slug", "list": "selected_brushes",
+            "scope": "selected_library", "scope_value": "lib.id", "mode": "auto"}});
+        let ctx = serde_json::json!({"brush": {"slug": "b"}, "lib": {"id": "lib"}, "event": {}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &ctx, &mut st);
+        assert_eq!(brushes_panel_key(&st, "selected_library"), serde_json::json!("lib"));
+        assert_eq!(brushes_panel_key(&st, "selected_brushes"), serde_json::json!(["b"]));
+    }
+
+    #[test]
+    fn an_action_dispatched_with_a_panel_scope_reads_it() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b", "c"]);
+        let scope = serde_json::json!({"selected_library": "lib", "selected_brushes": ["a", "c"]});
+        super::dispatch_action_in("delete_brush", &serde_json::Map::new(), Some(&scope), &mut st);
+        assert_eq!(brush_names(&st), vec!["b"]);
+    }
+
+    #[test]
+    fn a_panel_scope_fills_only_the_keys_the_app_scope_lacks() {
+        let mut ctx = serde_json::json!({"panel": {"selected_symbol": "star"}});
+        super::merge_panel_scope(&mut ctx, &serde_json::json!({"selected_symbol": "moon", "selected_library": "lib"}));
+        assert_eq!(ctx["panel"]["selected_symbol"], "star", "the app scope wins");
+        assert_eq!(ctx["panel"]["selected_library"], "lib", "a missing key is filled");
+        let mut none = serde_json::json!({});
+        super::merge_panel_scope(&mut none, &serde_json::json!({"k": 1}));
+        assert_eq!(none["panel"]["k"], 1, "a ctx with no panel gains one");
+    }
+
+    #[test]
+    fn delete_brush_from_the_brushes_menu_deletes_the_selection() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b", "c"]);
+        let sel = st.panel_state.entry("brushes_panel_content".into()).or_default();
+        sel.insert("selected_library".into(), serde_json::json!("lib"));
+        sel.insert("selected_brushes".into(), serde_json::json!(["b"]));
+        let addr = crate::workspace::workspace::PanelAddr {
+            group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        crate::panels::brushes_panel::dispatch("delete_brush", addr, &mut st);
+        assert_eq!(brush_names(&st), vec!["a", "c"]);
     }
 
     #[test]
