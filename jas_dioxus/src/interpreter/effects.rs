@@ -342,6 +342,46 @@ pub(crate) fn eval_expr(expr: &str, store: &StateStore, ctx: &serde_json::Value)
     eval(&expr, &eval_ctx)
 }
 
+/// The `select` effect's body (see its arm in [`run_one`]'s chain). Row for row
+/// with the reference's `SELECT_ROWS`.
+fn apply_select(spec: &serde_json::Map<String, serde_json::Value>, ctx: &serde_json::Value,
+                store: &mut StateStore) {
+    let Some(panel) = store.active_panel_id().map(|s| s.to_string()) else { return };
+    let str_of = |k: &str| spec.get(k).and_then(|v| v.as_str()).unwrap_or("");
+    let list_field = str_of("list");
+    if list_field.is_empty() {
+        return;
+    }
+    let scope_field = str_of("scope");
+    let target = value_to_json(&eval_expr(str_of("target"), store, ctx));
+    let scope_value = value_to_json(&eval_expr(str_of("scope_value"), store, ctx));
+    let flag = |k: &str| ctx.get("event").and_then(|e| e.get(k)).and_then(|v| v.as_bool()).unwrap_or(false);
+    let mode = match str_of("mode") {
+        "" | "auto" if flag("shift") => "extend",
+        "" | "auto" if flag("ctrl") || flag("meta") => "toggle",
+        "" | "auto" => "single",
+        m => m,
+    };
+    if !scope_field.is_empty() && store.get_panel(&panel, scope_field) != &scope_value {
+        store.set_panel(&panel, scope_field, scope_value);
+        store.set_panel(&panel, list_field, serde_json::json!([target]));
+        return;
+    }
+    let cur: Vec<serde_json::Value> = store.get_panel(&panel, list_field).as_array().cloned().unwrap_or_default();
+    let new_list: Vec<serde_json::Value> = match mode {
+        "toggle" => match cur.iter().position(|v| v == &target) {
+            Some(_) => cur.into_iter().filter(|v| v != &target).collect(),
+            None => cur.into_iter().chain(std::iter::once(target)).collect(),
+        },
+        "extend" => match (cur.first().and_then(|a| a.as_i64()), target.as_i64()) {
+            (Some(a), Some(t)) => (a.min(t)..=a.max(t)).map(|i| serde_json::json!(i)).collect(),
+            _ => vec![target],
+        },
+        _ => vec![target],
+    };
+    store.set_panel(&panel, list_field, serde_json::Value::Array(new_list));
+}
+
 pub fn value_to_json(v: &Value) -> serde_json::Value {
     match v {
         Value::Null => serde_json::Value::Null,
@@ -673,6 +713,18 @@ fn run_one<'h>(
                 store.list_toggle(&active, parts[1], value_to_json(&value));
             }
         }
+        return;
+    }
+
+    // select: { target, list, scope, scope_value, mode } — tile selection
+    // (the Swatches library tiles), on the ACTIVE panel's store scope, as the
+    // reference's arm has it. A scope other than the panel's current one
+    // restarts the list at [target]; otherwise mode `auto` reads event.shift
+    // (extend an int range from the list's FIRST entry), then event.ctrl /
+    // event.meta (toggle), else single. The web renderer's own arm writes
+    // typed AppState and is a different function.
+    if let Some(serde_json::Value::Object(spec)) = effect.get("select") {
+        apply_select(spec, ctx, store);
         return;
     }
 
@@ -13247,6 +13299,80 @@ mod tests {
             let (got, unhandled) = toggled(initial, value, active, target, ctx);
             assert_eq!(got, want, "{name}");
             assert_eq!(unhandled, vec![], "{name}: reported {unhandled:?}");
+        }
+    }
+
+    /// `select`, row for row with the reference's `SELECT_ROWS`
+    /// (`test_effects.py`, `TestSelectEffect`). It was the engine door's
+    /// refusal on a library swatch's tap (`UnknownEffect:select`).
+    #[test]
+    fn select_matches_the_reference_row_for_row() {
+        use serde_json::json;
+        type Row = (&'static str, Option<serde_json::Value>, Option<serde_json::Value>, serde_json::Value,
+                    serde_json::Value, bool, serde_json::Value, serde_json::Value);
+        let rows: Vec<Row> = vec![
+            ("single: a plain click replaces the list", Some(json!([1, 2])), Some(json!("a")), json!({}), json!({}),
+             true, json!([4]), json!("a")),
+            ("single: an empty list gets the target", Some(json!([])), Some(json!("a")), json!({}), json!({}), true,
+             json!([4]), json!("a")),
+            ("a NEW scope sets it and restarts the list, even under ctrl", Some(json!([1, 2])), Some(json!("b")),
+             json!({}), json!({"ctrl": true}), true, json!([4]), json!("a")),
+            ("a missing scope key is a new scope", Some(json!([1, 2])), None, json!({}), json!({"shift": true}),
+             true, json!([4]), json!("a")),
+            ("ctrl: an absent target is appended", Some(json!([1, 2])), Some(json!("a")), json!({}),
+             json!({"ctrl": true}), true, json!([1, 2, 4]), json!("a")),
+            ("ctrl: a present target is removed, order kept", Some(json!([4, 1, 2])), Some(json!("a")), json!({}),
+             json!({"ctrl": true}), true, json!([1, 2]), json!("a")),
+            // Every occurrence, unlike `list_toggle`, which removes only the first.
+            ("ctrl: a present target is removed EVERY time it occurs", Some(json!([4, 1, 4])), Some(json!("a")),
+             json!({}), json!({"ctrl": true}), true, json!([1]), json!("a")),
+            ("meta toggles as ctrl does", Some(json!([1, 4])), Some(json!("a")), json!({}), json!({"meta": true}),
+             true, json!([1]), json!("a")),
+            ("shift: an int range from the FIRST entry up", Some(json!([2, 9])), Some(json!("a")), json!({}),
+             json!({"shift": true}), true, json!([2, 3, 4]), json!("a")),
+            ("shift: an int range from the first entry DOWN", Some(json!([6])), Some(json!("a")), json!({}),
+             json!({"shift": true}), true, json!([4, 5, 6]), json!("a")),
+            ("shift beats ctrl", Some(json!([2])), Some(json!("a")), json!({}), json!({"shift": true, "ctrl": true}),
+             true, json!([2, 3, 4]), json!("a")),
+            ("shift with no anchor is a single select", Some(json!([])), Some(json!("a")), json!({}),
+             json!({"shift": true}), true, json!([4]), json!("a")),
+            ("an explicit mode ignores the modifiers", Some(json!([1])), Some(json!("a")), json!({"mode": "toggle"}),
+             json!({"shift": true}), true, json!([1, 4]), json!("a")),
+            ("an unknown mode is a single select", Some(json!([1])), Some(json!("a")), json!({"mode": "sideways"}),
+             json!({}), true, json!([4]), json!("a")),
+            ("a non-list value is read as empty", Some(json!("x")), Some(json!("a")), json!({}),
+             json!({"ctrl": true}), true, json!([4]), json!("a")),
+            ("no scope key: the scope is never read or written", Some(json!([1])), Some(json!("zz")),
+             json!({"scope": ""}), json!({"ctrl": true}), true, json!([1, 4]), json!("zz")),
+            ("no list key: a no-op", Some(json!([1])), Some(json!("a")), json!({"list": ""}), json!({}), true,
+             json!([1]), json!("a")),
+            ("no active panel: a no-op", Some(json!([1])), Some(json!("a")), json!({}), json!({}), false,
+             json!([1]), json!("a")),
+        ];
+        assert_eq!(rows.len(), 18, "the reference's SELECT_ROWS has 18 rows");
+        for (name, initial, scope, extra, event, active, want_list, want_scope) in rows {
+            let mut store = StateStore::new();
+            let mut defaults = std::collections::HashMap::new();
+            if let Some(v) = initial {
+                defaults.insert("sel".to_string(), v);
+            }
+            if let Some(v) = scope {
+                defaults.insert("lib".to_string(), v);
+            }
+            store.init_panel("swatches", defaults);
+            if active {
+                store.set_active_panel(Some("swatches"));
+            }
+            let mut spec = json!({"target": "param.t", "list": "sel", "scope": "lib", "scope_value": "param.s"});
+            for (k, v) in extra.as_object().unwrap() {
+                spec[k] = v.clone();
+            }
+            let ctx = json!({"param": {"t": 4, "s": "a"}, "event": event});
+            let report = run_effects(&[json!({"select": spec})], &ctx, &mut store, None, None, None, None);
+            assert_eq!(report.unhandled, vec![], "{name}: reported {:?}", report.unhandled);
+            assert_eq!(store.get_panel("swatches", "sel"), &want_list, "{name}");
+            let got_scope = store.get_panel("swatches", "lib");
+            assert_eq!(got_scope, &want_scope, "{name}");
         }
     }
 

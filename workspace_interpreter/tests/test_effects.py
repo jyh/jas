@@ -478,6 +478,65 @@ class TestListToggleEffect:
         assert self._toggle(["path"], '"rect"', target="state.type_filter") == ["path"]
 
 
+# `select: { target, list, scope, scope_value, mode }` -- the tile-selection
+# effect (Swatches library tiles). It had NO test in this reference until the
+# engine door needed a library swatch's tap to run, so these rows are its
+# spec, and the Rust and Swift runners replay them row for row. Each row has
+# its own store. Columns: name, initial list (None = key absent), initial
+# scope (None = key absent), the spec's extra keys, the event modifiers,
+# whether the panel is active, the list after, the scope after.
+_SEL = {"target": "param.t", "list": "sel", "scope": "lib", "scope_value": "param.s"}
+SELECT_ROWS = [
+    ("single: a plain click replaces the list", [1, 2], "a", {}, {}, True, [4], "a"),
+    ("single: an empty list gets the target", [], "a", {}, {}, True, [4], "a"),
+    ("a NEW scope sets it and restarts the list, even under ctrl", [1, 2], "b", {}, {"ctrl": True}, True,
+     [4], "a"),
+    ("a missing scope key is a new scope", [1, 2], None, {}, {"shift": True}, True, [4], "a"),
+    ("ctrl: an absent target is appended", [1, 2], "a", {}, {"ctrl": True}, True, [1, 2, 4], "a"),
+    ("ctrl: a present target is removed, order kept", [4, 1, 2], "a", {}, {"ctrl": True}, True, [1, 2], "a"),
+    # Every occurrence, unlike `list_toggle`, which removes only the first.
+    ("ctrl: a present target is removed EVERY time it occurs", [4, 1, 4], "a", {}, {"ctrl": True}, True,
+     [1], "a"),
+    ("meta toggles as ctrl does", [1, 4], "a", {}, {"meta": True}, True, [1], "a"),
+    ("shift: an int range from the FIRST entry up", [2, 9], "a", {}, {"shift": True}, True, [2, 3, 4], "a"),
+    ("shift: an int range from the first entry DOWN", [6], "a", {}, {"shift": True}, True, [4, 5, 6], "a"),
+    ("shift beats ctrl", [2], "a", {}, {"shift": True, "ctrl": True}, True, [2, 3, 4], "a"),
+    ("shift with no anchor is a single select", [], "a", {}, {"shift": True}, True, [4], "a"),
+    ("an explicit mode ignores the modifiers", [1], "a", {"mode": "toggle"}, {"shift": True}, True, [1, 4], "a"),
+    ("an unknown mode is a single select", [1], "a", {"mode": "sideways"}, {}, True, [4], "a"),
+    ("a non-list value is read as empty", "x", "a", {}, {"ctrl": True}, True, [4], "a"),
+    ("no scope key: the scope is never read or written", [1], "zz", {"scope": ""}, {"ctrl": True}, True,
+     [1, 4], "zz"),
+    ("no list key: a no-op", [1], "a", {"list": ""}, {}, True, [1], "a"),
+    ("no active panel: a no-op", [1], "a", {}, {}, False, [1], "a"),
+]
+
+
+class TestSelectEffect:
+    @pytest.mark.parametrize(
+        "name, initial, scope, extra, event, active, want_list, want_scope", SELECT_ROWS,
+        ids=[r[0] for r in SELECT_ROWS])
+    def test_row(self, name, initial, scope, extra, event, active, want_list, want_scope):
+        store = StateStore()
+        defaults = {}
+        if initial is not None:
+            defaults["sel"] = initial
+        if scope is not None:
+            defaults["lib"] = scope
+        store.init_panel("swatches", defaults)
+        if active:
+            store.set_active_panel("swatches")
+        run_effects([{"select": {**_SEL, **extra}}], {"param": {"t": 4, "s": "a"}, "event": event}, store)
+        assert store.get_panel("swatches", "sel") == want_list
+        assert store.get_panel("swatches", "lib") == want_scope
+
+    def test_the_rows_are_pairwise_distinct_cases(self):
+        # A table's power is in its probes: two rows with the same inputs
+        # would be one row counted twice.
+        keys = [repr(r[1:6]) for r in SELECT_ROWS]
+        assert len(set(keys)) == len(keys)
+
+
 class TestListPopEffect:
     def test_pop_removes_last_element(self):
         store = StateStore()
