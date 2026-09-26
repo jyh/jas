@@ -50,6 +50,20 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// Pick a dropdown item by its `value`: `toggle`, or with Alt held
+    /// `alt_toggle` (WIDGET_EVENTS.md, "Picking a dropdown item").
+    @discardableResult
+    func pick(_ widget: [String: Any], value: String, alt: Bool) -> WidgetEvent.Result {
+        run { host, panel, ws in
+            WidgetEvent.pick(widget: widget, itemValue: value,
+                             event: alt ? "alt_toggle" : "toggle",
+                             store: model.stateStore, panel: panel,
+                             actions: ws?.actions(), dialogs: ws?.dialogs(),
+                             platformEffects: alignPlatformEffects(model: model),
+                             host: host)
+        }
+    }
+
     private func run(
         _ event: (WidgetEvent.Host, [String: Any]?, WorkspaceData?) -> WidgetEvent.Result
     ) -> WidgetEvent.Result {
