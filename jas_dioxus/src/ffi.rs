@@ -2487,14 +2487,18 @@ mod tests {
                     if b["event"].as_str().unwrap_or("click") != "click" {
                         continue;
                     }
-                    let keys: Vec<String> = b["effects"].as_array().into_iter().flatten()
+                    // A render key is written by `set:` or by `swap:` (Swap
+                    // Arrowheads, whose batch the engine refused until it
+                    // hosted `swap_panel_state`).
+                    let effects = || b["effects"].as_array().into_iter().flatten();
+                    let keys: Vec<String> = effects()
                         .filter_map(|eff| eff["set"].as_object())
                         .flat_map(|m| m.keys().cloned())
+                        .chain(effects().filter_map(|eff| eff["swap"].as_array())
+                            .flat_map(|a| a.iter().filter_map(|k| k.as_str().map(String::from))))
                         .filter(|k| is_render_key(k))
                         .collect();
-                    let refused = b["effects"].as_array().into_iter().flatten()
-                        .any(|eff| eff.get("swap_panel_state").is_some());
-                    if !keys.is_empty() && !refused {
+                    if !keys.is_empty() {
                         out.push((id.to_string(), keys));
                     }
                 }
@@ -2507,6 +2511,8 @@ mod tests {
         }
         walk(&ws.panel(STROKE).unwrap()["content"], &mut clicks);
         assert!(clicks.len() >= 10, "the census read {} clicks: {clicks:?}", clicks.len());
+        assert!(clicks.iter().any(|(w, _)| w == "stk_swap_arrowheads"),
+                "the `swap:` writes are not in the census: {clicks:?}");
         let mut changed = 0;
         for (widget, keys) in &clicks {
             let e = stroked_engine();
@@ -3166,19 +3172,23 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// **Q5.** A behavior that reaches an effect the engine cannot run is
-    /// refused by name, and NO effect of its batch ran.
-    ///
-    /// ⚠️ Until W2b-13 this arm used the Boolean panel's Union button, and it
-    /// also showed that the batch's `snapshot` and `set` never ran. The engine
-    /// hosts the Boolean keys now, so a real unhosted widget is Stroke's
-    /// `stk_swap_arrowheads`: `swap_panel_state` (unhosted) comes BEFORE two
-    /// `swap` writes to globals the engine store holds. The globals are seeded
-    /// DIFFERENT from each other, so a swap that ran would show. When
-    /// `swap_panel_state` is hosted, this arm must move again. The modifier
-    /// routing it also carried is `a_behavior_condition_routes_on_the_event_modifiers`.
+    /// **Q5, and where its halves live now.** Q5 says a behavior that reaches an
+    /// effect the engine cannot run is refused by name, and NO effect of its
+    /// batch ran. This arm carried both halves on Stroke's `stk_swap_arrowheads`
+    /// until the engine hosted `swap_panel_state`; it now pins that widget
+    /// RUNNING through the door. A census of every widget event in every panel
+    /// at this node found no other real batch with a visible write before a
+    /// refused effect, so the halves moved:
+    /// * "nothing of the batch ran": the planted batches in `panel_behavior`
+    ///   (`a_refused_batch_that_edits_first_leaves_the_model_untouched`,
+    ///   `..._strokes_first_...`), which put a document edit and a stroke write
+    ///   BEFORE the refusal and so are stricter than any real widget;
+    /// * "refused by name at the door": the `Dialog:` and `Logged:` arms
+    ///   (`bp_new_brush_btn`, `bp_libraries_menu_btn`).
+    /// The census's remaining real `UnknownEffect` is the Layers filter
+    /// dropdown's `list_toggle`, which has no batch in front of it.
     #[test]
-    fn panel_behavior_refuses_an_unhosted_effect_before_any_effect_runs() {
+    fn the_swap_arrowheads_widget_runs_through_the_door() {
         use crate::panel_behavior::test_fixture::misaligned;
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0, 1]));
@@ -3188,22 +3198,27 @@ mod tests {
             let mut st = eng.store.borrow_mut();
             st.set("stroke_start_arrowhead", serde_json::json!("simple_arrow"));
             st.set("stroke_end_arrowhead", serde_json::json!("none"));
+            st.set_panel("stroke_panel_content", "start_arrowhead", serde_json::json!("simple_arrow"));
+            st.set_panel("stroke_panel_content", "end_arrowhead", serde_json::json!("none"));
         }
-        let before = doc_json(e);
-        let store_before = engine_of(e).store.borrow().eval_context();
-        let (reply, err) = behave(e, "stroke_panel_content",
-                                  r#"{"widget":"stk_swap_arrowheads","event":"click"}"#);
-        assert_eq!(reply, "");
-        assert_eq!(err, refusal("PlatformEffect", "UnknownEffect:swap_panel_state"));
-        assert_eq!(doc_json(e), before);
-        engine_of(e).with_model(|m| {
-            assert!(!m.in_txn(), "the refused batch left a transaction open");
-            assert!(!m.can_undo());
-        });
-        assert_eq!(engine_of(e).store.borrow().eval_context(), store_before,
-                   "a `swap` of the refused batch ran on the live store");
-        assert_eq!(engine_of(e).store.borrow().get("stroke_end_arrowhead"),
-                   &serde_json::json!("none"), "the control: the seeded values differ");
+        let (_reply, err) = behave(e, "stroke_panel_content",
+                                   r#"{"widget":"stk_swap_arrowheads","event":"click"}"#);
+        assert_eq!(err, "", "the door refused the swap");
+        // NOT pinned, deliberately: the batch's `swap:` of the arrowhead
+        // globals is a render-key write, which the engine applies to the
+        // selection, and on these UNSTROKED rects that creates a 1pt stroke.
+        // The refusal hid it (nothing of the batch ever ran here). Whether an
+        // arrowhead swap should stroke an unstroked element is the stroke
+        // apply law's question, not this effect's.
+        let eng = engine_of(e);
+        let st = eng.store.borrow();
+        assert_eq!(st.get("stroke_start_arrowhead"), &serde_json::json!("none"), "the globals swapped");
+        assert_eq!(st.get("stroke_end_arrowhead"), &serde_json::json!("simple_arrow"));
+        assert_eq!(st.get_panel("stroke_panel_content", "start_arrowhead"), &serde_json::json!("none"),
+                   "the panel's own values swapped");
+        assert_eq!(st.get_panel("stroke_panel_content", "end_arrowhead"), &serde_json::json!("simple_arrow"));
+        drop(st);
+        drop(eng);
         unsafe { jas_engine_free(e) };
     }
 
