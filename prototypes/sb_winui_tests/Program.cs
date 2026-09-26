@@ -487,10 +487,17 @@ static class Program
         Eq("swatch: #rrggbb is its three channels", "102,64,64", ShowRgb(PanelWire.SwatchColor("#664040")));
         Eq("swatch: either case", "255,255,255", ShowRgb(PanelWire.SwatchColor("#FFfFff")));
         Eq("swatch: black is a colour, not a failure", "0,0,0", ShowRgb(PanelWire.SwatchColor("#000000")));
-        foreach (var bad in new[] { "664040", "#66404", "#6640400", "#gg0000", "", "null", " #664040" })
-        {
-            Eq($"swatch: '{bad}' is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(bad)));
-        }
+        // One literal case per malformed string: check_title_oracle_ran sizes
+        // cases by reading their names, and a name built in a loop cannot be
+        // sized (#235 and this node both tripped it).
+        Eq("swatch: no # is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("664040")));
+        Eq("swatch: five digits is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("#66404")));
+        Eq("swatch: seven digits is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("#6640400")));
+        Eq("swatch: a non-hex digit is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("#gg0000")));
+        Eq("swatch: empty is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("")));
+        Eq("swatch: the word null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("null")));
+        Eq("swatch: a leading space is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(" #664040")));
+        Eq("swatch: a space inside, which HexNumber would accept is no colour", "(null)", ShowRgb(PanelWire.SwatchColor("# 12345")));
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
