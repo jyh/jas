@@ -168,10 +168,27 @@ fn flags_of(node: &Value) -> Map<String, Value> {
 /// shipped input can witness. `a_non_pt_unit_is_converted_by_the_core...` is
 /// the arm that does.
 ///
+/// A `brush_preview` is the same case with no bind at all: every port draws it
+/// from the enclosing tile's `brush` loop variable at its view layer, which the
+/// shell does not have. So the core sends the drawing:
+/// `preview.svg` ([`crate::brush_preview::preview_svg`], painted in
+/// `currentColor`) and `preview.viewbox`, the pair a shell already draws an
+/// icon from. A brush type with no preview sends neither, and the tile stays an
+/// empty box, as it does in the web port.
+///
 /// Empty for every other kind: a shell reads `display` first and must never
 /// find a stale or invented string shadowing a resolved value.
-fn display_of(node: &Value, values: &Map<String, Value>) -> Map<String, Value> {
+fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<String, Value> {
     let mut out = Map::new();
+    if node.get("type").and_then(Value::as_str) == Some("brush_preview") {
+        let brush = ctx.get("brush").unwrap_or(&Value::Null);
+        if let Some(svg) = crate::brush_preview::preview_svg(brush) {
+            out.insert("preview.svg".to_string(), Value::String(svg));
+            out.insert("preview.viewbox".to_string(),
+                       Value::String(crate::brush_preview::VIEWBOX.to_string()));
+        }
+        return out;
+    }
     if node.get("type").and_then(Value::as_str) != Some("length_input") {
         return out;
     }
@@ -298,7 +315,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
     }
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
-    let display = display_of(&item.node, &values);
+    let display = display_of(&item.node, &values, &item.ctx);
     let options = options_of(&item.node, &values, &item.path, withheld);
     json!({
         "path": item.path,

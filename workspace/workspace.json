@@ -12028,6 +12028,10 @@
                       {
                         "type": "brush_preview",
                         "summary": "Preview of {{brush.name}}",
+                        "style": {
+                          "width": 38,
+                          "height": 38
+                        },
                         "description": "Visual preview of the brush tip / stroke, read from the enclosing tile's `brush` loop variable.\n"
                       }
                     ],

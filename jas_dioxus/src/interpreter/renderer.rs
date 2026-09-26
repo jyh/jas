@@ -9422,144 +9422,30 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
 }
 
 /// Render a brush_preview widget: a small preview of the brush tip / stroke,
-/// read from the enclosing tile's `brush` loop variable. Calligraphic draws
-/// a nib ellipse — `size` scales the display diameter, `roundness` flattens
-/// the minor axis, `angle` rotates it. Other brush types fall back to an
-/// empty box until their stroke-sample preview lands. Manual-floor GUI
-/// (the widget_tree gate only pins the `brush_preview` kind, not the pixels).
+/// read from the enclosing tile's `brush` loop variable. The drawing is
+/// [`crate::brush_preview::preview_svg`], the same markup the panel plan sends
+/// a native shell; it paints in `currentColor`, which this view sets to the
+/// theme's text colour. A brush type with no preview is an empty box.
+/// Manual-floor GUI (the widget_tree gate only pins the `brush_preview` kind,
+/// not the pixels).
 fn render_brush_preview(el: &serde_json::Value, ctx: &serde_json::Value, _rctx: &RenderCtx) -> Element {
     let id = get_id(el);
-    let brush = ctx.get("brush");
-    let btype = brush.and_then(|b| b.get("type")).and_then(|v| v.as_str()).unwrap_or("");
-    if btype == "calligraphic" {
-        let size = brush.and_then(|b| b.get("size")).and_then(|v| v.as_f64()).unwrap_or(5.0);
-        let roundness = brush.and_then(|b| b.get("roundness")).and_then(|v| v.as_f64()).unwrap_or(100.0);
-        let angle = brush.and_then(|b| b.get("angle")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-        // Map pt size -> display px so the nib fills the square tile;
-        // roundness flattens the minor axis (100 = circle), angle rotates it.
-        let major = (size * 2.8).clamp(4.0, 30.0);
-        let minor = (major * (roundness / 100.0)).clamp(1.5, major);
-        let rx = major / 2.0;
-        let ry = minor / 2.0;
-        let svg = format!(
-            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"><ellipse cx="20" cy="20" rx="{rx}" ry="{ry}" fill="var(--jas-text,#ccc)" transform="rotate({angle} 20 20)"/></svg>"#
-        );
-        rsx! {
-            div {
-                id: "{id}",
-                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
-                dangerous_inner_html: "{svg}",
-            }
-        }
-    } else if btype == "art" {
-        // Art: warp the artwork along a short horizontal path across the
-        // tile — a stroke sample. Reuses art_along_path (so the thumbnail
-        // also exercises the canvas algorithm). Fixed preview ribbon height.
-        use crate::geometry::element::PathCommand;
-        let mut svg = String::new();
-        if let Some(mut art) = crate::canvas::render::art_from_json(brush.unwrap_or(&serde_json::Value::Null), 14.0) {
-            art.scale = 100.0; // fixed preview height regardless of the brush's scale
-            let cmds = vec![
-                PathCommand::MoveTo { x: 5.0, y: 20.0 },
-                PathCommand::LineTo { x: 35.0, y: 20.0 },
-            ];
-            let polys = crate::algorithms::art_along_path::art_along_path(&cmds, &art);
-            for poly in &polys {
-                if poly.len() < 3 {
-                    continue;
+    let brush = ctx.get("brush").unwrap_or(&serde_json::Value::Null);
+    match crate::brush_preview::preview_svg(brush) {
+        Some(inner) => {
+            let svg = format!(
+                r#"<svg viewBox="{}" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{inner}</svg>"#,
+                crate::brush_preview::VIEWBOX
+            );
+            rsx! {
+                div {
+                    id: "{id}",
+                    style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;color:var(--jas-text,#ccc);",
+                    dangerous_inner_html: "{svg}",
                 }
-                let pts: String = poly
-                    .iter()
-                    .map(|(x, y)| format!("{:.2},{:.2}", x, y))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                svg.push_str(&format!(
-                    r#"<polygon points="{pts}" fill="var(--jas-text,#ccc)"/>"#
-                ));
             }
         }
-        let svg = format!(
-            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{svg}</svg>"#
-        );
-        rsx! {
-            div {
-                id: "{id}",
-                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
-                dangerous_inner_html: "{svg}",
-            }
-        }
-    } else if btype == "pattern" {
-        // Pattern: tile the side artwork along a short horizontal path.
-        use crate::geometry::element::PathCommand;
-        let mut svg = String::new();
-        if let Some(mut pat) = crate::canvas::render::pattern_from_json(brush.unwrap_or(&serde_json::Value::Null), 10.0) {
-            pat.scale = 100.0;
-            let cmds = vec![
-                PathCommand::MoveTo { x: 4.0, y: 20.0 },
-                PathCommand::LineTo { x: 36.0, y: 20.0 },
-            ];
-            let polys = crate::algorithms::pattern_along_path::pattern_along_path(&cmds, &pat);
-            for poly in &polys {
-                if poly.len() < 3 {
-                    continue;
-                }
-                let pts: String = poly
-                    .iter()
-                    .map(|(x, y)| format!("{:.2},{:.2}", x, y))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                svg.push_str(&format!(r#"<polygon points="{pts}" fill="var(--jas-text,#ccc)"/>"#));
-            }
-        }
-        let svg = format!(
-            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{svg}</svg>"#
-        );
-        rsx! {
-            div {
-                id: "{id}",
-                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
-                dangerous_inner_html: "{svg}",
-            }
-        }
-    } else if btype == "bristle" {
-        // Bristle: stroke the offset bristle lines across the tile with
-        // per-bristle opacity (they overlap and build up).
-        use crate::geometry::element::PathCommand;
-        let mut svg = String::new();
-        if let Some(br) = crate::canvas::render::bristle_from_json(brush.unwrap_or(&serde_json::Value::Null), 6.0) {
-            let cmds = vec![
-                PathCommand::MoveTo { x: 4.0, y: 20.0 },
-                PathCommand::LineTo { x: 36.0, y: 20.0 },
-            ];
-            let lines = crate::algorithms::bristle_stroke::bristle_stroke(&cmds, &br);
-            for line in &lines {
-                if line.len() < 2 {
-                    continue;
-                }
-                let pts: String = line
-                    .iter()
-                    .map(|(x, y)| format!("{:.2},{:.2}", x, y))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                svg.push_str(&format!(
-                    r#"<polyline points="{pts}" fill="none" stroke="var(--jas-text,#ccc)" stroke-width="{}" stroke-opacity="{}" stroke-linecap="round"/>"#,
-                    br.line_width(),
-                    br.alpha()
-                ));
-            }
-        }
-        let svg = format!(
-            r#"<svg viewBox="0 0 40 40" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">{svg}</svg>"#
-        );
-        rsx! {
-            div {
-                id: "{id}",
-                style: "width:100%;height:100%;display:flex;align-items:center;justify-content:center;pointer-events:none;",
-                dangerous_inner_html: "{svg}",
-            }
-        }
-    } else {
-        rsx! { div { id: "{id}", style: "width:100%;height:100%;pointer-events:none;" } }
+        None => rsx! { div { id: "{id}", style: "width:100%;height:100%;pointer-events:none;" } },
     }
 }
 

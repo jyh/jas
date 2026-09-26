@@ -175,6 +175,16 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// A `brush_preview` leaf's drawing: the core's `preview.viewbox` and
+    /// `preview.svg` (the elements, painted in `currentColor`), the same pair an
+    /// icon is drawn from, or null. BOTH OR NEITHER: a drawing with no box, or a
+    /// box with nothing in it, is drawn as the empty tile the core means by
+    /// sending no preview (a brush type with no preview), never half-drawn.
+    /// </summary>
+    internal static (string Viewbox, string Svg)? Preview(string? viewbox, string? svg) =>
+        string.IsNullOrWhiteSpace(viewbox) || string.IsNullOrWhiteSpace(svg) ? null : (viewbox, svg);
+
+    /// <summary>
     /// W2b-9: which name a leaf's glyph is looked up under.
     ///
     /// ⛔ AN `icon` NODE NAMES ITS GLYPH UNDER `name`, NOT `icon`, AND NOTHING
