@@ -209,6 +209,34 @@ pub fn action_and_params(
     Some((action, params))
 }
 
+/// Run a panel menu command the generic way: `close_panel` closes the panel at
+/// `addr`, and any other command runs the entry's YAML action with its declared
+/// params, in that panel's scope ([`panel_menu_ctx`]).
+///
+/// This is the whole dispatch for a panel with no bespoke menu commands
+/// (Brushes, Gradient, Concepts). Until 2026-09-26 Gradient and Concepts had an
+/// empty arm in `panel_dispatch`, so every item in their menus did nothing in
+/// this app, including Close and the Concepts "Place Instance".
+pub fn dispatch_yaml_menu(
+    content_id: &str,
+    cmd: &str,
+    addr: crate::workspace::workspace::PanelAddr,
+    state: &mut crate::workspace::app_state::AppState,
+) {
+    if cmd == "close_panel" {
+        crate::workspace::layout_apply::layout_apply(
+            &mut state.workspace_layout,
+            &crate::workspace::layout_apply::op_close_panel(addr),
+        );
+        return;
+    }
+    let (action, params) = action_and_params(content_id, cmd)
+        .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
+    let scope = panel_menu_ctx(content_id, state)
+        .get("panel").cloned().unwrap_or(serde_json::Value::Null);
+    crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
+}
+
 /// The bundle menu entry whose runtime command is `cmd`, matched with the SAME
 /// fold `build_menu_items` applies (`command_with_params` for radio members,
 /// the bare action otherwise), so a caller holding a `PanelMenuItem`'s command

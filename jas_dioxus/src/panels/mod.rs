@@ -57,12 +57,13 @@ pub fn panel_menu(kind: PanelKind) -> Vec<PanelMenuItem> {
         PanelKind::Opacity => opacity_panel::menu_items(),
         PanelKind::MagicWand => magic_wand_panel::menu_items(),
         PanelKind::Symbols => symbols_panel::menu_items(),
-        // Gradient / Concepts are rendered generically from the YAML bundle
-        // and have no native panel module, so their hamburger menu is empty
-        // (the bundle supplies any panel-menu rows). They exist as PanelKind
-        // variants purely so the dock can show/hide them by the generic
-        // toggle_panel path.
-        PanelKind::Gradient | PanelKind::Concepts => Vec::new(),
+        // Gradient / Concepts have no native panel module: their menu is the
+        // bundle's, as it is for every other panel. Until 2026-09-26 this arm
+        // returned nothing, so both menus were empty although the bundle
+        // declares them (Concepts' Place Instance, each panel's Close).
+        PanelKind::Gradient | PanelKind::Concepts => {
+            panel_menu::menu_items_from_yaml(panel_kind_to_content_id(kind))
+        }
     }
 }
 
@@ -88,8 +89,10 @@ pub(crate) fn panel_dispatch(
         PanelKind::Opacity => opacity_panel::dispatch(cmd, addr, state),
         PanelKind::MagicWand => magic_wand_panel::dispatch(cmd, addr, state),
         PanelKind::Symbols => symbols_panel::dispatch(cmd, addr, state),
-        // No native module (YAML-rendered): no bespoke menu commands.
-        PanelKind::Gradient | PanelKind::Concepts => {}
+        // No native module (YAML-rendered): no bespoke menu commands, so the
+        // generic route runs each item's YAML action in the panel's scope.
+        PanelKind::Gradient | PanelKind::Concepts => panel_menu::dispatch_yaml_menu(
+            panel_kind_to_content_id(kind), cmd, addr, state),
     }
 }
 
@@ -231,6 +234,47 @@ mod tests {
         assert!(state.workspace_layout.is_panel_visible(PanelKind::Color));
         panel_dispatch(PanelKind::Color, "close_panel", addr, &mut state);
         assert!(!state.workspace_layout.is_panel_visible(PanelKind::Color));
+    }
+
+    /// Every panel's menu shows a "Close <name>" item, and it closes the panel.
+    /// The menu view renders `panel_menu(kind)` and hands a click to
+    /// `panel_dispatch`. Until 2026-09-26 both returned nothing for Gradient and
+    /// Concepts, so their menus were empty although the bundle declares them.
+    ///
+    /// ⚠️ It walks EVERY variant, not `PanelKind::ALL`, which omits Brushes,
+    /// Gradient and Concepts on purpose (see its doc) and so omits exactly the
+    /// two kinds this arm exists for. The match below fails to compile when a
+    /// variant is added, so the list cannot fall behind the enum.
+    #[test]
+    fn every_panels_close_item_closes_it() {
+        use PanelKind::*;
+        let every = [Layers, Color, Swatches, Brushes, Stroke, Properties, Character, Paragraph,
+            Artboards, Align, Boolean, Opacity, MagicWand, Symbols, Gradient, Concepts];
+        // The population is the bundle's: `every` must name each panel the
+        // workspace declares, once.
+        let named: std::collections::BTreeSet<&str> =
+            every.iter().map(|&k| panel_kind_to_content_id(k)).collect();
+        let ws = Workspace::load().expect("bundle");
+        let declared: std::collections::BTreeSet<&str> =
+            ws.panels().as_object().expect("panels map").keys().map(|k| k.as_str()).collect();
+        assert_eq!(named.len(), every.len(), "`every` names a panel twice");
+        assert_eq!(named, declared, "`every` is not the bundle's panel set");
+        for kind in every {
+            let mut state = test_app_state(WorkspaceLayout::default_layout());
+            state.workspace_layout.reveal_panel(kind);
+            assert!(state.workspace_layout.panel_on_screen(kind), "{kind:?} was not revealed");
+            let addr = crate::workspace::clipboard::find_panel(&state.workspace_layout, kind)
+                .unwrap_or_else(|| panic!("{kind:?} has no address after reveal"));
+            // The route the menu view takes: render the menu, find the item,
+            // dispatch ITS command.
+            let close = panel_menu(kind).into_iter().find_map(|item| match item {
+                PanelMenuItem::Action { command: "close_panel", .. } => Some("close_panel"),
+                _ => None,
+            }).unwrap_or_else(|| panic!("{kind:?}: its menu shows no Close item"));
+            panel_dispatch(kind, close, addr, &mut state);
+            assert!(!state.workspace_layout.panel_on_screen(kind),
+                "{kind:?}: its Close menu item left the panel on screen");
+        }
     }
 
     /// The Brushes panel's eleven `checked_when:` predicates, through the

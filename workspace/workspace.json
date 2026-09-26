@@ -11969,6 +11969,15 @@
           "action": "save_brush_library",
           "enabled_when": "panel.selected_library != null",
           "description": "Open the Save Brush Library dialog. The selected library's manifest and artwork files are written to workspace/brushes/<new_slug>/.\n"
+        },
+        "separator",
+        {
+          "label": "Close Brushes",
+          "action": "close_panel",
+          "params": {
+            "panel": "brushes"
+          },
+          "description": "Close the Brushes panel"
         }
       ],
       "content": {

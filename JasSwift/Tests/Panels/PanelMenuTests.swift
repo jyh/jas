@@ -536,3 +536,82 @@ private func ctxHasPath(_ ctx: [String: Any], _ path: String) -> Bool {
     #expect(missing.isEmpty,
             "panel-menu predicate reads the menu context does not publish:\n\(missing.joined(separator: "\n"))")
 }
+
+// ── Every panel's menu, over the bundle's panel set ─────────────────
+//
+// `PanelKind.all` omits Brushes, Gradient and Concepts on purpose, so the
+// arms above never visit them. Until 2026-09-26 Gradient and Concepts
+// rendered an EMPTY menu here (and in jas_dioxus) although the bundle
+// declares one, and brushes.yaml declared no Close item. These arms walk
+// every variant and check the list against the bundle's panel set.
+// Mirrors the Rust `every_panels_close_item_closes_it`.
+
+private let everyPanelKind: [PanelKind] = [
+    .layers, .color, .swatches, .stroke, .properties, .character, .paragraph, .artboards,
+    .align, .boolean, .opacity, .magicWand, .symbols, .brushes, .gradient, .concepts,
+]
+
+private func addressOf(_ kind: PanelKind, in layout: WorkspaceLayout) -> PanelAddr? {
+    for (_, dock) in layout.anchored {
+        for (gi, group) in dock.groups.enumerated() {
+            if let pi = group.panels.firstIndex(of: kind) {
+                return PanelAddr(group: GroupAddr(dockId: dock.id, groupIdx: gi), panelIdx: pi)
+            }
+        }
+    }
+    for fd in layout.floating {
+        for (gi, group) in fd.dock.groups.enumerated() {
+            if let pi = group.panels.firstIndex(of: kind) {
+                return PanelAddr(group: GroupAddr(dockId: fd.dock.id, groupIdx: gi), panelIdx: pi)
+            }
+        }
+    }
+    return nil
+}
+
+@Test func everyPanelKindListIsTheBundlesPanelSet() {
+    let named = Set(everyPanelKind.map(panelKindToContentId))
+    #expect(named.count == everyPanelKind.count, "a panel is named twice")
+    let declared = Set((WorkspaceData.load()?.data["panels"] as? [String: Any])?.keys.map { $0 } ?? [])
+    #expect(!declared.isEmpty, "the bundle declares no panels")
+    #expect(named == declared)
+}
+
+@Test func everyPanelsCloseItemClosesIt() {
+    for kind in everyPanelKind {
+        var layout = WorkspaceLayout.defaultLayout()
+        layout.revealPanel(kind)
+        #expect(layout.panelOnScreen(kind), "\(kind) was not revealed")
+        guard let addr = addressOf(kind, in: layout) else {
+            Issue.record("\(kind) has no address after reveal"); continue
+        }
+        // The route the menu view takes: render the menu, find the item,
+        // dispatch ITS command.
+        let close = panelMenu(kind).compactMap { item -> String? in
+            if case .action(_, let cmd, _) = item, cmd == "close_panel" { return cmd }
+            return nil
+        }.first
+        guard let cmd = close else { Issue.record("\(kind): its menu shows no Close item"); continue }
+        panelDispatch(kind, cmd: cmd, addr: addr, layout: &layout)
+        #expect(!layout.panelOnScreen(kind), "\(kind): its Close menu item left the panel on screen")
+    }
+}
+
+@Test func theConceptsMenuPlacesAnInstance() {
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [])], selectedLayer: 0, selection: []))
+    let concepts = "concepts_panel_content"
+    model.stateStore.initPanel(concepts, defaults: [:])
+    model.stateStore.setPanel(concepts, "selected_concept", "regular_polygon")
+    let place = panelMenu(.concepts).compactMap { item -> String? in
+        if case .action(_, let cmd, _) = item, cmd == "place_concept_instance" { return cmd }
+        return nil
+    }.first
+    guard let cmd = place else { Issue.record("the Concepts menu shows no Place Instance"); return }
+    var layout = WorkspaceLayout.defaultLayout()
+    let addr = PanelAddr(group: GroupAddr(dockId: DockId(0), groupIdx: 0), panelIdx: 0)
+    panelDispatch(.concepts, cmd: cmd, addr: addr, layout: &layout, model: model)
+    guard case .live(.generated) = model.document.tryGetElement([0, 0]) else {
+        Issue.record("Place Instance put no Generated element at [0,0]"); return
+    }
+}
