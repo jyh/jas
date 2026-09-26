@@ -3217,6 +3217,38 @@ fn run_yaml_effect(
         deferred.push(resolved);
     }
 
+    // Brush-library edits (BRUSH_LIBRARY_UNDO.md): the shared runner owns
+    // them, on a StateStore. This app keeps the libraries in
+    // `st.brush_libraries` and the Brushes panel in the generic `panel_state`,
+    // so both are carried into a store, the effect runs there, and both are
+    // carried back. Until 2026-09-26 these keys were dropped here, and Delete,
+    // Duplicate and Sort Brush did nothing in this app.
+    const BRUSH_LIBRARY_KEYS: [&str; 4] = [
+        "brush.delete_selected", "brush.duplicate_selected", "brush.sort_by_name", "brush.select_unused",
+    ];
+    let brush_key = eff.as_object()
+        .and_then(|m| m.keys().find(|k| BRUSH_LIBRARY_KEYS.contains(&k.as_str())).cloned());
+    if brush_key.is_some() {
+        const BRUSHES: &str = "brushes_panel_content";
+        let mut store = super::state_store::StateStore::new();
+        store.set_data_path("brush_libraries", st.brush_libraries.clone());
+        let scope: std::collections::HashMap<String, serde_json::Value> = st.panel_state
+            .get(BRUSHES).map(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        store.init_panel(BRUSHES, scope);
+        let model = st.tabs.get_mut(st.active_tab).map(|t| &mut t.model);
+        super::effects::run_effects(
+            std::slice::from_ref(eff), &*eval_ctx, &mut store, model, None, None, None);
+        st.brush_libraries = store.get_data_path("brush_libraries");
+        if let Some(out) = store.panel_scope(BRUSHES) {
+            let entry = st.panel_state.entry(BRUSHES.to_string()).or_default();
+            for (k, v) in out {
+                entry.insert(k.clone(), v.clone());
+            }
+        }
+        return deferred;
+    }
+
     // Fallback: route Model-level `doc.*` effects (doc.zoom.*,
     // doc.pan.*, doc.translate_selection, doc.add_element, etc.) to
     // the effects.rs dispatcher so view actions like
@@ -14096,6 +14128,64 @@ mod tests {
         assert!(all(&st), "All ran: in force again");
         // A toggle row is not an action: the rule does not answer it.
         assert!(!super::layers_filter_item_in_force(&el, "path", &ctx, &st));
+    }
+
+    // ── Brush-library edits run in the web app (BRUSH_LIBRARY_UNDO.md) ──
+    //
+    // The web runner handed only `doc.*` keys to the shared runner, so every
+    // `brush.*` library edit was dropped. These drive the web runner with the
+    // library named as a LITERAL, so they test the routing and not the scope.
+
+    fn brush_lib(names: &[&str]) -> serde_json::Value {
+        let brushes: Vec<serde_json::Value> = names.iter()
+            .map(|n| serde_json::json!({"name": n, "slug": n, "type": "calligraphic"})).collect();
+        serde_json::json!({"lib": {"name": "Lib", "brushes": brushes}})
+    }
+
+    fn brush_names(st: &AppState) -> Vec<String> {
+        st.brush_libraries["lib"]["brushes"].as_array().expect("brushes").iter()
+            .map(|b| b["name"].as_str().unwrap_or("").to_string()).collect()
+    }
+
+    fn brushes_panel_key(st: &AppState, key: &str) -> serde_json::Value {
+        st.panel_state.get("brushes_panel_content").and_then(|m| m.get(key)).cloned()
+            .unwrap_or(serde_json::Value::Null)
+    }
+
+    #[test]
+    fn sort_brushes_by_name_runs_in_the_web_app() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["b", "c", "a"]);
+        let eff = serde_json::json!({"brush.sort_by_name": {"library": "\"lib\""}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(brush_names(&st), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn delete_brush_runs_in_the_web_app_and_clears_the_selection() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b", "c"]);
+        st.panel_state.entry("brushes_panel_content".into()).or_default()
+            .insert("selected_brushes".into(), serde_json::json!(["a", "c"]));
+        let eff = serde_json::json!({"brush.delete_selected": {"library": "\"lib\"", "slugs": "[\"a\", \"c\"]"}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        assert_eq!(brush_names(&st), vec!["b"]);
+        assert_eq!(brushes_panel_key(&st, "selected_brushes"), serde_json::json!([]));
+    }
+
+    #[test]
+    fn duplicate_brush_runs_in_the_web_app_and_selects_the_copies() {
+        let mut st = AppState::new();
+        st.brush_libraries = brush_lib(&["a", "b"]);
+        let eff = serde_json::json!({"brush.duplicate_selected": {"library": "\"lib\"", "slugs": "[\"a\"]"}});
+        super::run_yaml_effects(std::slice::from_ref(&eff), &serde_json::json!({}), &mut st);
+        let names = brush_names(&st);
+        assert_eq!(names.len(), 3, "{names:?}");
+        assert_eq!(names[0], "a");
+        assert_eq!(names[1], "a copy", "the copy follows its original");
+        let selected = brushes_panel_key(&st, "selected_brushes");
+        let copy_slug = st.brush_libraries["lib"]["brushes"][1]["slug"].clone();
+        assert_eq!(selected, serde_json::json!([copy_slug]), "the copies become the selection");
     }
 
     #[test]
