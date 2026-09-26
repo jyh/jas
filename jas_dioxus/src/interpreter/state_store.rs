@@ -485,6 +485,29 @@ impl StateStore {
         }
     }
 
+    /// Add `value` to a panel-state list, or remove its FIRST occurrence if
+    /// present: set membership, the checkbox primitive (council Q3.2).
+    /// Appends, never prepends, so the order is stable. A key holding no list
+    /// starts from an empty one. Mirrors the reference's
+    /// `StateStore.list_toggle`, which removes with Python's `list.remove`
+    /// (the first occurrence only, never every one).
+    pub fn list_toggle(&mut self, panel_id: &str, key: &str, value: serde_json::Value) {
+        let scope = match self.panels.get_mut(&panel_content_id(panel_id)) {
+            Some(s) => s,
+            None => return,
+        };
+        let mut arr = match scope.get(key) {
+            Some(serde_json::Value::Array(a)) => a.clone(),
+            _ => vec![],
+        };
+        match arr.iter().position(|item| item == &value) {
+            Some(i) => { arr.remove(i); }
+            None => arr.push(value),
+        }
+        scope.insert(key.to_string(), serde_json::Value::Array(arr));
+        self.journal_panel_write(panel_id, key);
+    }
+
     // ── Context for expression evaluation ────────────────
 
     /// Build a serde_json::Value context for the expression evaluator.
