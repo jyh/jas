@@ -48,20 +48,7 @@ pub fn menu_items() -> Vec<PanelMenuItem> {
 /// string through with an empty params map — which is what this did — named no
 /// action at all, so every Brushes menu row was a silent no-op.
 pub fn dispatch(cmd: &str, addr: PanelAddr, state: &mut AppState) {
-    match cmd {
-        "close_panel" => crate::workspace::layout_apply::layout_apply(
-            &mut state.workspace_layout,
-            &crate::workspace::layout_apply::op_close_panel(addr),
-        ),
-        _ => {
-            let (action, params) =
-                super::panel_menu::action_and_params("brushes_panel_content", cmd)
-                    .unwrap_or_else(|| (cmd.to_string(), serde_json::Map::new()));
-            // The action evaluates with this panel's scope (selected_library,
-            // selected_brushes), which the app scope alone does not carry.
-            let scope = super::panel_menu::panel_menu_ctx("brushes_panel_content", state)
-                .get("panel").cloned().unwrap_or(serde_json::Value::Null);
-            crate::interpreter::renderer::dispatch_action_in(&action, &params, Some(&scope), state);
-        }
-    }
+    // The action evaluates with this panel's scope (selected_library,
+    // selected_brushes), which the app scope alone does not carry.
+    super::panel_menu::dispatch_yaml_menu("brushes_panel_content", cmd, addr, state);
 }

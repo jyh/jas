@@ -201,6 +201,15 @@
         "action": "save_brush_library",
         "enabled": true,
         "checked": null
+      },
+      {
+        "path": [
+          0,
+          26
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
       }
     ]
   },
@@ -402,6 +411,15 @@
           24
         ],
         "action": "save_brush_library",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          26
+        ],
+        "action": "close_panel",
         "enabled": true,
         "checked": null
       }

@@ -138,11 +138,12 @@ public func panelMenu(_ kind: PanelKind) -> [PanelMenuItem] {
     case .magicWand: return MagicWandPanel.menuItems()
     case .symbols: return SymbolsPanel.menuItems()
     case .brushes: return BrushesPanel.menuItems()
-    // Gradient / Concepts are rendered generically from the YAML bundle and
-    // have no native panel-menu module, so their hamburger menu is empty (the
-    // bundle supplies any panel-menu rows). They exist as PanelKind cases
-    // purely so the dock can show/hide them via the generic toggle_panel path.
-    case .gradient, .concepts: return []
+    // Gradient / Concepts have no native panel module: their menu is the
+    // bundle's, as it is for every other panel. Until 2026-09-26 this arm
+    // returned nothing, so both menus were empty although the bundle declares
+    // them (Concepts' Place Instance, each panel's Close).
+    case .gradient: return menuItemsFromYaml("gradient_panel_content")
+    case .concepts: return ConceptsPanel.menuItems()
     }
 }
 
@@ -176,8 +177,11 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
     case .magicWand: MagicWandPanel.dispatch(cmd, addr: addr, layout: &layout)
     case .symbols: SymbolsPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
     case .brushes: BrushesPanel.dispatch(cmd, addr: addr, layout: &layout, model: model)
-    // No native panel-menu module (YAML-rendered): no bespoke menu commands.
-    case .gradient, .concepts: break
+    case .concepts: ConceptsPanel.menuDispatch(cmd, addr: addr, layout: &layout, model: model)
+    // Gradient's rows other than Close are disabled placeholders with no
+    // action (gradient.yaml), so Close is its whole dispatch.
+    case .gradient:
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)) }
     }
 }
 

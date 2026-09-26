@@ -13214,6 +13214,34 @@ mod tests {
         assert_eq!(d3.get_element(&vec![0usize]).unwrap().visibility(), Visibility::Preview);
     }
 
+    /// The Concepts menu shows "Place Instance" and it reaches the native verb.
+    /// Until 2026-09-26 the Concepts menu rendered no items in this app.
+    #[test]
+    fn the_concepts_menu_places_an_instance() {
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let mut params = serde_json::Map::new();
+        params.insert("concept_id".into(), serde_json::json!("regular_polygon"));
+        dispatch_action("concepts_panel_select", &params, &mut st);
+        assert_eq!(st.concepts_selected.as_deref(), Some("regular_polygon"), "precondition");
+        let count = |st: &AppState| match &st.tabs[st.active_tab].model.document().layers[0] {
+            Element::Layer(l) => l.children.len(),
+            other => panic!("expected a layer, got {other:?}"),
+        };
+        let before = count(&st);
+        let addr = crate::workspace::workspace::PanelAddr {
+            group: crate::workspace::workspace::GroupAddr { dock_id: crate::workspace::workspace::DockId(0), group_idx: 0 },
+            panel_idx: 0,
+        };
+        let kind = crate::workspace::workspace::PanelKind::Concepts;
+        let place = crate::panels::panel_menu(kind).into_iter().find_map(|item| match item {
+            crate::panels::panel_menu::PanelMenuItem::Action { command: "place_concept_instance", .. } =>
+                Some("place_concept_instance"),
+            _ => None,
+        }).expect("the Concepts menu shows Place Instance");
+        crate::panels::panel_dispatch(kind, place, addr, &mut st);
+        assert_eq!(count(&st), before + 1, "Place Instance adds one instance to the active layer");
+    }
+
     #[test]
     fn active_document_view_selected_concept_present_for_single_generated() {
         // Concepts panel Slice 2 (piece A): with exactly one Generated

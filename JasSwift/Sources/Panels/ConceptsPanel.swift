@@ -8,6 +8,25 @@ import Foundation
 /// params, append + select — lives here, mirroring SymbolsPanel and the Rust
 /// dispatch arm.
 public enum ConceptsPanel {
+    /// The panel's menu, from concepts.yaml's `menu:` block.
+    public static func menuItems() -> [PanelMenuItem] {
+        menuItemsFromYaml(scopeId)
+    }
+
+    /// A Concepts menu command: Close closes the panel, and Place Instance runs
+    /// the native verb (its YAML action is a `log` stub). Mirrors the Rust
+    /// `panel_menu::dispatch_yaml_menu`, which reaches the same verb through
+    /// `dispatch_action`'s native intercept.
+    public static func menuDispatch(_ cmd: String, addr: PanelAddr,
+                                    layout: inout WorkspaceLayout, model: Model? = nil) {
+        if cmd == "close_panel" { layoutApply(&layout, opClosePanel(addr)); return }
+        guard let model = model, !cmd.isEmpty else { return }
+        switch cmd {
+        case "place_concept_instance", "promote_to_concept": dispatch(cmd, model: model)
+        default: runYamlActionByName(cmd, params: [:], model: model)
+        }
+    }
+
     /// The StateStore scope id for the Concepts panel; the generic
     /// `set_panel_state { panel: concepts }` effect appends `_panel_content`,
     /// and the YAML `panel.selected_concept` read resolves against it.
