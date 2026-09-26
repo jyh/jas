@@ -516,12 +516,13 @@ static class Program
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
         // ─────────────────────────────────────────────────────────────
         // §1.2: a dropdown's `items` channel, read from the core's OWN bytes:
-        // the Layers type filter's entry after one pick checked `path`,
+        // the Layers type filter's entry after one pick checked `path` (so
+        // "All" is no longer in force),
         // printed by `the_layers_filter_plan_carries_its_items_and_their_checks`
         // -- copied, never typed from the shape.
         // ─────────────────────────────────────────────────────────────
         const string LayersFilter = """
-            [{"kind":"action","label":"All","value":"__all__"},{"checked":false,"kind":"toggle","label":"Layer","value":"layer"},{"checked":false,"kind":"toggle","label":"Group","value":"group"},{"checked":true,"kind":"toggle","label":"Path","value":"path"},{"checked":false,"kind":"toggle","label":"Rectangle","value":"rectangle"},{"checked":false,"kind":"toggle","label":"Circle","value":"circle"},{"checked":false,"kind":"toggle","label":"Ellipse","value":"ellipse"},{"checked":false,"kind":"toggle","label":"Polyline","value":"polyline"},{"checked":false,"kind":"toggle","label":"Polygon","value":"polygon"},{"checked":false,"kind":"toggle","label":"Text","value":"text"},{"checked":false,"kind":"toggle","label":"Text Path","value":"text_path"},{"checked":false,"kind":"toggle","label":"Line","value":"line"},{"checked":false,"kind":"toggle","label":"Compound Shape","value":"live"}]
+            [{"checked":false,"kind":"action","label":"All","value":"__all__"},{"checked":false,"kind":"toggle","label":"Layer","value":"layer"},{"checked":false,"kind":"toggle","label":"Group","value":"group"},{"checked":true,"kind":"toggle","label":"Path","value":"path"},{"checked":false,"kind":"toggle","label":"Rectangle","value":"rectangle"},{"checked":false,"kind":"toggle","label":"Circle","value":"circle"},{"checked":false,"kind":"toggle","label":"Ellipse","value":"ellipse"},{"checked":false,"kind":"toggle","label":"Polyline","value":"polyline"},{"checked":false,"kind":"toggle","label":"Polygon","value":"polygon"},{"checked":false,"kind":"toggle","label":"Text","value":"text"},{"checked":false,"kind":"toggle","label":"Text Path","value":"text_path"},{"checked":false,"kind":"toggle","label":"Line","value":"line"},{"checked":false,"kind":"toggle","label":"Compound Shape","value":"live"}]
             """;
         var filter = PanelWire.ReadItems(LayersFilter);
         Check("items: the Layers filter's channel reads", filter is not null && filter.Refused == 0, $"refused={filter?.Refused}");
@@ -533,8 +534,12 @@ static class Program
             (filter?.Rows.Count(r => r.Kind == "toggle") ?? -1).ToString());
         Eq("items: the core's one check is the one read", "path",
             filter is null ? "(null)" : string.Join(",", filter.Rows.Where(r => r.Checked == true).Select(r => r.Value)));
-        Eq("items: an action row carries no check", "(null)",
+        Eq("items: an action row carries the core's in-force check", "False",
             filter is null ? "(no list)" : filter.Rows.First(r => r.Kind == "action").Checked?.ToString() ?? "(null)");
+        var inForce = PanelWire.ReadItems("""[{"kind":"action","value":"__all__","label":"All","checked":true}]""");
+        Eq("items: an action in force reads true", "True", inForce?.Rows[0].Checked?.ToString() ?? "(null)");
+        var badAction = PanelWire.ReadItems("""[{"kind":"action","value":"a","label":"A","checked":1}]""");
+        Eq("items: an action's unreadable check is refused", "1", (badAction?.Refused ?? -1).ToString());
         Check("items: CONTROL: an unchecked toggle reads false, not unknown",
             filter is not null && filter.Rows.Any(r => r.Kind == "toggle" && r.Checked == false),
             "the check arms above would pass on a reader that made every check null");

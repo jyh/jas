@@ -118,9 +118,16 @@ dropdown by `bind.checked_in`: an expression that resolves to a LIST. A
 `toggle` item is checked exactly when its `value` is an element of that
 list, compared as JSON values. Nothing else is decided here:
 
-- An `action` item carries no check. Whether its action is already in
-  force (the Layers filter's "All" with nothing checked) is not declared,
-  and each app answers it natively.
+- An `action` item's check says whether its action is already IN
+  FORCE: running it now would change nothing (the Layers filter's "All"
+  with nothing checked). It is known only when the item declares no
+  `params`, the action is defined, and it has at least one effect, every
+  one a `set_panel_state` that NAMES the dropdown's own panel. The item
+  is then checked exactly when, for every such effect, the effect's
+  `value` evaluated now equals the key's current value, compared as JSON
+  values with numbers compared by value (`45` equals `45.0`). In every other case the check is unknown (`checked: null`),
+  never `false`: an effect of any other kind could change something this
+  test cannot see.
 - With no `bind.checked_in`, or one that does not resolve to a list, no
   item's check is known. That is its own state, not "unchecked": the
   engine's panel plan sends `checked: null` for it, never `false`.

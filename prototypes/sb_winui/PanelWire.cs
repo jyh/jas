@@ -57,8 +57,9 @@ internal static class PanelWire
     ///
     /// ⛔ THE SHELL DECIDES NOTHING ABOUT A ROW. A divider is `kind: separator`;
     /// an `action` or `toggle` row carries a `value` string (what a pick sends
-    /// back) and a `label` string; a toggle's `checked` is `true`, `false`, or
-    /// null (unknown), as the core sent it. Any other `kind`, a row missing a
+    /// back) and a `label` string; its `checked` is `true`, `false`, or null
+    /// (unknown), as the core sent it: a toggle's membership in
+    /// `bind.checked_in`, or whether an action is already in force. Any other `kind`, a row missing a
     /// string, or a `checked` that is not a boolean or null is COUNTED in
     /// `Refused` and not offered.
     /// </summary>
@@ -87,7 +88,7 @@ internal static class PanelWire
                     continue;
                 }
                 bool? isChecked = null;
-                if (kind == "toggle" && row.TryGetProperty("checked", out var c))
+                if (row.TryGetProperty("checked", out var c))
                 {
                     switch (c.ValueKind)
                     {
@@ -451,9 +452,8 @@ internal static class PanelWire
 /// <summary>
 /// §1.2: one row of a dropdown's `items` channel. `Kind` is `action` or
 /// `toggle` (a separator carries neither value nor label). `Checked` is the
-/// core's answer for a toggle, and null when the core does not know it (no
-/// `bind.checked_in`) or the row is an action: never read as false by the
-/// reader. See <see cref="PanelWire.ReadItems"/>.
+/// core's answer (a toggle's membership, an action's being in force), and null
+/// when the core does not know it: never read as false by the reader. See <see cref="PanelWire.ReadItems"/>.
 /// </summary>
 internal sealed record PaneItem(bool Separator, string Kind, string Value, string Label, bool? Checked);
 
