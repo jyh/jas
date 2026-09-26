@@ -2043,9 +2043,13 @@ public sealed partial class MainWindow : Window
                 // `bind.color` (STATUS-flask §110: 228 of Swatches' 234 leaves
                 // were placeholders). NOT a Button: ApplyLeafValues' Button arm
                 // clears Background on every draw, which would wipe the colour.
+                // A library tile has NO id (the template repeats per colour);
+                // its plan path addresses it, so the count reads the same
+                // predicate as the tap (STATUS-flask §114: 216 of 228 drew
+                // and sent nothing while this read the id alone).
                 case "color_swatch":
                     swatches++;
-                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    if (!PanelWire.Addressable(leaf.Id, leaf.Path)) { unaddressable++; }
                     el = BuildSwatch(leaf);
                     break;
 
@@ -2175,8 +2179,9 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// A `color_swatch`: a bordered square, filled on every draw by
     /// ApplyLeafValues from `bind.color`. A tap sends the leaf's `click` by its
-    /// plan path, like every other control; a leaf with no id is counted
-    /// unaddressable and sends nothing. Double-click is not routed here.
+    /// plan path, like every other control; a leaf with neither an id nor a
+    /// plan path is counted unaddressable and sends nothing
+    /// (<see cref="PanelWire.Addressable"/>). Double-click is not routed here.
     /// </summary>
     private Border BuildSwatch(PaneLeaf leaf)
     {
@@ -2185,7 +2190,7 @@ public sealed partial class MainWindow : Window
         if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(swatch, summary); }
         var id = leaf.Id;
         var path = leaf.Path;
-        if (id.Length > 0) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
+        if (PanelWire.Addressable(id, path)) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
         return swatch;
     }
 
