@@ -3806,7 +3806,9 @@ actions:
       Undoable.
     category: brushes
     effects:
-      - "brush.duplicate_selected": {}
+      - "brush.duplicate_selected":
+          library: "panel.selected_library"
+          slugs: "panel.selected_brushes"
 
   delete_brush:
     description: >
@@ -3816,7 +3818,9 @@ actions:
       plain stroke. Undoable.
     category: brushes
     effects:
-      - "brush.delete_selected": {}
+      - "brush.delete_selected":
+          library: "panel.selected_library"
+          slugs: "panel.selected_brushes"
 
   select_all_unused_brushes:
     description: >

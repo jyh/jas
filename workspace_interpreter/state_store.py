@@ -1003,6 +1003,15 @@ class StateStore:
         has_selection = len(canvas_sel) > 0
         selection_count = len(canvas_sel)
         element_selection = [Value.path(p) for p in canvas_sel]
+        # BRUSHES.md § Bottom toolbar's two gates (runtime_contexts.yaml):
+        # a selected element is a brushed stroke when it carries a non-empty
+        # stroke_brush. Only the selected elements are read, never their
+        # descendants.
+        brushed = [p for p in canvas_sel if self._is_brushed_stroke(p)]
+        brush_facts = {
+            "selection_has_brushed_stroke": len(brushed) > 0,
+            "selection_is_single_brushed_stroke": selection_count == 1 and len(brushed) == 1,
+        }
         # Artboard-view computation (works whether document is None or not)
         if self._document is None:
             raw_artboards: list = []
@@ -1073,6 +1082,7 @@ class StateStore:
                 "has_selection": has_selection,
                 "selection_count": selection_count,
                 "element_selection": element_selection,
+                **brush_facts,
                 **artboards_common,
             }
         layers = self._document.get("layers", [])
@@ -1161,8 +1171,14 @@ class StateStore:
             "has_selection": has_selection,
             "selection_count": selection_count,
             "element_selection": element_selection,
+            **brush_facts,
             **artboards_common,
         }
+
+    def _is_brushed_stroke(self, path: tuple[int, ...]) -> bool:
+        elem = self.get_element(path) if self._document is not None else None
+        brush = elem.get("stroke_brush") if isinstance(elem, dict) else None
+        return isinstance(brush, str) and brush != ""
 
     def _canvas_selection_paths(self) -> list[tuple[int, ...]]:
         """Extract canvas selection from the document as a list of path

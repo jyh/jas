@@ -19,6 +19,8 @@ runtime_contexts:
       layers_panel_selection_count: 0
       layers_panel_selection_is_container: false
       layers_panel_selection_has_group: false
+      selection_has_brushed_stroke: false
+      selection_is_single_brushed_stroke: false
       artboards_count: 0
       artboards_panel_selection_ids: []
       element_tree: null
@@ -80,6 +82,23 @@ runtime_contexts:
       layers_panel_selection_has_group:
         type: bool
         description: "True when at least one selected layer item is a group"
+      # Canvas-selection brush rollups (BRUSHES.md § Bottom toolbar), read by
+      # brushes.yaml's Remove Brush Stroke and Brush Options for Selection
+      # gates. Until W2b-18 those gates read two bare names that no port built,
+      # so both buttons were disabled on every selection.
+      selection_has_brushed_stroke:
+        type: bool
+        description: >
+          True when at least one canvas-selected element carries a non-empty
+          stroke_brush (a brush id). Only the selected elements themselves are
+          read: a group is not searched for brushed descendants.
+      selection_is_single_brushed_stroke:
+        type: bool
+        description: >
+          True when exactly one element is canvas-selected and it carries a
+          non-empty stroke_brush. Brush Options for Selection edits that one
+          stroke's per-instance overrides, so a selection that also holds
+          other elements does not qualify.
       # Artboards-panel rollups (ARTBOARDS.md § Artboard data model). Built by
       # every port's active-document view since the artboards work landed and
       # read by artboards.yaml's menu, context menu and keyboard rows; declared
