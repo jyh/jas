@@ -146,6 +146,16 @@ enum WidgetEvent {
         return Result(outcome: "committed", value: value, bindWritten: true)
     }
 
+    /// Whether a dropdown's `toggle` item is checked (WIDGET_EVENTS.md,
+    /// "Showing an item's check"): its value is an element of the list the
+    /// dropdown's `bind.checked_in` resolves to in `scope`. Nil when there is
+    /// no such list: the check is unknown, not unchecked.
+    static func itemChecked(widget: [String: Any], value: String, scope: [String: Any]) -> Bool? {
+        guard let expr = (widget["bind"] as? [String: Any])?["checked_in"] as? String,
+              case .list(let list) = evaluate(expr, context: scope) else { return nil }
+        return list.contains { ($0.value as? String) == value }
+    }
+
     /// Pick one declared item of an item kind (`dropdown`), named by its
     /// `value` (WIDGET_EVENTS.md, "Picking a dropdown item"). An `action` item
     /// runs its own action; any other item runs the behaviors declared for

@@ -393,3 +393,47 @@ private let gradient = "gradient_panel_content"
     #expect(ctx["panel"] == nil && ctx["item"] != nil && ctx["event"] != nil,
             "ctx keys: \(ctx.keys.sorted())")
 }
+
+// MARK: - The Layers type filter's pick (the bank's §1.3)
+
+// The menu used to compute the next checked set natively, and SORTED it. The
+// declared route (`list_toggle`, WIDGET_EVENTS.md "Picking a dropdown item")
+// APPENDS, so the two stores disagreed on order from the first pick. These
+// drive the shipped widget through the app's route, as the menu now does.
+
+private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [String]? {
+    let model = Model()
+    let route = events(model, "layers_panel_content")
+    model.stateStore.setPanel("layers_panel_content", "type_filter", initial)
+    let widget = shipped("layers_panel_content", "lp_filter_button")
+    for (value, alt) in picks {
+        let r = route.pick(widget, value: value, alt: alt)
+        #expect(r.outcome == "committed", "\(value) alt=\(alt): \(r.outcome) \(r.reason ?? "")")
+    }
+    return model.stateStore.getPanel("layers_panel_content", "type_filter") as? [String]
+}
+
+@Test func aPlainPickTogglesByTheDeclaredRouteAndKeepsItsOrder() {
+    #expect(filterAfter([("circle", false)], from: ["path"]) == ["path", "circle"],
+            "appended, not sorted")
+    #expect(filterAfter([("path", false)], from: ["path", "text"]) == ["text"])
+}
+
+@Test func anAltPickSolosAndASecondRestoresEverything() {
+    #expect(filterAfter([("text", true)], from: ["path", "circle"]) == ["text"])
+    #expect(filterAfter([("text", true), ("text", true)], from: ["path"]) == [])
+}
+
+@Test func theAllItemRunsItsOwnActionAndClearsTheFilter() {
+    #expect(filterAfter([("__all__", false)], from: ["path", "circle"]) == [])
+}
+
+@Test func anItemsCheckIsItsValueInTheDeclaredList() {
+    let widget = shipped("layers_panel_content", "lp_filter_button")
+    let scope: [String: Any] = ["panel": ["type_filter": ["path", "text"]]]
+    #expect(WidgetEvent.itemChecked(widget: widget, value: "path", scope: scope) == true)
+    #expect(WidgetEvent.itemChecked(widget: widget, value: "circle", scope: scope) == false)
+    // No declared list: the check is UNKNOWN, not unchecked.
+    #expect(WidgetEvent.itemChecked(widget: ["type": "dropdown"], value: "path", scope: scope) == nil)
+    #expect(WidgetEvent.itemChecked(widget: widget, value: "path", scope: ["panel": [:]]) == nil)
+}

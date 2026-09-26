@@ -2640,6 +2640,13 @@ struct YamlElementView: View {
         // `layers.yaml` declares (`action: clear_layers_type_filter`) instead of
         // a literal that happens to agree.
         let rows = layersFilterMenuRows(items)
+        // EVERY ROW TAKES THE DECLARED ROUTE (WIDGET_EVENTS.md, "Picking a
+        // dropdown item"): the pick runs the item's action, or the behaviors
+        // `layers.yaml` declares for `toggle` / `alt_toggle`. Until 2026-09-26
+        // this menu computed the next set here and SORTED it, while the
+        // declared `list_toggle` appends, so the two disagreed on the store.
+        let route = PanelWidgetEvents(model: model, panelId: panelId, scope: context)
+        let element = self.element
 
         return AnyView(Menu {
             ForEach(rows.indices, id: \.self) { i in
@@ -2651,12 +2658,7 @@ struct YamlElementView: View {
                 // boxes over a full tree.
                 case .action(let action):
                     Button(action: {
-                        // An action this port does not know leaves the state
-                        // alone. Nothing is guessed here.
-                        if let next = layersCheckedAfterAction(action, checked) {
-                            store.setPanel(panelId, bindKey, Array(next).sorted())
-                            model.panelStateVersion += 1
-                        }
+                        route.pick(element, value: row.value, alt: false)
                     }) {
                         SwiftUI.Text(layersActionIsInForce(action, checked)
                                      ? "✓ \(row.label)" : row.label)
@@ -2664,21 +2666,16 @@ struct YamlElementView: View {
                     SwiftUI.Divider()
                 case .toggle:
                     Button(action: {
-                        var next = checked
-                        // Option held: SOLO. A second Alt-click on an
-                        // already-soloed type restores the full tree, exactly
-                        // as a second Option-click un-solos the eye.
-                        if NSEvent.modifierFlags.contains(.option) {
-                            next = (next.count == 1 && next.contains(row.value)) ? [] : [row.value]
-                        } else if next.contains(row.value) {
-                            next.remove(row.value)
-                        } else {
-                            next.insert(row.value)
-                        }
-                        store.setPanel(panelId, bindKey, Array(next).sorted())
-                        model.panelStateVersion += 1
+                        // Option held: SOLO (`alt_toggle`), a second one on a
+                        // soloed type restores the full tree, as `layers.yaml`
+                        // declares.
+                        route.pick(element, value: row.value,
+                                   alt: NSEvent.modifierFlags.contains(.option))
                     }) {
-                        SwiftUI.Text(checked.contains(row.value) ? "✓ \(row.label)" : row.label)
+                        // The check is the declared one (`bind.checked_in`).
+                        SwiftUI.Text(WidgetEvent.itemChecked(widget: element, value: row.value,
+                                                             scope: context) == true
+                                     ? "✓ \(row.label)" : row.label)
                     }
                 }
             }
@@ -3638,7 +3635,9 @@ enum LayersMenuRowKind: Equatable {
     /// `type: toggle` — a type token that goes in or out of the CHECKED set.
     case toggle
     /// `type: action` — a named behaviour, carried verbatim from the item's
-    /// `action` key and routed by `layersCheckedAfterAction`.
+    /// `action` key. A click runs it by the declared pick
+    /// (`PanelWidgetEvents.pick`); `layersCheckedAfterAction` answers only
+    /// whether it is already in force, for the row's tick.
     case action(String)
 }
 
