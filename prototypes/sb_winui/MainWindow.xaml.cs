@@ -1826,6 +1826,11 @@ public sealed partial class MainWindow : Window
     private int _paneIconsSvg;
     private int _paneIconsText;
     private int _paneIconsFailed;
+    /// <summary>`brush_preview` loads, tallied apart from icons: they share the
+    /// loader and its pending count, so the PANEL ICONS row still waits for
+    /// them, but a failed preview must not read as a failed icon face.</summary>
+    private int _panePreviewsSvg;
+    private int _panePreviewsFailed;
     private int _paneBuild;
 
     /// <summary>One plan leaf, as this shell reads it. Values and static strings are the core's.</summary>
@@ -1980,6 +1985,8 @@ public sealed partial class MainWindow : Window
         _paneIconsSvg = 0;
         _paneIconsText = 0;
         _paneIconsFailed = 0;
+        _panePreviewsSvg = 0;
+        _panePreviewsFailed = 0;
 
         var host = new Microsoft.UI.Xaml.Controls.Canvas
         {
@@ -2001,6 +2008,7 @@ public sealed partial class MainWindow : Window
         var (texts, buttons, inputs, toggles, glyphs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0, 0);
         var optionsRefused = 0;
         var swatches = 0;
+        var (previews, previewEmpty) = (0, 0);
         foreach (var leaf in leaves)
         {
             FrameworkElement el;
@@ -2039,6 +2047,15 @@ public sealed partial class MainWindow : Window
                     swatches++;
                     if (leaf.Id.Length == 0) { unaddressable++; }
                     el = BuildSwatch(leaf);
+                    break;
+
+                // A brush tile's preview: the drawing the core sends in
+                // `display` (preview.svg + preview.viewbox), loaded as an icon
+                // is. A brush type with no preview is an EMPTY tile, counted
+                // as `preview-empty`, which is what the web port shows too.
+                case "brush_preview":
+                    previews++;
+                    el = BuildBrushPreview(leaf, ref previewEmpty);
                     break;
 
                 // A `length_input` is this control too: the person types TEXT
@@ -2109,7 +2126,8 @@ public sealed partial class MainWindow : Window
         // and asserts only `leaves` and `controls`; nothing sums the category
         // counters, and the self-test's row is an INPUT to that parser.
         Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-             + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} unmaterialized={unmaterialized} "
+             + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} previews={previews} preview-empty={previewEmpty} "
+             + $"unmaterialized={unmaterialized} "
              + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
              + $"options-refused={optionsRefused}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
@@ -2129,6 +2147,31 @@ public sealed partial class MainWindow : Window
     /// button's own label or summary text, COUNTED as `icon-text`. Never blank:
     /// the text face is shown first and replaced only by an icon that loaded.
     /// </summary>
+    /// <summary>
+    /// A `brush_preview`: no id, no bind, no click (the tile around it carries
+    /// the click). Its face is the core's drawing, through the icon loader; a
+    /// leaf the core sent no drawing for stays empty and is counted.
+    /// </summary>
+    private ContentControl BuildBrushPreview(PaneLeaf leaf, ref int empty)
+    {
+        var host = new ContentControl
+        {
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            IsHitTestVisible = false,
+        };
+        if (PanelWire.Preview(leaf.Shown("preview.viewbox"), leaf.Shown("preview.svg")) is { } p)
+        {
+            _paneIconsPending++;
+            LoadIcon(host, p.Viewbox, p.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild, preview: true);
+        }
+        else
+        {
+            empty++;
+        }
+        return host;
+    }
+
     /// <summary>
     /// A `color_swatch`: a bordered square, filled on every draw by
     /// ApplyLeafValues from `bind.color`. A tap sends the leaf's `click` by its
@@ -2256,7 +2299,7 @@ public sealed partial class MainWindow : Window
     // icon_button call site is unchanged and this widens the type rather than
     // duplicating the loader -- the alternative was a second copy of the SVG
     // wrapping, the currentColor substitution and the staleness guard.
-    private async void LoadIcon(ContentControl host, string viewbox, string svg, double box, int build)
+    private async void LoadIcon(ContentControl host, string viewbox, string svg, double box, int build, bool preview = false)
     {
         var ok = false;
         try
@@ -2306,7 +2349,8 @@ public sealed partial class MainWindow : Window
             // nothing about the pane on screen, so it is not counted.
             if (build == _paneBuild)
             {
-                if (ok) { _paneIconsSvg++; } else { _paneIconsFailed++; }
+                if (preview) { if (ok) { _panePreviewsSvg++; } else { _panePreviewsFailed++; } }
+                else if (ok) { _paneIconsSvg++; } else { _paneIconsFailed++; }
                 _paneIconsPending--;
                 if (_paneIconsPending == 0) { ReportPaneIcons(); }
             }
@@ -2317,7 +2361,8 @@ public sealed partial class MainWindow : Window
     private void ReportPaneIcons() =>
         Report($"PANEL ICONS panel={_paneDrawnPanel} build={_paneBuild} svg={_paneIconsSvg} "
              + $"text={_paneIconsText} failed={_paneIconsFailed} "
-             + $"icon={(_paneIconsSvg > 0 && _paneIconsText + _paneIconsFailed == 0 ? "SVG" : "TEXT")}");
+             + $"icon={(_paneIconsSvg > 0 && _paneIconsText + _paneIconsFailed == 0 ? "SVG" : "TEXT")} "
+             + $"preview-svg={_panePreviewsSvg} preview-failed={_panePreviewsFailed}");
 
     /// <summary>
     /// Show what the core says about one control. Returns `(disabled, checked,
