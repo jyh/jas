@@ -235,17 +235,6 @@ pub fn checked_after_action(action: &str, checked: &HashSet<String>) -> Option<H
     }
 }
 
-/// Whether an action's effect is ALREADY IN FORCE — what the tick on an action
-/// row means, as against a toggle's tick, which means "this type is checked".
-///
-/// Stated as *invoking it would change nothing* rather than as a hand-written
-/// per-action predicate, so a new action cannot arrive with a tick rule that
-/// contradicts what its own invocation does. An unknown action is never in
-/// force: it is inert, not satisfied.
-pub fn action_is_in_force(action: &str, checked: &HashSet<String>) -> bool {
-    checked_after_action(action, checked).as_ref() == Some(checked)
-}
-
 #[cfg(test)]
 mod checked_semantics_tests {
     use super::*;

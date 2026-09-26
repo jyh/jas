@@ -6266,11 +6266,9 @@ mod tests {
 
     /// Whether a dropdown action item is already in force (WIDGET_EVENTS.md,
     /// "Showing an item's check"), from the shared corpus Swift also drives.
-    /// The rule lives in the panel plan, which only the `ffi` build has.
-    #[cfg(feature = "ffi")]
     #[test]
     fn algorithm_dropdown_action_in_force_vectors() {
-        use crate::panel_plan::action_in_force;
+        use crate::interpreter::widget_commit::action_in_force;
         let json_str = read_fixture("algorithms/dropdown_action_in_force.json");
         let doc: serde_json::Value = serde_json::from_str(&json_str).unwrap();
         let bundle_str =

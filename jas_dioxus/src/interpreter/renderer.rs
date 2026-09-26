@@ -2338,6 +2338,38 @@ fn run_input_behavior(
     }
 }
 
+/// Whether the Layers filter's item `value` is an action already IN FORCE
+/// (WIDGET_EVENTS.md, "Showing an item's check"), by the shared rule
+/// (`widget_commit::action_in_force`). This app holds the filter as a typed
+/// set rather than in the panel scope, so the set is projected into
+/// `panel.type_filter` first, sorted: a set has no order, and a list does.
+/// An unknown answer shows no tick, as a toggle's unknown check does.
+fn layers_filter_item_in_force(
+    el: &serde_json::Value,
+    value: &str,
+    render_ctx: &serde_json::Value,
+    st: &crate::workspace::app_state::AppState,
+) -> bool {
+    let Some(item) = el.get("items").and_then(|i| i.as_array()).into_iter().flatten()
+        .find(|i| i.get("value").and_then(|v| v.as_str()) == Some(value))
+    else {
+        return false;
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else { return false };
+    let mut filter: Vec<String> = st.layers_type_filter.iter().cloned().collect();
+    filter.sort();
+    let mut scope = render_ctx.clone();
+    if !scope.is_object() {
+        scope = serde_json::json!({});
+    }
+    let panel = scope.as_object_mut().expect("object").entry("panel").or_insert_with(|| serde_json::json!({}));
+    if let serde_json::Value::Object(p) = panel {
+        p.insert("type_filter".into(), serde_json::json!(filter));
+    }
+    crate::interpreter::widget_commit::action_in_force(item, "layers_panel_content", ws.actions(), &scope)
+        == serde_json::Value::Bool(true)
+}
+
 /// Pick a dropdown item by its `value` (WIDGET_EVENTS.md, "Picking a
 /// dropdown item"): `toggle`, or with Alt held `alt_toggle`. An `action` item
 /// runs its own action; any other item runs every behavior declared for the
@@ -9551,7 +9583,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
     // vocabulary -- so the row meaning "show me everything" blanked the tree.
     // The partition is shared with JasSwift and pinned by the `menu` block of
     // test_fixtures/view_state/layers_type_filter.json.
-    use crate::algorithms::layers_filter::{action_is_in_force, MenuRowKind};
+    use crate::algorithms::layers_filter::MenuRowKind;
     let rows = el.get("items")
         .and_then(|v| v.as_array())
         .map(|arr| crate::algorithms::layers_filter::menu_rows(arr))
@@ -9635,8 +9667,8 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                         // what stops CHECKED semantics reading as
                                         // twelve switched-off boxes over a full
                                         // tree.
-                                        MenuRowKind::Action(action) => {
-                                            let mark = if action_is_in_force(action, &checked_types) { "☑" } else { "☐" };
+                                        MenuRowKind::Action(_) => {
+                                            let mark = if layers_filter_item_in_force(&pick_el, &v, &pick_ctx, &rctx.app.borrow()) { "☑" } else { "☐" };
                                             let (pel, pctx) = (pick_el.clone(), pick_ctx.clone());
                                             let pv = v.clone();
                                             rsx! {
@@ -14044,6 +14076,26 @@ mod tests {
                    "a second Alt on the soloed type restores everything");
         assert_eq!(filter_after(&[("__all__", false)], &["path", "circle"]), Vec::<String>::new(),
                    "All runs its own action");
+    }
+
+    /// The "All" row's tick is the declared rule (WIDGET_EVENTS.md, "Showing
+    /// an item's check"): a dry run of its own action against this app's
+    /// filter. Driven after real picks, so the tick follows the store.
+    #[test]
+    fn the_layers_all_tick_is_the_declared_in_force_rule() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let panel = ws.panel("layers_panel_content").expect("layers");
+        let el = find_by_id(&panel["content"], "lp_filter_button").expect("lp_filter_button").clone();
+        let mut st = AppState::new();
+        let all = |st: &AppState| super::layers_filter_item_in_force(&el, "__all__", &serde_json::json!({}), st);
+        assert!(all(&st), "nothing checked: All is in force");
+        let ctx = serde_json::json!({});
+        assert!(super::run_pick_behavior(&el, "path", false, &ctx, &mut st));
+        assert!(!all(&st), "a type checked: running All would change the filter");
+        assert!(super::run_pick_behavior(&el, "__all__", false, &ctx, &mut st));
+        assert!(all(&st), "All ran: in force again");
+        // A toggle row is not an action: the rule does not answer it.
+        assert!(!super::layers_filter_item_in_force(&el, "path", &ctx, &st));
     }
 
     #[test]
