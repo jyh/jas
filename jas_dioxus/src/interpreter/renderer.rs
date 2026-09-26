@@ -2338,6 +2338,51 @@ fn run_input_behavior(
     }
 }
 
+/// Pick a dropdown item by its `value` (WIDGET_EVENTS.md, "Picking a
+/// dropdown item"): `toggle`, or with Alt held `alt_toggle`. An `action` item
+/// runs its own action; any other item runs every behavior declared for the
+/// event, with `item` bound to the whole item and `event.value` to its value.
+/// Returns false, and changes nothing, when no declared item has that value.
+fn run_pick_behavior(
+    el: &serde_json::Value,
+    value: &str,
+    alt: bool,
+    render_ctx: &serde_json::Value,
+    st: &mut crate::workspace::app_state::AppState,
+) -> bool {
+    let Some(item) = el.get("items").and_then(|i| i.as_array()).into_iter().flatten()
+        .find(|i| i.is_object() && i.get("value").and_then(|v| v.as_str()) == Some(value))
+    else {
+        return false;
+    };
+    let mut cs = render_ctx.clone();
+    if let serde_json::Value::Object(root) = &mut cs {
+        root.insert("item".into(), item.clone());
+        root.insert("event".into(), serde_json::json!({ "value": value, "alt": alt }));
+    }
+    let empty = serde_json::Map::new();
+    if item.get("type").and_then(|t| t.as_str()) == Some("action") {
+        if let Some(action) = item.get("action").and_then(|a| a.as_str()) {
+            let decl = item.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+            let _ = dispatch_action(action, &resolve_behavior_params(decl, &cs), st);
+        }
+        return true;
+    }
+    let event = if alt { "alt_toggle" } else { "toggle" };
+    for b in el.get("behavior").and_then(|b| b.as_array()).into_iter().flatten()
+        .filter(|b| b.get("event").and_then(|e| e.as_str()) == Some(event))
+    {
+        if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
+            run_yaml_effects(effects, &cs, st);
+        }
+        if let Some(action) = b.get("action").and_then(|a| a.as_str()) {
+            let decl = b.get("params").and_then(|p| p.as_object()).unwrap_or(&empty);
+            let _ = dispatch_action(action, &resolve_behavior_params(decl, &cs), st);
+        }
+    }
+    true
+}
+
 /// `run_yaml_effects` with the owning action's name threaded in (OP_LOG.md §9).
 /// The batch owner stamps `name_txn(action)` just before `commit_txn` so every
 /// menu/keyboard/panel-dispatched undoable transaction is named — closing the
@@ -3041,6 +3086,21 @@ fn run_yaml_effect(
     if let Some(target) = eff.get("pop").and_then(|v| v.as_str()) {
         if target == "panel.isolation_stack" {
             st.layers_isolation_stack.pop();
+        }
+        return deferred;
+    }
+
+    // list_toggle: { target, value } — set membership. The one shipped target
+    // is the Layers type filter, which this app holds as a typed set; any
+    // other target is a no-op here, as an unknown `list_push` target is.
+    if let Some(lt) = eff.get("list_toggle").and_then(|v| v.as_object()) {
+        if lt.get("target").and_then(|v| v.as_str()) == Some("panel.type_filter") {
+            let value_expr = lt.get("value").and_then(|v| v.as_str()).unwrap_or("null");
+            if let super::expr_types::Value::Str(t) = super::expr::eval(value_expr, eval_ctx) {
+                if !st.layers_type_filter.remove(&t) {
+                    st.layers_type_filter.insert(t);
+                }
+            }
         }
         return deferred;
     }
@@ -9513,6 +9573,13 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
     // so with an empty set NO type box is ticked and the "All" row carries the
     // tick instead -- the panel reads as a mode ("All" / "these types") rather
     // than eleven boxes that are all on and all meaningless.
+    // EVERY ROW TAKES THE DECLARED ROUTE (`run_pick_behavior`, WIDGET_EVENTS.md
+    // "Picking a dropdown item"). Until 2026-09-26 each row mutated
+    // `layers_type_filter` here, and the declared behaviors never ran in this
+    // app: it hosted no `list_toggle`.
+    let pick_el = el.clone();
+    let pick_ctx = ctx.clone();
+
     let checked_types: std::collections::HashSet<String> = rctx.app.borrow()
         .layers_type_filter.iter().cloned().collect();
 
@@ -9570,7 +9637,8 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                         // tree.
                                         MenuRowKind::Action(action) => {
                                             let mark = if action_is_in_force(action, &checked_types) { "☑" } else { "☐" };
-                                            let act = action.clone();
+                                            let (pel, pctx) = (pick_el.clone(), pick_ctx.clone());
+                                            let pv = v.clone();
                                             rsx! {
                                                 div {
                                                     key: "{v_for_key}",
@@ -9578,17 +9646,12 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                                     onclick: move |evt: Event<MouseData>| {
                                                         evt.stop_propagation();
                                                         let a = item_app.clone();
-                                                        let act = act.clone();
+                                                        let (pel, pctx, pv) = (pel.clone(), pctx.clone(), pv.clone());
                                                         spawn(async move {
                                                             let mut st = a.borrow_mut();
-                                                            let current: std::collections::HashSet<String> =
-                                                                st.layers_type_filter.iter().cloned().collect();
-                                                            // An action this port does not know leaves the
-                                                            // state alone. Nothing is guessed here -- guessing
-                                                            // is what made `__all__` a type.
-                                                            if let Some(next) = crate::algorithms::layers_filter::checked_after_action(&act, &current) {
-                                                                st.layers_type_filter = next;
-                                                            }
+                                                            // The item's OWN action runs; an action the
+                                                            // runner does not know changes nothing.
+                                                            run_pick_behavior(&pel, &pv, false, &pctx, &mut st);
                                                             item_rev += 1;
                                                         });
                                                     },
@@ -9600,6 +9663,7 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                         MenuRowKind::Toggle => {
                                             let checked = checked_types.contains(&v);
                                             let check_mark = if checked { "☑" } else { "☐" };
+                                            let (pel, pctx) = (pick_el.clone(), pick_ctx.clone());
                                             rsx! {
                                                 div {
                                                     key: "{v_for_key}",
@@ -9615,20 +9679,10 @@ fn render_layers_filter_dropdown(el: &serde_json::Value, ctx: &serde_json::Value
                                                         let alt = evt.data().modifiers().alt();
                                                         let a = item_app.clone();
                                                         let vv = v.clone();
+                                                        let (pel, pctx) = (pel.clone(), pctx.clone());
                                                         spawn(async move {
                                                             let mut st = a.borrow_mut();
-                                                            if alt {
-                                                                let soloed = st.layers_type_filter.len() == 1
-                                                                    && st.layers_type_filter.contains(&vv);
-                                                                st.layers_type_filter.clear();
-                                                                if !soloed {
-                                                                    st.layers_type_filter.insert(vv);
-                                                                }
-                                                            } else if st.layers_type_filter.contains(&vv) {
-                                                                st.layers_type_filter.remove(&vv);
-                                                            } else {
-                                                                st.layers_type_filter.insert(vv);
-                                                            }
+                                                            run_pick_behavior(&pel, &vv, alt, &pctx, &mut st);
                                                             item_rev += 1;
                                                         });
                                                     },
@@ -13956,6 +14010,52 @@ mod tests {
         );
         // And the tile's type must be pointer-wired per the contract.
         assert!(wires_pointer_click("container"));
+    }
+
+    // ── The Layers type filter takes the declared pick (the bank's §1.3) ──
+    //
+    // The menu mutated `layers_type_filter` natively and the declared route
+    // never ran here: this renderer hosted no `list_toggle`, so
+    // `toggle_layers_type_filter` would have done nothing. These drive the
+    // SHIPPED widget through `run_pick_behavior`, the route the menu takes.
+
+    fn filter_after(picks: &[(&str, bool)], initial: &[&str]) -> Vec<String> {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let panel = ws.panel("layers_panel_content").expect("layers");
+        let el = find_by_id(&panel["content"], "lp_filter_button").expect("lp_filter_button").clone();
+        let mut st = AppState::new();
+        st.layers_type_filter = initial.iter().map(|s| s.to_string()).collect();
+        for (value, alt) in picks {
+            let ctx = serde_json::json!({"panel": {"type_filter":
+                st.layers_type_filter.iter().cloned().collect::<Vec<_>>()}});
+            assert!(super::run_pick_behavior(&el, value, *alt, &ctx, &mut st), "{value} alt={alt} was refused");
+        }
+        let mut out: Vec<String> = st.layers_type_filter.iter().cloned().collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn the_layers_filter_pick_runs_the_declared_behaviors() {
+        assert_eq!(filter_after(&[("circle", false)], &["path"]), vec!["circle", "path"], "a plain pick adds");
+        assert_eq!(filter_after(&[("path", false)], &["path", "text"]), vec!["text"], "and removes");
+        assert_eq!(filter_after(&[("text", true)], &["path", "circle"]), vec!["text"], "Alt solos");
+        assert_eq!(filter_after(&[("text", true), ("text", true)], &["path"]), Vec::<String>::new(),
+                   "a second Alt on the soloed type restores everything");
+        assert_eq!(filter_after(&[("__all__", false)], &["path", "circle"]), Vec::<String>::new(),
+                   "All runs its own action");
+    }
+
+    #[test]
+    fn a_pick_of_an_undeclared_value_is_refused_and_changes_nothing() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("bundle");
+        let panel = ws.panel("layers_panel_content").expect("layers");
+        let el = find_by_id(&panel["content"], "lp_filter_button").expect("lp_filter_button").clone();
+        let mut st = AppState::new();
+        st.layers_type_filter = ["path".to_string()].into_iter().collect();
+        let ctx = serde_json::json!({"panel": {"type_filter": ["path"]}});
+        assert!(!super::run_pick_behavior(&el, "no_such_type", false, &ctx, &mut st));
+        assert_eq!(st.layers_type_filter.len(), 1);
     }
 
     // The tile also carries a `selected_in` bind for its highlight; the
