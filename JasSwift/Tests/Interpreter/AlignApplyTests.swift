@@ -142,6 +142,11 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // NOTHING — every YAML action run through `runYamlActionByName` built
         // its map here and got no hook. Found at the canvas by JYH.
         "notify_panel_state_changed",
+        // W2b-18: the Brushes panel's library edits. They lived only in the
+        // tool table, so Delete Brush and Duplicate Brush from the panel menu
+        // were skipped by `runEffects` without a word.
+        "brush.options_confirm", "brush.delete_selected", "brush.duplicate_selected",
+        "brush.append", "brush.update",
     ]
     // THIS ASSERTION IS THE REGISTRY GATE IN EMBRYO, and it is worth saying so.
     // It compares the built map against a HAND-MAINTAINED literal, which catches
