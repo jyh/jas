@@ -1818,6 +1818,10 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private string? _paneSignature;
 
+    /// <summary>§1.2: the newest plan's `items` per leaf path, read by a
+    /// dropdown's flyout when it opens.</summary>
+    private readonly Dictionary<string, PaneItems> _paneItems = new(StringComparer.Ordinal);
+
     /// <summary>The drawn controls, by plan path.</summary>
     private readonly Dictionary<string, FrameworkElement> _paneControls = new();
 
@@ -1837,7 +1841,7 @@ public sealed partial class MainWindow : Window
     private sealed record PaneLeaf(
         string Path, string Type, string Id, double X, double Y, double W, double H,
         Dictionary<string, string> Values, Dictionary<string, string> Static,
-        Dictionary<string, string> Display, PaneOptions? Options)
+        Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items)
     {
         internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
         internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -1911,7 +1915,9 @@ public sealed partial class MainWindow : Window
                 // W-b: null when the core sent `null` (no declared list) or an
                 // older core sent no key at all. The two read the same here:
                 // either way there is no list to offer.
-                PanelWire.ReadOptions(e.TryGetProperty("options", out var opts) ? opts.GetRawText() : null)));
+                PanelWire.ReadOptions(e.TryGetProperty("options", out var opts) ? opts.GetRawText() : null),
+                // §1.2: a dropdown's items, read the same way: null is no list.
+                PanelWire.ReadItems(e.TryGetProperty("items", out var its) ? its.GetRawText() : null)));
         }
         var icons = new Dictionary<string, (string Viewbox, string Svg)>();
         foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -1935,6 +1941,15 @@ public sealed partial class MainWindow : Window
         _paneDrawnPanel = snap.PanelId;
         if (rebuilt) { BuildPane(leaves, icons, height); }
         _paneSignature = signature;
+
+        // §1.2: a dropdown's flyout is built at every OPEN from the newest
+        // plan's items, so a check the core moved is never shown stale and a
+        // moved check need not rebuild the pane.
+        _paneItems.Clear();
+        foreach (var leaf in leaves)
+        {
+            if (leaf.Items is not null) { _paneItems[leaf.Path] = leaf.Items; }
+        }
 
         var (disabled, @checked, hidden, editing) = (0, 0, 0, 0);
         foreach (var leaf in leaves)
@@ -2007,6 +2022,7 @@ public sealed partial class MainWindow : Window
         // not read, so a list shown short is never shown silently.
         var (texts, buttons, inputs, toggles, glyphs, unmaterialized, unaddressable) = (0, 0, 0, 0, 0, 0, 0);
         var optionsRefused = 0;
+        var (menus, itemsRefused) = (0, 0);
         var swatches = 0;
         var (previews, previewEmpty) = (0, 0);
         foreach (var leaf in leaves)
@@ -2084,6 +2100,23 @@ public sealed partial class MainWindow : Window
                     el = BuildToggle(leaf);
                     break;
 
+                // §1.2: a `dropdown` is a MENU BUTTON (`items` + a `behavior`),
+                // not a selector: it binds no value. The core sends its items
+                // as kinds with each toggle's check; with no `items` channel it
+                // stays a counted placeholder.
+                case "dropdown":
+                    if (leaf.Items is null)
+                    {
+                        unmaterialized++;
+                        el = Placeholder(leaf.Type);
+                        break;
+                    }
+                    menus++;
+                    if (leaf.Id.Length == 0) { unaddressable++; }
+                    itemsRefused += leaf.Items.Refused;
+                    el = BuildDropdown(leaf, icons);
+                    break;
+
                 // W-b: the three list kinds, from the plan's `options` channel.
                 // ⛔ ONLY WHEN THE CORE SENT A LIST, or `combo_box`'s free entry
                 // (`grad_stop_location_combo` declares no options and is typed
@@ -2093,9 +2126,6 @@ public sealed partial class MainWindow : Window
                 // ⛔ PLAIN LABELS, NOT `case "select" when …`: the kind-label
                 // gate reads a bare quoted case label, and a guarded one is invisible
                 // to it (measured: 8 labels read of 10).
-                // ⛔ `dropdown` IS NOT HERE ON PURPOSE. `lp_filter_button` is a
-                // MENU BUTTON (`items` + a `behavior`) wearing a selector's
-                // kind name; it stays a counted `[dropdown]` placeholder.
                 case "select":
                 case "icon_select":
                 case "combo_box":
@@ -2133,7 +2163,7 @@ public sealed partial class MainWindow : Window
              + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} previews={previews} preview-empty={previewEmpty} "
              + $"unmaterialized={unmaterialized} "
              + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
-             + $"options-refused={optionsRefused}");
+             + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
         if (_paneIconsPending == 0) { ReportPaneIcons(); }
     }
 
@@ -2201,7 +2231,8 @@ public sealed partial class MainWindow : Window
             ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00));
 
-    private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
+    private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons,
+                                   bool sendsClick = true)
     {
         var label = leaf.Literal("label") ?? leaf.Literal("summary") ?? leaf.Id;
         var btn = new Button
@@ -2223,7 +2254,7 @@ public sealed partial class MainWindow : Window
 
         var id = leaf.Id;
         var path = leaf.Path;
-        btn.Click += (_, _) => OnPaneClick(id, path);
+        if (sendsClick) { btn.Click += (_, _) => OnPaneClick(id, path); }
 
         var name = leaf.IconName;
         if (name is not null && icons.TryGetValue(name, out var def))
@@ -2237,6 +2268,45 @@ public sealed partial class MainWindow : Window
             // (`icons_missing`): the text face stays, by design.
             _paneIconsText++;
         }
+        return btn;
+    }
+
+    /// <summary>
+    /// §1.2: a `dropdown`, drawn as its icon button with a menu flyout. The
+    /// button sends NOTHING itself (a `click` on an item kind is refused
+    /// `WrongEvent`); each menu row sends a pick of its own `value`, `toggle`
+    /// or with Alt held `alt_toggle` (WIDGET_EVENTS.md, "Picking a dropdown
+    /// item"). The rows are rebuilt at every open from the newest plan
+    /// (`_paneItems`): a toggle row shows the core's check, and an unknown
+    /// check (null) shows unchecked. A row's own tick after a click is the
+    /// control's guess and is discarded at the next open.
+    /// </summary>
+    private Button BuildDropdown(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
+    {
+        var btn = BuildIconButton(leaf, icons, sendsClick: false);
+        var (id, path) = (leaf.Id, leaf.Path);
+        var menu = new MenuFlyout();
+        menu.Opening += (_, _) =>
+        {
+            menu.Items.Clear();
+            if (!_paneItems.TryGetValue(path, out var items)) { return; }
+            foreach (var row in items.Rows)
+            {
+                if (row.Separator)
+                {
+                    menu.Items.Add(new MenuFlyoutSeparator());
+                    continue;
+                }
+                MenuFlyoutItem item = row.Kind == "toggle"
+                    ? new ToggleMenuFlyoutItem { Text = row.Label, IsChecked = row.Checked == true }
+                    : new MenuFlyoutItem { Text = row.Label };
+                var value = row.Value;
+                item.Click += (_, _) => SendPane(
+                    id, PanelWire.PickEvent(IsKeyDown(Windows.System.VirtualKey.Menu)), value, path);
+                menu.Items.Add(item);
+            }
+        };
+        btn.Flyout = menu;
         return btn;
     }
 

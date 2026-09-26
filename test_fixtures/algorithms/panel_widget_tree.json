@@ -11169,7 +11169,9 @@
         "col": 0,
         "visible": true,
         "dyn_visible": false,
-        "bind": [],
+        "bind": [
+          "checked_in"
+        ],
         "style": [
           "size"
         ]

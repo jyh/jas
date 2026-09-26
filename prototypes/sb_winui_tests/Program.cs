@@ -514,6 +514,46 @@ static class Program
         Eq("preview: an empty svg is no drawing", "(null)", ShowPreview(PanelWire.Preview("0 0 40 40", "")));
         Eq("preview: a blank viewbox is no drawing", "(null)", ShowPreview(PanelWire.Preview("  ", "<ellipse/>")));
         Eq("swatch: null is no colour", "(null)", ShowRgb(PanelWire.SwatchColor(null)));
+        // ─────────────────────────────────────────────────────────────
+        // §1.2: a dropdown's `items` channel, read from the core's OWN bytes:
+        // the Layers type filter's entry after one pick checked `path`,
+        // printed by `the_layers_filter_plan_carries_its_items_and_their_checks`
+        // -- copied, never typed from the shape.
+        // ─────────────────────────────────────────────────────────────
+        const string LayersFilter = """
+            [{"kind":"action","label":"All","value":"__all__"},{"checked":false,"kind":"toggle","label":"Layer","value":"layer"},{"checked":false,"kind":"toggle","label":"Group","value":"group"},{"checked":true,"kind":"toggle","label":"Path","value":"path"},{"checked":false,"kind":"toggle","label":"Rectangle","value":"rectangle"},{"checked":false,"kind":"toggle","label":"Circle","value":"circle"},{"checked":false,"kind":"toggle","label":"Ellipse","value":"ellipse"},{"checked":false,"kind":"toggle","label":"Polyline","value":"polyline"},{"checked":false,"kind":"toggle","label":"Polygon","value":"polygon"},{"checked":false,"kind":"toggle","label":"Text","value":"text"},{"checked":false,"kind":"toggle","label":"Text Path","value":"text_path"},{"checked":false,"kind":"toggle","label":"Line","value":"line"},{"checked":false,"kind":"toggle","label":"Compound Shape","value":"live"}]
+            """;
+        var filter = PanelWire.ReadItems(LayersFilter);
+        Check("items: the Layers filter's channel reads", filter is not null && filter.Refused == 0, $"refused={filter?.Refused}");
+        // Counts DERIVED from the fixture by a route the reader does not use.
+        var wantRows = LayersFilter.Split("\"kind\":").Length - 1;
+        var wantToggles = LayersFilter.Split("\"kind\":\"toggle\"").Length - 1;
+        Eq("items: one row per item", wantRows.ToString(), (filter?.Rows.Count ?? -1).ToString());
+        Eq("items: every toggle is a toggle row", wantToggles.ToString(),
+            (filter?.Rows.Count(r => r.Kind == "toggle") ?? -1).ToString());
+        Eq("items: the core's one check is the one read", "path",
+            filter is null ? "(null)" : string.Join(",", filter.Rows.Where(r => r.Checked == true).Select(r => r.Value)));
+        Eq("items: an action row carries no check", "(null)",
+            filter is null ? "(no list)" : filter.Rows.First(r => r.Kind == "action").Checked?.ToString() ?? "(null)");
+        Check("items: CONTROL: an unchecked toggle reads false, not unknown",
+            filter is not null && filter.Rows.Any(r => r.Kind == "toggle" && r.Checked == false),
+            "the check arms above would pass on a reader that made every check null");
+        // An unknown check is its own state, and it is not unchecked.
+        var unknown = PanelWire.ReadItems("""[{"kind":"toggle","value":"a","label":"A","checked":null}]""");
+        Eq("items: a null check is unknown, not false", "(null)", unknown?.Rows[0].Checked?.ToString() ?? "(null)");
+        Eq("items: the core's null is no list", "(null)", PanelWire.ReadItems("null") is null ? "(null)" : "list");
+        Eq("items: an absent key is no list", "(null)", PanelWire.ReadItems(null) is null ? "(null)" : "list");
+        var oddItems = PanelWire.ReadItems("""
+            [{"kind":"submenu","value":"s","label":"S"},{"kind":"toggle","label":"no value"},
+             {"kind":"toggle","value":"x","label":"X","checked":"yes"},{"kind":"separator"},
+             {"kind":"action","value":"ok","label":"OK"}]
+            """);
+        Eq("items: an unreadable row is refused and counted", "3", (oddItems?.Refused ?? -1).ToString());
+        Eq("items: ...and the readable rows are still offered", "separator,action",
+            oddItems is null ? "(null)" : string.Join(",", oddItems.Rows.Select(r => r.Kind)));
+        Eq("items: a plain pick is toggle", "toggle", PanelWire.PickEvent(false));
+        Eq("items: an Alt pick is alt_toggle", "alt_toggle", PanelWire.PickEvent(true));
+
         // A swatch's tap reaches the core by its id OR its plan path
         // (STATUS-flask §114: a library tile has no id, only a path).
         Eq("addressable: an id alone", "True", PanelWire.Addressable("sp_recent_0", null).ToString());

@@ -512,6 +512,10 @@ content:
             parent row. Stated as checking rather than unchecking, the ancestor
             rule stops being an exception and becomes half the definition.
           style: { size: 20 }
+          # Which type items show a check: those whose value is in the
+          # CHECKED set (WIDGET_EVENTS.md, "Showing an item's check").
+          bind:
+            checked_in: "panel.type_filter"
           items:
             # FIRST, and deliberately: the one-click way back to the default.
             # An artist wanting "just the circles" Alt-clicks Circle; wanting

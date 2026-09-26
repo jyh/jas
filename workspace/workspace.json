@@ -16101,6 +16101,9 @@
                 "style": {
                   "size": 20
                 },
+                "bind": {
+                  "checked_in": "panel.type_filter"
+                },
                 "items": [
                   {
                     "label": "All",
