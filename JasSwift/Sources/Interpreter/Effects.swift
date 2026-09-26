@@ -553,6 +553,26 @@ private func runOne(
         return
     }
 
+    // swap_panel_state: [a, b] (the ACTIVE panel) or { panel, keys: [a, b] }
+    // (the named panel). Exchanges the two keys' values in that panel's
+    // state; anything but exactly two key names is a no-op. Mirrors the
+    // reference's arm. Stroke's Swap Arrowheads uses both forms. Until this
+    // arm JasSwift skipped the key, so the widget swapped the two globals and
+    // left the panel's own values where they were.
+    if let raw = effect["swap_panel_state"] {
+        let spec = raw as? [String: Any]
+        let keys = (spec?["keys"] ?? raw) as? [String]
+        let panelId = (spec?["panel"] as? String).map(StateStore.panelContentId)
+            ?? store.getActivePanelId()
+        if let keys = keys, keys.count == 2, let panelId = panelId {
+            let va = store.getPanel(panelId, keys[0])
+            let vb = store.getPanel(panelId, keys[1])
+            store.setPanel(panelId, keys[0], vb)
+            store.setPanel(panelId, keys[1], va)
+        }
+        return
+    }
+
     // set_panel_state: { key, value, panel? }
     if let sps = effect["set_panel_state"] as? [String: Any] {
         let key = sps["key"] as? String ?? ""

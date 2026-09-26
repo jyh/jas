@@ -618,6 +618,32 @@ fn run_one<'h>(
         return;
     }
 
+    // swap_panel_state: [a, b] (the ACTIVE panel) or { panel, keys: [a, b] }
+    // (the named panel). Exchanges the two keys' values in that panel's
+    // store state; anything but exactly two key names is a no-op. Mirrors the
+    // reference's arm. The web renderer still answers the array form on the
+    // Stroke panel's typed slot before this runner sees it; this arm is what
+    // the engine, and anything else running on the store, reaches.
+    if let Some(raw) = effect.get("swap_panel_state") {
+        let (keys, panel) = match raw {
+            serde_json::Value::Object(o) => (o.get("keys"), o.get("panel").and_then(|v| v.as_str())),
+            other => (Some(other), None),
+        };
+        let panel = panel.map(str::to_string).or_else(|| store.active_panel_id().map(str::to_string));
+        let names: Option<Vec<&str>> = keys.and_then(|k| k.as_array())
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect());
+        if let (Some(panel), Some(names)) = (panel, names) {
+            let arity = keys.and_then(|k| k.as_array()).map_or(0, |a| a.len());
+            if names.len() == 2 && arity == 2 {
+                let va = store.get_panel(&panel, names[0]).clone();
+                let vb = store.get_panel(&panel, names[1]).clone();
+                store.set_panel(&panel, names[0], vb);
+                store.set_panel(&panel, names[1], va);
+            }
+        }
+        return;
+    }
+
     // list_push: { target, value, unique, max_length }
     if let Some(serde_json::Value::Object(lp)) = effect.get("list_push") {
         let target = lp.get("target").and_then(|v| v.as_str()).unwrap_or("");
@@ -12972,6 +12998,57 @@ mod tests {
         assert_eq!(brush_slugs(&store, "lib_a"), ["a", "b", "c", "a_copy", "d"]);
         assert_eq!(report_of(vec![serde_json::json!({"brush.options_confirm": {}})], None, None, None),
                    vec![Unhandled::NoModel("brush.options_confirm".into())]);
+    }
+
+    /// swap_panel_state, both forms, as the reference's
+    /// `test_swap_panel_state.py` pins them. Until this arm only the web
+    /// renderer handled the array form (on the Stroke panel's typed slot), and
+    /// the engine refused the key by name.
+    #[test]
+    fn swap_panel_state_swaps_two_keys_of_the_active_or_named_panel() {
+        fn stroke_store() -> StateStore {
+            let mut store = StateStore::new();
+            let mut d = std::collections::HashMap::new();
+            d.insert("start_arrowhead".to_string(), serde_json::json!("simple_arrow"));
+            d.insert("end_arrowhead".to_string(), serde_json::json!("none"));
+            d.insert("start_arrowhead_scale".to_string(), serde_json::json!(100.0));
+            d.insert("end_arrowhead_scale".to_string(), serde_json::json!(150.0));
+            store.init_panel("stroke", d);
+            store.set_active_panel(Some("stroke"));
+            store
+        }
+        fn panel(store: &StateStore) -> Vec<serde_json::Value> {
+            ["start_arrowhead", "end_arrowhead", "start_arrowhead_scale", "end_arrowhead_scale"]
+                .iter().map(|k| store.get_panel("stroke", k).clone()).collect()
+        }
+        let run = |effects: Vec<serde_json::Value>, store: &mut StateStore| {
+            let r = run_effects(&effects, &serde_json::json!({}), store, None, None, None, None);
+            assert_eq!(r.unhandled, vec![]);
+        };
+        let untouched = serde_json::json!(["simple_arrow", "none", 100.0, 150.0]);
+
+        let mut s = stroke_store();
+        run(vec![serde_json::json!({"swap_panel_state": ["start_arrowhead", "end_arrowhead"]})], &mut s);
+        assert_eq!(serde_json::json!(panel(&s)), serde_json::json!(["none", "simple_arrow", 100.0, 150.0]));
+
+        let mut s = stroke_store();
+        s.set_active_panel(None);
+        run(vec![serde_json::json!({"swap_panel_state": {"panel": "stroke",
+            "keys": ["start_arrowhead_scale", "end_arrowhead_scale"]}})], &mut s);
+        assert_eq!(serde_json::json!(panel(&s)), serde_json::json!(["simple_arrow", "none", 150.0, 100.0]));
+
+        for keys in [serde_json::json!(["start_arrowhead"]),
+                     serde_json::json!(["start_arrowhead", "end_arrowhead", "x"]),
+                     serde_json::json!([]), serde_json::json!("start_arrowhead")] {
+            // One store PER FORM: on one store a wrongly accepted list swaps
+            // twice and restores itself (a mutant accepting 3 names survived).
+            for eff in [serde_json::json!({"swap_panel_state": keys.clone()}),
+                        serde_json::json!({"swap_panel_state": {"panel": "stroke", "keys": keys.clone()}})] {
+                let mut s = stroke_store();
+                run(vec![eff.clone()], &mut s);
+                assert_eq!(serde_json::json!(panel(&s)), untouched, "{eff}");
+            }
+        }
     }
 
     #[test]
