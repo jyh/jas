@@ -75,7 +75,6 @@ use serde_json::{json, Map, Value};
 use crate::interpreter::bind_values::bind_values;
 use crate::interpreter::length;
 use crate::interpreter::panel_layout::{render_plan_with_omitted, RenderLeaf};
-use crate::interpreter::state_store::panel_content_id;
 
 fn path_of(v: &Value) -> Vec<i64> {
     v.as_array()
@@ -303,7 +302,7 @@ fn options_of(
 /// the item's value is an element of that list, compared as JSON, so `"1"` is
 /// not `1`. When `checked_in` is absent or does not resolve to a list it is
 /// `null`, never `false`. An action item's `checked` is whether its action is
-/// already in force ([`action_in_force`]).
+/// already in force ([`crate::interpreter::widget_commit::action_in_force`]).
 ///
 /// An item of any other type (no port draws one), one whose value is not a
 /// string (a pick is matched by a string value, so it could never be sent
@@ -335,7 +334,7 @@ fn items_of(node: &Value, ctx: &Value, path: &[i64], acts: &PanelActions, withhe
         row["checked"] = if kind == "toggle" {
             checked_in.as_ref().map_or(Value::Null, |l| Value::Bool(l.contains(&value)))
         } else {
-            action_in_force(item, acts.panel_id, acts.actions, ctx)
+            crate::interpreter::widget_commit::action_in_force(item, acts.panel_id, acts.actions, ctx)
         };
         rows.push(row);
     }
@@ -347,60 +346,6 @@ fn items_of(node: &Value, ctx: &Value, path: &[i64], acts: &PanelActions, withhe
 struct PanelActions<'a> {
     panel_id: &'a str,
     actions: &'a Value,
-}
-
-/// Whether an action item's action is already IN FORCE: running it now would
-/// change nothing (WIDGET_EVENTS.md, "Showing an item's check").
-///
-/// Stated as a dry run of the action's OWN effects rather than a per-item
-/// expression, so the tick cannot disagree with what a pick does. It is only
-/// answerable when every effect is a `set_panel_state` NAMING this panel, the
-/// one kind whose whole result is visible in the scope: the row is `true`
-/// exactly when each value, evaluated now, equals the key's current value.
-/// Anything else (another effect kind, an unnamed or foreign panel, `params`
-/// on the item, no effects, an undefined action) is `null`, never `false`,
-/// because an unseen effect could change something.
-pub(crate) fn action_in_force(item: &Value, panel_id: &str, actions: &Value, ctx: &Value) -> Value {
-    if item.get("params").is_some() || panel_id.is_empty() {
-        return Value::Null;
-    }
-    let effects = item.get("action").and_then(Value::as_str)
-        .and_then(|a| actions.get(a))
-        .and_then(|a| a.get("effects"))
-        .and_then(Value::as_array);
-    let Some(effects) = effects.filter(|e| !e.is_empty()) else { return Value::Null };
-    let own = panel_content_id(panel_id);
-    let mut in_force = true;
-    for effect in effects {
-        let sps = effect.get("set_panel_state").and_then(Value::as_object);
-        let Some(sps) = sps else { return Value::Null };
-        let named = sps.get("panel").and_then(Value::as_str).map(panel_content_id);
-        let Some(key) = sps.get("key").and_then(Value::as_str) else { return Value::Null };
-        if named.as_deref() != Some(own.as_str()) {
-            return Value::Null;
-        }
-        // "null" is the runner's own default for an absent value.
-        let expr = sps.get("value").and_then(Value::as_str).unwrap_or("null");
-        let next = crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(expr, ctx));
-        let now = ctx.get("panel").and_then(|p| p.get(key)).unwrap_or(&Value::Null);
-        in_force &= json_value_eq(&next, now);
-    }
-    Value::Bool(in_force)
-}
-
-/// JSON equality with numbers compared by value, so a store holding `45.0`
-/// equals an expression's `45`.
-fn json_value_eq(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
-        (Value::Array(x), Value::Array(y)) => {
-            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_value_eq(p, q))
-        }
-        (Value::Object(x), Value::Object(y)) => {
-            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_value_eq(v, w)))
-        }
-        _ => a == b,
-    }
 }
 
 /// The icon names an entry displays: its static `icon`, an `icon` node's

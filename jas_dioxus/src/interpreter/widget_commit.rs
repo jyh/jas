@@ -268,6 +268,65 @@ pub fn mirrored_global<'a>(panel: &'a serde_json::Value, key: &str) -> Option<&'
         .then_some(ident)
 }
 
+/// Whether an action item's action is already IN FORCE: running it now would
+/// change nothing (WIDGET_EVENTS.md, "Showing an item's check").
+///
+/// Stated as a dry run of the action's OWN effects rather than a per-item
+/// expression, so the tick cannot disagree with what a pick does. It is only
+/// answerable when every effect is a `set_panel_state` NAMING this panel, the
+/// one kind whose whole result is visible in the scope: the row is `true`
+/// exactly when each value, evaluated now, equals the key's current value.
+/// Anything else (another effect kind, an unnamed or foreign panel, `params`
+/// on the item, no effects, an undefined action) is `null`, never `false`,
+/// because an unseen effect could change something.
+pub fn action_in_force(
+    item: &serde_json::Value,
+    panel_id: &str,
+    actions: &serde_json::Value,
+    ctx: &serde_json::Value,
+) -> serde_json::Value {
+    if item.get("params").is_some() || panel_id.is_empty() {
+        return serde_json::Value::Null;
+    }
+    let effects = item.get("action").and_then(serde_json::Value::as_str)
+        .and_then(|a| actions.get(a))
+        .and_then(|a| a.get("effects"))
+        .and_then(serde_json::Value::as_array);
+    let Some(effects) = effects.filter(|e| !e.is_empty()) else { return serde_json::Value::Null };
+    let own = crate::interpreter::state_store::panel_content_id(panel_id);
+    let mut in_force = true;
+    for effect in effects {
+        let sps = effect.get("set_panel_state").and_then(serde_json::Value::as_object);
+        let Some(sps) = sps else { return serde_json::Value::Null };
+        let named = sps.get("panel").and_then(serde_json::Value::as_str).map(crate::interpreter::state_store::panel_content_id);
+        let Some(key) = sps.get("key").and_then(serde_json::Value::as_str) else { return serde_json::Value::Null };
+        if named.as_deref() != Some(own.as_str()) {
+            return serde_json::Value::Null;
+        }
+        // "null" is the runner's own default for an absent value.
+        let expr = sps.get("value").and_then(serde_json::Value::as_str).unwrap_or("null");
+        let next = crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(expr, ctx));
+        let now = ctx.get("panel").and_then(|p| p.get(key)).unwrap_or(&serde_json::Value::Null);
+        in_force &= json_value_eq(&next, now);
+    }
+    serde_json::Value::Bool(in_force)
+}
+
+/// JSON equality with numbers compared by value, so a store holding `45.0`
+/// equals an expression's `45`.
+fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    match (a, b) {
+        (serde_json::Value::Number(x), serde_json::Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (serde_json::Value::Array(x), serde_json::Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_value_eq(p, q))
+        }
+        (serde_json::Value::Object(x), serde_json::Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_value_eq(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
