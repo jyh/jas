@@ -1129,6 +1129,30 @@ mod tests {
                             &synthetic_actions(), &json!({}), host)
     }
 
+    /// A pick's item list may carry bare `separator` strings, as `options`
+    /// do, and one is never an item. The shipped filter declares none, so
+    /// the door test's separator row cannot witness this: it is `BadValue`
+    /// there because no item has that value at all.
+    #[test]
+    fn a_separator_in_a_dropdowns_items_is_never_picked() {
+        let spec = json!({"content": {"type": "container", "id": "root", "children": [
+            {"id": "dd", "type": "dropdown",
+             "items": ["separator", {"label": "A", "value": "a", "type": "toggle"}],
+             "behavior": [{"event": "toggle", "effects": [{"set_panel_state": {"key": "x", "value": "item.value"}}]}]}
+        ]}});
+        let run = |value: &str, store: &mut StateStore| {
+            let ev = parse_event(&json!({"widget": "dd", "event": "toggle", "value": value})).unwrap();
+            let mut model = Model::default();
+            run_widget_behavior("zz_panel", &spec, &ev, &json!({"state": {}, "panel": {}}), store,
+                                &mut model, &json!({}), &json!({}), &mut EngineHost { artboard_selection: vec![] })
+        };
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", std::collections::HashMap::new());
+        assert_eq!(run("separator", &mut store).unwrap_err(), Refusal::new("BadValue", "dd"));
+        assert!(run("a", &mut store).is_ok(), "the control: a declared item IS picked");
+        assert_eq!(store.get_panel("zz_panel", "x"), &json!("a"));
+    }
+
     /// Q5 where it is hardest: the batch EDITS the document before the effect
     /// the engine cannot run. Nothing reaches the live model, and the refusal
     /// names the FIRST unhosted effect.
