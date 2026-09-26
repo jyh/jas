@@ -455,6 +455,41 @@ floor + earliest-child remainder), bumping the flex child's rect height; a
 `spacer` gets an implicit `flex` weight of 1. This makes a `foreach` list
 (`flex: 1`) grow to fill and pins a trailing footer to the bottom.
 
+### B.5 Open question — a container's `style.width` (2026-09-26, not ruled)
+
+⚠️ **This section records a question. It changes no rule above.** B.4 honours a
+container's `style.height`; the column rule (A.5) gives a container the width it is
+handed. So `style.width` on a container is read by NO layout pass: the reference sets
+`w = avail_w if avail_w > 0 else _natural_w(...)` (`workspace_interpreter/panel_layout.py:362`)
+beside `exp_h = _resolve_dim(st.get("height"), 0)` (`:359`). The active ports do the
+same (`jas_dioxus/src/interpreter/panel_layout.rs:533`,
+`JasSwift/Sources/Interpreter/PanelLayout.swift:467`); the frozen ports were not re-read. Nothing in this document gives a reason for the
+asymmetry.
+
+**Measured over the compiled bundle's panels (dialogs not counted):** 4 of 696
+containers declare a width, against 9 that declare a height.
+
+| container | declared | where |
+|---|---|---|
+| a brush tile (`bp_tile_…`) | `width: 40` | `workspace/panels/brushes.yaml`; its leaf carries the size instead (comment at `:263`) |
+| the Layers row's select square | `width: 12` | `workspace/panels/layers.yaml:688` (`lp_select`) |
+| the fill/stroke widget (Color) | `width: 48` | `fill_stroke_widget` instance, `workspace/panels/color.yaml:363` |
+| the fill/stroke widget (Swatches) | `width: 50` | `fill_stroke_widget` instance, `workspace/panels/swatches.yaml:214` |
+
+**Why it is more than tidiness:** the web app's DOM DOES honour it. `render_container`
+builds its CSS from `build_style` (`jas_dioxus/src/interpreter/renderer.rs:3935`),
+which emits `width:` (`:3793`). So on these four containers the web app's picture and
+every port's plan rect disagree, and the WinUI shell draws from the rects.
+
+**The two arms, for a ruling:**
+- **(A) honour it, as height is:** `resolve_dim(style.width, avail_w)`, clamped to
+  `avail_w`, then the reference, the goldens and every active port follow. It matches
+  the author's intent in 4 of 4 cases and the web's picture.
+- **(B) refuse it:** a lint rejects `style.width` on a container, and the four move
+  their size onto a leaf, as the brush tile already did.
+
+Neither arm is taken here. Whichever is ruled replaces this section.
+
 ### A.6 Deferred in v1 — status updated 2026-06-29
 
 **Now implemented** (were deferred when this section was written): `foreach` row/wrap layout
