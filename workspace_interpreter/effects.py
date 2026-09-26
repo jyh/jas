@@ -162,6 +162,25 @@ def _eval(expr, store: StateStore, ctx: dict):
     return result.value
 
 
+def _used_stroke_brushes(document: dict | None) -> set[str]:
+    """Every non-empty ``stroke_brush`` id on any element of the document, at
+    any depth (layers and groups nest through ``children``), selected or not.
+    The brush.select_unused arm reads it."""
+    used: set[str] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            brush = node.get("stroke_brush")
+            if isinstance(brush, str) and brush:
+                used.add(brush)
+            for child in node.get("children") or []:
+                walk(child)
+
+    for layer in (document or {}).get("layers") or []:
+        walk(layer)
+    return used
+
+
 def apply_set_schemadriven(
     set_map: dict,
     store: StateStore,
@@ -758,6 +777,38 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 copies.append(new)
             store.set_data_path(path, out)
             store.set_panel("brushes", "selected_brushes", copies)
+            return None
+
+    # brush.sort_by_name / brush.select_unused: { library } — BRUSHES.md
+    # § Panel menu. `library` is an EXPRESSION (the actions pass
+    # panel.selected_library). Sort reorders that library's brushes by name,
+    # stable, by code point (Python's str order; the ports must match it, not
+    # a locale or canonical-equivalence order); a missing name is "". Select
+    # Unused replaces the panel's brush selection with every slug of that
+    # library, in library order, that no element in the document carries as
+    # `stroke_brush == "<library>/<slug>"`. A missing library is a no-op.
+    for key in ("brush.sort_by_name", "brush.select_unused"):
+        if key in effect:
+            spec = effect[key] if isinstance(effect[key], dict) else {}
+            lib = _eval(spec.get("library"), store, ctx)
+            if not isinstance(lib, str) or not lib:
+                return None
+            path = f"brush_libraries.{lib}.brushes"
+            brushes = store.get_data_path(path)
+            if not isinstance(brushes, list):
+                return None
+            if key == "brush.sort_by_name":
+                def name(b):
+                    n = b.get("name") if isinstance(b, dict) else None
+                    return n if isinstance(n, str) else ""
+                store.set_data_path(path, sorted(brushes, key=name))
+                return None
+            used = _used_stroke_brushes(store.document())
+            store.set_panel("brushes", "selected_brushes", [
+                b["slug"] for b in brushes
+                if isinstance(b, dict) and isinstance(b.get("slug"), str)
+                and f"{lib}/{b['slug']}" not in used
+            ])
             return None
 
     # foreach: { source, as } do: [...] — PHASE3 §5.3

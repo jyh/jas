@@ -3824,38 +3824,46 @@ actions:
 
   select_all_unused_brushes:
     description: >
-      Replace panel.selected_brushes with every brush in the
-      panel whose slug does not appear as jas:stroke-brush on any
-      element in the document.
+      Replace panel.selected_brushes with every brush in
+      panel.selected_library that no element in the document
+      uses, in library order. An element uses a brush when its
+      jas:stroke-brush is "<library>/<slug>" for that library and
+      slug, so a brush with the same slug in ANOTHER library does
+      not count as a use. Every element counts: selected or not,
+      at any depth inside groups and layers. The library itself
+      is not changed. No selected library, or a library that does
+      not exist, is a no-op.
     category: brushes
     effects:
-      - log: "select_all_unused_brushes"
+      - "brush.select_unused":
+          library: "panel.selected_library"
 
   sort_brushes_by_name:
     description: >
-      Permanently reorder panel.selected_library's brushes
-      alphabetically (case-sensitive, lexicographic). Slugs
-      unchanged; selection preserved. Persisted on next
-      save_brush_library.
+      Permanently reorder panel.selected_library's brushes by
+      name, case-sensitive and lexicographic by Unicode code
+      point: every upper-case ASCII letter sorts before every
+      lower-case one, and two names that differ only in Unicode
+      normalization are NOT equal (a decomposed "e" + combining
+      acute sorts with the "e"s, a precomposed "é" after "z").
+      No locale collation. The sort is stable, so brushes with
+      equal names keep their relative order; a brush with no name
+      sorts as the empty string. Slugs are unchanged, and the
+      selection, being slug-keyed, is preserved. Only the selected
+      library moves. Persisted on the next save_brush_library. No
+      selected library, or a library that does not exist, is a
+      no-op.
 
-      NOT YET IMPLEMENTED in any port, and declared as a log-only
-      stub rather than as an effect that cannot run. The library to
-      sort is panel.selected_library, which is known only at run
-      time, and no port can address a data path computed from state:
-      every data.* effect reads its `path:` as a LITERAL dotted path
-      (jas_flask _readDataPath), and the reference interpreter, Rust
-      and Swift implement no data.* effect at all. The prior
-      declaration interpolated panel.selected_library into the
-      data.list_sort path with a ${...} substitution, but ${...} is
-      loader.substitute_params, which runs on template expansion and
-      layout includes and never on an effect payload — so the path was read literally, matched
-      nothing, and Sort by Name was a silent no-op that looked
-      implemented. The shape of the real fix is a brush.sort_by_name
-      shortcut taking `library:` as an EXPRESSION, exactly as
-      brush.delete_selected and brush.duplicate_selected already do.
+      Until this node it was a log-only stub. An earlier
+      declaration interpolated panel.selected_library into a
+      data.list_sort path with a ${...} substitution, which never
+      runs on an effect payload, so Sort by Name was a silent no-op
+      that looked implemented. It now takes `library:` as an
+      EXPRESSION, the shape of brush.delete_selected.
     category: brushes
     effects:
-      - log: "sort_brushes_by_name"
+      - "brush.sort_by_name":
+          library: "panel.selected_library"
 
   set_brush_view_mode:
     description: >

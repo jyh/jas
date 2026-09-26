@@ -54,3 +54,15 @@ pub(crate) fn model_with(rects: Vec<Element>, selected: &[usize]) -> Model {
 pub(crate) fn misaligned(selected: &[usize]) -> Model {
     model_with(vec![rect(10.0, 0.0, 5.0, 5.0), rect(40.0, 20.0, 5.0, 5.0)], selected)
 }
+
+/// A group holding `children` (the Brushes menu's Select All Unused walks
+/// into groups).
+pub(crate) fn group(children: Vec<Element>) -> Element {
+    use crate::geometry::element::GroupElem;
+    Element::Group(GroupElem {
+        children: children.into_iter().map(std::rc::Rc::new).collect(),
+        common: CommonProps::default(),
+        isolated_blending: false,
+        knockout_group: false,
+    })
+}
