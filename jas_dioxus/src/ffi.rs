@@ -743,7 +743,7 @@ pub unsafe extern "C" fn jas_panel_plan(
         return JasBytes::empty();
     };
     let ctx = panel_ctx(engine, &ws, id);
-    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx, ws.icons());
+    let (plan, rows) = crate::panel_plan::panel_plan(spec, avail_w, avail_h, &ctx, ws.icons(), ws.actions());
     engine.registry.borrow_mut().record(id, &rows);
     let out = JasBytes::from_string(serde_json::to_string(&plan).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelPlan, out.len);
@@ -1916,7 +1916,9 @@ mod tests {
 
     /// **§1.2 (a) through the ABI.** The Layers type filter's plan leaf carries
     /// its declared items in order, and a toggle item's `checked` follows
-    /// `panel.type_filter` through a real pick at the engine door. The labels,
+    /// `panel.type_filter` through a real pick at the engine door, as does
+    /// the "All" row's in-force check. `ITEMS-AFTER` is the WinUI reader's
+    /// fixture (`sb_winui_tests`), printed so it is copied, never typed. The labels,
     /// values and order are read from the compiled workspace, never typed.
     #[test]
     fn the_layers_filter_plan_carries_its_items_and_their_checks() {
@@ -1937,7 +1939,12 @@ mod tests {
         let toggles: Vec<&serde_json::Value> = before.iter().filter(|r| r["kind"] == "toggle").collect();
         assert!(toggles.len() > 2, "fixture: {toggles:?}");
         assert!(toggles.iter().all(|r| r["checked"] == false), "the default filter checks nothing: {toggles:?}");
-        assert!(before.iter().filter(|r| r["kind"] == "action").all(|r| r.get("checked").is_none()));
+        // "All" is IN FORCE while nothing is checked: running it would change
+        // nothing (WIDGET_EVENTS.md, "Showing an item's check").
+        let all_in_force = |rows: &[serde_json::Value]| -> Vec<serde_json::Value> {
+            rows.iter().filter(|r| r["kind"] == "action").map(|r| r["checked"].clone()).collect()
+        };
+        assert_eq!(all_in_force(&before), vec![serde_json::json!(true)], "{before:?}");
 
         let pick = toggles[2]["value"].as_str().unwrap().to_string();
         let ev = format!(r#"{{"widget":"lp_filter_button","event":"toggle","value":"{pick}"}}"#);
@@ -1947,6 +1954,8 @@ mod tests {
         let checked: Vec<&str> = after.iter().filter(|r| r["checked"] == true)
             .map(|r| r["value"].as_str().unwrap()).collect();
         assert_eq!(checked, vec![pick.as_str()]);
+        assert_eq!(all_in_force(&after), vec![serde_json::json!(false)], "{after:?}");
+        println!("ITEMS-AFTER {}", serde_json::Value::Array(after.clone()));
         assert_eq!(engine_of(e).store.borrow().get_panel(P, "type_filter"), &serde_json::json!([pick]));
         unsafe { jas_engine_free(e) };
     }

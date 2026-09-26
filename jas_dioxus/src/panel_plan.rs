@@ -75,6 +75,7 @@ use serde_json::{json, Map, Value};
 use crate::interpreter::bind_values::bind_values;
 use crate::interpreter::length;
 use crate::interpreter::panel_layout::{render_plan_with_omitted, RenderLeaf};
+use crate::interpreter::state_store::panel_content_id;
 
 fn path_of(v: &Value) -> Vec<i64> {
     v.as_array()
@@ -291,7 +292,7 @@ fn options_of(
 /// (§1.2 (a)), in declaration order:
 ///
 /// ```text
-/// {"kind": "action", "value": <the item's value>, "label": "..."}
+/// {"kind": "action", "value": <the item's value>, "label": "...", "checked": <bool|null>}
 /// {"kind": "toggle", "value": <the item's value>, "label": "...", "checked": <bool|null>}
 /// {"kind": "separator"}
 /// ```
@@ -301,14 +302,15 @@ fn options_of(
 /// answer from the dropdown's `bind.checked_in` ("Showing an item's check"):
 /// the item's value is an element of that list, compared as JSON, so `"1"` is
 /// not `1`. When `checked_in` is absent or does not resolve to a list it is
-/// `null`, never `false`. An action item carries no `checked`.
+/// `null`, never `false`. An action item's `checked` is whether its action is
+/// already in force ([`action_in_force`]).
 ///
 /// An item of any other type (no port draws one), one whose value is not a
 /// string (a pick is matched by a string value, so it could never be sent
 /// back), or one whose label or value carries a template, is withheld as
 /// `items[<i>]` and not sent. A node with no
 /// `items` list carries `null`.
-fn items_of(node: &Value, ctx: &Value, path: &[i64], withheld: &mut Vec<Value>) -> Value {
+fn items_of(node: &Value, ctx: &Value, path: &[i64], acts: &PanelActions, withheld: &mut Vec<Value>) -> Value {
     let Some(list) = node.get("items").and_then(Value::as_array) else { return Value::Null };
     let checked_in = node.get("bind").and_then(|b| b.get("checked_in")).and_then(Value::as_str)
         .map(|expr| crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(expr, ctx)))
@@ -330,12 +332,75 @@ fn items_of(node: &Value, ctx: &Value, path: &[i64], withheld: &mut Vec<Value>) 
             continue;
         }
         let mut row = json!({"kind": kind, "value": value, "label": label});
-        if kind == "toggle" {
-            row["checked"] = checked_in.as_ref().map_or(Value::Null, |l| Value::Bool(l.contains(&value)));
-        }
+        row["checked"] = if kind == "toggle" {
+            checked_in.as_ref().map_or(Value::Null, |l| Value::Bool(l.contains(&value)))
+        } else {
+            action_in_force(item, acts, ctx)
+        };
         rows.push(row);
     }
     Value::Array(rows)
+}
+
+/// The panel a plan is built for and the workspace's actions, which an
+/// action item's check reads.
+struct PanelActions<'a> {
+    panel_id: &'a str,
+    actions: &'a Value,
+}
+
+/// Whether an action item's action is already IN FORCE: running it now would
+/// change nothing (WIDGET_EVENTS.md, "Showing an item's check").
+///
+/// Stated as a dry run of the action's OWN effects rather than a per-item
+/// expression, so the tick cannot disagree with what a pick does. It is only
+/// answerable when every effect is a `set_panel_state` NAMING this panel, the
+/// one kind whose whole result is visible in the scope: the row is `true`
+/// exactly when each value, evaluated now, equals the key's current value.
+/// Anything else (another effect kind, an unnamed or foreign panel, `params`
+/// on the item, no effects, an undefined action) is `null`, never `false`,
+/// because an unseen effect could change something.
+fn action_in_force(item: &Value, acts: &PanelActions, ctx: &Value) -> Value {
+    if item.get("params").is_some() || acts.panel_id.is_empty() {
+        return Value::Null;
+    }
+    let effects = item.get("action").and_then(Value::as_str)
+        .and_then(|a| acts.actions.get(a))
+        .and_then(|a| a.get("effects"))
+        .and_then(Value::as_array);
+    let Some(effects) = effects.filter(|e| !e.is_empty()) else { return Value::Null };
+    let own = panel_content_id(acts.panel_id);
+    let mut in_force = true;
+    for effect in effects {
+        let sps = effect.get("set_panel_state").and_then(Value::as_object);
+        let Some(sps) = sps else { return Value::Null };
+        let named = sps.get("panel").and_then(Value::as_str).map(panel_content_id);
+        let Some(key) = sps.get("key").and_then(Value::as_str) else { return Value::Null };
+        if named.as_deref() != Some(own.as_str()) {
+            return Value::Null;
+        }
+        // "null" is the runner's own default for an absent value.
+        let expr = sps.get("value").and_then(Value::as_str).unwrap_or("null");
+        let next = crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(expr, ctx));
+        let now = ctx.get("panel").and_then(|p| p.get(key)).unwrap_or(&Value::Null);
+        in_force &= json_value_eq(&next, now);
+    }
+    Value::Bool(in_force)
+}
+
+/// JSON equality with numbers compared by value, so a store holding `45.0`
+/// equals an expression's `45`.
+fn json_value_eq(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => x.as_f64() == y.as_f64(),
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_value_eq(p, q))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| json_value_eq(v, w)))
+        }
+        _ => a == b,
+    }
 }
 
 /// The icon names an entry displays: its static `icon`, an `icon` node's
@@ -356,7 +421,7 @@ fn icon_names(entry: &Value, out: &mut Vec<String>) {
     push(&entry["values"]["bind.icon"]);
 }
 
-fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value>) -> Value {
+fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, withheld: &mut Vec<Value>) -> Value {
     // A templated id is not resolved by any port and a foreach widget is not
     // addressable by id (D12), so it is sent empty and named, never raw.
     let mut id = item.node.get("id").and_then(Value::as_str).unwrap_or("");
@@ -368,7 +433,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, withheld: &mut Vec<Value
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     let display = display_of(&item.node, &values, &item.ctx);
     let options = options_of(&item.node, &values, &item.path, withheld);
-    let items = items_of(&item.node, &item.ctx, &item.path, withheld);
+    let items = items_of(&item.node, &item.ctx, &item.path, acts, withheld);
     json!({
         "path": item.path,
         "rect": {"x": item.x, "y": item.y, "w": item.w, "h": item.h},
@@ -394,7 +459,10 @@ pub fn panel_plan(
     avail_h: i64,
     ctx: &Value,
     icon_defs: &Value,
+    actions: &Value,
 ) -> (Value, Value) {
+    let panel_id = panel_node.get("id").and_then(Value::as_str).unwrap_or("");
+    let acts = PanelActions { panel_id, actions };
     let rows = bind_values(panel_node, ctx);
     let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
 
@@ -416,16 +484,16 @@ pub fn panel_plan(
     let chrome: Vec<Value> = plan
         .chrome
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &mut withheld))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld))
         .collect();
     let leaves: Vec<Value> = plan
         .leaves
         .iter()
-        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &mut withheld))
+        .map(|it| entry(it, by_path.remove(&it.path).unwrap_or_default(), &acts, &mut withheld))
         .collect();
     let containers: Vec<Value> = omitted
         .iter()
-        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &mut withheld)))
+        .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &acts, &mut withheld)))
         .collect();
     // Whatever is left joined nothing. Reported in row order.
     let unjoined: Vec<Value> = rows
@@ -880,7 +948,7 @@ mod tests {
                     .map(|r| (r["path"].to_string(), r.clone()))
                     .collect();
                 for (w, h) in SIZES {
-                    let (plan, joined_from) = panel_plan(spec, w, h, ctx, ws.icons());
+                    let (plan, joined_from) = panel_plan(spec, w, h, ctx, ws.icons(), ws.actions());
                     let at = format!("{pid} {sname} {w}x{h}");
                     assert_eq!(joined_from, rows, "{at}: the plan must be joined from bind_values' rows");
                     let (values, n) = checks::plan_values(&plan);
@@ -993,7 +1061,7 @@ mod tests {
                             containers.push(p);
                         }
                     }
-                    let (plan, _) = panel_plan(spec, w, h, ctx, ws.icons());
+                    let (plan, _) = panel_plan(spec, w, h, ctx, ws.icons(), ws.actions());
                     let paths = |list: &str| -> Vec<String> {
                         plan[list].as_array().unwrap().iter().map(|e| e["path"].to_string()).collect()
                     };
@@ -1022,7 +1090,7 @@ mod tests {
             {"type": "text", "id": "hidden", "visible": false, "bind": {"value": "panel.a"}},
         ]}});
         let ctx = json!({"panel": {"a": "x"}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         assert_eq!(
             plan["unjoined"],
             json!([{"path": [1], "key": "bind.value"}]),
@@ -1041,7 +1109,7 @@ mod tests {
         let ws = Workspace::load().expect("workspace");
         let spec = ws.panel("align_panel_content").expect("align");
         let ctx = engine_scope();
-        let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons());
+        let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons(), ws.actions());
         let layout = layout_panel(spec, 228, 0, &ctx);
         let rp = render_plan(spec, 228, 0, &ctx);
         let n = checks::plan_matches_layout(&plan, &layout, &rp).expect("the unmutated plan passes");
@@ -1077,7 +1145,7 @@ mod tests {
     fn q2_oracle_fails_on_each_planted_interpretable() {
         let ws = Workspace::load().expect("workspace");
         let spec = ws.panel("color_panel_content").expect("color");
-        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
+        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons(), ws.actions());
         let clean = serde_json::to_string(&plan).unwrap();
         checks::nothing_interpretable(&clean).expect("the unmutated plan passes");
         assert!(plan["leaves"].as_array().is_some_and(|a| !a.is_empty()), "vacuous plan: {clean}");
@@ -1112,8 +1180,8 @@ mod tests {
             })
         };
         let (a, b) = (ctx_of("664040"), ctx_of("664141"));
-        let (plan_a, _) = panel_plan(spec, 228, 600, &a, ws.icons());
-        let (plan_b, _) = panel_plan(spec, 228, 600, &b, ws.icons());
+        let (plan_a, _) = panel_plan(spec, 228, 600, &a, ws.icons(), ws.actions());
+        let (plan_b, _) = panel_plan(spec, 228, 600, &b, ws.icons(), ws.actions());
 
         let (va, na) = checks::plan_values(&plan_a);
         let want = checks::row_values(&bind_values(spec, &a));
@@ -1177,7 +1245,7 @@ mod tests {
     fn the_align_plan_carries_its_display_text_and_its_icons() {
         let ws = Workspace::load().expect("workspace");
         let spec = ws.panel("align_panel_content").expect("align");
-        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
+        let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons(), ws.actions());
         let leaves = plan["leaves"].as_array().expect("leaves");
         // The artifact's own first leaf, as the dump printed it.
         assert_eq!(leaves[0]["static"], json!({"content": "Align Objects:"}), "{}", leaves[0]);
@@ -1241,7 +1309,7 @@ mod tests {
         ]}});
         let icons = json!({"zz_icon": {"viewbox": "0 0 1 1", "svg": "<rect/>", "extra": "x"}});
         let ctx = json!({"panel": {"a": "x"}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons, &Value::Null);
         let l = &plan["leaves"];
         assert_eq!(
             l[0]["static"],
@@ -1274,7 +1342,7 @@ mod tests {
             {"type": "text", "id": "t_{{panel.a}}", "content": "hi"},
             {"type": "text", "id": "plain", "content": "hi"},
         ]}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {"a": "x"}}), &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {"a": "x"}}), &Value::Null, &Value::Null);
         assert_eq!(plan["leaves"][0]["id"], "", "{plan}");
         assert_eq!(plan["withheld"], json!([{"path": [0], "key": "id"}]), "{plan}");
         // The control: a literal id crosses as itself.
@@ -1296,7 +1364,7 @@ mod tests {
             {"type": "text", "id": "v", "content": "x", "bind": {"value": "panel.plain"}},
         ]}});
         let ctx = json!({"panel": {"bg": "{{theme.colors.selection}}", "plain": "ok"}});
-        let (plan, rows) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let (plan, rows) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         assert!(rows.to_string().contains("{{theme"), "the fixture must reproduce the row: {rows}");
         assert_eq!(plan["chrome"][0]["path"], json!([0]), "{plan}");
         assert_eq!(plan["chrome"][0]["values"], json!({}), "{plan}");
@@ -1329,7 +1397,7 @@ mod tests {
         ]}});
         let icons = json!({"zz_chrome": {"viewbox": "0 0 1 1", "svg": "<c/>"}});
         let ctx = json!({"panel": {"mid": "pre {{theme.x}}", "veil": "{{theme.y}}"}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons, &Value::Null);
         assert_eq!(plan["leaves"][0]["values"], json!({}), "{plan}");
         let containers = plan["containers"].as_array().expect("containers");
         assert!(
@@ -1365,7 +1433,7 @@ mod tests {
         let icons = json!({"zz_static": def("0 0 1 1"), "zz_bound": def("0 0 2 2"),
                            "zz_not_an_icon": def("0 0 3 3")});
         let ctx = json!({"panel": {"which": "zz_bound"}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &icons, &Value::Null);
         // Named by two buttons, listed ONCE (mutation M11 survived without the
         // second button).
         assert_eq!(plan["icons_missing"], json!(["zz_nowhere"]), "{plan}");
@@ -1398,7 +1466,7 @@ mod tests {
             for (sname, ctx) in scopes() {
                 for (w, h) in SIZES {
                     let at = format!("{pid} {sname} {w}x{h}");
-                    let (plan, _) = panel_plan(spec, w, h, &ctx, ws.icons());
+                    let (plan, _) = panel_plan(spec, w, h, &ctx, ws.icons(), ws.actions());
                     checks::nothing_interpretable(&serde_json::to_string(&plan).unwrap())
                         .unwrap_or_else(|err| panic!("{at}: {err}"));
                     let mut named = BTreeSet::new();
@@ -1581,7 +1649,7 @@ mod tests {
         for panel in panel_ids(&ws) {
             let spec = ws.panel(&panel).expect("a listed panel");
             for ctx in [loaded_stroke_ctx(), engine_scope()] {
-                let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons());
+                let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons(), ws.actions());
                 let rp = render_plan(spec, 228, 0, &ctx);
                 for (e, leaf) in plan["leaves"].as_array().expect("leaves").iter().zip(rp.leaves.iter()) {
                     if e["type"] != "length_input" {
@@ -1635,7 +1703,7 @@ mod tests {
             {"type": "length_input", "id": "inches", "unit": "in", "bind": {"value": "panel.v"}},
         ]}});
         let ctx = json!({"panel": {"v": 72.0}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         let got = plan["leaves"][0]["display"]["bind.value"].as_str().unwrap_or("<MISSING>");
 
         // Derived, never typed (idiom law 1): the expectation is the core's
@@ -1669,7 +1737,7 @@ mod tests {
         let mut kinds_reached: BTreeSet<&str> = BTreeSet::new();
         for panel in panel_ids(&ws) {
             let spec = ws.panel(&panel).expect("a listed panel");
-            let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons());
+            let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons(), ws.actions());
             for key in ["leaves", "chrome", "containers"] {
                 let arr = plan[key].as_array().unwrap_or_else(|| panic!("{key} is an array: {plan}"));
                 if !arr.is_empty() {
@@ -1713,7 +1781,7 @@ mod tests {
             {"type": "length_input", "id": "bare", "bind": {"value": "panel.v"}},
         ]}});
         let ctx = json!({"panel": {"v": 36.0}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         let got = plan["leaves"][0]["display"]["bind.value"].as_str().unwrap_or("<MISSING>");
         assert_eq!(got, length::format(Some(36.0), "pt", 2), "{plan}");
         // The control: the node really does carry no unit, so the assertion
@@ -1729,7 +1797,7 @@ mod tests {
         let panel = json!({"content": {"type": "col", "children": [
             {"type": "length_input", "id": "none", "unit": "pt", "bind": {"value": "panel.missing"}},
         ]}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null, &Value::Null);
         assert_eq!(plan["leaves"][0]["display"]["bind.value"], json!(""), "{plan}");
     }
 
@@ -1742,7 +1810,7 @@ mod tests {
             {"type": "number_input", "id": "plain", "unit": "pt", "bind": {"value": "panel.v"}},
         ]}});
         let ctx = json!({"panel": {"v": 12.0}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
         assert_eq!(plan["leaves"][0]["display"], json!({}), "{plan}");
         // The control: the same node DOES carry the resolved value, so the
         // empty display above is a scoping decision and not a dead walk.
@@ -1754,7 +1822,7 @@ mod tests {
     /// Every entry the plan builds for `panel`, in all three arrays, paired
     /// with the node it was built from.
     fn entries_with_nodes(panel: &Value, ctx: &Value) -> Vec<(Value, Value)> {
-        let (plan, _) = panel_plan(panel, 228, 0, ctx, &Value::Null);
+        let (plan, _) = panel_plan(panel, 228, 0, ctx, &Value::Null, &Value::Null);
         let mut out = vec![];
         for list in checks::LISTS {
             for e in plan[list].as_array().into_iter().flatten() {
@@ -1881,7 +1949,7 @@ mod tests {
             {"type": "select", "id": "sel", "bind": {"value": "panel.v"}, "options": ["x"]},
         ]}});
         let run = |ctx: Value| -> (Value, Value, Value) {
-            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null);
+            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &Value::Null);
             let entries: Vec<Value> = checks::LISTS.iter()
                 .flat_map(|l| plan[*l].as_array().cloned().unwrap_or_default()).collect();
             let of = |id: &str| entries.iter().find(|e| e["id"] == id).cloned().unwrap_or(Value::Null);
@@ -1889,7 +1957,7 @@ mod tests {
         };
         let (items, sel_items, withheld) = run(json!({"panel": {"on": ["b", 1]}}));
         assert_eq!(items, json!([
-            {"kind": "action", "value": "__all__", "label": "All"},
+            {"kind": "action", "value": "__all__", "label": "All", "checked": null},
             {"kind": "separator"},
             {"kind": "toggle", "value": "a", "label": "A", "checked": false},
             {"kind": "toggle", "value": "b", "label": "B", "checked": true},
@@ -1909,6 +1977,84 @@ mod tests {
                 .filter(|r| r["kind"] == "toggle").map(|r| &r["checked"]).collect();
             assert_eq!(checks, vec![&Value::Null; 3], "{ctx}");
         }
+    }
+
+    /// An ACTION item's `checked` answers "is this action already in force":
+    /// would running it now change nothing (WIDGET_EVENTS.md, "Showing an
+    /// item's check"). Known only for an action whose every effect is a
+    /// `set_panel_state` naming this panel; the row is checked exactly when
+    /// each value, evaluated now, equals the key's current value. Every other
+    /// shape is UNKNOWN (`null`), never `false`.
+    #[test]
+    fn an_action_items_check_is_whether_running_it_would_change_nothing() {
+        let actions = json!({
+            "reset": {"effects": [{"set_panel_state": {"panel": "p", "key": "f", "value": "[]"}}]},
+            "two": {"effects": [
+                {"set_panel_state": {"panel": "p_panel_content", "key": "f", "value": "[]"}},
+                {"set_panel_state": {"panel": "p", "key": "n", "value": "45"}}]},
+            "mixed": {"effects": [
+                {"set_panel_state": {"panel": "p", "key": "f", "value": "[]"}},
+                {"log": "x"}]},
+            "unnamed": {"effects": [{"set_panel_state": {"key": "f", "value": "[]"}}]},
+            "elsewhere": {"effects": [{"set_panel_state": {"panel": "q", "key": "f", "value": "[]"}}]},
+            "empty": {"effects": []},
+        });
+        let item = |a: &str| json!({"label": a, "value": a, "type": "action", "action": a});
+        let panel = json!({"id": "p_panel_content", "content": {"type": "col", "children": [
+            {"type": "dropdown", "id": "dd", "items": [
+                item("reset"), item("two"), item("mixed"), item("unnamed"), item("elsewhere"),
+                item("empty"), item("undefined"),
+                {"label": "P", "value": "withparams", "type": "action", "action": "reset", "params": {"k": 1}},
+            ]},
+        ]}});
+        let checks = |ctx: Value| -> Vec<Value> {
+            let (plan, _) = panel_plan(&panel, 228, 0, &ctx, &Value::Null, &actions);
+            let entries: Vec<Value> = checks::LISTS.iter()
+                .flat_map(|l| plan[*l].as_array().cloned().unwrap_or_default()).collect();
+            let dd = entries.iter().find(|e| e["id"] == "dd").cloned().unwrap_or(Value::Null);
+            dd["items"].as_array().expect("items").iter().map(|r| {
+                assert_eq!(r["kind"], "action", "{r}");
+                r.get("checked").cloned().expect("an action row carries `checked`")
+            }).collect()
+        };
+        let unknown = vec![Value::Null; 6];
+        // In force: nothing to change. `n` is stored as a FLOAT, as a store
+        // seeded from JSON may hold it, and still equals the evaluated `45`.
+        let got = checks(json!({"panel": {"f": [], "n": 45.0}}));
+        assert_eq!(got[..2], [json!(true), json!(true)]);
+        assert_eq!(got[2..], unknown[..], "every other shape is unknown, even when in force");
+        // One effect would change something: not in force.
+        let got = checks(json!({"panel": {"f": ["a"], "n": 45}}));
+        assert_eq!(got[..2], [json!(false), json!(false)]);
+        assert_eq!(got[2..], unknown[..]);
+        // `two` is in force only when EVERY effect is.
+        let got = checks(json!({"panel": {"f": [], "n": 7}}));
+        assert_eq!(got[..2], [json!(true), json!(false)]);
+        // An absent key is null, and `[]` is not null.
+        let got = checks(json!({"panel": {}}));
+        assert_eq!(got[..2], [json!(false), json!(false)]);
+    }
+
+    /// The shipping case: the Layers type filter's "All" row is in force
+    /// exactly when no type is checked, against the workspace's own action.
+    #[test]
+    fn the_layers_all_row_is_in_force_exactly_when_no_type_is_checked() {
+        let ws = Workspace::load().expect("workspace");
+        let spec = ws.panel("layers_panel_content").expect("layers");
+        let all_row = |filter: Value| -> Value {
+            let ctx = json!({"panel": {"type_filter": filter}});
+            let (plan, _) = panel_plan(spec, 228, 0, &ctx, ws.icons(), ws.actions());
+            let entries: Vec<Value> = checks::LISTS.iter()
+                .flat_map(|l| plan[*l].as_array().cloned().unwrap_or_default()).collect();
+            let rows: Vec<Value> = entries.iter()
+                .filter_map(|e| e["items"].as_array().cloned()).flatten()
+                .filter(|r| r["kind"] == "action").collect();
+            assert_eq!(rows.len(), 1, "vacuous or ambiguous: {rows:?}");
+            assert_eq!(rows[0]["label"], "All");
+            rows[0]["checked"].clone()
+        };
+        assert_eq!(all_row(json!([])), json!(true));
+        assert_eq!(all_row(json!(["circle"])), json!(false));
     }
 
     /// `selected` is the CORE's answer to "which row is the bound value", so
@@ -2024,7 +2170,7 @@ mod tests {
              "options": [{"label": "no value"}, {"value": "a", "label": "{{panel.x}}"},
                          {"value": {"nested": 1}, "label": "object"}, {"value": "ok", "label": "OK"}]},
         ]}});
-        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null);
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {}}), &Value::Null, &Value::Null);
         let e = &plan["leaves"][0];
         assert_eq!(option_rows(e).len(), 1, "{e}");
         assert_eq!(e["options"][0]["value"], "ok", "{e}");

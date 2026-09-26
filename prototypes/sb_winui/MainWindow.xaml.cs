@@ -2278,7 +2278,9 @@ public sealed partial class MainWindow : Window
     /// or with Alt held `alt_toggle` (WIDGET_EVENTS.md, "Picking a dropdown
     /// item"). The rows are rebuilt at every open from the newest plan
     /// (`_paneItems`): a toggle row shows the core's check, and an unknown
-    /// check (null) shows unchecked. A row's own tick after a click is the
+    /// check (null) shows unchecked. An action row whose check the core knows
+    /// (the Layers filter's "All", in force when nothing is checked) is drawn
+    /// with a tick column too; one it does not know is a plain item. A row's own tick after a click is the
     /// control's guess and is discarded at the next open.
     /// </summary>
     private Button BuildDropdown(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
@@ -2297,7 +2299,7 @@ public sealed partial class MainWindow : Window
                     menu.Items.Add(new MenuFlyoutSeparator());
                     continue;
                 }
-                MenuFlyoutItem item = row.Kind == "toggle"
+                MenuFlyoutItem item = row.Kind == "toggle" || row.Checked is not null
                     ? new ToggleMenuFlyoutItem { Text = row.Label, IsChecked = row.Checked == true }
                     : new MenuFlyoutItem { Text = row.Label };
                 var value = row.Value;
