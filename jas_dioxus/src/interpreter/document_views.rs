@@ -9,6 +9,20 @@ use crate::document::document::Document;
 use crate::geometry::element::Element;
 use crate::geometry::live::LiveVariant;
 
+/// The Brushes panel's two gates (BRUSHES.md § Bottom toolbar;
+/// runtime_contexts.yaml): `(selection_has_brushed_stroke,
+/// selection_is_single_brushed_stroke)`. A selected element is a brushed stroke
+/// when it is a path carrying a non-empty `stroke_brush`; only the selected
+/// elements are read, never their descendants. A stale selection path counts as
+/// nothing, never a panic.
+pub fn brushed_stroke_facts(doc: &Document) -> (bool, bool) {
+    let brushed = doc.selection.iter().filter(|es| matches!(
+        doc.get_element(&es.path),
+        Some(Element::Path(p)) if p.stroke_brush.as_deref().is_some_and(|b| !b.is_empty())
+    )).count();
+    (brushed > 0, doc.selection.len() == 1 && brushed == 1)
+}
+
 /// Symbols view (SYMBOLS.md §8). One row per master in the off-canvas
 /// store. `name` is the master's common.name, falling back to a
 /// positional "Symbol N" label so every row shows something readable.
@@ -142,4 +156,33 @@ pub fn concept_view(
         "operations": operations_out,
         "violations": violations_out,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::test_fixture::{brushed_path as path, model_with, rect};
+
+    const B: Option<&str> = Some("default_brushes/flat_10");
+
+    /// W2b-18: the reference's table (`test_brush_panel_spec.py::CASES`), row
+    /// for row: (name, children, selected, has, single).
+    #[test]
+    fn brushed_stroke_facts_match_the_reference_table() {
+        let cases: Vec<(&str, Vec<Element>, Vec<usize>, bool, bool)> = vec![
+            ("one brushed path", vec![path(0.0, B)], vec![0], true, true),
+            ("one plain path", vec![path(0.0, None)], vec![0], false, false),
+            ("brushed + plain selected", vec![path(0.0, B), path(60.0, None)], vec![0, 1], true, false),
+            ("two brushed selected", vec![path(0.0, B), path(60.0, B)], vec![0, 1], true, false),
+            ("brushed but NOT selected", vec![path(0.0, B), path(60.0, None)], vec![1], false, false),
+            ("a rect", vec![rect(0.0, 0.0, 10.0, 10.0)], vec![0], false, false),
+            ("empty brush id", vec![path(0.0, Some(""))], vec![0], false, false),
+            ("nothing selected", vec![path(0.0, B)], vec![], false, false),
+            ("a stale selection path", vec![path(0.0, B)], vec![7], false, false),
+        ];
+        for (name, children, sel, has, single) in cases {
+            let m = model_with(children, &sel);
+            assert_eq!(brushed_stroke_facts(m.document()), (has, single), "{name}");
+        }
+    }
 }

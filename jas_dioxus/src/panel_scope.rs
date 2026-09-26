@@ -232,7 +232,8 @@ fn as_number(v: &Value) -> Option<f64> {
 
 /// The `active_document.*` facts the ENGINE owns, as a JSON object: the five
 /// that `menu_state.rs:19-25` also names, plus `selection_has_compound_shape`
-/// (W2b-13b), which the Boolean panel's Expand button binds.
+/// (W2b-13b), which the Boolean panel's Expand button binds, and the Brushes
+/// panel's two brushed-stroke gates (W2b-18).
 ///
 /// ⛔ THE LIST IS EXHAUSTIVE ON PURPOSE AND IT IS SHORTER THAN THE NAMESPACE.
 /// `menu_state.rs:19-25` names six `active_document` fields; the engine can
@@ -253,6 +254,10 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
     m.insert("is_modified".into(), model.is_modified().into());
     m.insert("selection_has_compound_shape".into(),
              crate::interpreter::boolean_host::selection_has_compound_shape(model.document()).into());
+    let (has_brushed, single_brushed) =
+        crate::interpreter::document_views::brushed_stroke_facts(model.document());
+    m.insert("selection_has_brushed_stroke".into(), has_brushed.into());
+    m.insert("selection_is_single_brushed_stroke".into(), single_brushed.into());
     m
 }
 
@@ -637,6 +642,25 @@ mod tests {
         assert!(crate::interpreter::boolean_host::run(
             &mut m, "boolean_union_compound", &BooleanOptions::default()));
         assert_eq!(read(&m), Value::Bool(true), "a compound shape is selected");
+    }
+
+    /// W2b-18. The engine's scope answers the Brushes panel's two gates from
+    /// the ONE definition the web view also calls (`document_views`).
+    #[test]
+    fn the_engine_scope_answers_the_brushed_stroke_predicates() {
+        use crate::document::test_fixture::{brushed_path, model_with};
+        let read = |m: &Model| {
+            let s = engine_scope(&PanelState::default(), &StateStore::new(), m, "brushes_panel_content");
+            (s["active_document"]["selection_has_brushed_stroke"].clone(),
+             s["active_document"]["selection_is_single_brushed_stroke"].clone())
+        };
+        let b = Some("default_brushes/flat_10");
+        assert_eq!(read(&model_with(vec![brushed_path(0.0, b)], &[0])),
+                   (Value::Bool(true), Value::Bool(true)));
+        assert_eq!(read(&model_with(vec![brushed_path(0.0, b), brushed_path(60.0, None)], &[0, 1])),
+                   (Value::Bool(true), Value::Bool(false)));
+        assert_eq!(read(&model_with(vec![brushed_path(0.0, None)], &[0])),
+                   (Value::Bool(false), Value::Bool(false)));
     }
 
     // -- the scope --------------------------------------------------------

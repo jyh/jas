@@ -1932,6 +1932,9 @@ pub(crate) fn build_active_document_view(
             // so no item is a container and none is a group.
             m.insert("layers_panel_selection_is_container".to_string(), serde_json::Value::Bool(false));
             m.insert("layers_panel_selection_has_group".to_string(), serde_json::Value::Bool(false));
+            // The Brushes panel's two gates (W2b-18): nothing is selected.
+            m.insert("selection_has_brushed_stroke".to_string(), serde_json::Value::Bool(false));
+            m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
         }
         return empty;
     };
@@ -2005,6 +2008,10 @@ pub(crate) fn build_active_document_view(
     // lives in `boolean_host`, which the engine's scope also calls.
     let selection_has_compound_shape =
         crate::interpreter::boolean_host::selection_has_compound_shape(tab.model.document());
+    // The Brushes panel's two gates (W2b-18), from the one definition the
+    // engine's scope also calls.
+    let (has_brushed_stroke, single_brushed_stroke) =
+        crate::interpreter::document_views::brushed_stroke_facts(tab.model.document());
     // Concepts panel (Slice 2): when exactly one generated concept instance is
     // selected, expose its concept id + param schema merged with current values
     // so the panel switches to PARAMS mode; null otherwise.
@@ -2142,6 +2149,8 @@ pub(crate) fn build_active_document_view(
     // object is already at the macro recursion ceiling, so the symbols
     // list is attached here (SYMBOLS.md §8).
     if let serde_json::Value::Object(m) = &mut view {
+        m.insert("selection_has_brushed_stroke".to_string(), has_brushed_stroke.into());
+        m.insert("selection_is_single_brushed_stroke".to_string(), single_brushed_stroke.into());
         m.insert("symbols".to_string(), symbols_json);
         // Concepts panel Slice 2: attached here too (macro recursion ceiling).
         m.insert("selected_concept".to_string(), selected_concept);
@@ -13094,6 +13103,25 @@ mod tests {
         let view = build_active_document_view(&st);
         assert_eq!(view["selection_count"], serde_json::json!(1), "the fixture selected nothing");
         assert_eq!(view["selection_has_compound_shape"], serde_json::json!(false));
+    }
+
+    /// W2b-18. The web view publishes the Brushes panel's two gates, from the
+    /// ONE definition the engine's scope also calls; with no tab, both are false.
+    #[test]
+    fn active_document_view_publishes_the_brushed_stroke_predicates() {
+        use crate::document::test_fixture::{brushed_path, model_with};
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        let m = model_with(vec![brushed_path(0.0, Some("default_brushes/flat_10")),
+                                brushed_path(60.0, None)], &[0, 1]);
+        st.tabs[st.active_tab].model.set_document_for_test(m.document().clone());
+        let view = build_active_document_view(&st);
+        assert_eq!(view["selection_count"], serde_json::json!(2), "the fixture selected nothing");
+        assert_eq!(view["selection_has_brushed_stroke"], serde_json::json!(true));
+        assert_eq!(view["selection_is_single_brushed_stroke"], serde_json::json!(false));
+        st.tabs.clear();
+        let empty = build_active_document_view(&st);
+        assert_eq!(empty["selection_has_brushed_stroke"], serde_json::json!(false));
+        assert_eq!(empty["selection_is_single_brushed_stroke"], serde_json::json!(false));
     }
 
     #[test]
