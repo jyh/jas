@@ -880,18 +880,14 @@ pub(crate) fn open_file_dialog(app: Rc<RefCell<AppState>>, revision: Signal<u64>
                 Some(s) => s,
                 None => return,
             };
-            // SVG has no artboards concept; svg_to_document leaves the
-            // artboards list empty by design. Restore the
-            // at-least-one-artboard invariant here per ARTBOARDS.md
-            // — without it, current_artboard is {} after open and
-            // fit_active_artboard / Cmd+0 silently no-op against a
-            // zero rect, making the document look like it has no
-            // canvas to zoom against. (Session restore in session.rs
-            // does the same repair on its load path.)
-            let mut doc = svg_to_document(&text);
-            crate::document::artboard::ensure_artboards_invariant(
-                &mut doc.artboards, None,
-            );
+            // `open_svg_document` is the codec read plus what OPENING adds:
+            // the sheet the file's root states when it declares no pages of
+            // its own, then the at-least-one-artboard invariant per
+            // ARTBOARDS.md. Without the invariant, current_artboard is {}
+            // after open and fit_active_artboard / Cmd+0 silently no-op
+            // against a zero rect. (Session restore in session.rs does the
+            // same repair on its load path.)
+            let doc = crate::geometry::svg::open_svg_document(&text);
             let model = Model::new(doc, Some(filename.clone()));
             let mut st = app3.borrow_mut();
             // The bytes just read ARE the saved version -- this is what Revert
