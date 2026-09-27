@@ -5760,7 +5760,7 @@
       ]
     },
     "duplicate_brush": {
-      "description": "Duplicate every brush in panel.selected_brushes within panel.selected_library. Copies are inserted immediately after their originals with \" copy\" appended to the name and a fresh slug. The copies become the new selection. Undoable.\n",
+      "description": "Duplicate every brush in panel.selected_brushes within panel.selected_library. Copies are inserted immediately after their originals with \" copy\" appended to the name and a fresh slug. The copies become the new selection. Not undoable: brush libraries are app-global and undo is per document (BRUSHES.md, Undo semantics).\n",
       "category": "brushes",
       "effects": [
         {
@@ -5772,7 +5772,7 @@
       ]
     },
     "delete_brush": {
-      "description": "Permanently remove every brush in panel.selected_brushes from panel.selected_library. Any element with stroke_brush referencing a deleted brush re-renders as a plain stroke. Undoable.\n",
+      "description": "Permanently remove every brush in panel.selected_brushes from panel.selected_library. Any element with stroke_brush referencing a deleted brush re-renders as a plain stroke. The element keeps its reference, so a brush re-added under the same slug restores its look. Not undoable: brush libraries are app-global and undo is per document (BRUSHES.md, Undo semantics).\n",
       "category": "brushes",
       "effects": [
         {
@@ -11958,7 +11958,7 @@
           "label": "Delete Brush",
           "action": "delete_brush",
           "enabled_when": "panel.selected_brushes.length > 0",
-          "description": "Remove the currently selected brushes from the selected library. Any element with jas:stroke-brush referencing a deleted brush re-renders as a plain stroke (null-on-missing fallback). Undoable.\n"
+          "description": "Remove the currently selected brushes from the selected library. Any element with jas:stroke-brush referencing a deleted brush re-renders as a plain stroke (null-on-missing fallback). Not undoable.\n"
         },
         {
           "label": "Brush Options...",
@@ -12321,7 +12321,7 @@
                 "id": "bp_delete_brush_btn",
                 "type": "icon_button",
                 "summary": "Delete Brush",
-                "description": "Permanently remove every brush in selected_brushes from the selected library. Undoable.\n",
+                "description": "Permanently remove every brush in selected_brushes from the selected library. Not undoable.\n",
                 "icon": "delete_brush",
                 "style": {
                   "size": 18
