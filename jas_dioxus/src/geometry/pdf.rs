@@ -805,12 +805,18 @@ fn emit_text(out: &mut String, t: &TextElem) {
     out.push_str("/F1 ");
     push_num(out, size);
     out.push_str("Tf\n");
-    // Re-flip the Y axis locally so glyphs read normally despite the
-    // page-CTM flip.
+    // ONE `Tm` carries both the position and the local Y re-flip (so glyphs
+    // read upright under the page-CTM flip). `Tm` REPLACES the text matrix
+    // (PDF 1.7 §9.4.2), so the earlier `x y Td` followed by
+    // `1 0 0 -1 0 0 Tm` discarded the position and every label landed at
+    // the origin. The origin is the BASELINE: the model's `y` is the top of
+    // the line box, and the baseline is `y + 0.8 * font_size`, the same law
+    // the SVG writer uses (`svg_y` in `svg.rs`).
+    out.push_str("1 0 0 -1 ");
     push_num(out, t.x);
-    push_num(out, t.y);
-    out.push_str("Td\n");
-    out.push_str("1 0 0 -1 0 0 Tm\n");
+    push_num(out, t.y + t.font_size * 0.8);
+    out.push_str("Tm\n");
+
     out.push('(');
     out.push_str(&pdf_escape(&s));
     out.push_str(") Tj\n");
@@ -1382,5 +1388,59 @@ mod tests {
         // which is why the fallback is a CHORD and not an approximation.
         assert!(out.contains("20") && out.contains('0'),
                 "the endpoint must survive even though the curvature does not: {out:?}");
+    }
+
+    /// The effective text matrix at the `Tj` that shows `needle`, computed
+    /// by applying each `Td`/`Tm` in its BT…ET block the way a PDF reader
+    /// does (PDF 1.7 §9.4.2: `Td` translates the line matrix, `Tm` REPLACES
+    /// both matrices). Returns `[a b c d e f]`.
+    fn text_matrix_at(stream: &str, needle: &str) -> [f64; 6] {
+        let bt = stream.find(&format!("({needle}) Tj")).expect("needle shown");
+        let start = stream[..bt].rfind("BT\n").expect("inside a BT block");
+        let mut tlm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        for line in stream[start..bt].lines() {
+            let toks: Vec<&str> = line.split_whitespace().collect();
+            match toks.last() {
+                Some(&"Td") => {
+                    let (tx, ty): (f64, f64) = (toks[0].parse().unwrap(), toks[1].parse().unwrap());
+                    tlm[4] += tx * tlm[0] + ty * tlm[2];
+                    tlm[5] += tx * tlm[1] + ty * tlm[3];
+                }
+                Some(&"Tm") => {
+                    for i in 0..6 { tlm[i] = toks[i].parse().unwrap(); }
+                }
+                _ => {}
+            }
+        }
+        tlm
+    }
+
+    /// A text element is shown at its own (x, y), glyphs upright under the
+    /// page's y-flip. Until this arm, `emit_text` wrote `x y Td` and then
+    /// `1 0 0 -1 0 0 Tm`, and the `Tm` threw the translation away, so every
+    /// label in every export landed at the artwork origin.
+    #[test]
+    fn a_text_is_shown_at_its_own_position() {
+        let svg = r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><text x="120" y="260" font-size="12">HELLO</text></svg>"#;
+        let doc = crate::geometry::svg::svg_to_document(svg);
+        let t = doc.layers.iter().find_map(|l| match l {
+            Element::Layer(g) => g.children.iter().find_map(|c| match &**c {
+                Element::Text(t) => Some(t.clone()),
+                _ => None,
+            }),
+            _ => None,
+        }).expect("one text");
+        assert!(t.x > 1.0 && t.y > 1.0, "fixture must sit away from the origin: ({}, {})", t.x, t.y);
+        // The PDF text origin is the BASELINE. The model's `y` is the top of
+        // the line box, so the expected point comes from the source file's
+        // own `x`/`y` (the SVG baseline, px -> pt), never from the model.
+        let (bx, by) = (120.0 * 72.0 / 96.0, 260.0 * 72.0 / 96.0);
+        assert!((t.y - by).abs() > 1.0, "fixture must separate the line top from the baseline");
+        let bytes = document_to_pdf(&doc);
+        let s = String::from_utf8_lossy(&bytes);
+        let m = text_matrix_at(&s, "HELLO");
+        assert!((m[4] - bx).abs() < 1e-3 && (m[5] - by).abs() < 1e-3,
+            "text origin ({}, {}) != source baseline ({bx}, {by})", m[4], m[5]);
+        assert_eq!((m[0], m[1], m[2], m[3]), (1.0, 0.0, 0.0, -1.0), "glyphs re-flipped upright");
     }
 }
