@@ -54,8 +54,14 @@ private func canvasFace(_ w: String, _ st: String) -> (bold: Bool, italic: Bool)
             "\(got)")
 }
 
-@Test(arguments: faces.indices)
-func pdfTextIsShownInItsOwnFace(_ i: Int) {
+// One @Test per face (not a parameterized test: the Swift execution gate
+// reads each case back by name and does not model expansion).
+@Test func pdfRegularTextIsShownInTheRegularFace() { expectFace(0) }
+@Test func pdfBoldTextIsShownInTheBoldFace() { expectFace(1) }
+@Test func pdfItalicTextIsShownInTheItalicFace() { expectFace(2) }
+@Test func pdfBoldItalicTextIsShownInTheBoldItalicFace() { expectFace(3) }
+
+private func expectFace(_ i: Int) {
     let (w, st) = faces[i]
     let svg = ##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="10" y="50" font-size="12" font-weight=""## + w + ##"" font-style=""## + st + ##"">HELLO</text></svg>"##
     let fonts = baseFonts(documentToPdf(documentForOpen(svg)))
