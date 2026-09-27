@@ -190,8 +190,8 @@ Two-way:
 
 - **Apply** — library mutation commits; every element with
   `jas:stroke-brush` referencing this brush is re-rendered. The parent
-  dialog closes. One undo transaction wraps the library mutation and
-  the canvas re-renders together.
+  dialog closes. A library mutation is not undoable (BRUSHES.md, Undo
+  semantics).
 - **Cancel** — library mutation is discarded; parent dialog stays
   open with the user's edits still pending. Closing the parent dialog
   via Cancel discards the edits entirely.

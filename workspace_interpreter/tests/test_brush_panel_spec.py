@@ -370,3 +370,79 @@ class TestSelectAllUnusedBrushes:
         store = _unused_store([_path(0, "lib_a/b")], [])
         _run(store, "select_all_unused_brushes")
         assert [b["slug"] for b in store.get_data_path("brush_libraries.lib_a.brushes")] == ["a", "b", "c"]
+
+
+# ---------------------------------------------------------------------------
+# Library edits are NOT undoable (the Captain's ruling C, 2026-09-27).
+#
+# Brush libraries are app-global store data; undo stacks are per document and
+# the journal records document ops only (OP_LOG.md §2 row 5), so no port ever
+# kept the old "Undoable." promise. The spec now says what the ports do. The
+# library-edit population is DERIVED from actions.yaml (every action with a
+# ``brush.*`` effect except the selection-only ``brush.select_unused``), so a
+# new library action inherits the arm without editing this list.
+
+_SPEC = os.path.join(_WS, "..", "transcripts", "BRUSHES.md")
+
+
+def _library_edit_actions() -> set[str]:
+    names = set()
+    for name, action in ACTIONS.items():
+        for effect in action.get("effects") or []:
+            if not isinstance(effect, dict):
+                continue
+            for key in effect:
+                if key.startswith("brush.") and key != "brush.select_unused":
+                    names.add(name)
+    return names
+
+
+def _descriptions_for(node, actions: set[str], out: list) -> list:
+    if isinstance(node, dict):
+        if node.get("action") in actions and "description" in node:
+            out.append((node["action"], node["description"]))
+        for value in node.values():
+            _descriptions_for(value, actions, out)
+    elif isinstance(node, list):
+        for value in node:
+            _descriptions_for(value, actions, out)
+    return out
+
+
+class TestLibraryEditsAreNotUndoable:
+    def test_population_is_the_library_writers(self):
+        # Positive control on the derivation: the three library writers named
+        # by the ruling are in it, and the selection-only action is not.
+        found = _library_edit_actions()
+        assert {"duplicate_brush", "delete_brush", "sort_brushes_by_name"} <= found
+        assert "select_all_unused_brushes" not in found
+
+    def test_no_action_description_promises_undo(self):
+        for name in sorted(_library_edit_actions()):
+            text = ACTIONS[name].get("description", "")
+            assert "Undoable." not in text, name
+
+    def test_no_panel_description_promises_undo(self):
+        hits = _descriptions_for(BRUSHES, _library_edit_actions(), [])
+        # Delete Brush appears in the menu and on the toolbar; both must be read.
+        assert len([a for a, _ in hits if a == "delete_brush"]) >= 1
+        for action, text in hits:
+            assert "Undoable." not in text, action
+        # A widget can carry the description without an `action:` key beside it
+        # (the toolbar button binds its action elsewhere), so also scan by id.
+        toolbar = _widget(BRUSHES, "bp_delete_brush_btn")
+        assert toolbar is not None
+        assert "Undoable." not in toolbar.get("description", "")
+
+    def test_spec_lists_library_edits_as_not_undoable(self):
+        with open(_SPEC, encoding="utf-8") as f:
+            text = f.read()
+        section = text.split("## Undo semantics", 1)[1].split("\n## ", 1)[0]
+        # Flatten whitespace: the prose is hard-wrapped, and a label can break
+        # across a line ("**Sort by\n  Name**").
+        section = " ".join(section.split())
+        undoable, not_undoable = section.split("are **not** undoable", 1)
+        for label in ("New Brush", "Duplicate Brush", "Delete Brush", "Sort by Name"):
+            assert f"**{label}**" not in undoable, label
+            assert f"**{label}**" in not_undoable, label
+        assert "library_edit" not in undoable
