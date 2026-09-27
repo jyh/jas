@@ -3439,6 +3439,30 @@ mod tests {
         );
     }
 
+    #[test]
+    fn path_eraser_drag_erases_on_move_not_only_on_press() {
+        // The press misses the line and only the DRAG crosses it, so the
+        // split can come from `on_mousemove` alone, which is gated on
+        // `tool.path_eraser.erasing`. The handler sets it with a bare YAML
+        // `true`; until #272 the shared runner read `set:` values with
+        // `as_str()`, stored null, and the drag erased nothing.
+        let mut tool = path_eraser_yaml_tool().expect("workspace.json declares path_eraser");
+        let mut model = model_with_long_line_path();
+        tool.on_press(&mut model, 50.0, -30.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            1,
+            "control: the press alone must miss the line",
+        );
+        tool.on_move(&mut model, 50.0, 30.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 30.0, false, false);
+        assert_eq!(
+            model.document().layers[0].children().unwrap().len(),
+            2,
+            "a drag across the line must split it",
+        );
+    }
+
     // ── Smooth tool behavioral tests ──────────────────────────────
 
     fn smooth_yaml_tool() -> Option<YamlTool> {
@@ -3530,6 +3554,31 @@ mod tests {
             original_len, new_len,
         );
         assert!(model.can_undo());
+    }
+
+    #[test]
+    fn smooth_drag_smooths_on_move_not_only_on_press() {
+        // The press lands out of the brush's reach and only the DRAG reaches
+        // the zigzag, so any smoothing comes from `on_mousemove`, which is
+        // gated on `tool.smooth.smoothing`. The handler sets it with a bare
+        // YAML `true`; until #272 the shared runner stored null for it, and
+        // the drag smoothed nothing.
+        let mut tool = smooth_yaml_tool().expect("workspace.json declares smooth");
+        let mut model = model_with_selected_zigzag_path();
+        let len = |m: &Model| match &*m.document().layers[0].children().unwrap()[0] {
+            Element::Path(pe) => pe.d.len(),
+            _ => panic!("expected Path"),
+        };
+        let original_len = len(&model);
+        tool.on_press(&mut model, 500.0, 500.0, false, false);
+        assert_eq!(len(&model), original_len, "control: the press alone must not reach the path");
+        tool.on_move(&mut model, 50.0, 0.0, false, false, true);
+        tool.on_release(&mut model, 50.0, 0.0, false, false);
+        assert!(
+            len(&model) < original_len,
+            "a drag onto the zigzag must smooth it (was {}, now {})",
+            original_len, len(&model),
+        );
     }
 
     #[test]
