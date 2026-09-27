@@ -2368,6 +2368,29 @@ private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPre
     return (setup, prefs)
 }
 
+/// The page a file states on its root when it declares none of its own: the
+/// `viewBox` window when there is one (at paper size, since `toPt` already
+/// carries the root's unit), else the root's absolute `width`/`height` at the
+/// origin. nil when the root states no size, so an unsized file keeps the
+/// document's own default. Mirrors Rust `root_sheet`.
+private func rootSheet(_ root: XMLElement) -> Artboard? {
+    let vb = (root.attribute(forName: "viewBox")?.stringValue ?? "")
+        .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" })
+        .compactMap { Double($0) }
+    let x, y, w, h: Double
+    if vb.count == 4, vb[2] > 0, vb[3] > 0 {
+        (x, y, w, h) = (toPt(vb[0]), toPt(vb[1]), toPt(vb[2]), toPt(vb[3]))
+    } else {
+        // No viewBox: user units are px, so the size converts px -> pt.
+        guard let wp = root.attribute(forName: "width")?.stringValue.flatMap(absoluteLengthPx),
+              let hp = root.attribute(forName: "height")?.stringValue.flatMap(absoluteLengthPx)
+        else { return nil }
+        (x, y, w, h) = (0, 0, wp * pxToPt, hp * pxToPt)
+    }
+    guard w > 0, h > 0 else { return nil }
+    return Artboard.defaultWithId(generateArtboardId()).with(x: x, y: y, width: w, height: h)
+}
+
 /// Parse an SVG for OPENING it — parse, then repair the invariants that a
 /// parse deliberately does not.
 ///
@@ -2387,8 +2410,19 @@ private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPre
 /// and cannot be driven from a test. The single line inside `openFile` that
 /// calls this is covered only by an artist opening a file, which is how the
 /// gap was found.
+///
+/// Opening also puts the drawing on the sheet its root states when the file
+/// declares no pages of its own (`rootSheet`), before the invariant. The
+/// codec stays a faithful read: the shared cross-language corpus pins that
+/// reading a file invents no page. Mirrors Rust `open_svg_document`.
 func documentForOpen(_ svgText: String) -> Document {
-    let doc = svgToDocument(svgText)
+    var doc = svgToDocument(svgText)
+    if doc.artboards.isEmpty,
+       let data = svgText.data(using: .utf8),
+       let root = (try? XMLDocument(data: data, options: []))?.rootElement(),
+       let sheet = SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root), operation: { rootSheet(root) }) {
+        doc = doc.replacing(artboards: [sheet])
+    }
     let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
     guard repaired.count != doc.artboards.count else { return doc }
     // Clone-then-mutate: `replacing` touches ONLY `artboards`, so the repair
