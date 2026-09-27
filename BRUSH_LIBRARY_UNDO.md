@@ -1,11 +1,18 @@
 # Undo for brush-library edits — the question, measured
 
-Status: RECORDED 2026-09-26. **The question is the Captain's.** Arm A was first taken
-here on the reading that keeping a promise needs no ruling. It was withdrawn within the
-hour, when OP_LOG was read (§ "Why A is not the lane's" below): every arm amends a
-decision he made. Until he rules, nothing changes, and the negative stays declared.
+Status: **RULED C, 2026-09-27 — the promise is WITHDRAWN.** Library edits are not
+undoable. `transcripts/BRUSHES.md` "Undo semantics", `BRUSH_OPTIONS_DIALOG.md`, and the
+`duplicate_brush` / `delete_brush` descriptions now say so. An arm in
+`workspace_interpreter/tests/test_brush_panel_spec.py` (`TestLibraryEditsAreNotUndoable`)
+keeps them saying so. No port code changed, because no port ever kept the promise.
+OP_LOG §2 row 5 stands unamended. The record below is kept as it was when the question
+was open: it is the reasoning the ruling took.
 
-## The promise
+(Recorded 2026-09-26. Arm A was first taken here on the reading that keeping a promise
+needs no ruling. It was withdrawn within the hour, when OP_LOG was read: every arm
+amends a decision he made.)
+
+## The promise (as it stood before the ruling)
 
 `transcripts/BRUSHES.md`, "Undo semantics": New Brush, Duplicate Brush, Delete Brush,
 Sort by Name and Brush Options → library edit → Apply each produce exactly one undoable

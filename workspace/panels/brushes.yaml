@@ -106,7 +106,7 @@ menu:
       Remove the currently selected brushes from the selected
       library. Any element with jas:stroke-brush referencing a
       deleted brush re-renders as a plain stroke (null-on-missing
-      fallback). Undoable.
+      fallback). Not undoable.
   - label: "Brush Options..."
     action: open_brush_options
     params: { mode: library_edit }
@@ -371,7 +371,7 @@ content:
           summary: "Delete Brush"
           description: >
             Permanently remove every brush in selected_brushes from
-            the selected library. Undoable.
+            the selected library. Not undoable.
           icon: delete_brush
           style: { size: 18 }
           bind:

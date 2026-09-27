@@ -507,9 +507,8 @@ Visual feedback during drag: 2 px accent highlight on valid targets;
 red "not allowed" cursor on invalid; ghosted bounding-box outline of
 the source follows the pointer.
 
-Undo: drop-into-panel is one transaction. Create-new undoes by
-removing the brush; replace-artwork undoes by restoring prior artwork
-and prior stroke renders.
+Undo: drop-into-panel is a library edit and is not undoable (see Undo
+semantics).
 
 ### Drag OUT — from panel to canvas
 
@@ -643,16 +642,6 @@ Stroke styling interaction table.
 The following operations each produce exactly one undoable
 transaction. A single Cmd-Z / Ctrl-Z reverts the entire effect.
 
-- **New Brush** — undo removes the brush and any artwork files it
-  added.
-- **Duplicate Brush** — undo removes the copies and restores the prior
-  selection.
-- **Delete Brush** — undo restores the brushes, the selection, and any
-  canvas elements whose `jas:stroke-brush` was nulled out.
-- **Sort by Name** — undo restores the prior order.
-- **Brush Options… → library_edit → Apply** — undo restores the prior
-  brush parameters and prior renders for every element that referenced
-  the brush. (Cancel produces no undo entry.)
 - **Single-click a tile** (active-brush + apply-to-selection) — undo
   reverts `state.stroke_brush`, clears `state.stroke_brush_overrides`,
   and strips the attributes from the selected paths.
@@ -661,12 +650,23 @@ transaction. A single Cmd-Z / Ctrl-Z reverts the entire effect.
   attributes on selected paths.
 - **BRUSH_OPTIONS_FOR_SELECTION_BUTTON → OK** — undo restores prior
   `state.stroke_brush_overrides`.
-- **Drag-in** — same transaction shape as New Brush (create-new) or as
-  library_edit → Apply (replace-artwork).
 - **Drag-out** — one element-creation transaction.
 
-The following are **not** undoable, consistent with the panel-state
-exclusion rule used elsewhere in the workspace:
+The following are **not** undoable. Library edits change brush
+library data, which is app-global, while every undo stack belongs to
+one document and the transaction journal records document operations
+only (OP_LOG.md §2, row 5):
+
+- **New Brush**, **Duplicate Brush**, **Delete Brush**, **Sort by
+  Name**, **Brush Options… → library_edit → Apply**, and **Drag-in**
+  (create-new or replace-artwork). A deleted brush is therefore not
+  recoverable by Cmd-Z. Delete does not touch the document: an element
+  keeps its `jas:stroke-brush`, draws as a plain stroke while the brush
+  is missing, and draws with the brush again if one with the same slug
+  is re-added.
+
+Nor are these, consistent with the panel-state exclusion rule used
+elsewhere in the workspace:
 
 - Selection-only clicks (shift / cmd click on tiles, no active-brush
   write).
@@ -679,10 +679,12 @@ exclusion rule used elsewhere in the workspace:
   document).
 - **Save Brush Library** (writes disk; beyond the app's undo model).
 
-This policy diverges from the Swatches Delete Swatch rule (which is
-non-undoable). The rationale: deleting a brush re-renders every canvas
-element referencing it, which is a substantial document mutation
-deserving an undo entry.
+This policy matches the Swatches Delete Swatch rule, which is also
+non-undoable. An earlier draft made library edits undoable because a
+delete re-renders every element that references the brush. No port
+built that, because both structures that own undo exclude library
+data. The promise was withdrawn by ruling on 2026-09-27; the record
+is `BRUSH_LIBRARY_UNDO.md`.
 
 Standard LIFO redo stack; an undo followed by any new undoable action
 drops the redo stack.
@@ -733,6 +735,3 @@ Open follow-ups:
   any app's widget catalogue.
 - **Sibling tool docs** — `PAINTBRUSH_TOOL.md` and
   `BLOB_BRUSH_TOOL.md` are stubbed; full drafts pending.
-- **Undo for library mutations** — diverges from the Swatches
-  precedent; each app's undo wiring may need extension to cover the
-  Brushes operations listed under Undo semantics.
