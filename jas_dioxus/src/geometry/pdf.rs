@@ -802,7 +802,8 @@ fn emit_text(out: &mut String, t: &TextElem) {
     out.push_str("rg\n");
     out.push_str("BT\n");
     let size = t.font_size.max(1.0);
-    out.push_str("/F1 ");
+    out.push_str(pdf_face_key(&t.font_weight, &t.font_style));
+    out.push(' ');
     push_num(out, size);
     out.push_str("Tf\n");
     // ONE `Tm` carries both the position and the local Y re-flip (so glyphs
@@ -822,6 +823,22 @@ fn emit_text(out: &mut String, t: &TextElem) {
     out.push_str(") Tj\n");
     out.push_str("ET\n");
     out.push_str("Q\n");
+}
+
+/// The page-resource key of the standard face for a weight and style:
+/// `/F1` Helvetica, `/F2` Bold, `/F3` Oblique, `/F4` BoldOblique (declared on
+/// every page). Bold is `bold`, `bolder` or a numeric weight of 600 or more,
+/// the CSS threshold; italic is `italic` or `oblique`.
+fn pdf_face_key(weight: &str, style: &str) -> &'static str {
+    let w = weight.trim();
+    let bold = w == "bold" || w == "bolder" || w.parse::<f64>().is_ok_and(|n| n >= 600.0);
+    let italic = matches!(style.trim(), "italic" | "oblique");
+    match (bold, italic) {
+        (false, false) => "/F1",
+        (true, false) => "/F2",
+        (false, true) => "/F3",
+        (true, true) => "/F4",
+    }
 }
 
 fn pdf_escape(s: &str) -> String {
@@ -936,7 +953,7 @@ impl PdfBuilder {
     ) {
         self.record_offset(id);
         let body = format!(
-            "{} 0 obj\n<< /Type /Page /Parent {} 0 R /MediaBox [{} {} {} {}] /Contents {} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>\nendobj\n",
+            "{} 0 obj\n<< /Type /Page /Parent {} 0 R /MediaBox [{} {} {} {}] /Contents {} 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> /F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> /F3 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique >> /F4 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-BoldOblique >> >> >> >>\nendobj\n",
             id, parent,
             fmt_pdf_num(media_box[0]), fmt_pdf_num(media_box[1]),
             fmt_pdf_num(media_box[2]), fmt_pdf_num(media_box[3]),
@@ -1443,4 +1460,27 @@ mod tests {
             "text origin ({}, {}) != source baseline ({bx}, {by})", m[4], m[5]);
         assert_eq!((m[0], m[1], m[2], m[3]), (1.0, 0.0, 0.0, -1.0), "glyphs re-flipped upright");
     }
+
+    /// Bold and italic text print in the matching standard face. Until this
+    /// arm every text used `/F1` (Helvetica), so a bold title printed regular.
+    #[test]
+    fn a_text_prints_in_its_weight_and_style() {
+        let cases = [
+            ("", "/F1", "Helvetica"),
+            (r#"font-weight="bold""#, "/F2", "Helvetica-Bold"),
+            (r#"font-weight="700""#, "/F2", "Helvetica-Bold"),
+            (r#"font-style="italic""#, "/F3", "Helvetica-Oblique"),
+            (r#"font-weight="bold" font-style="oblique""#, "/F4", "Helvetica-BoldOblique"),
+        ];
+        for (attrs, key, face) in cases {
+            let svg = format!(r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><text x="10" y="20" font-size="12" {attrs}>FACE</text></svg>"#);
+            let s = String::from_utf8_lossy(&document_to_pdf(&crate::geometry::svg::svg_to_document(&svg))).to_string();
+            let tj = s.find("(FACE) Tj").expect("shown");
+            let bt = s[..tj].rfind("BT\n").expect("its BT");
+            assert!(s[bt..tj].contains(&format!("{key} ")), "`{attrs}` shown with the wrong face:\n{}", &s[bt..tj]);
+            assert!(s.contains(&format!("{key} << /Type /Font /Subtype /Type1 /BaseFont /{face} >>")),
+                "`{key}` is not declared as {face}");
+        }
+    }
 }
+
