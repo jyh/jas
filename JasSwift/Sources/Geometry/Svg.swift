@@ -425,7 +425,7 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
                             letterSpacing: String, xmlLang: String,
                             aaMode: String, rotate: String,
                             horizontalScale: String, verticalScale: String,
-                            kerning: String) -> String {
+                            kerning: String, textAnchor: String = "") -> String {
     var s = ""
     if !textTransform.isEmpty { s += " text-transform=\"\(textTransform)\"" }
     if !fontVariant.isEmpty { s += " font-variant=\"\(fontVariant)\"" }
@@ -437,6 +437,10 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     if !rotate.isEmpty { s += " rotate=\"\(rotate)\"" }
     if !horizontalScale.isEmpty { s += " horizontal-scale=\"\(horizontalScale)\"" }
     if !verticalScale.isEmpty { s += " vertical-scale=\"\(verticalScale)\"" }
+    // Point-text `text-anchor` sits just before the kerning mode, as in
+    // Rust's writer; both are emitted only when set, so a file without
+    // either is byte-identical to what this writer produced before.
+    if !textAnchor.isEmpty { s += " text-anchor=\"\(escapeXml(textAnchor))\"" }
     if !kerning.isEmpty { s += " urn:jas:1:kerning-mode=\"\(escapeXml(kerning))\"" }
     return s
 }
@@ -655,7 +659,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
             aaMode: v.aaMode, rotate: v.rotate,
             horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-            kerning: v.kerning)
+            kerning: v.kerning, textAnchor: v.textAnchor)
         // SVG `y` is the baseline of the first line; internally `v.y`
         // is the *top* of the layout box, so add the ascent (0.8 *
         // fontSize, the same value `text_layout` uses).
@@ -1482,6 +1486,18 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
 /// A list with any function this cannot read imports as NO transform rather
 /// than as the part it could read, which would place the element somewhere
 /// the file never put it. Mirrors Rust `parse_transform`.
+/// The model's spelling of an SVG `text-anchor`: `middle` and `end` are kept,
+/// and `start`, an absent attribute or anything unknown is the empty default,
+/// so a file that says `start` reads exactly like one that says nothing.
+/// Mirrors Rust `text_anchor_from_attr`.
+private func textAnchorFromAttr(_ v: String) -> String {
+    switch v.trimmingCharacters(in: .whitespacesAndNewlines) {
+    case "middle": return "middle"
+    case "end": return "end"
+    default: return ""
+    }
+}
+
 private func parseTransform(_ node: XMLElement) -> Transform? {
     guard let val = node.attribute(forName: "transform")?.stringValue else { return nil }
     // nil until the first function, which is then taken AS IS: composing it
@@ -1926,6 +1942,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         // SVG `y` is the baseline of the first line; convert to the
         // layout-box top by subtracting the ascent (0.8 * fs).
         let svgY = toPt(attrF(elem, "y"))
+        let anchor = textAnchorFromAttr(elem.attribute(forName: "text-anchor")?.stringValue ?? "")
         if !tspanChildren.isEmpty {
             return .text(Text(
                 x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
@@ -1936,6 +1953,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
                 baselineShift: bs, lineHeight: lh, letterSpacing: ls,
                 xmlLang: lang, aaMode: aa, rotate: rotate,
                 horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+                textAnchor: anchor,
                 width: tw, height: th,
                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
                 name: name, id: id))
@@ -1948,6 +1966,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             baselineShift: bs, lineHeight: lh, letterSpacing: ls,
             xmlLang: lang, aaMode: aa, rotate: rotate,
             horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+            textAnchor: anchor,
             width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
             name: name, id: id))

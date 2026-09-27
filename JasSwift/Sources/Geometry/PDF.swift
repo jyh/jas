@@ -1123,7 +1123,14 @@ private func emitText(_ ctx: CGContext, _ t: Text) {
     applyTransform(ctx, t.transform)
     // The page CTM has Y flipped; re-flip locally so the text reads
     // right-side up. Anchor at the text origin (t.x, t.y).
-    ctx.translateBy(x: CGFloat(t.x), y: CGFloat(t.y))
+    // The anchor moves the line's start left of `x` by `anchorShift` of its
+    // width, measured exactly as the bounds measure it, so the shown text and
+    // the selection box agree. (This exporter shows the content as one line.)
+    // Mirrors Rust `emit_text`.
+    let dx = t.textAnchor.isEmpty ? 0 : t.anchorShift(
+        renderedTextWidth(s, family: t.fontFamily, weight: t.fontWeight,
+                          style: t.fontStyle, size: t.fontSize))
+    ctx.translateBy(x: CGFloat(t.x + dx), y: CGFloat(t.y))
     ctx.scaleBy(x: 1, y: -1)
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)

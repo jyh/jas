@@ -180,13 +180,6 @@
         "strokeGradient"
       ]
     },
-    "JasSwift/Sources/Geometry/Normalize.swift::Text": {
-      "sites": 1,
-      "missing": [
-        "blendMode",
-        "mask"
-      ]
-    },
     "JasSwift/Sources/Geometry/Normalize.swift::TextPath": {
       "sites": 1,
       "missing": [

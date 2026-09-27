@@ -170,23 +170,14 @@ private func normalizeElement(_ elem: Element) -> Element {
                           name: e.name, id: e.id,
                           fillRule: e.fillRule))
     case .text(let e):
-        // Pass the tspans tuple through so multi-tspan text
-        // survives normalisation. The content-init would collapse
-        // into a single flat tspan and drop any per-range overrides.
-        return .text(Text(x: e.x, y: e.y, tspans: e.tspans,
-                          fontFamily: e.fontFamily, fontSize: e.fontSize,
-                          fontWeight: e.fontWeight, fontStyle: e.fontStyle,
-                          textDecoration: e.textDecoration,
-                          textTransform: e.textTransform, fontVariant: e.fontVariant,
-                          baselineShift: e.baselineShift, lineHeight: e.lineHeight,
-                          letterSpacing: e.letterSpacing, xmlLang: e.xmlLang,
-                          aaMode: e.aaMode, rotate: e.rotate,
-                          horizontalScale: e.horizontalScale, verticalScale: e.verticalScale,
-                          kerning: e.kerning,
-                          width: e.width, height: e.height,
-                          fill: e.fill.map(normalizeFill), stroke: e.stroke.map(normalizeStroke),
-                          opacity: e.opacity, transform: e.transform,
-                          locked: e.locked, visibility: e.visibility, name: e.name, id: e.id))
+        // Clone-then-mutate, as Rust's `TextElem { fill, stroke, ..e.clone() }`:
+        // only the paint is normalised. The memberwise rebuild this replaced
+        // named 29 of 32 fields and dropped `textAnchor`, `blendMode` and
+        // `mask` (scripts/check_swift_copy_sites.py named all three).
+        var v = e
+        v.fill = e.fill.map(normalizeFill)
+        v.stroke = e.stroke.map(normalizeStroke)
+        return .text(v)
     case .textPath(let e):
         return .textPath(TextPath(d: e.d, tspans: e.tspans, startOffset: e.startOffset,
                                   fontFamily: e.fontFamily, fontSize: e.fontSize,
