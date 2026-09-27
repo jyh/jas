@@ -159,14 +159,16 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
 }
 
 @Test func panelMenuNonEmptyForAllKinds() {
-    for kind in PanelKind.all {
+    // Every variant, not `PanelKind.all` (which omits three kinds on purpose).
+    for kind in everyPanelKind {
         let items = panelMenu(kind)
         #expect(!items.isEmpty, "Menu for \(kind) is empty")
     }
 }
 
 @Test func everyPanelHasCloseAction() {
-    for kind in PanelKind.all {
+    // Every variant, not `PanelKind.all` (which omits three kinds on purpose).
+    for kind in everyPanelKind {
         let items = panelMenu(kind)
         let hasClose = items.contains { item in
             if case .action(_, let cmd, _) = item { return cmd == "close_panel" }
@@ -177,7 +179,8 @@ private func commands(_ items: [PanelMenuItem]) -> [String] {
 }
 
 @Test func closeLabelMatchesPanelName() {
-    for kind in PanelKind.all {
+    // Every variant, not `PanelKind.all` (which omits three kinds on purpose).
+    for kind in everyPanelKind {
         let items = panelMenu(kind)
         let closeItem = items.first { item in
             if case .action(_, let cmd, _) = item { return cmd == "close_panel" }
