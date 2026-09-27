@@ -137,10 +137,10 @@ WHAT THIS GATE CANNOT SEE -- stated on the GREEN path as well as the red
 ------------------------------------------------------------------------
   * It counts fields PRESENT IN FIXTURE JSON. A field the canonical writer
     never emits is invisible here no matter how badly it is dropped.
-  * THE VOCABULARY IS 16 FIELD NAMES, AND 73 ELEMENT-STRUCT SLOTS SIT OUTSIDE
+  * THE VOCABULARY IS 16 FIELD NAMES, AND 74 ELEMENT-STRUCT SLOTS SIT OUTSIDE
     IT. A field enters only by being on `CommonProps` or by being
     `Option`-typed. `PathElem::fill_rule`, `GroupElem::isolated_blending` and
-    `knockout_group`, `width_points`, and the whole 21-field TextElem
+    `knockout_group`, `width_points`, and the whole 22-field TextElem
     typography block are plain-typed on structs with no `Default` impl, so
     there is no default to read and they are outside the primitive entirely.
     That set skews hard toward exactly the never-had-a-campaign fields this
@@ -224,8 +224,13 @@ MIN_DERIVED_DEFAULTS = 16
 # It is pinned because MIN_DERIVED_DEFAULTS only notices the vocabulary
 # SHRINKING, and adding a plain-typed field to an Elem struct moves neither
 # number -- so without this the third way to add a field arrives in silence.
-# 73 today over 14 payload structs; see the self-test for what lives in there.
-UNWATCHED_ELEMENT_FIELDS = 73
+# 74 today over 14 payload structs; see the self-test for what lives in there.
+# 73 -> 74 on 2026-09-26: `TextElem::text_anchor` (point-text `text-anchor`), a
+# plain String with a serde default, joins the typography block for the same
+# reason `kerning` sits there. Its unset value is "" and the canonical JSON
+# omits it, so this gate is blind to it by construction; its arms live in
+# `svg.rs::text_anchor_codec_tests` and the PDF/bounds/painter tests.
+UNWATCHED_ELEMENT_FIELDS = 74
 
 
 class SourceParseError(RuntimeError):
@@ -893,7 +898,7 @@ def scope_note():
         "that differs per port, and to a value that is non-default but "
         "semantically inert (scale(1,1) scores as a carrier). Blind to REPLICAS: "
         "a floor of N is satisfied by N identical copies of one document, "
-        "proven on this corpus. 73 plain-typed element fields have no derivable "
+        "proven on this corpus. 74 plain-typed element fields have no derivable "
         "default and are outside the vocabulary; square boxes, rx==ry and "
         "colour space are out of reach by construction. See the ledger's "
         "`out_of_reach` -- all of it, not just the first line.")
