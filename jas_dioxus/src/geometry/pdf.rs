@@ -812,8 +812,18 @@ fn emit_text(out: &mut String, t: &TextElem) {
     // the origin. The origin is the BASELINE: the model's `y` is the top of
     // the line box, and the baseline is `y + 0.8 * font_size`, the same law
     // the SVG writer uses (`svg_y` in `svg.rs`).
+    // The anchor moves the line's start left of `x` by `anchor_shift` of its
+    // width, measured exactly as the bounds measure it, so the shown text and
+    // the selection box agree. (This exporter shows the content as one line.)
+    let dx = if t.text_anchor.is_empty() {
+        0.0
+    } else {
+        let font = crate::text_measure::font_string(
+            &t.font_style, &t.font_weight, t.font_size, &t.font_family);
+        t.anchor_shift(crate::text_measure::make_measurer(&font, t.font_size)(&s))
+    };
     out.push_str("1 0 0 -1 ");
-    push_num(out, t.x);
+    push_num(out, t.x + dx);
     push_num(out, t.y + t.font_size * 0.8);
     out.push_str("Tm\n");
 
@@ -1442,5 +1452,29 @@ mod tests {
         assert!((m[4] - bx).abs() < 1e-3 && (m[5] - by).abs() < 1e-3,
             "text origin ({}, {}) != source baseline ({bx}, {by})", m[4], m[5]);
         assert_eq!((m[0], m[1], m[2], m[3]), (1.0, 0.0, 0.0, -1.0), "glyphs re-flipped upright");
+    }
+
+    /// An anchored point text is shown with its line's left edge where the
+    /// anchor puts it: the same left edge its bounds report, since both read
+    /// `anchor_shift` over the same measurer.
+    #[test]
+    fn an_anchored_text_is_shown_at_its_anchored_left() {
+        for (anchor, k) in [("middle", 0.5), ("end", 1.0)] {
+            let svg = format!(r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><text x="120" y="260" font-size="12" text-anchor="{anchor}">HELLO</text></svg>"#);
+            let doc = crate::geometry::svg::svg_to_document(&svg);
+            let t = doc.layers.iter().find_map(|l| match l {
+                Element::Layer(g) => g.children.iter().find_map(|c| match &**c {
+                    Element::Text(t) => Some(t.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            }).expect("one text");
+            let (_, _, w, _) = Element::Text(t.clone()).bounds();
+            assert!(w > 1.0, "measured width {w}");
+            let s = String::from_utf8_lossy(&document_to_pdf(&doc)).to_string();
+            let m = text_matrix_at(&s, "HELLO");
+            let want = 120.0 * 72.0 / 96.0 - k * w;
+            assert!((m[4] - want).abs() < 1e-3, "{anchor}: origin x {} != {want}", m[4]);
+        }
     }
 }

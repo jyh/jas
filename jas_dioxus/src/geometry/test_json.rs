@@ -822,6 +822,11 @@ fn element_json(elem: &Element) -> String {
             o.empty_as_null("rotate", &e.rotate);
             o.raw("stroke", stroke_json(&e.stroke));
             o.null("style_name");
+            // Point-text anchor: emitted ONLY when set, so every golden
+            // written before the field existed is byte-identical.
+            if !e.text_anchor.is_empty() {
+                o.str_val("text_anchor", &e.text_anchor);
+            }
             o.raw("text_decoration", text_decoration_json(&e.text_decoration));
             o.null("text_rendering");
             o.empty_as_null("text_transform", &e.text_transform);
@@ -1745,6 +1750,7 @@ fn parse_element_base(v: &serde_json::Value) -> Element {
             horizontal_scale: v["horizontal_scale"].as_str().unwrap_or("").to_string(),
             vertical_scale: v["vertical_scale"].as_str().unwrap_or("").to_string(),
             kerning: v["jas_kerning_mode"].as_str().unwrap_or("").to_string(),
+            text_anchor: v["text_anchor"].as_str().unwrap_or("").to_string(),
             width: parse_f(&v["width"]),
             height: parse_f(&v["height"]),
             fill: parse_fill(&v["fill"]),

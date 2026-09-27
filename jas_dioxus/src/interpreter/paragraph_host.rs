@@ -206,13 +206,13 @@ pub fn paragraph_align_attrs(pp: &ParagraphPanelState)
 /// buttons map; the justify buttons fall through to the default `start`
 /// (they are grayed for point text).
 ///
-/// ⚠️ **NOT CALLED BY [`apply_to_selection`], and that is not an omission.**
-/// `Element::Text` has no `text_anchor` field today, so the web-side apply
-/// computed this value and immediately discarded it (`let _ = text_anchor;`)
-/// against a Phase 5 rendering follow-up. Moving that discard would have moved
-/// a dead call; the function is kept because it states half of the alignment
-/// law and its inverse lives beside it, and it is wired the day the element
-/// gains the field.
+/// ⚠️ **STILL NOT CALLED BY [`apply_to_selection`].** `TextElem::text_anchor`
+/// now exists (read and written by the SVG codec, applied by every renderer
+/// and the bounds through `TextElem::anchor_shift`), but the Paragraph panel
+/// does not yet write it: wiring this function into the apply is the one
+/// remaining step of the point-text alignment node, and it is a panel change
+/// with its own Rust/Swift equivalence arm, not part of the import work that
+/// added the field.
 pub fn paragraph_text_anchor(pp: &ParagraphPanelState) -> Option<String> {
     if pp.align_center { Some("middle".into()) }
     else if pp.align_right { Some("end".into()) }
