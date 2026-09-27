@@ -1612,48 +1612,52 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
     Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit, align: StrokeAlign::Center, dash_pattern, dash_len, dash_align_anchors, start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align, opacity })
 }
 
+/// A `transform` attribute: a LIST of functions (SVG 1.1 §7.6), composed so
+/// the RIGHTMOST applies first — `translate(10,0) rotate(90)` rotates, then
+/// translates. Every function SVG defines is read: `matrix`, `translate`,
+/// `scale`, `rotate` (with its optional centre), `skewX`, `skewY`. Lengths
+/// (translations, the rotate centre, the matrix's e/f) are user units and go
+/// through [`pt`]; the rest are unitless.
+///
+/// A list with any function this cannot read imports as NO transform rather
+/// than as the part it could read, which would place the element somewhere
+/// the file never put it.
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
     let val = node.attrs.get("transform")?;
-    if val.starts_with("matrix(") {
-        let inner = val.trim_start_matches("matrix(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if parts.len() == 6 {
-            return Some(Transform {
-                a: parts[0], b: parts[1], c: parts[2], d: parts[3],
-                e: pt(parts[4]), f: pt(parts[5]),
-            });
-        }
+    // `None` until the first function, which is then taken AS IS: composing
+    // it onto the identity would compute `1*(-0) + 0*1 = +0` and lose the
+    // sign of a zero entry, and a saved matrix must reopen bit-exactly.
+    let mut acc: Option<Transform> = None;
+    let mut rest = val.trim();
+    while !rest.is_empty() {
+        let open = rest.find('(')?;
+        let name = rest[..open].trim().trim_start_matches(',').trim();
+        let close = rest[open..].find(')')? + open;
+        let args: Vec<f64> = rest[open + 1..close]
+            .split([',', ' ', '\t', '\n'])
+            .filter(|t| !t.is_empty())
+            .map(|t| t.parse::<f64>())
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let f = match (name, args.as_slice()) {
+            ("matrix", [a, b, c, d, e, f]) => Transform { a: *a, b: *b, c: *c, d: *d, e: pt(*e), f: pt(*f) },
+            ("translate", [tx]) => Transform::translate(pt(*tx), 0.0),
+            ("translate", [tx, ty]) => Transform::translate(pt(*tx), pt(*ty)),
+            ("scale", [sx]) => Transform::scale(*sx, *sx),
+            ("scale", [sx, sy]) => Transform::scale(*sx, *sy),
+            ("rotate", [a]) => Transform::rotate(*a),
+            ("rotate", [a, cx, cy]) => Transform::rotate(*a).around_point(pt(*cx), pt(*cy)),
+            ("skewX", [a]) => Transform::shear(a.to_radians().tan(), 0.0),
+            ("skewY", [a]) => Transform::shear(0.0, a.to_radians().tan()),
+            _ => return None,
+        };
+        acc = Some(match acc {
+            None => f,
+            Some(a) => a.multiply(&f),
+        });
+        rest = rest[close + 1..].trim_start().trim_start_matches(',').trim_start();
     }
-    if val.starts_with("translate(") {
-        let inner = val.trim_start_matches("translate(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let tx = parts.first().copied().unwrap_or(0.0);
-        let ty = parts.get(1).copied().unwrap_or(0.0);
-        return Some(Transform::translate(pt(tx), pt(ty)));
-    }
-    if val.starts_with("rotate(") {
-        let inner = val.trim_start_matches("rotate(").trim_end_matches(')');
-        if let Ok(angle) = inner.trim().parse::<f64>() {
-            return Some(Transform::rotate(angle));
-        }
-    }
-    if val.starts_with("scale(") {
-        let inner = val.trim_start_matches("scale(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let sx = parts.first().copied().unwrap_or(1.0);
-        let sy = parts.get(1).copied().unwrap_or(sx);
-        return Some(Transform::scale(sx, sy));
-    }
-    None
+    acc
 }
 
 /// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
@@ -5076,7 +5080,6 @@ mod tests {
     }
 }
 
-
 /// Root-size units (SVG 1.1 §7.2 / §7.7): the outermost `<svg>`'s
 /// `width`/`height` with a unit, over a `viewBox`, fix what one USER UNIT
 /// is on paper. A drawing authored in inches at 1:24 says so this way, and
@@ -5268,5 +5271,74 @@ mod root_artboard_tests {
         let d = doc(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, "");
         let again = svg_to_document(&document_to_svg(&d));
         assert_eq!(one(&again), one(&d));
+    }
+}
+
+/// SVG transform lists (SVG 1.1 §7.6): a `transform` attribute is a LIST of
+/// functions applied right to left, and `rotate` takes an optional centre.
+/// Each arm maps a point through the imported transform and compares it with
+/// the point SVG itself puts there.
+#[cfg(test)]
+mod transform_list_tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn transform_of(t: &str) -> Option<Transform> {
+        let d = svg_to_document(&format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><g><rect x="0" y="0" width="1" height="1" fill="#000000" transform="{t}"/></g></svg>"##
+        ));
+        fn find(e: &Element) -> Option<Option<Transform>> {
+            match e {
+                Element::Rect(r) => Some(r.common.transform),
+                Element::Group(g) => g.children.iter().find_map(|c| find(c)),
+                Element::Layer(g) => g.children.iter().find_map(|c| find(c)),
+                _ => None,
+            }
+        }
+        d.layers.iter().find_map(find).expect("the rect")
+    }
+
+    /// `t` sends the file point (x, y) to the file point (ex, ey). Compared
+    /// in pt, the model's space, through the importer's own conversion.
+    fn maps(t: &str, (x, y): (f64, f64), (ex, ey): (f64, f64)) {
+        let m = transform_of(t).unwrap_or_else(|| panic!("`{t}` imported as no transform"));
+        let (gx, gy) = m.apply_point(pt(x), pt(y));
+        assert!((gx - pt(ex)).abs() < 1e-9 && (gy - pt(ey)).abs() < 1e-9,
+            "`{t}`: ({x}, {y}) -> ({}, {}), SVG puts it at ({ex}, {ey})", gx / pt(1.0), gy / pt(1.0));
+    }
+
+    #[test]
+    fn rotate_about_a_centre() {
+        // +90 deg with y down turns (+5, 0) from the centre into (0, +5).
+        maps("rotate(90 10 0)", (15.0, 0.0), (10.0, 5.0));
+        maps("rotate(-90 -37 164)", (-37.0, 154.0), (-47.0, 164.0));
+    }
+
+    #[test]
+    fn a_list_applies_right_to_left() {
+        maps("translate(10,0) rotate(90)", (1.0, 0.0), (10.0, 1.0));
+        maps("scale(2) translate(5,0)", (0.0, 0.0), (10.0, 0.0));
+        maps("translate(10 0), scale(2)", (1.0, 1.0), (12.0, 2.0));
+    }
+
+    #[test]
+    fn skews_are_read() {
+        maps("skewX(45)", (0.0, 1.0), (1.0, 1.0));
+        maps("skewY(45)", (1.0, 0.0), (1.0, 1.0));
+    }
+
+    #[test]
+    fn single_functions_still_read() {
+        maps("translate(3,4)", (0.0, 0.0), (3.0, 4.0));
+        maps("translate(3)", (0.0, 0.0), (3.0, 0.0));
+        maps("rotate(90)", (1.0, 0.0), (0.0, 1.0));
+        maps("scale(2,3)", (1.0, 1.0), (2.0, 3.0));
+        maps("matrix(1,0,0,1,7,8)", (0.0, 0.0), (7.0, 8.0));
+    }
+
+    #[test]
+    fn a_malformed_list_imports_no_transform() {
+        assert!(transform_of("rotate(abc)").is_none());
+        assert!(transform_of("translate(1,0) wobble(3)").is_none());
     }
 }
