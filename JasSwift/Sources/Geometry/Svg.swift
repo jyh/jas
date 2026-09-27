@@ -1472,35 +1472,54 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
                   arrowAlign: arrowAlign, opacity: opacity)
 }
 
+/// A `transform` attribute: a LIST of functions (SVG 1.1 §7.6), composed so
+/// the RIGHTMOST applies first — `translate(10,0) rotate(90)` rotates, then
+/// translates. Every function SVG defines is read: `matrix`, `translate`,
+/// `scale`, `rotate` (with its optional centre), `skewX`, `skewY`. Lengths
+/// (translations, the rotate centre, the matrix's e/f) are user units and go
+/// through `toPt`; the rest are unitless.
+///
+/// A list with any function this cannot read imports as NO transform rather
+/// than as the part it could read, which would place the element somewhere
+/// the file never put it. Mirrors Rust `parse_transform`.
 private func parseTransform(_ node: XMLElement) -> Transform? {
     guard let val = node.attribute(forName: "transform")?.stringValue else { return nil }
-    if val.hasPrefix("matrix(") {
-        let inner = val.dropFirst(7).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count >= 6 else { return nil }
-        return Transform(a: parts[0], b: parts[1], c: parts[2],
-                            d: parts[3], e: toPt(parts[4]), f: toPt(parts[5]))
+    // nil until the first function, which is then taken AS IS: composing it
+    // onto the identity would compute `1*(-0) + 0*1 = +0` and lose the sign
+    // of a zero entry, and a saved matrix must reopen bit-exactly.
+    var acc: Transform? = nil
+    var rest = Substring(val).drop(while: { $0.isWhitespace })
+    while !rest.isEmpty {
+        guard let open = rest.firstIndex(of: "("),
+              let close = rest[open...].firstIndex(of: ")") else { return nil }
+        let name = rest[..<open].trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { $0 == "," }).trimmingCharacters(in: .whitespacesAndNewlines)
+        var args: [Double] = []
+        for tok in rest[rest.index(after: open)..<close]
+            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" }) {
+            guard let v = Double(tok) else { return nil }
+            args.append(v)
+        }
+        let f: Transform
+        switch (name, args.count) {
+        case ("matrix", 6):
+            f = Transform(a: args[0], b: args[1], c: args[2], d: args[3],
+                          e: toPt(args[4]), f: toPt(args[5]))
+        case ("translate", 1): f = .translate(toPt(args[0]), 0)
+        case ("translate", 2): f = .translate(toPt(args[0]), toPt(args[1]))
+        case ("scale", 1): f = .scale(args[0], args[0])
+        case ("scale", 2): f = .scale(args[0], args[1])
+        case ("rotate", 1): f = .rotate(args[0])
+        case ("rotate", 3): f = Transform.rotate(args[0]).aroundPoint(toPt(args[1]), toPt(args[2]))
+        case ("skewX", 1): f = .shear(tan(args[0] * (Double.pi / 180)), 0)
+        case ("skewY", 1): f = .shear(0, tan(args[0] * (Double.pi / 180)))
+        default: return nil
+        }
+        acc = acc.map { $0.multiply(f) } ?? f
+        rest = rest[rest.index(after: close)...]
+            .drop(while: { $0.isWhitespace || $0 == "," })
     }
-    if val.hasPrefix("translate(") {
-        let inner = val.dropFirst(10).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard !parts.isEmpty else { return nil }
-        let ty = parts.count > 1 ? parts[1] : 0.0
-        return Transform.translate(toPt(parts[0]), toPt(ty))
-    }
-    if val.hasPrefix("rotate(") {
-        let inner = val.dropFirst(7).dropLast(1)
-        guard let deg = Double(inner.trimmingCharacters(in: .whitespaces)) else { return nil }
-        return Transform.rotate(deg)
-    }
-    if val.hasPrefix("scale(") {
-        let inner = val.dropFirst(6).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard !parts.isEmpty else { return nil }
-        let sy = parts.count > 1 ? parts[1] : parts[0]
-        return Transform.scale(parts[0], sy)
-    }
-    return nil
+    return acc
 }
 
 /// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
