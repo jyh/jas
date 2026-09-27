@@ -1024,7 +1024,65 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
 
 private let pxToPt = 72.0 / 96.0
 
-private func toPt(_ v: Double) -> Double { v * pxToPt }
+/// Points per USER UNIT for the import in progress. It is `pxToPt` unless
+/// the root `<svg>` sizes a `viewBox` in real units (see
+/// `rootUserUnitPt`), and it is bound only for the duration of one
+/// `svgToDocument` call, so it cannot leak into the next import. Mirrors
+/// Rust's `USER_UNIT_PT` + `UserUnitScope`.
+private enum SvgImportUnit {
+    @TaskLocal static var ptPerUnit: Double = pxToPt
+}
+
+/// A user-unit length from the file, in pt. Every length the importer reads
+/// goes through here, so the root's unit reaches all of them at once.
+private func toPt(_ v: Double) -> Double { v * SvgImportUnit.ptPerUnit }
+
+/// An absolute SVG length (`2in`, `25.4mm`, `72pt`, `96px`, `96`) in CSS px.
+/// nil for relative units (`%`, `em`, `ex`) and anything unparseable: those
+/// say nothing about paper size. Mirrors Rust `absolute_length_px`.
+private func absoluteLengthPx(_ raw: String) -> Double? {
+    let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let split = s.firstIndex(where: { ($0.isASCII && $0.isLetter) || $0 == "%" }) ?? s.endIndex
+    guard let v = Double(s[..<split].trimmingCharacters(in: .whitespaces)) else { return nil }
+    let per: Double
+    switch s[split...].trimmingCharacters(in: .whitespaces) {
+    case "", "px": per = 1
+    case "in": per = 96
+    case "cm": per = 96 / 2.54
+    case "mm": per = 96 / 25.4
+    case "pt": per = 96.0 / 72.0
+    case "pc": per = 16
+    default: return nil
+    }
+    return v * per
+}
+
+/// Points per user unit, from the root `<svg>`'s `width`/`height` over its
+/// `viewBox` (SVG 1.1 §7.7). With no `viewBox`, user units are px whatever
+/// the root size says. With both axes sized, the default
+/// `preserveAspectRatio` (`xMidYMid meet`) fits the viewBox INSIDE the
+/// viewport, so the smaller axis scale wins.
+///
+/// Only the SCALE is taken. The viewBox origin is a window onto user space,
+/// not a shift of it: coordinates keep their values, which is also what
+/// jas's own writer relies on (it emits a viewBox whose origin is the
+/// drawing's bounds and whose size equals the unitless root size, k = 1 px).
+/// Mirrors Rust `root_user_unit_pt`.
+private func rootUserUnitPt(_ root: XMLElement) -> Double {
+    guard let vbRaw = root.attribute(forName: "viewBox")?.stringValue else { return pxToPt }
+    let vb = vbRaw.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" })
+        .compactMap { Double($0) }
+    guard vb.count == 4, vb[2] > 0, vb[3] > 0 else { return pxToPt }
+    let sx = root.attribute(forName: "width")?.stringValue.flatMap(absoluteLengthPx).map { $0 / vb[2] }
+    let sy = root.attribute(forName: "height")?.stringValue.flatMap(absoluteLengthPx).map { $0 / vb[3] }
+    let pxPerUnit: Double
+    switch (sx, sy) {
+    case let (a?, b?): pxPerUnit = min(a, b)
+    case let (a?, nil), let (nil, a?): pxPerUnit = a
+    case (nil, nil): pxPerUnit = 1
+    }
+    return pxPerUnit.isFinite && pxPerUnit > 0 ? pxPerUnit * pxToPt : pxToPt
+}
 
 private let namedColors: [String: (Int, Int, Int)] = [
     "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0),
@@ -1965,6 +2023,13 @@ public func svgToDocument(_ svg: String) -> Document {
         return Document(layers: [Layer(children: [])], artboards: [])
     }
 
+    return SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root)) {
+        svgRootToDocument(root)
+    }
+}
+
+/// The import proper, run with the root's user unit bound (`svgToDocument`).
+private func svgRootToDocument(_ root: XMLElement) -> Document {
     let (parsedSetup, parsedPrefs) = parseJasPrintBlocks(root)
     // Artboards ride a <sodipodi:namedview> + <inkscape:page> block (Inkscape's
     // multi-page convention); SVG has no native artboard concept. Empty when the
