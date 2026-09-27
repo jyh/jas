@@ -695,6 +695,14 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let kern_attr = if !e.kerning.is_empty() {
                 format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
             } else { String::new() };
+            // `text-anchor` rides the same trailing slot as the kerning mode:
+            // both are emitted only when set, so a file without either is
+            // byte-identical to what this writer produced before.
+            let kern_attr = if e.text_anchor.is_empty() {
+                kern_attr
+            } else {
+                format!(" text-anchor=\"{}\"{}", escape_xml(&e.text_anchor), kern_attr)
+            };
             let svg_y = e.y + e.font_size * 0.8;
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             if is_flat {
@@ -1911,6 +1919,17 @@ fn tokenize_path(d: &str) -> Vec<PathToken> {
 // Parse SVG element tree to Document elements
 // ---------------------------------------------------------------------------
 
+/// The model's spelling of an SVG `text-anchor`: `middle` and `end` are kept,
+/// and `start`, an absent attribute or anything unknown is the empty default,
+/// so a file that says `start` reads exactly like one that says nothing.
+fn text_anchor_from_attr(v: &str) -> String {
+    match v.trim() {
+        "middle" => "middle".to_string(),
+        "end" => "end".to_string(),
+        _ => String::new(),
+    }
+}
+
 fn parse_element(node: &XmlNode) -> Option<Element> {
     let tag = strip_ns(&node.tag);
     let common = parse_common(node);
@@ -2172,6 +2191,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 horizontal_scale: h_scale,
                 vertical_scale: v_scale,
                 kerning,
+                text_anchor: text_anchor_from_attr(get_s(node, "text-anchor", "")),
                 width: tw,
                 height: th,
                 fill: parse_fill(node),
@@ -4951,3 +4971,80 @@ mod tests {
     }
 }
 
+
+/// Point-text `text-anchor` through the codec (PARAGRAPH.md §Storage): read,
+/// normalised (`start` is the empty default), and written back only when set,
+/// so every file without it stays byte-identical.
+#[cfg(test)]
+mod text_anchor_codec_tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn text_of(attrs: &str) -> TextElem {
+        let d = svg_to_document(&format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" {attrs}>ABCD</text></svg>"##
+        ));
+        d.layers.iter().find_map(|l| match l {
+            Element::Layer(g) => g.children.iter().find_map(|c| match &**c {
+                Element::Text(t) => Some(t.clone()),
+                _ => None,
+            }),
+            _ => None,
+        }).expect("the text")
+    }
+
+    #[test]
+    fn middle_and_end_are_read_and_start_is_the_default() {
+        assert_eq!(text_of(r#"text-anchor="middle""#).text_anchor, "middle");
+        assert_eq!(text_of(r#"text-anchor="end""#).text_anchor, "end");
+        assert_eq!(text_of(r#"text-anchor="start""#).text_anchor, "");
+        assert_eq!(text_of("").text_anchor, "");
+        assert_eq!(text_of(r#"text-anchor="sideways""#).text_anchor, "");
+    }
+
+    #[test]
+    fn an_anchor_is_written_back_and_read_again() {
+        for a in ["middle", "end"] {
+            let d = svg_to_document(&format!(
+                r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" text-anchor="{a}">ABCD</text></svg>"##
+            ));
+            let out = document_to_svg(&d);
+            assert!(out.contains(&format!(r#"text-anchor="{a}""#)), "writer dropped `{a}`:\n{out}");
+            let again = svg_to_document(&out);
+            assert_eq!(document_to_svg(&again), out, "`{a}` is a fixpoint");
+        }
+    }
+
+    #[test]
+    fn no_anchor_writes_no_attribute() {
+        let d = svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" text-anchor="start">ABCD</text></svg>"##);
+        assert!(!document_to_svg(&d).contains("text-anchor"));
+    }
+
+    /// The box a selection draws is where the glyphs are: its left edge is
+    /// `x + anchor_shift(width)`, the width from the same measurer the bounds
+    /// always used. Start keeps today's box exactly.
+    #[test]
+    fn bounds_sit_where_the_anchor_puts_the_line() {
+        let start = Element::Text(text_of(""));
+        let (sx, sy, sw, sh) = start.bounds();
+        assert!(sw > 1.0, "a measured width: {sw}");
+        for (attrs, k) in [(r#"text-anchor="middle""#, 0.5), (r#"text-anchor="end""#, 1.0)] {
+            let (x, y, w, h) = Element::Text(text_of(attrs)).bounds();
+            assert!((x - (sx - k * sw)).abs() < 1e-9, "{attrs}: left {x}, expected {}", sx - k * sw);
+            assert_eq!((y, w, h), (sy, sw, sh), "{attrs}: only x moves");
+        }
+    }
+
+    /// The canonical JSON the cross-language corpus compares omits an unset
+    /// anchor, so every existing golden is unchanged, and carries a set one.
+    #[test]
+    fn canonical_json_carries_only_a_set_anchor() {
+        let plain = crate::geometry::test_json::document_to_test_json(&svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="1" y="5" font-size="10">A</text></svg>"##));
+        assert!(!plain.contains("text_anchor"), "{plain}");
+        let set = crate::geometry::test_json::document_to_test_json(&svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="1" y="5" font-size="10" text-anchor="end">A</text></svg>"##));
+        assert!(set.contains(r#""text_anchor":"end""#), "{set}");
+        let back = crate::geometry::test_json::test_json_to_document(&set);
+        assert_eq!(crate::geometry::test_json::document_to_test_json(&back), set, "JSON round trip");
+    }
+}

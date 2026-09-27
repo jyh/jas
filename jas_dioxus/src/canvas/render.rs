@@ -2055,6 +2055,11 @@ fn draw_element_body(
             for line in &layout.lines {
                 let s: String = chars[line.start..line.end].iter().collect();
                 let s = s.trim_end_matches('\n');
+                // The line's origin: `x` moved by the point-text anchor over
+                // this line's own width (`TextElem::anchor_shift`, the law the
+                // bounds and every other renderer share). 0 for start and for
+                // area text, so every unanchored line draws exactly as before.
+                let x0 = if e.text_anchor.is_empty() { e.x } else { e.x + e.anchor_shift(measure(s)) };
                 let baseline = e.y + line.baseline_y + y_shift;
                 // Per-line x shift comes from the first glyph's x,
                 // which the paragraph-aware layout already shifted
@@ -2063,7 +2068,7 @@ fn draw_element_body(
                     .get(line.glyph_start)
                     .map(|g| g.x)
                     .unwrap_or(0.0);
-                let line_x = e.x + line_x_shift;
+                let line_x = x0 + line_x_shift;
                 // When the layout stretched glue widths (justify), the
                 // single fill_text path would render each line with the
                 // canvas's *natural* inter-word advance and the result
@@ -2102,7 +2107,7 @@ fn draw_element_body(
                         let is_ws = ch.map_or(true, |c| c.is_whitespace());
                         if !is_ws && !g.is_trailing_space {
                             if !in_word {
-                                word_x = e.x + g.x;
+                                word_x = x0 + g.x;
                                 in_word = true;
                                 word_buf.clear();
                             }
@@ -2127,7 +2132,7 @@ fn draw_element_body(
                     let hyph_x = line_glyphs.iter()
                         .filter(|g| !g.is_trailing_space)
                         .last()
-                        .map(|g| e.x + g.x)
+                        .map(|g| x0 + g.x)
                         .unwrap_or(line_x);
                     ctx.fill_text("-", hyph_x, baseline).ok();
                 }
@@ -2438,12 +2443,8 @@ fn draw_segmented_text(
     // The baseline sits at the first visual line: element y + 0.8 *
     // font_size. Segmented rendering is one-line only for now.
     let baseline = e.y + e.font_size * 0.8;
-    let mut cx = e.x;
-
-    for t in &e.tspans {
-        if t.content.is_empty() {
-            continue;
-        }
+    // Each tspan's canvas font and size, with the parent's fallbacks.
+    let tspan_font = |t: &crate::geometry::tspan::Tspan| {
         let eff_family = t.font_family.as_deref().unwrap_or(&e.font_family);
         let eff_size = t.font_size.unwrap_or(e.font_size);
         let eff_weight = match t.font_weight.as_deref() {
@@ -2454,8 +2455,28 @@ fn draw_segmented_text(
             Some(s) => s,
             None => if parent_italic { "italic" } else { "normal" },
         };
-        let font = format!("{} {} {}px {}",
-            eff_style, eff_weight, eff_size, eff_family);
+        (format!("{} {} {}px {}", eff_style, eff_weight, eff_size, eff_family), eff_size)
+    };
+    // The point-text anchor moves the whole line by its width, measured with
+    // the SAME per-tspan fonts and `dx` nudges the pen advances by below.
+    let mut cx = e.x;
+    if !e.text_anchor.is_empty() {
+        let total: f64 = e.tspans.iter()
+            .filter(|t| !t.content.is_empty())
+            .map(|t| {
+                let (font, size) = tspan_font(t);
+                t.dx.unwrap_or(0.0) * size
+                    + crate::tools::text_measure::make_measurer(&font, size)(&t.content)
+            })
+            .sum();
+        cx += e.anchor_shift(total);
+    }
+
+    for t in &e.tspans {
+        if t.content.is_empty() {
+            continue;
+        }
+        let (font, eff_size) = tspan_font(t);
         ctx.set_font(&font);
 
         // Per-tspan positioning: dx is a leading-edge horizontal

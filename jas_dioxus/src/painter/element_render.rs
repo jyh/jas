@@ -379,6 +379,18 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
             return true;
         }
     }
+    // ⛔ AN ANCHOR POSITIONS BY A MEASURED WIDTH, so it takes the same
+    // fail-closed rule as segmented text above: lower only where a real
+    // measurer exists (Direct2D), never on the 0.55-per-character stub. The
+    // legacy renderer applies the anchor everywhere else.
+    if t.anchor_shift(1.0) != 0.0
+        && crate::text_measure::try_make_measurer(
+            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+            t.font_size,
+        ).is_none()
+    {
+        return true;
+    }
     !t.letter_spacing.is_empty()
         || !t.kerning.is_empty()
         || !t.baseline_shift.is_empty()
@@ -449,12 +461,9 @@ fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextEl
     let parent_bold = e.font_weight == "bold";
     let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
     let baseline = e.y + e.font_size * 0.8;
-    let mut cx = e.x;
-
-    for t in &e.tspans {
-        if t.content.is_empty() {
-            continue;
-        }
+    // Each tspan's (font shorthand, size): style, weight, family, the same
+    // shape every other FastRun carries, with the size in its own field.
+    let run_font = |t: &crate::geometry::tspan::Tspan| {
         let family = t.font_family.as_deref().unwrap_or(&e.font_family);
         let size = t.font_size.unwrap_or(e.font_size);
         let weight = match t.font_weight.as_deref() {
@@ -465,9 +474,29 @@ fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextEl
             Some(s) => s,
             None => if parent_italic { "italic" } else { "normal" },
         };
-        // The same shorthand shape every other FastRun carries: style, weight,
-        // family — the size rides its own field.
-        let font = format!("{style} {weight} {family}");
+        (format!("{style} {weight} {family}"), size)
+    };
+    // An anchor moves the whole line by its measured width, so measure it
+    // first with the same per-tspan measurers the pen advances by. A tspan
+    // that will not measure stops the draw (the rule directly below).
+    let mut cx = e.x;
+    if !e.text_anchor.is_empty() {
+        let mut total = 0.0;
+        for t in e.tspans.iter().filter(|t| !t.content.is_empty()) {
+            let (font, size) = run_font(t);
+            let Some(measure) = crate::text_measure::try_make_measurer(&font, size) else {
+                return;
+            };
+            total += measure(&t.content);
+        }
+        cx += e.anchor_shift(total);
+    }
+
+    for t in &e.tspans {
+        if t.content.is_empty() {
+            continue;
+        }
+        let (font, size) = run_font(t);
         p.draw_text_run(
             &TextRun::FastRun {
                 font: font.clone(),
@@ -1366,12 +1395,20 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             // text pipeline stays legacy in PH1 (see `element_needs_legacy`);
             // this lowering is reference-only vocabulary coverage.
             if let Some(f) = e.fill.as_ref() {
+                let font = format!("{} {} {}", e.font_style, e.font_weight, e.font_family);
+                // An anchored text reaches here only with a real measurer
+                // (`text_needs_legacy`); without one the shift stays 0 and the
+                // router has already sent the element to legacy.
+                let dx = if e.text_anchor.is_empty() { 0.0 } else {
+                    crate::text_measure::try_make_measurer(&font, e.font_size)
+                        .map_or(0.0, |m| e.anchor_shift(m(&e.content())))
+                };
                 let run = TextRun::FastRun {
-                    font: format!("{} {} {}", e.font_style, e.font_weight, e.font_family),
+                    font,
                     size: e.font_size,
                     text: e.content(),
                     letter_spacing: 0.0,
-                    x: e.x,
+                    x: e.x + dx,
                     y: e.y,
                 };
                 p.draw_text_run(&run, &Brush::Solid(f.color), eff * f.opacity);

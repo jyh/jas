@@ -3053,3 +3053,39 @@ fn an_outlined_ellipse_draws_the_elements_own_conic() {
     assert!(!cmds.iter().any(|c| matches!(c, Command::FillEllipseArc { .. })),
             "an outlined ellipse is not filled: {cmds:?}");
 }
+
+/// An ANCHORED point text positions by a measured width, so it lowers only
+/// where a real measurer exists, the same fail-closed rule as segmented text:
+/// off Direct2D it stays on the legacy renderer, which applies the anchor.
+#[test]
+fn anchored_text_stays_legacy_without_a_real_measurer() {
+    let mut e = crate::geometry::element::TextElem::from_string(
+        10.0, 20.0, "Hi", "sans-serif", 12.0, "normal", "normal", "", 0.0, 0.0,
+        fill(Color::BLACK), None, crate::geometry::element::CommonProps::default());
+    assert!(!crate::painter::element_render::text_needs_legacy(&e), "control: plain flat text lowers");
+    e.text_anchor = "middle".into();
+    let has_real = crate::text_measure::try_make_measurer("normal normal sans-serif", 12.0).is_some();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&e), !has_real,
+               "anchored text lowers exactly when a real measurer exists");
+}
+
+/// Where a real measurer exists the anchored run LOWERS, and its origin is
+/// `x + anchor_shift(measured width)`: `x - w/2` for middle.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn an_anchored_flat_run_starts_at_its_anchored_left() {
+    let mut e = crate::geometry::element::TextElem::from_string(
+        100.0, 20.0, "Hello", "sans-serif", 12.0, "normal", "normal", "", 0.0, 0.0,
+        fill(Color::BLACK), None, crate::geometry::element::CommonProps::default());
+    e.text_anchor = "middle".into();
+    let m = crate::text_measure::try_make_measurer("normal normal sans-serif", 12.0)
+        .expect("Direct2D measures sans-serif");
+    let w = m("Hello");
+    let elem = Element::Text(e);
+    assert!(!element_needs_legacy(&elem, all_caps()), "an anchored run lowers where it can be measured");
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &elem, 1.0);
+    let xs = run_origins(rec.commands());
+    assert_eq!(xs.len(), 1, "{:?}", rec.commands());
+    assert!((xs[0] - (100.0 - w / 2.0)).abs() < 1e-9, "origin {} != {}", xs[0], 100.0 - w / 2.0);
+}
