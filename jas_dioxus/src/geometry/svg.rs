@@ -2446,6 +2446,56 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
 /// vec when no namedview / pages are present — callers (the open
 /// path in clipboard.rs, session restore in session.rs) repair
 /// the at-least-one-artboard invariant separately.
+/// The document a person gets when they OPEN a drawing: [`svg_to_document`],
+/// then, if the file declares no pages of its own, the sheet its root states
+/// ([`root_sheet`]), then the at-least-one-artboard invariant (ARTBOARDS.md).
+///
+/// It is a separate entry point, not a change to the codec, on purpose: the
+/// codec stays a faithful read of the file (the shared cross-language corpus
+/// pins that no page appears where the file names none). Opening a file for a
+/// person is where a stated paper size should become the page they print on,
+/// and where a Letter default used to be invented instead.
+pub fn open_svg_document(svg: &str) -> Document {
+    let mut doc = svg_to_document(svg);
+    if doc.artboards.is_empty() {
+        if let Some(root) = parse_xml(svg) {
+            let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
+            doc.artboards.extend(root_sheet(&root));
+        }
+    }
+    crate::document::artboard::ensure_artboards_invariant(&mut doc.artboards, None);
+    doc
+}
+
+/// The page a file states on its root when it declares none of its own: the
+/// `viewBox` window when there is one (at paper size, since [`pt`] already
+/// carries the root's unit), else the root's absolute `width`/`height` at the
+/// origin. `None` when the root states no size, so an unsized file keeps the
+/// document's own default.
+fn root_sheet(root: &XmlNode) -> Option<crate::document::artboard::Artboard> {
+    use crate::document::artboard::{generate_artboard_id, Artboard};
+    let vb: Vec<f64> = root.attrs.get("viewBox")
+        .map(|v| v.split([',', ' ', '\t', '\n']).filter(|t| !t.is_empty()).filter_map(|t| t.parse().ok()).collect())
+        .unwrap_or_default();
+    let (x, y, w, h) = if vb.len() == 4 && vb[2] > 0.0 && vb[3] > 0.0 {
+        (pt(vb[0]), pt(vb[1]), pt(vb[2]), pt(vb[3]))
+    } else {
+        // No viewBox: user units are px, so the size converts px -> pt.
+        let w = absolute_length_px(root.attrs.get("width")?)?;
+        let h = absolute_length_px(root.attrs.get("height")?)?;
+        (0.0, 0.0, w * PX_TO_PT, h * PX_TO_PT)
+    };
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let mut ab = Artboard::default_with_id(generate_artboard_id(None));
+    ab.x = x;
+    ab.y = y;
+    ab.width = w;
+    ab.height = h;
+    Some(ab)
+}
+
 fn parse_artboards(root: &XmlNode) -> Vec<crate::document::artboard::Artboard> {
     use crate::document::artboard::{Artboard, ArtboardFill};
     let mut out = Vec::new();
@@ -5138,5 +5188,85 @@ mod root_units_tests {
         let doc = svg_to_document(&drawing(r#"width="2in" height="1in" viewBox="0 0 20 10""#));
         let again = svg_to_document(&document_to_svg(&doc));
         assert_scaled(&again, 2.0 * 72.0 / 20.0);
+    }
+}
+
+/// The sheet a drawing states on its root. A file that declares no pages of
+/// its own (no Inkscape `namedview`) still states its paper: the root
+/// `width`/`height`, over the `viewBox` when there is one. That is the page
+/// a PDF export should print on.
+#[cfg(test)]
+mod root_artboard_tests {
+    use super::*;
+
+    fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-6 }
+
+    fn body() -> &'static str {
+        r##"<rect x="1" y="1" width="2" height="2" fill="#000000"/>"##
+    }
+
+    fn src(root_attrs: &str, extra: &str) -> String {
+        format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" {root_attrs}>{extra}{}</svg>"##,
+            body()
+        )
+    }
+
+    fn doc(root_attrs: &str, extra: &str) -> Document {
+        open_svg_document(&src(root_attrs, extra))
+    }
+
+    fn one(d: &Document) -> (f64, f64, f64, f64) {
+        assert_eq!(d.artboards.len(), 1, "exactly one artboard: {:?}", d.artboards);
+        let a = &d.artboards[0];
+        (a.x, a.y, a.width, a.height)
+    }
+
+    #[test]
+    fn a_sized_viewbox_becomes_the_sheet() {
+        // 2 in x 1 in over a viewBox whose origin is not zero: the sheet is
+        // the viewBox window, at paper size (k = 7.2 pt per unit).
+        let d = doc(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, "");
+        let (x, y, w, h) = one(&d);
+        assert!(close(w, 144.0) && close(h, 72.0), "sheet {w} x {h} pt");
+        assert!(close(x, -5.0 * 7.2) && close(y, -2.0 * 7.2), "sheet origin ({x}, {y})");
+    }
+
+    #[test]
+    fn a_sized_root_without_a_viewbox_becomes_the_sheet() {
+        let d = doc(r#"width="5in" height="3in""#, "");
+        assert_eq!(one(&d), (0.0, 0.0, 360.0, 216.0));
+    }
+
+    #[test]
+    fn declared_pages_win_over_the_root() {
+        let pages = r#"<sodipodi:namedview><inkscape:page x="0" y="0" width="40" height="40" id="p1" inkscape:label="Page"/></sodipodi:namedview>"#;
+        let d = doc(r#"width="2in" height="1in" viewBox="0 0 20 10""#, pages);
+        let (_, _, w, h) = one(&d);
+        assert!(close(w, 40.0 * 7.2) && close(h, 40.0 * 7.2), "the declared page, not the root: {w} x {h}");
+        assert_eq!(d.artboards[0].name, "Page");
+    }
+
+    #[test]
+    fn an_unsized_root_opens_on_the_default_sheet() {
+        // No stated size: the at-least-one invariant supplies its default.
+        let d = doc("", "");
+        let (x, y, w, h) = one(&d);
+        let def = crate::document::artboard::Artboard::default_with_id(String::new());
+        assert_eq!((x, y, w, h), (def.x, def.y, def.width, def.height));
+    }
+
+    #[test]
+    fn the_codec_itself_invents_no_sheet() {
+        // The shared corpus pins this: reading a file is not opening it.
+        let d = svg_to_document(&src(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, ""));
+        assert!(d.artboards.is_empty(), "codec read: {:?}", d.artboards);
+    }
+
+    #[test]
+    fn the_sheet_round_trips_through_the_writer() {
+        let d = doc(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, "");
+        let again = svg_to_document(&document_to_svg(&d));
+        assert_eq!(one(&again), one(&d));
     }
 }
