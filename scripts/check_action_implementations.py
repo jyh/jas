@@ -147,7 +147,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 61
+MIN_LOG_ONLY = 60
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -495,6 +495,11 @@ def self_test() -> int:
     # with `library:` as an expression), and `select_all_unused_brushes` the
     # same shape (`brush.select_unused`). Two leaving at once is why the delta
     # is 2 -- a delta of 1 here would mean one of them is still a stub.
+    #
+    # 60 when `apply_artboard_preset` left: the Artboard Options preset table
+    # is now effects in actions.yaml (an `if`/`set` per sized preset), driven
+    # in all three interpreters against the dropdown's own labels. One stub,
+    # a delta of 1.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")
