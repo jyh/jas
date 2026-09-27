@@ -1134,6 +1134,14 @@ pub struct TextElem {
     /// `"0.025em"`. Empty = Auto (default). Panel field: Kerning.
     #[serde(default)]
     pub kerning: String,
+    /// SVG `text-anchor` for POINT text: which point of each line sits at
+    /// `x`. Empty = `start` (the default, and the only value before this
+    /// field existed); `"middle"` or `"end"` otherwise. Area text aligns
+    /// inside its box through the paragraph `text-align` and ignores this.
+    /// Read it through [`TextElem::anchor_shift`], the one law every
+    /// renderer and the bounds share. PARAGRAPH.md §Storage.
+    #[serde(default)]
+    pub text_anchor: String,
     pub width: f64,
     pub height: f64,
     pub fill: Option<Fill>,
@@ -1144,6 +1152,21 @@ pub struct TextElem {
 impl TextElem {
     pub fn is_area_text(&self) -> bool {
         self.width > 0.0 && self.height > 0.0
+    }
+
+    /// How far a line `line_width` wide starts LEFT of `x` under this
+    /// element's anchor: `0` for start, `-w/2` for middle, `-w` for end.
+    /// Always `0` for area text. Every point-text renderer and the bounds
+    /// add this to each line's x; it is the whole of the anchor law.
+    pub fn anchor_shift(&self, line_width: f64) -> f64 {
+        if self.is_area_text() {
+            return 0.0;
+        }
+        match self.text_anchor.as_str() {
+            "middle" => -line_width / 2.0,
+            "end" => -line_width,
+            _ => 0.0,
+        }
     }
 
     /// Returns `true` when every tspan can be rendered by the
@@ -1220,6 +1243,7 @@ impl TextElem {
             horizontal_scale: String::new(),
             vertical_scale: String::new(),
             kerning: String::new(),
+            text_anchor: String::new(),
             width,
             height,
             fill,
@@ -1597,14 +1621,22 @@ impl Element {
                     // the whole native test target failed to build until today.
                     // The divergence survived because the only platform that
                     // could see it could not compile the test that watches it.
-                    let max_width = {
+                    // Each line sits at `x + anchor_shift(its width)`, so the
+                    // box spans the leftmost line start to the rightmost end.
+                    // Under the default anchor every start is `x` and this is
+                    // exactly the old `(x, widest line)` box.
+                    let (left, right) = {
                         let font = crate::text_measure::font_string(
                             &e.font_style, &e.font_weight, e.font_size, &e.font_family);
                         let measure = crate::text_measure::make_measurer(&font, e.font_size);
-                        lines.iter().map(|l| measure(l)).fold(0.0_f64, f64::max)
+                        lines.iter().map(|l| {
+                            let w = measure(l);
+                            let start = e.x + e.anchor_shift(w);
+                            (start, start + w)
+                        }).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), (a, b)| (lo.min(a), hi.max(b)))
                     };
                     let height = lines.len() as f64 * e.font_size;
-                    (e.x, e.y, max_width, height)
+                    (left, e.y, right - left, height)
                 }
             }
             Element::TextPath(e) => inflate_bounds(path_bounds(&e.d), e.stroke.as_ref()),

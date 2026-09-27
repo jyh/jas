@@ -769,6 +769,14 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
             let kern_attr = if !e.kerning.is_empty() {
                 format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
             } else { String::new() };
+            // `text-anchor` rides the same trailing slot as the kerning mode:
+            // both are emitted only when set, so a file without either is
+            // byte-identical to what this writer produced before.
+            let kern_attr = if e.text_anchor.is_empty() {
+                kern_attr
+            } else {
+                format!(" text-anchor=\"{}\"{}", escape_xml(&e.text_anchor), kern_attr)
+            };
             let svg_y = e.y + e.font_size * 0.8;
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             if is_flat {
@@ -1612,48 +1620,52 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
     Some(Stroke { color, width, linecap: lc, linejoin: lj, miter_limit, align: StrokeAlign::Center, dash_pattern, dash_len, dash_align_anchors, start_arrow, end_arrow, start_arrow_scale, end_arrow_scale, arrow_align, opacity })
 }
 
+/// A `transform` attribute: a LIST of functions (SVG 1.1 §7.6), composed so
+/// the RIGHTMOST applies first — `translate(10,0) rotate(90)` rotates, then
+/// translates. Every function SVG defines is read: `matrix`, `translate`,
+/// `scale`, `rotate` (with its optional centre), `skewX`, `skewY`. Lengths
+/// (translations, the rotate centre, the matrix's e/f) are user units and go
+/// through [`pt`]; the rest are unitless.
+///
+/// A list with any function this cannot read imports as NO transform rather
+/// than as the part it could read, which would place the element somewhere
+/// the file never put it.
 fn parse_transform(node: &XmlNode) -> Option<Transform> {
     let val = node.attrs.get("transform")?;
-    if val.starts_with("matrix(") {
-        let inner = val.trim_start_matches("matrix(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        if parts.len() == 6 {
-            return Some(Transform {
-                a: parts[0], b: parts[1], c: parts[2], d: parts[3],
-                e: pt(parts[4]), f: pt(parts[5]),
-            });
-        }
+    // `None` until the first function, which is then taken AS IS: composing
+    // it onto the identity would compute `1*(-0) + 0*1 = +0` and lose the
+    // sign of a zero entry, and a saved matrix must reopen bit-exactly.
+    let mut acc: Option<Transform> = None;
+    let mut rest = val.trim();
+    while !rest.is_empty() {
+        let open = rest.find('(')?;
+        let name = rest[..open].trim().trim_start_matches(',').trim();
+        let close = rest[open..].find(')')? + open;
+        let args: Vec<f64> = rest[open + 1..close]
+            .split([',', ' ', '\t', '\n'])
+            .filter(|t| !t.is_empty())
+            .map(|t| t.parse::<f64>())
+            .collect::<Result<_, _>>()
+            .ok()?;
+        let f = match (name, args.as_slice()) {
+            ("matrix", [a, b, c, d, e, f]) => Transform { a: *a, b: *b, c: *c, d: *d, e: pt(*e), f: pt(*f) },
+            ("translate", [tx]) => Transform::translate(pt(*tx), 0.0),
+            ("translate", [tx, ty]) => Transform::translate(pt(*tx), pt(*ty)),
+            ("scale", [sx]) => Transform::scale(*sx, *sx),
+            ("scale", [sx, sy]) => Transform::scale(*sx, *sy),
+            ("rotate", [a]) => Transform::rotate(*a),
+            ("rotate", [a, cx, cy]) => Transform::rotate(*a).around_point(pt(*cx), pt(*cy)),
+            ("skewX", [a]) => Transform::shear(a.to_radians().tan(), 0.0),
+            ("skewY", [a]) => Transform::shear(0.0, a.to_radians().tan()),
+            _ => return None,
+        };
+        acc = Some(match acc {
+            None => f,
+            Some(a) => a.multiply(&f),
+        });
+        rest = rest[close + 1..].trim_start().trim_start_matches(',').trim_start();
     }
-    if val.starts_with("translate(") {
-        let inner = val.trim_start_matches("translate(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let tx = parts.first().copied().unwrap_or(0.0);
-        let ty = parts.get(1).copied().unwrap_or(0.0);
-        return Some(Transform::translate(pt(tx), pt(ty)));
-    }
-    if val.starts_with("rotate(") {
-        let inner = val.trim_start_matches("rotate(").trim_end_matches(')');
-        if let Ok(angle) = inner.trim().parse::<f64>() {
-            return Some(Transform::rotate(angle));
-        }
-    }
-    if val.starts_with("scale(") {
-        let inner = val.trim_start_matches("scale(").trim_end_matches(')');
-        let parts: Vec<f64> = inner.split([',', ' '])
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| s.parse().ok())
-            .collect();
-        let sx = parts.first().copied().unwrap_or(1.0);
-        let sy = parts.get(1).copied().unwrap_or(sx);
-        return Some(Transform::scale(sx, sy));
-    }
-    None
+    acc
 }
 
 /// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
@@ -1985,6 +1997,17 @@ fn tokenize_path(d: &str) -> Vec<PathToken> {
 // Parse SVG element tree to Document elements
 // ---------------------------------------------------------------------------
 
+/// The model's spelling of an SVG `text-anchor`: `middle` and `end` are kept,
+/// and `start`, an absent attribute or anything unknown is the empty default,
+/// so a file that says `start` reads exactly like one that says nothing.
+fn text_anchor_from_attr(v: &str) -> String {
+    match v.trim() {
+        "middle" => "middle".to_string(),
+        "end" => "end".to_string(),
+        _ => String::new(),
+    }
+}
+
 fn parse_element(node: &XmlNode) -> Option<Element> {
     let tag = strip_ns(&node.tag);
     let common = parse_common(node);
@@ -2246,6 +2269,7 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
                 horizontal_scale: h_scale,
                 vertical_scale: v_scale,
                 kerning,
+                text_anchor: text_anchor_from_attr(get_s(node, "text-anchor", "")),
                 width: tw,
                 height: th,
                 fill: parse_fill(node),
@@ -2446,6 +2470,56 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
 /// vec when no namedview / pages are present — callers (the open
 /// path in clipboard.rs, session restore in session.rs) repair
 /// the at-least-one-artboard invariant separately.
+/// The document a person gets when they OPEN a drawing: [`svg_to_document`],
+/// then, if the file declares no pages of its own, the sheet its root states
+/// ([`root_sheet`]), then the at-least-one-artboard invariant (ARTBOARDS.md).
+///
+/// It is a separate entry point, not a change to the codec, on purpose: the
+/// codec stays a faithful read of the file (the shared cross-language corpus
+/// pins that no page appears where the file names none). Opening a file for a
+/// person is where a stated paper size should become the page they print on,
+/// and where a Letter default used to be invented instead.
+pub fn open_svg_document(svg: &str) -> Document {
+    let mut doc = svg_to_document(svg);
+    if doc.artboards.is_empty() {
+        if let Some(root) = parse_xml(svg) {
+            let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
+            doc.artboards.extend(root_sheet(&root));
+        }
+    }
+    crate::document::artboard::ensure_artboards_invariant(&mut doc.artboards, None);
+    doc
+}
+
+/// The page a file states on its root when it declares none of its own: the
+/// `viewBox` window when there is one (at paper size, since [`pt`] already
+/// carries the root's unit), else the root's absolute `width`/`height` at the
+/// origin. `None` when the root states no size, so an unsized file keeps the
+/// document's own default.
+fn root_sheet(root: &XmlNode) -> Option<crate::document::artboard::Artboard> {
+    use crate::document::artboard::{generate_artboard_id, Artboard};
+    let vb: Vec<f64> = root.attrs.get("viewBox")
+        .map(|v| v.split([',', ' ', '\t', '\n']).filter(|t| !t.is_empty()).filter_map(|t| t.parse().ok()).collect())
+        .unwrap_or_default();
+    let (x, y, w, h) = if vb.len() == 4 && vb[2] > 0.0 && vb[3] > 0.0 {
+        (pt(vb[0]), pt(vb[1]), pt(vb[2]), pt(vb[3]))
+    } else {
+        // No viewBox: user units are px, so the size converts px -> pt.
+        let w = absolute_length_px(root.attrs.get("width")?)?;
+        let h = absolute_length_px(root.attrs.get("height")?)?;
+        (0.0, 0.0, w * PX_TO_PT, h * PX_TO_PT)
+    };
+    if !(w > 0.0 && h > 0.0) {
+        return None;
+    }
+    let mut ab = Artboard::default_with_id(generate_artboard_id(None));
+    ab.x = x;
+    ab.y = y;
+    ab.width = w;
+    ab.height = h;
+    Some(ab)
+}
+
 fn parse_artboards(root: &XmlNode) -> Vec<crate::document::artboard::Artboard> {
     use crate::document::artboard::{Artboard, ArtboardFill};
     let mut out = Vec::new();
@@ -5026,7 +5100,6 @@ mod tests {
     }
 }
 
-
 /// Root-size units (SVG 1.1 §7.2 / §7.7): the outermost `<svg>`'s
 /// `width`/`height` with a unit, over a `viewBox`, fix what one USER UNIT
 /// is on paper. A drawing authored in inches at 1:24 says so this way, and
@@ -5138,5 +5211,231 @@ mod root_units_tests {
         let doc = svg_to_document(&drawing(r#"width="2in" height="1in" viewBox="0 0 20 10""#));
         let again = svg_to_document(&document_to_svg(&doc));
         assert_scaled(&again, 2.0 * 72.0 / 20.0);
+    }
+}
+
+/// The sheet a drawing states on its root. A file that declares no pages of
+/// its own (no Inkscape `namedview`) still states its paper: the root
+/// `width`/`height`, over the `viewBox` when there is one. That is the page
+/// a PDF export should print on.
+#[cfg(test)]
+mod root_artboard_tests {
+    use super::*;
+
+    fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-6 }
+
+    fn body() -> &'static str {
+        r##"<rect x="1" y="1" width="2" height="2" fill="#000000"/>"##
+    }
+
+    fn src(root_attrs: &str, extra: &str) -> String {
+        format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" {root_attrs}>{extra}{}</svg>"##,
+            body()
+        )
+    }
+
+    fn doc(root_attrs: &str, extra: &str) -> Document {
+        open_svg_document(&src(root_attrs, extra))
+    }
+
+    fn one(d: &Document) -> (f64, f64, f64, f64) {
+        assert_eq!(d.artboards.len(), 1, "exactly one artboard: {:?}", d.artboards);
+        let a = &d.artboards[0];
+        (a.x, a.y, a.width, a.height)
+    }
+
+    #[test]
+    fn a_sized_viewbox_becomes_the_sheet() {
+        // 2 in x 1 in over a viewBox whose origin is not zero: the sheet is
+        // the viewBox window, at paper size (k = 7.2 pt per unit).
+        let d = doc(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, "");
+        let (x, y, w, h) = one(&d);
+        assert!(close(w, 144.0) && close(h, 72.0), "sheet {w} x {h} pt");
+        assert!(close(x, -5.0 * 7.2) && close(y, -2.0 * 7.2), "sheet origin ({x}, {y})");
+    }
+
+    #[test]
+    fn a_sized_root_without_a_viewbox_becomes_the_sheet() {
+        let d = doc(r#"width="5in" height="3in""#, "");
+        assert_eq!(one(&d), (0.0, 0.0, 360.0, 216.0));
+    }
+
+    #[test]
+    fn declared_pages_win_over_the_root() {
+        let pages = r#"<sodipodi:namedview><inkscape:page x="0" y="0" width="40" height="40" id="p1" inkscape:label="Page"/></sodipodi:namedview>"#;
+        let d = doc(r#"width="2in" height="1in" viewBox="0 0 20 10""#, pages);
+        let (_, _, w, h) = one(&d);
+        assert!(close(w, 40.0 * 7.2) && close(h, 40.0 * 7.2), "the declared page, not the root: {w} x {h}");
+        assert_eq!(d.artboards[0].name, "Page");
+    }
+
+    #[test]
+    fn an_unsized_root_opens_on_the_default_sheet() {
+        // No stated size: the at-least-one invariant supplies its default.
+        let d = doc("", "");
+        let (x, y, w, h) = one(&d);
+        let def = crate::document::artboard::Artboard::default_with_id(String::new());
+        assert_eq!((x, y, w, h), (def.x, def.y, def.width, def.height));
+    }
+
+    #[test]
+    fn the_codec_itself_invents_no_sheet() {
+        // The shared corpus pins this: reading a file is not opening it.
+        let d = svg_to_document(&src(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, ""));
+        assert!(d.artboards.is_empty(), "codec read: {:?}", d.artboards);
+    }
+
+    #[test]
+    fn the_sheet_round_trips_through_the_writer() {
+        let d = doc(r#"width="2in" height="1in" viewBox="-5 -2 20 10""#, "");
+        let again = svg_to_document(&document_to_svg(&d));
+        assert_eq!(one(&again), one(&d));
+    }
+}
+
+/// SVG transform lists (SVG 1.1 §7.6): a `transform` attribute is a LIST of
+/// functions applied right to left, and `rotate` takes an optional centre.
+/// Each arm maps a point through the imported transform and compares it with
+/// the point SVG itself puts there.
+#[cfg(test)]
+mod transform_list_tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn transform_of(t: &str) -> Option<Transform> {
+        let d = svg_to_document(&format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><g><rect x="0" y="0" width="1" height="1" fill="#000000" transform="{t}"/></g></svg>"##
+        ));
+        fn find(e: &Element) -> Option<Option<Transform>> {
+            match e {
+                Element::Rect(r) => Some(r.common.transform),
+                Element::Group(g) => g.children.iter().find_map(|c| find(c)),
+                Element::Layer(g) => g.children.iter().find_map(|c| find(c)),
+                _ => None,
+            }
+        }
+        d.layers.iter().find_map(find).expect("the rect")
+    }
+
+    /// `t` sends the file point (x, y) to the file point (ex, ey). Compared
+    /// in pt, the model's space, through the importer's own conversion.
+    fn maps(t: &str, (x, y): (f64, f64), (ex, ey): (f64, f64)) {
+        let m = transform_of(t).unwrap_or_else(|| panic!("`{t}` imported as no transform"));
+        let (gx, gy) = m.apply_point(pt(x), pt(y));
+        assert!((gx - pt(ex)).abs() < 1e-9 && (gy - pt(ey)).abs() < 1e-9,
+            "`{t}`: ({x}, {y}) -> ({}, {}), SVG puts it at ({ex}, {ey})", gx / pt(1.0), gy / pt(1.0));
+    }
+
+    #[test]
+    fn rotate_about_a_centre() {
+        // +90 deg with y down turns (+5, 0) from the centre into (0, +5).
+        maps("rotate(90 10 0)", (15.0, 0.0), (10.0, 5.0));
+        maps("rotate(-90 -37 164)", (-37.0, 154.0), (-47.0, 164.0));
+    }
+
+    #[test]
+    fn a_list_applies_right_to_left() {
+        maps("translate(10,0) rotate(90)", (1.0, 0.0), (10.0, 1.0));
+        maps("scale(2) translate(5,0)", (0.0, 0.0), (10.0, 0.0));
+        maps("translate(10 0), scale(2)", (1.0, 1.0), (12.0, 2.0));
+    }
+
+    #[test]
+    fn skews_are_read() {
+        maps("skewX(45)", (0.0, 1.0), (1.0, 1.0));
+        maps("skewY(45)", (1.0, 0.0), (1.0, 1.0));
+    }
+
+    #[test]
+    fn single_functions_still_read() {
+        maps("translate(3,4)", (0.0, 0.0), (3.0, 4.0));
+        maps("translate(3)", (0.0, 0.0), (3.0, 0.0));
+        maps("rotate(90)", (1.0, 0.0), (0.0, 1.0));
+        maps("scale(2,3)", (1.0, 1.0), (2.0, 3.0));
+        maps("matrix(1,0,0,1,7,8)", (0.0, 0.0), (7.0, 8.0));
+    }
+
+    #[test]
+    fn a_malformed_list_imports_no_transform() {
+        assert!(transform_of("rotate(abc)").is_none());
+        assert!(transform_of("translate(1,0) wobble(3)").is_none());
+    }
+}
+
+/// Point-text `text-anchor` through the codec (PARAGRAPH.md §Storage): read,
+/// normalised (`start` is the empty default), and written back only when set,
+/// so every file without it stays byte-identical.
+#[cfg(test)]
+mod text_anchor_codec_tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn text_of(attrs: &str) -> TextElem {
+        let d = svg_to_document(&format!(
+            r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" {attrs}>ABCD</text></svg>"##
+        ));
+        d.layers.iter().find_map(|l| match l {
+            Element::Layer(g) => g.children.iter().find_map(|c| match &**c {
+                Element::Text(t) => Some(t.clone()),
+                _ => None,
+            }),
+            _ => None,
+        }).expect("the text")
+    }
+
+    #[test]
+    fn middle_and_end_are_read_and_start_is_the_default() {
+        assert_eq!(text_of(r#"text-anchor="middle""#).text_anchor, "middle");
+        assert_eq!(text_of(r#"text-anchor="end""#).text_anchor, "end");
+        assert_eq!(text_of(r#"text-anchor="start""#).text_anchor, "");
+        assert_eq!(text_of("").text_anchor, "");
+        assert_eq!(text_of(r#"text-anchor="sideways""#).text_anchor, "");
+    }
+
+    #[test]
+    fn an_anchor_is_written_back_and_read_again() {
+        for a in ["middle", "end"] {
+            let d = svg_to_document(&format!(
+                r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" text-anchor="{a}">ABCD</text></svg>"##
+            ));
+            let out = document_to_svg(&d);
+            assert!(out.contains(&format!(r#"text-anchor="{a}""#)), "writer dropped `{a}`:\n{out}");
+            let again = svg_to_document(&out);
+            assert_eq!(document_to_svg(&again), out, "`{a}` is a fixpoint");
+        }
+    }
+
+    #[test]
+    fn no_anchor_writes_no_attribute() {
+        let d = svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="100" y="50" font-size="10" text-anchor="start">ABCD</text></svg>"##);
+        assert!(!document_to_svg(&d).contains("text-anchor"));
+    }
+
+    /// The box a selection draws is where the glyphs are: its left edge is
+    /// `x + anchor_shift(width)`, the width from the same measurer the bounds
+    /// always used. Start keeps today's box exactly.
+    #[test]
+    fn bounds_sit_where_the_anchor_puts_the_line() {
+        let start = Element::Text(text_of(""));
+        let (sx, sy, sw, sh) = start.bounds();
+        assert!(sw > 1.0, "a measured width: {sw}");
+        for (attrs, k) in [(r#"text-anchor="middle""#, 0.5), (r#"text-anchor="end""#, 1.0)] {
+            let (x, y, w, h) = Element::Text(text_of(attrs)).bounds();
+            assert!((x - (sx - k * sw)).abs() < 1e-9, "{attrs}: left {x}, expected {}", sx - k * sw);
+            assert_eq!((y, w, h), (sy, sw, sh), "{attrs}: only x moves");
+        }
+    }
+
+    /// The canonical JSON the cross-language corpus compares omits an unset
+    /// anchor, so every existing golden is unchanged, and carries a set one.
+    #[test]
+    fn canonical_json_carries_only_a_set_anchor() {
+        let plain = crate::geometry::test_json::document_to_test_json(&svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="1" y="5" font-size="10">A</text></svg>"##));
+        assert!(!plain.contains("text_anchor"), "{plain}");
+        let set = crate::geometry::test_json::document_to_test_json(&svg_to_document(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><text x="1" y="5" font-size="10" text-anchor="end">A</text></svg>"##));
+        assert!(set.contains(r#""text_anchor":"end""#), "{set}");
+        let back = crate::geometry::test_json::test_json_to_document(&set);
+        assert_eq!(crate::geometry::test_json::document_to_test_json(&back), set, "JSON round trip");
     }
 }

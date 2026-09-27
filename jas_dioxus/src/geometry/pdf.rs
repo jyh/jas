@@ -586,6 +586,7 @@ fn emit_paint<F: FnOnce(&mut String)>(
         out.push_str("RG\n");
         push_num(out, s.width);
         out.push_str("w\n");
+        emit_stroke_style(out, s);
     }
     geom(out);
     let op = match (fill.is_some(), stroke.is_some()) {
@@ -596,6 +597,39 @@ fn emit_paint<F: FnOnce(&mut String)>(
     };
     out.push_str(op);
     out.push_str("Q\n");
+}
+
+/// The stroke's cap, join, miter limit and dash (PDF 1.7 §8.4.3), each
+/// written ONLY when it differs from PDF's own default (butt, miter, 10,
+/// solid), so a default stroke's bytes are unchanged. The dash lengths are
+/// already in pt, like the width.
+fn emit_stroke_style(out: &mut String, s: &Stroke) {
+    use crate::geometry::element::{LineCap, LineJoin};
+    match s.linecap {
+        LineCap::Butt => {}
+        LineCap::Round => out.push_str("1 J\n"),
+        LineCap::Square => out.push_str("2 J\n"),
+    }
+    match s.linejoin {
+        LineJoin::Miter => {}
+        LineJoin::Round => out.push_str("1 j\n"),
+        LineJoin::Bevel => out.push_str("2 j\n"),
+    }
+    if s.miter_limit != 10.0 {
+        push_num(out, s.miter_limit);
+        out.push_str("M\n");
+    }
+    let n = s.dash_len as usize;
+    if n > 0 {
+        out.push('[');
+        let parts: Vec<String> = s.dash_pattern[..n].iter().map(|v| {
+            let mut t = String::new();
+            push_num(&mut t, *v);
+            t.trim_end().to_string()
+        }).collect();
+        out.push_str(&parts.join(" "));
+        out.push_str("] 0 d\n");
+    }
 }
 
 fn emit_path_geom(out: &mut String, commands: &[PathCommand]) {
@@ -813,8 +847,18 @@ fn emit_text(out: &mut String, t: &TextElem) {
     // the origin. The origin is the BASELINE: the model's `y` is the top of
     // the line box, and the baseline is `y + 0.8 * font_size`, the same law
     // the SVG writer uses (`svg_y` in `svg.rs`).
+    // The anchor moves the line's start left of `x` by `anchor_shift` of its
+    // width, measured exactly as the bounds measure it, so the shown text and
+    // the selection box agree. (This exporter shows the content as one line.)
+    let dx = if t.text_anchor.is_empty() {
+        0.0
+    } else {
+        let font = crate::text_measure::font_string(
+            &t.font_style, &t.font_weight, t.font_size, &t.font_family);
+        t.anchor_shift(crate::text_measure::make_measurer(&font, t.font_size)(&s))
+    };
     out.push_str("1 0 0 -1 ");
-    push_num(out, t.x);
+    push_num(out, t.x + dx);
     push_num(out, t.y + t.font_size * 0.8);
     out.push_str("Tm\n");
 
@@ -1480,6 +1524,63 @@ mod tests {
             assert!(s[bt..tj].contains(&format!("{key} ")), "`{attrs}` shown with the wrong face:\n{}", &s[bt..tj]);
             assert!(s.contains(&format!("{key} << /Type /Font /Subtype /Type1 /BaseFont /{face} >>")),
                 "`{key}` is not declared as {face}");
+        }
+    }
+
+    /// The one stroked block of a single-element document: from its `q` to
+    /// the stroke operator.
+    fn stroked_block(svg: &str) -> String {
+        let doc = crate::geometry::svg::svg_to_document(svg);
+        let s = String::from_utf8_lossy(&document_to_pdf(&doc)).to_string();
+        let end = s.find("\nS\n").expect("a stroke operator");
+        let start = s[..end].rfind("q\n").expect("its q");
+        s[start..end].to_string()
+    }
+
+    /// A stroke's dash, cap, join and miter limit reach the PDF. Until this
+    /// arm the exporter set colour and width only, so a dashed line printed
+    /// solid and every cap and join printed as PDF's defaults.
+    #[test]
+    fn a_stroke_prints_its_dash_cap_and_join() {
+        let b = stroked_block(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><line x1="0" y1="0" x2="80" y2="0" stroke="#000000" stroke-width="4" stroke-dasharray="8 4" stroke-linecap="round" stroke-linejoin="bevel" stroke-miterlimit="4"/></svg>"##);
+        // Lengths arrive in px and are stored in pt (x 0.75).
+        assert!(b.contains("[6 3] 0 d\n"), "dash:\n{b}");
+        assert!(b.contains("1 J\n"), "round cap:\n{b}");
+        assert!(b.contains("2 j\n"), "bevel join:\n{b}");
+        assert!(b.contains("4 M\n"), "miter limit:\n{b}");
+    }
+
+    /// A default stroke writes none of them, so every export made before
+    /// this arm is byte-identical.
+    #[test]
+    fn a_default_stroke_writes_no_style_operators() {
+        let b = stroked_block(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><line x1="0" y1="0" x2="80" y2="0" stroke="#000000" stroke-width="4"/></svg>"##);
+        for op in [" d\n", " J\n", " j\n", " M\n"] {
+            assert!(!b.contains(op), "default stroke wrote `{}`:\n{b}", op.trim());
+        }
+    }
+
+    /// An anchored point text is shown with its line's left edge where the
+    /// anchor puts it: the same left edge its bounds report, since both read
+    /// `anchor_shift` over the same measurer.
+    #[test]
+    fn an_anchored_text_is_shown_at_its_anchored_left() {
+        for (anchor, k) in [("middle", 0.5), ("end", 1.0)] {
+            let svg = format!(r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><text x="120" y="260" font-size="12" text-anchor="{anchor}">HELLO</text></svg>"#);
+            let doc = crate::geometry::svg::svg_to_document(&svg);
+            let t = doc.layers.iter().find_map(|l| match l {
+                Element::Layer(g) => g.children.iter().find_map(|c| match &**c {
+                    Element::Text(t) => Some(t.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            }).expect("one text");
+            let (_, _, w, _) = Element::Text(t.clone()).bounds();
+            assert!(w > 1.0, "measured width {w}");
+            let s = String::from_utf8_lossy(&document_to_pdf(&doc)).to_string();
+            let m = text_matrix_at(&s, "HELLO");
+            let want = 120.0 * 72.0 / 96.0 - k * w;
+            assert!((m[4] - want).abs() < 1e-3, "{anchor}: origin x {} != {want}", m[4]);
         }
     }
 }

@@ -337,11 +337,20 @@ mod tests {
 
     #[test]
     fn point_text_alignment_falls_back_to_left() {
-        // ⛔ POINT-TEXT ALIGNMENT IS UNIMPLEMENTED, AND THERE IS NO
+        // ⚠️ UPDATED 2026-09-26: `TextElem::text_anchor` NOW EXISTS. The
+        // SVG codec reads and writes `text-anchor`, and every renderer and
+        // the bounds apply it through `TextElem::anchor_shift`, which is the
+        // channel. What this arm pins is unchanged and still true: the
+        // PARAGRAPH WRAPPER's `text-align` is not the anchor, and the layout
+        // does not turn it into one. The Paragraph panel does not write the
+        // anchor yet (`paragraph_host::paragraph_text_anchor`).
+        //
+        // The record below is the 2026-09-19 reading, kept as measured.
+        // ⛔ POINT-TEXT ALIGNMENT WAS UNIMPLEMENTED, AND THERE WAS NO
         // COMPENSATING CHANNEL. `PARAGRAPH.md` §Storage maps it to
         // `text-anchor` on the `<text>` element (ALIGN_LEFT → start ·
         // CENTER → middle · RIGHT → end, "paragraph wrapper not used for
-        // anchor"). That attribute exists NOWHERE — measured 2026-09-19,
+        // anchor"). That attribute existed NOWHERE — measured 2026-09-19,
         // each count against a live control:
         //
         //   `text_anchor` in the crate   3 files, ALL PROSE (two doc
