@@ -17,8 +17,82 @@ fn px(v: f64) -> f64 {
     v * PT_TO_PX
 }
 
+thread_local! {
+    /// Points per USER UNIT for the import in progress. It is `PX_TO_PT`
+    /// unless the root `<svg>` sizes a `viewBox` in real units (see
+    /// [`root_user_unit_pt`]), and it is set only for the duration of
+    /// [`try_svg_to_document`] by [`UserUnitScope`].
+    static USER_UNIT_PT: std::cell::Cell<f64> = const { std::cell::Cell::new(PX_TO_PT) };
+}
+
+/// A user-unit length from the file, in pt. Every length the importer reads
+/// goes through here, so the root's unit reaches all of them at once.
 fn pt(v: f64) -> f64 {
-    v * PX_TO_PT
+    v * USER_UNIT_PT.with(|c| c.get())
+}
+
+/// Sets the import's user unit and restores the previous one on drop, so a
+/// nested or panicking import cannot leak its scale into the next one.
+struct UserUnitScope(f64);
+
+impl UserUnitScope {
+    fn enter(pt_per_unit: f64) -> Self {
+        UserUnitScope(USER_UNIT_PT.with(|c| c.replace(pt_per_unit)))
+    }
+}
+
+impl Drop for UserUnitScope {
+    fn drop(&mut self) {
+        USER_UNIT_PT.with(|c| c.set(self.0));
+    }
+}
+
+/// An absolute SVG length (`2in`, `25.4mm`, `72pt`, `96px`, `96`) in CSS px.
+/// `None` for relative units (`%`, `em`, `ex`) and anything unparseable:
+/// those say nothing about paper size.
+fn absolute_length_px(s: &str) -> Option<f64> {
+    let s = s.trim();
+    let split = s.find(|c: char| c.is_ascii_alphabetic() || c == '%').unwrap_or(s.len());
+    let (num, unit) = s.split_at(split);
+    let v: f64 = num.trim().parse().ok()?;
+    let per = match unit.trim() {
+        "" | "px" => 1.0,
+        "in" => 96.0,
+        "cm" => 96.0 / 2.54,
+        "mm" => 96.0 / 25.4,
+        "pt" => 96.0 / 72.0,
+        "pc" => 16.0,
+        _ => return None,
+    };
+    Some(v * per)
+}
+
+/// Points per user unit, from the root `<svg>`'s `width`/`height` over its
+/// `viewBox` (SVG 1.1 §7.7). With no `viewBox`, user units are px whatever
+/// the root size says. With both axes sized, the default
+/// `preserveAspectRatio` (`xMidYMid meet`) fits the viewBox INSIDE the
+/// viewport, so the smaller axis scale wins.
+///
+/// Only the SCALE is taken. The viewBox origin is a window onto user space,
+/// not a shift of it: coordinates keep their values, which is also what
+/// jas's own writer relies on (it emits a viewBox whose origin is the
+/// drawing's bounds and whose size equals the unitless root size, k = 1 px).
+fn root_user_unit_pt(root: &XmlNode) -> f64 {
+    let vb: Vec<f64> = match root.attrs.get("viewBox") {
+        Some(v) => v.split([',', ' ', '\t', '\n']).filter(|t| !t.is_empty()).filter_map(|t| t.parse().ok()).collect(),
+        None => return PX_TO_PT,
+    };
+    if vb.len() != 4 || !(vb[2] > 0.0) || !(vb[3] > 0.0) {
+        return PX_TO_PT;
+    }
+    let sx = root.attrs.get("width").and_then(|w| absolute_length_px(w)).map(|w| w / vb[2]);
+    let sy = root.attrs.get("height").and_then(|h| absolute_length_px(h)).map(|h| h / vb[3]);
+    let px_per_unit = match (sx, sy) {
+        (Some(a), Some(b)) => a.min(b),
+        (Some(a), None) | (None, Some(a)) => a,
+        (None, None) => 1.0,
+    };
+    if px_per_unit.is_finite() && px_per_unit > 0.0 { px_per_unit * PX_TO_PT } else { PX_TO_PT }
 }
 
 /// The workspace-private stroke PROFILE attributes: the brush slug, its
@@ -1488,7 +1562,7 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
         return None;
     }
     let color = parse_color(val)?;
-    let width = get_f(node, "stroke-width", 1.0) * PX_TO_PT;
+    let width = pt(get_f(node, "stroke-width", 1.0));
     let lc = match get_s(node, "stroke-linecap", "butt") {
         "round" => LineCap::Round,
         "square" => LineCap::Square,
@@ -1513,7 +1587,7 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
             for tok in raw.split([',', ' ', '\t', '\n']).filter(|t| !t.is_empty()) {
                 if n == 6 { break; }
                 match tok.parse::<f64>() {
-                    Ok(v) => { arr[n] = v * PX_TO_PT; n += 1; }
+                    Ok(v) => { arr[n] = pt(v); n += 1; }
                     Err(_) => { n = 0; break; }
                 }
             }
@@ -2272,6 +2346,7 @@ pub fn svg_to_document(svg: &str) -> Document {
 /// otherwise would refuse real blank drawings.
 pub fn try_svg_to_document(svg: &str) -> Option<Document> {
     let root = parse_xml(svg)?;
+    let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
     let artboards = parse_artboards(&root);
     let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
     let mut layers: Vec<Element> = Vec::new();
@@ -4951,3 +5026,117 @@ mod tests {
     }
 }
 
+
+/// Root-size units (SVG 1.1 §7.2 / §7.7): the outermost `<svg>`'s
+/// `width`/`height` with a unit, over a `viewBox`, fix what one USER UNIT
+/// is on paper. A drawing authored in inches at 1:24 says so this way, and
+/// the import must land each length at that real size.
+#[cfg(test)]
+mod root_units_tests {
+    use super::*;
+    use crate::geometry::element::*;
+
+    fn all(doc: &Document) -> Vec<Element> {
+        fn walk(e: &Element, out: &mut Vec<Element>) {
+            out.push(e.clone());
+            match e {
+                Element::Group(g) => for c in &g.children { walk(c, out) },
+                Element::Layer(g) => for c in &g.children { walk(c, out) },
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for l in &doc.layers { walk(l, &mut out); }
+        out
+    }
+
+    fn rect(doc: &Document) -> RectElem {
+        all(doc).into_iter().find_map(|e| match e { Element::Rect(r) => Some(r), _ => None }).expect("a rect")
+    }
+
+    fn close(a: f64, b: f64) -> bool { (a - b).abs() < 1e-6 }
+
+    /// One fixture body, wrapped in whichever root is under test.
+    fn drawing(root_attrs: &str) -> String {
+        format!(r##"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" {root_attrs}>
+<g><g transform="translate(1,0)"><rect x="10" y="2" width="5" height="3" fill="#cccccc" stroke="#000000" stroke-width="0.5" stroke-dasharray="1 2"/></g></g>
+<line x1="0" y1="0" x2="4" y2="0" stroke="#000000"/>
+<circle cx="3" cy="3" r="1" fill="#ff0000"/>
+<text x="4" y="6" font-size="2" fill="#000000">A</text>
+</svg>"##)
+    }
+
+    /// Every length kind the importer converts, checked against `k`, the
+    /// fixture's own pt-per-user-unit, derived from its root attributes.
+    fn assert_scaled(doc: &Document, k: f64) {
+        let r = rect(doc);
+        assert!(close(r.x, 10.0 * k) && close(r.y, 2.0 * k), "rect origin ({}, {}) at k={k}", r.x, r.y);
+        assert!(close(r.width, 5.0 * k) && close(r.height, 3.0 * k), "rect size ({}, {}) at k={k}", r.width, r.height);
+        let s = r.stroke.expect("stroke");
+        assert!(close(s.width, 0.5 * k), "stroke width {} at k={k}", s.width);
+        assert_eq!(s.dash_len, 2);
+        assert!(close(s.dash_pattern[0], 1.0 * k) && close(s.dash_pattern[1], 2.0 * k), "dash {:?}", &s.dash_pattern[..2]);
+        let es = all(doc);
+        let g = es.iter().find_map(|e| match e { Element::Group(g) => Some(g.clone()), _ => None }).expect("group");
+        let t = g.common.transform.expect("group transform");
+        assert!(close(t.e, 1.0 * k) && close(t.f, 0.0), "translate ({}, {}) at k={k}", t.e, t.f);
+        let l = es.iter().find_map(|e| match e { Element::Line(l) => Some(l.clone()), _ => None }).expect("line");
+        assert!(close(l.x2, 4.0 * k), "line x2 {}", l.x2);
+        let c = es.iter().find_map(|e| match e { Element::Ellipse(c) => Some(c.clone()), _ => None }).expect("circle");
+        assert!(close(c.cx, 3.0 * k) && close(c.rx, 1.0 * k), "circle cx {} r {}", c.cx, c.rx);
+        let tx = es.iter().find_map(|e| match e { Element::Text(t) => Some(t.clone()), _ => None }).expect("text");
+        assert!(close(tx.x, 4.0 * k) && close(tx.font_size, 2.0 * k), "text x {} size {}", tx.x, tx.font_size);
+    }
+
+    #[test]
+    fn inch_root_over_a_viewbox_sets_the_user_unit() {
+        // 20 user units across 2 in: one unit is 0.1 in = 7.2 pt.
+        let doc = svg_to_document(&drawing(r#"width="2in" height="1in" viewBox="0 0 20 10""#));
+        assert_scaled(&doc, 2.0 * 72.0 / 20.0);
+    }
+
+    #[test]
+    fn millimetre_root_sets_the_user_unit() {
+        let doc = svg_to_document(&drawing(r#"width="100mm" height="50mm" viewBox="0 0 100 50""#));
+        assert_scaled(&doc, 72.0 / 25.4);
+    }
+
+    #[test]
+    fn every_absolute_unit_is_read() {
+        // Each root is exactly 1 in wide over 10 units: k = 7.2 pt always.
+        for w in ["1in", "2.54cm", "25.4mm", "72pt", "6pc", "96px", "96"] {
+            let doc = svg_to_document(&drawing(&format!(r#"width="{w}" height="{w}" viewBox="0 0 10 10""#)));
+            assert!(close(rect(&doc).x, 10.0 * 7.2), "width={w}: rect x {}", rect(&doc).x);
+        }
+    }
+
+    #[test]
+    fn a_mismatched_aspect_takes_the_smaller_scale() {
+        // Default preserveAspectRatio is `xMidYMid meet`: the viewBox fits
+        // INSIDE the viewport, so the smaller of the two axis scales wins.
+        let doc = svg_to_document(&drawing(r#"width="2in" height="2in" viewBox="0 0 20 10""#));
+        assert_scaled(&doc, 2.0 * 72.0 / 20.0);
+    }
+
+    #[test]
+    fn a_unitless_root_matching_its_viewbox_is_unchanged() {
+        // What jas's own writer emits: width/height equal the viewBox size,
+        // with a non-zero viewBox origin. Unit is px, and coordinates keep
+        // their origin (the viewBox is a window, not a shift).
+        let doc = svg_to_document(&drawing(r#"width="420" height="267" viewBox="-54 50.6 420 267""#));
+        assert_scaled(&doc, 0.75);
+    }
+
+    #[test]
+    fn no_viewbox_means_px_user_units_whatever_the_root_width() {
+        let doc = svg_to_document(&drawing(r#"width="5in" height="3in""#));
+        assert_scaled(&doc, 0.75);
+    }
+
+    #[test]
+    fn a_scaled_import_round_trips_through_the_writer() {
+        let doc = svg_to_document(&drawing(r#"width="2in" height="1in" viewBox="0 0 20 10""#));
+        let again = svg_to_document(&document_to_svg(&doc));
+        assert_scaled(&again, 2.0 * 72.0 / 20.0);
+    }
+}
