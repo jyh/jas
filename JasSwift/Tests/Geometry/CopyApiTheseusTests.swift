@@ -132,7 +132,7 @@ private func populated() -> [(String, Element)] {
                             letterSpacing: "2", xmlLang: "fr",
                             aaMode: "crisp", rotate: "5",
                             horizontalScale: "120", verticalScale: "80",
-                            kerning: "3", width: 40, height: 20,
+                            kerning: "3", textAnchor: "end", width: 40, height: 20,
                             fill: richFill, stroke: richStroke,
                             opacity: 0.42, transform: Transform.translate(7, 11),
                             locked: true, visibility: .outline, blendMode: .multiply,

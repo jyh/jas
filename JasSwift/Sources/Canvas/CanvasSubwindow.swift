@@ -1698,7 +1698,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             // leftIndent + firstLineIndent + alignment.
             let lineXShift: Double = (line.glyphStart < lay.glyphs.count)
                 ? lay.glyphs[line.glyphStart].x : 0.0
-            let lineX = v.x + lineXShift
+            let layoutLineX = v.x + lineXShift
             // Build the per-line attributed string. Single-tspan with
             // no overrides → reuse element-level `attrs`. Multi-tspan or
             // any override → walk tspans and weave per-segment font /
@@ -1770,6 +1770,20 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 }
                 return mutable
             }()
+            // Point-text anchor: the line starts `anchorShift(w)` left of
+            // where the layout put it, `w` the width of exactly the runs this
+            // line draws (a trailing hard break excluded, as the bounds split
+            // on it). Always 0 for area text, and 0 under the default anchor,
+            // so every other text draws as before. Mirrors Rust's canvas.
+            let anchorDx: Double = {
+                if v.textAnchor.isEmpty || v.isAreaText { return 0 }
+                let drawn = lineStr.string.hasSuffix("\n")
+                    ? lineStr.attributedSubstring(from: NSRange(location: 0, length: lineStr.length - 1))
+                    : lineStr
+                let w = CTLineGetTypographicBounds(CTLineCreateWithAttributedString(drawn), nil, nil, nil)
+                return v.anchorShift(Double(w))
+            }()
+            let lineX = layoutLineX + anchorDx
             // When the layout stretched glue widths (justify), the
             // single CTLine path would render the line with the
             // canvas's *natural* inter-word advance and the result
@@ -1807,7 +1821,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                     let isWs = ch.map { $0.isWhitespace } ?? true
                     if !isWs && !g.isTrailingSpace {
                         if !inWord {
-                            wordX = v.x + g.x
+                            wordX = v.x + anchorDx + g.x
                             inWord = true
                             wordBuf = ""
                         }
@@ -1855,7 +1869,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 let hyphenX = lineGlyphs
                     .filter { !$0.isTrailingSpace }
                     .last
-                    .map { v.x + $0.x } ?? lineX
+                    .map { v.x + anchorDx + $0.x } ?? lineX
                 let str = NSAttributedString(string: "-", attributes: attrs)
                 let ctLine = CTLineCreateWithAttributedString(str)
                 ctx.textPosition = CGPoint(x: hyphenX, y: baselineY)
