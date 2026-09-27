@@ -1122,7 +1122,11 @@ private func emitText(_ ctx: CGContext, _ t: Text) {
     ctx.saveGState()
     applyTransform(ctx, t.transform)
     // The page CTM has Y flipped; re-flip locally so the text reads
-    // right-side up. Anchor at the text origin (t.x, t.y).
+    // right-side up. The origin is the BASELINE: the model's `y` is the top
+    // of the line box and the baseline is `y + 0.8 * fontSize`, the law the
+    // SVG writer uses (`svgY`) and Rust's `emit_text` states. The line is
+    // drawn with CoreText at that baseline; `NSAttributedString.draw(at:)`
+    // anchored the line box instead, which put every label ~one line high.
     // The anchor moves the line's start left of `x` by `anchorShift` of its
     // width, measured exactly as the bounds measure it, so the shown text and
     // the selection box agree. (This exporter shows the content as one line.)
@@ -1130,11 +1134,9 @@ private func emitText(_ ctx: CGContext, _ t: Text) {
     let dx = t.textAnchor.isEmpty ? 0 : t.anchorShift(
         renderedTextWidth(s, family: t.fontFamily, weight: t.fontWeight,
                           style: t.fontStyle, size: t.fontSize))
-    ctx.translateBy(x: CGFloat(t.x + dx), y: CGFloat(t.y))
+    ctx.translateBy(x: CGFloat(t.x + dx), y: CGFloat(t.y + t.fontSize * 0.8))
     ctx.scaleBy(x: 1, y: -1)
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
-    attr.draw(at: CGPoint(x: 0, y: 0))
-    NSGraphicsContext.restoreGraphicsState()
+    ctx.textPosition = .zero
+    CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
     ctx.restoreGState()
 }
