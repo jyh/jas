@@ -619,6 +619,11 @@ package func elementJson(_ elem: Element) -> String {
         o.emptyAsNull("rotate", e.rotate)
         o.raw("stroke", strokeJson(e.stroke))
         o.null("style_name")
+        // Point-text anchor: emitted ONLY when set, so every golden written
+        // before the field existed is byte-identical. Mirrors Rust.
+        if !e.textAnchor.isEmpty {
+            o.str("text_anchor", e.textAnchor)
+        }
         o.raw("text_decoration", textDecorationJson(e.textDecoration))
         o.null("text_rendering")
         o.emptyAsNull("text_transform", e.textTransform)
@@ -1388,6 +1393,7 @@ private func parseElementBase(_ d: [String: Any]) -> Element {
                           horizontalScale: d["horizontal_scale"] as? String ?? "",
                           verticalScale: d["vertical_scale"] as? String ?? "",
                           kerning: d["jas_kerning_mode"] as? String ?? "",
+                          textAnchor: d["text_anchor"] as? String ?? "",
                           width: parseF(d["width"]), height: parseF(d["height"]),
                           fill: parseFill(d["fill"]), stroke: parseStroke(d["stroke"]),
                           opacity: opacity, transform: transform, locked: locked,

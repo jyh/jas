@@ -3115,6 +3115,13 @@ public struct Text: Equatable {
     public internal(set) var horizontalScale: String
     public internal(set) var verticalScale: String
     public internal(set) var kerning: String
+    /// SVG `text-anchor` for POINT text: which point of each line sits at
+    /// `x`. Empty = `start` (the default, and the only value before this
+    /// field existed); `"middle"` or `"end"` otherwise. Area text aligns
+    /// inside its box through the paragraph `text-align` and ignores this.
+    /// Read it through ``anchorShift(_:)``, the one law every renderer and
+    /// the bounds share. PARAGRAPH.md §Storage; Rust `TextElem::text_anchor`.
+    public internal(set) var textAnchor: String
     public internal(set) var width: Double
     public internal(set) var height: Double
     public internal(set) var fill: Fill?
@@ -3138,6 +3145,7 @@ public struct Text: Equatable {
                 aaMode: String = "", rotate: String = "",
                 horizontalScale: String = "", verticalScale: String = "",
                 kerning: String = "",
+                textAnchor: String = "",
                 width: Double = 0, height: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
@@ -3158,6 +3166,7 @@ public struct Text: Equatable {
         self.aaMode = aaMode; self.rotate = rotate
         self.horizontalScale = horizontalScale; self.verticalScale = verticalScale
         self.kerning = kerning
+        self.textAnchor = textAnchor
         self.width = width; self.height = height
         self.fill = fill; self.stroke = stroke; self.opacity = opacity; self.transform = transform
         self.locked = locked
@@ -3178,6 +3187,7 @@ public struct Text: Equatable {
                 aaMode: String = "", rotate: String = "",
                 horizontalScale: String = "", verticalScale: String = "",
                 kerning: String = "",
+                textAnchor: String = "",
                 width: Double = 0, height: Double = 0,
                 fill: Fill? = nil, stroke: Stroke? = nil,
                 opacity: Double = 1.0, transform: Transform? = nil,
@@ -3198,6 +3208,7 @@ public struct Text: Equatable {
                   aaMode: aaMode, rotate: rotate,
                   horizontalScale: horizontalScale, verticalScale: verticalScale,
                   kerning: kerning,
+                  textAnchor: textAnchor,
                   width: width, height: height,
                   fill: fill, stroke: stroke,
                   opacity: opacity, transform: transform,
@@ -3216,6 +3227,20 @@ public struct Text: Equatable {
     public var content: String { concatTspanContent(tspans) }
 
     public var isAreaText: Bool { width > 0 && height > 0 }
+
+    /// How far a line `lineWidth` wide starts LEFT of `x` under this
+    /// element's anchor: `0` for start, `-w/2` for middle, `-w` for end.
+    /// Always `0` for area text. Every point-text renderer and the bounds
+    /// add this to each line's x; it is the whole of the anchor law.
+    /// Mirrors Rust `TextElem::anchor_shift`.
+    public func anchorShift(_ lineWidth: Double) -> Double {
+        if isAreaText { return 0 }
+        switch textAnchor {
+        case "middle": return -lineWidth / 2
+        case "end": return -lineWidth
+        default: return 0
+        }
+    }
 
     /// Returns `true` when every tspan can be rendered by the
     /// flat / paragraph-aware fast path:
@@ -3270,15 +3295,20 @@ public struct Text: Equatable {
         // `y + 0.8*fontSize`, matching `text_layout`'s ascent). Width is
         // the widest "\n"-separated line measured with the real font;
         // height is fontSize × line count.
+        // Each line sits at `x + anchorShift(its width)`, so the box spans the
+        // leftmost line start to the rightmost end. Under the default anchor
+        // every start is `x` and this is exactly the old `(x, widest line)`
+        // box. Mirrors Rust's point-text bounds.
         let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
-        var maxW: Double = 0
+        var left = Double.infinity, right = -Double.infinity
         for l in lines {
             let w = renderedTextWidth(String(l), family: fontFamily,
                                       weight: fontWeight, style: fontStyle, size: fontSize)
-            if w > maxW { maxW = w }
+            let start = x + anchorShift(w)
+            left = min(left, start); right = max(right, start + w)
         }
         let height = Double(max(lines.count, 1)) * fontSize
-        return (x, y, maxW, height)
+        return (left, y, right - left, height)
     }
 }
 

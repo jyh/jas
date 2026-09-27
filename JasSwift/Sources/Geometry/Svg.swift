@@ -425,7 +425,7 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
                             letterSpacing: String, xmlLang: String,
                             aaMode: String, rotate: String,
                             horizontalScale: String, verticalScale: String,
-                            kerning: String) -> String {
+                            kerning: String, textAnchor: String = "") -> String {
     var s = ""
     if !textTransform.isEmpty { s += " text-transform=\"\(textTransform)\"" }
     if !fontVariant.isEmpty { s += " font-variant=\"\(fontVariant)\"" }
@@ -437,6 +437,10 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     if !rotate.isEmpty { s += " rotate=\"\(rotate)\"" }
     if !horizontalScale.isEmpty { s += " horizontal-scale=\"\(horizontalScale)\"" }
     if !verticalScale.isEmpty { s += " vertical-scale=\"\(verticalScale)\"" }
+    // Point-text `text-anchor` sits just before the kerning mode, as in
+    // Rust's writer; both are emitted only when set, so a file without
+    // either is byte-identical to what this writer produced before.
+    if !textAnchor.isEmpty { s += " text-anchor=\"\(escapeXml(textAnchor))\"" }
     if !kerning.isEmpty { s += " urn:jas:1:kerning-mode=\"\(escapeXml(kerning))\"" }
     return s
 }
@@ -655,7 +659,7 @@ public func elementSvg(_ elem: Element, indent: String) -> String {
             letterSpacing: v.letterSpacing, xmlLang: v.xmlLang,
             aaMode: v.aaMode, rotate: v.rotate,
             horizontalScale: v.horizontalScale, verticalScale: v.verticalScale,
-            kerning: v.kerning)
+            kerning: v.kerning, textAnchor: v.textAnchor)
         // SVG `y` is the baseline of the first line; internally `v.y`
         // is the *top* of the layout box, so add the ascent (0.8 *
         // fontSize, the same value `text_layout` uses).
@@ -1024,7 +1028,65 @@ private func printPreferencesToSvg(_ p: PrintPreferences, indent: String) -> Str
 
 private let pxToPt = 72.0 / 96.0
 
-private func toPt(_ v: Double) -> Double { v * pxToPt }
+/// Points per USER UNIT for the import in progress. It is `pxToPt` unless
+/// the root `<svg>` sizes a `viewBox` in real units (see
+/// `rootUserUnitPt`), and it is bound only for the duration of one
+/// `svgToDocument` call, so it cannot leak into the next import. Mirrors
+/// Rust's `USER_UNIT_PT` + `UserUnitScope`.
+private enum SvgImportUnit {
+    @TaskLocal static var ptPerUnit: Double = pxToPt
+}
+
+/// A user-unit length from the file, in pt. Every length the importer reads
+/// goes through here, so the root's unit reaches all of them at once.
+private func toPt(_ v: Double) -> Double { v * SvgImportUnit.ptPerUnit }
+
+/// An absolute SVG length (`2in`, `25.4mm`, `72pt`, `96px`, `96`) in CSS px.
+/// nil for relative units (`%`, `em`, `ex`) and anything unparseable: those
+/// say nothing about paper size. Mirrors Rust `absolute_length_px`.
+private func absoluteLengthPx(_ raw: String) -> Double? {
+    let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let split = s.firstIndex(where: { ($0.isASCII && $0.isLetter) || $0 == "%" }) ?? s.endIndex
+    guard let v = Double(s[..<split].trimmingCharacters(in: .whitespaces)) else { return nil }
+    let per: Double
+    switch s[split...].trimmingCharacters(in: .whitespaces) {
+    case "", "px": per = 1
+    case "in": per = 96
+    case "cm": per = 96 / 2.54
+    case "mm": per = 96 / 25.4
+    case "pt": per = 96.0 / 72.0
+    case "pc": per = 16
+    default: return nil
+    }
+    return v * per
+}
+
+/// Points per user unit, from the root `<svg>`'s `width`/`height` over its
+/// `viewBox` (SVG 1.1 §7.7). With no `viewBox`, user units are px whatever
+/// the root size says. With both axes sized, the default
+/// `preserveAspectRatio` (`xMidYMid meet`) fits the viewBox INSIDE the
+/// viewport, so the smaller axis scale wins.
+///
+/// Only the SCALE is taken. The viewBox origin is a window onto user space,
+/// not a shift of it: coordinates keep their values, which is also what
+/// jas's own writer relies on (it emits a viewBox whose origin is the
+/// drawing's bounds and whose size equals the unitless root size, k = 1 px).
+/// Mirrors Rust `root_user_unit_pt`.
+private func rootUserUnitPt(_ root: XMLElement) -> Double {
+    guard let vbRaw = root.attribute(forName: "viewBox")?.stringValue else { return pxToPt }
+    let vb = vbRaw.split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" })
+        .compactMap { Double($0) }
+    guard vb.count == 4, vb[2] > 0, vb[3] > 0 else { return pxToPt }
+    let sx = root.attribute(forName: "width")?.stringValue.flatMap(absoluteLengthPx).map { $0 / vb[2] }
+    let sy = root.attribute(forName: "height")?.stringValue.flatMap(absoluteLengthPx).map { $0 / vb[3] }
+    let pxPerUnit: Double
+    switch (sx, sy) {
+    case let (a?, b?): pxPerUnit = min(a, b)
+    case let (a?, nil), let (nil, a?): pxPerUnit = a
+    case (nil, nil): pxPerUnit = 1
+    }
+    return pxPerUnit.isFinite && pxPerUnit > 0 ? pxPerUnit * pxToPt : pxToPt
+}
 
 private let namedColors: [String: (Int, Int, Int)] = [
     "black": (0, 0, 0), "white": (255, 255, 255), "red": (255, 0, 0),
@@ -1414,35 +1476,66 @@ private func parseStroke(_ node: XMLElement) -> Stroke? {
                   arrowAlign: arrowAlign, opacity: opacity)
 }
 
+/// A `transform` attribute: a LIST of functions (SVG 1.1 §7.6), composed so
+/// the RIGHTMOST applies first — `translate(10,0) rotate(90)` rotates, then
+/// translates. Every function SVG defines is read: `matrix`, `translate`,
+/// `scale`, `rotate` (with its optional centre), `skewX`, `skewY`. Lengths
+/// (translations, the rotate centre, the matrix's e/f) are user units and go
+/// through `toPt`; the rest are unitless.
+///
+/// A list with any function this cannot read imports as NO transform rather
+/// than as the part it could read, which would place the element somewhere
+/// the file never put it. Mirrors Rust `parse_transform`.
+/// The model's spelling of an SVG `text-anchor`: `middle` and `end` are kept,
+/// and `start`, an absent attribute or anything unknown is the empty default,
+/// so a file that says `start` reads exactly like one that says nothing.
+/// Mirrors Rust `text_anchor_from_attr`.
+private func textAnchorFromAttr(_ v: String) -> String {
+    switch v.trimmingCharacters(in: .whitespacesAndNewlines) {
+    case "middle": return "middle"
+    case "end": return "end"
+    default: return ""
+    }
+}
+
 private func parseTransform(_ node: XMLElement) -> Transform? {
     guard let val = node.attribute(forName: "transform")?.stringValue else { return nil }
-    if val.hasPrefix("matrix(") {
-        let inner = val.dropFirst(7).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard parts.count >= 6 else { return nil }
-        return Transform(a: parts[0], b: parts[1], c: parts[2],
-                            d: parts[3], e: toPt(parts[4]), f: toPt(parts[5]))
+    // nil until the first function, which is then taken AS IS: composing it
+    // onto the identity would compute `1*(-0) + 0*1 = +0` and lose the sign
+    // of a zero entry, and a saved matrix must reopen bit-exactly.
+    var acc: Transform? = nil
+    var rest = Substring(val).drop(while: { $0.isWhitespace })
+    while !rest.isEmpty {
+        guard let open = rest.firstIndex(of: "("),
+              let close = rest[open...].firstIndex(of: ")") else { return nil }
+        let name = rest[..<open].trimmingCharacters(in: .whitespacesAndNewlines)
+            .drop(while: { $0 == "," }).trimmingCharacters(in: .whitespacesAndNewlines)
+        var args: [Double] = []
+        for tok in rest[rest.index(after: open)..<close]
+            .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" }) {
+            guard let v = Double(tok) else { return nil }
+            args.append(v)
+        }
+        let f: Transform
+        switch (name, args.count) {
+        case ("matrix", 6):
+            f = Transform(a: args[0], b: args[1], c: args[2], d: args[3],
+                          e: toPt(args[4]), f: toPt(args[5]))
+        case ("translate", 1): f = .translate(toPt(args[0]), 0)
+        case ("translate", 2): f = .translate(toPt(args[0]), toPt(args[1]))
+        case ("scale", 1): f = .scale(args[0], args[0])
+        case ("scale", 2): f = .scale(args[0], args[1])
+        case ("rotate", 1): f = .rotate(args[0])
+        case ("rotate", 3): f = Transform.rotate(args[0]).aroundPoint(toPt(args[1]), toPt(args[2]))
+        case ("skewX", 1): f = .shear(tan(args[0] * (Double.pi / 180)), 0)
+        case ("skewY", 1): f = .shear(0, tan(args[0] * (Double.pi / 180)))
+        default: return nil
+        }
+        acc = acc.map { $0.multiply(f) } ?? f
+        rest = rest[rest.index(after: close)...]
+            .drop(while: { $0.isWhitespace || $0 == "," })
     }
-    if val.hasPrefix("translate(") {
-        let inner = val.dropFirst(10).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard !parts.isEmpty else { return nil }
-        let ty = parts.count > 1 ? parts[1] : 0.0
-        return Transform.translate(toPt(parts[0]), toPt(ty))
-    }
-    if val.hasPrefix("rotate(") {
-        let inner = val.dropFirst(7).dropLast(1)
-        guard let deg = Double(inner.trimmingCharacters(in: .whitespaces)) else { return nil }
-        return Transform.rotate(deg)
-    }
-    if val.hasPrefix("scale(") {
-        let inner = val.dropFirst(6).dropLast(1)
-        let parts = inner.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
-        guard !parts.isEmpty else { return nil }
-        let sy = parts.count > 1 ? parts[1] : parts[0]
-        return Transform.scale(parts[0], sy)
-    }
-    return nil
+    return acc
 }
 
 /// Parse a `matrix(a,b,c,d,e,f)` value from the named attribute, returning
@@ -1849,6 +1942,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         // SVG `y` is the baseline of the first line; convert to the
         // layout-box top by subtracting the ascent (0.8 * fs).
         let svgY = toPt(attrF(elem, "y"))
+        let anchor = textAnchorFromAttr(elem.attribute(forName: "text-anchor")?.stringValue ?? "")
         if !tspanChildren.isEmpty {
             return .text(Text(
                 x: toPt(attrF(elem, "x")), y: svgY - fs * 0.8,
@@ -1859,6 +1953,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
                 baselineShift: bs, lineHeight: lh, letterSpacing: ls,
                 xmlLang: lang, aaMode: aa, rotate: rotate,
                 horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+                textAnchor: anchor,
                 width: tw, height: th,
                 fill: fill, stroke: stroke, opacity: opacity, transform: transform,
                 name: name, id: id))
@@ -1871,6 +1966,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             baselineShift: bs, lineHeight: lh, letterSpacing: ls,
             xmlLang: lang, aaMode: aa, rotate: rotate,
             horizontalScale: hScale, verticalScale: vScale, kerning: kern,
+            textAnchor: anchor,
             width: tw, height: th,
             fill: fill, stroke: stroke, opacity: opacity, transform: transform,
             name: name, id: id))
@@ -1965,6 +2061,13 @@ public func svgToDocument(_ svg: String) -> Document {
         return Document(layers: [Layer(children: [])], artboards: [])
     }
 
+    return SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root)) {
+        svgRootToDocument(root)
+    }
+}
+
+/// The import proper, run with the root's user unit bound (`svgToDocument`).
+private func svgRootToDocument(_ root: XMLElement) -> Document {
     let (parsedSetup, parsedPrefs) = parseJasPrintBlocks(root)
     // Artboards ride a <sodipodi:namedview> + <inkscape:page> block (Inkscape's
     // multi-page convention); SVG has no native artboard concept. Empty when the
@@ -2303,6 +2406,29 @@ private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPre
     return (setup, prefs)
 }
 
+/// The page a file states on its root when it declares none of its own: the
+/// `viewBox` window when there is one (at paper size, since `toPt` already
+/// carries the root's unit), else the root's absolute `width`/`height` at the
+/// origin. nil when the root states no size, so an unsized file keeps the
+/// document's own default. Mirrors Rust `root_sheet`.
+private func rootSheet(_ root: XMLElement) -> Artboard? {
+    let vb = (root.attribute(forName: "viewBox")?.stringValue ?? "")
+        .split(whereSeparator: { $0 == "," || $0 == " " || $0 == "\t" || $0 == "\n" })
+        .compactMap { Double($0) }
+    let x, y, w, h: Double
+    if vb.count == 4, vb[2] > 0, vb[3] > 0 {
+        (x, y, w, h) = (toPt(vb[0]), toPt(vb[1]), toPt(vb[2]), toPt(vb[3]))
+    } else {
+        // No viewBox: user units are px, so the size converts px -> pt.
+        guard let wp = root.attribute(forName: "width")?.stringValue.flatMap(absoluteLengthPx),
+              let hp = root.attribute(forName: "height")?.stringValue.flatMap(absoluteLengthPx)
+        else { return nil }
+        (x, y, w, h) = (0, 0, wp * pxToPt, hp * pxToPt)
+    }
+    guard w > 0, h > 0 else { return nil }
+    return Artboard.defaultWithId(generateArtboardId()).with(x: x, y: y, width: w, height: h)
+}
+
 /// Parse an SVG for OPENING it — parse, then repair the invariants that a
 /// parse deliberately does not.
 ///
@@ -2322,8 +2448,19 @@ private func parseJasPrintBlocks(_ root: XMLElement) -> (DocumentSetup, PrintPre
 /// and cannot be driven from a test. The single line inside `openFile` that
 /// calls this is covered only by an artist opening a file, which is how the
 /// gap was found.
+///
+/// Opening also puts the drawing on the sheet its root states when the file
+/// declares no pages of its own (`rootSheet`), before the invariant. The
+/// codec stays a faithful read: the shared cross-language corpus pins that
+/// reading a file invents no page. Mirrors Rust `open_svg_document`.
 func documentForOpen(_ svgText: String) -> Document {
-    let doc = svgToDocument(svgText)
+    var doc = svgToDocument(svgText)
+    if doc.artboards.isEmpty,
+       let data = svgText.data(using: .utf8),
+       let root = (try? XMLDocument(data: data, options: []))?.rootElement(),
+       let sheet = SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root), operation: { rootSheet(root) }) {
+        doc = doc.replacing(artboards: [sheet])
+    }
     let (repaired, _) = ensureArtboardsInvariant(doc.artboards)
     guard repaired.count != doc.artboards.count else { return doc }
     // Clone-then-mutate: `replacing` touches ONLY `artboards`, so the repair
