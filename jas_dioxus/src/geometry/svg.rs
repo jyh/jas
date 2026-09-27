@@ -248,9 +248,13 @@ fn fmt(v: f64) -> String {
 ///
 /// Non-finite entries are excluded and keep their pre-existing behaviour
 /// ([`fmt`], which yields `NaN`/`inf`): SVG's number grammar cannot express
-/// them at any precision, so `parse_transform` drops such a matrix on
-/// reload either way, and inventing a shared spelling for them would add a
-/// cross-port contract without adding a representable value. A subnormal
+/// them at any precision, and inventing a shared spelling for them would
+/// add a cross-port contract without adding a representable value. (This
+/// said `parse_transform` DROPS such a matrix on reload. It never did: f64's
+/// `FromStr` reads `NaN` and `inf`, so the matrix reloads with its
+/// non-finite entry, in the old parser and the list parser alike; Swift's
+/// `Double(_:)` reads them too. Measured 2026-09-26; not pinned by an arm,
+/// for the contract reason above.) A subnormal
 /// entry expands to ~330 positional characters; that is a bounded cost on a
 /// matrix already too singular to invert.
 fn fmt_matrix_entry(v: f64) -> String {

@@ -139,8 +139,12 @@ private func fmt(_ v: Double) -> String {
 /// detect contract breaks. DO NOT WIDEN IT.
 ///
 /// Non-finite entries are excluded and keep their pre-existing behaviour
-/// (`fmt`): SVG's number grammar cannot express them at any precision, so
-/// `parseTransform` drops such a matrix on reload either way. A subnormal
+/// (`fmt`): SVG's number grammar cannot express them at any precision.
+/// (This said `parseTransform` DROPS such a matrix on reload. It never did:
+/// `Double(_:)` reads `nan` and `inf`, so the matrix reloads with its
+/// non-finite entry; Rust's f64 parse reads them too. Measured 2026-09-26;
+/// not pinned by an arm, since a shared spelling would be a cross-port
+/// contract for an unrepresentable value.) A subnormal
 /// entry expands to ~330 positional characters; that is a bounded cost on a
 /// matrix already too singular to invert.
 ///
