@@ -183,9 +183,19 @@ mod tests {
         ));
     }
 
+    /// Every `PanelKind` variant. `PanelKind::ALL` omits Brushes, Gradient
+    /// and Concepts on purpose (see its doc), so an arm about EVERY panel's
+    /// menu walks this instead; `every_panels_close_item_closes_it` checks it
+    /// against the bundle's panel set, so it cannot fall behind.
+    fn every_kind() -> [PanelKind; 16] {
+        use PanelKind::*;
+        [Layers, Color, Swatches, Brushes, Stroke, Properties, Character, Paragraph,
+         Artboards, Align, Boolean, Opacity, MagicWand, Symbols, Gradient, Concepts]
+    }
+
     #[test]
     fn panel_menu_non_empty_for_all_kinds() {
-        for &kind in PanelKind::ALL {
+        for kind in every_kind() {
             let items = panel_menu(kind);
             assert!(!items.is_empty(), "{:?} menu is empty", kind);
         }
@@ -193,7 +203,7 @@ mod tests {
 
     #[test]
     fn every_panel_has_close_action() {
-        for &kind in PanelKind::ALL {
+        for kind in every_kind() {
             let items = panel_menu(kind);
             let has_close = items.iter().any(|item| matches!(
                 item,
@@ -205,7 +215,7 @@ mod tests {
 
     #[test]
     fn close_label_matches_panel_name() {
-        for &kind in PanelKind::ALL {
+        for kind in every_kind() {
             let items = panel_menu(kind);
             let close_item = items.iter().find(|item| matches!(
                 item,
@@ -247,9 +257,7 @@ mod tests {
     /// variant is added, so the list cannot fall behind the enum.
     #[test]
     fn every_panels_close_item_closes_it() {
-        use PanelKind::*;
-        let every = [Layers, Color, Swatches, Brushes, Stroke, Properties, Character, Paragraph,
-            Artboards, Align, Boolean, Opacity, MagicWand, Symbols, Gradient, Concepts];
+        let every = every_kind();
         // The population is the bundle's: `every` must name each panel the
         // workspace declares, once.
         let named: std::collections::BTreeSet<&str> =
