@@ -463,9 +463,14 @@ fn run_one<'h>(
     // behavior from before the tool-state scope was introduced.
     if let Some(serde_json::Value::Object(pairs)) = effect.get("set") {
         for (key, expr) in pairs {
-            let expr_str = expr.as_str().unwrap_or("");
-            let value = eval_expr(expr_str, store, ctx);
-            let json = value_to_json(&value);
+            // A string is an expression; any other value is a bare YAML
+            // literal (`true`, `3`, `1.0`, `null`) and is itself, as the
+            // Python reference and Swift take it (SET_EFFECT.md). Reading
+            // only `as_str()` turned every bare literal into null.
+            let json = match expr {
+                serde_json::Value::String(s) => value_to_json(&eval_expr(s, store, ctx)),
+                other => other.clone(),
+            };
             set_by_scoped_target(store, key, json);
         }
         return;
@@ -13617,5 +13622,59 @@ mod tests {
         assert_eq!(store.get("got"), &serde_json::json!("artboard"));
         assert_eq!(store.get("dotted"), &serde_json::Value::Null);
         assert_eq!(store.get("known"), &serde_json::json!(5));
+    }
+}
+
+/// A `set:` value that is a bare YAML literal (`true`, `3`, `1.0`, `null`)
+/// is that value, exactly as the Python reference and Swift take it
+/// (SET_EFFECT.md §`number`/`bool`: a YAML number or bool is accepted).
+/// Rust read every value with `as_str()`, so a bare literal evaluated the
+/// empty expression and wrote null: 81 such sets in the bundle, among them
+/// every dialog Reset button.
+#[cfg(test)]
+mod set_bare_literal_tests {
+    use super::run_effects;
+    use crate::interpreter::state_store::StateStore;
+    use crate::interpreter::workspace::Workspace;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn a_bare_literal_is_its_own_value() {
+        let mut store = StateStore::new();
+        let mut d = std::collections::HashMap::new();
+        d.insert("n".to_string(), json!(0));
+        d.insert("s".to_string(), json!(0));
+        store.init_dialog("p", d, None);
+        run_effects(&vec![json!({"set": {
+            "canvas_maximized": true, "stroke_width": 1.5, "active_tab": -1,
+            "fill_color": null, "dialog.n": 3, "dialog.s": "3"
+        }})], &json!({}), &mut store, None, None, None, None);
+        assert_eq!(store.get("canvas_maximized"), &json!(true));
+        assert_eq!(store.get("stroke_width"), &json!(1.5));
+        assert_eq!(store.get("active_tab"), &json!(-1));
+        assert_eq!(store.get("fill_color"), &Value::Null);
+        assert_eq!(store.get_dialog("n"), &json!(3));
+        // Control: an expression string is still evaluated.
+        assert_eq!(store.get_dialog("s").as_f64(), Some(3.0));
+    }
+
+    /// The real Reset button: every dialog field the action sets lands at
+    /// the literal the bundle declares for it (read from the bundle, never
+    /// typed here).
+    #[test]
+    fn paintbrush_reset_lands_the_literals_it_declares() {
+        let ws = Workspace::load().expect("bundle");
+        let effects = ws.actions()["paintbrush_tool_options_reset"]["effects"].as_array().expect("effects").clone();
+        let pairs = effects.iter().find_map(|e| e.get("set")).and_then(|s| s.as_object()).expect("a set").clone();
+        assert!(pairs.len() >= 5, "population: {pairs:?}");
+        let mut store = StateStore::new();
+        let defaults = pairs.keys().map(|k| (k.trim_start_matches("dialog.").to_string(), json!("unset"))).collect();
+        store.init_dialog("paintbrush_tool_options", defaults, None);
+        run_effects(&effects, &json!({}), &mut store, None, Some(ws.actions()), Some(ws.dialogs()), None);
+        for (k, v) in &pairs {
+            let got = store.get_dialog(k.trim_start_matches("dialog."));
+            let same = match (got.as_f64(), v.as_f64()) { (Some(a), Some(b)) => a == b, _ => got == v };
+            assert!(same, "{k}: dialog holds {got}, the bundle sets {v}");
+        }
     }
 }
