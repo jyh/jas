@@ -113,10 +113,11 @@ actions:
   revert:
     description: >
       Reload the active document from its file on disk, discarding all
-      unsaved changes since the last save. The canvas re-renders with the
-      file contents, the undo stack is cleared, and the modified flag is
-      reset. Only enabled when the document has a filename and has been
-      modified.
+      unsaved changes since the last save. The document becomes exactly
+      what opening that file gives, including the page its root states
+      when the file declares none. The reload is ONE undoable step, so an
+      artist can take a revert back, and the modified flag is reset. Only
+      enabled when the document has a filename and has been modified.
     category: file
     enabled_when: "active_document.is_modified and active_document.has_filename"
     effects:
