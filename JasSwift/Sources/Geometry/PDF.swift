@@ -1135,8 +1135,13 @@ private func emitText(_ ctx: CGContext, _ t: Text) {
     if s.isEmpty { return }
     let (r, g, b, a) = (t.fill?.color ?? Color.black).toRgba()
     let fillAlpha = (t.fill?.opacity ?? 1.0) * a
-    let font = NSFont(name: t.fontFamily, size: CGFloat(t.fontSize))
-        ?? NSFont.systemFont(ofSize: CGFloat(t.fontSize))
+    // The face the canvas draws and the measurer measures (`resolveFont`,
+    // the same bold/italic rule as the canvas): a bold or italic label was
+    // shown regular, so it also no longer matched its own measured width.
+    // Mirrors Rust's bold/italic faces (#266).
+    let font = resolveFont(family: t.fontFamily, bold: t.fontWeight == "bold",
+                           italic: t.fontStyle == "italic" || t.fontStyle == "oblique",
+                           size: t.fontSize)
     let attrs: [NSAttributedString.Key: Any] = [
         .font: font,
         .foregroundColor: NSColor(red: CGFloat(r), green: CGFloat(g),
