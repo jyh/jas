@@ -2924,12 +2924,64 @@ actions:
   # with concrete dialog-state mutations.
 
   apply_artboard_preset:
-    description: "Translate dialog.preset into dialog.width/height (native-app concrete; Flask log)."
+    description: >
+      Set dialog.width and dialog.height to the selected preset's size,
+      in points: Letter 612 x 792, Legal 612 x 1008, Tabloid 792 x 1224,
+      A4 595.28 x 841.89, A3 841.89 x 1190.55, 1080p 1920 x 1080, 720p
+      1280 x 720, iPhone 1179 x 2556, iPad Pro 11 1668 x 2388, Square
+      1000 x 1000. Each size is the one the preset dropdown's own label
+      states (dialogs/artboard_options.yaml, ao_preset), and a test in
+      every port derives its expectation from those labels, so a label
+      and this table cannot drift apart. Custom has no size and leaves
+      the dialog unchanged. Only the dialog's fields change; the
+      artboard itself changes when the dialog is confirmed. The sizes
+      are written as expression strings, not bare YAML numbers: the Rust
+      `set` runner reads a value only as an expression string and turns
+      a bare number into null.
     category: artboards
     params:
       preset: { type: string }
     effects:
-      - log: "apply_artboard_preset (sub-phase follow-up / native)"
+      - if:
+          condition: "param.preset == 'letter'"
+          then:
+            - set: { dialog.width: "612", dialog.height: "792" }
+      - if:
+          condition: "param.preset == 'legal'"
+          then:
+            - set: { dialog.width: "612", dialog.height: "1008" }
+      - if:
+          condition: "param.preset == 'tabloid'"
+          then:
+            - set: { dialog.width: "792", dialog.height: "1224" }
+      - if:
+          condition: "param.preset == 'a4'"
+          then:
+            - set: { dialog.width: "595.28", dialog.height: "841.89" }
+      - if:
+          condition: "param.preset == 'a3'"
+          then:
+            - set: { dialog.width: "841.89", dialog.height: "1190.55" }
+      - if:
+          condition: "param.preset == 'hd1080'"
+          then:
+            - set: { dialog.width: "1920", dialog.height: "1080" }
+      - if:
+          condition: "param.preset == 'hd720'"
+          then:
+            - set: { dialog.width: "1280", dialog.height: "720" }
+      - if:
+          condition: "param.preset == 'iphone'"
+          then:
+            - set: { dialog.width: "1179", dialog.height: "2556" }
+      - if:
+          condition: "param.preset == 'ipad_pro_11'"
+          then:
+            - set: { dialog.width: "1668", dialog.height: "2388" }
+      - if:
+          condition: "param.preset == 'square'"
+          then:
+            - set: { dialog.width: "1000", dialog.height: "1000" }
 
   toggle_artboard_chain_link:
     description: "Toggle dialog.chain_link_engaged; capture dialog.chain_link_ratio on engage."

@@ -268,3 +268,77 @@ mod tests {
         assert_eq!(ids(&m), vec!["a", "b", "c"]);
     }
 }
+
+/// `apply_artboard_preset` (actions.yaml): the preset dropdown sets
+/// dialog.width / dialog.height to the preset's size. The expected sizes are
+/// parsed from the dropdown's own option labels in the compiled bundle, never
+/// typed here, so a label and the action cannot drift apart. Twin of
+/// `workspace_interpreter/tests/test_artboard_preset.py`.
+#[cfg(test)]
+mod artboard_preset_tests {
+    use crate::interpreter::effects::run_effects;
+    use crate::interpreter::state_store::StateStore;
+    use crate::interpreter::workspace::Workspace;
+    use serde_json::{json, Value};
+
+    fn find<'a>(n: &'a Value, id: &str) -> Option<&'a Value> {
+        match n {
+            Value::Object(m) => {
+                if m.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+                m.values().find_map(|v| find(v, id))
+            }
+            Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+            _ => None,
+        }
+    }
+
+    /// (value, Some((w, h))) per option; None for Custom.
+    fn options() -> Vec<(String, Option<(f64, f64)>)> {
+        let ws = Workspace::load().expect("bundle");
+        let sel = find(&ws.dialogs()["artboard_options"], "ao_preset").expect("the preset select");
+        sel["options"].as_array().expect("options").iter().map(|o| {
+            let label = o["label"].as_str().unwrap_or("");
+            let size = label.rsplit_once('(').and_then(|(_, t)| t.strip_suffix(')')).and_then(|t| {
+                let (w, h) = t.split_once(" × ")?;
+                Some((w.parse().ok()?, h.parse().ok()?))
+            });
+            (o["value"].as_str().unwrap_or("").to_string(), size)
+        }).collect()
+    }
+
+    fn apply(preset: &str) -> (Value, Value) {
+        let ws = Workspace::load().expect("bundle");
+        let mut store = StateStore::new();
+        let mut defaults = std::collections::HashMap::new();
+        defaults.insert("width".to_string(), json!(123.0));
+        defaults.insert("height".to_string(), json!(45.0));
+        defaults.insert("preset".to_string(), json!(preset));
+        store.init_dialog("artboard_options", defaults, None);
+        let effects = ws.actions()["apply_artboard_preset"]["effects"].as_array().expect("effects").clone();
+        run_effects(&effects, &json!({"param": {"preset": preset}}), &mut store,
+                    None, Some(ws.actions()), Some(ws.dialogs()), None);
+        (store.get_dialog("width").clone(), store.get_dialog("height").clone())
+    }
+
+    #[test]
+    fn the_option_list_is_what_this_arm_expects() {
+        let opts = options();
+        assert_eq!(opts.len(), 11, "{opts:?}");
+        let unsized_: Vec<&str> = opts.iter().filter(|(_, s)| s.is_none()).map(|(v, _)| v.as_str()).collect();
+        assert_eq!(unsized_, vec!["custom"]);
+    }
+
+    #[test]
+    fn every_sized_preset_sets_its_labelled_size() {
+        for (value, size) in options() {
+            let Some((w, h)) = size else { continue };
+            let (gw, gh) = apply(&value);
+            assert_eq!((gw.as_f64(), gh.as_f64()), (Some(w), Some(h)), "{value}: dialog {gw} x {gh}");
+        }
+    }
+
+    #[test]
+    fn custom_leaves_the_size_alone() {
+        assert_eq!(apply("custom"), (json!(123.0), json!(45.0)));
+    }
+}
