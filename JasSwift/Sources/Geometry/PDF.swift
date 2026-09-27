@@ -1019,6 +1019,7 @@ private func emitPaint(
         let (r, g, b, a) = s.color.toRgba()
         ctx.setStrokeColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a * s.opacity)))
         ctx.setLineWidth(CGFloat(s.width))
+        applyStrokeStyle(ctx, s)
     }
     let mode: CGPathDrawingMode
     switch (fill != nil, stroke != nil) {
@@ -1043,8 +1044,31 @@ private func emitStrokeOnly(
     let (r, g, b, a) = s.color.toRgba()
     ctx.setStrokeColor(CGColor(red: CGFloat(r), green: CGFloat(g), blue: CGFloat(b), alpha: CGFloat(a * s.opacity)))
     ctx.setLineWidth(CGFloat(s.width))
+    applyStrokeStyle(ctx, s)
     ctx.strokePath()
     ctx.restoreGState()
+}
+
+/// The stroke's cap, join, miter limit and dash (PDF 1.7 §8.4.3), each set
+/// ONLY when it differs from PDF's own default (butt, miter, 10, solid), so
+/// a default stroke's operators are unchanged. The dash lengths are already
+/// in pt, like the width. Mirrors Rust's `emit_stroke_style`: before this,
+/// a dashed line printed solid and every cap and join printed as butt/miter.
+private func applyStrokeStyle(_ ctx: CGContext, _ s: Stroke) {
+    switch s.linecap {
+    case .butt: break
+    case .round: ctx.setLineCap(.round)
+    case .square: ctx.setLineCap(.square)
+    }
+    switch s.linejoin {
+    case .miter: break
+    case .round: ctx.setLineJoin(.round)
+    case .bevel: ctx.setLineJoin(.bevel)
+    }
+    if s.miterLimit != 10 { ctx.setMiterLimit(CGFloat(s.miterLimit)) }
+    if !s.dashPattern.isEmpty {
+        ctx.setLineDash(phase: 0, lengths: s.dashPattern.map { CGFloat($0) })
+    }
 }
 
 private func addPolyline(_ ctx: CGContext, _ points: [(Double, Double)], close: Bool) {
@@ -1111,8 +1135,13 @@ private func emitText(_ ctx: CGContext, _ t: Text) {
     if s.isEmpty { return }
     let (r, g, b, a) = (t.fill?.color ?? Color.black).toRgba()
     let fillAlpha = (t.fill?.opacity ?? 1.0) * a
-    let font = NSFont(name: t.fontFamily, size: CGFloat(t.fontSize))
-        ?? NSFont.systemFont(ofSize: CGFloat(t.fontSize))
+    // The face the canvas draws and the measurer measures (`resolveFont`,
+    // the same bold/italic rule as the canvas): a bold or italic label was
+    // shown regular, so it also no longer matched its own measured width.
+    // Mirrors Rust's bold/italic faces (#266).
+    let font = resolveFont(family: t.fontFamily, bold: t.fontWeight == "bold",
+                           italic: t.fontStyle == "italic" || t.fontStyle == "oblique",
+                           size: t.fontSize)
     let attrs: [NSAttributedString.Key: Any] = [
         .font: font,
         .foregroundColor: NSColor(red: CGFloat(r), green: CGFloat(g),
