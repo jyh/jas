@@ -613,9 +613,7 @@ public struct JasCommands: Commands {
     }
 
     private func revert() {
-        guard let model = model,
-              model.isModified,
-              !model.filename.hasPrefix("Untitled-") else { return }
+        guard let model = model, MenuActions.canRevert(model) else { return }
         let alert = NSAlert()
         alert.messageText = "Revert to the saved version of \"\(model.filename)\"?"
         alert.informativeText = "All current modifications will be lost."
@@ -633,12 +631,7 @@ public struct JasCommands: Commands {
                 return
             }
             let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
-            // The document Open gives (the root's sheet, the artboard
-            // invariant), not the bare codec read. Mirrors Rust `apply_revert`.
-            let newDoc = documentForOpen(svg)
-            // Undoable revert: editDocument self-brackets one undo step.
-            model.editDocument(newDoc)
-            model.markSaved()
+            MenuActions.applyRevert(model, svg: svg)
         } catch {
             let errAlert = NSAlert(error: error)
             errAlert.runModal()
