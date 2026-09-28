@@ -11,6 +11,28 @@ import Foundation
 /// verbatim. Mirrors the Python `menu.menu` free functions the
 /// `_MENU_NATIVE_HANDLERS` intercept routes to.
 enum MenuActions {
+    /// Revert is offered only when there are changes AND a saved version to
+    /// return to (an `Untitled-` document was never saved). Mirrors Rust
+    /// `can_revert`, whose never-saved guard is "no saved SVG on the tab".
+    static func canRevert(_ model: Model) -> Bool {
+        model.isModified && !model.filename.hasPrefix("Untitled-")
+    }
+
+    /// Apply a confirmed Revert to the saved file's text: install the document
+    /// Open gives (the root's sheet, the artboard invariant), not the bare
+    /// codec read, as ONE undoable step, then mark the document clean. Returns
+    /// whether anything changed. Mirrors Rust `apply_revert`. The menu's
+    /// `revert()` keeps the confirmation alert and the file read, which cannot
+    /// be driven from a test; this half is what the tests drive.
+    @discardableResult
+    static func applyRevert(_ model: Model, svg: String) -> Bool {
+        guard canRevert(model) else { return false }
+        // editDocument self-brackets one undo step.
+        model.editDocument(documentForOpen(svg))
+        model.markSaved()
+        return true
+    }
+
     /// Select every element on the canvas. Non-undoable selection write through
     /// the Controller (matches the prior `selectAll()` body).
     static func selectAll(_ model: Model) {
