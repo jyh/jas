@@ -633,7 +633,9 @@ public struct JasCommands: Commands {
                 return
             }
             let svg = try String(contentsOfFile: model.filename, encoding: .utf8)
-            let newDoc = svgToDocument(svg)
+            // The document Open gives (the root's sheet, the artboard
+            // invariant), not the bare codec read. Mirrors Rust `apply_revert`.
+            let newDoc = documentForOpen(svg)
             // Undoable revert: editDocument self-brackets one undo step.
             model.editDocument(newDoc)
             model.markSaved()

@@ -1057,7 +1057,9 @@ pub(crate) fn apply_revert(st: &mut AppState) -> bool {
         return false;
     }
     let Some(svg) = st.tab().and_then(|t| t.saved_svg.clone()) else { return false };
-    let doc = svg_to_document(&svg);
+    // The document Open gives (the root's sheet, the artboard invariant), not
+    // the bare codec read, which leaves a page-less file with no artboard.
+    let doc = crate::geometry::svg::open_svg_document(&svg);
     let Some(tab) = st.tab_mut() else { return false };
     tab.model.with_txn(|m| m.set_document(doc));
     tab.model.mark_saved();
@@ -1067,6 +1069,17 @@ pub(crate) fn apply_revert(st: &mut AppState) -> bool {
 #[cfg(test)]
 mod revert_tests {
     use super::*;
+
+    /// A document with every artboard id blanked. The artboard invariant
+    /// mints a fresh random id on each read of a page-less file, so two reads
+    /// of the same bytes differ only there.
+    fn without_artboard_ids(doc: &Document) -> Document {
+        let mut doc = doc.clone();
+        for ab in doc.artboards.iter_mut() {
+            ab.id = String::new();
+        }
+        doc
+    }
 
     fn tab_with_saved(saved: Option<&str>) -> AppState {
         let mut st = AppState::new();
@@ -1137,10 +1150,33 @@ mod revert_tests {
                     the artist must be able to undo a revert");
         // Compared in canonical SVG, the house's document equality (Document
         // is not PartialEq).
-        assert_eq!(document_to_svg(tab.model.document()),
-                   document_to_svg(&svg_to_document(SAVED)),
-                   "the document must equal the parsed baseline -- the dirtying \
+        assert_eq!(document_to_svg(&without_artboard_ids(tab.model.document())),
+                   document_to_svg(&without_artboard_ids(
+                       &crate::geometry::svg::open_svg_document(SAVED))),
+                   "the document must equal the opened baseline -- the dirtying \
                     edit is gone and the saved rect is back");
+    }
+
+    /// A revert returns the document OPEN gives, not the bare codec read.
+    /// A file that states its paper on its root and declares no pages opens
+    /// on that sheet (`open_svg_document`); reverting to it must land on the
+    /// same sheet, not on whatever the codec alone leaves.
+    #[test]
+    fn revert_lands_on_the_sheet_open_gives() {
+        const SHEET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="5in" height="7in" viewBox="0 0 360 504"><rect x="1" y="2" width="3" height="4"/></svg>"#;
+        let opened = crate::geometry::svg::open_svg_document(SHEET);
+        let codec = svg_to_document(SHEET);
+        // Control: the fixture must tell the two reads apart, or this arm
+        // proves nothing about which one Revert uses.
+        assert_ne!(format!("{:?}", opened.artboards), format!("{:?}", codec.artboards),
+                   "control: Open and the codec must differ on this file");
+
+        let mut st = tab_with_saved(Some(SHEET));
+        dirty(&mut st);
+        assert!(apply_revert(&mut st));
+        assert_eq!(format!("{:?}", without_artboard_ids(st.tab().unwrap().model.document()).artboards),
+                   format!("{:?}", without_artboard_ids(&opened).artboards),
+                   "Revert must land on the sheet Open gives");
     }
 
     /// Refusing is not the same as failing: a revert that cannot run must
