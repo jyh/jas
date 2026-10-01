@@ -1160,6 +1160,18 @@ fn parse_xml_node(input: &str) -> Option<(XmlNode, &str)> {
             }
             break;
         }
+        // CDATA is character data, taken verbatim (no entity unescaping). A
+        // `<style>` sheet commonly wraps itself in one; read as a child
+        // element it failed to parse and ended the PARENT, so the rest of the
+        // document imported as nothing at all.
+        if let Some(after) = rest.strip_prefix("<![CDATA[") {
+            if let Some(pos) = after.find("]]>") {
+                text.push_str(&after[..pos]);
+                rest = &after[pos + 3..];
+                continue;
+            }
+            break;
+        }
         // Try to parse child element
         if rest.starts_with('<') {
             if let Some((child, new_rest)) = parse_xml_node(rest) {
@@ -2357,6 +2369,238 @@ fn parse_element(node: &XmlNode) -> Option<Element> {
 /// is NOT tolerable at a boundary, where "the file is malformed" and "the file
 /// is blank" are different things to tell a user. Use
 /// [`try_svg_to_document`] where the difference matters.
+// ---------------------------------------------------------------------------
+// CSS at import (G1): class selectors and inline `style`
+// ---------------------------------------------------------------------------
+//
+// The cascade runs ONCE, on the XML tree, before any element is read: every
+// winning declaration is written into the element's attribute map, so each
+// reader below sees exactly the value a presentation attribute would have
+// held, and nothing about how it got there. Mirrored in JasSwift's
+// `applyStyleSheet`; the shared vector is `test_fixtures/svg/css_class_paint.svg`
+// against its attribute-only twin.
+//
+// WHAT IS HONOURED
+// * The text of every `<style>` element, anywhere in the file, in document
+//   order (CDATA or not). `/* comments */` are removed first.
+// * A selector made only of CLASSES: `.a`, or the compound `.a.b`, alone or in
+//   a comma list. Its specificity is its class count.
+// * The inline `style` attribute.
+// * Precedence, lowest first: presentation attribute < sheet rule < inline
+//   style < sheet `!important` < inline `!important`. Within a tier the higher
+//   specificity wins, then the later rule, then the later declaration.
+// * Only PRESENTATION properties (`PRESENTATION_PROPERTIES`): a stylesheet
+//   cannot move geometry or set a `transform`.
+//
+// WHAT IS NOT, deliberately, and silently skipped rule by rule:
+// type (`rect`), id (`#a`), universal, attribute, pseudo-class and combinator
+// selectors; at-rules (`@media`, `@import`, `@font-face`, their blocks
+// included). A skipped selector in a comma list does not void its siblings.
+// Nothing INHERITS through a class: a class on a `<g>` reaches the `<g>`'s own
+// attributes, exactly as an attribute on the `<g>` would, and the codec does
+// not inherit presentation attributes into children either.
+
+/// SVG 1.1's presentation attributes (§M.2), plus the CSS text properties this
+/// codec reads as attributes on text (`text-align`, `text-align-last`,
+/// `text-indent`, `text-transform`, `line-height`).
+const PRESENTATION_PROPERTIES: &[&str] = &[
+    "alignment-baseline", "baseline-shift", "clip", "clip-path", "clip-rule",
+    "color", "color-interpolation", "color-interpolation-filters",
+    "color-profile", "color-rendering", "cursor", "direction", "display",
+    "dominant-baseline", "enable-background", "fill", "fill-opacity",
+    "fill-rule", "filter", "flood-color", "flood-opacity", "font",
+    "font-family", "font-size", "font-size-adjust", "font-stretch",
+    "font-style", "font-variant", "font-weight",
+    "glyph-orientation-horizontal", "glyph-orientation-vertical",
+    "image-rendering", "kerning", "letter-spacing", "lighting-color",
+    "marker", "marker-end", "marker-mid", "marker-start", "mask", "opacity",
+    "overflow", "pointer-events", "shape-rendering", "stop-color",
+    "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset",
+    "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-opacity", "stroke-width", "text-anchor", "text-decoration",
+    "text-rendering", "unicode-bidi", "visibility", "word-spacing",
+    "writing-mode",
+    "line-height", "text-align", "text-align-last", "text-indent",
+    "text-transform",
+];
+
+struct CssDecl {
+    prop: String,
+    value: String,
+    important: bool,
+}
+
+/// One class-only selector with its rule's declarations. `order` is the
+/// rule's position in the concatenated sheet.
+struct CssRule {
+    classes: Vec<String>,
+    decls: std::rc::Rc<Vec<CssDecl>>,
+    order: usize,
+}
+
+fn strip_css_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(pos) = rest.find("/*") {
+        out.push_str(&rest[..pos]);
+        match rest[pos + 2..].find("*/") {
+            Some(end) => rest = &rest[pos + 2 + end + 2..],
+            None => return out, // an unclosed comment runs to the end
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `prop: value; ...` — the body of a rule, or an inline `style`. Keeps only
+/// presentation properties; property names are case-insensitive.
+fn parse_css_declarations(body: &str) -> Vec<CssDecl> {
+    let mut out = Vec::new();
+    for item in body.split(';') {
+        let Some(colon) = item.find(':') else { continue };
+        let prop = item[..colon].trim().to_ascii_lowercase();
+        let mut value = item[colon + 1..].trim();
+        let mut important = false;
+        if let Some(bang) = value.rfind('!')
+            && value[bang + 1..].trim().eq_ignore_ascii_case("important")
+        {
+            important = true;
+            value = value[..bang].trim_end();
+        }
+        if value.is_empty() || !PRESENTATION_PROPERTIES.contains(&prop.as_str()) {
+            continue;
+        }
+        out.push(CssDecl { prop, value: value.to_string(), important });
+    }
+    out
+}
+
+/// `.a` or `.a.b` → the class names; anything else → `None`.
+fn parse_class_selector(sel: &str) -> Option<Vec<String>> {
+    let sel = sel.trim();
+    let rest = sel.strip_prefix('.')?;
+    let mut classes = Vec::new();
+    for name in rest.split('.') {
+        let first = name.chars().next()?;
+        if first.is_ascii_digit()
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return None;
+        }
+        classes.push(name.to_string());
+    }
+    Some(classes)
+}
+
+/// Skip one at-rule starting at `s[0] == '@'`: through its `;`, or through its
+/// balanced `{...}` block, whichever comes first.
+fn skip_at_rule(s: &str) -> &str {
+    let semi = s.find(';');
+    let brace = s.find('{');
+    match (semi, brace) {
+        (Some(sc), Some(b)) if sc < b => &s[sc + 1..],
+        (Some(sc), None) => &s[sc + 1..],
+        (_, Some(b)) => {
+            let mut depth = 0usize;
+            for (i, c) in s[b..].char_indices() {
+                match c {
+                    '{' => depth += 1,
+                    '}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return &s[b + i + 1..];
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            ""
+        }
+        (None, None) => "",
+    }
+}
+
+fn parse_stylesheet(text: &str) -> Vec<CssRule> {
+    let text = strip_css_comments(text);
+    let mut rules = Vec::new();
+    let mut rest = text.as_str();
+    let mut order = 0usize;
+    loop {
+        rest = rest.trim_start();
+        if rest.is_empty() {
+            break;
+        }
+        if rest.starts_with('@') {
+            rest = skip_at_rule(rest);
+            continue;
+        }
+        let Some(open) = rest.find('{') else { break };
+        let Some(close) = rest[open..].find('}') else { break };
+        let selectors = &rest[..open];
+        let decls = std::rc::Rc::new(parse_css_declarations(&rest[open + 1..open + close]));
+        for sel in selectors.split(',') {
+            if let Some(classes) = parse_class_selector(sel) {
+                rules.push(CssRule { classes, decls: decls.clone(), order });
+            }
+        }
+        order += 1;
+        rest = &rest[open + close + 1..];
+    }
+    rules
+}
+
+fn collect_style_text(node: &XmlNode, out: &mut String) {
+    if strip_ns(&node.tag) == "style" {
+        out.push_str(&node.text);
+        out.push('\n');
+    }
+    for child in &node.children {
+        collect_style_text(child, out);
+    }
+}
+
+fn apply_css(node: &mut XmlNode, rules: &[CssRule]) {
+    // (tier, specificity, rule order, declaration index) — the largest wins.
+    let mut winners: HashMap<String, ((u8, usize, usize, usize), String)> = HashMap::new();
+    let mut offer = |prop: &str, key: (u8, usize, usize, usize), value: &str| {
+        let better = winners.get(prop).is_none_or(|(k, _)| key > *k);
+        if better {
+            winners.insert(prop.to_string(), (key, value.to_string()));
+        }
+    };
+    if let Some(class_attr) = node.attrs.get("class") {
+        let classes: Vec<&str> = class_attr.split_whitespace().collect();
+        for rule in rules {
+            if rule.classes.iter().all(|c| classes.contains(&c.as_str())) {
+                for (i, d) in rule.decls.iter().enumerate() {
+                    let tier = if d.important { 3 } else { 1 };
+                    offer(&d.prop, (tier, rule.classes.len(), rule.order, i), &d.value);
+                }
+            }
+        }
+    }
+    if let Some(style) = node.attrs.get("style") {
+        for (i, d) in parse_css_declarations(style).iter().enumerate() {
+            let tier = if d.important { 4 } else { 2 };
+            offer(&d.prop, (tier, 0, 0, i), &d.value);
+        }
+    }
+    for (prop, (_, value)) in winners {
+        node.attrs.insert(prop, value);
+    }
+    for child in &mut node.children {
+        apply_css(child, rules);
+    }
+}
+
+/// Run the cascade over the whole tree (see the block comment above).
+fn apply_style_sheet(root: &mut XmlNode) {
+    let mut sheet = String::new();
+    collect_style_text(root, &mut sheet);
+    let rules = parse_stylesheet(&sheet);
+    apply_css(root, &rules);
+}
+
 pub fn svg_to_document(svg: &str) -> Document {
     try_svg_to_document(svg).unwrap_or_default()
 }
@@ -2373,7 +2617,8 @@ pub fn svg_to_document(svg: &str) -> Document {
 /// no drawable content legitimately yields an empty `Document`, and saying
 /// otherwise would refuse real blank drawings.
 pub fn try_svg_to_document(svg: &str) -> Option<Document> {
-    let root = parse_xml(svg)?;
+    let mut root = parse_xml(svg)?;
+    apply_style_sheet(&mut root);
     let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
     let artboards = parse_artboards(&root);
     let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
