@@ -327,6 +327,10 @@ mod tests {
             // all three codecs; id is the only common field SVG preserves for
             // live elements — name is intentionally excluded).
             "live_compound_id",
+            // G1: the attribute-only twin of css_class_paint.svg. Its golden is
+            // regenerated here; css_class_paint.json is a COPY of it, never a
+            // regeneration (see `css_class_paint_goldens_are_one_document`).
+            "css_class_paint_inlined",
             // Symbols P1 (SYMBOLS.md §10): a <defs> master (m1) + an instance
             // (<use> -> i1) parses to the canonical `symbols` array + the
             // layer's reference. Rust is the canonical generator.
@@ -400,6 +404,31 @@ mod tests {
     /// golden rather than only against itself: `<g data-jas-live=...
     /// inkscape:label="hull">` and `<use ... inkscape:label="eye"/>` import
     /// with those names, and so do the two named operands.
+    /// G1 (council 2026-10-01): CSS class selectors and inline `style` are
+    /// honoured at import. `css_class_paint_inlined.svg` is the same document
+    /// with each winning declaration written as a presentation attribute, read
+    /// by the attribute path alone, so its golden is the DERIVATION of the class
+    /// document's expected import. Both parse to that one golden.
+    #[test]
+    fn svg_parse_css_class_paint_inlined() {
+        assert_svg_parse("css_class_paint_inlined");
+    }
+
+    #[test]
+    fn svg_parse_css_class_paint() {
+        assert_svg_parse("css_class_paint");
+    }
+
+    /// The class document's golden is a copy of its twin's, never regenerated
+    /// from the class path: a regeneration would pin whatever the cascade did.
+    #[test]
+    fn css_class_paint_goldens_are_one_document() {
+        assert_eq!(
+            read_fixture("expected/css_class_paint.json"),
+            read_fixture("expected/css_class_paint_inlined.json"),
+        );
+    }
+
     #[test]
     fn svg_parse_live_named() {
         assert_svg_parse("live_named");
