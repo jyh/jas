@@ -206,13 +206,12 @@ pub fn paragraph_align_attrs(pp: &ParagraphPanelState)
 /// buttons map; the justify buttons fall through to the default `start`
 /// (they are grayed for point text).
 ///
-/// ⚠️ **STILL NOT CALLED BY [`apply_to_selection`].** `TextElem::text_anchor`
-/// now exists (read and written by the SVG codec, applied by every renderer
-/// and the bounds through `TextElem::anchor_shift`), but the Paragraph panel
-/// does not yet write it: wiring this function into the apply is the one
-/// remaining step of the point-text alignment node, and it is a panel change
-/// with its own Rust/Swift equivalence arm, not part of the import work that
-/// added the field.
+/// [`apply_to_selection`] writes it onto every selected POINT text's
+/// `TextElem::text_anchor` (council 2026-10-01, O25); `None` writes `""`, the
+/// identity value. Area text is left as it was: it aligns by the wrapper's
+/// `text-align` and its anchor is inert ([`TextElem::anchor_shift`]). Text on
+/// a path carries no anchor field. The shared vector is
+/// `test_fixtures/paragraph_apply/text_anchor.json`.
 pub fn paragraph_text_anchor(pp: &ParagraphPanelState) -> Option<String> {
     if pp.align_center { Some("middle".into()) }
     else if pp.align_right { Some("end".into()) }
@@ -362,6 +361,7 @@ pub fn apply_to_selection(
 ) -> bool {
     use crate::geometry::element::Element;
     let (text_align, text_align_last) = paragraph_align_attrs(pp);
+    let text_anchor = paragraph_text_anchor(pp).unwrap_or_default();
     let list_style = if !pp.bullets.is_empty() {
         Some(pp.bullets.clone())
     } else if !pp.numbered_list.is_empty() {
@@ -408,6 +408,11 @@ pub fn apply_to_selection(
             Some(Element::Text(t)) => {
                 let mut nt = t.clone();
                 nt.tspans = write(&t.tspans);
+                // POINT text's alignment is the anchor on the <text>, never the
+                // wrapper (PARAGRAPH.md §Storage); area text's anchor is inert.
+                if !nt.is_area_text() {
+                    nt.text_anchor = text_anchor.clone();
+                }
                 Some(Element::Text(nt))
             }
             Some(Element::TextPath(tp)) => {

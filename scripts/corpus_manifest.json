@@ -238,6 +238,21 @@
       },
       "notes": "The op_apply corpus — the journal/undo spine's byte gate. 60+ of these files exist ONLY as data references (expected_json / expected_journal_json inside the driver fixtures); the transitive pass claims them. Port symmetry here is the gate's founding case: the Swift registration set lacked tspan_ops.json until S4 forced the remediation."
     },
+    "test_fixtures/paragraph_apply": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "the anchor is a three-row table (centre, right, everything else); a checker would restate it",
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs paragraph_apply_text_anchor_corpus)",
+        "swift": "path literal (Tests/Panels/ParagraphAnchorCorpusTests.swift paragraphAnchorCorpus)"
+      },
+      "notes": "The Paragraph panel writes the POINT-TEXT anchor (council 2026-10-01, O25; transcripts/PARAGRAPH.md \u00a7Storage). One setup document with point, area, on-a-path and unselected text, and five vectors over the alignment radio. Rust and Swift only, because the reference has no Paragraph-panel apply to consume it: measured 2026-10-01, no file in workspace_interpreter/ mentions paragraph or text_anchor. Both runners refuse the setup by name if it does not load as point, point, area, path, point."
+    },
     "test_fixtures/preservation": {
       "kind": "fixtures",
       "required_consumers": [

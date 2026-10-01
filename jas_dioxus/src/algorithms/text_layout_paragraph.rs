@@ -342,8 +342,9 @@ mod tests {
         // the bounds apply it through `TextElem::anchor_shift`, which is the
         // channel. What this arm pins is unchanged and still true: the
         // PARAGRAPH WRAPPER's `text-align` is not the anchor, and the layout
-        // does not turn it into one. The Paragraph panel does not write the
-        // anchor yet (`paragraph_host::paragraph_text_anchor`).
+        // does not turn it into one. The Paragraph panel writes the anchor
+        // onto the <text> (2026-10-01, `paragraph_host::apply_to_selection`;
+        // vector `test_fixtures/paragraph_apply/text_anchor.json`).
         //
         // The record below is the 2026-09-19 reading, kept as measured.
         // ⛔ POINT-TEXT ALIGNMENT WAS UNIMPLEMENTED, AND THERE WAS NO
