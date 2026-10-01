@@ -100,6 +100,9 @@ private func assertSvgRoundtrip(_ name: String) {
         // A Line's width profile (`jas:width-points`) across the SVG
         // boundary. Mirrors the Rust registration.
         "line_width_profile",
+        // G1: paint arriving by CSS class re-exports as attributes and reads
+        // back to the same document. Mirrors the Rust registration.
+        "css_class_paint", "css_class_paint_inlined",
     ]
     for name in names { assertSvgRoundtrip(name) }
 }
@@ -130,6 +133,15 @@ private func assertSvgRoundtrip(_ name: String) {
 /// those names, and so do the two named operands. Mirrors Rust's
 /// svg_parse_live_named.
 @Test func svgParseLiveNamed() { assertSvgParse("live_named") }
+// G1 (council 2026-10-01): CSS class selectors and inline `style` at import.
+// The attribute-only twin's golden is the derivation of the class document's
+// expected import; both parse to that one golden. Mirrors the Rust arms.
+@Test func svgParseCssClassPaintInlined() { assertSvgParse("css_class_paint_inlined") }
+@Test func svgParseCssClassPaint() { assertSvgParse("css_class_paint") }
+@Test func cssClassPaintGoldensAreOneDocument() {
+    #expect(readFixture("expected/css_class_paint.json")
+            == readFixture("expected/css_class_paint_inlined.json"))
+}
 /// LOCKSVG — the SEMANTIC lock vector, and the one the inherited-lock ruling
 /// (transcripts/LAYER_STRUCTURE.md §13) needed to exist before it could be
 /// gated at all: a LOCKED LAYER whose children carry no lock flag of their own
