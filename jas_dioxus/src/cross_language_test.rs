@@ -394,6 +394,9 @@ mod tests {
             // A Line's width profile (`jas:width-points`) across the SVG
             // boundary; the three readers parse the same bytes.
             "line_width_profile",
+            // G1: a document whose paint arrives by CSS class re-exports it as
+            // attributes, and that export reads back to the same document.
+            "css_class_paint", "css_class_paint_inlined",
         ];
         for name in &names {
             assert_svg_roundtrip(name);

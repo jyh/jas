@@ -19,6 +19,7 @@
       #r9 { fill: #654321 }
       .st5 > .st6, .st5 .st6 { fill: #fedcba }
       @media print { .st0 { fill: #ffff00 } }
+      .after { fill: #0f0f0f }
       .late { fill: #00ff00 }
       .late { fill: #00ffff }
       .imp { fill: #ff00ff !important }
@@ -53,5 +54,11 @@
     <rect x="220" y="0" width="10" height="10" class="geo" fill="#666666"/>
     <!-- a class rule outranks a presentation attribute for a length, too -->
     <rect x="0" y="40" width="10" height="10" class="st0" stroke-width="9"/>
+    <!-- a compound selector needs EVERY class: `thick` alone is not `.st1.thick` -->
+    <rect x="20" y="40" width="10" height="10" class="thick" fill="#777777"/>
+    <!-- a type selector is not a class of the same name -->
+    <rect x="40" y="40" width="10" height="10" class="rect" fill="#888888"/>
+    <!-- the rule after an @media BLOCK is read: the block is skipped whole -->
+    <rect x="60" y="40" width="10" height="10" class="after"/>
   </g>
 </svg>
