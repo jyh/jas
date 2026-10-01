@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 240 120" width="240" height="120">
+  <!-- G1: css_class_paint.svg with every WINNING declaration written as a
+       presentation attribute. The two must import identically; this one is
+       read by the attribute path the codec has always had, so it is the
+       derivation of the other's expected document. Rect by rect, in order. -->
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <rect x="0" y="0" width="10" height="10" fill="#ff0000" stroke="#0000ff" stroke-width="3"/>
+    <rect x="20" y="0" width="10" height="10" fill="rgb(0,128,0)" stroke="#808080" stroke-width="7"/>
+    <rect x="40" y="0" width="10" height="10" fill="rgb(0,128,0)" stroke="#000000"/>
+    <rect x="60" y="0" width="10" height="10" fill="#abcdef" stroke="#0000ff" stroke-width="3"/>
+    <rect x="80" y="0" width="10" height="10" fill="#445566"/>
+    <rect x="100" y="0" width="10" height="10" fill="#00ffff"/>
+    <rect x="120" y="0" width="10" height="10" fill="#ff00ff"/>
+    <rect x="140" y="0" width="10" height="10" stroke="#222222" stroke-width="4"/>
+    <rect x="160" y="0" width="10" height="10" fill="#333333"/>
+    <rect id="r9" x="180" y="0" width="10" height="10" fill="#444444"/>
+    <rect x="200" y="0" width="10" height="10" fill="#555555" stroke="#00ff00" stroke-width="2"/>
+    <rect x="220" y="0" width="10" height="10" fill="#666666"/>
+    <rect x="0" y="40" width="10" height="10" fill="#ff0000" stroke="#0000ff" stroke-width="3"/>
+    <rect x="20" y="40" width="10" height="10" fill="#777777"/>
+    <rect x="40" y="40" width="10" height="10" fill="#888888"/>
+    <rect x="60" y="40" width="10" height="10" fill="#0f0f0f"/>
+  </g>
+</svg>

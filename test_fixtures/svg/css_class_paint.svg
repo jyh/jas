@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 240 120" width="240" height="120">
+  <!-- G1: paint carried by CSS CLASS SELECTORS and inline `style`.
+       Its twin, css_class_paint_inlined.svg, is this document with every
+       WINNING declaration written as a presentation attribute and every
+       `class`/`style`/<style> removed. The two must import identically:
+       the cascade decides which value an attribute would have held, and
+       nothing else. Each rect's comment names the rule it exercises. -->
+  <defs>
+    <style type="text/css"><![CDATA[
+      /* a comment is not a rule: .st0 { fill: #ffff00 } */
+      .st0 { fill: #ff0000; stroke: #0000ff; stroke-width: 3 }
+      .st1, .st2 { fill: rgb(0,128,0) }
+      .st2 { stroke: #000000 }
+      .st1.thick { stroke-width: 7; stroke: #808080 }
+      .st3.st4 { fill: #445566 }
+      .st3 { fill: #998877 }
+      rect { fill: #123456 }
+      #r9 { fill: #654321 }
+      .st5 > .st6, .st5 .st6 { fill: #fedcba }
+      @media print { .st0 { fill: #ffff00 } }
+      .after { fill: #0f0f0f }
+      .late { fill: #00ff00 }
+      .late { fill: #00ffff }
+      .imp { fill: #ff00ff !important }
+      .geo { x: 200; transform: translate(50px, 0) }
+    ]]></style>
+  </defs>
+  <style>.second { stroke: #00ff00; stroke-width: 2 }</style>
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <!-- a single class -->
+    <rect x="0" y="0" width="10" height="10" class="st0"/>
+    <!-- a compound selector outranks a single class -->
+    <rect x="20" y="0" width="10" height="10" class="st1 thick"/>
+    <!-- a class rule outranks a presentation attribute -->
+    <rect x="40" y="0" width="10" height="10" class="st2" fill="#ffffff"/>
+    <!-- inline style outranks a class rule -->
+    <rect x="60" y="0" width="10" height="10" class="st0" style="fill: #abcdef"/>
+    <!-- specificity outranks source order (.st3.st4 is EARLIER than .st3) -->
+    <rect x="80" y="0" width="10" height="10" class="st4 st3"/>
+    <!-- the later of two equal-specificity rules wins -->
+    <rect x="100" y="0" width="10" height="10" class="late"/>
+    <!-- !important in the sheet outranks inline style -->
+    <rect x="120" y="0" width="10" height="10" class="imp" style="fill:#111111"/>
+    <!-- inline style with no class at all -->
+    <rect x="140" y="0" width="10" height="10" style="stroke:#222222;stroke-width:4"/>
+    <!-- no rule names this class: the attribute stands -->
+    <rect x="160" y="0" width="10" height="10" class="unknown" fill="#333333"/>
+    <!-- type, id and combinator selectors are not honoured; neither is @media -->
+    <rect id="r9" x="180" y="0" width="10" height="10" class="st6" fill="#444444"/>
+    <!-- a second <style> element, outside <defs> -->
+    <rect x="200" y="0" width="10" height="10" class="second" fill="#555555"/>
+    <!-- geometry and transform are not presentation properties -->
+    <rect x="220" y="0" width="10" height="10" class="geo" fill="#666666"/>
+    <!-- a class rule outranks a presentation attribute for a length, too -->
+    <rect x="0" y="40" width="10" height="10" class="st0" stroke-width="9"/>
+    <!-- a compound selector needs EVERY class: `thick` alone is not `.st1.thick` -->
+    <rect x="20" y="40" width="10" height="10" class="thick" fill="#777777"/>
+    <!-- a type selector is not a class of the same name -->
+    <rect x="40" y="40" width="10" height="10" class="rect" fill="#888888"/>
+    <!-- the rule after an @media BLOCK is read: the block is skipped whole -->
+    <rect x="60" y="40" width="10" height="10" class="after"/>
+  </g>
+</svg>

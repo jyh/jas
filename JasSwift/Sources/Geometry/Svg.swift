@@ -2065,9 +2065,219 @@ public func svgToDocument(_ svg: String) -> Document {
         return Document(layers: [Layer(children: [])], artboards: [])
     }
 
+    applyStyleSheet(root)
     return SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root)) {
         svgRootToDocument(root)
     }
+}
+
+// MARK: - CSS at import (G1): class selectors and inline `style`
+//
+// The cascade runs ONCE, on the XML tree, before any element is read: every
+// winning declaration is written into the element's attributes, so each reader
+// sees exactly the value a presentation attribute would have held. Mirrors
+// Rust `apply_style_sheet` (svg.rs), whose block comment is the full statement
+// of what is and is not honoured; the shared vector is
+// `test_fixtures/svg/css_class_paint.svg` against its attribute-only twin.
+//
+// Honoured: every `<style>` element's text in document order (CDATA or not),
+// `/* comments */` removed; selectors made only of classes (`.a`, `.a.b`, in a
+// comma list), specificity = class count; the inline `style` attribute.
+// Precedence, lowest first: presentation attribute < sheet rule < inline style
+// < sheet `!important` < inline `!important`; within a tier, higher
+// specificity, then the later rule, then the later declaration. Presentation
+// properties only. NOT honoured, skipped rule by rule: type, id, universal,
+// attribute, pseudo-class and combinator selectors; at-rules with their blocks.
+// Nothing inherits through a class.
+
+/// SVG 1.1's presentation attributes (§M.2), plus the CSS text properties this
+/// codec reads as attributes on text. Mirrors Rust `PRESENTATION_PROPERTIES`.
+private let presentationProperties: Set<String> = [
+    "alignment-baseline", "baseline-shift", "clip", "clip-path", "clip-rule",
+    "color", "color-interpolation", "color-interpolation-filters",
+    "color-profile", "color-rendering", "cursor", "direction", "display",
+    "dominant-baseline", "enable-background", "fill", "fill-opacity",
+    "fill-rule", "filter", "flood-color", "flood-opacity", "font",
+    "font-family", "font-size", "font-size-adjust", "font-stretch",
+    "font-style", "font-variant", "font-weight",
+    "glyph-orientation-horizontal", "glyph-orientation-vertical",
+    "image-rendering", "kerning", "letter-spacing", "lighting-color",
+    "marker", "marker-end", "marker-mid", "marker-start", "mask", "opacity",
+    "overflow", "pointer-events", "shape-rendering", "stop-color",
+    "stop-opacity", "stroke", "stroke-dasharray", "stroke-dashoffset",
+    "stroke-linecap", "stroke-linejoin", "stroke-miterlimit",
+    "stroke-opacity", "stroke-width", "text-anchor", "text-decoration",
+    "text-rendering", "unicode-bidi", "visibility", "word-spacing",
+    "writing-mode",
+    "line-height", "text-align", "text-align-last", "text-indent",
+    "text-transform",
+]
+
+private struct CssDecl {
+    let prop: String
+    let value: String
+    let important: Bool
+}
+
+/// One class-only selector with its rule's declarations; `order` is the rule's
+/// position in the concatenated sheet.
+private struct CssRule {
+    let classes: [String]
+    let decls: [CssDecl]
+    let order: Int
+}
+
+private func stripCssComments(_ s: String) -> String {
+    var out = ""
+    var rest = Substring(s)
+    while let open = rest.range(of: "/*") {
+        out += rest[..<open.lowerBound]
+        guard let close = rest[open.upperBound...].range(of: "*/") else { return out }
+        rest = rest[close.upperBound...]
+    }
+    out += rest
+    return out
+}
+
+private func cssTrim(_ s: Substring) -> String {
+    s.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// `prop: value; ...` — a rule body or an inline `style`. Presentation
+/// properties only; names are case-insensitive.
+private func parseCssDeclarations(_ body: String) -> [CssDecl] {
+    var out: [CssDecl] = []
+    for item in body.split(separator: ";", omittingEmptySubsequences: false) {
+        guard let colon = item.firstIndex(of: ":") else { continue }
+        let prop = cssTrim(item[..<colon]).lowercased()
+        var value = cssTrim(item[item.index(after: colon)...])
+        var important = false
+        if let bang = value.lastIndex(of: "!"),
+           cssTrim(value[value.index(after: bang)...]).lowercased() == "important" {
+            important = true
+            value = cssTrim(value[..<bang])
+        }
+        if value.isEmpty || !presentationProperties.contains(prop) { continue }
+        out.append(CssDecl(prop: prop, value: value, important: important))
+    }
+    return out
+}
+
+/// `.a` or `.a.b` → the class names; anything else → `nil`.
+private func parseClassSelector(_ sel: Substring) -> [String]? {
+    let sel = cssTrim(sel)
+    guard sel.hasPrefix(".") else { return nil }
+    var classes: [String] = []
+    for name in sel.dropFirst().split(separator: ".", omittingEmptySubsequences: false) {
+        guard let first = name.unicodeScalars.first, !("0"..."9").contains(first) else { return nil }
+        let ok = name.unicodeScalars.allSatisfy { c in
+            c.isASCII && (CharacterSet.alphanumerics.contains(c) || c == "-" || c == "_")
+        }
+        if !ok { return nil }
+        classes.append(String(name))
+    }
+    return classes
+}
+
+/// Skip one at-rule starting at `s.first == "@"`: through its `;`, or through
+/// its balanced `{...}` block, whichever comes first.
+private func skipAtRule(_ s: Substring) -> Substring {
+    let semi = s.firstIndex(of: ";")
+    let brace = s.firstIndex(of: "{")
+    if let sc = semi, brace == nil || sc < brace! { return s[s.index(after: sc)...] }
+    guard let b = brace else { return "" }
+    var depth = 0
+    var i = b
+    while i < s.endIndex {
+        if s[i] == "{" { depth += 1 }
+        if s[i] == "}" {
+            depth -= 1
+            if depth == 0 { return s[s.index(after: i)...] }
+        }
+        i = s.index(after: i)
+    }
+    return ""
+}
+
+private func parseStyleSheet(_ text: String) -> [CssRule] {
+    let text = stripCssComments(text)
+    var rules: [CssRule] = []
+    var rest = Substring(text)
+    var order = 0
+    while true {
+        rest = rest.drop(while: { $0.isWhitespace })
+        if rest.isEmpty { break }
+        if rest.first == "@" {
+            rest = skipAtRule(rest)
+            continue
+        }
+        guard let open = rest.firstIndex(of: "{"),
+              let close = rest[open...].firstIndex(of: "}") else { break }
+        let decls = parseCssDeclarations(String(rest[rest.index(after: open)..<close]))
+        for sel in rest[..<open].split(separator: ",", omittingEmptySubsequences: false) {
+            if let classes = parseClassSelector(sel) {
+                rules.append(CssRule(classes: classes, decls: decls, order: order))
+            }
+        }
+        order += 1
+        rest = rest[rest.index(after: close)...]
+    }
+    return rules
+}
+
+private func collectStyleText(_ node: XMLElement, into out: inout String) {
+    if node.localName == "style" {
+        out += node.stringValue ?? ""
+        out += "\n"
+    }
+    for child in node.children ?? [] {
+        if let e = child as? XMLElement { collectStyleText(e, into: &out) }
+    }
+}
+
+/// (tier, specificity, rule order, declaration index): the largest wins.
+private typealias CssKey = (Int, Int, Int, Int)
+
+private func cssKeyGreater(_ a: CssKey, _ b: CssKey) -> Bool {
+    if a.0 != b.0 { return a.0 > b.0 }
+    if a.1 != b.1 { return a.1 > b.1 }
+    if a.2 != b.2 { return a.2 > b.2 }
+    return a.3 > b.3
+}
+
+private func applyCss(_ node: XMLElement, _ rules: [CssRule]) {
+    var winners: [String: (CssKey, String)] = [:]
+    func offer(_ prop: String, _ key: CssKey, _ value: String) {
+        if let (k, _) = winners[prop], !cssKeyGreater(key, k) { return }
+        winners[prop] = (key, value)
+    }
+    if let classAttr = node.attribute(forName: "class")?.stringValue {
+        let classes = Set(classAttr.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+        for rule in rules where rule.classes.allSatisfy({ classes.contains($0) }) {
+            for (i, d) in rule.decls.enumerated() {
+                offer(d.prop, (d.important ? 3 : 1, rule.classes.count, rule.order, i), d.value)
+            }
+        }
+    }
+    if let style = node.attribute(forName: "style")?.stringValue {
+        for (i, d) in parseCssDeclarations(style).enumerated() {
+            offer(d.prop, (d.important ? 4 : 2, 0, 0, i), d.value)
+        }
+    }
+    for (prop, (_, value)) in winners {
+        node.removeAttribute(forName: prop)
+        node.addAttribute(XMLNode.attribute(withName: prop, stringValue: value) as! XMLNode)
+    }
+    for child in node.children ?? [] {
+        if let e = child as? XMLElement { applyCss(e, rules) }
+    }
+}
+
+/// Run the cascade over the whole tree (see the MARK block above).
+private func applyStyleSheet(_ root: XMLElement) {
+    var sheet = ""
+    collectStyleText(root, into: &sheet)
+    applyCss(root, parseStyleSheet(sheet))
 }
 
 /// The import proper, run with the root's user unit bound (`svgToDocument`).
