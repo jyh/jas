@@ -8448,4 +8448,50 @@ mod tests {
         assert_eq!(keep_of(&hidden), paths_of("expected_keep", d),
                    "the defect's blank tree is not what the fixture records");
     }
+
+    // Runs test_fixtures/paragraph_apply/text_anchor.json — the Paragraph panel
+    // writing the POINT-TEXT anchor (council 2026-10-01, O25). Mirrored by
+    // JasSwift ParagraphAnchorCorpusTests; the corpus's `_doc` states the law.
+    #[test]
+    fn paragraph_apply_text_anchor_corpus() {
+        use crate::geometry::element::Element;
+        use crate::document::document::ElementSelection;
+        use crate::interpreter::paragraph_host::{apply_to_selection, ParagraphPanelState};
+        let raw = read_fixture("paragraph_apply/text_anchor.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let setup = svg_to_document(corpus["setup_svg"].as_str().unwrap());
+        // The setup is a PRECONDITION, refused by name rather than let read as
+        // an anchor law that happened to hold on the wrong kinds of element.
+        let kinds: Vec<&str> = setup.layers[0].children().unwrap().iter().map(|e| match &**e {
+            Element::Text(t) if t.is_area_text() => "area",
+            Element::Text(_) => "point",
+            Element::TextPath(_) => "path",
+            _ => "other",
+        }).collect();
+        assert_eq!(kinds, ["point", "point", "area", "path", "point"],
+                   "paragraph_apply setup does not load as the corpus describes");
+        let mut ran = 0usize;
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let mut doc = setup.clone();
+            doc.selection = vec["select"].as_array().unwrap().iter()
+                .map(|i| ElementSelection::all(vec![0, i.as_u64().unwrap() as usize]))
+                .collect();
+            let mut model = Model::new(doc, None);
+            let mut pp = ParagraphPanelState::default();
+            for (k, v) in vec["panel"].as_object().unwrap() {
+                pp.set_field(k, v);
+            }
+            apply_to_selection(&mut model, &pp);
+            let got: Vec<serde_json::Value> = model.document().layers[0].children().unwrap()
+                .iter().map(|e| match &**e {
+                    Element::Text(t) => serde_json::json!(t.text_anchor),
+                    _ => serde_json::Value::Null,
+                }).collect();
+            assert_eq!(serde_json::Value::Array(got), vec["expected"],
+                       "paragraph_apply text_anchor '{}'", name);
+            ran += 1;
+        }
+        assert!(ran >= 5, "paragraph_apply corpus ran only {} vectors", ran);
+    }
 }

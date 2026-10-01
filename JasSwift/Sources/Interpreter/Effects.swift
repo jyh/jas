@@ -1732,6 +1732,12 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
     else if justifyRight { textAlign = "justify"; textAlignLast = "right" }
     else if justifyAll { textAlign = "justify"; textAlignLast = "justify" }
     else { textAlign = nil; textAlignLast = nil }
+    // POINT text's alignment is `text-anchor` on the <text>, never the wrapper
+    // (PARAGRAPH.md §Storage): centre -> middle, right -> end, everything else
+    // -> start, the identity value, stored as "". Mirrors Rust
+    // `paragraph_host::paragraph_text_anchor`; vector
+    // test_fixtures/paragraph_apply/text_anchor.json.
+    let textAnchor = alignCenter ? "middle" : (alignRight ? "end" : "")
 
     func optD(_ v: Double) -> Double? { v == 0 ? nil : v }
     func optB(_ v: Bool) -> Bool? { v ? true : nil }
@@ -1771,7 +1777,11 @@ public func applyParagraphPanelToSelection(store: StateStore, controller: Contro
                     jasHangingPunctuation: optB(hangPunct),
                     jasListStyle: listStyle)
             }
-            newElem = .text(t.withTspans(tspans))
+            var nt = t.withTspans(tspans)
+            // Area text's anchor is inert (`anchorShift`), so it keeps the
+            // file's; text on a path has no anchor field.
+            if !nt.isAreaText { nt.textAnchor = textAnchor }
+            newElem = .text(nt)
         case .textPath(let tp):
             var tspans = tp.tspans
             let wrapperIdx = ensureParagraphWrapper(&tspans)

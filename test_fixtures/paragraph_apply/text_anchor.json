@@ -1,0 +1,40 @@
+{
+  "_doc": [
+    "The Paragraph panel writes the POINT-TEXT anchor (council 2026-10-01, O25).",
+    "transcripts/PARAGRAPH.md §Storage: alignment of point text is `text-anchor` on",
+    "the <text> element, never the paragraph wrapper; the sub-mapping is",
+    "ALIGN_LEFT -> start, ALIGN_CENTER -> middle, ALIGN_RIGHT -> end, and `start` is",
+    "the identity value, so it is OMITTED (the field reads \"\"). The justify buttons",
+    "are grayed for point text and fall through to start.",
+    "",
+    "Run by Rust (cross_language_test.rs, paragraph_apply_text_anchor_corpus) and",
+    "Swift (ParagraphAnchorCorpusTests). Each vector loads `setup_svg`, selects the",
+    "children of layer 0 named in `select`, seeds the Paragraph panel with `panel`,",
+    "runs the panel apply, and reads `text_anchor` off every child of layer 0 in",
+    "order. `null` in `expected` names a child with NO anchor field (text on a path:",
+    "the model carries none, so the panel has nothing to write there).",
+    "",
+    "THE CHILDREN: 0 point text, no anchor · 1 point text, anchor end · 2 AREA text",
+    "with anchor end (area text aligns by the wrapper's text-align and ignores the",
+    "anchor, so the panel leaves it as the file had it) · 3 text on a path · 4 point",
+    "text, anchor end, NEVER selected (the apply touches only the selection)."
+  ],
+  "setup_svg": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:inkscape=\"http://www.inkscape.org/namespaces/inkscape\" width=\"400\" height=\"200\" viewBox=\"0 0 400 200\"><g inkscape:groupmode=\"layer\" inkscape:label=\"Layer 1\"><text x=\"10\" y=\"20\" font-size=\"12\">A</text><text x=\"10\" y=\"40\" font-size=\"12\" text-anchor=\"end\">B</text><text x=\"10\" y=\"60\" font-size=\"12\" text-anchor=\"end\" style=\"inline-size: 100px\">C</text><text font-size=\"12\"><textPath path=\"M0,100 L200,100\">D</textPath></text><text x=\"10\" y=\"140\" font-size=\"12\" text-anchor=\"end\">E</text></g></svg>",
+  "vectors": [
+    {"name": "centre_writes_middle",
+     "panel": {"align_center": true}, "select": [0, 1, 2, 3],
+     "expected": ["middle", "middle", "end", null, "end"]},
+    {"name": "right_writes_end",
+     "panel": {"align_right": true}, "select": [0, 1, 2, 3],
+     "expected": ["end", "end", "end", null, "end"]},
+    {"name": "left_omits_start_and_resets_an_anchor",
+     "panel": {"align_left": true}, "select": [0, 1, 2, 3],
+     "expected": ["", "", "end", null, "end"]},
+    {"name": "justify_falls_through_to_start",
+     "panel": {"justify_center": true}, "select": [0, 1, 2, 3],
+     "expected": ["", "", "end", null, "end"]},
+    {"name": "only_the_selection_is_written",
+     "panel": {"align_center": true}, "select": [1],
+     "expected": ["", "middle", "end", null, "end"]}
+  ]
+}
