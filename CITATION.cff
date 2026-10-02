@@ -1,0 +1,44 @@
+# Zenodo reads this file when archiving a GitHub release, and GitHub renders it
+# as "Cite this repository".
+#
+# Do not add a `.zenodo.json` beside it: Zenodo's guide says that when both are
+# present it uses only `.zenodo.json` and ignores this file completely. If a
+# future change needs Zenodo-only fields, move this metadata there instead.
+#
+# The paper is listed under `references`, not `preferred-citation`, so the
+# archived record describes the software. The paper's own record links to it.
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "jas: a vector illustration application built from one specification in several languages"
+abstract: >-
+  A vector illustration application whose behaviour is defined once, in
+  language-agnostic YAML workspace specifications with a shared conformance
+  corpus, and implemented against that specification in Rust and Swift (with
+  frozen Python, OCaml and reference ports). It is the artifact for the paper
+  "Five Implementations, One Spec: AI-Paired Engineering as a Revival of
+  N-Version Programming".
+authors:
+  - family-names: Hickey
+    given-names: Jason
+    affiliation: Independent
+repository-code: "https://github.com/jyh/jas"
+url: "https://jyh.github.io/jas"
+license: Apache-2.0
+keywords:
+  - vector graphics
+  - illustration
+  - N-version programming
+  - specification
+  - conformance testing
+  - AI-paired engineering
+references:
+  - type: article
+    title: "Five Implementations, One Spec: AI-Paired Engineering as a Revival of N-Version Programming"
+    authors:
+      - family-names: Hickey
+        given-names: Jason
+    year: 2026
+    journal: "arXiv preprint"
+    notes: "arXiv:2606.07828"
+    url: "https://arxiv.org/abs/2606.07828"
