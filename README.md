@@ -9,7 +9,7 @@ No install — the full editor (the Rust/Dioxus port compiled to WebAssembly)
 runs entirely in your browser. ~2 MB download, no accounts, no analytics,
 no third-party requests; static hosting on GitHub Pages.
 
-Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **four parallel, behaviourally-identical native implementations** — Rust, Swift, OCaml, and Python — plus a thin Flask web reference renderer, all driven from one shared executable YAML specification. Cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. As of the `five-port-parity` tag (2026-07-22), active development continues in the **Rust and Swift** ports; the OCaml and Python-Qt ports are preserved at that tag as the N-version study concluded, verified by tag-pinned CI canaries (see `POLICY.md` §1). New features land in Rust, get tuned, then propagate to Swift with matching tests.
+Jas is a small, inspectable vector-illustration editor (shapes, a full Pen/Pencil path suite, native in-place text, SVG round-tripping) built as **four parallel, behaviourally-identical native implementations** — Rust, Swift, OCaml, and Python — plus a thin Flask web reference renderer, all driven from one shared executable YAML specification. Cross-language differential testing against the shared spec is how correctness is enforced, rather than trusting any single implementation. As of the `five-port-parity` tag (2026-07-22), active development continues in the **Rust and Swift** ports; the OCaml and Python-Qt ports are preserved at that tag as the N-version study concluded, verified by tag-pinned CI canaries in [`.github/workflows/test.yml`](.github/workflows/test.yml) (see `POLICY.md` §1). New features land in Rust, get tuned, then propagate to Swift with matching tests.
 
 This repository is the artifact for the paper **"Five Implementations, One Spec: AI-Paired Engineering as a Revival of N-Version Programming"** (Jason Hickey) — [read it on arXiv](https://arxiv.org/abs/2606.07828). The founding vision lives in [`transcripts/AI.md`](transcripts/AI.md) and per-feature prompt transcripts in [`transcripts/`](transcripts/). Status: actively maintained, Apache-2.0.
 *(The paper's “five” are the four native ports plus the Flask reference renderer, and the count was accurate at publication — arXiv v1 stands as the published record; development has since narrowed to Rust and Swift per `POLICY.md` §1. The difference is evolution, not error.)*
@@ -46,7 +46,8 @@ reacts to the same key events, the same selection tool picks the same
 elements from the same marquee. The N-version study those four ports served
 is complete (see the paper); ongoing development continues in Rust and
 Swift, with the frozen ports preserved exactly as tagged and verified by
-tag-pinned CI canaries (`POLICY.md` §1). New features land in Rust first,
+tag-pinned CI canaries in [`.github/workflows/test.yml`](.github/workflows/test.yml)
+(`POLICY.md` §1). New features land in Rust first,
 get tuned, and are then propagated to Swift with matching tests. Because of
 this, *Rust is the most complete application*.
 

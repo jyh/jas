@@ -371,7 +371,7 @@ numbers are 5–8% optimistic at and below 100k, and within noise above it.**
   different vendor, backend and OS hitting the same element count, which confirms
   this is the WebGPU spec limit rather than a device quirk. Reaching 1M needs the
   document split into multiple scene batches (a distinct multi-pass / compositing
-  architecture the conductor should weigh).
+  architecture the conductor should weigh). The measuring rig is [`src/`](src/).
 
 Net: the wgpu/Vello path is comfortably fast enough at 100k on both Metal and
 D3D12 and degrades gracefully on both, but "one retained scene to 1M" is blocked
