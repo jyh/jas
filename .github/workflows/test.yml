@@ -697,6 +697,15 @@ jobs:
           fi
           python scripts/check_pr_descriptions.py --open
 
+      # Council 2026-10-06 ruling 1 (the saltworks post-mortem's recs 1 and 5): the claim-citation gate runs
+      # here as well as in Scrub, because every README in this tree is written on this platform and the gate
+      # prints prose from it; it forces UTF-8 on its own stdout so cp1252 cannot turn a verdict into exit 1.
+      - name: Every verification claim in a README or abstract cites its check
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_verification_claims.py --self-test
+          python scripts/check_verification_claims.py
+
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
         run: |
