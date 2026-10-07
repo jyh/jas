@@ -706,6 +706,16 @@ jobs:
           python scripts/check_verification_claims.py --self-test
           python scripts/check_verification_claims.py
 
+      # Council 2026-10-07 ruling 3 ("ratchet only"): the infrastructure-name gate runs here as well as in
+      # Scrub, because check_lane_coverage.py requires every scripts/check_*.py on both platform families.
+      # Its verdict lines are ASCII (driven under PYTHONIOENCODING=ascii:strict before wiring) and it reads
+      # the working tree, which .gitattributes keeps LF here too, so the line digests match the Linux lane.
+      - name: No NEW host or account name in the tree (Windows lane) — self-test, then the ratchet
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_infra_names.py --self-test
+          python scripts/check_infra_names.py --tree
+
       - name: Untracked files are invisible to index-reading gates
         if: ${{ !cancelled() }}
         run: |

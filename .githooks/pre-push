@@ -33,6 +33,13 @@
 #      bodies already public are history this arm does not rule on. The
 #      pushed REF NAME too: a merge subject will quote it, and the forge
 #      writes that subject where no hook runs.
+#   4. scripts/check_infra_names.py --range -- no NEW host or account name in
+#      what the push adds (council 2026-10-07 ruling 3: "ratchet only"). The
+#      tree already carries such names; scripts/infra_names_baseline.tsv
+#      accepts them by (file, line digest), so an added line byte-identical
+#      to a baselined line of the same file passes (a verbatim move) and an
+#      EDITED line that keeps a name is NEW. A finding names file:line, never
+#      the name. CI runs the same arm, plus the --tree and --history ratchets.
 #
 # ⛔ NO PATTERN IS TYPED IN THIS FILE. Until 2026-09-13 arm 1 was a grep for two
 #   literal shapes, and it was narrower than the gate: a lowercase key, a space
@@ -57,6 +64,7 @@ ZERO=0000000000000000000000000000000000000000
 GATE=scripts/check_private_paths.py
 TRAILER_GATE=scripts/check_commit_trailers.py
 SUBJECT_GATE=scripts/check_pr_descriptions.py
+INFRA_GATE=scripts/check_infra_names.py
 HISTORY_BASELINE=scripts/private_paths_history_baseline.tsv
 SCAN="$(cd "$(dirname "$0")" && pwd)/gate_scan.py"
 
@@ -75,7 +83,7 @@ if [ -z "$PY" ]; then
 fi
 
 ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || ROOT=.
-for need in "$ROOT/$GATE" "$ROOT/$TRAILER_GATE" "$ROOT/$SUBJECT_GATE" "$SCAN"; do
+for need in "$ROOT/$GATE" "$ROOT/$TRAILER_GATE" "$ROOT/$SUBJECT_GATE" "$ROOT/$INFRA_GATE" "$SCAN"; do
   if [ ! -f "$need" ]; then
     echo "pre-push REFUSED: $need is not in this working tree." >&2
     echo "  This hook derives its verdict from the gates and will not guess it." >&2
@@ -216,13 +224,24 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     bad=1
   fi
 
+  # ---- ARM 4: no NEW host or account name in what the push adds ------------
+  # Council 2026-10-07 ruling 3 ("ratchet only"). An added line byte-identical
+  # to a baselined line of the same file passes (a verbatim move); an edited
+  # line that keeps a name is NEW. </dev/null for the same reason as ARM 2.
+  if ! ( cd "$ROOT" && "$PY" "$INFRA_GATE" --range "$RANGE" ) < /dev/null; then
+    echo "pre-push REFUSED: the infrastructure-name gate RED on ${RANGE} (${local_ref:-<ref>} -> ${remote_ref:-<ref>})." >&2
+    echo "  The findings above name file:line, never the name. Drop the name from the" >&2
+    echo "  line (a role word); the baseline grows only by a reviewed act." >&2
+    bad=1
+  fi
+
   if [ "$bad" -ne 0 ]; then
     status=1
     continue
   fi
 
   n=$(git rev-list --count "$RANGE" 2>/dev/null) || n="?"
-  echo "pre-push OK [per-commit trailer+paths + private-paths --range + subject gate --range]: ${local_ref:-<ref>} -> ${remote_ref:-<ref>}, range ${RANGE} (${WHY}), ${n} commit(s) scanned."
+  echo "pre-push OK [per-commit trailer+paths + private-paths --range + subject gate --range + infra-names --range]: ${local_ref:-<ref>} -> ${remote_ref:-<ref>}, range ${RANGE} (${WHY}), ${n} commit(s) scanned."
 done < "$TMPIN"
 
 if [ "$seen" -eq 0 ]; then

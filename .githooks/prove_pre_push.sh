@@ -16,9 +16,18 @@
 #                  A lane name in a SUBJECT only, a family reference in a
 #                  SUBJECT only, and a lane name in a BODY only are each REFUSED
 #                  too (desk QA), each after a control shows the two older arms
-#                  passing that range.
+#                  passing that range. An infrastructure name (a host or an
+#                  account) in an ADDED LINE is REFUSED by the hook's ARM 4
+#                  (council 2026-10-07 ruling 3), after a control shows the
+#                  three older arms passing that range, and the refusal does
+#                  not echo the name.
+#   RATCHET     -- the SAME commit, once a baseline accepts that exact (file,
+#     CONTROL      line digest), must SUCCEED and print the new arm in its
+#                  receipt: the refusal was about the line being NEW, which is
+#                  the whole of what the ratchet forbids.
 #   FAIL CLOSED -- with the scanner missing, a clean push is refused; so it is
-#                  with the subject gate missing.
+#                  with the subject gate missing, and with the infrastructure-
+#                  name gate missing.
 #   DELETE arm  -- deleting a ref pushes no objects and must be ALLOWED.
 #   MUTATION    -- the same refused push must SUCCEED with `--no-verify`. Without
 #     CONTROL      this arm, every red above is equally consistent with "the push
@@ -45,6 +54,7 @@ HOOK="$HERE/pre-push"
 PATHS_GATE="$REPO/scripts/check_private_paths.py"
 TRAILER_GATE="$REPO/scripts/check_commit_trailers.py"
 SUBJECT_GATE="$REPO/scripts/check_pr_descriptions.py"
+INFRA_GATE="$REPO/scripts/check_infra_names.py"
 SUBJECT_BASELINE="$REPO/scripts/subject_debt_baseline.tsv"
 
 fail=0
@@ -56,6 +66,7 @@ bad()  { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
 [ -f "$PATHS_GATE" ]   || { note "FAIL: no $PATHS_GATE"; exit 2; }
 [ -f "$TRAILER_GATE" ] || { note "FAIL: no $TRAILER_GATE"; exit 2; }
 [ -f "$SUBJECT_GATE" ] || { note "FAIL: no $SUBJECT_GATE"; exit 2; }
+[ -f "$INFRA_GATE" ]   || { note "FAIL: no $INFRA_GATE"; exit 2; }
 [ -f "$SUBJECT_BASELINE" ] || { note "FAIL: no $SUBJECT_BASELINE"; exit 2; }
 
 PY=
@@ -115,6 +126,20 @@ for w in "$LANE_WORD" "$KIN_WORD"; do
   [ "$n" = "1" ] || { note "FAIL: a subject-gate fixture is not exactly one finding (got '${n}') -- its arm would prove nothing"; exit 2; }
 done
 
+# THE INFRASTRUCTURE-NAME GATE'S WORD, read out of it (ARM 4 of the hook,
+# council 2026-10-07 ruling 3). The gate ASSEMBLES its names so that it can scan
+# itself; this prover is a tracked file the gate's tree ratchet also scans, so
+# the word is never spelled here and never printed. The fixture line must be
+# exactly one finding, or its arm is vacuous.
+INFRA_WORD=$(read_const "$INFRA_GATE" 'FORBIDDEN[1]') || INFRA_WORD=
+[ -n "$INFRA_WORD" ] || { note "FAIL: could not read a forbidden word out of the infrastructure-name gate"; exit 2; }
+INFRA_LINE="the box $INFRA_WORD ran it"
+n=$(MSG="$INFRA_LINE" read_const "$INFRA_GATE" 'len(scan([("f", __import__("os").environ["MSG"])]))') || n=
+[ "$n" = "1" ] || { note "FAIL: the infrastructure-name fixture is not exactly one finding (got '${n}') -- its arm would prove nothing"; exit 2; }
+# The ratchet control's baseline row, DERIVED with the gate's own digest, never typed.
+INFRA_SHA=$(MSG="$INFRA_LINE" read_const "$INFRA_GATE" 'line_sha(__import__("os").environ["MSG"])') || INFRA_SHA=
+[ -n "$INFRA_SHA" ] || { note "FAIL: could not derive the fixture line's digest with the gate's own line_sha"; exit 2; }
+
 # The fixture must actually be forbidden, or every RED arm below is vacuous.
 if "$PY" "$PATHS_GATE" --self-test >/dev/null 2>&1; then :; else
   note "FAIL: the private-paths gate's own self-test does not pass; nothing here is readable"
@@ -153,6 +178,10 @@ cp "$TRAILER_GATE" "$W/scripts/check_commit_trailers.py"
 cp "$SCAN" "$W/.githooks/gate_scan.py"
 cp "$SUBJECT_GATE" "$W/scripts/check_pr_descriptions.py"
 cp "$SUBJECT_BASELINE" "$W/scripts/subject_debt_baseline.tsv"
+# The hook's ARM 4 needs its gate here, or it refuses every push as "not in this
+# working tree". NO baseline is copied: in the sandbox every added name is NEW,
+# which is the arm under test (ARM 17b writes one deliberately, then removes it).
+cp "$INFRA_GATE" "$W/scripts/check_infra_names.py"
 git -C "$W" config core.hooksPath .githooks
 
 commit_file() { # <path> <content> <message>
@@ -445,17 +474,79 @@ expect_out fail-closed-no-subject-gate "check_pr_descriptions.py is not in this 
 mv "$SBX/check_pr_descriptions.py.hidden" "$W/scripts/check_pr_descriptions.py"
 git -C "$W" reset -q --hard "$GOOD"; restore_remote
 
+# ── ARM 17 ── an infrastructure name (a host or an account) in an ADDED LINE:
+#              the hook's ARM 4 (council 2026-10-07 ruling 3, "ratchet only").
+#              CONTROL FIRST: the three older arms pass this range, so the
+#              refusal is ARM 4's. The word is never printed: neither branch of
+#              the echo check below prints it or the output.
+note "ARM 17 an infrastructure name in an ADDED LINE (hook ARM 4)    expect 1"
+commit_file infra17.txt "$INFRA_LINE" "docs: a clean subject, a doc line"
+INFRA_SHA_C=$(git -C "$W" rev-parse HEAD)
+if older_arms_pass "$GOOD..HEAD" \
+   && ( cd "$W" && "$PY" scripts/check_pr_descriptions.py --range "$GOOD..HEAD" ) >/dev/null 2>&1; then
+  printf '       +   infra-arm: CONTROL -- the per-commit scan, the paths gate and the subject gate pass this range\n'
+else
+  bad "infra-arm: an older arm already refuses this range, so the arm tests nothing new"
+fi
+run_push 1 red-infra-arm origin main
+expect_out red-infra-arm "the infrastructure-name gate RED"
+expect_out red-infra-arm "infra17.txt:1: an infrastructure name"
+expect_no_out red-infra-arm "Traceback"
+if grep -qF -- "$INFRA_WORD" "$OUT"; then
+  bad "red-infra-arm: the output ECHOES the infrastructure name (output withheld)"
+else
+  printf '       +   red-infra-arm: output does not echo the infrastructure name\n'
+fi
+if [ "$(remote_tip main)" = "$BEFORE_TIP" ]; then
+  printf '       +   red-infra-arm: the remote ref did NOT move\n'
+else
+  bad "red-infra-arm: THE REMOTE REF MOVED"
+fi
+
+# ── ARM 17b ── THE RATCHET CONTROL: the SAME commit, once a baseline accepts that
+#              exact (file, line digest), must SUCCEED -- so the refusal above
+#              was about the line being NEW, not about the hook refusing
+#              everything -- and its receipt must NAME the new arm. The baseline
+#              row is derived with the gate's own line_sha, never typed.
+note "ARM 17b the same line, accepted by a ratchet baseline           expect 0"
+if [ "$(git -C "$W" rev-parse HEAD)" != "$INFRA_SHA_C" ]; then
+  bad "ratchet-control: HEAD is not the commit ARM 17 refused -- the control would test another object"
+fi
+printf 'infra17.txt\t%s\tan infrastructure name (account or host)\n' "$INFRA_SHA" > "$W/scripts/infra_names_baseline.tsv"
+run_push 0 green-infra-baselined origin main
+expect_out green-infra-baselined "pre-push OK"
+expect_out green-infra-baselined "infra-names --range"
+if grep -qF -- "$INFRA_WORD" "$OUT"; then
+  bad "green-infra-baselined: the output ECHOES the infrastructure name (output withheld)"
+else
+  printf '       +   green-infra-baselined: output does not echo the infrastructure name\n'
+fi
+rm -f -- "${W:?}/scripts/infra_names_baseline.tsv"
+git -C "$W" reset -q --hard "$GOOD"; restore_remote
+
+# ── ARM 18 ── FAIL CLOSED: with the infrastructure-name gate absent, a clean
+#              push is refused rather than waved through on three of four arms.
+note "ARM 18 the infra-name gate is missing: a clean push is refused expect 1"
+mv "$W/scripts/check_infra_names.py" "$SBX/check_infra_names.py.hidden"
+commit_file clean18.txt "nothing wrong with this line" "clean: nothing forbidden here"
+run_push 1 fail-closed-no-infra-gate origin main
+expect_out fail-closed-no-infra-gate "check_infra_names.py is not in this working tree"
+mv "$SBX/check_infra_names.py.hidden" "$W/scripts/check_infra_names.py"
+git -C "$W" reset -q --hard "$GOOD"; restore_remote
+
 note ""
 if [ "$fail" -eq 0 ]; then
   note "prove_pre_push: PASS -- 3 clean pushes each SUCCEED and print a receipt"
-  note "  naming the range; 12 leak shapes (message path, added-line path, the 5"
+  note "  naming the range; 13 leak shapes (message path, added-line path, the 5"
   note "  trailer shapes, a path and a URL each added then removed inside one"
-  note "  push, and a lane name or family reference in a subject or a lane name in"
-  note "  a body) are each REFUSED with the remote ref unmoved, and so is a branch"
-  note "  whose name carries a refused word; a missing scanner"
-  note "  or subject gate refuses a clean push; a delete is allowed; and the"
-  note "  mutation control lands the same commit with the hook bypassed, so the"
-  note "  refusals are the hook's."
+  note "  push, a lane name or family reference in a subject or a lane name in"
+  note "  a body, and an infrastructure name in an added line) are each REFUSED"
+  note "  with the remote ref unmoved, and so is a branch whose name carries a"
+  note "  refused word; the same infrastructure-name line LANDS once a ratchet"
+  note "  baseline accepts it, and its receipt names the arm; a missing scanner,"
+  note "  subject gate or infrastructure-name gate refuses a clean push; a delete"
+  note "  is allowed; and the mutation control lands the same commit with the"
+  note "  hook bypassed, so the refusals are the hook's."
   exit 0
 fi
 note "prove_pre_push: FAILED ($fail arm(s))"
