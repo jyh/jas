@@ -80,5 +80,8 @@ Both active ports run the same file (POLICY.md §1).
 
 - **Where an accept is answered** (in the app, or by the client on the artist's behalf). A3 and A4 decide that. The model
   only requires that `accept` is a separate call from `propose`.
+- **A selection change while a proposal is pending.** Selection is written through the non-journaled selection channel,
+  not `begin_txn`, so it does not withdraw the proposal; an accept restores the held document (and its selection) before
+  replaying. No law pins this yet. It is stated here so that nobody reads its absence as a decision.
 - **Proposals spanning documents, or concurrent proposers.** `targets: [common.id]` (`OP_LOG.md` §8 item 2) is what a
   later conflict rule would read.
