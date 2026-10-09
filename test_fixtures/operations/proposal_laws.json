@@ -1,0 +1,495 @@
+[
+  {
+    "name": "accept_equals_hand: a proposal accepted lands as the same edit a hand would make, attributed to its proposer",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "accept": "p1"
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      }
+    ],
+    "expect_actors": [
+      "ai"
+    ],
+    "expect_refused": []
+  },
+  {
+    "name": "reject_is_identity: a rejected proposal leaves the document and the journal as they were",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "reject": "p1"
+      }
+    ],
+    "equals_steps": [],
+    "expect_actors": [],
+    "expect_refused": []
+  },
+  {
+    "name": "pending_is_previewed_not_journaled: an open proposal shows on the canvas and is in no transaction",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      }
+    ],
+    "expect_actors": [],
+    "expect_refused": [],
+    "expect_pending": [
+      "p1"
+    ],
+    "journal_equals_steps": []
+  },
+  {
+    "name": "artist_edit_withdraws: an artist edit while a proposal is open withdraws it, and a later accept is refused",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": -5,
+              "dy": -5
+            }
+          ]
+        }
+      },
+      {
+        "accept": "p1"
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": -5,
+              "dy": -5
+            }
+          ]
+        }
+      }
+    ],
+    "expect_actors": [
+      "artist"
+    ],
+    "expect_refused": [
+      "p1"
+    ]
+  },
+  {
+    "name": "accepted_is_one_undo_step: undo after an accept restores the document before the proposal",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move_twice",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            },
+            {
+              "op": "move_selection",
+              "dx": 3,
+              "dy": 4
+            }
+          ]
+        }
+      },
+      {
+        "accept": "p1"
+      },
+      {
+        "history": "undo"
+      }
+    ],
+    "equals_steps": [],
+    "expect_actors": [],
+    "expect_refused": []
+  },
+  {
+    "name": "accept_is_once: a second accept of the same proposal is refused and changes nothing",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "accept": "p1"
+      },
+      {
+        "accept": "p1"
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      }
+    ],
+    "expect_actors": [
+      "ai"
+    ],
+    "expect_refused": [
+      "p1"
+    ]
+  },
+  {
+    "name": "one_pending_at_a_time: a second proposal while one is open is refused and the first stays previewed",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "propose": {
+          "id": "p2",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": -5,
+              "dy": -5
+            }
+          ]
+        }
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      }
+    ],
+    "expect_actors": [],
+    "expect_refused": [
+      "p2"
+    ],
+    "expect_pending": [
+      "p1"
+    ],
+    "journal_equals_steps": []
+  },
+  {
+    "name": "undo_withdraws: undo while a proposal is open withdraws it, and a later accept is refused",
+    "setup_svg": "two_rects.svg",
+    "steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": -5,
+              "dy": -5
+            }
+          ]
+        }
+      },
+      {
+        "propose": {
+          "id": "p1",
+          "actor": "ai",
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 50,
+              "height": 50,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 10,
+              "dy": 20
+            }
+          ]
+        }
+      },
+      {
+        "history": "undo"
+      },
+      {
+        "accept": "p1"
+      }
+    ],
+    "equals_steps": [
+      {
+        "txn": {
+          "name": "move",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": -5,
+              "dy": -5
+            }
+          ]
+        }
+      },
+      {
+        "history": "undo"
+      }
+    ],
+    "expect_actors": [],
+    "expect_refused": [
+      "p1"
+    ]
+  }
+]
