@@ -382,6 +382,14 @@ public sealed partial class MainWindow : Window
         target.PointerCaptureLost += OnPointerCaptureLost;
         target.PointerCanceled += OnPointerCanceled;
 
+        // W5-3b: KEYS. The canvas is a SwapChainPanel, which cannot take focus,
+        // so keys are read where they bubble to: the window's root content.
+        if (this.Content is UIElement root)
+        {
+            root.KeyDown += OnKeyDown;
+            root.CharacterReceived += OnCharacterReceived;
+        }
+
         // ⛔⛔ WHERE THE HIT TARGET ACTUALLY IS, IN THE COORDINATES THE INJECTOR
         // AIMS IN. This is the one number nothing on either side reports, and
         // without it the two sides cannot be compared at all.
@@ -691,6 +699,62 @@ public sealed partial class MainWindow : Window
     {
         var p = e.GetCurrentPoint(this.Canvas).Position;
         return (p.X * this.Canvas.CompositionScaleX, p.Y * this.Canvas.CompositionScaleY);
+    }
+
+    /// <summary>
+    /// W5-3b: the four NAMED keys go to the core as their control codes; the core
+    /// routes them to the active tool (Escape cancels a marquee). A key typed into
+    /// a text field is that field's, as on the web (`keyboard.rs`). The core's
+    /// answer arrives on the render thread, so the event is never marked handled
+    /// here: XAML's own handling proceeds either way.
+    /// </summary>
+    private void OnKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) { return; }
+        uint code = e.Key switch
+        {
+            Windows.System.VirtualKey.Escape => JasCore.KeyEscape,
+            Windows.System.VirtualKey.Enter => JasCore.KeyEnter,
+            Windows.System.VirtualKey.Delete => JasCore.KeyDelete,
+            Windows.System.VirtualKey.Back => JasCore.KeyBackspace,
+            _ => 0,
+        };
+        var mods = KeyMods();
+        // W5-3d, his "Ctrl-Z is not working": a COMMAND chord's character never
+        // reaches `OnCharacterReceived` as a letter (Ctrl+Z arrives there as the
+        // control character 0x1A, which it skips), so a Ctrl+letter is sent from
+        // HERE, as the lowercase letter with MOD_CMD. The core acts on undo and
+        // redo and leaves every other chord to the menu (`jas_key_event`).
+        if (code == 0 && (mods & JasCore.ModCmd) != 0
+            && e.Key >= Windows.System.VirtualKey.A && e.Key <= Windows.System.VirtualKey.Z)
+        {
+            code = (uint)'a' + (uint)(e.Key - Windows.System.VirtualKey.A);
+        }
+        if (code != 0) { _canvas.Key(code, mods); }
+    }
+
+    /// <summary>
+    /// W5-3b: a CHARACTER goes to the core as the character it is ('p', 'V', '='),
+    /// never a virtual-key number; the core resolves it against shortcuts.yaml.
+    /// Control characters are skipped: Escape, Enter and Backspace also arrive
+    /// here as 0x1B / 0x0D / 0x08, and `OnKeyDown` has already sent them.
+    /// </summary>
+    private void OnCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs e)
+    {
+        if (e.OriginalSource is TextBox) { return; }
+        uint c = e.Character;
+        if (c < 0x20 || c == 0x7F) { return; }
+        _canvas.Key(c, KeyMods());
+    }
+
+    /// <summary>Shift/Alt/Ctrl as `MOD_*` for a key, read from the keyboard state.</summary>
+    private static uint KeyMods()
+    {
+        uint m = 0;
+        if (IsKeyDown(Windows.System.VirtualKey.Shift)) { m |= JasCore.ModShift; }
+        if (IsKeyDown(Windows.System.VirtualKey.Menu)) { m |= JasCore.ModAlt; }
+        if (IsKeyDown(Windows.System.VirtualKey.Control)) { m |= JasCore.ModCmd; }
+        return m;
     }
 
     /// <summary>
