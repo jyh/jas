@@ -56,6 +56,9 @@ pub mod canvas;
 #[cfg(test)]
 mod cross_language_test;
 pub mod document;
+// The agent API's MCP transport core (docs/AGENT_API.md §4, node A3). Pure: no
+// I/O and no dependency beyond serde_json, so it compiles in every build.
+pub mod mcp;
 pub mod geometry;
 // The immediate-mode Painter seam (contract v2, RATIFIED + FROZEN 2026-07-23).
 // Always compiled (pure-native core; the Canvas2dPainter backend is
