@@ -246,6 +246,7 @@ public sealed partial class MainWindow
             var optionsRefused = 0;
             var (menus, itemsRefused) = (0, 0);
             var swatches = 0;
+            var spacers = 0;
             var (previews, previewEmpty) = (0, 0);
             foreach (var leaf in leaves)
             {
@@ -363,6 +364,14 @@ public sealed partial class MainWindow
                         el = BuildChoice(leaf);
                         break;
 
+                    // A `spacer` is layout-only flex: the plan already gave it
+                    // its room, and it draws nothing in any port. Counted, never
+                    // drawn as a `[spacer]` placeholder.
+                    case "spacer":
+                        spacers++;
+                        el = new Border();
+                        break;
+
                     default:
                         unmaterialized++;
                         el = Placeholder(leaf.Type);
@@ -382,7 +391,7 @@ public sealed partial class MainWindow
             // and asserts only `leaves` and `controls`; nothing sums the category
             // counters, and the self-test's row is an INPUT to that parser.
             _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} previews={previews} preview-empty={previewEmpty} "
+                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} previews={previews} preview-empty={previewEmpty} "
                  + $"unmaterialized={unmaterialized} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
