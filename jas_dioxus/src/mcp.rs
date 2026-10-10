@@ -422,6 +422,54 @@ mod tests {
         assert_eq!(got, want);
     }
 
+    /// A3b slice 3: each op's ARGUMENTS reach the schema. `ops.items` carries
+    /// one `anyOf` branch per declared verb, whose `op` is that verb as a
+    /// `const` and whose other properties are exactly the keys
+    /// `op_arguments.json` derives for it, typed with its `argument_types` (a
+    /// single type as a string, several as an array). A verb with no corpus
+    /// instance has a branch naming only `op`. No argument is `required`: a
+    /// witnessed key may still have a default. The expectation is read from the
+    /// FILES, not from the code under test.
+    #[test]
+    fn propose_declares_each_ops_arguments() {
+        let mut s = session();
+        let out = call(&mut s, 2, "tools/list", json!({}));
+        let propose = out[0]["result"]["tools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == "propose").unwrap();
+        let branches = propose["inputSchema"]["properties"]["ops"]["items"]["anyOf"]
+            .as_array().expect("an anyOf of per-verb branches");
+        let read = |name: &str| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(format!(
+                "{}/../test_fixtures/operations/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap()
+        };
+        let vocab = read("op_vocabulary.json");
+        let file = read("op_arguments.json");
+        let verbs = vocab["verbs"].as_object().unwrap();
+        assert!(verbs.len() >= 40, "the vocabulary file is not vacuous: {}", verbs.len());
+        assert_eq!(branches.len(), verbs.len(), "one branch per declared verb");
+        let mut typed = 0;
+        for (verb, _) in verbs {
+            let b = branches.iter().find(|b| b["properties"]["op"]["const"] == verb.as_str())
+                .unwrap_or_else(|| panic!("no branch for `{verb}`"));
+            assert!(b.get("required").is_none(), "`{verb}`: no argument is required");
+            let mut got: Vec<&String> = b["properties"].as_object().unwrap().keys()
+                .filter(|k| *k != "op").collect();
+            got.sort();
+            let want_types = file["argument_types"][verb.as_str()].as_object();
+            let mut want: Vec<&String> = want_types.map(|o| o.keys().collect()).unwrap_or_default();
+            want.sort();
+            assert_eq!(got, want, "`{verb}`: the branch's keys are the file's");
+            for k in want {
+                let ts: Vec<&str> = file["argument_types"][verb.as_str()][k].as_array().unwrap()
+                    .iter().map(|t| t.as_str().unwrap()).collect();
+                let expect = if ts.len() == 1 { json!(ts[0]) } else { json!(ts) };
+                assert_eq!(b["properties"][k.as_str()]["type"], expect, "`{verb}.{k}`'s type");
+                typed += 1;
+            }
+        }
+        assert!(typed >= 100, "the branches typed only {typed} argument(s)");
+    }
+
     #[test]
     fn propose_previews_and_journals_nothing() {
         let mut s = session();
