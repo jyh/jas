@@ -3715,6 +3715,29 @@ mod tests {
         }
     }
 
+    /// I1b-2: the box a gradient is mapped onto is the one the PAINTER
+    /// resolves it on, which for a Rect is its raw `(x, y, w, h)`, not its
+    /// stroke-inflated `bounds()`. A stroked rect is the case that tells them
+    /// apart; the unstroked arm above cannot.
+    #[test]
+    fn a_standard_linear_gradient_on_a_stroked_rect_maps_onto_the_painted_box() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+          </linearGradient></defs>
+          <g><rect x="0" y="0" width="96" height="48" fill="url(#g)" stroke="black" stroke-width="16"/></g></svg>"##;
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let Element::Rect(r) = &*layer.children[0] else { panic!("a rect") };
+        let g = r.fill_gradient.as_deref().expect("a gradient");
+        let bbox = (r.x, r.y, r.width, r.height);
+        for k in 0..=10 {
+            let t = k as f64 / 10.0;
+            let got = jas_linear_r_at(g, bbox, bbox.0 + t * bbox.2);
+            assert!((got - (1.0 - t)).abs() < 1e-9, "at t={t}: r={got}, the SVG ramp paints {}", 1.0 - t);
+        }
+    }
+
     /// I1b-2: a bare `stroke="url(#g)"` keeps its Stroke (the width lives
     /// there) and gains a radial stroke gradient, re-centred, with the radius
     /// mapped to `aspect_ratio` and the stops' offsets and opacities kept.
