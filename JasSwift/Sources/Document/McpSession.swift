@@ -148,8 +148,27 @@ public final class McpSession {
         }
     }
 
-    /// The tool list (Rust: `mcp::tool_list`). The edit vocabulary is the
-    /// primitive ops, validated by the model.
+    /// The declared op vocabulary (A3b), sorted: the verbs of
+    /// `test_fixtures/operations/op_vocabulary.json`, which
+    /// `scripts/check_op_vocabulary.py` holds equal to both ports' `opApply`.
+    /// Read the way `WorkspaceLoader` reads the workspace bundle (the source
+    /// tree, then the app bundle). Empty only if neither is readable, which
+    /// `mcpProposeDeclaresTheOpVocabularyAsAnEnum` reds.
+    static func opVerbs() -> [String] {
+        let tree = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test_fixtures/operations/op_vocabulary.json")
+        let url = FileManager.default.fileExists(atPath: tree.path)
+            ? tree : Bundle.main.url(forResource: "op_vocabulary", withExtension: "json")
+        guard let url, let data = try? Data(contentsOf: url),
+              let file = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let verbs = file["verbs"] as? [String: Any] else { return [] }
+        return verbs.keys.sorted()
+    }
+
+    /// The tool list (Rust: `mcp::tool_list`). Each op's `op` is an enum of the
+    /// declared verbs; the model still validates every op.
     private static func toolList() -> [[String: Any]] {
         [
             [
@@ -159,7 +178,9 @@ public final class McpSession {
                     "type": "object",
                     "properties": [
                         "name": ["type": "string", "description": "the action verb that names this edit"],
-                        "ops": ["type": "array", "items": ["type": "object", "required": ["op"]],
+                        "ops": ["type": "array",
+                                "items": ["type": "object", "required": ["op"],
+                                          "properties": ["op": ["type": "string", "enum": opVerbs()]]],
                                 "description": "primitive document ops, applied in order"],
                     ],
                     "required": ["name", "ops"],

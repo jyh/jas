@@ -1709,6 +1709,25 @@ private func mcpMatch(_ want: Any, _ got: Any, _ settled: Any, _ at: String) {
     Issue.record("\(at): \(want) != \(got)")
 }
 
+/// A3b in Swift, the twin of Rust's `propose_declares_the_op_vocabulary_as_an_enum`:
+/// `propose`'s `op` is an enum of the declared vocabulary. The expectation is
+/// read from the FILE, not from `McpSession`, and its size is asserted.
+@Test func mcpProposeDeclaresTheOpVocabularyAsAnEnum() throws {
+    let out = McpSession(model: Model(document: Document(layers: [Layer(children: [])], artboards: [])))
+        .handle(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+    let msg = try JSONSerialization.jsonObject(with: Data(out[0].utf8)) as! [String: Any]
+    let tools = (msg["result"] as! [String: Any])["tools"] as! [[String: Any]]
+    let propose = tools.first { $0["name"] as? String == "propose" }!
+    let schema = propose["inputSchema"] as! [String: Any]
+    let ops = (schema["properties"] as! [String: Any])["ops"] as! [String: Any]
+    let op = ((ops["items"] as! [String: Any])["properties"] as! [String: Any])["op"] as! [String: Any]
+    let got = op["enum"] as? [String] ?? []
+    let file = try JSONSerialization.jsonObject(with: readFixture("operations/op_vocabulary.json").data(using: .utf8)!) as! [String: Any]
+    let want = (file["verbs"] as! [String: Any]).keys.sorted()
+    #expect(want.count >= 40, "the vocabulary file is not vacuous: \(want.count)")
+    #expect(got == want)
+}
+
 /// A4 (i), the transport conformance corpus: every case of
 /// `operations/mcp_exchanges.json` replayed through `McpSession`, the twin of
 /// Rust's `mcp_exchanges`.
@@ -1746,6 +1765,27 @@ private func mcpMatch(_ want: Any, _ got: Any, _ settled: Any, _ at: String) {
             for (k, (w, g)) in zip(want, got).enumerated() { mcpMatch(w, g, settled, "\(name) step \(i) message \(k)") }
         }
     }
+}
+
+/// A3b, at runtime, the twin of Rust's `op_vocabulary_tests`: every verb
+/// `operations/op_vocabulary.json` declares reaches an arm of `opApply` (its
+/// error, if any, is about its arguments, never `unknownVerb`), and a verb the
+/// file does not declare is `unknownVerb`.
+@Test func opVocabularyEveryDeclaredVerbReachesAnArm() throws {
+    let json = readFixture("operations/op_vocabulary.json")
+    let file = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let verbs = (file["verbs"] as! [String: Any]).keys.sorted()
+    #expect(verbs.count >= 40, "the vocabulary file is not vacuous: \(verbs.count)")
+    for v in verbs {
+        let model = Model(document: Document(layers: [Layer(children: [])], artboards: []))
+        let controller = Controller(model: model)
+        if case .unknownVerb = opApply(model, controller, ["op": v]) {
+            Issue.record("\(v) is declared and opApply does not know it")
+        }
+    }
+    let model = Model(document: Document(layers: [Layer(children: [])], artboards: []))
+    let r = opApply(model, Controller(model: model), ["op": "zz_not_a_verb"])
+    if case .unknownVerb = r {} else { Issue.record("the control: an undeclared verb is refused, got \(String(describing: r))") }
 }
 
 @Test func proposalLaws() throws {
