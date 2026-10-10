@@ -629,6 +629,71 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// W5-2: IDLE MOTION IS SAFE FOR EVERY TOOL. The shell is about to forward
+    /// unpressed moves (`MOD_DRAGGING` clear), so every tool the shell can
+    /// select must take them without touching the document: not its elements,
+    /// not its selection, not its journal. Measured over ALL of `TOOL_IDS`, over
+    /// the seeded rect and off it, because a census READ of each tool's
+    /// `on_mousemove` (W4 §3) is not a measurement.
+    #[test]
+    fn an_unpressed_move_changes_no_tools_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let snapshot = |e: *mut JasEngine| unsafe { &*e }.with_model(|m| (
+            crate::geometry::test_json::document_to_test_json(m.document()),
+            m.journal().len(),
+            m.journal_head(),
+        ));
+        let mut moved = Vec::new();
+        for i in 0..TOOL_IDS.len() {
+            let e = jas_engine_new();
+            seed(e);
+            assert_eq!(unsafe { jas_set_tool(e, i) }, JasStatus::Ok, "{}", TOOL_IDS[i]);
+            let before = snapshot(e);
+            for (x, y) in [(5.0, 5.0), (40.0, 50.0), (70.0, 70.0), (300.0, 200.0), (60.0, 40.0)] {
+                assert_eq!(unsafe { jas_pointer_event(e, KIND_MOVE, x, y, 0) }, JasStatus::Ok);
+            }
+            if snapshot(e) != before {
+                moved.push(TOOL_IDS[i]);
+            }
+            unsafe { jas_engine_free(e) };
+        }
+        assert!(TOOL_IDS.len() >= 27, "the census covers every selectable tool: {}", TOOL_IDS.len());
+        assert!(moved.is_empty(), "an UNPRESSED move changed the document under: {moved:?}");
+    }
+
+    /// W5-2: and idle motion is what class B needs. The pen draws a rubber band
+    /// from its last anchor to the pointer while NO button is down
+    /// (`pen.yaml`'s `on_mousemove` sets `mouse_x/y` unguarded), so after one
+    /// placed anchor the overlay must FOLLOW an unpressed pointer.
+    #[test]
+    fn the_pen_rubber_band_follows_an_unpressed_pointer() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::RecordingPainter;
+        let pen = TOOL_IDS.iter().position(|t| *t == "pen").expect("pen is selectable");
+        let e = jas_engine_new();
+        seed(e);
+        let frame = |e: *mut JasEngine| {
+            let mut p = RecordingPainter::new();
+            emit_frame(unsafe { &*e }, &mut p);
+            format!("{:?}", p.commands())
+        };
+        unsafe {
+            assert_eq!(jas_set_tool(e, pen), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 200.0, 20.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 200.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 250.0, 150.0, 0);
+        }
+        let at_a = frame(e);
+        unsafe { jas_pointer_event(e, KIND_MOVE, 320.0, 60.0, 0) };
+        let at_b = frame(e);
+        assert_ne!(at_a, at_b, "the pen's overlay must follow an unpressed pointer");
+        // And back: the overlay is a function of where the pointer IS, not of
+        // how many moves arrived.
+        unsafe { jas_pointer_event(e, KIND_MOVE, 250.0, 150.0, 0) };
+        assert_eq!(frame(e), at_a, "the same pointer position draws the same overlay");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// ⛔ A COUNT CANNOT EXPRESS A REFUSAL, so a null engine does not return 0.
     #[test]
     fn the_selection_count_crosses_and_a_null_engine_is_not_zero() {
