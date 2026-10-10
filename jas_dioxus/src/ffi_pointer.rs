@@ -91,8 +91,19 @@ pub unsafe extern "C" fn jas_tool_name(index: usize, out_len: *mut usize) -> *co
 pub unsafe extern "C" fn jas_set_tool(e: *mut JasEngine, index: usize) -> JasStatus {
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
     let Some(id) = TOOL_IDS.get(index) else { return JasStatus::MissingTarget };
-    let Some(built) = build_tool(id) else { return JasStatus::MissingTarget };
-    *engine.tool_slot() = Some((index, built));
+    let Some(mut built) = build_tool(id) else { return JasStatus::MissingTarget };
+    // ⛔ A SWITCH IS LEAVE-THEN-ENTER, NEVER A SLOT ASSIGNMENT (W5-0). The old
+    // tool's `on_leave` is what commits work in flight (the pen's open path),
+    // and the new tool's `on_enter` resets state it shares with others (the
+    // pen's thread-local anchor buffer). Both apps switch this way (Swift's
+    // `CanvasSubwindow` tool observer, the web app's `active_tool` route in
+    // `renderer.rs`); an assignment alone drops the path and keeps the anchors.
+    let mut slot = engine.tool_slot();
+    if let Some((_, old)) = slot.as_mut() {
+        engine.with_model_mut(|m| old.deactivate(m));
+    }
+    engine.with_model_mut(|m| built.activate(m));
+    *slot = Some((index, built));
     JasStatus::Ok
 }
 
@@ -152,7 +163,12 @@ pub unsafe extern "C" fn jas_pointer_event(
         // Default to the first tool rather than refusing: a shell that never
         // called `jas_set_tool` still gets the selection tool, which is what
         // every drawing app opens with.
-        let Some(built) = build_tool(TOOL_IDS[0]) else { return JasStatus::MissingTarget };
+        let Some(mut built) = build_tool(TOOL_IDS[0]) else { return JasStatus::MissingTarget };
+        // ⚠️ A SURVIVING MUTANT, RECORDED (W5-0): deleting this line reds no
+        // arm, because selection's `on_enter` only writes `mode: 'idle'`, its
+        // own declared default. It stays so the implicit tool is entered the
+        // same way a picked one is; it gains a witness when TOOL_IDS[0] does.
+        engine.with_model_mut(|m| built.activate(m));
         *slot = Some((0, built));
     }
     let (_, tool) = slot.as_mut().expect("just built");
