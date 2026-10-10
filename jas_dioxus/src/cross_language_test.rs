@@ -1350,6 +1350,72 @@ mod tests {
         out
     }
 
+    /// A3b slice 2 PROBE (temporary): drop each argument of each corpus op and
+    /// see whether the observable changes.
+    fn a3b_observe(tc: &serde_json::Value) -> (String, Vec<String>) {
+        let mut model = Model::new(setup_document(tc), None);
+        let mut results = Vec::new();
+        let mut run = |model: &mut Model, op: &serde_json::Value| {
+            let r = crate::document::op_apply::op_apply(model, op);
+            results.push(match r { Ok(()) => "Ok".to_string(), Err(e) => e.class_name().to_string() });
+        };
+        if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
+            for txn in txns {
+                model.begin_txn();
+                for op in txn["ops"].as_array().unwrap() { run(&mut model, op); }
+                model.commit_txn();
+            }
+        } else {
+            model.begin_txn();
+            for op in tc["ops"].as_array().unwrap() { run(&mut model, op); }
+            model.commit_txn();
+        }
+        (<DocumentOps as OpWorld>::to_test_json(&model), results)
+    }
+
+    #[test]
+    #[ignore]
+    fn a3b_probe() {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut eff: BTreeMap<String, BTreeMap<String, (usize, usize)>> = BTreeMap::new();
+        let mut instances = 0usize;
+        for fixture in operation_fixtures() {
+            let tests: serde_json::Value = serde_json::from_str(&read_fixture(&fixture)).unwrap();
+            for tc in tests.as_array().unwrap() {
+                let base = a3b_observe(tc);
+                // every op location: (txn index or None, op index)
+                let mut locs = Vec::new();
+                if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
+                    for (ti, txn) in txns.iter().enumerate() {
+                        for oi in 0..txn["ops"].as_array().unwrap().len() { locs.push((Some(ti), oi)); }
+                    }
+                } else {
+                    for oi in 0..tc["ops"].as_array().unwrap().len() { locs.push((None, oi)); }
+                }
+                for (ti, oi) in locs {
+                    let op = match ti { Some(t) => &tc["txns"][t]["ops"][oi], None => &tc["ops"][oi] };
+                    let verb = op["op"].as_str().unwrap().to_string();
+                    instances += 1;
+                    let keys: BTreeSet<String> = op.as_object().unwrap().keys().filter(|k| *k != "op").cloned().collect();
+                    for k in keys {
+                        let mut m = tc.clone();
+                        let o = match ti { Some(t) => &mut m["txns"][t]["ops"][oi], None => &mut m["ops"][oi] };
+                        o.as_object_mut().unwrap().remove(&k);
+                        let changed = std::panic::catch_unwind(|| a3b_observe(&m)).map(|r| r != base).unwrap_or(true);
+                        let e = eff.entry(verb.clone()).or_default().entry(k).or_insert((0, 0));
+                        e.1 += 1;
+                        if changed { e.0 += 1; }
+                    }
+                }
+            }
+        }
+        eprintln!("A3B-PROBE instances={instances}");
+        for (v, ks) in &eff {
+            let s: Vec<String> = ks.iter().map(|(k, (c, n))| format!("{k}={c}/{n}")).collect();
+            eprintln!("A3B {v:28} {}", s.join(" "));
+        }
+    }
+
     /// Bootstrap helper: generate expected JSON for operation tests.
     /// Run with: cargo test generate_operation_expected -- --nocapture --ignored
     ///
