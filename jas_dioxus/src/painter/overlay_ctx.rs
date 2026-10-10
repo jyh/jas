@@ -181,7 +181,14 @@ impl<'a> OverlayCtx<'a> {
         self.p.push_state(Transform { a: sx, b: 0.0, c: 0.0, d: sy, e: 0.0, f: 0.0 });
         self.frames += 1;
     }
-    /// Undo the most recent `translate`/`rotate`/`scale`.
+    /// Multiply in a general affine `transform` (canvas `ctx.transform(a..f)`),
+    /// undone by one `restore`. An element's own transform is not always a
+    /// translate/rotate/scale, so the selection outline needs the general form.
+    pub fn transform(&mut self, t: &Transform) {
+        self.p.push_state(*t);
+        self.frames += 1;
+    }
+    /// Undo the most recent `translate`/`rotate`/`scale`/`transform`.
     pub fn restore(&mut self) {
         if self.frames > 0 {
             self.p.pop_state();
