@@ -193,6 +193,14 @@ internal static unsafe class JasCore
     internal const uint ModShift = 1u << 0;
     internal const uint ModAlt = 1u << 1;
     internal const uint ModDragging = 1u << 2;
+    internal const uint ModCmd = 1u << 3;
+
+    // W5-3a's named keys for `jas_key_event`, as ASCII control codes
+    // (`ffi_pointer.rs`, KEY_*). Any other code is the character a key produced.
+    internal const uint KeyBackspace = 0x08;
+    internal const uint KeyEnter = 0x0D;
+    internal const uint KeyEscape = 0x1B;
+    internal const uint KeyDelete = 0x7F;
 
     /// <summary>
     /// One pointer transition. <paramref name="x"/> and <paramref name="y"/>
@@ -216,6 +224,14 @@ internal static unsafe class JasCore
     /// <summary>Select the tool the pointer drives, by index.</summary>
     [DllImport(Lib)]
     internal static extern int jas_set_tool(IntPtr engine, nuint index);
+
+    /// <summary>
+    /// One key (W5-3a): Escape/Enter/Delete/Backspace reach the active tool, and a
+    /// bare character resolves against shortcuts.yaml in the core. Returns 0 when
+    /// handled, `UnknownVerb` (2) when nothing handled it.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern int jas_key_event(IntPtr engine, uint code, uint mods);
 
     /// <summary>How many tools the core offers.</summary>
     [DllImport(Lib)]

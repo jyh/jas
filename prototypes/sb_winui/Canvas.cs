@@ -112,6 +112,13 @@ internal sealed class RepaintCmd : Cmd
     internal string Cause = "repaint";
 }
 
+/// <summary>One key for `jas_key_event` (W5-3b), queued like a pointer event.</summary>
+internal sealed class KeyCmd : Cmd
+{
+    internal uint Code;
+    internal uint Mods;
+}
+
 internal sealed class PointerCmd : Cmd
 {
     internal uint Kind;
@@ -806,6 +813,8 @@ internal sealed unsafe class Canvas : IDisposable
     internal void Pointer(uint kind, double x, double y, uint mods) =>
         _queue.Add(new PointerCmd { Kind = kind, X = x, Y = y, Mods = mods });
 
+    internal void Key(uint code, uint mods) => _queue.Add(new KeyCmd { Code = code, Mods = mods });
+
     internal void PointerReport(PointerReportCmd report) => _queue.Add(report);
 
     internal void SetDpiScale(double scale) => _queue.Add(new DpiCmd { Scale = scale });
@@ -1064,6 +1073,16 @@ internal sealed unsafe class Canvas : IDisposable
                     // A release is where a gesture lands on the document (a
                     // selection, a move), so an open panel's plan is re-read.
                     if (p.Kind == JasCore.PointerRelease) { _panelStale = true; }
+                    break;
+
+                case KeyCmd k:
+                    // IN ORDER with the pointer events around it: Escape between a
+                    // press and its release is what cancels a marquee.
+                    if (_engine != IntPtr.Zero) { JasCore.jas_key_event(_engine, k.Code, k.Mods); }
+                    dirty = true;
+                    cause = "key";
+                    // A shortcut may have switched the tool, so an open panel is re-read.
+                    _panelStale = true;
                     break;
 
                 case PointerReportCmd pr:
