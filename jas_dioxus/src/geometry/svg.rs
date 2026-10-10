@@ -3521,6 +3521,61 @@ mod tests {
         assert_eq!(el.stroke_gradient(), Some(&stroke), "the hsb stroke stop came back equal");
     }
 
+    /// The colour a jas gradient paints at absolute position `x` along a
+    /// LINEAR ramp at angle 0 on `bbox`, computed here from the painter's
+    /// published geometry (ramp = centre ± half-diagonal), NOT by calling the
+    /// importer's own helper: an oracle that shares the subject's code agrees
+    /// by construction.
+    fn jas_linear_r_at(g: &Gradient, bbox: (f64, f64, f64, f64), x: f64) -> f64 {
+        let (bx, _, bw, bh) = bbox;
+        let hd = (bw * bw + bh * bh).sqrt() / 2.0;
+        let l = 50.0 * ((x - (bx + bw / 2.0)) / hd + 1.0);
+        let r = |c: &Color| c.to_rgba().0;
+        let st = &g.stops;
+        if l <= st[0].location { return r(&st[0].color); }
+        for w in st.windows(2) {
+            if l <= w[1].location {
+                let t = (l - w[0].location) / (w[1].location - w[0].location);
+                return r(&w[0].color) + t * (r(&w[1].color) - r(&w[0].color));
+            }
+        }
+        r(&st[st.len() - 1].color)
+    }
+
+    /// ⭐ I1b-2: a standard `<linearGradient>` in `<defs>`, referenced by
+    /// `fill="url(#g)"`, imports as a jas gradient that PAINTS THE SAME RAMP:
+    /// sampled at eleven points across the element, the red channel the jas
+    /// gradient paints equals the one the SVG gradient paints there. The SVG
+    /// vector runs edge to edge (objectBoundingBox), which is SHORTER than the
+    /// jas ramp (the bbox diagonal), so a naive copy of the offsets would be
+    /// visibly wrong. And the fallback colour after `url(#g)` is the element's
+    /// own fill.
+    #[test]
+    fn a_standard_linear_gradient_imports_as_the_same_painted_ramp() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+          </linearGradient></defs>
+          <g><rect x="0" y="0" width="96" height="48" fill="url(#g) rgb(0,255,0)"/></g></svg>"##;
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let el = &layer.children[0];
+        let g = el.fill_gradient().expect("the url(#g) fill imports as a gradient");
+        assert_eq!(g.gtype, GradientType::Linear);
+        assert!(g.angle.abs() < 1e-9, "a left-to-right vector is angle 0: {}", g.angle);
+        let Element::Rect(r) = &**el else { panic!("a rect") };
+        assert_eq!(r.fill.as_ref().map(|f| f.color.to_rgba()), Some((0.0, 1.0, 0.0, 1.0)),
+                   "the colour after url(#g) is the element's fill");
+        let bbox = el.bounds();
+        for k in 0..=10 {
+            let t = k as f64 / 10.0;
+            let x = bbox.0 + t * bbox.2;
+            let want = 1.0 - t; // red falls linearly from the left edge to the right
+            let got = jas_linear_r_at(g, bbox, x);
+            assert!((got - want).abs() < 1e-9, "at t={t}: the jas ramp paints r={got}, the SVG ramp r={want}");
+        }
+    }
+
     /// The control: an element with no gradient writes no gradient attribute,
     /// so every existing SVG fixture is byte-identical.
     #[test]
