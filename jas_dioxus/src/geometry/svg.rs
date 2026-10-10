@@ -3777,6 +3777,102 @@ mod tests {
         assert!((g.angle - 90.0).abs() < 1e-9, "the jas attribute's angle, not the url's: {}", g.angle);
     }
 
+    /// Drop every `jas:*-gradient` attribute, which is what an app that does
+    /// not know the `jas:` namespace reads.
+    fn without_jas_gradients(svg: &str) -> String {
+        let mut out = String::new();
+        let mut rest = svg;
+        while let Some(i) = rest.find(" jas:").filter(|&i| rest[i..].starts_with(" jas:fill-gradient=\"")
+                                                       || rest[i..].starts_with(" jas:stroke-gradient=\"")) {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 1..];
+            let q = after.find('"').unwrap();
+            let close = after[q + 1..].find('"').unwrap();
+            rest = &after[q + 1 + close + 1..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// ⭐ I1b-2b: the SVG a jas gradient is saved as carries a STANDARD
+    /// gradient beside the `jas:` record, so another app draws it. The oracle:
+    /// strip the `jas:` attribute (what that app sees), re-import, and the
+    /// standard element alone gives back the same angle and stops, because it
+    /// was written at the exact ends of the ramp the painter draws. A stroked,
+    /// non-square rect and an off-axis angle make the box and the projection
+    /// both load-bearing.
+    #[test]
+    fn a_linear_gradient_is_saved_as_a_standard_one_another_app_can_draw() {
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 30.0,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 20.0, midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 40.0, location: 80.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        };
+        let mut rect = make_rect(10.0, 20.0, 60.0, 30.0);
+        if let Element::Rect(r) = &mut rect {
+            r.stroke = Some(Stroke::new(Color::BLACK, 6.0));
+            r.fill_gradient = Some(Box::new(g.clone()));
+        }
+        let svg = document_to_svg(&make_doc(vec![rect]));
+        assert!(svg.contains("<linearGradient id=\"jas-g1\""), "a standard element is written:\n{svg}");
+        assert!(svg.contains("fill=\"url(#jas-g1) rgb(255,0,0)\""), "the fill refers to it, keeping its own colour:\n{svg}");
+        let plain = without_jas_gradients(&svg);
+        assert!(!plain.contains("jas:fill-gradient"), "the control: the jas record is gone");
+        let back = svg_to_document(&plain);
+        let Element::Layer(layer) = &back.layers[0] else { panic!("a layer") };
+        let got = layer.children[0].fill_gradient().expect("the standard element alone imports");
+        assert!((got.angle - 30.0).abs() < 1e-6, "angle {}", got.angle);
+        let locs: Vec<f64> = got.stops.iter().map(|s| s.location).collect();
+        assert_eq!(got.stops.len(), 2, "no clipping, so no extra stops: {locs:?}");
+        for (a, b) in got.stops.iter().zip(&g.stops) {
+            assert!((a.location - b.location).abs() < 1e-6, "{locs:?}");
+            assert!((a.opacity - b.opacity).abs() < 1e-6 && a.color.to_rgba() == b.color.to_rgba());
+        }
+    }
+
+    /// I1b-2b: a radial gradient is saved centred on the painter's box with
+    /// the radius the painter draws, so it re-imports with the same aspect.
+    /// It is on a STROKE, which is written `stroke="url(#…) <colour>"`.
+    #[test]
+    fn a_radial_stroke_gradient_is_saved_as_a_standard_one() {
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            aspect_ratio: 70.0,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(1.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        };
+        let mut rect = make_rect(0.0, 0.0, 40.0, 20.0);
+        if let Element::Rect(r) = &mut rect {
+            r.fill = None;
+            r.stroke = Some(Stroke::new(Color::BLACK, 2.0));
+            r.stroke_gradient = Some(Box::new(g.clone()));
+        }
+        let svg = document_to_svg(&make_doc(vec![rect]));
+        assert!(svg.contains("<radialGradient id=\"jas-g1\""), "{svg}");
+        assert!(svg.contains("stroke=\"url(#jas-g1) rgb(0,0,0)\""), "{svg}");
+        assert!(svg.contains("fill=\"none\""), "an unfilled rect stays unfilled: {svg}");
+        let back = svg_to_document(&without_jas_gradients(&svg));
+        let Element::Layer(layer) = &back.layers[0] else { panic!("a layer") };
+        let got = layer.children[0].stroke_gradient().expect("a radial gradient");
+        assert_eq!(got.gtype, GradientType::Radial);
+        assert!((got.aspect_ratio - 70.0).abs() < 1e-6, "aspect {}", got.aspect_ratio);
+    }
+
+    /// The control for I1b-2b: a document with no gradient writes no standard
+    /// gradient element and no `url(`, so every existing SVG is byte-identical.
+    #[test]
+    fn a_document_with_no_gradient_writes_no_standard_gradient() {
+        let svg = document_to_svg(&make_doc(vec![make_rect(1.0, 2.0, 3.0, 4.0)]));
+        assert!(!svg.contains("Gradient") && !svg.contains("url("), "{svg}");
+    }
+
     /// The control: an element with no gradient writes no gradient attribute,
     /// so every existing SVG fixture is byte-identical.
     #[test]
