@@ -210,10 +210,35 @@ public sealed partial class MainWindow : Window
     /// <summary>The dock pane (the right-hand panel). See PaneView.cs.</summary>
     private PaneView _dock = null!;
 
+    /// <summary>The toolbar pane (the left-hand column), under SB_TOOLBAR. See PaneView.cs.</summary>
+    private PaneView _toolbar = null!;
+
+    /// <summary>`layout.yaml`'s toolbar, by its pane id; the core plans it like a panel.</summary>
+    private const string ToolbarPanelId = "toolbar_pane";
+
+    /// <summary>The toolbar's width in canonical panel units: `toolbar_pane`'s own 72.</summary>
+    private const long ToolbarAvailW = 72;
+
+    private bool _toolbarWanted;
+    private bool _toolbarRefused;
+
+    /// <summary>A new toolbar plan was published. Draw it, on the UI thread.</summary>
+    private void OnToolbarChanged()
+    {
+        var snap = _canvas.Toolbar;
+        if (snap is null) { return; }
+        try { _toolbar.DrawPane(snap); }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL TOOLBAR DRAW threw {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     public MainWindow()
     {
         InitializeComponent();
         _dock = new PaneView(this, PaneHost, PaneScroll, PaneAvailW, PaneFirstPanelId);
+        _toolbar = new PaneView(this, ToolbarHost, ToolbarScroll, ToolbarAvailW, ToolbarPanelId, topAligned: true);
         // `RUSTPENDING`, not a bare name: a window that has reported nothing yet
         // must SAY so. The bare title used to be indistinguishable from a run
         // whose verdict had been blanked by a verdict-less last row.
@@ -226,6 +251,7 @@ public sealed partial class MainWindow : Window
         _canvas.DocumentDirtyChanged = OnDocumentDirtyChanged;
         _canvas.HashTaken = OnHashTaken;
         _canvas.PanelChanged = OnPanelChanged;
+        _canvas.ToolbarChanged = OnToolbarChanged;
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
         // (W2-5, stop 5). Shown here, its column is already taken when the
@@ -242,6 +268,20 @@ public sealed partial class MainWindow : Window
             _paneWanted = true;
             PaneHost.Width = PaneAvailW + 2 * PanePad + PaneHost.BorderThickness.Left;
             PaneHost.Visibility = Visibility.Visible;
+            // THE TOOLBAR PANE, behind its knob until the harness proves its
+            // pane verdicts read the dock alone beside it. The SAME predicate
+            // as the other pane knobs (whitespace is unset).
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+            {
+                _toolbarWanted = true;
+                ToolbarHost.Width = ToolbarAvailW + 2 * PanePad + ToolbarHost.BorderThickness.Right;
+                ToolbarHost.Visibility = Visibility.Visible;
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+        {
+            // Refused, never ignored: only `app` opens panes.
+            _toolbarRefused = true;
         }
 
         // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
@@ -954,6 +994,32 @@ public sealed partial class MainWindow : Window
             // is read against the document a person will actually see. The
             // queue is ordered, so this is a sequence, not a race.
             if (_paneWanted) { _canvas.OpenPanel(firstPanel, PaneAvailW, "app"); }
+            if (_toolbarWanted)
+            {
+                _canvas.OpenToolbar(ToolbarPanelId, ToolbarAvailW);
+                // SB_TOOLBAR_SYNTH=<widget>: one click on a toolbar control, queued
+                // after the open, through the method a person's click reaches --
+                // the toolbar's twin of SB_PANEL_SYNTH, so its routing is driven.
+                var tbSynth = Environment.GetEnvironmentVariable("SB_TOOLBAR_SYNTH");
+                if (!string.IsNullOrWhiteSpace(tbSynth))
+                {
+                    _canvas.PanelClick(new PanelClickCmd
+                    {
+                        PanelId = ToolbarPanelId, Widget = tbSynth.Trim(), Via = "synth:toolbar", Event = "click",
+                    });
+                }
+            }
+            if (!_toolbarWanted
+                && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR_SYNTH")))
+            {
+                // Refused, never ignored: a toolbar click with no toolbar open.
+                Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs SB_TOOLBAR=1 under SB_SCENE=app");
+            }
+            if (_toolbarRefused)
+            {
+                Report($"RUSTFAIL TOOLBAR REFUSED -- SB_TOOLBAR needs SB_SCENE=app, the one scene "
+                     + $"that opens panes; this run is '{scene}'");
+            }
 
             // ⭐ Q6's SYNTHETIC ARM (W2-6), queued AFTER the open so it runs on
             // the plan the pane is drawn from -- whichever panel is first. The

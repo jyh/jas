@@ -1,4 +1,4 @@
-// One PaneView per pane, added 2026-10-10.
+﻿// One PaneView per pane, added 2026-10-10.
 //
 // Moved out of MainWindow.xaml.cs unchanged except for the instance it now
 // belongs to: every control, receipt and icon load below was written for ONE
@@ -25,9 +25,12 @@ public sealed partial class MainWindow
         private readonly Border _host;
         private readonly ScrollViewer _scroll;
         private readonly long _availW;
+        private readonly bool _topAligned;
 
-        internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel)
+        internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
+                          bool topAligned = false)
         {
+            _topAligned = topAligned;
             _w = w;
             _host = host;
             _scroll = scroll;
@@ -225,6 +228,9 @@ public sealed partial class MainWindow
                 Height = height,
                 Margin = new Thickness(PanePad),
             };
+            // The toolbar's buttons sit at the TOP of its column, as every port
+            // draws a toolbar. The dock keeps its placement (unchanged here).
+            if (_topAligned) { host.VerticalAlignment = VerticalAlignment.Top; }
             // ⚠️ `toggles` COUNTS BOTH BOOLEAN KINDS since W2b-9, so its name now
             // understates its population -- ask what a count is a count OF before
             // quoting this row. It is NOT renamed: nothing parses these fields (only

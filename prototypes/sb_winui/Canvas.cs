@@ -226,6 +226,13 @@ internal sealed class QuitCmd : Cmd
 {
 }
 
+/// <summary>Open the TOOLBAR pane: read its plan and publish it (the pane registry).</summary>
+internal sealed class ToolbarOpenCmd : Cmd
+{
+    internal string PanelId = "";
+    internal long AvailW;
+}
+
 /// <summary>Open a panel: read its plan and publish it for the UI thread (W2-5).</summary>
 internal sealed class PanelOpenCmd : Cmd
 {
@@ -1121,6 +1128,10 @@ internal sealed unsafe class Canvas : IDisposable
                     ApplyPanelOpen(po);
                     break;
 
+                case ToolbarOpenCmd to:
+                    ApplyToolbarOpen(to);
+                    break;
+
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
                     break;
@@ -1145,6 +1156,10 @@ internal sealed unsafe class Canvas : IDisposable
         {
             _panelStale = false;
             ApplyPanelRefresh(cause);
+            // The toolbar's `checked` follows `active_tool`, which a gesture's
+            // tool can move; it is re-read with the dock, never inside the
+            // dock's own refresh (Q6.2 counts the dock open's crossings).
+            ApplyToolbarRefresh(cause);
         }
 
         if (dirty && _swapChain is not null)
@@ -3955,6 +3970,54 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Something in this drain may have moved the document. Render thread only.</summary>
     private bool _panelStale;
 
+    /// <summary>The TOOLBAR pane's plan, published like <see cref="Panel"/>.</summary>
+    internal volatile PanelSnapshot? Toolbar;
+
+    /// <summary>A new <see cref="Toolbar"/> has been published. Raised on the UI thread.</summary>
+    internal Action? ToolbarChanged { get; set; }
+
+    /// <summary>The toolbar pane's id, or null when no toolbar is open. Render thread only.</summary>
+    private string? _toolbarId;
+    private long _toolbarAvailW;
+    private long _toolbarSeq;
+
+    internal void OpenToolbar(string panelId, long availW) =>
+        _queue.Add(new ToolbarOpenCmd { PanelId = panelId, AvailW = availW });
+
+    private void ApplyToolbarOpen(ToolbarOpenCmd open)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            _report($"RUSTFAIL TOOLBAR REFUSED panel={open.PanelId} cause=open -- no engine {Tids()}");
+            return;
+        }
+        _toolbarId = open.PanelId;
+        _toolbarAvailW = open.AvailW;
+        var plan = ApplyToolbarRefresh("open");
+        if (plan is null) { return; }
+        _report($"TOOLBAR OPEN panel={open.PanelId} avail-w={open.AvailW} {PlanReading(plan)} "
+              + $"seq={_toolbarSeq} {Tids()}");
+    }
+
+    /// <summary>Read the toolbar's plan and publish it; null when none is open or the core refused.</summary>
+    private string? ApplyToolbarRefresh(string cause)
+    {
+        if (_engine == IntPtr.Zero || _toolbarId is null) { return null; }
+        var id = System.Text.Encoding.UTF8.GetBytes(_toolbarId);
+        var plan = JasCore.TakeString(
+            JasCore.jas_panel_plan(_engine, id, (nuint)id.Length, _toolbarAvailW, 0));
+        if (plan.Length == 0)
+        {
+            _report($"RUSTFAIL TOOLBAR REFUSED panel={_toolbarId} cause={cause} -- jas_panel_plan "
+                  + $"returned the empty span {Tids()}");
+            return null;
+        }
+        _toolbarSeq++;
+        Toolbar = new PanelSnapshot(_toolbarId, plan, _toolbarSeq, cause);
+        PostToUi(() => ToolbarChanged?.Invoke());
+        return plan;
+    }
+
     internal void OpenPanel(string panelId, long availW, string via) =>
         _queue.Add(new PanelOpenCmd { PanelId = panelId, AvailW = availW, Via = via });
 
@@ -4129,7 +4192,9 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_engine == IntPtr.Zero) { return false; }
         var head = ClickHead(click);
-        if (!string.Equals(click.PanelId, _panelId, StringComparison.Ordinal))
+        var toToolbar = _toolbarId is not null
+            && string.Equals(click.PanelId, _toolbarId, StringComparison.Ordinal);
+        if (!toToolbar && !string.Equals(click.PanelId, _panelId, StringComparison.Ordinal))
         {
             // A person used a control of the pane they were LOOKING AT, and the
             // selector's open ran first. Its reply rows could not be checked
@@ -4176,8 +4241,13 @@ internal sealed unsafe class Canvas : IDisposable
         // The plan is re-read NOW, not at the end of the drain, because the
         // reply's rows are checked against it and a later command in the same
         // drain could move the values first.
-        var plan = ApplyPanelRefresh(click.Event);
+        // Both panes are re-read: a toolbar click moves the toolbar's checks, and
+        // a dock click can move what the toolbar shows (and the reverse). The
+        // reply's rows are checked against the plan of the pane that was clicked.
+        var dockPlan = ApplyPanelRefresh(click.Event);
+        var toolbarPlan = ApplyToolbarRefresh(click.Event);
         _panelStale = false;
+        var plan = toToolbar ? toolbarPlan : dockPlan;
         var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
         var outcome = channel.Length == 0 ? "changed" : "unchanged";
         var row = $"PANEL CLICK {head} outcome={outcome} "

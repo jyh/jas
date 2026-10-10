@@ -2276,8 +2276,10 @@ function Get-SbValueKnobRefusal([string]$Commit, [string]$Press) {
 # Q6's knob, or BOTH value knobs (one alone is refused, and nothing runs). Every
 # replayed click that the core answers republishes the menu, so P4.4's rebuild
 # count has no derivation on such a run and reads NOT RUN.
-function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press) {
+function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press, [string]$Toolbar = '') {
     if (Test-SbSynthAsked $Synth) { return $true }
+    # The toolbar pane's one-click knob (SB_TOOLBAR_SYNTH): its click republishes the menu too.
+    if (-not [string]::IsNullOrWhiteSpace($Toolbar)) { return $true }
     return (-not [string]::IsNullOrWhiteSpace($Commit)) -and (-not [string]::IsNullOrWhiteSpace($Press))
 }
 
