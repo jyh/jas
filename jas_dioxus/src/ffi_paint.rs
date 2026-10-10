@@ -2178,7 +2178,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 74, "the fixture corpus changed size");
+        assert_eq!(total, 75, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2213,6 +2213,15 @@ mod tests {
         // pins bumped in the same edit. Expected to present (rects only); this
         // lane is the measurement.
         //
+        // ⛔ 74 → 75 (jas, 2026-10-09, I1b-1): `gradient_fill_and_stroke.svg`, a
+        // rect with a LINEAR fill gradient and a path with a RADIAL stroke
+        // gradient, both carried as `jas:*-gradient`. Both pins bumped in the
+        // same edit. Its first draft also held a FREEFORM fill, and freeform
+        // takes `element_needs_legacy` here, so it would have entered
+        // `refusing` and broken the whole-corpus law; it was moved to each
+        // port's own round-trip arm instead. Expected to present; this lane is
+        // the measurement.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2223,6 +2232,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 74, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 75, "the whole corpus presents");
     }
 }

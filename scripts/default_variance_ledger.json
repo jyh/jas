@@ -163,14 +163,14 @@
         "why_not_closed": "Two non-default slots, one family. BlendMode has sixteen variants and the corpus exercises one of them once. Same reason as mask: storage-only in Phase 2, renderer support deferred, so the fixtures that would carry it do not exist yet."
       },
       "families_varying:fill_gradient": {
-        "value": 1,
+        "value": 2,
         "improves": "up",
-        "why_not_closed": "One slot. Gradient paint lives on the gradient-panel branch and its corpus has not merged; until it does, the shared tree carries a single witness that the field survives serialization at all."
+        "why_not_closed": "One slot. Gradient paint lives on the gradient-panel branch and its corpus has not merged; until it does, the shared tree carries a single witness that the field survives serialization at all. RESTATED 1 -> 2 (jas, 2026-10-09, I1b-1): the SVG codec now carries gradients, and svg/gradient_fill_and_stroke.svg is the second witness (a linear fill). It is not promoted to an obligation because the gradient-panel corpus this row waits on has still not merged."
       },
       "families_varying:stroke_gradient": {
-        "value": 1,
+        "value": 2,
         "improves": "up",
-        "why_not_closed": "One slot, same branch, same reason as fill_gradient. Recorded separately because the two are independent Option fields and a copy site can drop either alone."
+        "why_not_closed": "One slot, same branch, same reason as fill_gradient. Recorded separately because the two are independent Option fields and a copy site can drop either alone. RESTATED 1 -> 2 (jas, 2026-10-09, I1b-1): the same document carries a radial stroke gradient. Not promoted, for the fill_gradient row's reason."
       },
       "families_varying:stroke_brush": {
         "value": 2,
@@ -183,17 +183,17 @@
         "why_not_closed": "Rides on stroke_brush and is blocked behind the same BRUSHAPPLY stone."
       },
       "families_varying:stroke": {
-        "value": 16,
+        "value": 17,
         "improves": "up",
-        "why_not_closed": "15 families, three obligated. Still debt because the corpus's strokes are nearly all the same stroke: width, cap, join, alignment, miter limit and dash pattern are effectively constant inside the non-null slots. This gate counts the SLOT as non-default and cannot see that its interior is frozen -- a Stroke is one field to P1 and eight fields to a copy site. RESTATED 14 -> 15 (flask, 2026-09-06): the O1.2c live-hit-test vector's document (gestures/select_click_topmost_over_largest_filled) carries a stroked line, so the count moved for a reason that has nothing to do with the debt's interior -- the new family's stroke is the same frozen stroke as the other fourteen. The gate asked for a promotion or a restatement; this is the restatement, and the reason it is not a promotion is written here rather than implied by the number. RESTATED 15 -> 16 (jas, 2026-10-01, G1): the css_class_paint document (svg/css_class_paint.svg and its attribute-only twin) carries paint by CSS class. Its strokes DO vary width (0.75 to 5.25 pt) and colour, but cap, join, alignment, miter limit and dash pattern stay at the defaults, so the frozen interior this debt names is unchanged. Restated, not promoted, for that reason. fill, id and name moved +1 for the same document; they are restated without comment."
+        "why_not_closed": "15 families, three obligated. Still debt because the corpus's strokes are nearly all the same stroke: width, cap, join, alignment, miter limit and dash pattern are effectively constant inside the non-null slots. This gate counts the SLOT as non-default and cannot see that its interior is frozen -- a Stroke is one field to P1 and eight fields to a copy site. RESTATED 14 -> 15 (flask, 2026-09-06): the O1.2c live-hit-test vector's document (gestures/select_click_topmost_over_largest_filled) carries a stroked line, so the count moved for a reason that has nothing to do with the debt's interior -- the new family's stroke is the same frozen stroke as the other fourteen. The gate asked for a promotion or a restatement; this is the restatement, and the reason it is not a promotion is written here rather than implied by the number. RESTATED 15 -> 16 (jas, 2026-10-01, G1): the css_class_paint document (svg/css_class_paint.svg and its attribute-only twin) carries paint by CSS class. Its strokes DO vary width (0.75 to 5.25 pt) and colour, but cap, join, alignment, miter limit and dash pattern stay at the defaults, so the frozen interior this debt names is unchanged. Restated, not promoted, for that reason. fill, id and name moved +1 for the same document; they are restated without comment. RESTATED 16 -> 17 (jas, 2026-10-09, I1b-1): svg/gradient_fill_and_stroke.svg strokes one path at width 4 with every other stroke field at its default, so the frozen interior is unchanged. fill and name moved +1 for the same document; they are restated without comment."
       },
       "families_varying:fill": {
-        "value": 65,
+        "value": 66,
         "improves": "up",
         "why_not_closed": "One of the two fields varied everywhere, and it is here as the control rather than as a gap: fill had a dedicated campaign, which is exactly why it looks healthy. Recorded so that if it ever DROPS the gate says so, and as the standing reminder of what the diagonal means."
       },
       "families_varying:name": {
-        "value": 68,
+        "value": 69,
         "improves": "up",
         "why_not_closed": "The other campaign field (name-any-element), varied in 67 of 69 families -- mostly because every document has a Layer and every Layer is named. Kept exact for the same reason as fill: it is the shape of a field that WAS looked at, and the contrast is the finding."
       },
