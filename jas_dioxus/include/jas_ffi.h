@@ -659,6 +659,22 @@ struct JasBytes jas_panel_plan(struct JasEngine *e,
 struct JasBytes jas_panel_list(void);
 
 /**
+ * **The dock's tab groups** for a named layout of `default_layouts.yaml`:
+ * `{"groups":[{"panels":["<content id>"...],"active":<index>}...]}`, in the
+ * layout's order. Each id is what [`jas_panel_plan`] takes (the layout names
+ * panels by their short id, `color`; this answers the content id,
+ * `color_panel_content`). TAKES NO ENGINE, for [`jas_panel_list`]'s reason.
+ *
+ * A refusal (no compiled workspace, bad UTF-8, a layout or a docked panel the
+ * bundle does not hold) is the empty span, never a partial dock.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `name` must be NULL or valid for `len` bytes.
+ */
+struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
+
+/**
  * **A widget's behavior**, run in the engine (wave 2, A6).
  *
  * `{"widget":"align_left_button","event":"click","alt":false}`: the shell

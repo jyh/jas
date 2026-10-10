@@ -112,6 +112,9 @@ pub enum Crossing {
     /// read ONCE, and a count that grew with panel switches is a shell
     /// re-reading the half that never moves.
     PanelList = 16,
+    /// The dock's tab groups for a named layout (`default_layouts.yaml`). Read
+    /// once per layout, as `PanelList` is.
+    DockLayout = 17,
 }
 
 impl Crossing {
@@ -135,6 +138,7 @@ impl Crossing {
         "jas_panel_plan",
         "jas_panel_behavior",
         "jas_panel_list",
+        "jas_dock_layout",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -144,7 +148,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 17;
+    pub(crate) const COUNT: usize = 18;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -169,6 +173,7 @@ impl Crossing {
         Crossing::PanelPlan,
         Crossing::PanelBehavior,
         Crossing::PanelList,
+        Crossing::DockLayout,
     ];
 
     pub fn name(self) -> &'static str {

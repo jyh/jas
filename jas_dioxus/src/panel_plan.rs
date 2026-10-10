@@ -506,6 +506,30 @@ pub fn panel_list(panels: &Value) -> Value {
     )
 }
 
+/// The dock of a named layout (`default_layouts.yaml`): `{"groups":[{"panels":
+/// ["<content id>"...], "active": <index>}...]}` in the layout's order. The
+/// layout names a panel by its short id (`color`); a shell plans it by its
+/// content id (`color_panel_content`), so this answers content ids. `None` --
+/// never a partial dock -- for a layout the bundle lacks, a group that is not
+/// a list of names, or a docked panel the bundle does not hold.
+pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
+    let groups = data.get("default_layouts")?.get(name)?.get("dock")?
+        .get("dock_main")?.get("groups")?.as_array()?;
+    let panels = data.get("panels")?;
+    let mut out = vec![];
+    for g in groups {
+        let mut ids = vec![];
+        for short in g.get("panels")?.as_array()? {
+            let id = format!("{}_panel_content", short.as_str()?);
+            panels.get(&id)?;
+            ids.push(Value::String(id));
+        }
+        let active = g.get("active").and_then(Value::as_i64).unwrap_or(0);
+        out.push(json!({"panels": ids, "active": active}));
+    }
+    Some(json!({"groups": out}))
+}
+
 /// The observables' oracles, shared by this module's tests and the ABI tests in
 /// `ffi.rs`. Each returns `Err` naming what it found, so a negative control can
 /// assert WHICH defect was reported, not merely that something was.

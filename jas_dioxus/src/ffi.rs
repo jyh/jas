@@ -785,6 +785,33 @@ pub extern "C" fn jas_panel_list() -> JasBytes {
     out
 }
 
+/// **The dock's tab groups** for a named layout of `default_layouts.yaml`:
+/// `{"groups":[{"panels":["<content id>"...],"active":<index>}...]}`, in the
+/// layout's order. Each id is what [`jas_panel_plan`] takes (the layout names
+/// panels by their short id, `color`; this answers the content id,
+/// `color_panel_content`). TAKES NO ENGINE, for [`jas_panel_list`]'s reason.
+///
+/// A refusal (no compiled workspace, bad UTF-8, a layout or a docked panel the
+/// bundle does not hold) is the empty span, never a partial dock.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `name` must be NULL or valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasBytes {
+    ffi_instr::record(Crossing::DockLayout, len, 0);
+    let Ok(name) = (unsafe { utf8(name, len) }) else { return JasBytes::empty() };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let Some(dock) = crate::panel_plan::dock_layout(ws.data(), name) else {
+        return JasBytes::empty();
+    };
+    let out = JasBytes::from_string(serde_json::to_string(&dock).unwrap_or_default());
+    ffi_instr::record_out(Crossing::DockLayout, out.len);
+    out
+}
+
 /// **A widget's behavior**, run in the engine (wave 2, A6).
 ///
 /// `{"widget":"align_left_button","event":"click","alt":false}`: the shell
@@ -2208,6 +2235,54 @@ mod tests {
                    "the toolbar's checked button stays the tool the pointer drives");
         assert!(err.contains("Unchanged"), "{err}");
         unsafe { jas_engine_free(e) };
+    }
+
+    // -----------------------------------------------------------------------
+    // THE DOCK: `default_layouts.yaml`'s tab groups (the first hand-test of the
+    // Windows app, 2026-10-10: "The panel shows only one at a time")
+    // -----------------------------------------------------------------------
+
+    fn dock_of(name: &str) -> String {
+        take(unsafe { jas_dock_layout(name.as_ptr(), name.len()) })
+    }
+
+    #[test]
+    fn the_default_dock_is_the_layouts_five_tab_groups() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let dock: serde_json::Value = serde_json::from_str(&dock_of("Default"))
+            .expect("the Default dock is JSON");
+        let groups = dock["groups"].as_array().expect("groups");
+        assert_eq!(groups.len(), 5, "{dock}");
+        let ids = |g: &serde_json::Value| -> Vec<String> {
+            g["panels"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect()
+        };
+        assert_eq!(ids(&groups[0]), ["color_panel_content", "swatches_panel_content", "brushes_panel_content"]);
+        assert_eq!(ids(&groups[1]), ["align_panel_content", "boolean_panel_content"]);
+        assert_eq!(ids(&groups[4]), ["artboards_panel_content", "layers_panel_content"]);
+        assert!(groups.iter().all(|g| g["active"] == 0), "every group opens on its first panel");
+    }
+
+    #[test]
+    fn every_docked_panel_of_every_layout_plans() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        for name in ["Default", "Minimal", "Painting"] {
+            let dock: serde_json::Value = serde_json::from_str(&dock_of(name)).expect(name);
+            for g in dock["groups"].as_array().unwrap() {
+                for id in g["panels"].as_array().unwrap() {
+                    let id = id.as_str().unwrap();
+                    assert!(!plan_of(e, id, 228, 0).is_empty(), "{name}: {id} plans");
+                }
+            }
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn an_unknown_layout_is_refused_with_the_empty_span() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        assert_eq!(dock_of("No Such Layout"), "");
+        assert_eq!(take(unsafe { jas_dock_layout(std::ptr::null(), 0) }), "");
     }
 
     fn refusal(class: &str, detail: &str) -> String {
