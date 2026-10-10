@@ -92,7 +92,12 @@ Both active ports run the same file (POLICY.md §1).
     equals its default; the corpus cannot tell those apart, and the file does not claim to. Rust and Swift each
     re-derive the file and must match it, so they agree on every witnessed argument. First reading, 2026-10-10:
     346 op instances, 52 verbs, 103 witnessed and 3 inert keys (`copy_by_ids.dy`, `scale_transform.scale_corners`,
-    `simplify.precision`); 7 verbs have no corpus instance. The `propose` schema does not use the arguments yet.
+    `simplify.precision`); 7 verbs have no corpus instance. **Slice 3, the schema:** the file also records
+    `argument_types`, the JSON types the corpus gives each key on ops it expects to SUCCEED (a value fed in order to be
+    refused is not advertised). `propose`'s `ops.items` carries one `anyOf` branch per declared verb: `op` as a `const`,
+    and that verb's keys typed from the file. Nothing is `required`, and a branch stays an open object, because an
+    argument the corpus never carries is not in the file. The types are OBSERVED, not a contract. Both ports build the
+    branches from the file and test them against it.
   - (b) run an action inside the proposal bracket and capture the primitive ops it records. It builds on (a) and does
     not replace it. It works only for actions whose recorded ops replay (`OP_LOG.md` §9: some production transactions
     are still opaque), so it needs a census first.
