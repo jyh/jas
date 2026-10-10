@@ -873,10 +873,18 @@ public class Model: ObservableObject {
         return p
     }
 
+    /// Called with the proposal's id whenever an ARTIST act withdraws it
+    /// (undo, redo, or the start of any transaction): the one place
+    /// withdrawal happens, so the agent API's session hears every edit the app
+    /// makes without wrapping each entry point (A4 (iv)). Accept and reject do
+    /// not call it; they are not withdrawals.
+    public var onProposalWithdrawn: ((String) -> Void)?
+
     private func withdrawProposal() {
         guard let p = pendingProposal else { return }
         pendingProposal = nil
         setDocumentUnbracketed(p.held, intent: .previewReapply)
+        onProposalWithdrawn?(p.id)
     }
 
     public func capturePreviewSnapshot() {
@@ -1001,9 +1009,19 @@ public class Model: ObservableObject {
     /// transaction is open**, so a caller that commits unconditionally at the end
     /// of a possibly-no-edit session does not spuriously clear redo. Mirrors
     /// Rust's `commit_txn`.
+    /// Called once each time a transaction ends by commit, whichever of the
+    /// commit's paths it takes (a no-op commit included: the listener compares
+    /// what it cares about). The agent API's session reports a settled-document
+    /// change to its client here, once per edit rather than once per write.
+    public var onTransactionCommitted: (() -> Void)?
+
+    /// Whether a transaction is open (read-only; `beginTxn` / `commitTxn` own it).
+    public var isInTransaction: Bool { inTxn }
+
     public func commitTxn() {
         if !inTxn { return }
         inTxn = false
+        defer { onTransactionCommitted?() }
         let pending = pendingTxn
         pendingTxn = nil
 

@@ -12,6 +12,12 @@ private final class LineClient {
     init?(path: String) {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // A write to a socket the server has CLOSED (the refused second
+        // client) raises SIGPIPE, which kills the whole test process rather
+        // than failing one test. It crashed CI's Swift lane once, when the
+        // server's close won the race; locally the write had won it.
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         _ = withUnsafeMutableBytes(of: &addr.sun_path) { raw in
@@ -97,6 +103,9 @@ private func emptyModel() -> Model {
     first.send(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
     _ = try #require(first.readLine(), "the first client is attached")
     let second = try #require(LineClient(path: path), "the connect itself succeeds")
+    // Let the server's close win the race, every run: the write below then
+    // always meets a closed socket, which is the case that crashed CI.
+    usleep(200_000)
     second.send(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
     #expect(second.readLine(timeoutMs: 500) == nil, "the second client gets no session")
     first.send(#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#)
@@ -110,4 +119,27 @@ private func emptyModel() -> Model {
     #expect(FileManager.default.fileExists(atPath: path), "the control: the socket exists while serving")
     server.stop()
     #expect(!FileManager.default.fileExists(atPath: path))
+}
+
+/// A4 (iv)(b), end to end over the socket: an ORDINARY edit to the model (not
+/// through the session) withdraws the client's proposal, and the client is told.
+@Test func mcpSocketServerTellsTheClientAnOrdinaryEditWithdrewItsProposal() throws {
+    let path = tempSocketPath()
+    let queue = DispatchQueue(label: "mcp-socket-test")
+    let model = Model(document: svgToDocument(#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><g><rect x="10" y="10" width="20" height="20" fill="red"/></g></svg>"#))
+    let server = try McpSocketServer(path: path, queue: queue) { McpSession(model: model) }
+    defer { server.stop() }
+    let client = try #require(LineClient(path: path))
+    client.send(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"propose","arguments":{"name":"nudge","ops":[{"op":"select_rect","x":0,"y":0,"width":50,"height":50,"extend":false},{"op":"move_selection","dx":5,"dy":0}]}}}"#)
+    let answer = try #require(client.readLine(), "the propose is answered")
+    #expect(answer.contains("p-0"), "\(answer)")
+    queue.sync {
+        model.withTxn {
+            let c = Controller(model: model)
+            _ = opApply(model, c, ["op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false])
+            _ = opApply(model, c, ["op": "move_selection", "dx": 1, "dy": 1])
+        }
+    }
+    let line = try #require(client.readLine(), "the withdrawal reaches the client")
+    #expect(line.contains("withdrawn") && line.contains("p-0"), "\(line)")
 }

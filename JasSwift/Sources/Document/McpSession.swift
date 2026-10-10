@@ -26,8 +26,46 @@ public final class McpSession {
     private var subscribed = false
     private var nextProposal = 0
 
+    /// Where the session sends what an artist does OUTSIDE it (an edit
+    /// through the app's ordinary paths): the socket server sets this to its
+    /// `push`. Nil, and nothing is sent, while no client is attached.
+    public var send: ((String) -> Void)?
+    /// True while the session itself is acting (an artist act, which returns
+    /// its own notifications, or a propose, whose writes are the preview's):
+    /// the hooks below must not report those a second time, or at all.
+    private var quiet = false
+    /// The settled document as last reported, so an ordinary edit is reported
+    /// to a subscriber once and a proposal's preview (which changes the drawn
+    /// document, not the settled one) is not reported at all.
+    private var lastSettled: String
+
     public init(model: Model) {
         self.model = model
+        self.lastSettled = documentToTestJson(model.documentWithoutPreview)
+        // A4 (iv)(b): the model withdraws a pending proposal at the one place
+        // an artist act begins, and tells us here.
+        model.onProposalWithdrawn = { [weak self] id in
+            guard let self, !self.quiet else { return }
+            self.send?(Self.notification("notifications/jas/proposal", ["proposal": id, "state": "withdrawn"]))
+        }
+        // Once per committed edit, plus any replacement outside a transaction
+        // (undo, redo); a write INSIDE a transaction waits for its commit.
+        model.onTransactionCommitted = { [weak self] in self?.settledMayHaveChanged() }
+        model.onDocumentChanged { [weak self] _ in
+            guard let self, !self.model.isInTransaction else { return }
+            self.settledMayHaveChanged()
+        }
+    }
+
+    /// Report a change to the settled document to a subscriber, once. The
+    /// comparison serialises the document, so it runs only while someone is
+    /// listening (a client attached and subscribed).
+    private func settledMayHaveChanged() {
+        guard !quiet, subscribed, let send else { return }
+        let now = documentToTestJson(model.documentWithoutPreview)
+        guard now != lastSettled else { return }
+        lastSettled = now
+        send(Self.notification("notifications/resources/updated", ["uri": Self.documentUri]))
     }
 
     /// Answer one incoming JSON-RPC line. Returns the outgoing lines: the
@@ -69,6 +107,7 @@ public final class McpSession {
         case "resources/subscribe", "resources/unsubscribe":
             guard uri == Self.documentUri else { return [Self.error(id, -32602, "unknown resource uri")] }
             subscribed = method == "resources/subscribe"
+            lastSettled = documentToTestJson(model.documentWithoutPreview)
             return [Self.result(id, [String: Any]())]
         default:
             return [Self.error(id, -32601, "method not found: \(method)")]
@@ -102,7 +141,10 @@ public final class McpSession {
     private func artistAct(_ act: (Model) -> Bool, fate: String) -> [String] {
         let beforePending = model.pendingProposalId
         let before = documentToTestJson(model.documentWithoutPreview)
+        quiet = true
         let decided = act(model)
+        quiet = false
+        lastSettled = documentToTestJson(model.documentWithoutPreview)
         var out: [String] = []
         if let p = beforePending, model.pendingProposalId != p {
             out.append(Self.notification("notifications/jas/proposal",
@@ -129,8 +171,13 @@ public final class McpSession {
                 return [Self.error(id, -32602, "propose needs `name` (string) and `ops` (array)")]
             }
             let pid = "p-\(nextProposal)"
-            if let r = model.propose(id: pid, actor: Self.clientActor, name: name,
-                                     ops: ops.map { $0 as? [String: Any] ?? [:] }) {
+            // Quiet while the model previews: its writes are the proposal's,
+            // not the artist's, and the settled document does not change.
+            quiet = true
+            let refusal = model.propose(id: pid, actor: Self.clientActor, name: name,
+                                        ops: ops.map { $0 as? [String: Any] ?? [:] })
+            quiet = false
+            if let r = refusal {
                 return [Self.toolResult(id, true, Self.refusalText(r), ["refused": Self.refusalText(r)])]
             }
             nextProposal += 1
