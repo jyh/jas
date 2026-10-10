@@ -377,6 +377,13 @@ public sealed partial class MainWindow
                         el = Placeholder(leaf.Type);
                         break;
                 }
+                // The RENDERED tree's identity (docs/TESTING.md section 5 item 2): the
+                // widget id, exactly the string the Mac app gives the same widget
+                // (`.accessibilityIdentifier(element["id"])`); none when it has none.
+                if (leaf.Id.Length > 0)
+                {
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(el, leaf.Id);
+                }
                 el.Width = leaf.W;
                 el.Height = leaf.H;
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(el, leaf.X);
