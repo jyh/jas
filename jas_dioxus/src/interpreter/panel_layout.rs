@@ -1156,4 +1156,17 @@ mod grid_2d_tests {
         assert!(r.contains_key(&vec![1]) && !r.contains_key(&vec![0]));
         assert_eq!((r[&vec![1]].0, r[&vec![1]].1), (0, 0));
     }
+
+    #[test]
+    fn a_row_number_no_child_uses_takes_no_space() {
+        let r = rects(grid(vec![btn(Some((0, 0))), btn(Some((2, 0)))], None), 72);
+        assert_eq!(r[&vec![1]].1, 24 + 2);
+    }
+
+    #[test]
+    fn a_float_cell_falls_back_to_reading_order() {
+        let floaty = json!({"type": "icon_button", "icon": "x", "grid": {"row": 1.0, "col": 1.0}});
+        let r = rects(grid(vec![btn(Some((0, 0))), floaty], None), 72);
+        assert_eq!((r[&vec![1]].0, r[&vec![1]].1), (37, 0));
+    }
 }

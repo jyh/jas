@@ -7,6 +7,12 @@ workspace bundle and writes their pinned goldens:
   * ``layout_panel``  -> test_fixtures/algorithms/panel_layout.json
   * ``widget_tree``   -> test_fixtures/algorithms/panel_widget_tree.json
   * ``bind_values``   -> test_fixtures/algorithms/panel_bind_values.json
+  * ``layout_panel`` over layout PANES -> test_fixtures/algorithms/pane_layout.json
+
+A layout pane (``layout.children[i]`` with an ``id`` and ``content``, the
+toolbar) is planned by the same pass as a panel. Its vectors live in their own
+file because the frozen Python app's runner replays ``panel_layout.json`` and
+looks every vector up in ``panels``.
 
 Every app's cross_language_test asserts its own implementation against these
 files (Template A — pinned vectors, in-suite, byte-exact).
@@ -136,6 +142,21 @@ SEED = [
     (f"{name}@228", f"{name}_panel_content", 228, _AVAIL_H, _CTX.get(name, {}))
     for name in _PANELS
 ]
+
+# Layout panes, at the size the layout declares (`default_position`). The
+# toolbar is PATH_B_DESIGN B.7's shipped case: its `tool_grid` is a 2-D grid.
+PANE_SEED = [
+    ("toolbar@72", "toolbar_pane", 72, 900, {}),
+]
+
+
+def layout_pane(bundle: dict, pane_id: str) -> dict:
+    """The layout pane with this id that has `content` (each port's runner
+    resolves a pane the same way)."""
+    for child in bundle["layout"]["children"]:
+        if child.get("id") == pane_id and "content" in child:
+            return child
+    raise KeyError(pane_id)
 
 # ---------------------------------------------------------------------------
 # bind_values seeds — four vectors over three panels, one per expression shape
@@ -417,6 +438,21 @@ def main() -> int:
         f.write("\n")
     rows = sum(len(c["expected"]) for c in bv_cases)
     print(f"wrote {len(bv_cases)} cases ({rows} rows) -> {bv_path}")
+
+    # Pane layout golden, from PANE_SEED (see the module docs).
+    pane_cases = []
+    for name, pane_id, avail_w, avail_h, ctx in PANE_SEED:
+        pane_cases.append({
+            "name": name,
+            "function": "layout_panel",
+            "args": {"pane": pane_id, "avail_w": avail_w, "avail_h": avail_h, "ctx": ctx},
+            "expected": layout_panel(layout_pane(bundle, pane_id), avail_w, avail_h, ctx),
+        })
+    pane_path = os.path.join(ROOT, "test_fixtures", "algorithms", "pane_layout.json")
+    with open(pane_path, "w", encoding="utf-8", newline="") as f:
+        json.dump(pane_cases, f, indent=2)
+        f.write("\n")
+    print(f"wrote {len(pane_cases)} cases -> {pane_path}")
     return 0
 
 

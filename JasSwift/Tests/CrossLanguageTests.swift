@@ -2972,6 +2972,41 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 
 // MARK: - Panel widget-layout (Path B) algorithm vectors
 
+/// Layout PANES (the toolbar) through the same pass, from their own golden:
+/// `pane_layout.json` (PATH_B_DESIGN B.7; the toolbar's tool grid is a 2-D
+/// grid). A pane is the layout child with that `id` and a `content`.
+@Test func testAlgorithmPaneLayout() throws {
+    let json = readFixture("algorithms/pane_layout.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    #expect(!tests.isEmpty, "pane_layout.json has no vectors")
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panes = ((bundle["layout"] as? [String: Any])?["children"] as? [[String: Any]]) ?? []
+    for tc in tests {
+        let name = tc["name"] as! String
+        #expect(tc["function"] as? String == "layout_panel", "\(name)")
+        let args = tc["args"] as! [String: Any]
+        let paneId = args["pane"] as! String
+        guard let pane = panes.first(where: { ($0["id"] as? String) == paneId && $0["content"] != nil }) else {
+            Issue.record("no layout pane '\(paneId)' with content")
+            continue
+        }
+        let availW = (args["avail_w"] as! NSNumber).intValue
+        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let actual = PanelLayout.layoutPanel(pane, availW: availW, availH: availH, ctx: ctx)
+        let actualBytes = try JSONSerialization.data(withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(withJSONObject: tc["expected"]!, options: [.sortedKeys])
+        #expect(actualBytes == expectedBytes,
+                "Pane layout '\(name)' mismatch:\n  expected: \(String(data: expectedBytes, encoding: .utf8)!)\n  actual:   \(String(data: actualBytes, encoding: .utf8)!)")
+    }
+}
+
 @Test func testAlgorithmPanelLayout() throws {
     let json = readFixture("algorithms/panel_layout.json")
     let data = json.data(using: .utf8)!

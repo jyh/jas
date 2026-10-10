@@ -508,7 +508,7 @@ Swift twins, the `panel_layout.json` golden, and synthetic arms in all three
 (`test_panel_layout_container_min_height.py`, `container_min_height_tests`,
 `ContainerMinHeightLayoutTests.swift`).
 
-### B.7 The 2-D `type: grid` (PROPOSED 2026-10-10, awaiting the port owner's ruling)
+### B.7 The 2-D `type: grid` (proposed 2026-10-10 by the Windows shell's author; RULED the same day by the port owner)
 
 A `grid` node lays out its visible children in `cols` columns (at least 1), `gap` apart.
 The gap is `style.gap`, else the node's own `gap` key (the toolbar's form). All integer:
@@ -519,7 +519,10 @@ The gap is `style.gap`, else the node's own `gap` key (the toolbar's form). All 
   next cell in reading order after the previous child's;
 * each child is measured in its cell's width, so a fixed-size leaf keeps its size and a
   fill leaf takes the cell;
-* a row is as tall as its tallest child; rows are `gap` apart, top to bottom by row number;
+* a row is as tall as its tallest child; rows are `gap` apart, top to bottom by row number,
+  and a row number no child uses takes NO space (the rows are compacted, not indexed);
+* a `grid: {row, col}` is read only when both are JSON integers; a float or a missing key
+  falls back to reading order;
 * the grid is as tall as its rows plus padding (B.4 still applies a declared height).
 
 **Why:** A.6 deferred 2-D grid because only the native composites used it. The
@@ -530,10 +533,11 @@ buttons were omitted from every port's rects. No panel uses `type: grid`, so no 
 golden rect moves.
 
 **Where it lives:** `_grid2d` in `workspace_interpreter/panel_layout.py` and its Rust twin
-`grid_2d`, with synthetic arms one for one (`test_panel_layout_grid.py`,
-`grid_2d_tests`). **Owed before this is RULED:** the Swift twin and its arms, then a
-`toolbar` vector in the `panel_layout.json` golden. The Swift corpus runner force-casts
-`panels[id]`, so the vector lands WITH the Swift port, never before it.
+`grid_2d`, and the Swift twin `grid2d` (`PanelLayout.swift`), with synthetic arms one for
+one (`test_panel_layout_grid.py`, `grid_2d_tests`, `Grid2dLayoutTests.swift`). The shipped
+toolbar is pinned by its own golden, `test_fixtures/algorithms/pane_layout.json`, which all
+three replay. It is a separate file because the frozen Python app's runner replays
+`panel_layout.json` and resolves every vector in `panels`, where a pane is not.
 
 ### A.6 Deferred in v1 — status updated 2026-06-29
 
