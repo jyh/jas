@@ -165,6 +165,12 @@ public sealed partial class MainWindow : Window
     private ulong _lastTimestamp;
     private double _lastPosX;
     private double _lastPosY;
+    // W5-2: the same triple for UNPRESSED moves, kept apart from the gesture's
+    // so a hover never seeds or shortens a drag's dedupe.
+    private uint? _lastIdleFrameId;
+    private ulong _lastIdleTimestamp;
+    private double _lastIdlePosX;
+    private double _lastIdlePosY;
     /// How many re-delivered frames were suppressed in THIS gesture. Zeroed at
     /// the press and carried onto the `POINTER` row.
     private int _dupFrames;
@@ -463,19 +469,21 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>
-    /// ⛔ ONLY WHILE CAPTURED, AND A HOVER IS NOT A DRAG. `MOD_DRAGGING`
+    /// ⭐ A HOVER IS FORWARDED, AND IT IS NOT A DRAG (W5-2). `MOD_DRAGGING`
     /// (`ffi_pointer.rs:35`) exists because the canvas has no such concept and
     /// the tool trait does -- `on_move`'s `dragging` -- so the shell is the only
-    /// thing that knows. Forwarding idle motion would drive the selection tool's
-    /// `on_move` with a button that is not down.
-    ///
-    /// ⚠️ TRUE OF TOOL 0 ONLY, which is why `SB_TOOL != 0` is refused by name
-    /// this wave: `pen.yaml:83-85` sets `mouse_x/y` on every `on_mousemove`,
-    /// captured or not, so captured-only forwarding would starve it.
+    /// thing that knows. Inside a gesture a move carries it; outside one it does
+    /// not, and it still reaches the tool, because `pen.yaml:83-85` draws its
+    /// rubber band from `mouse_x/y` set on every `on_mousemove`, pressed or not,
+    /// and captured-only forwarding starved it. That idle motion is SAFE for
+    /// every tool -- no tool writes the document on an unpressed move -- is
+    /// measured in the core over all of `TOOL_IDS`
+    /// (`an_unpressed_move_changes_no_tools_document`); the pen's half is
+    /// `the_pen_rubber_band_follows_an_unpressed_pointer`.
     /// </summary>
     private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_gestureOpen) { TracePointer("MOVE-IGNORED", e); return; }
+        if (!_gestureOpen) { ForwardIdleMove(e); return; }
 
         // ⭐⭐ ONE INPUT FRAME IS ONE MOVE. THIS IS THE `move != k` DEFECT, AND
         // IT IS A RE-DELIVERY, NOT AN ARRIVAL.
@@ -540,6 +548,35 @@ public sealed partial class MainWindow : Window
         _moveCount++;
         _canvas.Pointer(JasCore.PointerMove, x, y, Mods(e) | JasCore.ModDragging);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// An unpressed move: forwarded with `MOD_DRAGGING` CLEAR, de-duplicated by
+    /// the same frame/timestamp/position triple as a drag (XAML re-raises a
+    /// hover frame as it re-raises a drag frame), and counted on NONE of the
+    /// gesture's counters: `_moveCount` and `_movesRaised` are the `move == k`
+    /// identity for one drag, and a hover between drags is not part of it. Its
+    /// evidence is the `IDLE` / `IDLE-DUP` trace rows (SB_TRACE_POINTER=1).
+    /// </summary>
+    private void ForwardIdleMove(PointerRoutedEventArgs e)
+    {
+        var pp = e.GetCurrentPoint(Canvas);
+        if (_lastIdleFrameId.HasValue
+            && pp.FrameId == _lastIdleFrameId.Value
+            && pp.Timestamp == _lastIdleTimestamp
+            && pp.Position.X == _lastIdlePosX
+            && pp.Position.Y == _lastIdlePosY)
+        {
+            TracePointer("IDLE-DUP", e);
+            return;
+        }
+        _lastIdleFrameId = pp.FrameId;
+        _lastIdleTimestamp = pp.Timestamp;
+        _lastIdlePosX = pp.Position.X;
+        _lastIdlePosY = pp.Position.Y;
+        TracePointer("IDLE", e);
+        var (x, y) = Physical(e);
+        _canvas.Pointer(JasCore.PointerMove, x, y, Mods(e));
     }
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
@@ -800,19 +837,28 @@ public sealed partial class MainWindow : Window
         _started = true;
         try
         {
-            // ⛔ SB_TOOL != 0 IS REFUSED BY NAME. Captured-only forwarding is
-            // answered for the SELECTION tool only (the freeze's R5, narrowed by
-            // the verdict at `selection.yaml:153-160`), and `pen` reads idle
-            // motion. A run that asked for the pen and silently got selection
-            // would report a gesture the tool never saw.
+            // SB_TOOL=<index> PICKS A TOOL FROM THE CORE'S LIST (`jas_tool_count`,
+            // `TOOL_IDS` in ffi_pointer.rs). W5-2 lifted the refusal of every tool
+            // but 0: idle motion is now forwarded (see `OnPointerMoved`), and the
+            // core proves it safe for all of them
+            // (`an_unpressed_move_changes_no_tools_document`). ⚠️ KEYS AND
+            // DOUBLE-CLICK ARE STILL NOT FORWARDED (W5-3), so a tool that commits
+            // on Enter or a double-click cannot commit that way here.
+            // ⛔ A VALUE THAT IS NOT AN INDEX IS REFUSED BY NAME: a run that asked
+            // for a tool and silently got selection would report a gesture the
+            // tool never saw.
             var tool = Environment.GetEnvironmentVariable("SB_TOOL");
-            if (!string.IsNullOrWhiteSpace(tool) && tool.Trim() != "0")
+            if (!string.IsNullOrWhiteSpace(tool))
             {
-                StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is refused this wave";
-                Report($"RUSTFAIL SB_TOOL='{tool}' is refused: only tool 0 (selection) is "
-                     + "answered this wave; captured-only pointer forwarding is not correct "
-                     + "for tools that read idle motion");
-                return;
+                var count = (ulong)JasCore.jas_tool_count();
+                if (!ulong.TryParse(tool.Trim(), out var index) || index >= count)
+                {
+                    StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is not a tool index";
+                    Report($"RUSTFAIL SB_TOOL='{tool}' is refused: not an index below the "
+                         + $"core's {count} tool(s)");
+                    return;
+                }
+                _canvas.ToolIndex = (nuint)index;
             }
 
             // SB_SIZE=WxH -- A MEASUREMENT INPUT, AND DELIBERATELY NOT THE FIX

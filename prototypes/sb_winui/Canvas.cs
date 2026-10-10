@@ -609,6 +609,11 @@ internal sealed unsafe class Canvas : IDisposable
 
     public string LastStatus { get; private set; } = "not started";
 
+    /// The core tool the engine selects at attach (`jas_set_tool`), set by the
+    /// window from SB_TOOL before `Attach`; 0 (selection) when unset. Written on
+    /// the UI thread before the render thread creates the engine, read once there.
+    public nuint ToolIndex { get; set; }
+
     public string Adapter { get; private set; } = "unknown";
 
     public string DebugLayer { get; private set; } = "off";
@@ -1427,9 +1432,13 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         JasCore.jas_set_dpi_scale(_engine, _scaleX);
-        // TOOL 0 (selection) IS THE ONLY TOOL THIS WAVE. `SB_TOOL != 0` is
-        // refused by name in the window, not silently ignored here.
-        JasCore.jas_set_tool(_engine, 0);
+        // The window validated SB_TOOL against `jas_tool_count`; a refusal
+        // here would mean the core's list moved under it, and it is named.
+        var toolStatus = JasCore.jas_set_tool(_engine, ToolIndex);
+        if (toolStatus != 0)
+        {
+            _report($"RUSTFAIL jas_set_tool({ToolIndex}) returned {toolStatus} {Tids()}");
+        }
 
         BindPanelFromRenderThread();
         LastStatus = $"attached {SurfaceLabel()} on {Adapter}";

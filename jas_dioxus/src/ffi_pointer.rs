@@ -53,8 +53,10 @@ pub const TOOL_IDS: &[&str] = &[
     "zoom",
     // W5-1 (2026-10-09): every other workspace tool, APPENDED in alphabetical
     // order so the nine indexes above keep their meaning. Each builds in the
-    // web-free engine (the wave-3 census, 27/27); none is selectable from the
-    // shell until its forwarding is answered (`SB_TOOL != 0` stays refused).
+    // web-free engine (the wave-3 census, 27/27). Since W5-2 every one is
+    // selectable from the shell by `SB_TOOL=<index>`: idle motion is forwarded
+    // and proved safe for all of them (`an_unpressed_move_changes_no_tools_document`).
+    // Keys and double-click are not forwarded yet (W5-3).
     "add_anchor_point",
     "anchor_point",
     "artboard",

@@ -185,11 +185,11 @@ static class Program
 
         Eq("O5: a refusal followed by a real OK reads RUSTOK (NOT sticky)",
             "RUSTOK",
-            Run("RUSTFAIL SB_TOOL='3' is refused: only tool 0 (selection) is bound",
+            Run("RUSTFAIL SB_TOOL='pen' is refused: not an index below the core's 27 tool(s)",
                 "RUSTOK STAY pid=4812").Verdict);
 
         Check("O5: ...and the refusal is still COUNTED, so it cannot hide",
-            Run("RUSTFAIL SB_TOOL='3' is refused", "RUSTOK STAY pid=4812").Fails == 1,
+            Run("RUSTFAIL SB_TOOL='pen' is refused", "RUSTOK STAY pid=4812").Fails == 1,
             "fails should be 1");
 
         Check("the ok rows are counted too",
@@ -212,7 +212,7 @@ static class Program
             okTitle.Contains("A' scene=retained"), okTitle);
 
         var maskedTitle = TitleVerdict.Compose(VerifyTitle,
-            Run("RUSTFAIL SB_TOOL='3' is refused", "RUSTOK STAY pid=4812"));
+            Run("RUSTFAIL SB_TOOL='pen' is refused", "RUSTOK STAY pid=4812"));
         Check("a run with an earlier failure still matches (O5 must not go red)",
             maskedTitle.Contains(OracleRequires), maskedTitle);
         Check("...and the title SAYS there was a failure -- masking made visible",

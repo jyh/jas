@@ -26,7 +26,7 @@ namespace SbWinUi;
 ///
 /// ⛔ IT IS DELIBERATELY NOT STICKY ON FAILURE, and that is a ruling, not an
 /// oversight. `RUSTFAIL` is overloaded in this shell: O5's refusals are CORRECT
-/// behaviour reported with it (`SB_TOOL='3' is refused`, `SB_SIZE pins the
+/// behaviour reported with it (`SB_TOOL='pen' is refused`, `SB_SIZE pins the
 /// surface`). A sticky fail would turn every O5 run red by construction. So the
 /// verdict is the LAST verdict-bearing row's, and masking is answered by
 /// COUNTING: <see cref="Compose"/> writes <c>fails=N</c> into the title whenever
