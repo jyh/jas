@@ -1607,6 +1607,93 @@ private func journalToTestJson(_ journal: [Transaction]) -> String {
     return "[\(txns)]"
 }
 
+// MARK: - Agent proposals (docs/AGENT_API.md §3), mirrors Rust `proposal_laws`
+
+/// Run one proposal-law step list; returns the model and the ids each refused
+/// call named, in order.
+private func runProposalSteps(_ setupSvg: String, _ steps: [[String: Any]]) -> (Model, [String]) {
+    let model = Model(document: svgToDocument(readFixture("svg/\(setupSvg)")))
+    let controller = Controller(model: model)
+    var refused: [String] = []
+    for step in steps {
+        #expect(step.count == 1, "a step has exactly one verb: \(step)")
+        let (verb, arg) = step.first!
+        var refusal: (String, ProposalRefusal)? = nil
+        switch verb {
+        case "txn":
+            let t = arg as! [String: Any]
+            model.beginTxn()
+            if let n = t["name"] as? String { model.nameTxn(n) }
+            for op in t["ops"] as! [[String: Any]] {
+                #expect(opApply(model, controller, op) == nil, "hand op errored: \(op)")
+            }
+            model.commitTxn()
+        case "propose":
+            let p = arg as! [String: Any]
+            let id = p["id"] as! String
+            if let r = model.propose(id: id, actor: p["actor"] as! String,
+                                     name: p["name"] as! String,
+                                     ops: p["ops"] as! [[String: Any]]) { refusal = (id, r) }
+        case "accept":
+            let id = arg as! String
+            if let r = model.acceptProposal(id) { refusal = (id, r) }
+        case "reject":
+            let id = arg as! String
+            if let r = model.rejectProposal(id) { refusal = (id, r) }
+        case "history":
+            switch arg as! String {
+            case "undo": model.undo()
+            case "redo": model.redo()
+            default: Issue.record("unknown history directive: \(arg)")
+            }
+        default:
+            Issue.record("unknown proposal-law step verb: \(verb)")
+        }
+        if let (id, _) = refusal { refused.append(id) }
+    }
+    return (model, refused)
+}
+
+private func journalWithoutActors(_ model: Model) -> String {
+    var journal = Array(model.journal[0..<model.journalHeadValue])
+    for i in journal.indices { journal[i].actor = "-" }
+    return journalToTestJson(journal)
+}
+
+@Test func proposalLaws() throws {
+    let json = readFixture("operations/proposal_laws.json")
+    let cases = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    // Anti-vacuity: the law file is not empty, and every case below asserts.
+    #expect(cases.count >= 8, "proposal_laws.json has \(cases.count) cases, expected >= 8")
+    for tc in cases {
+        let name = tc["name"] as! String
+        let setup = tc["setup_svg"] as! String
+        let (model, refused) = runProposalSteps(setup, tc["steps"] as! [[String: Any]])
+        let (hand, handRefused) = runProposalSteps(setup, tc["equals_steps"] as! [[String: Any]])
+        #expect(handRefused.isEmpty, "\(name): equals_steps must not refuse")
+        // A pending proposal's canvas and journal are compared against
+        // different step lists (`journal_equals_steps` when given).
+        let journalRef = runProposalSteps(
+            setup, (tc["journal_equals_steps"] ?? tc["equals_steps"]) as! [[String: Any]]).0
+
+        #expect(documentToTestJson(model.document) == documentToTestJson(hand.document),
+                "\(name): document differs from equals_steps")
+        #expect(journalWithoutActors(model) == journalWithoutActors(journalRef),
+                "\(name): journal differs from its reference steps (actors blanked)")
+        let actors = model.journal[0..<model.journalHeadValue].map { $0.actor }
+        #expect(actors == (tc["expect_actors"] as! [String]), "\(name): journal actors")
+        #expect(refused == (tc["expect_refused"] as! [String]), "\(name): refused calls")
+        let wantPending = (tc["expect_pending"] as? [String])?.first
+        #expect(model.pendingProposalId == wantPending, "\(name): pending proposal")
+
+        // checkpoint_equivalence, extended: the journal replays to the
+        // document WITHOUT the preview (a preview is not history).
+        let replayed = replayJournal(readFixture("svg/\(setup)"), model.journal, model.journalHeadValue)
+        #expect(replayed == documentToTestJson(model.documentWithoutPreview),
+                "\(name): checkpoint_equivalence (journal replay vs the un-previewed document)")
+    }
+}
+
 /// OP_LOG.md §10 item 4: the journal's causal/merge metadata serializes
 /// byte-identically across apps (deterministic txn-N counter + parent edge).
 /// Runs BOTH the base txn_metadata fixture and the txn_labels fixture

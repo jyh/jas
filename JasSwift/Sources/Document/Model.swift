@@ -125,8 +125,30 @@ func differsOnlyInSelection(_ old: Document, _ new: Document) -> Bool {
 /// transaction without serializing. Mirrors Rust's `PendingTxn`.
 private struct PendingTxn {
     var name: String? = nil
+    /// The journal `actor` to commit under; nil = the artist. Set only by
+    /// ``Model/acceptProposal(_:)`` (docs/AGENT_API.md §2). Mirrors Rust.
+    var actor: String? = nil
     var ops: [PrimitiveOp] = []
     var genAtBegin: UInt64
+}
+
+/// A pending agent proposal (docs/AGENT_API.md §2). Mirrors Rust's `Proposal`.
+private struct Proposal {
+    let id: String
+    let actor: String
+    let name: String
+    let ops: [[String: Any]]
+    /// The document before the preview was applied.
+    let held: Document
+}
+
+/// Why a proposal call was refused. Every refusal leaves the document and the
+/// journal unchanged. Mirrors Rust's `ProposalRefusal`.
+public enum ProposalRefusal: Equatable {
+    case anotherPending(String)
+    case transactionOpen
+    case notPending(String)
+    case opFailed(String)
 }
 
 /// THE PASTE RUN — `workspace/actions.yaml` paste, "Repeated pastes stack with
@@ -777,6 +799,86 @@ public class Model: ObservableObject {
     /// pollute undo history. See SCALE_TOOL.md §Preview.
     private var previewDocSnapshot: Document?
 
+    // MARK: - Agent proposals (docs/AGENT_API.md, OP_LOG.md §8 item 4)
+
+    /// The one pending agent proposal, if any. While set, `document` shows the
+    /// proposal applied (a preview) and the proposal holds the document as it
+    /// was before; it is in no transaction. Mirrors Rust's `pending_proposal`.
+    private var pendingProposal: Proposal?
+
+    /// Show `ops` applied as a PREVIEW, journaling nothing (run once through an
+    /// aborted transaction, which validates them and yields the preview).
+    /// Returns a refusal, or nil on success. Mirrors Rust's `propose`.
+    @discardableResult
+    public func propose(id: String, actor: String, name: String,
+                        ops: [[String: Any]]) -> ProposalRefusal? {
+        if let p = pendingProposal { return .anotherPending(p.id) }
+        if inTxn { return .transactionOpen }
+        let held = document
+        let controller = Controller(model: self)
+        beginTxn()
+        for op in ops {
+            if let err = opApply(self, controller, op) {
+                abortTxn()
+                return .opFailed(String(describing: err))
+            }
+        }
+        let previewed = document
+        abortTxn()
+        setDocumentUnbracketed(previewed, intent: .previewReapply)
+        pendingProposal = Proposal(id: id, actor: actor, name: name, ops: ops, held: held)
+        return nil
+    }
+
+    /// Land the pending proposal `id` as ONE transaction named for it and
+    /// attributed to its actor. Mirrors Rust's `accept_proposal`.
+    @discardableResult
+    public func acceptProposal(_ id: String) -> ProposalRefusal? {
+        guard let p = takeProposal(id) else { return .notPending(id) }
+        setDocumentUnbracketed(p.held, intent: .previewReapply)
+        let controller = Controller(model: self)
+        beginTxn()
+        nameTxn(p.name)
+        pendingTxn?.actor = p.actor
+        for op in p.ops {
+            if let err = opApply(self, controller, op) {
+                // The same ops succeeded on the same document at propose time;
+                // roll back rather than land half.
+                abortTxn()
+                return .opFailed(String(describing: err))
+            }
+        }
+        commitTxn()
+        return nil
+    }
+
+    /// Discard the pending proposal `id`, restoring the held document.
+    @discardableResult
+    public func rejectProposal(_ id: String) -> ProposalRefusal? {
+        guard let p = takeProposal(id) else { return .notPending(id) }
+        setDocumentUnbracketed(p.held, intent: .previewReapply)
+        return nil
+    }
+
+    /// The id of the pending proposal, if any.
+    public var pendingProposalId: String? { pendingProposal?.id }
+
+    /// The document without the preview: the held document while a proposal
+    /// is pending, else the live one. The journal replays to this.
+    public var documentWithoutPreview: Document { pendingProposal?.held ?? document }
+
+    private func takeProposal(_ id: String) -> Proposal? {
+        guard let p = pendingProposal, p.id == id else { return nil }
+        pendingProposal = nil
+        return p
+    }
+
+    private func withdrawProposal() {
+        guard let p = pendingProposal else { return }
+        pendingProposal = nil
+        setDocumentUnbracketed(p.held, intent: .previewReapply)
+    }
+
     public func capturePreviewSnapshot() {
         previewDocSnapshot = document
     }
@@ -796,6 +898,9 @@ public class Model: ObservableObject {
     public var hasPreviewSnapshot: Bool { previewDocSnapshot != nil }
 
     public func undo() {
+        // History navigation bypasses beginTxn, so it withdraws a pending
+        // proposal itself (law `undo_withdraws`). Mirrors Rust.
+        withdrawProposal()
         // History navigation ends any open edit context, so the next edit
         // self-brackets fresh (OP_LOG.md Increment 1: keeps inTxn honest after
         // undo). Mirrors Rust `undo` clearing in_txn / pending_txn.
@@ -824,6 +929,7 @@ public class Model: ObservableObject {
     }
 
     public func redo() {
+        withdrawProposal()
         inTxn = false
         pendingTxn = nil
         guard let next = redoStack.popLast() else { return }
@@ -873,6 +979,9 @@ public class Model: ObservableObject {
     /// no-op), so many edits can ride one checkpoint. Mirrors Rust's `begin_txn`.
     public func beginTxn() {
         if inTxn { return }
+        // An artist edit withdraws a pending proposal BEFORE its checkpoint is
+        // taken (docs/AGENT_API.md §2: withdraw, never rebase). Mirrors Rust.
+        withdrawProposal()
         undoStack.append(checkpoint())
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
@@ -987,7 +1096,7 @@ public class Model: ObservableObject {
             txnId: "txn-\(nextTxnCounter)",
             ops: pending?.ops ?? [],
             name: pending?.name,
-            actor: actorArtist,
+            actor: pending?.actor ?? actorArtist,
             parent: parent,
             lamport: nextTxnCounter)
         nextTxnCounter += 1
