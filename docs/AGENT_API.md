@@ -76,13 +76,18 @@ Both active ports run the same file (POLICY.md §1).
   core, stdio with a reader thread, the tools `propose` and `withdraw_proposal` (there is no accept tool: accepting is
   the artist's), the `jas://document` resource (the settled document plus the pending proposal's id), subscriptions,
   and a `notifications/jas/proposal` message reporting each proposal's fate (`accepted` · `rejected` · `withdrawn`).
-- **A3b, the tool VOCABULARY, is an open question.** ROADMAP §3.1 says tool schemas are generated from `actions.yaml`.
-  But its 239 entries are the **UI action layer** (tabs, panels, dialogs), while a proposal carries **primitive document
-  ops** (`op_apply`'s 141 verbs), which are declared nowhere as data: they exist only as a `match`. Two arms:
-  - (a) declare the op vocabulary as data, then generate from it;
-  - (b) run an action inside the proposal bracket and capture the primitive ops it records.
-  Arm (b) works only for actions whose recorded ops replay (`OP_LOG.md` §9: some production transactions are still
-  opaque), so it needs a census first. Until then, `propose` takes primitive ops and the model validates them.
+- **A3b, the tool VOCABULARY.** ROADMAP §3.1 says tool schemas are generated from `actions.yaml`. But its 239 entries
+  are the **UI action layer** (tabs, panels, dialogs), while a proposal carries **primitive document ops**: the
+  **51** verbs `op_apply` accepts, the same 51 in both active ports. *(This line said "141" until 2026-10-09. That
+  figure added the 90 `doc.*` keys of the YAML effect layer, which is a different vocabulary.)* Two arms:
+  - (a) declare the op vocabulary as data, then generate from it. **TAKEN, slice 1:**
+    `test_fixtures/operations/op_vocabulary.json` lists the 51 verbs, each classed `history`, `selection` or `edit`;
+    `scripts/check_op_vocabulary.py` asserts that both ports' matches and both selection-only sets equal it; and
+    `propose`'s `op` is an enum of it. **Each op's arguments are not declared yet.** They are the next slice.
+  - (b) run an action inside the proposal bracket and capture the primitive ops it records. It builds on (a) and does
+    not replace it. It works only for actions whose recorded ops replay (`OP_LOG.md` §9: some production transactions
+    are still opaque), so it needs a census first.
+  Until the arguments are declared, the model validates every op, and a failing op refuses the proposal.
 - **A4, accept in the app:** the preview drawn as an overlay, with Accept and Reject. This is ROADMAP §3.1's first
   observable.
 - **A7, the intent ledger's schema:** open by R0. What a ledger entry records is not part of this repository.
