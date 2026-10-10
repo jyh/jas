@@ -113,6 +113,25 @@
  */
 #define MOD_DRAGGING (1 << 2)
 
+/**
+ * The platform's command modifier (Ctrl on Windows). W5-3a carries it so a
+ * menu chord is never mistaken for a bare tool letter; no chord acts yet.
+ */
+#define MOD_CMD (1 << 3)
+
+/**
+ * Named keys for [`jas_key_event`], as their ASCII control codes. Any other
+ * `code` is a Unicode scalar: the CHARACTER the key produced, never a
+ * virtual-key number, so the shell need not know the core's key table.
+ */
+#define KEY_BACKSPACE 8
+
+#define KEY_ENTER 13
+
+#define KEY_ESCAPE 27
+
+#define KEY_DELETE 127
+
 #if (defined(JAS_WITH_D2D) && defined(_WIN32))
 /**
  * Status codes for the spike seam. Deliberately NOT `JasStatus`: that enum is
@@ -822,6 +841,25 @@ JasStatus jas_set_dpi_scale(struct JasEngine *e, double scale);
  * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
  */
 JasStatus jas_pointer_event(struct JasEngine *e, uint32_t kind, double x, double y, uint32_t mods);
+
+/**
+ * One key press (W5-3a). `code` is a [`KEY_ESCAPE`]-style named key or the
+ * Unicode scalar of the character the key produced; `mods` is `MOD_SHIFT |
+ * MOD_ALT | MOD_CMD`. The order is the web keyboard path's
+ * (`workspace/keyboard.rs`):
+ *   1. Escape, Enter, Delete and Backspace go to the ACTIVE TOOL's
+ *      `on_key_event` (Escape cancels a marquee, Enter commits the pen).
+ *   2. A character without `MOD_CMD` is resolved against
+ *      `workspace/shortcuts.yaml` IN THE CORE (`resolve_key`); a
+ *      `select_tool` result switches the tool as [`jas_set_tool`] does.
+ * Returns `Ok` when the key was handled and `UnknownVerb` when nothing
+ * handled it, so the shell can let the key fall through to its own default.
+ * Menu chords (`MOD_CMD`) are not acted on here yet.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+JasStatus jas_key_event(struct JasEngine *e, uint32_t code, uint32_t mods);
 
 /**
  * How many elements the session currently has selected.
