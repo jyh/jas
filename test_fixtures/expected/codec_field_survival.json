@@ -305,7 +305,7 @@
    "common.mask": "DROPPED",
    "common.mode": "DROPPED",
    "common.tool_origin": "PRESERVED",
-   "fill_gradient": "DROPPED",
+   "fill_gradient": "PRESERVED",
    "fill_rule": "PRESERVED",
    "group.isolated_blending": "PRESERVED",
    "group.knockout_group": "PRESERVED",
@@ -318,7 +318,7 @@
    "stroke.miter_limit": "PRESERVED",
    "stroke_brush": "PRESERVED",
    "stroke_brush_overrides": "PRESERVED",
-   "stroke_gradient": "DROPPED",
+   "stroke_gradient": "PRESERVED",
    "width_points": "PRESERVED"
   }
  },
