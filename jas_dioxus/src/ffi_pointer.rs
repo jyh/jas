@@ -33,6 +33,22 @@ pub const MOD_ALT: u32 = 1 << 1;
 /// tool trait does (`on_move`'s `dragging`), and the shell is the only thing
 /// that knows.
 pub const MOD_DRAGGING: u32 = 1 << 2;
+/// The platform's command modifier (Ctrl on Windows). W5-3a carries it so a
+/// menu chord is never mistaken for a bare tool letter; no chord acts yet.
+pub const MOD_CMD: u32 = 1 << 3;
+
+/// Named keys for [`jas_key_event`], as their ASCII control codes. Any other
+/// `code` is a Unicode scalar: the CHARACTER the key produced, never a
+/// virtual-key number, so the shell need not know the core's key table.
+pub const KEY_BACKSPACE: u32 = 0x08;
+pub const KEY_ENTER: u32 = 0x0D;
+pub const KEY_ESCAPE: u32 = 0x1B;
+pub const KEY_DELETE: u32 = 0x7F;
+
+/// `select_tool` targets in `workspace/shortcuts.yaml` the shell CANNOT select,
+/// by declaration: `type` is the native Type tool, which `TOOL_IDS` does not
+/// carry (it needs text input, W4 class G). A key bound to one is not handled.
+pub(crate) const KEY_NOT_SELECTABLE: &[&str] = &["type"];
 
 /// The tools the shell may select, by index. Order is ABI.
 ///
@@ -105,6 +121,14 @@ pub unsafe extern "C" fn jas_tool_name(index: usize, out_len: *mut usize) -> *co
     };
     if !out_len.is_null() { unsafe { *out_len = id.len() }; }
     id.as_ptr()
+}
+
+/// The [`TOOL_IDS`] index a `select_tool` routing id names: the id itself, or
+/// the anchor tools' short routing form (`add_anchor` → `add_anchor_point`,
+/// `ToolKind::panel_state_name`). None when no selectable tool has that id.
+pub(crate) fn selectable_index(id: &str) -> Option<usize> {
+    TOOL_IDS.iter().position(|t| *t == id)
+        .or_else(|| TOOL_IDS.iter().position(|t| *t == format!("{id}_point")))
 }
 
 /// Select the tool the pointer drives, by index into [`TOOL_IDS`].
@@ -203,6 +227,58 @@ pub unsafe extern "C" fn jas_pointer_event(
         _ => tool.on_release(m, dx, dy, shift, alt),
     });
     JasStatus::Ok
+}
+
+/// One key press (W5-3a). `code` is a [`KEY_ESCAPE`]-style named key or the
+/// Unicode scalar of the character the key produced; `mods` is `MOD_SHIFT |
+/// MOD_ALT | MOD_CMD`. The order is the web keyboard path's
+/// (`workspace/keyboard.rs`):
+///   1. Escape, Enter, Delete and Backspace go to the ACTIVE TOOL's
+///      `on_key_event` (Escape cancels a marquee, Enter commits the pen).
+///   2. A character without `MOD_CMD` is resolved against
+///      `workspace/shortcuts.yaml` IN THE CORE (`resolve_key`); a
+///      `select_tool` result switches the tool as [`jas_set_tool`] does.
+/// Returns `Ok` when the key was handled and `UnknownVerb` when nothing
+/// handled it, so the shell can let the key fall through to its own default.
+/// Menu chords (`MOD_CMD`) are not acted on here yet.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> JasStatus {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    let km = crate::tools::tool::KeyMods {
+        shift: mods & MOD_SHIFT != 0,
+        ctrl: mods & MOD_CMD != 0,
+        alt: mods & MOD_ALT != 0,
+        meta: false,
+    };
+    let named = match code {
+        KEY_ESCAPE => Some("Escape"),
+        KEY_ENTER => Some("Enter"),
+        KEY_DELETE => Some("Delete"),
+        KEY_BACKSPACE => Some("Backspace"),
+        _ => None,
+    };
+    if let Some(key) = named {
+        let mut slot = engine.tool_slot();
+        let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
+        let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
+        return if handled { JasStatus::Ok } else { JasStatus::UnknownVerb };
+    }
+    if km.ctrl {
+        return JasStatus::UnknownVerb;
+    }
+    let Some(ch) = char::from_u32(code) else { return JasStatus::BadParamType };
+    let chord = crate::workspace::resolve_key::KeyChord::new(&ch.to_string(), false, km.shift, km.alt, false);
+    let Some(cmd) = crate::workspace::resolve_key::resolve_key(&chord) else { return JasStatus::UnknownVerb };
+    if cmd.action != "select_tool" {
+        return JasStatus::UnknownVerb;
+    }
+    let Some(index) = cmd.params.get("tool").and_then(|v| v.as_str()).and_then(selectable_index) else {
+        return JasStatus::UnknownVerb;
+    };
+    unsafe { jas_set_tool(e, index) }
 }
 
 /// How many elements the session currently has selected.
@@ -694,6 +770,92 @@ mod tests {
         unsafe { jas_pointer_event(e, KIND_MOVE, 250.0, 150.0, 0) };
         assert_eq!(frame(e), at_a, "the same pointer position draws the same overlay");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// The index of the engine's active tool, or None before one is built.
+    fn active_tool(e: *mut JasEngine) -> Option<usize> {
+        unsafe { &*e }.tool_slot().as_ref().map(|(i, _)| *i)
+    }
+
+    fn tool_at(id: &str) -> usize {
+        TOOL_IDS.iter().position(|t| *t == id).unwrap_or_else(|| panic!("`{id}` is selectable"))
+    }
+
+    /// W5-3a: a bare letter resolves through `workspace/shortcuts.yaml` in the
+    /// CORE and selects its tool, exactly as the web keyboard path does
+    /// (`resolve_key` → `select_tool`). `P` is the pen, `Shift+V` interior
+    /// selection; a modifier the table does not bind selects nothing.
+    #[test]
+    fn a_tool_shortcut_selects_its_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        seed(e);
+        unsafe {
+            assert_eq!(jas_key_event(e, 'p' as u32, 0), JasStatus::Ok);
+            assert_eq!(active_tool(e), Some(tool_at("pen")));
+            assert_eq!(jas_key_event(e, 'V' as u32, MOD_SHIFT), JasStatus::Ok);
+            assert_eq!(active_tool(e), Some(tool_at("interior_selection")));
+            assert_eq!(jas_key_event(e, '=' as u32, 0), JasStatus::Ok, "a routing id maps to its tool");
+            assert_eq!(active_tool(e), Some(tool_at("add_anchor_point")));
+            // Unbound: Alt+P, and a key the table does not name. NOT handled,
+            // and the tool does not move, so the shell may let the key fall through.
+            assert_eq!(jas_key_event(e, 'p' as u32, MOD_ALT), JasStatus::UnknownVerb);
+            assert_eq!(jas_key_event(e, 'j' as u32, 0), JasStatus::UnknownVerb);
+            assert_eq!(active_tool(e), Some(tool_at("add_anchor_point")));
+            jas_engine_free(e);
+        }
+    }
+
+    /// W5-3a: EVERY `select_tool` target in `shortcuts.yaml` either maps to a
+    /// selectable tool or is declared not selectable from the shell. A target
+    /// added tomorrow that maps to neither reds here, rather than doing nothing
+    /// when its key is pressed on Windows.
+    #[test]
+    fn every_tool_shortcut_maps_to_a_selectable_tool_or_is_declared() {
+        let bundle = crate::interpreter::workspace::Workspace::load()
+            .expect("the compiled workspace loads");
+        let shortcuts = bundle.data().get("shortcuts").and_then(|v| v.as_array()).expect("a shortcuts table");
+        let mut targets = 0;
+        let mut unmapped = Vec::new();
+        for s in shortcuts {
+            if s["action"] != "select_tool" { continue; }
+            let id = s["params"]["tool"].as_str().expect("a tool id");
+            targets += 1;
+            if selectable_index(id).is_none() && !KEY_NOT_SELECTABLE.contains(&id) {
+                unmapped.push(id.to_string());
+            }
+        }
+        assert!(targets >= 25, "the table names its tools: {targets}");
+        assert!(unmapped.is_empty(), "select_tool targets with no tool and no declaration: {unmapped:?}");
+        for id in KEY_NOT_SELECTABLE {
+            assert!(selectable_index(id).is_none(), "`{id}` is declared not selectable but IS: drop it from the list");
+        }
+    }
+
+    /// W5-3a: Escape reaches the active tool. The selection tool cancels its
+    /// marquee on Escape (`selection.yaml`), so a drag that is escaped selects
+    /// NOTHING on release, while the same drag unescaped selects the rect.
+    #[test]
+    fn escape_cancels_a_marquee() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        fn drag(escape: bool) -> usize {
+            let e = jas_engine_new();
+            seed(e);
+            unsafe {
+                jas_set_tool(e, 0);
+                jas_pointer_event(e, KIND_PRESS, 5.0, 5.0, 0);
+                jas_pointer_event(e, KIND_MOVE, 200.0, 200.0, MOD_DRAGGING);
+                if escape {
+                    assert_eq!(jas_key_event(e, KEY_ESCAPE, 0), JasStatus::Ok);
+                }
+                jas_pointer_event(e, KIND_RELEASE, 200.0, 200.0, 0);
+                let n = jas_selection_len(e);
+                jas_engine_free(e);
+                n
+            }
+        }
+        assert_eq!(drag(false), 1, "the control: an unescaped marquee selects the rect");
+        assert_eq!(drag(true), 0, "an escaped marquee selects nothing");
     }
 
     /// ⛔ A COUNT CANNOT EXPRESS A REFUSAL, so a null engine does not return 0.
