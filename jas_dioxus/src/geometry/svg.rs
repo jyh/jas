@@ -611,6 +611,7 @@ impl StdGradientScope {
     fn enter(root: &XmlNode) -> Self {
         let mut found = HashMap::new();
         collect_std_gradients(root, &mut found);
+        resolve_std_gradient_hrefs(&mut found);
         StdGradientScope(STD_GRADIENTS.with(|c| c.replace(found)))
     }
 }
@@ -619,6 +620,56 @@ impl Drop for StdGradientScope {
     fn drop(&mut self) {
         STD_GRADIENTS.with(|c| *c.borrow_mut() = std::mem::take(&mut self.0));
     }
+}
+
+/// The gradient attributes an `href` passes down (SVG 1.1 §13.2.2 and §13.2.3):
+/// every one the referencing gradient does not set itself.
+const STD_GRADIENT_INHERITED: &[&str] = &[
+    "x1", "y1", "x2", "y2", "cx", "cy", "r", "fx", "fy",
+    "gradientUnits", "gradientTransform", "spreadMethod",
+];
+
+/// I1b-3: resolve `href` / `xlink:href` between standard gradients, the shape
+/// Inkscape writes for nearly every gradient (a stops-only gradient, and one
+/// that hrefs it and carries the coordinates). A gradient with no stops of its
+/// own takes the nearest referenced gradient's stops, and each inheritable
+/// attribute it does not set comes from the nearest referenced gradient that
+/// does. A radial may take a linear's stops. The walk follows the chain from
+/// the ORIGINAL definitions, stops at a missing target, and refuses to revisit
+/// a gradient, so a cycle ends rather than hangs; a gradient still without
+/// stops paints nothing, as before.
+fn resolve_std_gradient_hrefs(found: &mut HashMap<String, StdGradientDef>) {
+    let href_of = |d: &StdGradientDef| -> Option<String> {
+        d.attrs.get("href").or_else(|| d.attrs.get("xlink:href"))
+            .map(|h| h.trim().trim_start_matches('#').to_string())
+    };
+    let mut resolved: Vec<(String, StdGradientDef)> = Vec::new();
+    for (id, own) in found.iter() {
+        let mut attrs = own.attrs.clone();
+        let mut stops = own.stops.clone();
+        let mut seen = std::collections::HashSet::from([id.clone()]);
+        let mut next = href_of(own);
+        while let Some(target) = next {
+            if !seen.insert(target.clone()) {
+                break; // a cycle
+            }
+            let Some(anc) = found.get(&target) else { break };
+            for k in STD_GRADIENT_INHERITED {
+                if !attrs.contains_key(*k) {
+                    if let Some(v) = anc.attrs.get(*k) {
+                        attrs.insert((*k).to_string(), v.clone());
+                    }
+                }
+            }
+            if stops.is_empty() {
+                stops = anc.stops.clone();
+            }
+            next = href_of(anc);
+        }
+        let user_space = attrs.get("gradientUnits").map(String::as_str) == Some("userSpaceOnUse");
+        resolved.push((id.clone(), StdGradientDef { radial: own.radial, user_space, attrs, stops }));
+    }
+    found.extend(resolved);
 }
 
 fn collect_std_gradients(node: &XmlNode, out: &mut HashMap<String, StdGradientDef>) {
@@ -667,8 +718,10 @@ fn paint_url_id(v: &str) -> Option<&str> {
 /// midpoint, so `gradient_remap::remap_linear_stops` re-expresses the stops
 /// on the element's own box, clipping with interpolated end colours.
 /// RADIAL is re-centred on the bbox (JYH 2026-07-26: the model has no anchor),
-/// and its radius maps to `aspect_ratio`. `gradientTransform`, `spreadMethod`,
-/// `fx`/`fy` and `href` inheritance are not read.
+/// and its radius maps to `aspect_ratio`. `href` inheritance is resolved before
+/// this runs (I1b-3, `resolve_std_gradient_hrefs`). `gradientTransform`,
+/// `spreadMethod` and `fx`/`fy` are not read: the jas model has no spread mode
+/// and no focal point, so those two wait on a model ruling.
 fn std_gradient_to_jas(def: &StdGradientDef, bbox: (f64, f64, f64, f64)) -> Option<Gradient> {
     if def.stops.len() < 2 {
         return None;
@@ -3878,6 +3931,65 @@ mod tests {
         assert_eq!(g.stops.len(), 2);
         assert!((g.stops[0].location - 20.0).abs() < 1e-9 && (g.stops[0].opacity - 50.0).abs() < 1e-9);
         assert!(r.fill.is_none() && r.fill_gradient.is_none(), "fill=none stays none");
+    }
+
+    /// I1b-3: the fill gradient of the FIRST rect of the first layer.
+    fn first_rect_fill_gradient(svg: &str) -> Option<Gradient> {
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let Element::Rect(r) = &*layer.children[0] else { panic!("a rect") };
+        r.fill_gradient.as_deref().cloned()
+    }
+
+    fn rect_with(defs: &str, fill: &str) -> String {
+        format!(r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="100">
+          <defs>{defs}</defs><g><rect x="10" y="20" width="100" height="50" fill="url(#{fill})"/></g></svg>"##)
+    }
+
+    const STOPS: &str = r##"<stop offset="0.2" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff" stop-opacity="0.5"/>"##;
+
+    /// I1b-3: `href` inheritance (SVG 1.1 §13.2.2), the shape Inkscape writes
+    /// for nearly every gradient: a stops-only gradient, and a second one that
+    /// `xlink:href`s it and carries the coordinates. It must import EXACTLY as
+    /// the same gradient written inline — the oracle is the inline form, never
+    /// a hand-typed value. Before I1b-3 the href'd fill imported as NOTHING.
+    #[test]
+    fn an_href_gradient_imports_as_its_inline_equivalent() {
+        let inline = rect_with(&format!(
+            r##"<linearGradient id="g" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse">{STOPS}</linearGradient>"##), "g");
+        let want = first_rect_fill_gradient(&inline).expect("the inline form imports a gradient");
+        for (label, defs) in [
+            ("xlink:href", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="g" xlink:href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##)),
+            ("plain href (SVG 2)", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="g" href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##)),
+            ("a two-hop chain", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="mid" xlink:href="#base" gradientUnits="userSpaceOnUse"/>
+              <linearGradient id="g" xlink:href="#mid" x1="10" y1="0" x2="110" y2="0"/>"##)),
+            ("attributes inherited, stops own", format!(r##"<linearGradient id="base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#00ff00"/><stop offset="1" stop-color="#00ff00"/></linearGradient>
+              <linearGradient id="g" xlink:href="#base">{STOPS}</linearGradient>"##)),
+        ] {
+            let got = first_rect_fill_gradient(&rect_with(&defs, "g"));
+            assert_eq!(got.as_ref(), Some(&want), "{label}: the href form must import as the inline form");
+        }
+        // A radial gradient may take a LINEAR gradient's stops (Inkscape does).
+        let radial_inline = rect_with(&format!(r##"<radialGradient id="g" cx="0.5" cy="0.5" r="0.25">{STOPS}</radialGradient>"##), "g");
+        let radial_href = rect_with(&format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <radialGradient id="g" xlink:href="#base" cx="0.5" cy="0.5" r="0.25"/>"##), "g");
+        let want_r = first_rect_fill_gradient(&radial_inline).expect("the inline radial imports");
+        assert_eq!(want_r.gtype, GradientType::Radial);
+        assert_eq!(first_rect_fill_gradient(&radial_href).as_ref(), Some(&want_r), "a radial takes a linear's stops");
+    }
+
+    /// I1b-3: an href CYCLE, or an href to nothing, imports without hanging or
+    /// panicking, and a gradient left with no stops paints nothing, as before.
+    #[test]
+    fn an_href_cycle_or_dangling_href_imports_without_a_gradient() {
+        let cycle = rect_with(r##"<linearGradient id="a" xlink:href="#b"/><linearGradient id="g" xlink:href="#a"/>
+              <linearGradient id="b" xlink:href="#g"/>"##, "g");
+        assert_eq!(first_rect_fill_gradient(&cycle), None);
+        let dangling = rect_with(r##"<linearGradient id="g" xlink:href="#nowhere"/>"##, "g");
+        assert_eq!(first_rect_fill_gradient(&dangling), None);
     }
 
     /// I1b-2: when an element carries BOTH a `jas:` gradient and a standard
