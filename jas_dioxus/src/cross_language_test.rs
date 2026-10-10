@@ -492,6 +492,29 @@ mod tests {
         assert_svg_parse("gradient_fill_and_stroke");
     }
 
+    /// A3b, at runtime: every verb `operations/op_vocabulary.json` declares
+    /// reaches an arm of `op_apply` (its error, if any, is about its arguments,
+    /// never `UnknownVerb`), and a verb the file does not declare is
+    /// `UnknownVerb`. `scripts/check_op_vocabulary.py` sees the match; this
+    /// sees what the match DOES with each name. Swift's twin is
+    /// `opVocabularyEveryDeclaredVerbReachesAnArm`.
+    #[test]
+    fn op_vocabulary_every_declared_verb_reaches_an_arm() {
+        use crate::document::op_apply::{op_apply, OpError};
+        let file: serde_json::Value =
+            serde_json::from_str(&read_fixture("operations/op_vocabulary.json")).unwrap();
+        let verbs: Vec<String> = file["verbs"].as_object().unwrap().keys().cloned().collect();
+        assert!(verbs.len() >= 40, "the vocabulary file is not vacuous: {}", verbs.len());
+        let fresh = || crate::document::model::Model::new(crate::document::document::Document::default(), None);
+        for v in &verbs {
+            let r = op_apply(&mut fresh(), &serde_json::json!({"op": v}));
+            assert!(!matches!(r, Err(OpError::UnknownVerb { .. })),
+                    "{v} is declared and op_apply does not know it");
+        }
+        assert!(matches!(op_apply(&mut fresh(), &serde_json::json!({"op": "zz_not_a_verb"})),
+                         Err(OpError::UnknownVerb { .. })), "the control: an undeclared verb is refused");
+    }
+
     #[test]
     fn svg_parse_rect_with_stroke() {
         assert_svg_parse("rect_with_stroke");

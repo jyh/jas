@@ -241,6 +241,10 @@ jobs:
       # Rust and says of itself that it stops there.
       - run: python scripts/check_shell_abi_bindings.py --self-test
       - run: python scripts/check_shell_abi_bindings.py
+      # The op vocabulary (A3b): both ports' `op_apply` matches equal the one
+      # declared list in test_fixtures/operations/op_vocabulary.json.
+      - run: python scripts/check_op_vocabulary.py --self-test
+      - run: python scripts/check_op_vocabulary.py
       - run: python scripts/check_shell_widget_kinds.py --self-test
       - run: python scripts/check_shell_widget_kinds.py
       - run: python scripts/check_shell_kind_labels.py --self-test
@@ -998,6 +1002,8 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          python scripts/check_op_vocabulary.py --self-test
+          python scripts/check_op_vocabulary.py
           # W2b-9's widget-kind join reads `Materializer.cs`, which SHIPS to
           # Windows, so this is where its two regexes are actually tested.
           # `check_lane_coverage.py` refused the ubuntu-only wiring by name,

@@ -163,9 +163,24 @@ impl Session {
     }
 }
 
-/// The tool list. The edit vocabulary is the `op_apply` primitive ops, passed
-/// through and validated by the model (a failing op refuses the proposal).
-/// Generating per-action schemas is node A3b (docs/AGENT_API.md §4).
+/// The declared op vocabulary (A3b): every verb `op_apply` accepts, as data.
+/// `scripts/check_op_vocabulary.py` asserts both ports' matches equal it.
+const OP_VOCABULARY: &str = include_str!("../../test_fixtures/operations/op_vocabulary.json");
+
+/// The verbs of [`OP_VOCABULARY`], sorted. Empty only if the embedded file is
+/// malformed, which `propose_declares_the_op_vocabulary_as_an_enum` reds.
+fn op_verbs() -> Vec<String> {
+    let mut v: Vec<String> = serde_json::from_str::<Value>(OP_VOCABULARY).ok()
+        .and_then(|f| f["verbs"].as_object().map(|o| o.keys().cloned().collect()))
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// The tool list. The edit vocabulary is the `op_apply` primitive ops: each
+/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), and
+/// the model still validates every op (a failing op refuses the proposal).
+/// An op's ARGUMENTS are not declared yet, so the items stay open objects.
 fn tool_list() -> Value {
     json!([
         {
@@ -175,7 +190,9 @@ fn tool_list() -> Value {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "the action verb that names this edit"},
-                    "ops": {"type": "array", "items": {"type": "object", "required": ["op"]},
+                    "ops": {"type": "array",
+                            "items": {"type": "object", "required": ["op"],
+                                      "properties": {"op": {"type": "string", "enum": op_verbs()}}},
                             "description": "primitive document ops, applied in order"}
                 },
                 "required": ["name", "ops"]
@@ -286,6 +303,27 @@ mod tests {
         let propose = out[0]["result"]["tools"].as_array().unwrap().iter()
             .find(|t| t["name"] == "propose").unwrap();
         assert_eq!(propose["inputSchema"]["required"], json!(["name", "ops"]));
+    }
+
+    /// A3b: the `op` a proposal may carry is an ENUM taken from the declared
+    /// vocabulary (`test_fixtures/operations/op_vocabulary.json`), so a client
+    /// sees the 51 verbs instead of an untyped object. The expectation is read
+    /// from the FILE, not from the code under test, and its size is asserted so
+    /// an empty file cannot agree with an empty enum.
+    #[test]
+    fn propose_declares_the_op_vocabulary_as_an_enum() {
+        let mut s = session();
+        let out = call(&mut s, 2, "tools/list", json!({}));
+        let propose = out[0]["result"]["tools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == "propose").unwrap();
+        let got: Vec<&str> = propose["inputSchema"]["properties"]["ops"]["items"]["properties"]["op"]["enum"]
+            .as_array().expect("an op enum").iter().map(|v| v.as_str().unwrap()).collect();
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/operations/op_vocabulary.json")).unwrap()).unwrap();
+        let mut want: Vec<&str> = file["verbs"].as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        want.sort();
+        assert!(want.len() >= 40, "the vocabulary file is not vacuous: {}", want.len());
+        assert_eq!(got, want);
     }
 
     #[test]
