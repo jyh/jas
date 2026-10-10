@@ -654,11 +654,17 @@ be the operative one, since §4.1 was not empty at all.
 The house rule: report clean negatives as negatives, and never let an unmeasured thing sit
 next to a measured one without a label.
 
-- **The Swift suite's "5 known issues."** The run passed (exit 0, 3028 tests), but the
-  runner reported five *known issues* and **I did not open them.** A known-issue count is
-  a suppressed-failure count wearing a green hat; it belongs in this section, not in the
-  suites table alone. Nothing in this roadmap depends on it, and nobody should read
-  "Swift green" from §2.1 without also reading this line.
+- **The Swift suite's "5 known issues": OPENED 2026-10-09, and they are not failures.**
+  All five are deliberate negative controls in `JasSwift/Tests/CrossLanguageTests.swift`
+  (`withKnownIssue` at :533, :545, :549, :579, :588). Each asserts that the
+  writer-resolution comparator DOES go red on a real divergence, on `true` vs `1`, on
+  `false` vs `0`, on a 5e-4 offset, and on differing strings. In swift-testing, a
+  `withKnownIssue` block whose issue does NOT occur is itself recorded as a failure. That was
+  DRIVEN, not assumed: making one probe's two inputs equal turned the run red with *"Known
+  issue was not recorded"*. So a probe that stops failing reds the suite by itself, and a
+  count other than 5 means only that a probe was added or removed. *(Until 2026-10-09 this line read "I did not open them" and called the count
+  "a suppressed-failure count wearing a green hat". That was the right caution, about
+  something that turned out not to be suppressed.)*
 - **The browser lane** (69/69) is **2026-09-02's** number, re-verified on merged main
   then, not re-run for this document. `main` has moved since, more than once. **A commit
   count here would be wrong by the time anyone read it, so there is not one** — compare
