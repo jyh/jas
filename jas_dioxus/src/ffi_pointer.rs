@@ -91,8 +91,19 @@ pub unsafe extern "C" fn jas_tool_name(index: usize, out_len: *mut usize) -> *co
 pub unsafe extern "C" fn jas_set_tool(e: *mut JasEngine, index: usize) -> JasStatus {
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
     let Some(id) = TOOL_IDS.get(index) else { return JasStatus::MissingTarget };
-    let Some(built) = build_tool(id) else { return JasStatus::MissingTarget };
-    *engine.tool_slot() = Some((index, built));
+    let Some(mut built) = build_tool(id) else { return JasStatus::MissingTarget };
+    // ⛔ A SWITCH IS LEAVE-THEN-ENTER, NEVER A SLOT ASSIGNMENT (W5-0). The old
+    // tool's `on_leave` is what commits work in flight (the pen's open path),
+    // and the new tool's `on_enter` resets state it shares with others (the
+    // pen's thread-local anchor buffer). Both apps switch this way (Swift's
+    // `CanvasSubwindow` tool observer, the web app's `active_tool` route in
+    // `renderer.rs`); an assignment alone drops the path and keeps the anchors.
+    let mut slot = engine.tool_slot();
+    if let Some((_, old)) = slot.as_mut() {
+        engine.with_model_mut(|m| old.deactivate(m));
+    }
+    engine.with_model_mut(|m| built.activate(m));
+    *slot = Some((index, built));
     JasStatus::Ok
 }
 
@@ -152,7 +163,12 @@ pub unsafe extern "C" fn jas_pointer_event(
         // Default to the first tool rather than refusing: a shell that never
         // called `jas_set_tool` still gets the selection tool, which is what
         // every drawing app opens with.
-        let Some(built) = build_tool(TOOL_IDS[0]) else { return JasStatus::MissingTarget };
+        let Some(mut built) = build_tool(TOOL_IDS[0]) else { return JasStatus::MissingTarget };
+        // ⚠️ A SURVIVING MUTANT, RECORDED (W5-0): deleting this line reds no
+        // arm, because selection's `on_enter` only writes `mode: 'idle'`, its
+        // own declared default. It stays so the implicit tool is entered the
+        // same way a picked one is; it gains a witness when TOOL_IDS[0] does.
+        engine.with_model_mut(|m| built.activate(m));
         *slot = Some((0, built));
     }
     let (_, tool) = slot.as_mut().expect("just built");
@@ -305,6 +321,66 @@ mod tests {
 
         assert_eq!(selection_len(e), 1,
                    "the marquee enclosed the rect, so the tool selected it");
+        unsafe { jas_engine_free(e) };
+    }
+
+    fn element_count(e: *mut JasEngine) -> usize {
+        fn walk(el: &Element) -> usize {
+            match el {
+                Element::Layer(l) => l.children.iter().map(|c| walk(c)).sum(),
+                Element::Group(g) => g.children.iter().map(|c| walk(c)).sum(),
+                _ => 1,
+            }
+        }
+        unsafe { &*e }.with_document(|d| d.layers.iter().map(|l| walk(l)).sum())
+    }
+
+    fn tool_index(id: &str) -> usize {
+        TOOL_IDS.iter().position(|t| *t == id).expect("id is in TOOL_IDS")
+    }
+
+    /// ⛔ W5-0: SWITCHING TOOLS RUNS THE OLD TOOL'S `on_leave`. The pen's
+    /// `on_leave` is what commits an in-progress path, so a switch that only
+    /// reassigns the slot drops the path the person was drawing. Selection is
+    /// the only tool the shell selects today, which is why this was invisible.
+    #[test]
+    fn switching_away_from_the_pen_commits_its_path() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        crate::interpreter::anchor_buffers::clear("pen");
+        let e = jas_engine_new();
+        seed(e);
+        let before = element_count(e);
+        unsafe {
+            assert_eq!(jas_set_tool(e, tool_index("pen")), JasStatus::Ok);
+            for x in [200.0, 260.0] {
+                assert_eq!(jas_pointer_event(e, KIND_PRESS, x, 200.0, 0), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_RELEASE, x, 200.0, 0), JasStatus::Ok);
+            }
+            assert_eq!(element_count(e), before, "two clicks place anchors and add nothing yet");
+            assert_eq!(jas_set_tool(e, tool_index("rect")), JasStatus::Ok);
+        }
+        assert_eq!(element_count(e), before + 1,
+                   "leaving the pen commits its two-anchor path as one element");
+        assert_eq!(crate::interpreter::anchor_buffers::length("pen"), 0,
+                   "and its anchor buffer is cleared");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⛔ W5-0: SELECTING A TOOL RUNS ITS `on_enter`. The pen's anchor buffer
+    /// is thread-local, so anchors left by anything else are still there when
+    /// the pen is picked; its `on_enter` is what clears them. A stale buffer
+    /// would turn the person's first click into the third anchor of a path
+    /// they never started.
+    #[test]
+    fn selecting_the_pen_runs_its_on_enter() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        crate::interpreter::anchor_buffers::clear("pen");
+        for x in [1.0, 2.0, 3.0] { crate::interpreter::anchor_buffers::push("pen", x, x); }
+        assert_eq!(crate::interpreter::anchor_buffers::length("pen"), 3, "the control: stale anchors are present");
+        let e = jas_engine_new();
+        unsafe { assert_eq!(jas_set_tool(e, tool_index("pen")), JasStatus::Ok) };
+        assert_eq!(crate::interpreter::anchor_buffers::length("pen"), 0,
+                   "the pen's on_enter cleared the stale buffer");
         unsafe { jas_engine_free(e) };
     }
 
