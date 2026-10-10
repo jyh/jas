@@ -131,6 +131,50 @@ pub(crate) fn selectable_index(id: &str) -> Option<usize> {
         .or_else(|| TOOL_IDS.iter().position(|t| *t == format!("{id}_point")))
 }
 
+/// The two workspace state names that are not the tool's YAML id -- the
+/// inverse [`selectable_index`] needs when the core WRITES `active_tool`. An
+/// explicit table, not a `_point` strip: `anchor_point` is itself a tool id.
+const STATE_NAME_TO_ID: &[(&str, &str)] = &[
+    ("add_anchor", "add_anchor_point"),
+    ("delete_anchor", "delete_anchor_point"),
+];
+
+/// The workspace state name for a [`TOOL_IDS`] id: the inverse of the above.
+fn state_name_for_id(id: &str) -> &str {
+    STATE_NAME_TO_ID.iter().find(|(_, i)| *i == id).map_or(id, |(n, _)| *n)
+}
+
+/// What [`sync_tool_to_state`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolSync {
+    /// The pointer already drives the tool `active_tool` names (or none is set).
+    Same,
+    /// The pointer now drives it: leave, then enter.
+    Switched,
+    /// `active_tool` named a tool no shell tool answers, so it was written
+    /// BACK to the tool the pointer drives -- the toolbar's checked button must
+    /// never claim a tool that is not the one in use.
+    Refused,
+}
+
+/// Make the pointer's tool agree with the workspace's `active_tool`, after
+/// anything that may have written it (a toolbar click runs `select_tool`).
+/// The switch is the one [`jas_set_tool`] makes: leave, then enter.
+pub(crate) fn sync_tool_to_state(engine: &JasEngine) -> ToolSync {
+    let Some(name) = engine.active_tool_state() else { return ToolSync::Same };
+    let current = engine.tool_slot().as_ref().map(|(i, _)| *i);
+    match selectable_index(&name) {
+        Some(want) if current == Some(want) => ToolSync::Same,
+        Some(want) if switch_tool(engine, want) == JasStatus::Ok => ToolSync::Switched,
+        _ => {
+            if let Some(i) = current {
+                engine.set_active_tool_state(state_name_for_id(TOOL_IDS[i]));
+            }
+            ToolSync::Refused
+        }
+    }
+}
+
 /// Select the tool the pointer drives, by index into [`TOOL_IDS`].
 ///
 /// # Safety
@@ -138,6 +182,13 @@ pub(crate) fn selectable_index(id: &str) -> Option<usize> {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn jas_set_tool(e: *mut JasEngine, index: usize) -> JasStatus {
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
+    switch_tool(engine, index)
+}
+
+/// The tool switch behind [`jas_set_tool`] and [`sync_tool_to_state`]. It also
+/// writes `active_tool`, so the toolbar's checked button is the tool the pointer
+/// drives however the tool was picked: one truth, read by both.
+fn switch_tool(engine: &JasEngine, index: usize) -> JasStatus {
     let Some(id) = TOOL_IDS.get(index) else { return JasStatus::MissingTarget };
     let Some(mut built) = build_tool(id) else { return JasStatus::MissingTarget };
     // ⛔ A SWITCH IS LEAVE-THEN-ENTER, NEVER A SLOT ASSIGNMENT (W5-0). The old
@@ -152,6 +203,8 @@ pub unsafe extern "C" fn jas_set_tool(e: *mut JasEngine, index: usize) -> JasSta
     }
     engine.with_model_mut(|m| built.activate(m));
     *slot = Some((index, built));
+    drop(slot);
+    engine.set_active_tool_state(state_name_for_id(id));
     JasStatus::Ok
 }
 
@@ -761,6 +814,88 @@ mod tests {
         corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
         assert_eq!(corners, vec![(20.0, 30.0), (20.0, 110.0), (120.0, 30.0), (120.0, 110.0)],
                    "one anchor square per corner, on top of the document");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE TOOLBAR SEAM: the workspace names a tool, the pointer drives one,
+    /// and they must be the same tool.
+    #[test]
+    fn a_state_tool_name_maps_to_its_shell_tool() {
+        let idx = |id: &str| TOOL_IDS.iter().position(|t| *t == id);
+        for name in ["selection", "rect", "pen", "lasso", "hand", "artboard"] {
+            assert_eq!(selectable_index(name), idx(name), "{name}");
+        }
+        assert_eq!(selectable_index("add_anchor"), idx("add_anchor_point"));
+        assert_eq!(selectable_index("delete_anchor"), idx("delete_anchor_point"));
+        assert_eq!(selectable_index("type"), None, "the type tools are native, not built here");
+        assert_eq!(selectable_index("no_such_tool"), None);
+    }
+
+    #[test]
+    fn writing_active_tool_swaps_the_pointer_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        seed(e);
+        let engine = unsafe { &*e };
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        engine.set_active_tool_state("rect");
+        assert_eq!(sync_tool_to_state(engine), ToolSync::Switched);
+        let rect = TOOL_IDS.iter().position(|t| *t == "rect").unwrap();
+        assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| *i), Some(rect));
+        // And it DRAWS: a drag on empty canvas now makes a rect.
+        let before = engine.with_document(|d| d.layers[0].children().map_or(0, |c| c.len()));
+        unsafe {
+            jas_pointer_event(e, KIND_PRESS, 200.0, 150.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 260.0, 190.0, MOD_DRAGGING);
+            jas_pointer_event(e, KIND_RELEASE, 260.0, 190.0, 0);
+        }
+        let after = engine.with_document(|d| d.layers[0].children().map_or(0, |c| c.len()));
+        assert_eq!(after, before + 1, "the rect tool drew a rect");
+        // Unchanged again: a second sync does nothing.
+        assert_eq!(sync_tool_to_state(engine), ToolSync::Same);
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_name_no_tool_answers_leaves_the_pointer_tool_alone() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let engine = unsafe { &*e };
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        engine.set_active_tool_state("type");
+        assert_eq!(sync_tool_to_state(engine), ToolSync::Refused);
+        assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| *i), Some(0));
+        assert_eq!(engine.active_tool_state().as_deref(), Some("selection"), "written back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The coupling a KEY must honour too (W5-3a): `P` switches through the
+    /// same switch, so the toolbar's checked button follows a keyboard switch.
+    #[test]
+    fn a_tool_key_writes_active_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"));
+        assert_eq!(unsafe { jas_key_event(e, 'p' as u32, 0) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("pen"),
+                   "a key switch lights the pen button, not the old one");
+        assert_eq!(unsafe { &*e }.tool_slot().as_ref().map(|(i, _)| TOOL_IDS[*i]), Some("pen"));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The other direction: a tool picked by index is the toolbar's checked one.
+    #[test]
+    fn jas_set_tool_writes_active_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let pen = TOOL_IDS.iter().position(|t| *t == "pen").unwrap();
+        assert_eq!(unsafe { jas_set_tool(e, pen) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("pen"));
+        let add = TOOL_IDS.iter().position(|t| *t == "add_anchor_point").unwrap();
+        assert_eq!(unsafe { jas_set_tool(e, add) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("add_anchor"),
+                   "written in the WORKSPACE's name, the one the toolbar binds");
         unsafe { jas_engine_free(e) };
     }
 
