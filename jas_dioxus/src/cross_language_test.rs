@@ -1433,10 +1433,14 @@ mod tests {
                     }
                     instances += 1;
                     let entry = args.entry(verb.to_string()).or_default();
+                    // Types come only from ops the corpus expects to SUCCEED: an op
+                    // carrying a harness key (`expected_error`) feeds a value in order
+                    // to be refused, and a schema must not advertise it.
+                    let expects_success = !OP_HARNESS_KEYS.iter().any(|h| op.get(*h).is_some());
+                    let verb_types = types.entry(verb.to_string()).or_default();
                     for (k, val) in op.as_object().unwrap().iter().filter(|(k, _)| *k != "op") {
-                        if !OP_HARNESS_KEYS.contains(&k.as_str()) {
-                            types.entry(verb.to_string()).or_default().entry(k.clone()).or_default()
-                                .insert(json_type_name(val));
+                        if expects_success && !OP_HARNESS_KEYS.contains(&k.as_str()) {
+                            verb_types.entry(k.clone()).or_default().insert(json_type_name(val));
                         }
                         let mut m = tc.clone();
                         m.pointer_mut(&ptr).unwrap().as_object_mut().unwrap().remove(k);
@@ -1505,8 +1509,10 @@ mod tests {
         "the two ports agree on every witnessed argument.",
         "`harness_keys` are corpus keys for the test harness, excluded here and asserted inert in every verb.",
         "",
-        "`argument_types`: the JSON Schema type names of the values the corpus gives each (non-harness) key. They are",
-        "OBSERVED types, not a contract: a key the corpus always gives as a number may accept a string.",
+        "`argument_types`: the JSON Schema type names of the values the corpus gives each key, read ONLY from ops the",
+        "corpus expects to succeed (no harness key), so a value fed in order to be refused is not advertised. They are",
+        "OBSERVED types, not a contract: a key the corpus always gives as a number may accept a string. A key that",
+        "appears only in error cases has no type entry.",
         "",
         "WHAT IT DOES NOT COVER. An argument the corpus never carries is absent. The verbs listed under",
         "`verbs_with_no_corpus_instance` have no entry at all.",
