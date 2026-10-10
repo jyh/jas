@@ -97,6 +97,9 @@ public final class McpSocketServer {
         clientFd = fd
         session = s
         buffer = Data()
+        // What the artist does outside the session (an ordinary edit) reaches
+        // this client through the session's hooks (A4 (iv)(b)).
+        s.send = { [weak self] line in self?.writeLine(line) }
         let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         src.setEventHandler { [weak self] in self?.readAvailable() }
         src.resume()
@@ -136,6 +139,7 @@ public final class McpSocketServer {
     }
 
     private func dropClient() {
+        session?.send = nil
         clientSource?.cancel()
         clientSource = nil
         if clientFd >= 0 { close(clientFd); clientFd = -1 }
