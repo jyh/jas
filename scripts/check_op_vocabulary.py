@@ -7,7 +7,8 @@ A proposal (docs/AGENT_API.md) carries primitive document ops. Until A3b those
 ops were declared nowhere but as two `match` statements, one per active port,
 so the vocabulary an agent may use was a property of the code, not of the
 spec, and nothing said the two matches agreed. They did (59 and 59, the same
-set; the first count, 2026-10-09, read 51 because it skipped computed arms), which is exactly the state that rots unwatched:
+set; the first count, 2026-10-09, read 51 because it skipped computed arms),
+which is exactly the state that rots unwatched:
 adding a verb to one port is a complete, compiling, green change.
 
 WHAT IT ASSERTS
