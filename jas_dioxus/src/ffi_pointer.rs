@@ -51,6 +51,28 @@ pub const TOOL_IDS: &[&str] = &[
     "pen",
     "pencil",
     "zoom",
+    // W5-1 (2026-10-09): every other workspace tool, APPENDED in alphabetical
+    // order so the nine indexes above keep their meaning. Each builds in the
+    // web-free engine (the wave-3 census, 27/27); none is selectable from the
+    // shell until its forwarding is answered (`SB_TOOL != 0` stays refused).
+    "add_anchor_point",
+    "anchor_point",
+    "artboard",
+    "blob_brush",
+    "delete_anchor_point",
+    "eyedropper",
+    "hand",
+    "lasso",
+    "magic_wand",
+    "paintbrush",
+    "path_eraser",
+    "polygon",
+    "rotate",
+    "rounded_rect",
+    "scale",
+    "shear",
+    "smooth",
+    "star",
 ];
 
 /// How many tools the shell may select. Pairs with [`jas_tool_name`].
