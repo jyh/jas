@@ -2,6 +2,9 @@
 ///
 /// Usage:
 ///   jas_mcp [file.svg]     -- serve one document (blank when no file is given)
+///   jas_mcp --attach PATH  -- relay to a RUNNING app's socket (node A4 (iii)):
+///                             the Mac app, launched with `--mcp-socket PATH`,
+///                             owns the document and the session
 ///
 /// A reader thread owns stdin and forwards each line over a channel; the main
 /// thread owns the session and stdout. The split is what makes the server
@@ -23,6 +26,25 @@ enum Event {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    // `--attach` reaches a Unix-domain socket, so it exists only on unix; the
+    // Mac app is its one host today (A4).
+    #[cfg(unix)]
+    if args.get(1).map(String::as_str) == Some("--attach") {
+        let Some(path) = args.get(2) else {
+            eprintln!("jas_mcp: --attach needs the app's socket path");
+            std::process::exit(2);
+        };
+        let stream = std::os::unix::net::UnixStream::connect(path).unwrap_or_else(|e| {
+            eprintln!("jas_mcp: cannot attach to {path}: {e} (is the app running with --mcp-socket?)");
+            std::process::exit(1);
+        });
+        if let Err(e) = jas_dioxus::mcp::relay_attached(stream, std::io::stdin().lock(), std::io::stdout()) {
+            eprintln!("jas_mcp: the relay ended: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let doc = match std::env::args().nth(1) {
         Some(path) => {
             let svg = std::fs::read_to_string(&path).unwrap_or_else(|e| {

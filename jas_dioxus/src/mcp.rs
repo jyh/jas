@@ -235,6 +235,84 @@ fn tool_result(id: Value, is_error: bool, text: &str, structured: Value) -> Stri
         "structuredContent": structured, "isError": is_error}))
 }
 
+/// A4 (iii): relay a stdio MCP client to a RUNNING app's socket (the Mac app
+/// owns it; `JasSwift`'s `McpSocketServer`). A stdio client always spawns a
+/// fresh process, and this is how that process reaches the app instead of
+/// serving a document of its own: `jas_mcp --attach <path>`.
+///
+/// Lines from `input` go to the socket; lines from the socket go to `output`.
+/// When `input` ends, the socket's write half is shut down, so the app reads
+/// EOF and closes; the relay returns once the socket's read half ends too,
+/// handing back `output`. A thread owns the socket-to-output half, so the
+/// app's pushes (an artist's accept or edit) reach the client while no
+/// request is in flight.
+#[cfg(unix)]
+pub fn relay_attached<R, W>(stream: std::os::unix::net::UnixStream, input: R, output: W) -> std::io::Result<W>
+where
+    R: std::io::BufRead,
+    W: std::io::Write + Send + 'static,
+{
+    use std::io::{BufRead, BufReader, Write};
+    let reader = stream.try_clone()?;
+    let down = std::thread::spawn(move || -> std::io::Result<W> {
+        let mut output = output;
+        for line in BufReader::new(reader).lines() {
+            writeln!(output, "{}", line?)?;
+            output.flush()?;
+        }
+        Ok(output)
+    });
+    let mut up = stream;
+    for line in input.lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        writeln!(up, "{line}")?;
+        up.flush()?;
+    }
+    up.shutdown(std::net::Shutdown::Write)?;
+    down.join().map_err(|_| std::io::Error::other("the socket reader panicked"))?
+}
+
+#[cfg(all(test, unix))]
+mod attach_tests {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+
+    /// A4 (iii): `jas_mcp --attach` relays the client's stdio to the app's
+    /// socket and back. A real listener stands in for the app: it answers each
+    /// line it reads, then keeps reading until the shim closes its write side.
+    /// The relay must return (not hang) once stdin ends and the app closes.
+    #[test]
+    fn attach_relays_stdin_to_the_socket_and_the_socket_to_stdout() {
+        let path = std::env::temp_dir().join(format!("jas-attach-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = UnixListener::bind(&path).unwrap();
+        let app = std::thread::spawn(move || {
+            let (conn, _) = listener.accept().unwrap();
+            let mut w = conn.try_clone().unwrap();
+            for line in BufReader::new(conn).lines() {
+                let line = line.unwrap();
+                writeln!(w, "answer:{line}").unwrap();
+            }
+            // stdin's EOF reached the app as a read EOF; closing here ends the
+            // shim's socket-to-stdout half.
+        });
+        let stream = std::os::unix::net::UnixStream::connect(&path).unwrap();
+        let stdin = std::io::Cursor::new(b"one\ntwo\n".to_vec());
+        // Bounded: a relay that never shuts its write half HANGS rather than
+        // failing, and a hung test is not a red one.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || { let _ = tx.send(super::relay_attached(stream, stdin, Vec::<u8>::new())); });
+        let out = rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the relay returned within 5 s").expect("the relay finishes");
+        app.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(String::from_utf8(out).unwrap(), "answer:one\nanswer:two\n");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
