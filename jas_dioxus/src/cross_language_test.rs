@@ -475,6 +475,79 @@ mod tests {
         assert_svg_parse("line_basic");
     }
 
+    /// The `mcp_exchanges.json` matcher (its `_doc` states the rules): a
+    /// subset match on objects, exact length on arrays, `"<any>"`, an expected
+    /// object against an actual JSON string, and `"<settled>"`.
+    fn mcp_match(want: &serde_json::Value, got: &serde_json::Value, settled: &serde_json::Value, at: &str) {
+        use serde_json::Value;
+        match want {
+            Value::String(w) if w == "<any>" => {}
+            Value::String(w) if w == "<settled>" => assert_eq!(got, settled, "{at}: not the settled document"),
+            Value::Object(wm) => {
+                let parsed;
+                let got = match got {
+                    Value::String(t) => { parsed = serde_json::from_str::<Value>(t).unwrap_or(Value::Null); &parsed }
+                    g => g,
+                };
+                let gm = got.as_object().unwrap_or_else(|| panic!("{at}: expected an object, got {got}"));
+                for (k, wv) in wm {
+                    let gv = gm.get(k).unwrap_or_else(|| panic!("{at}: missing key `{k}` in {got}"));
+                    mcp_match(wv, gv, settled, &format!("{at}.{k}"));
+                }
+            }
+            Value::Array(wa) => {
+                let ga = got.as_array().unwrap_or_else(|| panic!("{at}: expected an array, got {got}"));
+                assert_eq!(wa.len(), ga.len(), "{at}: array length; got {got}");
+                for (i, (wv, gv)) in wa.iter().zip(ga).enumerate() {
+                    mcp_match(wv, gv, settled, &format!("{at}[{i}]"));
+                }
+            }
+            w => assert_eq!(w, got, "{at}"),
+        }
+    }
+
+    /// A4, the transport conformance corpus: every case of
+    /// `operations/mcp_exchanges.json` replayed through `mcp::Session`. Swift's
+    /// twin is `mcpExchanges`. Anti-vacuity: the corpus has cases, and every
+    /// step's outgoing count is asserted (an empty expectation is a claim).
+    #[test]
+    fn mcp_exchanges() {
+        use crate::mcp::Session;
+        let file: serde_json::Value = serde_json::from_str(&read_fixture("operations/mcp_exchanges.json")).unwrap();
+        let cases = file["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8, "mcp_exchanges has {} cases", cases.len());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let doc = svg_to_document(&read_fixture(&format!("svg/{}", case["setup_svg"].as_str().unwrap())));
+            let settled: serde_json::Value = serde_json::from_str(&document_to_test_json(&doc)).unwrap();
+            let mut session = Session::new(crate::document::model::Model::new(doc, None));
+            for (i, step) in case["steps"].as_array().unwrap().iter().enumerate() {
+                let out = if let Some(msg) = step.get("client") {
+                    session.handle(&msg.to_string())
+                } else {
+                    let pid = step["proposal"].as_str().unwrap_or("");
+                    match step["artist"].as_str().unwrap() {
+                        "accept" => session.artist_accept(pid),
+                        "reject" => session.artist_reject(pid),
+                        "edit" => {
+                            let ops = step["ops"].as_array().unwrap().clone();
+                            session.artist_edit(|m| for op in &ops {
+                                crate::document::op_apply::op_apply(m, op).expect("an edit op applies");
+                            })
+                        }
+                        other => panic!("{name}: unknown artist act {other}"),
+                    }
+                };
+                let got: Vec<serde_json::Value> = out.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+                let want = step["expect"].as_array().unwrap();
+                assert_eq!(want.len(), got.len(), "{name} step {i}: outgoing count; got {got:?}");
+                for (k, (w, g)) in want.iter().zip(&got).enumerate() {
+                    mcp_match(w, g, &settled, &format!("{name} step {i} message {k}"));
+                }
+            }
+        }
+    }
+
     #[test]
     fn svg_parse_rect_basic() {
         assert_svg_parse("rect_basic");
