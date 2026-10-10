@@ -66,13 +66,13 @@ The bins come from rules in the tool, never from a hand list.
 Spec classes not yet censused are declared with their counts, and a spec class in neither list refuses the run. CI
 runs the census's self-test and a full run in the `workspace-json-fresh` job.
 
-**The reading on 2026-10-10** (spec sha256/16 `93c08c304810d2a0`, build `24fd5ca2`): **198 of 753 censused
+**The reading on 2026-10-10** (spec sha256/16 `93c08c304810d2a0`, build `24fd5ca2`, with the counting rules of #321): **184 of 753 censused
 item-observables are covered.**
 
 | observable | covered |
 |---|---|
-| state | 125 of 441 |
-| tree | 73 of 106 |
+| state | 113 of 441 |
+| tree | 71 of 106 |
 | pixels | 0 of 206 |
 
 The bins:
@@ -81,13 +81,16 @@ The bins:
 |---|---|---|
 | NOT_INSTRUMENTABLE | 2 | native file dialogs |
 | UNDERSPECIFIED | 48 | log-only actions |
-| NOT_YET_BUILT | 505 | everything else that is uncovered |
+| NOT_YET_BUILT | 519 | everything else that is uncovered |
 
 ⚠️ **The census's limits print beside its numbers, and they are part of the reading:**
 * "Covered" means a committed corpus or golden names the item and an active port consumes it. It does **not** mean a
   live window was driven.
 * Tree coverage is the shared interpreter's **plan**, not the rendered widgets.
 * Widgets are counted at their panel's or dialog's granularity.
+* A golden counts only when a port runs it. One that only a script compares with the bundle does not count, and
+  neither does one a port emits from a typed literal. The state-defaults golden is the second kind, so the census
+  counts no state variable as covered.
 
 ## 5. The mechanism today, and what level 2 still needs
 
