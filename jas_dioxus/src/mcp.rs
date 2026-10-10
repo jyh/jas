@@ -195,10 +195,34 @@ fn op_verbs() -> Vec<String> {
     v
 }
 
+const OP_ARGUMENTS: &str = include_str!("../../test_fixtures/operations/op_arguments.json");
+
+/// One `anyOf` branch per declared verb (A3b slice 3): `op` as a `const`, and
+/// the keys `op_arguments.json` DERIVES for that verb, typed with the types the
+/// corpus gives them on ops it expects to succeed. Nothing is `required` (a
+/// witnessed key may still have a default), and the branches stay open objects
+/// (an argument the corpus never carries is not in the file).
+fn op_branches() -> Vec<Value> {
+    let file: Value = serde_json::from_str(OP_ARGUMENTS).unwrap_or(Value::Null);
+    op_verbs().into_iter().map(|verb| {
+        let mut props = serde_json::Map::new();
+        props.insert("op".into(), json!({"const": verb}));
+        if let Some(keys) = file["argument_types"][verb.as_str()].as_object() {
+            for (k, ts) in keys {
+                let ts: Vec<&str> = ts.as_array().map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                let ty = if ts.len() == 1 { json!(ts[0]) } else { json!(ts) };
+                props.insert(k.clone(), json!({"type": ty}));
+            }
+        }
+        json!({"type": "object", "properties": props})
+    }).collect()
+}
+
 /// The tool list. The edit vocabulary is the `op_apply` primitive ops: each
-/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), and
-/// the model still validates every op (a failing op refuses the proposal).
-/// An op's ARGUMENTS are not declared yet, so the items stay open objects.
+/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), each
+/// verb's arguments are declared by an `anyOf` branch (slice 3), and the model
+/// still validates every op (a failing op refuses the proposal).
 fn tool_list() -> Value {
     json!([
         {
@@ -210,7 +234,8 @@ fn tool_list() -> Value {
                     "name": {"type": "string", "description": "the action verb that names this edit"},
                     "ops": {"type": "array",
                             "items": {"type": "object", "required": ["op"],
-                                      "properties": {"op": {"type": "string", "enum": op_verbs()}}},
+                                      "properties": {"op": {"type": "string", "enum": op_verbs()}},
+                                      "anyOf": op_branches()},
                             "description": "primitive document ops, applied in order"}
                 },
                 "required": ["name", "ops"]
