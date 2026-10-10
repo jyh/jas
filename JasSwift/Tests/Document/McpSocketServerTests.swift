@@ -134,3 +134,20 @@ private func emptyModel() -> Model {
     let line = try #require(client.readLine(), "the withdrawal reaches the client")
     #expect(line.contains("withdrawn") && line.contains("p-0"), "\(line)")
 }
+
+/// A4 (iv)(a), end to end: the bar's Accept, with the proposing client
+/// attached, goes through that client's session, so the client is told.
+@Test func theBarsAcceptReachesTheAttachedClient() throws {
+    let path = tempSocketPath()
+    let queue = DispatchQueue(label: "mcp-socket-test")
+    let model = Model(document: svgToDocument(#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><g><rect x="10" y="10" width="20" height="20" fill="red"/></g></svg>"#))
+    let server = try McpSocketServer(path: path, queue: queue) { McpSession(model: model) }
+    defer { server.stop() }
+    let client = try #require(LineClient(path: path))
+    client.send(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"propose","arguments":{"name":"nudge","ops":[{"op":"select_rect","x":0,"y":0,"width":50,"height":50,"extend":false},{"op":"move_selection","dx":5,"dy":0}]}}}"#)
+    _ = try #require(client.readLine(), "the propose is answered")
+    queue.sync { ProposalBar.accept(model: model, server: server) }
+    let line = try #require(client.readLine(), "the accept reaches the client")
+    #expect(line.contains("accepted") && line.contains("p-0"), "\(line)")
+    #expect(model.journal.last?.actor == "ai")
+}

@@ -863,6 +863,10 @@ public class Model: ObservableObject {
     /// The id of the pending proposal, if any.
     public var pendingProposalId: String? { pendingProposal?.id }
 
+    /// The pending proposal's name (the `propose` call's verb), which the
+    /// accept bar shows (A4 (iv)(a)).
+    public var pendingProposalName: String? { pendingProposal?.name }
+
     /// The document without the preview: the held document while a proposal
     /// is pending, else the live one. The journal replays to this.
     public var documentWithoutPreview: Document { pendingProposal?.held ?? document }
