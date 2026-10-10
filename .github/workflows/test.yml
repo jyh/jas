@@ -56,6 +56,12 @@ jobs:
       - run: bash scripts/check_workspace_json.sh
       - run: python scripts/check_menu_structure.py
       - run: python scripts/check_toolbar_structure.py
+      # The YAML coverage census (the three-level testing process's first
+      # certificate): its rule arms, then a full run, which refuses a spec class
+      # it has not declared and any row its rules cannot classify. It REPORTS
+      # coverage; it does not gate a coverage number.
+      - run: python scripts/yaml_coverage_census.py --self-test
+      - run: python scripts/yaml_coverage_census.py
       - run: python scripts/check_action_refs.py
       # The sibling sub-check of the same VISION.md §11 layer, and it reads the
       # YAML SOURCES rather than the compiled bundle ON PURPOSE: `safe_load`
