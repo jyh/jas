@@ -12,6 +12,12 @@ private final class LineClient {
     init?(path: String) {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // A write to a socket the server has CLOSED (the refused second
+        // client) raises SIGPIPE, which kills the whole test process rather
+        // than failing one test. It crashed CI's Swift lane once, when the
+        // server's close won the race; locally the write had won it.
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         _ = withUnsafeMutableBytes(of: &addr.sun_path) { raw in
@@ -97,6 +103,9 @@ private func emptyModel() -> Model {
     first.send(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
     _ = try #require(first.readLine(), "the first client is attached")
     let second = try #require(LineClient(path: path), "the connect itself succeeds")
+    // Let the server's close win the race, every run: the write below then
+    // always meets a closed socket, which is the case that crashed CI.
+    usleep(200_000)
     second.send(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
     #expect(second.readLine(timeoutMs: 500) == nil, "the second client gets no session")
     first.send(#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#)
