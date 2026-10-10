@@ -12,7 +12,12 @@
 
 param(
     [Parameter(Mandatory = $true)][int]$ProcessId,
-    [Parameter(Mandatory = $true)][string]$Out
+    [Parameter(Mandatory = $true)][string]$Out,
+    # Read only BELOW the element with this AutomationId (the pane's host,
+    # `PaneScroll`), so the shell's own XAML chrome -- Menu, PanePicker,
+    # StatusLine, which surface their x:Name as an AutomationId -- is not read
+    # as a widget the plan lacks. Empty reads the whole window.
+    [string]$Root = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName UIAutomationClient
@@ -27,21 +32,41 @@ $err = $null
 if ($null -eq $window) {
     $err = "no top-level UIA element for pid $ProcessId (session=$((Get-Process -Id $PID).SessionId))"
 } else {
-    $all = $window.FindAll($scope::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-    foreach ($el in $all) {
-        $c = $el.Current
-        if ([string]::IsNullOrEmpty($c.AutomationId)) { continue }
-        $rows.Add([ordered]@{
-            id        = $c.AutomationId
-            type      = ($c.ControlType.ProgrammaticName -replace '^ControlType\.', '')
-            enabled   = $c.IsEnabled
-            offscreen = $c.IsOffscreen
-            name      = $c.Name
-        })
+    $under = $window
+    if ($Root.Length -gt 0) {
+        $byId = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Root)
+        $under = $window.FindFirst($scope::Descendants, $byId)
+        if ($null -eq $under) { $err = "no element with AutomationId '$Root' under pid $ProcessId" }
     }
+}
+# A plan widget is a LEAF, so the walk stops at the first element carrying an
+# AutomationId: what is below it is that control's own template (an editable
+# ComboBox surfaces `EditableText`, measured on Windows in gradient and stroke),
+# not a widget the plan could hold. Elements without one are walked through.
+function Read-SbUiaLeaves($Parent, $Walker, $Rows) {
+    $child = $Walker.GetFirstChild($Parent)
+    while ($null -ne $child) {
+        $c = $child.Current
+        if ([string]::IsNullOrEmpty($c.AutomationId)) {
+            Read-SbUiaLeaves $child $Walker $Rows
+        } else {
+            $Rows.Add([ordered]@{
+                id        = $c.AutomationId
+                type      = ($c.ControlType.ProgrammaticName -replace '^ControlType\.', '')
+                enabled   = $c.IsEnabled
+                offscreen = $c.IsOffscreen
+                name      = $c.Name
+            })
+        }
+        $child = $Walker.GetNextSibling($child)
+    }
+}
+if ($null -eq $err) {
+    Read-SbUiaLeaves $under ([System.Windows.Automation.TreeWalker]::RawViewWalker) $rows
 }
 [ordered]@{
     pid     = $ProcessId
+    root    = $Root
     session = (Get-Process -Id $PID).SessionId
     error   = $err
     count   = $rows.Count

@@ -192,7 +192,29 @@ public sealed partial class MainWindow
                  + $"editing={editing} "
                  + $"pane-dips={_host.ActualWidth:0}x{_host.ActualHeight:0} "
                  + $"canvas-dips={_w.Canvas.ActualWidth:0}x{_w.Canvas.ActualHeight:0}");
+
+            // #323: the plan bytes this tree was DRAWN from, so a UIA read of the
+            // same window is compared against the same selection (the harness's
+            // `Compare-SbRenderedTree`). Overwritten at every draw: the newest wins.
+            if (PlanOutPath is { } planOut)
+            {
+                try
+                {
+                    System.IO.File.WriteAllText(planOut, snap.PlanJson);
+                    _w.Report($"PLAN OUT panel={snap.PanelId} seq={snap.Seq} bytes={snap.PlanJson.Length}");
+                }
+                catch (Exception ex)
+                {
+                    _w.Report($"RUSTFAIL PLAN OUT panel={snap.PanelId} seq={snap.Seq} -- {ex.GetType().Name}: {ex.Message}");
+                }
+            }
         }
+
+        /// <summary>`SB_PLAN_OUT`, resolved beside the exe when relative; null when unset.</summary>
+        private static readonly string? PlanOutPath =
+            Environment.GetEnvironmentVariable("SB_PLAN_OUT") is { Length: > 0 } v
+                ? System.IO.Path.Combine(AppContext.BaseDirectory, v)
+                : null;
 
         private static Dictionary<string, string> Strings(System.Text.Json.JsonElement map)
         {
@@ -451,9 +473,9 @@ public sealed partial class MainWindow
         /// plan path is counted unaddressable and sends nothing
         /// (<see cref="PanelWire.Addressable"/>). Double-click is not routed here.
         /// </summary>
-        private Border BuildSwatch(PaneLeaf leaf)
+        private SwatchTile BuildSwatch(PaneLeaf leaf)
         {
-            var swatch = new Border { BorderBrush = _paneMutedBrush, BorderThickness = new Thickness(1) };
+            var swatch = new SwatchTile { BorderBrush = _paneMutedBrush, BorderThickness = new Thickness(1) };
             var summary = leaf.Literal("summary");
             if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(swatch, summary); }
             var id = leaf.Id;
@@ -699,7 +721,7 @@ public sealed partial class MainWindow
 
             switch (el)
             {
-                case Border swatch when leaf.Type == "color_swatch":
+                case SwatchTile swatch when leaf.Type == "color_swatch":
                     swatch.Background = SwatchBrush(leaf.Value("bind.color"));
                     break;
 
@@ -963,4 +985,18 @@ public sealed partial class MainWindow
             return combo;
         }
     }
+}
+
+/// <summary>
+/// A `color_swatch` tile: a bordered, filled square that UI Automation can SEE.
+/// A `Border` has no automation peer, so its AutomationId reached no reader:
+/// measured on the Windows box (#323), 14 of color_panel_content's and 12 of
+/// swatches_panel_content's ids were absent from the rendered tree while the
+/// Mac gives the same widget its identifier. A `Grid` draws the same fill and
+/// edge and takes the same tap; the peer is the only addition.
+/// </summary>
+internal sealed partial class SwatchTile : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
 }
