@@ -10,7 +10,7 @@
     "STRING parses the string as JSON first (resources/read's `text`). \"<settled>\" matches the canonical test JSON of the",
     "case's setup document, so a pending preview that leaked into the resource reds.",
     "A proposal's ERROR TEXT for a failing op is not pinned here: it carries each port's own op-error wording.",
-    "jas://journal reads the APPLIED journal (up to its head) as {head, transactions: [{name, actor}]}: the machine read-back for an accept."
+    "jas://journal reads the APPLIED journal (up to its head) as {head, transactions: [{name, actor}]}: the machine read-back for an accept. An `undo` artist step undoes in the app."
   ],
   "cases": [
     {
@@ -788,7 +788,7 @@
       ]
     },
     {
-      "name": "the journal resource: an accepted proposal is ONE named ai transaction, a rejected one is none",
+      "name": "the journal resource: an accepted proposal is ONE named ai transaction, a rejected one is none; undone, it is none applied",
       "setup_svg": "two_rects.svg",
       "steps": [
         {
@@ -1026,6 +1026,38 @@
                           "actor": "ai"
                         }
                       ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "artist": "undo",
+          "expect": []
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://journal"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 8,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://journal",
+                    "mimeType": "application/json",
+                    "text": {
+                      "head": 0,
+                      "transactions": []
                     }
                   }
                 ]

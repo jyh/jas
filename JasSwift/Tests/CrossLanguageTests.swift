@@ -1765,6 +1765,7 @@ private func mcpMatch(_ want: Any, _ got: Any, _ settled: Any, _ at: String) {
                 switch step["artist"] as! String {
                 case "accept": out = session.artistAccept(pid)
                 case "reject": out = session.artistReject(pid)
+                case "undo": out = session.artistUndo()
                 case "edit":
                     let ops = step["ops"] as! [[String: Any]]
                     out = session.artistEdit { m in
