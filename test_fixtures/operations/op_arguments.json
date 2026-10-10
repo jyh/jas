@@ -1,0 +1,239 @@
+{
+  "_doc": [
+    "THE OP ARGUMENTS -- each op's argument keys, DERIVED by running the operations corpus (node A3b slice 2,",
+    "docs/AGENT_API.md section 4). GENERATED: never edit by hand; regenerate with",
+    "`cargo test generate_op_arguments -- --ignored` from jas_dioxus/.",
+    "",
+    "HOW. For every op instance in every operations fixture, each key is dropped in turn and the case re-run through",
+    "`op_apply`; the observation is the document left behind and each op's result class. `witnessed`: dropping the key",
+    "changed the observation at least once. `inert`: the corpus carries the key and no drop changed anything.",
+    "",
+    "WHAT `inert` DOES NOT MEAN. It does not mean `op_apply` ignores the key: an argument whose corpus value equals its",
+    "default reads `inert` too. The corpus cannot tell those apart, so this file does not claim to.",
+    "",
+    "WHAT IS ASSERTED. Rust and Swift each re-derive this file from the same corpus and must equal it byte for byte",
+    "(jas_dioxus/src/cross_language_test.rs `op_arguments_file_matches_the_corpus`, JasSwift/Tests/",
+    "CrossLanguageTests.swift `opArgumentsFileMatchesTheCorpus`), so the two ports agree on every witnessed argument.",
+    "`harness_keys` are corpus keys for the test harness, excluded here and asserted inert in every verb.",
+    "",
+    "WHAT IT DOES NOT COVER. An argument the corpus never carries is absent. The verbs listed under",
+    "`verbs_with_no_corpus_instance` have no entry at all."
+  ],
+  "arguments": {
+    "add_to_selection": {
+      "path": "witnessed"
+    },
+    "assign_id": {
+      "id": "witnessed",
+      "path": "witnessed"
+    },
+    "boolean_union": {},
+    "copy_by_ids": {
+      "dx": "witnessed",
+      "dy": "inert",
+      "from": "witnessed"
+    },
+    "copy_selection": {
+      "dx": "witnessed",
+      "dy": "witnessed"
+    },
+    "create_artboard": {
+      "fields": "witnessed",
+      "id": "witnessed"
+    },
+    "create_reference": {
+      "ref_id": "witnessed",
+      "target_id": "witnessed",
+      "target_path": "witnessed"
+    },
+    "delete_artboard_by_id": {
+      "id": "witnessed"
+    },
+    "delete_at": {
+      "path": "witnessed"
+    },
+    "delete_selection": {},
+    "delete_symbol": {
+      "master_id": "witnessed"
+    },
+    "detach": {
+      "path": "witnessed"
+    },
+    "duplicate_artboard": {
+      "id": "witnessed",
+      "name": "witnessed",
+      "new_id": "witnessed",
+      "offset_x": "witnessed",
+      "offset_y": "witnessed"
+    },
+    "hide_selection": {},
+    "insert_after": {
+      "element": "witnessed",
+      "path": "witnessed"
+    },
+    "insert_at": {
+      "element": "witnessed",
+      "index": "witnessed",
+      "parent_path": "witnessed"
+    },
+    "lock_selection": {},
+    "make_symbol": {
+      "master_id": "witnessed",
+      "path": "witnessed",
+      "ref_id": "witnessed"
+    },
+    "move_artboards_down": {
+      "ids": "witnessed"
+    },
+    "move_artboards_up": {
+      "ids": "witnessed"
+    },
+    "move_by_ids": {
+      "dx": "witnessed",
+      "dy": "witnessed",
+      "ids": "witnessed"
+    },
+    "move_selection": {
+      "dx": "witnessed",
+      "dy": "witnessed"
+    },
+    "paste": {
+      "offset": "witnessed",
+      "preserve_layers": "witnessed",
+      "svg": "witnessed",
+      "text": "witnessed"
+    },
+    "place_instance": {
+      "master_id": "witnessed",
+      "ref_id": "witnessed"
+    },
+    "redefine": {
+      "master_id": "witnessed",
+      "path": "witnessed",
+      "ref_id": "witnessed"
+    },
+    "rotate_transform": {
+      "angle": "witnessed",
+      "rx": "witnessed",
+      "ry": "witnessed"
+    },
+    "scale_transform": {
+      "rx": "witnessed",
+      "ry": "witnessed",
+      "scale_corners": "inert",
+      "scale_strokes": "witnessed",
+      "sx": "witnessed",
+      "sy": "witnessed"
+    },
+    "select_all": {},
+    "select_by_ids": {
+      "ids": "witnessed"
+    },
+    "select_element": {
+      "path": "witnessed"
+    },
+    "select_rect": {
+      "extend": "witnessed",
+      "height": "witnessed",
+      "width": "witnessed",
+      "x": "witnessed",
+      "y": "witnessed"
+    },
+    "set_advanced_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_artboard_field": {
+      "field": "witnessed",
+      "id": "witnessed",
+      "value": "witnessed"
+    },
+    "set_artboard_options_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_attr_on_selection": {
+      "attr": "witnessed",
+      "value": "witnessed"
+    },
+    "set_character_attribute": {
+      "attribute": "witnessed",
+      "char_end": "witnessed",
+      "char_start": "witnessed",
+      "path": "witnessed",
+      "value": "witnessed"
+    },
+    "set_color_management_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_document_setup_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_graphics_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_instance_transform": {
+      "path": "witnessed",
+      "transform": "witnessed"
+    },
+    "set_marks_and_bleed_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_output_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "set_output_ink_field": {
+      "field": "witnessed",
+      "index": "witnessed",
+      "value": "witnessed"
+    },
+    "set_print_preferences_field": {
+      "field": "witnessed",
+      "value": "witnessed"
+    },
+    "shear_transform": {
+      "angle": "witnessed",
+      "axis": "witnessed",
+      "axis_angle": "witnessed",
+      "rx": "witnessed",
+      "ry": "witnessed"
+    },
+    "show_all": {},
+    "simplify": {
+      "precision": "inert"
+    },
+    "toggle_element_lock": {
+      "path": "witnessed"
+    },
+    "unlock_all": {},
+    "unpack_group_at": {
+      "path": "witnessed"
+    },
+    "wrap_in_group": {
+      "id": "witnessed",
+      "paths": "witnessed"
+    },
+    "wrap_in_layer": {
+      "id": "witnessed",
+      "name": "witnessed",
+      "paths": "witnessed"
+    }
+  },
+  "harness_keys": [
+    "expected_error"
+  ],
+  "verbs_with_no_corpus_instance": [
+    "apply_concept_operation",
+    "place_concept_instance",
+    "promote_to_concept",
+    "redo",
+    "set_concept_param",
+    "snapshot",
+    "undo"
+  ]
+}
