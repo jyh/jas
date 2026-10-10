@@ -158,6 +158,16 @@
       "verdict": "leaf_only",
       "reason": "Promotes a Line or open Polyline to a geometry-identical Path so it can carry a stroke brush. A container has no stroke geometry to promote; its members are promoted individually when the brush recurses to them.",
       "handled_at": "element.rs::map_paintable reaches each member, which promotes itself"
+    },
+    "rust:jas_dioxus/src/painter/element_render.rs::gradient_bbox": {
+      "verdict": "leaf_only",
+      "reason": "A container carries no gradient (Element::fill_gradient / stroke_gradient return None for Group and Layer), so the box is only ever asked of a leaf; the default arm returns bounds() for any other kind. The painter recurses into a container's children and asks each leaf.",
+      "handled_at": "painter/element_render.rs (the painter's per-kind arms) and geometry/svg.rs (the I1b-2 importer and exporter)"
+    },
+    "swift:JasSwift/Sources/Geometry/Svg.swift::gradientBBox": {
+      "verdict": "leaf_only",
+      "reason": "As Rust's gradient_bbox: a container carries no gradient, so the SVG importer asks the box only of a leaf it is attaching a url(#id) gradient to; the default arm returns bounds.",
+      "handled_at": "Geometry/Svg.swift::applyGradientAttrs (per parsed element)"
     }
   }
 }
