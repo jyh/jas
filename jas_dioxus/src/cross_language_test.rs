@@ -1403,6 +1403,7 @@ mod tests {
         let verbs: BTreeSet<String> = vocab["verbs"].as_object().unwrap().keys().cloned().collect();
         let mut args: BTreeMap<String, BTreeMap<String, bool>> = BTreeMap::new();
         let mut harness: BTreeMap<String, bool> = BTreeMap::new();
+        let mut types: BTreeMap<String, BTreeMap<String, BTreeSet<&'static str>>> = BTreeMap::new();
         let (mut cases, mut instances) = (0usize, 0usize);
         for fixture in operation_fixtures() {
             let tests: serde_json::Value = serde_json::from_str(&read_fixture(&fixture)).unwrap();
@@ -1432,7 +1433,11 @@ mod tests {
                     }
                     instances += 1;
                     let entry = args.entry(verb.to_string()).or_default();
-                    for k in op.as_object().unwrap().keys().filter(|k| *k != "op") {
+                    for (k, val) in op.as_object().unwrap().iter().filter(|(k, _)| *k != "op") {
+                        if !OP_HARNESS_KEYS.contains(&k.as_str()) {
+                            types.entry(verb.to_string()).or_default().entry(k.clone()).or_default()
+                                .insert(json_type_name(val));
+                        }
                         let mut m = tc.clone();
                         m.pointer_mut(&ptr).unwrap().as_object_mut().unwrap().remove(k);
                         let changed = op_case_observation(&m) != base;
@@ -1463,9 +1468,23 @@ mod tests {
             "_doc": OP_ARGUMENTS_DOC,
             "harness_keys": OP_HARNESS_KEYS,
             "arguments": arguments,
+            "argument_types": types,
             "verbs_with_no_corpus_instance": unwitnessed,
         });
         serde_json::to_string_pretty(&doc).unwrap() + "\n"
+    }
+
+    /// The JSON Schema type name of a corpus value (an integer and a float are
+    /// both `number`: the ports read every numeric argument as a float).
+    fn json_type_name(v: &serde_json::Value) -> &'static str {
+        match v {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "boolean",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
     }
 
     const OP_ARGUMENTS_DOC: &[&str] = &[
@@ -1485,6 +1504,9 @@ mod tests {
         "verb by verb and key by key (JasSwift/Tests/CrossLanguageTests.swift `opArgumentsFileMatchesTheCorpus`) -- so",
         "the two ports agree on every witnessed argument.",
         "`harness_keys` are corpus keys for the test harness, excluded here and asserted inert in every verb.",
+        "",
+        "`argument_types`: the JSON Schema type names of the values the corpus gives each (non-harness) key. They are",
+        "OBSERVED types, not a contract: a key the corpus always gives as a number may accept a string.",
         "",
         "WHAT IT DOES NOT COVER. An argument the corpus never carries is absent. The verbs listed under",
         "`verbs_with_no_corpus_instance` have no entry at all.",
