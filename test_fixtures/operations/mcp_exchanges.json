@@ -9,7 +9,8 @@
     "element-wise with equal length, scalars exactly. \"<any>\" matches any value. An expected OBJECT against an actual",
     "STRING parses the string as JSON first (resources/read's `text`). \"<settled>\" matches the canonical test JSON of the",
     "case's setup document, so a pending preview that leaked into the resource reds.",
-    "A proposal's ERROR TEXT for a failing op is not pinned here: it carries each port's own op-error wording."
+    "A proposal's ERROR TEXT for a failing op is not pinned here: it carries each port's own op-error wording.",
+    "jas://journal reads the APPLIED journal (up to its head) as {head, transactions: [{name, actor}]}: the machine read-back for an accept."
   ],
   "cases": [
     {
@@ -780,6 +781,277 @@
               "error": {
                 "code": -32602,
                 "message": "propose needs `name` (string) and `ops` (array)"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the journal resource: an accepted proposal is ONE named ai transaction, a rejected one is none",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://journal"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://journal",
+                    "mimeType": "application/json",
+                    "text": {
+                      "head": 0,
+                      "transactions": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://journal"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://journal",
+                    "mimeType": "application/json",
+                    "text": {
+                      "head": 0,
+                      "transactions": []
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "artist": "accept",
+          "proposal": "p-0",
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/jas/proposal",
+              "params": {
+                "proposal": "p-0",
+                "state": "accepted"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://journal"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 4,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://journal",
+                    "mimeType": "application/json",
+                    "text": {
+                      "head": 1,
+                      "transactions": [
+                        {
+                          "name": "nudge",
+                          "actor": "ai"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 5,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-1 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-1"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "artist": "reject",
+          "proposal": "p-1",
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/jas/proposal",
+              "params": {
+                "proposal": "p-1",
+                "state": "rejected"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://journal"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 6,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://journal",
+                    "mimeType": "application/json",
+                    "text": {
+                      "head": 1,
+                      "transactions": [
+                        {
+                          "name": "nudge",
+                          "actor": "ai"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "resources/list"
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 7,
+              "result": {
+                "resources": [
+                  {
+                    "uri": "jas://document"
+                  },
+                  {
+                    "uri": "jas://journal"
+                  }
+                ]
               }
             }
           ]
