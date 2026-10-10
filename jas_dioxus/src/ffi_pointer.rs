@@ -51,6 +51,28 @@ pub const TOOL_IDS: &[&str] = &[
     "pen",
     "pencil",
     "zoom",
+    // W5-1 (2026-10-09): every other workspace tool, APPENDED in alphabetical
+    // order so the nine indexes above keep their meaning. Each builds in the
+    // web-free engine (the wave-3 census, 27/27); none is selectable from the
+    // shell until its forwarding is answered (`SB_TOOL != 0` stays refused).
+    "add_anchor_point",
+    "anchor_point",
+    "artboard",
+    "blob_brush",
+    "delete_anchor_point",
+    "eyedropper",
+    "hand",
+    "lasso",
+    "magic_wand",
+    "paintbrush",
+    "path_eraser",
+    "polygon",
+    "rotate",
+    "rounded_rect",
+    "scale",
+    "shear",
+    "smooth",
+    "star",
 ];
 
 /// How many tools the shell may select. Pairs with [`jas_tool_name`].
@@ -382,6 +404,31 @@ mod tests {
         assert_eq!(crate::interpreter::anchor_buffers::length("pen"), 0,
                    "the pen's on_enter cleared the stale buffer");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// ⛔ W5-1: THE SHELL CAN SELECT EVERY TOOL THE ENGINE CAN BUILD, AND THE
+    /// INDEXES IT ALREADY USES DO NOT MOVE. The tool list is ABI (an index is
+    /// what crosses), so it grows by APPENDING: the first nine ids are pinned
+    /// here by position, deliberately, because a reorder would silently repoint
+    /// a shell that sends `6` for the pen. The SET is derived from the
+    /// workspace bundle, never typed, so a tool added to `workspace/tools/`
+    /// without a row here reds.
+    #[test]
+    fn the_tool_list_is_every_workspace_tool_and_appends_only() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace bundle");
+        let mut want: Vec<String> = ws.data()["tools"].as_object().expect("tools").keys().cloned().collect();
+        want.sort();
+        let mut got: Vec<String> = TOOL_IDS.iter().map(|s| s.to_string()).collect();
+        got.sort();
+        assert!(want.len() >= 20, "the workspace's tool set is not vacuous: {}", want.len());
+        assert_eq!(got, want, "TOOL_IDS is exactly the workspace's tools");
+        assert_eq!(TOOL_IDS.len(), want.len(), "no id twice");
+        assert_eq!(&TOOL_IDS[..9],
+                   &["selection", "interior_selection", "partial_selection", "rect", "ellipse", "line", "pen", "pencil", "zoom"],
+                   "the nine indexes a shell may already send keep their meaning");
+        for (i, id) in TOOL_IDS.iter().enumerate() {
+            assert!(build_tool(id).is_some(), "index {i} ({id}) builds in this engine");
+        }
     }
 
     /// ⛔ THE REFUSAL LANE, BOTH SHAPES. A null engine and an unknown kind are
