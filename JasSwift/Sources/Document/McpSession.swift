@@ -19,6 +19,8 @@ public final class McpSession {
     public static let protocolVersion = "2025-06-18"
     /// The one resource (Rust: `mcp::DOCUMENT_URI`).
     public static let documentUri = "jas://document"
+    /// The applied journal (Rust: `mcp::JOURNAL_URI`).
+    public static let journalUri = "jas://journal"
     /// The journal actor a client's proposals land under (Rust: `mcp::CLIENT_ACTOR`).
     public static let clientActor = "ai"
 
@@ -97,6 +99,13 @@ public final class McpSession {
             return [Self.result(id, ["resources": [[
                 "uri": Self.documentUri, "name": "document", "mimeType": "application/json",
                 "description": "The settled document (without any pending preview) and the pending proposal's id.",
+            ], [
+                "uri": Self.journalUri, "name": "journal", "mimeType": "application/json",
+                "description": "The applied journal: each transaction's name and actor (`ai` for an accepted proposal).",
+            ]]])]
+        case "resources/read" where uri == Self.journalUri:
+            return [Self.result(id, ["contents": [[
+                "uri": Self.journalUri, "mimeType": "application/json", "text": journalResource(),
             ]]])]
         case "resources/read" where uri == Self.documentUri:
             return [Self.result(id, ["contents": [[
@@ -154,6 +163,15 @@ public final class McpSession {
             out.append(Self.notification("notifications/resources/updated", ["uri": Self.documentUri]))
         }
         return out
+    }
+
+    /// The APPLIED journal, up to its head (Rust: `Session::journal_resource`).
+    private func journalResource() -> String {
+        let head = model.journalHeadValue
+        let txns: [[String: Any]] = model.journal.prefix(head).map {
+            ["name": $0.name ?? NSNull(), "actor": $0.actor]
+        }
+        return Self.encode(["head": head, "transactions": txns])
     }
 
     private func documentResource() -> String {

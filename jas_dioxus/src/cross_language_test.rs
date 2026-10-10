@@ -529,6 +529,7 @@ mod tests {
                     match step["artist"].as_str().unwrap() {
                         "accept" => session.artist_accept(pid),
                         "reject" => session.artist_reject(pid),
+                        "undo" => session.artist_undo(),
                         "edit" => {
                             let ops = step["ops"].as_array().unwrap().clone();
                             session.artist_edit(|m| for op in &ops {

@@ -22,6 +22,8 @@ use serde_json::{json, Value};
 pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The one resource: the settled document plus the pending proposal's id.
 pub const DOCUMENT_URI: &str = "jas://document";
+/// The applied journal (A4's machine read-back): `{head, transactions: [{name, actor}]}`.
+pub const JOURNAL_URI: &str = "jas://journal";
 /// The journal actor a client's proposals land under (OP_LOG.md §5).
 pub const CLIENT_ACTOR: &str = "ai";
 
@@ -66,7 +68,13 @@ impl Session {
             "tools/call" => self.call_tool(id, params),
             "resources/list" => vec![result(id, json!({"resources": [{
                 "uri": DOCUMENT_URI, "name": "document", "mimeType": "application/json",
-                "description": "The settled document (without any pending preview) and the pending proposal's id."}]}))],
+                "description": "The settled document (without any pending preview) and the pending proposal's id."}, {
+                "uri": JOURNAL_URI, "name": "journal", "mimeType": "application/json",
+                "description": "The applied journal: each transaction's name and actor (`ai` for an accepted proposal)."}]}))],
+            "resources/read" if params["uri"] == JOURNAL_URI => {
+                vec![result(id, json!({"contents": [{"uri": JOURNAL_URI,
+                    "mimeType": "application/json", "text": self.journal_resource().to_string()}]}))]
+            }
             "resources/read" if params["uri"] == DOCUMENT_URI => {
                 vec![result(id, json!({"contents": [{"uri": DOCUMENT_URI,
                     "mimeType": "application/json", "text": self.document_resource().to_string()}]}))]
@@ -124,6 +132,16 @@ impl Session {
             out.push(notification("notifications/resources/updated", json!({"uri": DOCUMENT_URI})));
         }
         out
+    }
+
+    /// The APPLIED journal, up to its head (undone transactions are past it),
+    /// as each transaction's name and actor: what an accept leaves behind.
+    fn journal_resource(&self) -> Value {
+        let head = self.model.journal_head();
+        let txns: Vec<Value> = self.model.journal()[..head].iter()
+            .map(|t| json!({"name": t.name, "actor": t.actor}))
+            .collect();
+        json!({"head": head, "transactions": txns})
     }
 
     fn document_resource(&self) -> Value {
