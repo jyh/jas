@@ -130,6 +130,7 @@ pub mod corpus;
 // `CanvasTool::draw_overlay` can take a `&mut dyn Painter` and `tools/` can
 // compile off the web.
 pub mod overlay_ctx;
+pub mod selection_overlay;
 pub mod element_render;
 // Test-gated with the driver it feeds. #56 landed it ungated and it has never
 // had a non-test consumer, which cost 12 dead-code warnings on every build; now
