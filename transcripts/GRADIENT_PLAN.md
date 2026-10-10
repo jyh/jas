@@ -261,6 +261,11 @@ paths.
   gradient, through `jas:fill-gradient` / `jas:stroke-gradient`, which
   carry the canonical test-JSON gradient. The standard `<defs>` +
   `url(#gN)` form, which other apps read, is still unbuilt: I1b-2.)*
+  *(Later the same day, I1b-2: both active ports also write a standard
+  `<linearGradient>`/`<radialGradient>` in `<defs>` with `url(#jas-gN)`
+  paint, at the painter's own geometry, and import other apps' standard
+  gradients as the same painted ramp. Freeform has no standard form and is
+  written as the `jas:` record only.)*
 
 ### Phase 8 — Stroke gradient (within-stroke sub-mode)
 

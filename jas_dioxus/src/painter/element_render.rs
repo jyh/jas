@@ -1284,7 +1284,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         _ if vis == Visibility::Outline => emit_outline_body(p, elem, eff),
         Element::Line(e) => {
             if let Some(s) = e.stroke.as_ref() {
-                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), tuple_bounds(elem));
+                let brush = stroke_brush(s, e.stroke_gradient.as_deref(), gradient_bbox(elem));
                 emit_path_stroke(
                     p,
                     &[
@@ -1298,7 +1298,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             }
         }
         Element::Rect(e) => {
-            let bbox = (e.x, e.y, e.width, e.height);
+            let bbox = gradient_bbox(elem);
             if e.rx > 0.0 || e.ry > 0.0 {
                 let path = rounded_rect_path(e.x, e.y, e.width, e.height, e.rx, e.ry);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
@@ -1326,7 +1326,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             }
         }
         Element::Ellipse(e) => {
-            let bbox = (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0);
+            let bbox = gradient_bbox(elem);
             let arc = EllipseArc::ellipse(e.cx, e.cy, e.rx, e.ry);
             if let Some((brush, op)) = fill_paint(e.fill.as_ref(), e.fill_gradient.as_deref(), bbox) {
                 p.fill_ellipse_arc(&arc, FillRule::NonZero, &brush, eff * op);
@@ -1358,7 +1358,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         Element::Polyline(e) => {
             if !e.points.is_empty() {
                 let path = poly_path(&e.points, false);
-                let bbox = poly_bbox(&e.points);
+                let bbox = gradient_bbox(elem);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
                 if let Some(s) = e.stroke.as_ref() {
                     let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
@@ -1369,7 +1369,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         Element::Polygon(e) => {
             if !e.points.is_empty() {
                 let path = poly_path(&e.points, true);
-                let bbox = poly_bbox(&e.points);
+                let bbox = gradient_bbox(elem);
                 emit_fill_path(p, &path, FillRule::NonZero, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
                 if let Some(s) = e.stroke.as_ref() {
                     let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
@@ -1378,7 +1378,7 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
             }
         }
         Element::Path(e) => {
-            let bbox = tuple_bounds(elem);
+            let bbox = gradient_bbox(elem);
             emit_fill_path(p, &e.d, e.fill_rule, e.fill.as_ref(), e.fill_gradient.as_deref(), bbox, eff);
             if let Some(s) = e.stroke.as_ref() {
                 let brush = stroke_brush(s, e.stroke_gradient.as_deref(), bbox);
@@ -1893,6 +1893,22 @@ fn poly_bbox(pts: &[(f64, f64)]) -> (f64, f64, f64, f64) {
 /// The element bbox as `(x, y, w, h)` (already a 4-tuple `Bounds`).
 fn tuple_bounds(elem: &Element) -> (f64, f64, f64, f64) {
     elem.bounds()
+}
+
+/// The box each element kind resolves its gradients on, stated ONCE so the
+/// painter and the SVG importer (I1b-2, which maps a file's gradient onto this
+/// same box) cannot disagree. Rect and Ellipse use their raw geometry and the
+/// poly kinds their raw points; Line and Path use `bounds()`, which inflates
+/// by the stroke (the legacy Path arm's box, RP1). Every other kind has no
+/// gradient and gets `bounds()`.
+pub(crate) fn gradient_bbox(elem: &Element) -> (f64, f64, f64, f64) {
+    match elem {
+        Element::Rect(e) => (e.x, e.y, e.width, e.height),
+        Element::Ellipse(e) => (e.cx - e.rx, e.cy - e.ry, e.rx * 2.0, e.ry * 2.0),
+        Element::Polyline(e) => poly_bbox(&e.points),
+        Element::Polygon(e) => poly_bbox(&e.points),
+        _ => tuple_bounds(elem),
+    }
 }
 
 /// The `(-1e6,-1e6) 2e6×2e6` rectangle `stroke_aligned` adds for the outside

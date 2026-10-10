@@ -389,6 +389,9 @@ lands with Phase 9 / Phase 10.
 *(2026-10-09, I1b-1: a jas file now carries the gradient through save
 and reopen, as `jas:fill-gradient` / `jas:stroke-gradient`. GRD-113 is
 the standard `<defs>` form other apps read, and it stays open.)*
+*(Later the same day, I1b-2: the standard form is written and read in both
+active ports, so GRD-113's export half is built for linear and radial. A
+parity suite over painted pixels, as this test describes, is still not.)*
 
 ---
 
