@@ -103,6 +103,9 @@ private func emptyModel() -> Model {
     first.send(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#)
     _ = try #require(first.readLine(), "the first client is attached")
     let second = try #require(LineClient(path: path), "the connect itself succeeds")
+    // Let the server's close win the race, every run: the write below then
+    // always meets a closed socket, which is the case that crashed CI.
+    usleep(200_000)
     second.send(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#)
     #expect(second.readLine(timeoutMs: 500) == nil, "the second client gets no session")
     first.send(#"{"jsonrpc":"2.0","id":3,"method":"ping"}"#)
