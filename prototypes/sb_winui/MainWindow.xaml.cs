@@ -311,7 +311,13 @@ public sealed partial class MainWindow : Window
                     Child = body,
                 };
                 _dockStack.Children.Add(frame);
-                var active = g.TryGetProperty("active", out var a) ? Math.Clamp(a.GetInt32(), 0, ids.Count - 1) : 0;
+                // In range by construction: the render thread refused the dock otherwise.
+                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
+                if (active < 0 || active >= ids.Count)
+                {
+                    Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
+                    continue;
+                }
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList);
                 MarkDockTab(key, ids[active]);
             }

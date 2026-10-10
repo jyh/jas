@@ -4102,9 +4102,16 @@ internal sealed unsafe class Canvas : IDisposable
             foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
             {
                 var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
+                // The core refuses an empty group or an out-of-range `active`
+                // (`dock_layout`), so one here is a broken reply, refused by name.
                 var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
-                if (ids.Count == 0) { continue; }
-                groups.Add((ids[Math.Clamp(active, 0, ids.Count - 1)], ids.Count));
+                if (ids.Count == 0 || active < 0 || active >= ids.Count)
+                {
+                    _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} -- a group with {ids.Count} panel(s) "
+                          + $"and active={active} {Tids()}");
+                    return;
+                }
+                groups.Add((ids[active], ids.Count));
             }
         }
         catch (Exception ex)
