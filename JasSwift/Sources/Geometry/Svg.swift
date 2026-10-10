@@ -677,6 +677,68 @@ private func stdGradientToJas(_ def: StdGradientDef, _ bbox: GradientBBox) -> Gr
                     strokeSubMode: .within, stops: def.stops, nodes: [])
 }
 
+/// The standard gradient elements the export in progress has written, so
+/// `documentToSvg` can put them in a `<defs>` (I1b-2b). Unbound outside an
+/// export, so a bare `elementSvg` call writes no `url(#…)` it cannot define.
+/// Mirrors Rust's `EXPORT_DEFS`.
+private final class ExportDefs: @unchecked Sendable { var defs: [String] = [] }
+private enum SvgExportDefs { @TaskLocal static var box: ExportDefs? = nil }
+
+/// A jas gradient as the standard SVG element that paints the same ramp on
+/// `bbox` (pt), or nil for freeform or fewer than two stops. Mirrors Rust's
+/// `standard_gradient_xml`, where the geometry is explained.
+private func standardGradientXml(_ id: String, _ g: Gradient, _ bbox: GradientBBox) -> String? {
+    guard g.stops.count >= 2, g.type != .freeform else { return nil }
+    let (bx, by, bw, bh) = bbox
+    let (cx, cy) = (bx + bw / 2, by + bh / 2)
+    var xml: String
+    if g.type == .linear {
+        let hd = (bw * bw + bh * bh).squareRoot() / 2
+        let rad = g.angle * Double.pi / 180
+        let (dx, dy) = (cos(rad) * hd, -sin(rad) * hd)
+        xml = "    <linearGradient id=\"\(id)\" gradientUnits=\"userSpaceOnUse\" x1=\"\(fmtFull(px(cx - dx)))\" y1=\"\(fmtFull(px(cy - dy)))\" x2=\"\(fmtFull(px(cx + dx)))\" y2=\"\(fmtFull(px(cy + dy)))\">\n"
+    } else {
+        let r = (max(bw, bh) / 2) * max(g.aspectRatio / 100, 0.01)
+        xml = "    <radialGradient id=\"\(id)\" gradientUnits=\"userSpaceOnUse\" cx=\"\(fmtFull(px(cx)))\" cy=\"\(fmtFull(px(cy)))\" r=\"\(fmtFull(px(r)))\">\n"
+    }
+    for st in g.stops {
+        let (r, gr, b, a) = (Color.fromHex(st.color) ?? .black).toRgba()
+        let alpha = st.opacity == 100 ? a : st.opacity / 100
+        xml += "      <stop offset=\"\(fmtFull(st.location / 100))\" stop-color=\"rgb(\(Int((r * 255).rounded())),\(Int((gr * 255).rounded())),\(Int((b * 255).rounded())))\""
+        if alpha < 1 { xml += " stop-opacity=\"\(fmtFull(alpha))\"" }
+        xml += "/>\n"
+    }
+    xml += g.type == .linear ? "    </linearGradient>" : "    </radialGradient>"
+    return xml
+}
+
+/// Point the opening tag's `key` paint at `url(#id)`, keeping the colour as
+/// SVG's fallback (`none` becomes the bare url). Mirrors Rust's `point_paint_at`.
+private func pointPaintAt(_ out: String, _ key: String, _ id: String) -> String {
+    let tagEnd = out.firstIndex(of: ">") ?? out.endIndex
+    guard let r = out.range(of: " \(key)=\"", range: out.startIndex..<tagEnd),
+          let close = out[r.upperBound...].firstIndex(of: "\"") else { return out }
+    let val = String(out[r.upperBound..<close])
+    let paint = val == "none" ? "url(#\(id))" : "url(#\(id)) \(val)"
+    return String(out[..<r.upperBound]) + paint + String(out[close...])
+}
+
+/// During an export, write each of the element's linear or radial gradients
+/// as a standard element and point its paint at it (I1b-2b).
+private func addStandardGradients(_ elem: Element, _ out: String) -> String {
+    guard let box = SvgExportDefs.box else { return out }
+    let bbox = gradientBBox(elem)
+    var out = out
+    for (key, g) in [("fill", elem.fillGradient), ("stroke", elem.strokeGradient)] {
+        guard let g = g else { continue }
+        let id = "jas-g\(box.defs.count + 1)"
+        guard let xml = standardGradientXml(id, g, bbox) else { continue }
+        box.defs.append(xml)
+        out = pointPaintAt(out, key, id)
+    }
+    return out
+}
+
 /// An element's gradients as `jas:fill-gradient` / `jas:stroke-gradient` (I1b-1).
 ///
 /// The value is the canonical test-JSON gradient (`gradientJson`), the one form
@@ -718,9 +780,9 @@ private func applyGradientAttrs(_ node: XMLElement, _ elem: Element) -> Element 
 }
 
 public func elementSvg(_ elem: Element, indent: String) -> String {
-    let out = elementSvgBody(elem, indent: indent)
     let attrs = gradientAttrs(elem)
-    if attrs.isEmpty { return out }
+    if attrs.isEmpty { return elementSvgBody(elem, indent: indent) }
+    let out = addStandardGradients(elem, elementSvgBody(elem, indent: indent))
     // Inserted right after the tag name, in both ports, so the two writers
     // agree on where the attribute sits.
     let chars = Array(out)
@@ -997,8 +1059,18 @@ public func documentToSvg(_ doc: Document) -> String {
         }
         bodyLines.append("  </defs>")
     }
-    for layer in doc.layers {
-        bodyLines.append(elementSvg(.layer(layer), indent: "  "))
+    // The standard gradients the layers refer to (I1b-2b), written ahead of
+    // the layers; none for a document with no gradient, so its SVG is
+    // byte-identical to before. Mirrors Rust's `document_to_svg`.
+    let exportDefs = ExportDefs()
+    let at = bodyLines.count
+    SvgExportDefs.$box.withValue(exportDefs) {
+        for layer in doc.layers {
+            bodyLines.append(elementSvg(.layer(layer), indent: "  "))
+        }
+    }
+    if !exportDefs.defs.isEmpty {
+        bodyLines.insert(contentsOf: ["  <defs>"] + exportDefs.defs + ["  </defs>"], at: at)
     }
     // ANY jas:-prefixed attribute in the body obliges the declaration, not just
     // the five arrowhead ones this test used to enumerate. The enumeration was
