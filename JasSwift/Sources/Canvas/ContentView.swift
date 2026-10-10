@@ -369,6 +369,14 @@ public struct ContentView: View {
                     }
                 }
 
+                // A4 (iv)(a): the accept bar for an agent's pending proposal,
+                // top centre over the panes. Draws nothing when none is pending.
+                if let active = workspace.activeModel {
+                    ProposalBarView(model: active)
+                        .position(x: geometry.size.width / 2, y: 44)
+                        .zIndex(10_000)
+                }
+
                 // Shared border handles
                 ForEach(rs.borders) { border in
                     let isActive = paneState.borderDrag?.snapIdx == border.snapIdx

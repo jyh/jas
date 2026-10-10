@@ -62,3 +62,31 @@ private func edit(_ m: Model) {
     let all = returned + sent
     #expect(all.filter { $0.contains("withdrawn") }.count == 1, "returned \(returned), sent \(sent)")
 }
+
+/// A4 (iv)(a): the bar's Accept with NO client attached lands the proposal as
+/// ONE journal transaction, named by the proposal, with actor `ai`; the bar
+/// reads the name it shows from the model.
+@Test func theBarAcceptsWithNoClientAsOneNamedAiTransaction() {
+    let m = twoRects()
+    let s = McpSession(model: m)
+    propose(s)
+    #expect(m.pendingProposalName == "nudge", "the bar's label")
+    let before = m.journal.count
+    ProposalBar.accept(model: m, server: nil)
+    #expect(m.pendingProposalId == nil)
+    #expect(m.journal.count == before + 1, "one transaction")
+    #expect(m.journal.last?.actor == "ai" && m.journal.last?.name == "nudge", "\(String(describing: m.journal.last))")
+}
+
+/// A4 (iv)(a): Reject restores the document and journals nothing.
+@Test func theBarRejectsAndJournalsNothing() {
+    let m = twoRects()
+    let settled = documentToTestJson(m.document)
+    let s = McpSession(model: m)
+    propose(s)
+    #expect(documentToTestJson(m.document) != settled, "the control: the preview is drawn")
+    let before = m.journal.count
+    ProposalBar.reject(model: m, server: nil)
+    #expect(m.pendingProposalId == nil && m.journal.count == before)
+    #expect(documentToTestJson(m.document) == settled)
+}

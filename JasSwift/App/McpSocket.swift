@@ -11,9 +11,9 @@ import JasLib
 // An artist edit made through the app's ordinary paths reaches the client
 // through the model's hooks (A4 (iv)(b)): a withdrawn proposal and, for a
 // subscriber, a settled-document change.
-// ⚠️ NOT YET WIRED, and stated so that nobody reads it as done: Accept and
-// Reject. They need the overlay (A4 (iv)(a)); until it exists the first
-// observable is not reachable from the app.
+// Accept and Reject are the bar over the canvas (`ProposalBarView`, A4
+// (iv)(a)), routed through the attached session via `ProposalBar.hosted`.
+// ⚠️ COMPILED, NOT DRIVEN: nobody has yet clicked it in the running app.
 extension JasAppDelegate {
     /// Parse `--mcp-socket <path>`, the same shape as `--test-fifo`.
     static var mcpSocketPath: String? {
@@ -33,6 +33,7 @@ extension JasAppDelegate {
                 guard let model = self?.workspace?.activeModel else { return nil }
                 return McpSession(model: model)
             }
+            ProposalBar.hosted = mcpServer
             NSLog("mcp-socket: listening on %@", path)
         } catch {
             NSLog("mcp-socket: cannot listen on %@ (%@)", path, String(describing: error))
