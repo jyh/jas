@@ -412,7 +412,7 @@ fn stroke_sub_mode_str(m: StrokeSubMode) -> &'static str {
 /// port can hold; the cost is stated rather than hidden: a shared fixture can
 /// only carry a stop colour JasSwift can express, because JasSwift's reader
 /// converts the object back to hex.
-fn gradient_json(g: &Gradient) -> String {
+pub(crate) fn gradient_json(g: &Gradient) -> String {
     let mut o = JsonObj::new();
     o.num("angle", g.angle);
     o.num("aspect_ratio", g.aspect_ratio);
@@ -1466,7 +1466,7 @@ fn parse_blend_mode(v: &serde_json::Value) -> BlendMode {
     }
 }
 
-fn parse_gradient(v: &serde_json::Value) -> Option<Box<Gradient>> {
+pub(crate) fn parse_gradient(v: &serde_json::Value) -> Option<Box<Gradient>> {
     let obj = v.as_object()?;
     let _ = obj;
     Some(Box::new(Gradient {

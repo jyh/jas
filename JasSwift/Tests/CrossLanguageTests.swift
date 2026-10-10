@@ -111,6 +111,7 @@ private func assertSvgRoundtrip(_ name: String) {
 
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
+@Test func svgParseGradientFillAndStroke() { assertSvgParse("gradient_fill_and_stroke") }
 @Test func svgParseRectWithStroke() { assertSvgParse("rect_with_stroke") }
 @Test func svgParseCircleBasic() { assertSvgParse("circle_basic") }
 @Test func svgParseEllipseBasic() { assertSvgParse("ellipse_basic") }

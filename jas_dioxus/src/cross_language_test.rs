@@ -480,6 +480,14 @@ mod tests {
         assert_svg_parse("rect_basic");
     }
 
+    /// I1b-1: a gradient written as `jas:fill-gradient` / `jas:stroke-gradient`
+    /// parses to the same canonical JSON in both ports: a linear fill with a
+    /// midpoint and dither, a FREEFORM fill, and a radial stroke gradient.
+    #[test]
+    fn svg_parse_gradient_fill_and_stroke() {
+        assert_svg_parse("gradient_fill_and_stroke");
+    }
+
     #[test]
     fn svg_parse_rect_with_stroke() {
         assert_svg_parse("rect_with_stroke");
