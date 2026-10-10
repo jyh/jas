@@ -305,7 +305,7 @@
    "common.mask": "DROPPED",
    "common.mode": "DROPPED",
    "common.tool_origin": "PRESERVED",
-   "fill_gradient": "DROPPED",
+   "fill_gradient": "PRESERVED",
    "fill_rule": "PRESERVED",
    "group.isolated_blending": "PRESERVED",
    "group.knockout_group": "PRESERVED",
@@ -318,13 +318,28 @@
    "stroke.miter_limit": "PRESERVED",
    "stroke_brush": "PRESERVED",
    "stroke_brush_overrides": "PRESERVED",
-   "stroke_gradient": "DROPPED",
+   "stroke_gradient": "PRESERVED",
    "width_points": "PRESERVED"
   }
  },
  "port_overrides": {
   "_doc": "A cell where the two ports MEASURABLY DISAGREE today. The `survival` value above is what both ports must reach; a port listed here is asserted to produce the stated OTHER value, so closing the divergence turns this gate red until the entry is deleted. Empty is the goal state.",
-  "entries": []
+  "entries": [
+        {
+          "codec": "svg",
+          "field": "fill_gradient",
+          "port": "python",
+          "value": "DROPPED",
+          "note": "FROZEN PORT, NOT A DIVERGENCE TO CLOSE. The Python app (jas/) is frozen at the `five-port-parity` tag (POLICY.md section 1): no propagation, so its SVG codec keeps the tag-era behaviour and drops fill_gradient. The active ports carry it as jas:fill-gradient since I1b-1 (2026-10-09). This entry exists because scripts/check_reference_drift.py runs the frozen harness against the live fixture; it is deleted if the freeze is ever lifted and the codec ported."
+        },
+        {
+          "codec": "svg",
+          "field": "stroke_gradient",
+          "port": "python",
+          "value": "DROPPED",
+          "note": "FROZEN PORT, NOT A DIVERGENCE TO CLOSE. The Python app (jas/) is frozen at the `five-port-parity` tag (POLICY.md section 1): no propagation, so its SVG codec keeps the tag-era behaviour and drops stroke_gradient. The active ports carry it as jas:stroke-gradient since I1b-1 (2026-10-09). This entry exists because scripts/check_reference_drift.py runs the frozen harness against the live fixture; it is deleted if the freeze is ever lifted and the codec ported."
+        }
+      ]
  },
  "classification": {
   "test_json": {
@@ -354,8 +369,8 @@
    "common.tool_origin": "REPRESENTABLE_BUT_DROPPED (Rust, until this wave). `jas:tool-origin` is written by JasSwift's <path> arm AND parsed by Rust's own `parse_common` for every element -- so the representation exists, this port's reader consumes it, and only this port's writer omitted it. Closed in the same wave as this fixture.",
    "common.mask": "NO_COUNTERPART as things stand. SVG has <mask>, but neither port writes or reads any mask construct, and jas's Mask carries `invert`, `disabled`, `linked` and `unlink_transform` with no SVG analogue. Documented, not guessed.",
    "common.mode": "NO_COUNTERPART as things stand. CSS `mix-blend-mode` covers the 16 modes, but neither port writes or reads it.",
-   "fill_gradient": "NO_EXACT_COUNTERPART. SVG <linearGradient>/<radialGradient> exist, but jas's Gradient carries `midpoint_to_next` per stop plus `aspect_ratio`, `dither` and `stroke_sub_mode`, none of which SVG expresses. A faithful export needs a jas: extension alongside the standard element -- a design question, not a one-line fix.",
-   "stroke_gradient": "NO_EXACT_COUNTERPART -- as fill_gradient, plus the stroke sub-mode has no SVG meaning at all.",
+   "fill_gradient": "CLOSED 2026-10-09 (I1b-1). Standard SVG gradients cannot carry `midpoint_to_next`, `aspect_ratio`, `method`, `dither`, `stroke_sub_mode` or freeform nodes, so both writers emit `jas:fill-gradient` carrying the canonical test-JSON gradient (the one form both ports already write byte-identically), and both readers parse it; JasSwift's normalizeElement forwards it. The standard <linearGradient>/<radialGradient> beside it, for other apps, is I1b-2 and is NOT built.",
+   "stroke_gradient": "CLOSED 2026-10-09 (I1b-1) -- as fill_gradient, through `jas:stroke-gradient`; the stroke sub-mode, which has no SVG meaning, rides inside it.",
    "stroke_brush": "PRESERVED as of BRUSHSAVE (2026-08-05). A jas-private reference (\"<library>/<brush>\") riding `jas:stroke-brush` on <path>, written and read in all three implementations. This entry still read NO_COUNTERPART ('no port writes one') from 2026-08-05 until 2026-09-21, while the survival cell above it read PRESERVED.",
    "stroke_brush_overrides": "PRESERVED as of BRUSHSAVE (2026-08-05) -- same shape as stroke_brush, on `jas:stroke-brush-overrides`. The value is a JSON object, so the writers escape it and the readers unescape it.",
    "width_points": "PRESERVED as of BRUSHSAVE (2026-08-05) for a PATH: `jas:width-points`, space-separated `t,left,right` triples at the writer's four-decimal floor, written only when non-empty. The variable-width profile has no SVG stroke analogue, so it rides a jas: attribute. For a LINE see `line.width_points`: BRUSHSAVE wired the path arm only.",

@@ -587,7 +587,62 @@ fn escape_xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// An element's gradients as `jas:fill-gradient` / `jas:stroke-gradient` (I1b-1).
+///
+/// The value is the canonical test-JSON gradient (`test_json::gradient_json`),
+/// the one form both ports already write byte-identically and parse. Standard
+/// SVG gradients cannot carry `midpoint_to_next`, `aspect_ratio`, `method`,
+/// `dither`, `stroke_sub_mode` or a freeform gradient's nodes, and a round trip
+/// may not narrow anything, so this attribute is the record. A stop colour is
+/// written as test-JSON's colour OBJECT, not hex, for the reason that file
+/// gives: hex is the narrower of the two ports' colour models.
+fn gradient_attrs(elem: &Element) -> String {
+    let mut s = String::new();
+    if let Some(g) = elem.fill_gradient() {
+        s += &format!(" jas:fill-gradient=\"{}\"",
+                      escape_xml(&crate::geometry::test_json::gradient_json(g)));
+    }
+    if let Some(g) = elem.stroke_gradient() {
+        s += &format!(" jas:stroke-gradient=\"{}\"",
+                      escape_xml(&crate::geometry::test_json::gradient_json(g)));
+    }
+    s
+}
+
+/// The inverse of [`gradient_attrs`]: an attribute that does not parse is
+/// ignored, as every other unreadable `jas:` attribute is.
+fn apply_gradient_attrs(node: &XmlNode, elem: Element) -> Element {
+    let read = |key: &str| {
+        node.attrs.get(key)
+            .and_then(|v| serde_json::from_str::<serde_json::Value>(&unescape_xml(v)).ok())
+            .and_then(|v| crate::geometry::test_json::parse_gradient(&v))
+    };
+    let mut elem = elem;
+    if let Some(g) = read("jas:fill-gradient") {
+        elem = crate::geometry::element::with_fill_gradient(&elem, Some(g));
+    }
+    if let Some(g) = read("jas:stroke-gradient") {
+        elem = crate::geometry::element::with_stroke_gradient(&elem, Some(g));
+    }
+    elem
+}
+
 pub fn element_svg(elem: &Element, indent: &str) -> String {
+    let out = element_svg_body(elem, indent);
+    let attrs = gradient_attrs(elem);
+    if attrs.is_empty() {
+        return out;
+    }
+    // Inserted right after the tag name, in both ports, so the two writers
+    // agree on where the attribute sits.
+    let open = indent.len() + 1;
+    let name_end = out[open..]
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .map_or(out.len(), |i| open + i);
+    format!("{}{}{}", &out[..name_end], attrs, &out[name_end..])
+}
+
+fn element_svg_body(elem: &Element, indent: &str) -> String {
     match elem {
         Element::Line(e) => {
             // A Line carries a width profile (the Width tool and the
@@ -2025,6 +2080,10 @@ fn text_anchor_from_attr(v: &str) -> String {
 }
 
 fn parse_element(node: &XmlNode) -> Option<Element> {
+    parse_element_body(node).map(|e| apply_gradient_attrs(node, e))
+}
+
+fn parse_element_body(node: &XmlNode) -> Option<Element> {
     let tag = strip_ns(&node.tag);
     let common = parse_common(node);
 
@@ -3414,6 +3473,60 @@ mod tests {
             selection: vec![],
             ..Document::default()
         }
+    }
+
+    /// ⭐ I1b-1: a gradient survives SAVE (SVG) and reopen. The inputs are
+    /// the two shapes a narrower wire form would lose: a FREEFORM gradient
+    /// (standard SVG has no construct for its nodes) on the fill, and a stop
+    /// whose colour is HSB and translucent (hex would flatten both) on the
+    /// stroke. The survival fixture's saturated gradient is radial and rgb,
+    /// so it cannot witness either.
+    #[test]
+    fn a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip() {
+        let mut hsb = Color::hsb(210.0, 0.5, 0.75);
+        if let Color::Hsb { ref mut a, .. } = hsb { *a = 0.4 }
+        let fill = Gradient {
+            gtype: GradientType::Freeform,
+            method: GradientMethod::Points,
+            nodes: vec![
+                GradientNode { x: 0.25, y: 0.5, color: Color::rgb(1.0, 0.5, 0.0), opacity: 80.0, spread: 30.0 },
+                GradientNode { x: 0.75, y: 0.2, color: hsb, opacity: 100.0, spread: 10.0 },
+            ],
+            ..Gradient::default()
+        };
+        let stroke = Gradient {
+            gtype: GradientType::Linear,
+            angle: -30.0,
+            aspect_ratio: 150.0,
+            dither: true,
+            stroke_sub_mode: StrokeSubMode::Across,
+            stops: vec![
+                GradientStop { color: hsb, opacity: 60.0, location: 0.0, midpoint_to_next: 35.0 },
+                GradientStop { color: Color::BLACK, opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        };
+        let mut rect = make_rect(10.0, 20.0, 30.0, 40.0);
+        if let Element::Rect(r) = &mut rect {
+            r.stroke = Some(Stroke::new(Color::BLACK, 2.0));
+            r.fill_gradient = Some(Box::new(fill.clone()));
+            r.stroke_gradient = Some(Box::new(stroke.clone()));
+        }
+        let svg = document_to_svg(&make_doc(vec![rect]));
+        assert!(svg.contains("<rect jas:fill-gradient=\""), "the attribute sits after the tag name:\n{svg}");
+        let back = svg_to_document(&svg);
+        let Element::Layer(layer) = &back.layers[0] else { panic!("a layer") };
+        let el = &layer.children[0];
+        assert_eq!(el.fill_gradient(), Some(&fill), "the freeform fill came back equal");
+        assert_eq!(el.stroke_gradient(), Some(&stroke), "the hsb stroke stop came back equal");
+    }
+
+    /// The control: an element with no gradient writes no gradient attribute,
+    /// so every existing SVG fixture is byte-identical.
+    #[test]
+    fn an_element_with_no_gradient_writes_no_gradient_attribute() {
+        let svg = document_to_svg(&make_doc(vec![make_rect(1.0, 2.0, 3.0, 4.0)]));
+        assert!(!svg.contains("-gradient="), "{svg}");
     }
 
     #[test]

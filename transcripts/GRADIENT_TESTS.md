@@ -386,6 +386,9 @@ reasonable tolerance. Stop colors match.
 gradient, so this test currently requires constructing the
 gradient programmatically in each app. A proper parity suite
 lands with Phase 9 / Phase 10.
+*(2026-10-09, I1b-1: a jas file now carries the gradient through save
+and reopen, as `jas:fill-gradient` / `jas:stroke-gradient`. GRD-113 is
+the standard `<defs>` form other apps read, and it stays open.)*
 
 ---
 
