@@ -324,7 +324,22 @@
  },
  "port_overrides": {
   "_doc": "A cell where the two ports MEASURABLY DISAGREE today. The `survival` value above is what both ports must reach; a port listed here is asserted to produce the stated OTHER value, so closing the divergence turns this gate red until the entry is deleted. Empty is the goal state.",
-  "entries": []
+  "entries": [
+        {
+          "codec": "svg",
+          "field": "fill_gradient",
+          "port": "python",
+          "value": "DROPPED",
+          "note": "FROZEN PORT, NOT A DIVERGENCE TO CLOSE. The Python app (jas/) is frozen at the `five-port-parity` tag (POLICY.md section 1): no propagation, so its SVG codec keeps the tag-era behaviour and drops fill_gradient. The active ports carry it as jas:fill-gradient since I1b-1 (2026-10-09). This entry exists because scripts/check_reference_drift.py runs the frozen harness against the live fixture; it is deleted if the freeze is ever lifted and the codec ported."
+        },
+        {
+          "codec": "svg",
+          "field": "stroke_gradient",
+          "port": "python",
+          "value": "DROPPED",
+          "note": "FROZEN PORT, NOT A DIVERGENCE TO CLOSE. The Python app (jas/) is frozen at the `five-port-parity` tag (POLICY.md section 1): no propagation, so its SVG codec keeps the tag-era behaviour and drops stroke_gradient. The active ports carry it as jas:stroke-gradient since I1b-1 (2026-10-09). This entry exists because scripts/check_reference_drift.py runs the frozen harness against the live fixture; it is deleted if the freeze is ever lifted and the codec ported."
+        }
+      ]
  },
  "classification": {
   "test_json": {
