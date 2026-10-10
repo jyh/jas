@@ -288,6 +288,27 @@ mod tests {
         assert_eq!(propose["inputSchema"]["required"], json!(["name", "ops"]));
     }
 
+    /// A3b: the `op` a proposal may carry is an ENUM taken from the declared
+    /// vocabulary (`test_fixtures/operations/op_vocabulary.json`), so a client
+    /// sees the 51 verbs instead of an untyped object. The expectation is read
+    /// from the FILE, not from the code under test, and its size is asserted so
+    /// an empty file cannot agree with an empty enum.
+    #[test]
+    fn propose_declares_the_op_vocabulary_as_an_enum() {
+        let mut s = session();
+        let out = call(&mut s, 2, "tools/list", json!({}));
+        let propose = out[0]["result"]["tools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == "propose").unwrap();
+        let got: Vec<&str> = propose["inputSchema"]["properties"]["ops"]["items"]["properties"]["op"]["enum"]
+            .as_array().expect("an op enum").iter().map(|v| v.as_str().unwrap()).collect();
+        let file: Value = serde_json::from_str(&std::fs::read_to_string(
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/operations/op_vocabulary.json")).unwrap()).unwrap();
+        let mut want: Vec<&str> = file["verbs"].as_object().unwrap().keys().map(|k| k.as_str()).collect();
+        want.sort();
+        assert!(want.len() >= 40, "the vocabulary file is not vacuous: {}", want.len());
+        assert_eq!(got, want);
+    }
+
     #[test]
     fn propose_previews_and_journals_nothing() {
         let mut s = session();
