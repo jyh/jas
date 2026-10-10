@@ -72,6 +72,17 @@ Both active ports run the same file (POLICY.md §1).
   - It needs a reader beside its request loop, so it can **notify** the client when the document changes, including
     when a proposal is withdrawn by an artist edit, and so it can ask the artist to accept.
   - Perception is the canonical document JSON plus an offscreen raster.
+- **A3 slice 1 is BUILT** (`jas_dioxus/src/mcp.rs`, `src/bin/jas_mcp.rs`): a pure `Session::handle(line) -> lines`
+  core, stdio with a reader thread, the tools `propose` and `withdraw_proposal` (there is no accept tool: accepting is
+  the artist's), the `jas://document` resource (the settled document plus the pending proposal's id), subscriptions,
+  and a `notifications/jas/proposal` message reporting each proposal's fate (`accepted` · `rejected` · `withdrawn`).
+- **A3b, the tool VOCABULARY, is an open question.** ROADMAP §3.1 says tool schemas are generated from `actions.yaml`.
+  But its 239 entries are the **UI action layer** (tabs, panels, dialogs), while a proposal carries **primitive document
+  ops** (`op_apply`'s 141 verbs), which are declared nowhere as data: they exist only as a `match`. Two arms:
+  - (a) declare the op vocabulary as data, then generate from it;
+  - (b) run an action inside the proposal bracket and capture the primitive ops it records.
+  Arm (b) works only for actions whose recorded ops replay (`OP_LOG.md` §9: some production transactions are still
+  opaque), so it needs a census first. Until then, `propose` takes primitive ops and the model validates them.
 - **A4, accept in the app:** the preview drawn as an overlay, with Accept and Reject. This is ROADMAP §3.1's first
   observable.
 - **A7, the intent ledger's schema:** open by R0. What a ledger entry records is not part of this repository.
