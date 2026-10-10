@@ -608,6 +608,46 @@ private func collectStdGradients(_ node: XMLElement, into out: inout [String: St
     for case let c as XMLElement in node.children ?? [] { collectStdGradients(c, into: &out) }
 }
 
+/// The gradient attributes an `href` passes down (SVG 1.1 §13.2.2–3).
+/// Mirrors Rust's `STD_GRADIENT_INHERITED`.
+private let stdGradientInherited = [
+    "x1", "y1", "x2", "y2", "cx", "cy", "r", "fx", "fy",
+    "gradientUnits", "gradientTransform", "spreadMethod",
+]
+
+/// I1b-3: resolve `href` / `xlink:href` between standard gradients (Inkscape's
+/// stops-only gradient plus a referencing one). Stops come from the nearest
+/// referenced gradient when a gradient has none; each inheritable attribute
+/// it does not set comes from the nearest one that does; a cycle or a missing
+/// target ends the walk. Mirrors Rust's `resolve_std_gradient_hrefs`.
+private func resolveStdGradientHrefs(_ found: inout [String: StdGradientDef]) {
+    func hrefOf(_ d: StdGradientDef) -> String? {
+        (d.attrs["href"] ?? d.attrs["xlink:href"]).map {
+            var s = $0.trimmingCharacters(in: .whitespaces)
+            while s.hasPrefix("#") { s.removeFirst() }
+            return s
+        }
+    }
+    var resolved: [String: StdGradientDef] = [:]
+    for (id, own) in found {
+        var attrs = own.attrs
+        var stops = own.stops
+        var seen: Set<String> = [id]
+        var next = hrefOf(own)
+        while let target = next, seen.insert(target).inserted, let anc = found[target] {
+            for k in stdGradientInherited where attrs[k] == nil {
+                if let v = anc.attrs[k] { attrs[k] = v }
+            }
+            if stops.isEmpty { stops = anc.stops }
+            next = hrefOf(anc)
+        }
+        resolved[id] = StdGradientDef(radial: own.radial,
+                                      userSpace: attrs["gradientUnits"] == "userSpaceOnUse",
+                                      attrs: attrs, stops: stops)
+    }
+    found = resolved
+}
+
 /// The `id` in a paint value of the form `url(#id)` or `url(#id) <fallback>`.
 private func paintUrlId(_ v: String) -> String? {
     let t = v.trimmingCharacters(in: .whitespaces)
@@ -2305,6 +2345,7 @@ public func svgToDocument(_ svg: String) -> Document {
     applyStyleSheet(root)
     var gradients: [String: StdGradientDef] = [:]
     collectStdGradients(root, into: &gradients)
+    resolveStdGradientHrefs(&gradients)
     return SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root)) {
         SvgStdGradients.$defs.withValue(gradients) {
             svgRootToDocument(root)

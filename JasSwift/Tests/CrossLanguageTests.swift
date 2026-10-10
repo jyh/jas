@@ -166,6 +166,37 @@ private func withoutJasGradients(_ svg: String) -> String {
     let g = svgToDocument(svg).layers.first?.children.first?.fillGradient
     #expect(g?.angle == 90, "the jas attribute's angle, not the url's: \(String(describing: g?.angle))")
 }
+/// I1b-3, the twin of Rust's `an_href_gradient_imports_as_its_inline_equivalent`:
+/// an `href`'d standard gradient (Inkscape's shape) imports EXACTLY as the same
+/// gradient written inline; the oracle is the inline form. And a cycle or a
+/// dangling href imports with no gradient, without hanging.
+private func hrefRectFillGradient(_ defs: String, _ fill: String = "g") -> Gradient? {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="100">
+      <defs>\(defs)</defs><g><rect x="10" y="20" width="100" height="50" fill="url(#\(fill))"/></g></svg>
+    """
+    return svgToDocument(svg).layers.first?.children.first?.fillGradient
+}
+@Test func svgHrefGradientImportsAsItsInlineEquivalent() {
+    let stops = ##"<stop offset="0.2" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff" stop-opacity="0.5"/>"##
+    let want = hrefRectFillGradient(##"<linearGradient id="g" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse">"## + stops + "</linearGradient>")
+    #expect(want != nil, "the inline form imports a gradient")
+    let cases: [(String, String)] = [
+        ("xlink:href", ##"<linearGradient id="base">"## + stops + ##"</linearGradient><linearGradient id="g" xlink:href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##),
+        ("plain href (SVG 2)", ##"<linearGradient id="base">"## + stops + ##"</linearGradient><linearGradient id="g" href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##),
+        ("a two-hop chain", ##"<linearGradient id="base">"## + stops + ##"</linearGradient><linearGradient id="mid" xlink:href="#base" gradientUnits="userSpaceOnUse"/><linearGradient id="g" xlink:href="#mid" x1="10" y1="0" x2="110" y2="0"/>"##),
+        ("attributes inherited, stops own", ##"<linearGradient id="base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#00ff00"/><stop offset="1" stop-color="#00ff00"/></linearGradient><linearGradient id="g" xlink:href="#base">"## + stops + "</linearGradient>"),
+    ]
+    for (label, defs) in cases {
+        #expect(hrefRectFillGradient(defs) == want, "\(label): the href form must import as the inline form")
+    }
+    let wantR = hrefRectFillGradient(##"<radialGradient id="g" cx="0.5" cy="0.5" r="0.25">"## + stops + "</radialGradient>")
+    #expect(wantR?.type == .radial)
+    #expect(hrefRectFillGradient(##"<linearGradient id="base">"## + stops + ##"</linearGradient><radialGradient id="g" xlink:href="#base" cx="0.5" cy="0.5" r="0.25"/>"##) == wantR,
+            "a radial takes a linear's stops")
+    #expect(hrefRectFillGradient(##"<linearGradient id="a" xlink:href="#b"/><linearGradient id="g" xlink:href="#a"/><linearGradient id="b" xlink:href="#g"/>"##) == nil)
+    #expect(hrefRectFillGradient(##"<linearGradient id="g" xlink:href="#nowhere"/>"##) == nil)
+}
 /// I1b-1: a FREEFORM fill gradient survives this port's SVG round trip (the
 /// twin of Rust's `a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip`,
 /// minus the hsb stop, which this port's hex colour cannot hold). Not in the SVG
