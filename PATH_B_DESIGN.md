@@ -508,6 +508,33 @@ Swift twins, the `panel_layout.json` golden, and synthetic arms in all three
 (`test_panel_layout_container_min_height.py`, `container_min_height_tests`,
 `ContainerMinHeightLayoutTests.swift`).
 
+### B.7 The 2-D `type: grid` (PROPOSED 2026-10-10, awaiting the port owner's ruling)
+
+A `grid` node lays out its visible children in `cols` columns (at least 1), `gap` apart.
+The gap is `style.gap`, else the node's own `gap` key (the toolbar's form). All integer:
+
+* the cell width is `cw = (inner_w − gap·(cols−1)) // cols` (never below 0);
+* the cell at column `c` starts at `x = c·(cw + gap)`;
+* a child's cell is its `grid: {row, col}` (the column clamped into `0..cols−1`), else the
+  next cell in reading order after the previous child's;
+* each child is measured in its cell's width, so a fixed-size leaf keeps its size and a
+  fill leaf takes the cell;
+* a row is as tall as its tallest child; rows are `gap` apart, top to bottom by row number;
+* the grid is as tall as its rows plus padding (B.4 still applies a declared height).
+
+**Why:** A.6 deferred 2-D grid because only the native composites used it. The
+**toolbar** uses it (`layout.yaml` `tool_grid`: `cols: 2`, `gap: 2`, a `grid: {row, col}` per
+button), and a native shell that plans the toolbar through this pass needs its buttons.
+Until B.7, `grid` was neither a measured container nor a drawn leaf, so its thirteen
+buttons were omitted from every port's rects. No panel uses `type: grid`, so no shipped
+golden rect moves.
+
+**Where it lives:** `_grid2d` in `workspace_interpreter/panel_layout.py` and its Rust twin
+`grid_2d`, with synthetic arms one for one (`test_panel_layout_grid.py`,
+`grid_2d_tests`). **Owed before this is RULED:** the Swift twin and its arms, then a
+`toolbar` vector in the `panel_layout.json` golden. The Swift corpus runner force-casts
+`panels[id]`, so the vector lands WITH the Swift port, never before it.
+
 ### A.6 Deferred in v1 — status updated 2026-06-29
 
 **Now implemented** (were deferred when this section was written): `foreach` row/wrap layout
@@ -517,7 +544,7 @@ flex-weighted children when `avail_h > 0`).
 **Still deferred:** `visible_when`/`bind.visible`/`enabled_when` expression evaluation
 (`_visible_children` honors only a literal `visible: false`); `max_width`/`max_height` clamps (0 uses, gated: B.6);
 2-D `grid` (`type:"grid"` with `cols`, distinct from the Bootstrap col-span the row grid
-already handles). Of these, only `visible_when` is **in-scope** — it is used by the rendered
+already handles); **2026-10-10: proposed in B.7 for the toolbar, in the reference and Rust.** Of these, only `visible_when` is **in-scope** — it is used by the rendered
 opacity/artboards/concepts panels (see Status); `max_*` and 2-D grid are needed only by the
 now-permanently-native composite panels, so they are out of scope unless that decision is
 revisited.

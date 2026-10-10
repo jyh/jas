@@ -38,7 +38,7 @@ from .expr import evaluate, evaluate_text
 
 CHAR_WIDTH = 10  # stub glyph advance; integer so text widths are exact
 
-_CONTAINER_TYPES = ("container", "row", "col", "panel")
+_CONTAINER_TYPES = ("container", "row", "col", "panel", "grid")
 
 _FILL_KINDS = frozenset({
     "select", "number_input", "text_input", "length_input",
@@ -232,7 +232,15 @@ def _visible_children(node: dict) -> list[tuple[int, dict]]:
 
 def _gap(node: dict) -> int:
     g = _style(node).get("gap")
+    # B.7: a 2-D grid may carry its gap on the node itself (the toolbar's form).
+    if g is None and node.get("type") == "grid":
+        g = node.get("gap")
     return int(g) if isinstance(g, (int, float)) else 0
+
+
+def _grid_cols(node: dict) -> int:
+    c = node.get("cols")
+    return max(int(c), 1) if isinstance(c, (int, float)) else 1
 
 
 def _flex(node: dict) -> int:
@@ -358,6 +366,9 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
             ch_items, content_h = _disclosure(node, path, inner_w, gap, ctx)
         elif isinstance(node.get("foreach"), dict) and node.get("do"):
             ch_items, content_h = _foreach(node, path, inner_w, gap, ctx)
+        elif node.get("type") == "grid":
+            ch_items, content_h = _grid2d(_visible_children(node), path, inner_w,
+                                          gap, _grid_cols(node), ctx)
         else:
             children = _visible_children(node)
             lay = _resolved_layout(node)
@@ -548,6 +559,46 @@ def _grid(children, path, inner_w, gap, ctx) -> tuple[list[dict], int]:
 
 
 _DISCLOSURE_HEADER_H = 24  # canonical disclosure header bar height
+
+
+def _grid2d(children, path, inner_w, gap, cols, ctx) -> tuple[list[dict], int]:
+    """B.7: a 2-D ``type: grid`` -- ``cols`` columns, ``gap`` between cells.
+
+    Cell width ``(inner_w - gap*(cols-1)) // cols``; the cell at column ``c``
+    starts at ``c * (cw + gap)``. A child's cell is its ``grid: {row, col}``,
+    else the next cell in reading order after the previous child's. A row is as
+    tall as its tallest child; rows are ``gap`` apart.
+    """
+    cw = max((inner_w - gap * (cols - 1)) // cols, 0) if inner_w > 0 else 0
+    placed = []  # (row, col, i, child)
+    nxt = 0
+    for i, c in children:
+        g = c.get("grid")
+        if isinstance(g, dict) and isinstance(g.get("row"), int) and isinstance(g.get("col"), int):
+            r, k = g["row"], min(max(g["col"], 0), cols - 1)
+        else:
+            r, k = divmod(nxt, cols)
+        nxt = r * cols + k + 1
+        placed.append((r, k, i, c))
+    measured = []  # (row, col, h, items)
+    for r, k, i, c in placed:
+        _w, h, cit = _measure(c, path + [i], cw, 0, ctx)
+        measured.append((r, k, h, cit))
+    rows = sorted({m[0] for m in measured})
+    row_h = {r: max(m[2] for m in measured if m[0] == r) for r in rows}
+    row_y = {}
+    y = 0
+    for r in rows:
+        row_y[r] = y
+        y += row_h[r] + gap
+    content_h = y - gap if rows else 0
+    items: list[dict] = []
+    for r, k, _h, cit in measured:
+        for it in cit:
+            it["x"] += k * (cw + gap)
+            it["y"] += row_y[r]
+            items.append(it)
+    return items, content_h
 
 
 def _disclosure(node, path, inner_w, gap, ctx) -> tuple[list[dict], int]:

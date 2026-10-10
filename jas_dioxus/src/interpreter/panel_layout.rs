@@ -23,7 +23,7 @@ use super::expr::eval_text;
 
 pub const CHAR_WIDTH: i64 = 10;
 
-const CONTAINER_TYPES: [&str; 4] = ["container", "row", "col", "panel"];
+const CONTAINER_TYPES: [&str; 5] = ["container", "row", "col", "panel", "grid"];
 
 struct MItem {
     // Read by both projections: `layout_panel` (the byte-gate) and
@@ -204,6 +204,16 @@ fn style_i(n: &Value, key: &str) -> Option<i64> {
     style(n)
         .get(key)
         .and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+}
+
+/// An integer from a JSON number, truncating a float as the reference's `int()` does.
+fn num_i(v: Option<&Value>) -> Option<i64> {
+    v.and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)))
+}
+
+/// B.7: a 2-D grid's column count, at least 1.
+fn grid_cols(n: &Value) -> i64 {
+    num_i(n.get("cols")).map_or(1, |c| c.max(1))
 }
 
 fn is_container(n: &Value) -> bool {
@@ -511,7 +521,10 @@ fn measure(
 ) -> (i64, i64, Vec<MItem>) {
     let st = style(n);
     let (pt, pr, pb, pl) = parse_padding(st.get("padding").unwrap_or(&Value::Null));
-    let gap = style_i(n, "gap").unwrap_or(0);
+    // B.7: a 2-D grid may carry its gap on the node itself (the toolbar's form).
+    let gap = style_i(n, "gap")
+        .or_else(|| (node_type(n) == "grid").then(|| num_i(n.get("gap"))).flatten())
+        .unwrap_or(0);
     // B.5: a container's declared width is honoured as its height is (B.4),
     // clamped to the width it is given; its children are laid out in it.
     let mut avail_w = avail_w;
@@ -529,6 +542,8 @@ fn measure(
             disclosure(n, path, inner_w, gap, ctx)
         } else if has_foreach {
             foreach(n, path, inner_w, gap, ctx)
+        } else if node_type(n) == "grid" {
+            grid_2d(&visible_children(n), path, inner_w, gap, grid_cols(n), ctx)
         } else {
             let children = visible_children(n);
             let lay = resolved_layout(n);
@@ -808,6 +823,63 @@ const DISCLOSURE_HEADER_H: i64 = 24;
 /// (children, column) below a fixed-height header (assumed expanded); the header
 /// is drawn by the widget itself (no separate rect). The body's inner foreach
 /// (swatch / brush grids) expands through the normal recursion.
+/// B.7: a 2-D `type: grid` -- `cols` columns, `gap` between cells. The
+/// reference's `_grid2d`, line for line: cell width
+/// `(inner_w - gap*(cols-1)) / cols`; the cell at column `c` starts at
+/// `c * (cw + gap)`; a child's cell is its `grid: {row, col}`, else the next
+/// cell in reading order after the previous child's; a row is as tall as its
+/// tallest child; rows are `gap` apart.
+fn grid_2d(
+    children: &[(i64, &Value)],
+    path: &[i64],
+    inner_w: i64,
+    gap: i64,
+    cols: i64,
+    ctx: &Value,
+) -> (Vec<MItem>, i64) {
+    let cw = if inner_w > 0 { ((inner_w - gap * (cols - 1)).div_euclid(cols)).max(0) } else { 0 };
+    let mut placed = vec![];
+    let mut next = 0i64;
+    for &(i, c) in children {
+        let cell = c.get("grid").filter(|g| g.is_object()).and_then(|g| {
+            Some((g.get("row")?.as_i64()?, g.get("col")?.as_i64()?))
+        });
+        let (r, k) = match cell {
+            Some((r, k)) => (r, k.clamp(0, cols - 1)),
+            None => (next.div_euclid(cols), next.rem_euclid(cols)),
+        };
+        next = r * cols + k + 1;
+        placed.push((r, k, i, c));
+    }
+    let mut measured = vec![];
+    for (r, k, i, c) in placed {
+        let mut p = path.to_vec();
+        p.push(i);
+        let (_w, h, items) = measure(c, &p, cw, 0, ctx);
+        measured.push((r, k, h, items));
+    }
+    let mut rows: Vec<i64> = measured.iter().map(|m| m.0).collect();
+    rows.sort_unstable();
+    rows.dedup();
+    let mut row_y = std::collections::HashMap::new();
+    let mut y = 0;
+    for &r in &rows {
+        row_y.insert(r, y);
+        let h = measured.iter().filter(|m| m.0 == r).map(|m| m.2).max().unwrap_or(0);
+        y += h + gap;
+    }
+    let content_h = if rows.is_empty() { 0 } else { y - gap };
+    let mut out = vec![];
+    for (r, k, _h, items) in measured {
+        for mut it in items {
+            it.x += k * (cw + gap);
+            it.y += row_y[&r];
+            out.push(it);
+        }
+    }
+    (out, content_h)
+}
+
 fn disclosure(
     n: &Value,
     path: &[i64],
@@ -999,5 +1071,89 @@ mod container_min_height_tests {
         for v in ["50%", "auto"] {
             assert_eq!(yh(col(json!([boxed(json!({"min_height": v}))])), json!([0])).1, content_h, "{v}");
         }
+    }
+}
+
+/// PATH_B_DESIGN B.7, the reference's synthetic arms
+/// (`test_panel_layout_grid.py`), one for one: the 2-D `type: grid` (`cols`,
+/// `gap`, a `grid: {row, col}` per child). The toolbar's tool grid is the
+/// shipped case; its golden lands with the Swift port.
+#[cfg(test)]
+mod grid_2d_tests {
+    use super::layout_panel;
+    use serde_json::{json, Value};
+
+    fn rects(content: Value, avail_w: i64) -> std::collections::HashMap<Vec<i64>, (i64, i64, i64, i64)> {
+        let out = layout_panel(&json!({"content": content}), avail_w, 0, &json!({}));
+        out.as_array().unwrap().iter().map(|r| {
+            let p: Vec<i64> = r["path"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+            let n = |k: &str| r["rect"][k].as_i64().unwrap();
+            (p, (n("x"), n("y"), n("w"), n("h")))
+        }).collect()
+    }
+
+    fn btn(cell: Option<(i64, i64)>) -> Value {
+        let mut b = json!({"type": "icon_button", "icon": "x"});
+        if let Some((row, col)) = cell {
+            b["grid"] = json!({"row": row, "col": col});
+        }
+        b
+    }
+
+    fn grid(children: Vec<Value>, style: Option<Value>) -> Value {
+        let mut g = json!({"type": "grid", "cols": 2, "gap": 2, "children": children});
+        if let Some(s) = style {
+            g["style"] = s;
+        }
+        g
+    }
+
+    #[test]
+    fn a_grids_children_are_laid_out() {
+        let r = rects(grid(vec![btn(Some((0, 0))), btn(Some((0, 1)))], None), 72);
+        assert!(r.contains_key(&vec![0]) && r.contains_key(&vec![1]), "{r:?}");
+    }
+
+    #[test]
+    fn cells_are_columns_of_the_inner_width_gap_apart() {
+        let r = rects(grid(vec![btn(Some((0, 0))), btn(Some((0, 1)))], None), 72);
+        assert_eq!((r[&vec![0]].0, r[&vec![1]].0), (0, 37));
+        assert_eq!((r[&vec![0]].1, r[&vec![1]].1), (0, 0));
+    }
+
+    #[test]
+    fn a_fixed_size_leaf_keeps_its_size_in_its_cell() {
+        let r = rects(grid(vec![btn(Some((0, 0)))], None), 72);
+        assert_eq!((r[&vec![0]].2, r[&vec![0]].3), (24, 24));
+    }
+
+    #[test]
+    fn rows_are_the_tallest_child_tall_and_gap_apart() {
+        let tall = json!({"type": "icon_button", "icon": "x", "style": {"height": 30}, "grid": {"row": 0, "col": 1}});
+        let r = rects(grid(vec![btn(Some((0, 0))), tall, btn(Some((1, 0)))], None), 72);
+        assert_eq!(r[&vec![2]].1, 30 + 2);
+    }
+
+    #[test]
+    fn a_child_without_a_cell_takes_the_next_in_reading_order() {
+        let r = rects(grid(vec![btn(None), btn(None), btn(None)], None), 72);
+        assert_eq!((r[&vec![0]].0, r[&vec![0]].1), (0, 0));
+        assert_eq!((r[&vec![1]].0, r[&vec![1]].1), (37, 0));
+        assert_eq!((r[&vec![2]].0, r[&vec![2]].1), (0, 24 + 2));
+    }
+
+    #[test]
+    fn the_grid_is_as_tall_as_its_rows_plus_padding() {
+        let r = rects(grid(vec![btn(Some((0, 0))), btn(Some((1, 1)))], Some(json!({"padding": 4}))), 72);
+        assert_eq!(r[&vec![]].3, 24 + 2 + 24 + 8);
+        assert_eq!(r[&vec![1]].0, 4 + (64 - 2) / 2 + 2);
+    }
+
+    #[test]
+    fn a_hidden_child_takes_no_cell() {
+        let hidden = json!({"type": "icon_button", "icon": "x", "visible": false});
+        let r = rects(grid(vec![hidden, btn(None)], None), 72);
+        assert!(r.contains_key(&vec![1]) && !r.contains_key(&vec![0]));
+        assert_eq!((r[&vec![1]].0, r[&vec![1]].1), (0, 0));
     }
 }
