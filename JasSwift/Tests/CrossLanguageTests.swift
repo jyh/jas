@@ -1828,6 +1828,20 @@ private func opCaseObservation(_ tc: [String: Any]) -> (String, [String]) {
     return (documentToTestJson(model.document), results)
 }
 
+/// The JSON Schema type name of a decoded corpus value, as Rust's
+/// `json_type_name`. JSONSerialization decodes a JSON boolean as an NSNumber
+/// too, so the boolean test reads its CF type, never `is Bool`.
+private func jsonTypeName(_ v: Any) -> String {
+    switch v {
+    case is NSNull: return "null"
+    case let n as NSNumber: return CFGetTypeID(n) == CFBooleanGetTypeID() ? "boolean" : "number"
+    case is String: return "string"
+    case is [Any]: return "array"
+    case is [String: Any]: return "object"
+    default: return "unknown:\(type(of: v))"
+    }
+}
+
 /// A3b slice 2 in Swift: re-derive `operations/op_arguments.json` from the
 /// corpus, by the same drop-one-key rule as Rust's `derive_op_arguments`, and
 /// require it to equal the committed file — so Swift agrees with Rust on every
@@ -1846,6 +1860,7 @@ private func opCaseObservation(_ tc: [String: Any]) -> (String, [String]) {
         .sorted()
     var args: [String: [String: Bool]] = [:]
     var liveHarness: [String] = []
+    var types: [String: [String: Set<String>]] = [:]
     var cases = 0, instances = 0
     for fixture in fixtures {
         let tests = try JSONSerialization.jsonObject(with: Data(readFixture("operations/\(fixture)").utf8)) as! [[String: Any]]
@@ -1867,6 +1882,12 @@ private func opCaseObservation(_ tc: [String: Any]) -> (String, [String]) {
                 guard let verb = op["op"] as? String, verbs.contains(verb) else { continue }
                 instances += 1
                 if args[verb] == nil { args[verb] = [:] }  // a verb with no keys still has an (empty) entry
+                if types[verb] == nil { types[verb] = [:] }
+                // Types only from ops expected to SUCCEED (no harness key), as in Rust.
+                let expectsSuccess = !harnessKeys.contains { op[$0] != nil }
+                for (k, v) in op where k != "op" && expectsSuccess && !harnessKeys.contains(k) {
+                    types[verb, default: [:]][k, default: []].insert(jsonTypeName(v))
+                }
                 for k in op.keys where k != "op" {
                     var dropped = op
                     dropped.removeValue(forKey: k)
@@ -1902,8 +1923,52 @@ private func opCaseObservation(_ tc: [String: Any]) -> (String, [String]) {
     for verb in Set(derived.keys).union(committed.keys).sorted() where derived[verb] != committed[verb] {
         Issue.record("op_arguments.json disagrees with Swift for `\(verb)`: file \(committed[verb].map { "\($0)" } ?? "absent"), Swift \(derived[verb].map { "\($0)" } ?? "absent")")
     }
+    let committedTypes = (file["argument_types"] as! [String: [String: [String]]])
+    let derivedTypes = types.mapValues { $0.mapValues { $0.sorted() } }
+    for verb in Set(derivedTypes.keys).union(committedTypes.keys).sorted() where derivedTypes[verb] != committedTypes[verb] {
+        Issue.record("op_arguments.json argument_types disagree with Swift for `\(verb)`: file \(committedTypes[verb].map { "\($0)" } ?? "absent"), Swift \(derivedTypes[verb].map { "\($0)" } ?? "absent")")
+    }
     let noInstance = verbs.filter { derived[$0] == nil }.sorted()
     #expect(noInstance == (file["verbs_with_no_corpus_instance"] as! [String]))
+}
+
+/// A3b slice 3 in Swift, the twin of Rust's `propose_declares_each_ops_arguments`:
+/// `ops.items` carries one `anyOf` branch per declared verb, `op` as a `const`,
+/// the other properties exactly `op_arguments.json`'s keys for that verb, typed
+/// with its `argument_types`; nothing `required`. Read from the FILES.
+@Test func mcpProposeDeclaresEachOpsArguments() throws {
+    let out = McpSession(model: Model(document: Document(layers: [Layer(children: [])], artboards: [])))
+        .handle(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+    let msg = try JSONSerialization.jsonObject(with: Data(out[0].utf8)) as! [String: Any]
+    let tools = (msg["result"] as! [String: Any])["tools"] as! [[String: Any]]
+    let propose = tools.first { $0["name"] as? String == "propose" }!
+    let ops = ((propose["inputSchema"] as! [String: Any])["properties"] as! [String: Any])["ops"] as! [String: Any]
+    let branches = (ops["items"] as! [String: Any])["anyOf"] as? [[String: Any]] ?? []
+    let vocab = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_vocabulary.json").utf8)) as! [String: Any]
+    let file = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_arguments.json").utf8)) as! [String: Any]
+    let verbs = (vocab["verbs"] as! [String: Any]).keys.sorted()
+    let types = file["argument_types"] as! [String: [String: [String]]]
+    #expect(verbs.count >= 40, "the vocabulary file is not vacuous: \(verbs.count)")
+    #expect(branches.count == verbs.count, "one branch per declared verb: \(branches.count)")
+    var typed = 0
+    for verb in verbs {
+        guard let b = branches.first(where: { (($0["properties"] as? [String: Any])?["op"] as? [String: Any])?["const"] as? String == verb })
+        else { Issue.record("no branch for `\(verb)`"); continue }
+        #expect(b["required"] == nil, "`\(verb)`: no argument is required")
+        let props = b["properties"] as! [String: Any]
+        let want = types[verb] ?? [:]
+        #expect(Set(props.keys).subtracting(["op"]) == Set(want.keys), "`\(verb)`: the branch's keys are the file's")
+        for (k, ts) in want {
+            let got = (props[k] as? [String: Any])?["type"]
+            if ts.count == 1 {
+                #expect(got as? String == ts[0], "`\(verb).\(k)`'s type")
+            } else {
+                #expect(got as? [String] == ts, "`\(verb).\(k)`'s types")
+            }
+            typed += 1
+        }
+    }
+    #expect(typed >= 100, "the branches typed only \(typed) argument(s)")
 }
 
 /// A4 (i), the transport conformance corpus: every case of

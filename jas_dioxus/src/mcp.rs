@@ -195,10 +195,34 @@ fn op_verbs() -> Vec<String> {
     v
 }
 
+const OP_ARGUMENTS: &str = include_str!("../../test_fixtures/operations/op_arguments.json");
+
+/// One `anyOf` branch per declared verb (A3b slice 3): `op` as a `const`, and
+/// the keys `op_arguments.json` DERIVES for that verb, typed with the types the
+/// corpus gives them on ops it expects to succeed. Nothing is `required` (a
+/// witnessed key may still have a default), and the branches stay open objects
+/// (an argument the corpus never carries is not in the file).
+fn op_branches() -> Vec<Value> {
+    let file: Value = serde_json::from_str(OP_ARGUMENTS).unwrap_or(Value::Null);
+    op_verbs().into_iter().map(|verb| {
+        let mut props = serde_json::Map::new();
+        props.insert("op".into(), json!({"const": verb}));
+        if let Some(keys) = file["argument_types"][verb.as_str()].as_object() {
+            for (k, ts) in keys {
+                let ts: Vec<&str> = ts.as_array().map(|a| a.iter().filter_map(Value::as_str).collect())
+                    .unwrap_or_default();
+                let ty = if ts.len() == 1 { json!(ts[0]) } else { json!(ts) };
+                props.insert(k.clone(), json!({"type": ty}));
+            }
+        }
+        json!({"type": "object", "properties": props})
+    }).collect()
+}
+
 /// The tool list. The edit vocabulary is the `op_apply` primitive ops: each
-/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), and
-/// the model still validates every op (a failing op refuses the proposal).
-/// An op's ARGUMENTS are not declared yet, so the items stay open objects.
+/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), each
+/// verb's arguments are declared by an `anyOf` branch (slice 3), and the model
+/// still validates every op (a failing op refuses the proposal).
 fn tool_list() -> Value {
     json!([
         {
@@ -210,7 +234,8 @@ fn tool_list() -> Value {
                     "name": {"type": "string", "description": "the action verb that names this edit"},
                     "ops": {"type": "array",
                             "items": {"type": "object", "required": ["op"],
-                                      "properties": {"op": {"type": "string", "enum": op_verbs()}}},
+                                      "properties": {"op": {"type": "string", "enum": op_verbs()}},
+                                      "anyOf": op_branches()},
                             "description": "primitive document ops, applied in order"}
                 },
                 "required": ["name", "ops"]
@@ -420,6 +445,54 @@ mod tests {
         want.sort();
         assert!(want.len() >= 40, "the vocabulary file is not vacuous: {}", want.len());
         assert_eq!(got, want);
+    }
+
+    /// A3b slice 3: each op's ARGUMENTS reach the schema. `ops.items` carries
+    /// one `anyOf` branch per declared verb, whose `op` is that verb as a
+    /// `const` and whose other properties are exactly the keys
+    /// `op_arguments.json` derives for it, typed with its `argument_types` (a
+    /// single type as a string, several as an array). A verb with no corpus
+    /// instance has a branch naming only `op`. No argument is `required`: a
+    /// witnessed key may still have a default. The expectation is read from the
+    /// FILES, not from the code under test.
+    #[test]
+    fn propose_declares_each_ops_arguments() {
+        let mut s = session();
+        let out = call(&mut s, 2, "tools/list", json!({}));
+        let propose = out[0]["result"]["tools"].as_array().unwrap().iter()
+            .find(|t| t["name"] == "propose").unwrap();
+        let branches = propose["inputSchema"]["properties"]["ops"]["items"]["anyOf"]
+            .as_array().expect("an anyOf of per-verb branches");
+        let read = |name: &str| -> Value {
+            serde_json::from_str(&std::fs::read_to_string(format!(
+                "{}/../test_fixtures/operations/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()).unwrap()
+        };
+        let vocab = read("op_vocabulary.json");
+        let file = read("op_arguments.json");
+        let verbs = vocab["verbs"].as_object().unwrap();
+        assert!(verbs.len() >= 40, "the vocabulary file is not vacuous: {}", verbs.len());
+        assert_eq!(branches.len(), verbs.len(), "one branch per declared verb");
+        let mut typed = 0;
+        for (verb, _) in verbs {
+            let b = branches.iter().find(|b| b["properties"]["op"]["const"] == verb.as_str())
+                .unwrap_or_else(|| panic!("no branch for `{verb}`"));
+            assert!(b.get("required").is_none(), "`{verb}`: no argument is required");
+            let mut got: Vec<&String> = b["properties"].as_object().unwrap().keys()
+                .filter(|k| *k != "op").collect();
+            got.sort();
+            let want_types = file["argument_types"][verb.as_str()].as_object();
+            let mut want: Vec<&String> = want_types.map(|o| o.keys().collect()).unwrap_or_default();
+            want.sort();
+            assert_eq!(got, want, "`{verb}`: the branch's keys are the file's");
+            for k in want {
+                let ts: Vec<&str> = file["argument_types"][verb.as_str()][k].as_array().unwrap()
+                    .iter().map(|t| t.as_str().unwrap()).collect();
+                let expect = if ts.len() == 1 { json!(ts[0]) } else { json!(ts) };
+                assert_eq!(b["properties"][k.as_str()]["type"], expect, "`{verb}.{k}`'s type");
+                typed += 1;
+            }
+        }
+        assert!(typed >= 100, "the branches typed only {typed} argument(s)");
     }
 
     #[test]

@@ -17,9 +17,445 @@
     "the two ports agree on every witnessed argument.",
     "`harness_keys` are corpus keys for the test harness, excluded here and asserted inert in every verb.",
     "",
+    "`argument_types`: the JSON Schema type names of the values the corpus gives each key, read ONLY from ops the",
+    "corpus expects to succeed (no harness key), so a value fed in order to be refused is not advertised. They are",
+    "OBSERVED types, not a contract: a key the corpus always gives as a number may accept a string. A key that",
+    "appears only in error cases has no type entry.",
+    "",
     "WHAT IT DOES NOT COVER. An argument the corpus never carries is absent. The verbs listed under",
     "`verbs_with_no_corpus_instance` have no entry at all."
   ],
+  "argument_types": {
+    "add_to_selection": {
+      "path": [
+        "array"
+      ]
+    },
+    "assign_id": {
+      "id": [
+        "string"
+      ],
+      "path": [
+        "array"
+      ]
+    },
+    "boolean_union": {},
+    "copy_by_ids": {
+      "dx": [
+        "number"
+      ],
+      "dy": [
+        "number"
+      ],
+      "from": [
+        "array"
+      ]
+    },
+    "copy_selection": {
+      "dx": [
+        "number"
+      ],
+      "dy": [
+        "number"
+      ]
+    },
+    "create_artboard": {
+      "fields": [
+        "object"
+      ],
+      "id": [
+        "string"
+      ]
+    },
+    "create_reference": {
+      "ref_id": [
+        "string"
+      ],
+      "target_id": [
+        "string"
+      ],
+      "target_path": [
+        "array"
+      ]
+    },
+    "delete_artboard_by_id": {
+      "id": [
+        "string"
+      ]
+    },
+    "delete_at": {
+      "path": [
+        "array"
+      ]
+    },
+    "delete_selection": {},
+    "delete_symbol": {
+      "master_id": [
+        "string"
+      ]
+    },
+    "detach": {
+      "path": [
+        "array"
+      ]
+    },
+    "duplicate_artboard": {
+      "id": [
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "new_id": [
+        "string"
+      ],
+      "offset_x": [
+        "number"
+      ],
+      "offset_y": [
+        "number"
+      ]
+    },
+    "hide_selection": {},
+    "insert_after": {
+      "element": [
+        "object"
+      ],
+      "path": [
+        "array"
+      ]
+    },
+    "insert_at": {
+      "element": [
+        "object"
+      ],
+      "index": [
+        "number"
+      ],
+      "parent_path": [
+        "array"
+      ]
+    },
+    "lock_selection": {},
+    "make_symbol": {
+      "master_id": [
+        "string"
+      ],
+      "path": [
+        "array"
+      ],
+      "ref_id": [
+        "string"
+      ]
+    },
+    "move_artboards_down": {
+      "ids": [
+        "array"
+      ]
+    },
+    "move_artboards_up": {
+      "ids": [
+        "array"
+      ]
+    },
+    "move_by_ids": {
+      "dx": [
+        "number"
+      ],
+      "dy": [
+        "number"
+      ],
+      "ids": [
+        "array"
+      ]
+    },
+    "move_selection": {
+      "dx": [
+        "number"
+      ],
+      "dy": [
+        "number"
+      ]
+    },
+    "paste": {
+      "offset": [
+        "number"
+      ],
+      "preserve_layers": [
+        "boolean"
+      ],
+      "svg": [
+        "string"
+      ],
+      "text": [
+        "null",
+        "string"
+      ]
+    },
+    "place_instance": {
+      "master_id": [
+        "string"
+      ],
+      "ref_id": [
+        "string"
+      ]
+    },
+    "redefine": {
+      "master_id": [
+        "string"
+      ],
+      "path": [
+        "array"
+      ],
+      "ref_id": [
+        "string"
+      ]
+    },
+    "rotate_transform": {
+      "angle": [
+        "number"
+      ],
+      "rx": [
+        "number"
+      ],
+      "ry": [
+        "number"
+      ]
+    },
+    "scale_transform": {
+      "rx": [
+        "number"
+      ],
+      "ry": [
+        "number"
+      ],
+      "scale_corners": [
+        "boolean"
+      ],
+      "scale_strokes": [
+        "boolean"
+      ],
+      "sx": [
+        "number"
+      ],
+      "sy": [
+        "number"
+      ]
+    },
+    "select_all": {},
+    "select_by_ids": {
+      "ids": [
+        "array"
+      ]
+    },
+    "select_element": {
+      "path": [
+        "array"
+      ]
+    },
+    "select_rect": {
+      "extend": [
+        "boolean"
+      ],
+      "height": [
+        "number"
+      ],
+      "width": [
+        "number"
+      ],
+      "x": [
+        "number"
+      ],
+      "y": [
+        "number"
+      ]
+    },
+    "set_advanced_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "string"
+      ]
+    },
+    "set_artboard_field": {
+      "field": [
+        "string"
+      ],
+      "id": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "number",
+        "string"
+      ]
+    },
+    "set_artboard_options_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean"
+      ]
+    },
+    "set_attr_on_selection": {
+      "attr": [
+        "string"
+      ],
+      "value": [
+        "string"
+      ]
+    },
+    "set_character_attribute": {
+      "attribute": [
+        "string"
+      ],
+      "char_end": [
+        "number"
+      ],
+      "char_start": [
+        "number"
+      ],
+      "path": [
+        "array"
+      ],
+      "value": [
+        "string"
+      ]
+    },
+    "set_color_management_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "string"
+      ]
+    },
+    "set_document_setup_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "number",
+        "string"
+      ]
+    },
+    "set_graphics_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "number",
+        "string"
+      ]
+    },
+    "set_instance_transform": {
+      "path": [
+        "array"
+      ],
+      "transform": [
+        "object"
+      ]
+    },
+    "set_marks_and_bleed_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "number"
+      ]
+    },
+    "set_output_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "string"
+      ]
+    },
+    "set_output_ink_field": {
+      "field": [
+        "string"
+      ],
+      "index": [
+        "number"
+      ],
+      "value": [
+        "boolean",
+        "number",
+        "string"
+      ]
+    },
+    "set_print_preferences_field": {
+      "field": [
+        "string"
+      ],
+      "value": [
+        "boolean",
+        "number",
+        "string"
+      ]
+    },
+    "shear_transform": {
+      "angle": [
+        "number"
+      ],
+      "axis": [
+        "string"
+      ],
+      "axis_angle": [
+        "number"
+      ],
+      "rx": [
+        "number"
+      ],
+      "ry": [
+        "number"
+      ]
+    },
+    "show_all": {},
+    "simplify": {
+      "precision": [
+        "number"
+      ]
+    },
+    "toggle_element_lock": {
+      "path": [
+        "array"
+      ]
+    },
+    "unlock_all": {},
+    "unpack_group_at": {
+      "path": [
+        "array"
+      ]
+    },
+    "wrap_in_group": {
+      "id": [
+        "string"
+      ],
+      "paths": [
+        "array"
+      ]
+    },
+    "wrap_in_layer": {
+      "id": [
+        "string"
+      ],
+      "name": [
+        "string"
+      ],
+      "paths": [
+        "array"
+      ]
+    }
+  },
   "arguments": {
     "add_to_selection": {
       "path": "witnessed"
