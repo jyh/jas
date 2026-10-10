@@ -865,12 +865,12 @@ JasStatus jas_pointer_event(struct JasEngine *e, uint32_t kind, double x, double
  * (`workspace/keyboard.rs`):
  *   1. Escape, Enter, Delete and Backspace go to the ACTIVE TOOL's
  *      `on_key_event` (Escape cancels a marquee, Enter commits the pen).
- *   2. A character without `MOD_CMD` is resolved against
- *      `workspace/shortcuts.yaml` IN THE CORE (`resolve_key`); a
- *      `select_tool` result switches the tool as [`jas_set_tool`] does.
+ *   2. A character is resolved against `workspace/shortcuts.yaml` IN THE
+ *      CORE (`resolve_key`). Without `MOD_CMD`, a `select_tool` result
+ *      switches the tool as [`jas_set_tool`] does. With `MOD_CMD`, only
+ *      `undo` and `redo` act (W5-3c); other command chords stay the menu's.
  * Returns `Ok` when the key was handled and `UnknownVerb` when nothing
  * handled it, so the shell can let the key fall through to its own default.
- * Menu chords (`MOD_CMD`) are not acted on here yet.
  *
  * # Safety
  * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
