@@ -220,20 +220,41 @@ public final class McpSession {
     /// tree, then the app bundle). Empty only if neither is readable, which
     /// `mcpProposeDeclaresTheOpVocabularyAsAnEnum` reds.
     static func opVerbs() -> [String] {
-        let tree = URL(fileURLWithPath: #file)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("test_fixtures/operations/op_vocabulary.json")
-        let url = FileManager.default.fileExists(atPath: tree.path)
-            ? tree : Bundle.main.url(forResource: "op_vocabulary", withExtension: "json")
-        guard let url, let data = try? Data(contentsOf: url),
-              let file = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let verbs = file["verbs"] as? [String: Any] else { return [] }
+        guard let verbs = operationsFile("op_vocabulary")?["verbs"] as? [String: Any] else { return [] }
         return verbs.keys.sorted()
     }
 
+    /// One of the `test_fixtures/operations` data files, read from the source
+    /// tree, then the app bundle. ⚠️ No build step copies these into a bundle
+    /// today, so a packaged app away from the source tree reads nil.
+    private static func operationsFile(_ name: String) -> [String: Any]? {
+        let tree = URL(fileURLWithPath: #file)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("test_fixtures/operations/\(name).json")
+        let url = FileManager.default.fileExists(atPath: tree.path)
+            ? tree : Bundle.main.url(forResource: name, withExtension: "json")
+        guard let url, let data = try? Data(contentsOf: url) else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+
+    /// One `anyOf` branch per declared verb (A3b slice 3; Rust: `mcp::op_branches`):
+    /// `op` as a `const`, and the keys `op_arguments.json` derives for that verb,
+    /// typed with its `argument_types`. Nothing is `required`.
+    static func opBranches() -> [[String: Any]] {
+        let types = operationsFile("op_arguments")?["argument_types"] as? [String: [String: [String]]] ?? [:]
+        return opVerbs().map { verb in
+            var props: [String: Any] = ["op": ["const": verb]]
+            for (k, ts) in types[verb] ?? [:] {
+                props[k] = ["type": ts.count == 1 ? ts[0] as Any : ts as Any]
+            }
+            return ["type": "object", "properties": props]
+        }
+    }
+
     /// The tool list (Rust: `mcp::tool_list`). Each op's `op` is an enum of the
-    /// declared verbs; the model still validates every op.
+    /// declared verbs, each verb's arguments an `anyOf` branch; the model still
+    /// validates every op.
     private static func toolList() -> [[String: Any]] {
         [
             [
@@ -245,7 +266,8 @@ public final class McpSession {
                         "name": ["type": "string", "description": "the action verb that names this edit"],
                         "ops": ["type": "array",
                                 "items": ["type": "object", "required": ["op"],
-                                          "properties": ["op": ["type": "string", "enum": opVerbs()]]],
+                                          "properties": ["op": ["type": "string", "enum": opVerbs()]],
+                                          "anyOf": opBranches()],
                                 "description": "primitive document ops, applied in order"],
                     ],
                     "required": ["name", "ops"],
