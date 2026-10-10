@@ -806,6 +806,40 @@ mod tests {
         }
     }
 
+    /// W5-3c, his finding 2026-10-10 ("Ctrl-Z is not working"): a COMMAND chord
+    /// resolves through `shortcuts.yaml` in the core like a tool letter does.
+    /// Ctrl+Z undoes a drag that moved the rect, back to the document byte for
+    /// byte; Ctrl+Shift+Z redoes it, back to the moved document byte for byte.
+    #[test]
+    fn ctrl_z_undoes_a_move_and_ctrl_shift_z_redoes_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
+            crate::geometry::test_json::document_to_test_json(d)
+        });
+        let e = jas_engine_new();
+        seed(e);
+        let before = doc(e);
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 110.0, 90.0, MOD_DRAGGING);
+            jas_pointer_event(e, KIND_RELEASE, 110.0, 90.0, 0);
+        }
+        let moved = doc(e);
+        assert_ne!(moved, before, "the control: the drag moved the rect");
+        unsafe {
+            assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
+            assert_eq!(doc(e), before, "Ctrl+Z restores the document");
+            assert_eq!(jas_key_event(e, 'Z' as u32, MOD_CMD | MOD_SHIFT), JasStatus::Ok);
+            assert_eq!(doc(e), moved, "Ctrl+Shift+Z restores the move");
+            // A chord the table binds to something the engine does not do yet is
+            // NOT handled, and changes nothing.
+            assert_eq!(jas_key_event(e, 'n' as u32, MOD_CMD), JasStatus::UnknownVerb);
+            assert_eq!(doc(e), moved);
+            jas_engine_free(e);
+        }
+    }
+
     /// W5-3a: EVERY `select_tool` target in `shortcuts.yaml` either maps to a
     /// selectable tool or is declared not selectable from the shell. A target
     /// added tomorrow that maps to neither reds here, rather than doing nothing
