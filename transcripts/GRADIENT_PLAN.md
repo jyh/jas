@@ -257,6 +257,10 @@ paths.
 - SVG export / import round-trip — the renderer produces gradients
   on screen, but the save-to-SVG / load-from-SVG round-trip with
   `<defs>` + `url(#gN)` remains Phase 9 territory.
+  *(2026-10-09, I1b-1: jas's own save and reopen now keeps every
+  gradient, through `jas:fill-gradient` / `jas:stroke-gradient`, which
+  carry the canonical test-JSON gradient. The standard `<defs>` +
+  `url(#gN)` form, which other apps read, is still unbuilt: I1b-2.)*
 
 ### Phase 8 — Stroke gradient (within-stroke sub-mode)
 
