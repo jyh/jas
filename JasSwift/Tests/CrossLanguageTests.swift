@@ -112,6 +112,20 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
 @Test func svgParseGradientFillAndStroke() { assertSvgParse("gradient_fill_and_stroke") }
+/// I1b-1: a FREEFORM fill gradient survives this port's SVG round trip (the
+/// twin of Rust's `a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip`,
+/// minus the hsb stop, which this port's hex colour cannot hold). Not in the SVG
+/// corpus, because a freeform gradient takes the legacy path on Windows.
+@Test func svgRoundTripKeepsAFreeformFillGradient() {
+    let g = Gradient(type: .freeform, angle: 0, aspectRatio: 100, method: .points, dither: false,
+                     strokeSubMode: .within, stops: [],
+                     nodes: [GradientNode(x: 0.25, y: 0.5, color: "#ff8000", opacity: 80, spread: 30),
+                             GradientNode(x: 0.75, y: 0.2, color: "#0000ff", opacity: 100, spread: 10)])
+    let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10), .closePath],
+                                 fill: Fill(color: .black), fillGradient: g, fillRule: .nonzero))
+    let back = svgToDocument(documentToSvg(Document(layers: [Layer(children: [path])], artboards: [])))
+    #expect(back.layers.first?.children.first?.fillGradient == g)
+}
 @Test func svgParseRectWithStroke() { assertSvgParse("rect_with_stroke") }
 @Test func svgParseCircleBasic() { assertSvgParse("circle_basic") }
 @Test func svgParseEllipseBasic() { assertSvgParse("ellipse_basic") }

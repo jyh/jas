@@ -482,7 +482,11 @@ mod tests {
 
     /// I1b-1: a gradient written as `jas:fill-gradient` / `jas:stroke-gradient`
     /// parses to the same canonical JSON in both ports: a linear fill with a
-    /// midpoint and dither, a FREEFORM fill, and a radial stroke gradient.
+    /// midpoint and dither, and a radial stroke gradient. ⚠️ NO FREEFORM here,
+    /// on purpose: this file joins the SVG corpus, whose every document must
+    /// present on the Windows surface (`ffi_paint`'s row-DA arm), and a
+    /// freeform gradient takes the legacy path there. Freeform is witnessed by
+    /// each port's own SVG round-trip arm instead.
     #[test]
     fn svg_parse_gradient_fill_and_stroke() {
         assert_svg_parse("gradient_fill_and_stroke");

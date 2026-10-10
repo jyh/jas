@@ -131,53 +131,42 @@
       "sites": 1,
       "missing": [
         "blendMode",
-        "fillGradient",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::Line": {
       "sites": 1,
       "missing": [
         "blendMode",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::Path": {
       "sites": 1,
       "missing": [
         "blendMode",
-        "fillGradient",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::Polygon": {
       "sites": 1,
       "missing": [
         "blendMode",
-        "fillGradient",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::Polyline": {
       "sites": 1,
       "missing": [
         "blendMode",
-        "fillGradient",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::Rect": {
       "sites": 1,
       "missing": [
         "blendMode",
-        "fillGradient",
-        "mask",
-        "strokeGradient"
+        "mask"
       ]
     },
     "JasSwift/Sources/Geometry/Normalize.swift::TextPath": {
