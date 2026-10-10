@@ -138,8 +138,37 @@ pub enum EditingTarget {
 #[derive(Debug, Clone)]
 struct PendingTxn {
     name: Option<String>,
+    /// The journal `actor` to commit under; `None` = the artist. Set only by
+    /// [`Model::accept_proposal`] (docs/AGENT_API.md §2).
+    actor: Option<String>,
     ops: Vec<crate::document::op_log::PrimitiveOp>,
     gen_at_open: u64,
+}
+
+/// A pending agent proposal (docs/AGENT_API.md §2).
+#[derive(Debug, Clone)]
+struct Proposal {
+    id: String,
+    actor: String,
+    name: String,
+    ops: Vec<serde_json::Value>,
+    /// The document before the preview was applied.
+    held: Document,
+}
+
+/// Why a proposal call was refused. Every refusal leaves the document and the
+/// journal unchanged.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProposalRefusal {
+    /// Another proposal (named) is already pending; one at a time.
+    AnotherPending(String),
+    /// A transaction is open; a proposal starts from a settled document.
+    TransactionOpen,
+    /// The named proposal is not pending: unknown, already accepted or
+    /// rejected, or withdrawn by an artist edit or history navigation.
+    NotPending(String),
+    /// One of the proposal's ops failed to apply.
+    OpFailed(String),
 }
 
 /// A named version point (OP_LOG.md Increment 3a / `VISION.md` §6.9). Stores the
@@ -335,6 +364,10 @@ pub struct Model {
     /// `undo_stack` so preview-driven applies don't pollute undo
     /// history. See SCALE_TOOL.md §Preview.
     preview_doc_snapshot: Option<Document>,
+    /// The one pending agent proposal, if any (docs/AGENT_API.md). While it is
+    /// set, `document` shows the proposal applied (a preview) and the proposal
+    /// holds the document as it was before; it is in no transaction.
+    pending_proposal: Option<Proposal>,
     /// Per-document view state (per ZOOM_TOOL.md §State persistence).
     /// Persists across tab switches within a session; reset to
     /// defaults on document open. Not serialized to disk in Phase 1.
@@ -375,6 +408,7 @@ impl Default for Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            pending_proposal: None,
             zoom_level: 1.0,
             view_offset_x: 0.0,
             view_offset_y: 0.0,
@@ -412,6 +446,7 @@ impl Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            pending_proposal: None,
             zoom_level: 1.0,
             view_offset_x: 0.0,
             view_offset_y: 0.0,
@@ -751,6 +786,10 @@ impl Model {
     /// Restore the most recently snapshotted document, moving the current
     /// document onto the redo stack. No-op if the undo stack is empty.
     pub fn undo(&mut self) {
+        // History navigation bypasses `begin_txn`, so it withdraws a pending
+        // proposal itself: otherwise a later accept would restore the document
+        // held before the undo and silently revert it (law `undo_withdraws`).
+        self.withdraw_proposal();
         // History navigation ends any open edit context, so the next edit
         // self-brackets fresh (OP_LOG.md Increment 1: keeps in_txn honest after
         // undo, so a post-undo edit clears redo via its own commit).
@@ -783,6 +822,7 @@ impl Model {
     /// document back onto the undo stack. No-op if the redo stack is
     /// empty (e.g. after any new edit, which clears redo).
     pub fn redo(&mut self) {
+        self.withdraw_proposal();
         self.in_txn = false;
         self.pending_txn = None;
         if let Some(next) = self.redo_stack.pop() {
@@ -940,6 +980,12 @@ impl Model {
         if self.in_txn {
             return;
         }
+        // An artist edit withdraws a pending proposal BEFORE its checkpoint is
+        // taken, so the edit applies to the document the artist saw before the
+        // preview, never on top of it (docs/AGENT_API.md §2: withdraw, never
+        // rebase). `propose`/`accept` take the proposal out of its slot before
+        // they open a bracket, so this never withdraws the proposal in flight.
+        self.withdraw_proposal();
         self.undo_stack.push(self.checkpoint());
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
@@ -950,6 +996,7 @@ impl Model {
         // `commit_txn` detect a zero-write no-op without serializing.
         self.pending_txn = Some(PendingTxn {
             name: None,
+            actor: None,
             ops: Vec::new(),
             gen_at_open: self.generation,
         });
@@ -1053,12 +1100,16 @@ impl Model {
         self.redo_stack.clear();
         self.op_journal.truncate(self.journal_head);
         let parent = self.op_journal.last().map(|t| t.txn_id.clone());
+        let txn_actor = pending
+            .as_ref()
+            .and_then(|p| p.actor.clone())
+            .unwrap_or_else(|| Transaction::ACTOR_ARTIST.to_string());
         let txn = Transaction {
             txn_id: format!("txn-{}", self.next_txn_counter),
             name: pending.as_ref().and_then(|p| p.name.clone()),
             ops: pending.map(|p| p.ops).unwrap_or_default(),
             summary: None,
-            actor: Transaction::ACTOR_ARTIST.to_string(),
+            actor: txn_actor,
             parent,
             lamport: self.next_txn_counter,
             label: None,
@@ -1321,6 +1372,104 @@ impl Model {
             // An aborted transaction was never journaled, so the journal and its
             // cursor are untouched (OP_LOG.md §5).
             self.pending_txn = None;
+        }
+    }
+
+    // --- Agent proposals (docs/AGENT_API.md, OP_LOG.md §8 item 4) ----------
+
+    /// Show `ops` applied as a PREVIEW, journaling nothing. The ops are run once
+    /// through a transaction that is then aborted, which both validates them and
+    /// yields the previewed document; the pre-proposal document is held in the
+    /// proposal. Refused while another proposal is pending, while a transaction
+    /// is open, or when any op errors (the document is then unchanged).
+    pub fn propose(
+        &mut self,
+        id: &str,
+        actor: &str,
+        name: &str,
+        ops: &[serde_json::Value],
+    ) -> Result<(), ProposalRefusal> {
+        if let Some(p) = &self.pending_proposal {
+            return Err(ProposalRefusal::AnotherPending(p.id.clone()));
+        }
+        if self.in_txn {
+            return Err(ProposalRefusal::TransactionOpen);
+        }
+        let held = self.document.clone();
+        self.begin_txn();
+        for op in ops {
+            if let Err(e) = crate::document::op_apply::op_apply(self, op) {
+                self.abort_txn();
+                return Err(ProposalRefusal::OpFailed(format!("{e:?}")));
+            }
+        }
+        let previewed = self.document.clone();
+        self.abort_txn();
+        self.set_document_unbracketed(previewed, NonUndoableIntent::PreviewReapply);
+        self.pending_proposal = Some(Proposal {
+            id: id.to_string(),
+            actor: actor.to_string(),
+            name: name.to_string(),
+            ops: ops.to_vec(),
+            held,
+        });
+        Ok(())
+    }
+
+    /// Land the pending proposal `id` as ONE transaction named for it and
+    /// attributed to its actor: restore the held document, then run the ops
+    /// through the ordinary bracket, so the journal replays it like a hand edit.
+    pub fn accept_proposal(&mut self, id: &str) -> Result<(), ProposalRefusal> {
+        let p = self.take_proposal(id)?;
+        self.set_document_unbracketed(p.held, NonUndoableIntent::PreviewReapply);
+        self.begin_txn();
+        self.name_txn(&p.name);
+        if let Some(t) = self.pending_txn.as_mut() {
+            t.actor = Some(p.actor.clone());
+        }
+        for op in &p.ops {
+            if let Err(e) = crate::document::op_apply::op_apply(self, op) {
+                // The same ops succeeded on the same document at propose time,
+                // so this is an invariant break; roll back rather than land half.
+                self.abort_txn();
+                return Err(ProposalRefusal::OpFailed(format!("{e:?}")));
+            }
+        }
+        self.commit_txn();
+        Ok(())
+    }
+
+    /// Discard the pending proposal `id`, restoring the held document.
+    pub fn reject_proposal(&mut self, id: &str) -> Result<(), ProposalRefusal> {
+        let p = self.take_proposal(id)?;
+        self.set_document_unbracketed(p.held, NonUndoableIntent::PreviewReapply);
+        Ok(())
+    }
+
+    /// The id of the pending proposal, if any.
+    pub fn pending_proposal_id(&self) -> Option<&str> {
+        self.pending_proposal.as_ref().map(|p| p.id.as_str())
+    }
+
+    /// The document as it stands without the preview: the held document while
+    /// a proposal is pending, else the live one. The journal replays to this
+    /// (a preview is not history).
+    pub fn document_without_preview(&self) -> &Document {
+        self.pending_proposal.as_ref().map_or(&self.document, |p| &p.held)
+    }
+
+    fn take_proposal(&mut self, id: &str) -> Result<Proposal, ProposalRefusal> {
+        match &self.pending_proposal {
+            Some(p) if p.id == id => Ok(self.pending_proposal.take().unwrap()),
+            _ => Err(ProposalRefusal::NotPending(id.to_string())),
+        }
+    }
+
+    /// Withdraw a pending proposal: restore the held document, journaling
+    /// nothing. No-op when none is pending.
+    fn withdraw_proposal(&mut self) {
+        if let Some(p) = self.pending_proposal.take() {
+            self.set_document_unbracketed(p.held, NonUndoableIntent::PreviewReapply);
         }
     }
 
