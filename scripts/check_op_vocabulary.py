@@ -23,7 +23,9 @@ WHAT IT ASSERTS
 
 WHAT IT DOES NOT COVER
 ----------------------
-* Each op's ARGUMENTS (the file says why they are not declared yet).
+* Each op's ARGUMENTS. They are derived from the corpus into
+  test_fixtures/operations/op_arguments.json, and that file has its own
+  tests in both ports (A3b slice 2).
 * The `history` class is checked against the file only. Neither port names
   that set in one place, so there is nothing to compare it with.
 * It reads source text. A COMPUTED arm (`v if NAME.contains(&v) =>` in Rust,
@@ -208,7 +210,7 @@ def main(argv):
             print(f"check_op_vocabulary: {f}")
         print(f"check_op_vocabulary: FAIL ({len(findings)} finding(s))")
         return 1
-    print(f"check_op_vocabulary: OK ({counts}). Not covered: op arguments; the history class "
+    print(f"check_op_vocabulary: OK ({counts}). Not covered: op arguments (op_arguments.json); the history class "
           f"beyond the file. Computed arms resolved against their list constants.")
     return 0
 
