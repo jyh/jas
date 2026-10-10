@@ -611,6 +611,7 @@ impl StdGradientScope {
     fn enter(root: &XmlNode) -> Self {
         let mut found = HashMap::new();
         collect_std_gradients(root, &mut found);
+        resolve_std_gradient_hrefs(&mut found);
         StdGradientScope(STD_GRADIENTS.with(|c| c.replace(found)))
     }
 }
@@ -619,6 +620,56 @@ impl Drop for StdGradientScope {
     fn drop(&mut self) {
         STD_GRADIENTS.with(|c| *c.borrow_mut() = std::mem::take(&mut self.0));
     }
+}
+
+/// The gradient attributes an `href` passes down (SVG 1.1 §13.2.2 and §13.2.3):
+/// every one the referencing gradient does not set itself.
+const STD_GRADIENT_INHERITED: &[&str] = &[
+    "x1", "y1", "x2", "y2", "cx", "cy", "r", "fx", "fy",
+    "gradientUnits", "gradientTransform", "spreadMethod",
+];
+
+/// I1b-3: resolve `href` / `xlink:href` between standard gradients, the shape
+/// Inkscape writes for nearly every gradient (a stops-only gradient, and one
+/// that hrefs it and carries the coordinates). A gradient with no stops of its
+/// own takes the nearest referenced gradient's stops, and each inheritable
+/// attribute it does not set comes from the nearest referenced gradient that
+/// does. A radial may take a linear's stops. The walk follows the chain from
+/// the ORIGINAL definitions, stops at a missing target, and refuses to revisit
+/// a gradient, so a cycle ends rather than hangs; a gradient still without
+/// stops paints nothing, as before.
+fn resolve_std_gradient_hrefs(found: &mut HashMap<String, StdGradientDef>) {
+    let href_of = |d: &StdGradientDef| -> Option<String> {
+        d.attrs.get("href").or_else(|| d.attrs.get("xlink:href"))
+            .map(|h| h.trim().trim_start_matches('#').to_string())
+    };
+    let mut resolved: Vec<(String, StdGradientDef)> = Vec::new();
+    for (id, own) in found.iter() {
+        let mut attrs = own.attrs.clone();
+        let mut stops = own.stops.clone();
+        let mut seen = std::collections::HashSet::from([id.clone()]);
+        let mut next = href_of(own);
+        while let Some(target) = next {
+            if !seen.insert(target.clone()) {
+                break; // a cycle
+            }
+            let Some(anc) = found.get(&target) else { break };
+            for k in STD_GRADIENT_INHERITED {
+                if !attrs.contains_key(*k) {
+                    if let Some(v) = anc.attrs.get(*k) {
+                        attrs.insert((*k).to_string(), v.clone());
+                    }
+                }
+            }
+            if stops.is_empty() {
+                stops = anc.stops.clone();
+            }
+            next = href_of(anc);
+        }
+        let user_space = attrs.get("gradientUnits").map(String::as_str) == Some("userSpaceOnUse");
+        resolved.push((id.clone(), StdGradientDef { radial: own.radial, user_space, attrs, stops }));
+    }
+    found.extend(resolved);
 }
 
 fn collect_std_gradients(node: &XmlNode, out: &mut HashMap<String, StdGradientDef>) {
@@ -667,8 +718,10 @@ fn paint_url_id(v: &str) -> Option<&str> {
 /// midpoint, so `gradient_remap::remap_linear_stops` re-expresses the stops
 /// on the element's own box, clipping with interpolated end colours.
 /// RADIAL is re-centred on the bbox (JYH 2026-07-26: the model has no anchor),
-/// and its radius maps to `aspect_ratio`. `gradientTransform`, `spreadMethod`,
-/// `fx`/`fy` and `href` inheritance are not read.
+/// and its radius maps to `aspect_ratio`. `href` inheritance is resolved before
+/// this runs (I1b-3, `resolve_std_gradient_hrefs`). `gradientTransform`,
+/// `spreadMethod` and `fx`/`fy` are not read: the jas model has no spread mode
+/// and no focal point, so those two wait on a model ruling.
 fn std_gradient_to_jas(def: &StdGradientDef, bbox: (f64, f64, f64, f64)) -> Option<Gradient> {
     if def.stops.len() < 2 {
         return None;
