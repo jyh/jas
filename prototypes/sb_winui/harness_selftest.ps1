@@ -1457,6 +1457,8 @@ Test-Case 'P4.4 REPLAY: one value knob alone runs none -- the shell refuses it' 
 Test-Case 'P4.4 REPLAY: no knob runs none, and whitespace is unset' { "$(Test-SbPaneReplayAsked ' ' ' ' ' ')" } 'False'
 Test-Case 'P4.4 REPLAY: the toolbar''s knob runs a replay (a toolbar click republishes the menu too)' { "$(Test-SbPaneReplayAsked '' '' '' 'btn_shape_slot')" } 'True'
 Test-Case 'P4.4 REPLAY: a whitespace toolbar knob is unset' { "$(Test-SbPaneReplayAsked '' '' '' ' ')" } 'False'
+Test-Case 'Q6 DOCK: under SB_DOCK the one pane is replaced, so its clauses are NOT RUN, never FAIL' { $v = @(Get-SbPaneVerdicts @() 'app' '' 'Default'); "$(@($v | Where-Object Verdict -eq 'FAIL').Count) $(@($v | Where-Object Verdict -eq 'NOT RUN').Count -eq $v.Count)" } '0 True'
+Test-Case 'Q6 DOCK: a replay asked for under SB_DOCK is a FAIL (no one pane to replay on)' { $v = @(Get-SbPaneVerdicts @() 'app' 'align_left_button' 'Default'); "$(@($v | Where-Object Verdict -eq 'FAIL').Count -ge 1)" } 'True'
 
 # ---- V3's grammar: which texts the core writes back byte for byte -----------
 Test-Case 'V3 GRAMMAR: an integer is canonical' { "$(Test-SbCanonicalNumber '40')" } 'True'

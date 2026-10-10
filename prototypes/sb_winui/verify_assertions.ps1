@@ -1573,7 +1573,7 @@ Add-NotRun 'P3.3 a saved document reloads into an equal document (round trip)' `
 # function on every branch. This loop only records what it returns -- all
 # seven clauses on every scene, NOT RUN by name where the scene has no pane.
 # `verify_window.ps1` has already waited for the pane's rows (`Get-SbPaneWaits`).
-foreach ($q in @(Get-SbPaneVerdicts $rows $Scene $env:SB_PANEL_SYNTH)) {
+foreach ($q in @(Get-SbPaneVerdicts $rows $Scene $env:SB_PANEL_SYNTH $env:SB_DOCK)) {
     if ($q.Verdict -eq 'NOT RUN') {
         Add-NotRun $q.Name $q.Detail -Row $q.Row
     } else {
