@@ -112,6 +112,20 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
 @Test func svgParseGradientFillAndStroke() { assertSvgParse("gradient_fill_and_stroke") }
+@Test func svgParseGradientStandardImport() { assertSvgParse("gradient_standard_import") }
+/// I1b-2: when an element carries BOTH a `jas:` gradient and a standard
+/// `url(#id)`, the jas attribute is the lossless record and wins (the twin of
+/// Rust's `the_jas_gradient_attribute_wins_over_a_standard_url`).
+@Test func svgJasGradientAttributeWinsOverAStandardUrl() {
+    let jas = "{&quot;angle&quot;:90.0,&quot;aspect_ratio&quot;:100.0,&quot;dither&quot;:false,&quot;method&quot;:&quot;classic&quot;,&quot;nodes&quot;:[],&quot;stops&quot;:[{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:0.0,&quot;g&quot;:0.0,&quot;r&quot;:0.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:0.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0},{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:1.0,&quot;g&quot;:1.0,&quot;r&quot;:1.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:100.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0}],&quot;stroke_sub_mode&quot;:&quot;within&quot;,&quot;type&quot;:&quot;linear&quot;}"
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+      <defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs>
+      <g><rect jas:fill-gradient="\(jas)" x="0" y="0" width="96" height="96" fill="url(#g) rgb(0,0,0)"/></g></svg>
+    """
+    let g = svgToDocument(svg).layers.first?.children.first?.fillGradient
+    #expect(g?.angle == 90, "the jas attribute's angle, not the url's: \(String(describing: g?.angle))")
+}
 /// I1b-1: a FREEFORM fill gradient survives this port's SVG round trip (the
 /// twin of Rust's `a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip`,
 /// minus the hsb stop, which this port's hex colour cannot hold). Not in the SVG

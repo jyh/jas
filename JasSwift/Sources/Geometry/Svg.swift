@@ -569,6 +569,114 @@ private func tspanSvg(_ t: Tspan) -> String {
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
+/// A standard `<linearGradient>` / `<radialGradient>` read from the file
+/// (I1b-2): its geometry attributes as written, and its stops resolved.
+/// Mirrors Rust's `StdGradientDef`.
+private struct StdGradientDef {
+    let radial: Bool
+    let userSpace: Bool
+    let attrs: [String: String]
+    let stops: [GradientStop]
+}
+
+/// The standard gradients of the import in progress, by `id`; bound only for
+/// the duration of `svgToDocument`, exactly as `SvgImportUnit` is.
+private enum SvgStdGradients {
+    @TaskLocal static var defs: [String: StdGradientDef] = [:]
+}
+
+private func collectStdGradients(_ node: XMLElement, into out: inout [String: StdGradientDef]) {
+    let tag = node.localName ?? ""
+    if tag == "linearGradient" || tag == "radialGradient",
+       let id = node.attribute(forName: "id")?.stringValue {
+        var stops: [GradientStop] = []
+        for case let c as XMLElement in node.children ?? [] where c.localName == "stop" {
+            let raw = (c.attribute(forName: "offset")?.stringValue ?? "0").trimmingCharacters(in: .whitespaces)
+            let parsed: Double? = raw.hasSuffix("%") ? Double(raw.dropLast().trimmingCharacters(in: .whitespaces)).map { $0 / 100 } : Double(raw)
+            guard let off = parsed,
+                  let color = parseColor(c.attribute(forName: "stop-color")?.stringValue ?? "black") else { continue }
+            let opacity = min(max(attrF(c, "stop-opacity", 1), 0), 1)
+            stops.append(GradientStop(color: "#" + color.toHex(), opacity: opacity * 100,
+                                      location: min(max(off, 0), 1) * 100, midpointToNext: 50))
+        }
+        var attrs: [String: String] = [:]
+        for a in node.attributes ?? [] { if let n = a.name, let v = a.stringValue { attrs[n] = v } }
+        out[id] = StdGradientDef(radial: tag == "radialGradient",
+                                 userSpace: attrs["gradientUnits"] == "userSpaceOnUse",
+                                 attrs: attrs, stops: stops)
+    }
+    for case let c as XMLElement in node.children ?? [] { collectStdGradients(c, into: &out) }
+}
+
+/// The `id` in a paint value of the form `url(#id)` or `url(#id) <fallback>`.
+private func paintUrlId(_ v: String) -> String? {
+    let t = v.trimmingCharacters(in: .whitespaces)
+    guard t.hasPrefix("url("), let close = t.firstIndex(of: ")") else { return nil }
+    let inner = t[t.index(t.startIndex, offsetBy: 4)..<close].trimmingCharacters(in: .whitespaces)
+    return inner.hasPrefix("#") ? String(inner.dropFirst()) : nil
+}
+
+/// What follows `url(#id)` in a paint value: SVG's fallback paint.
+private func paintFallback(_ v: String) -> String {
+    guard let close = v.firstIndex(of: ")") else { return "" }
+    return v[v.index(after: close)...].trimmingCharacters(in: .whitespaces)
+}
+
+/// The box each element kind resolves its gradients on, as the painter does
+/// (`CanvasSubwindow`'s per-kind `bbox`): Rect and Ellipse raw, polys their
+/// points, Line and Path `bounds`. Mirrors Rust's `gradient_bbox`.
+private func gradientBBox(_ elem: Element) -> GradientBBox {
+    func pts(_ p: [(Double, Double)]) -> GradientBBox {
+        guard let f = p.first else { return (0, 0, 0, 0) }
+        var (x0, y0, x1, y1) = (f.0, f.1, f.0, f.1)
+        for (x, y) in p { x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x); y1 = max(y1, y) }
+        return (x0, y0, x1 - x0, y1 - y0)
+    }
+    switch elem {
+    case .rect(let v): return (v.x, v.y, v.width, v.height)
+    case .ellipse(let v): return (v.cx - v.rx, v.cy - v.ry, v.rx * 2, v.ry * 2)
+    case .polyline(let v): return pts(v.points)
+    case .polygon(let v): return pts(v.points)
+    default:
+        let b = elem.bounds
+        return (b.x, b.y, b.width, b.height)
+    }
+}
+
+/// A standard gradient as the jas gradient that paints the same ramp on
+/// `bbox` (I1b-2). Mirrors Rust's `std_gradient_to_jas`, where the reasoning
+/// is written out: the file's vector is the ramp of a square box of side
+/// `|P1-P0|/sqrt(2)` on its midpoint, remapped onto the element's box.
+private func stdGradientToJas(_ def: StdGradientDef, _ bbox: GradientBBox) -> Gradient? {
+    guard def.stops.count >= 2 else { return nil }
+    let (bx, by, bw, bh) = bbox
+    func num(_ k: String, _ d: Double) -> Double {
+        guard let v = def.attrs[k]?.trimmingCharacters(in: .whitespaces) else { return d }
+        if v.hasSuffix("%") { return Double(v.dropLast()).map { $0 / 100 } ?? d }
+        return Double(v) ?? d
+    }
+    func at(_ v: Double, _ origin: Double, _ extent: Double) -> Double {
+        def.userSpace ? toPt(v) : origin + v * extent
+    }
+    if !def.radial {
+        let (x0, y0) = (at(num("x1", 0), bx, bw), at(num("y1", 0), by, bh))
+        let (x1, y1) = (at(num("x2", 1), bx, bw), at(num("y2", 0), by, bh))
+        let d = ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0)).squareRoot()
+        guard d > 0 else { return nil }
+        let angle = atan2(-(y1 - y0), x1 - x0) * 180 / Double.pi + 0.0  // -0.0 -> 0.0, as Rust
+        let side = d / 2.0.squareRoot()
+        let parent: GradientBBox = ((x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side)
+        let stops = remapLinearStops(def.stops, angleDeg: angle, parent: parent, fragment: bbox)
+        return Gradient(type: .linear, angle: angle, aspectRatio: 100, method: .classic, dither: false,
+                        strokeSubMode: .within, stops: stops, nodes: [])
+    }
+    let half = max(bw, bh) / 2
+    let r = def.userSpace ? toPt(num("r", 0.5)) : num("r", 0.5) * max(bw, bh)
+    let aspect = half > 0 ? min(max(100 * r / half, 1), 1000) : 100
+    return Gradient(type: .radial, angle: 0, aspectRatio: aspect, method: .classic, dither: false,
+                    strokeSubMode: .within, stops: def.stops, nodes: [])
+}
+
 /// An element's gradients as `jas:fill-gradient` / `jas:stroke-gradient` (I1b-1).
 ///
 /// The value is the canonical test-JSON gradient (`gradientJson`), the one form
@@ -596,9 +704,16 @@ private func applyGradientAttrs(_ node: XMLElement, _ elem: Element) -> Element 
               let v = try? JSONSerialization.jsonObject(with: data) else { return nil }
         return parseGradient(v)
     }
+    // A standard `url(#id)` paint (I1b-2), used only when the element carries
+    // no `jas:` gradient: the jas attribute is the lossless record and wins.
+    func standard(_ key: String, _ e: Element) -> Gradient? {
+        guard let v = node.attribute(forName: key)?.stringValue, let id = paintUrlId(v),
+              let def = SvgStdGradients.defs[id] else { return nil }
+        return stdGradientToJas(def, gradientBBox(e))
+    }
     var out = elem
-    if let g = read("jas:fill-gradient") { out = withFillGradient(out, fillGradient: g) }
-    if let g = read("jas:stroke-gradient") { out = withStrokeGradient(out, strokeGradient: g) }
+    if let g = read("jas:fill-gradient") ?? standard("fill", out) { out = withFillGradient(out, fillGradient: g) }
+    if let g = read("jas:stroke-gradient") ?? standard("stroke", out) { out = withStrokeGradient(out, strokeGradient: g) }
     return out
 }
 
@@ -1477,14 +1592,19 @@ private func collectTspanChildren(_ elem: XMLElement) -> [Tspan] {
 
 private func parseFill(_ node: XMLElement) -> Fill? {
     guard let val = node.attribute(forName: "fill")?.stringValue, val != "none" else { return nil }
-    guard let c = parseColor(val) else { return nil }
+    // `url(#g) <colour>`: the colour is the element's own fill; a bare
+    // `url(#g)` has none (I1b-2, as Rust's `parse_fill`).
+    guard let c = parseColor(paintUrlId(val) != nil ? paintFallback(val) : val) else { return nil }
     let opacity = Double(node.attribute(forName: "fill-opacity")?.stringValue ?? "1") ?? 1.0
     return Fill(color: c, opacity: opacity)
 }
 
 private func parseStroke(_ node: XMLElement) -> Stroke? {
     guard let val = node.attribute(forName: "stroke")?.stringValue, val != "none" else { return nil }
-    guard let c = parseColor(val) else { return nil }
+    // A `url(#g)` stroke keeps its Stroke, because the width lives there; its
+    // colour is the fallback when given, else black (I1b-2, as Rust).
+    let urlColor: Color? = paintUrlId(val) != nil ? (parseColor(paintFallback(val)) ?? .black) : nil
+    guard let c = urlColor ?? parseColor(val) else { return nil }
     let width = toPt(Double(node.attribute(forName: "stroke-width")?.stringValue ?? "1") ?? 1.0)
     let lcStr = node.attribute(forName: "stroke-linecap")?.stringValue ?? "butt"
     let ljStr = node.attribute(forName: "stroke-linejoin")?.stringValue ?? "miter"
@@ -2111,8 +2231,12 @@ public func svgToDocument(_ svg: String) -> Document {
     }
 
     applyStyleSheet(root)
+    var gradients: [String: StdGradientDef] = [:]
+    collectStdGradients(root, into: &gradients)
     return SvgImportUnit.$ptPerUnit.withValue(rootUserUnitPt(root)) {
-        svgRootToDocument(root)
+        SvgStdGradients.$defs.withValue(gradients) {
+            svgRootToDocument(root)
+        }
     }
 }
 

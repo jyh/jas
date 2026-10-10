@@ -693,7 +693,8 @@ fn std_gradient_to_jas(def: &StdGradientDef, bbox: (f64, f64, f64, f64)) -> Opti
         if d <= 0.0 {
             return None;
         }
-        let angle = (-(y1 - y0)).atan2(x1 - x0).to_degrees();
+        // `+ 0.0` turns the -0.0 a horizontal vector yields into 0.0.
+        let angle = (-(y1 - y0)).atan2(x1 - x0).to_degrees() + 0.0;
         let side = d / std::f64::consts::SQRT_2;
         let parent = ((x0 + x1) / 2.0 - side / 2.0, (y0 + y1) / 2.0 - side / 2.0, side, side);
         let stops = crate::algorithms::gradient_remap::remap_linear_stops(&def.stops, angle, parent, bbox);
