@@ -1797,6 +1797,115 @@ private func mcpMatch(_ want: Any, _ got: Any, _ settled: Any, _ at: String) {
     #expect(got == want)
 }
 
+/// A3b slice 2 in Swift, the twin of Rust's `op_case_observation`: what one
+/// operations corpus case does, as an agent would observe it — the document it
+/// leaves and each op's result class (`Ok` or the error class name). It calls
+/// `opApply` directly, not `applyFixtureOp`, which asserts `expected_error`.
+private func opCaseObservation(_ tc: [String: Any]) -> (String, [String]) {
+    let doc: Document
+    if let name = tc["setup_test_json"] as? String {
+        doc = testJsonToDocument(readFixture("expected/\(name)"))
+    } else {
+        doc = svgToDocument(readFixture("svg/\(tc["setup_svg"] as! String)"))
+    }
+    let model = Model(document: doc)
+    let controller = Controller(model: model)
+    var results: [String] = []
+    func run(_ op: [String: Any]) {
+        results.append(opApply(model, controller, op)?.className ?? "Ok")
+    }
+    if let txns = tc["txns"] as? [[String: Any]] {
+        for txn in txns {
+            model.beginTxn()
+            for op in (txn["ops"] as! [[String: Any]]) { run(op) }
+            model.commitTxn()
+        }
+    } else {
+        model.beginTxn()
+        for op in (tc["ops"] as! [[String: Any]]) { run(op) }
+        model.commitTxn()
+    }
+    return (documentToTestJson(model.document), results)
+}
+
+/// A3b slice 2 in Swift: re-derive `operations/op_arguments.json` from the
+/// corpus, by the same drop-one-key rule as Rust's `derive_op_arguments`, and
+/// require it to equal the committed file — so Swift agrees with Rust on every
+/// witnessed argument. The fixture list is derived from disk exactly as Rust's
+/// `operation_fixtures()` derives it. The comparison is STRUCTURAL (verbs, keys,
+/// states), because two JSON writers do not share a byte format.
+@Test func opArgumentsFileMatchesTheCorpus() throws {
+    let file = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_arguments.json").utf8)) as! [String: Any]
+    let vocab = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_vocabulary.json").utf8)) as! [String: Any]
+    let verbs = Set((vocab["verbs"] as! [String: Any]).keys)
+    let harnessKeys = Set(file["harness_keys"] as! [String])
+    let dir = (fixturesPath() as NSString).appendingPathComponent("operations")
+    let fixtures = try FileManager.default.contentsOfDirectory(atPath: dir)
+        .filter { $0.hasSuffix(".json") && !$0.hasSuffix("_expected.json") }
+        .filter { readFixture("operations/\($0)").contains("\"expected_json\"") }
+        .sorted()
+    var args: [String: [String: Bool]] = [:]
+    var liveHarness: [String] = []
+    var cases = 0, instances = 0
+    for fixture in fixtures {
+        let tests = try JSONSerialization.jsonObject(with: Data(readFixture("operations/\(fixture)").utf8)) as! [[String: Any]]
+        for tc in tests {
+            cases += 1
+            let base = opCaseObservation(tc)
+            // Every op location, as (txn index or nil, op index).
+            var locs: [(Int?, Int)] = []
+            if let txns = tc["txns"] as? [[String: Any]] {
+                for (ti, txn) in txns.enumerated() {
+                    for oi in 0..<(txn["ops"] as! [[String: Any]]).count { locs.append((ti, oi)) }
+                }
+            } else {
+                for oi in 0..<(tc["ops"] as! [[String: Any]]).count { locs.append((nil, oi)) }
+            }
+            for (ti, oi) in locs {
+                let op: [String: Any] = ti.map { ((tc["txns"] as! [[String: Any]])[$0]["ops"] as! [[String: Any]])[oi] }
+                    ?? (tc["ops"] as! [[String: Any]])[oi]
+                guard let verb = op["op"] as? String, verbs.contains(verb) else { continue }
+                instances += 1
+                if args[verb] == nil { args[verb] = [:] }  // a verb with no keys still has an (empty) entry
+                for k in op.keys where k != "op" {
+                    var dropped = op
+                    dropped.removeValue(forKey: k)
+                    var m = tc
+                    if let ti {
+                        var txns = tc["txns"] as! [[String: Any]]
+                        var ops = txns[ti]["ops"] as! [[String: Any]]
+                        ops[oi] = dropped
+                        txns[ti]["ops"] = ops
+                        m["txns"] = txns
+                    } else {
+                        var ops = tc["ops"] as! [[String: Any]]
+                        ops[oi] = dropped
+                        m["ops"] = ops
+                    }
+                    let after = opCaseObservation(m)
+                    let changed = after.0 != base.0 || after.1 != base.1
+                    if harnessKeys.contains(k) {
+                        if changed { liveHarness.append("\(verb).\(k)") }
+                    } else {
+                        args[verb, default: [:]][k] = (args[verb]?[k] ?? false) || changed
+                    }
+                }
+            }
+        }
+    }
+    // FAIL CLOSED, with Rust's floors: an empty derivation agrees with nothing.
+    #expect(cases >= 100 && instances >= 300 && args.count >= 40,
+        "op-argument derivation read \(cases) case(s), \(instances) op instance(s), \(args.count) verb(s)")
+    #expect(liveHarness.isEmpty, "a HARNESS key changed what opApply does: \(liveHarness)")
+    let derived = args.mapValues { $0.mapValues { $0 ? "witnessed" : "inert" } }
+    let committed = (file["arguments"] as! [String: [String: String]])
+    for verb in Set(derived.keys).union(committed.keys).sorted() where derived[verb] != committed[verb] {
+        Issue.record("op_arguments.json disagrees with Swift for `\(verb)`: file \(committed[verb].map { "\($0)" } ?? "absent"), Swift \(derived[verb].map { "\($0)" } ?? "absent")")
+    }
+    let noInstance = verbs.filter { derived[$0] == nil }.sorted()
+    #expect(noInstance == (file["verbs_with_no_corpus_instance"] as! [String]))
+}
+
 /// A4 (i), the transport conformance corpus: every case of
 /// `operations/mcp_exchanges.json` replayed through `McpSession`, the twin of
 /// Rust's `mcp_exchanges`.

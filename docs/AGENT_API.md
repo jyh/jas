@@ -85,11 +85,18 @@ Both active ports run the same file (POLICY.md §1).
   - (a) declare the op vocabulary as data, then generate from it. **TAKEN, slice 1:**
     `test_fixtures/operations/op_vocabulary.json` lists the 59 verbs, each classed `history`, `selection` or `edit`;
     `scripts/check_op_vocabulary.py` asserts that both ports' matches and both selection-only sets equal it; and
-    `propose`'s `op` is an enum of it. **Each op's arguments are not declared yet.** They are the next slice.
+    `propose`'s `op` is an enum of it. **Slice 2, each op's ARGUMENTS:** `test_fixtures/operations/op_arguments.json`,
+    DERIVED and never typed. For every op instance in the operations corpus, each key is dropped in turn and the case
+    re-run through `op_apply`. A key is `witnessed` if the document or a result class changed at least once, and `inert`
+    if the corpus carries it and no drop changed anything. An `inert` key may still be an argument whose corpus value
+    equals its default; the corpus cannot tell those apart, and the file does not claim to. Rust and Swift each
+    re-derive the file and must match it, so they agree on every witnessed argument. First reading, 2026-10-10:
+    346 op instances, 52 verbs, 103 witnessed and 3 inert keys (`copy_by_ids.dy`, `scale_transform.scale_corners`,
+    `simplify.precision`); 7 verbs have no corpus instance. The `propose` schema does not use the arguments yet.
   - (b) run an action inside the proposal bracket and capture the primitive ops it records. It builds on (a) and does
     not replace it. It works only for actions whose recorded ops replay (`OP_LOG.md` §9: some production transactions
     are still opaque), so it needs a census first.
-  Until the arguments are declared, the model validates every op, and a failing op refuses the proposal.
+  The model validates every op either way, and a failing op refuses the proposal.
 - **A4, accept in the app:** the preview drawn as an overlay, with Accept and Reject. This is ROADMAP §3.1's first
   observable.
 - **A7, the intent ledger's schema:** open by R0. What a ledger entry records is not part of this repository.

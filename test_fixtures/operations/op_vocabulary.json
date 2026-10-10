@@ -14,9 +14,9 @@
     "that both ports' selection-only sets EQUAL the `selection` class. The MCP core's `propose` tool takes its `op` enum from",
     "this file (jas_dioxus/src/mcp.rs).",
     "",
-    "WHAT IS NOT DECLARED HERE, and there is nothing missing from this file for that reason: each op's ARGUMENTS. The arms",
-    "hand `op` to helpers that read keys elsewhere, so a static scan cannot enumerate them, and a hand-typed list would be",
-    "correct-not-verified. The arguments are the next slice of A3b."
+    "EACH OP'S ARGUMENTS are not declared here; they are DERIVED from the corpus into op_arguments.json beside this",
+    "file (A3b slice 2). The arms hand `op` to helpers that read keys elsewhere, so a static scan cannot enumerate",
+    "them, and a hand-typed list would be correct-not-verified."
   ],
   "verbs": {
     "add_to_selection": "selection",
