@@ -3880,6 +3880,65 @@ mod tests {
         assert!(r.fill.is_none() && r.fill_gradient.is_none(), "fill=none stays none");
     }
 
+    /// I1b-3: the fill gradient of the FIRST rect of the first layer.
+    fn first_rect_fill_gradient(svg: &str) -> Option<Gradient> {
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let Element::Rect(r) = &*layer.children[0] else { panic!("a rect") };
+        r.fill_gradient.as_deref().cloned()
+    }
+
+    fn rect_with(defs: &str, fill: &str) -> String {
+        format!(r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="100">
+          <defs>{defs}</defs><g><rect x="10" y="20" width="100" height="50" fill="url(#{fill})"/></g></svg>"##)
+    }
+
+    const STOPS: &str = r##"<stop offset="0.2" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff" stop-opacity="0.5"/>"##;
+
+    /// I1b-3: `href` inheritance (SVG 1.1 §13.2.2), the shape Inkscape writes
+    /// for nearly every gradient: a stops-only gradient, and a second one that
+    /// `xlink:href`s it and carries the coordinates. It must import EXACTLY as
+    /// the same gradient written inline — the oracle is the inline form, never
+    /// a hand-typed value. Before I1b-3 the href'd fill imported as NOTHING.
+    #[test]
+    fn an_href_gradient_imports_as_its_inline_equivalent() {
+        let inline = rect_with(&format!(
+            r##"<linearGradient id="g" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse">{STOPS}</linearGradient>"##), "g");
+        let want = first_rect_fill_gradient(&inline).expect("the inline form imports a gradient");
+        for (label, defs) in [
+            ("xlink:href", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="g" xlink:href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##)),
+            ("plain href (SVG 2)", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="g" href="#base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"/>"##)),
+            ("a two-hop chain", format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <linearGradient id="mid" xlink:href="#base" gradientUnits="userSpaceOnUse"/>
+              <linearGradient id="g" xlink:href="#mid" x1="10" y1="0" x2="110" y2="0"/>"##)),
+            ("attributes inherited, stops own", format!(r##"<linearGradient id="base" x1="10" y1="0" x2="110" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#00ff00"/><stop offset="1" stop-color="#00ff00"/></linearGradient>
+              <linearGradient id="g" xlink:href="#base">{STOPS}</linearGradient>"##)),
+        ] {
+            let got = first_rect_fill_gradient(&rect_with(&defs, "g"));
+            assert_eq!(got.as_ref(), Some(&want), "{label}: the href form must import as the inline form");
+        }
+        // A radial gradient may take a LINEAR gradient's stops (Inkscape does).
+        let radial_inline = rect_with(&format!(r##"<radialGradient id="g" cx="0.5" cy="0.5" r="0.25">{STOPS}</radialGradient>"##), "g");
+        let radial_href = rect_with(&format!(r##"<linearGradient id="base">{STOPS}</linearGradient>
+              <radialGradient id="g" xlink:href="#base" cx="0.5" cy="0.5" r="0.25"/>"##), "g");
+        let want_r = first_rect_fill_gradient(&radial_inline).expect("the inline radial imports");
+        assert_eq!(want_r.gtype, GradientType::Radial);
+        assert_eq!(first_rect_fill_gradient(&radial_href).as_ref(), Some(&want_r), "a radial takes a linear's stops");
+    }
+
+    /// I1b-3: an href CYCLE, or an href to nothing, imports without hanging or
+    /// panicking, and a gradient left with no stops paints nothing, as before.
+    #[test]
+    fn an_href_cycle_or_dangling_href_imports_without_a_gradient() {
+        let cycle = rect_with(r##"<linearGradient id="a" xlink:href="#b"/><linearGradient id="g" xlink:href="#a"/>
+              <linearGradient id="b" xlink:href="#g"/>"##, "g");
+        assert_eq!(first_rect_fill_gradient(&cycle), None);
+        let dangling = rect_with(r##"<linearGradient id="g" xlink:href="#nowhere"/>"##, "g");
+        assert_eq!(first_rect_fill_gradient(&dangling), None);
+    }
+
     /// I1b-2: when an element carries BOTH a `jas:` gradient and a standard
     /// `url(#id)`, the jas attribute is the lossless record and wins.
     #[test]
