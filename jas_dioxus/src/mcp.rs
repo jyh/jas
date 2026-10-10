@@ -403,7 +403,7 @@ mod tests {
 
     /// A3b: the `op` a proposal may carry is an ENUM taken from the declared
     /// vocabulary (`test_fixtures/operations/op_vocabulary.json`), so a client
-    /// sees the 51 verbs instead of an untyped object. The expectation is read
+    /// sees the declared verbs instead of an untyped object. The expectation is read
     /// from the FILE, not from the code under test, and its size is asserted so
     /// an empty file cannot agree with an empty enum.
     #[test]

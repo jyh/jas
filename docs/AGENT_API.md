@@ -78,10 +78,12 @@ Both active ports run the same file (POLICY.md §1).
   and a `notifications/jas/proposal` message reporting each proposal's fate (`accepted` · `rejected` · `withdrawn`).
 - **A3b, the tool VOCABULARY.** ROADMAP §3.1 says tool schemas are generated from `actions.yaml`. But its 239 entries
   are the **UI action layer** (tabs, panels, dialogs), while a proposal carries **primitive document ops**: the
-  **51** verbs `op_apply` accepts, the same 51 in both active ports. *(This line said "141" until 2026-10-09. That
-  figure added the 90 `doc.*` keys of the YAML effect layer, which is a different vocabulary.)* Two arms:
+  **59** verbs `op_apply` accepts, the same 59 in both active ports. *(This line said "141" until 2026-10-09. That
+  figure added the 90 `doc.*` keys of the YAML effect layer, which is a different vocabulary. It then said "51" until
+  2026-10-10: the count read the literal match arms and skipped the computed arm that accepts the eight print-config
+  setters, `PRINT_CONFIG_VERBS` in both ports.)* Two arms:
   - (a) declare the op vocabulary as data, then generate from it. **TAKEN, slice 1:**
-    `test_fixtures/operations/op_vocabulary.json` lists the 51 verbs, each classed `history`, `selection` or `edit`;
+    `test_fixtures/operations/op_vocabulary.json` lists the 59 verbs, each classed `history`, `selection` or `edit`;
     `scripts/check_op_vocabulary.py` asserts that both ports' matches and both selection-only sets equal it; and
     `propose`'s `op` is an enum of it. **Each op's arguments are not declared yet.** They are the next slice.
   - (b) run an action inside the proposal bracket and capture the primitive ops it records. It builds on (a) and does
