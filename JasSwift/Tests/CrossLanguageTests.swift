@@ -112,6 +112,60 @@ private func assertSvgRoundtrip(_ name: String) {
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
 @Test func svgParseGradientFillAndStroke() { assertSvgParse("gradient_fill_and_stroke") }
+@Test func svgParseGradientStandardImport() { assertSvgParse("gradient_standard_import") }
+/// Drop every `jas:*-gradient` attribute: what an app that does not know the
+/// `jas:` namespace reads.
+private func withoutJasGradients(_ svg: String) -> String {
+    svg.replacingOccurrences(of: #" jas:(fill|stroke)-gradient="[^"]*""#, with: "", options: .regularExpression)
+}
+
+/// I1b-2b, the twin of Rust's `…_is_saved_as_a_standard_one…` arms: a jas
+/// gradient is ALSO written as a standard SVG gradient, so with the `jas:`
+/// record stripped, re-importing gives back the angle and stops (linear, on a
+/// stroked non-square rect) and the aspect (radial, on a stroke). Tolerance
+/// 1e-3 for the root's four-decimal viewBox, as the Rust arm explains.
+@Test func svgJasGradientIsSavedAsAStandardOne() {
+    let lin = Gradient(type: .linear, angle: 30, aspectRatio: 100, method: .classic, dither: false, strokeSubMode: .within,
+                       stops: [GradientStop(color: "#ff0000", opacity: 100, location: 20),
+                               GradientStop(color: "#0000ff", opacity: 40, location: 80)], nodes: [])
+    let rad = Gradient(type: .radial, angle: 0, aspectRatio: 70, method: .classic, dither: false, strokeSubMode: .within,
+                       stops: [GradientStop(color: "#00ff00", location: 0), GradientStop(color: "#ff00ff", location: 100)], nodes: [])
+    let a = Element.rect(Rect(x: 10, y: 20, width: 60, height: 30, fill: Fill(color: Color(r: 1, g: 0, b: 0)),
+                              stroke: Stroke(color: .black, width: 6), fillGradient: lin))
+    let b = Element.rect(Rect(x: 0, y: 80, width: 40, height: 20, fill: nil,
+                              stroke: Stroke(color: .black, width: 2), strokeGradient: rad))
+    let svg = documentToSvg(Document(layers: [Layer(children: [a, b])], artboards: []))
+    #expect(svg.contains("<linearGradient id=\"jas-g1\""), "\(svg)")
+    #expect(svg.contains("fill=\"url(#jas-g1) rgb(255,0,0)\""), "\(svg)")
+    #expect(svg.contains("stroke=\"url(#jas-g2) rgb(0,0,0)\""), "\(svg)")
+    let plain = withoutJasGradients(svg)
+    #expect(!plain.contains("jas:fill-gradient"), "the control: the jas record is gone")
+    let kids = svgToDocument(plain).layers.first?.children ?? []
+    let g1 = kids.first?.fillGradient
+    #expect(abs((g1?.angle ?? 0) - 30) < 1e-3, "angle \(String(describing: g1?.angle))")
+    for want in lin.stops {
+        let hit = g1?.stops.first { abs($0.location - want.location) < 1e-3 }
+        #expect(hit != nil && hit!.color == want.color && abs(hit!.opacity - want.opacity) < 1e-3,
+                "no stop at \(want.location) in \(String(describing: g1?.stops.map { $0.location }))")
+    }
+    let g2 = kids.count > 1 ? kids[1].strokeGradient : nil
+    #expect(g2?.type == .radial && abs((g2?.aspectRatio ?? 0) - 70) < 1e-3, "\(String(describing: g2))")
+    let none = documentToSvg(Document(layers: [Layer(children: [.rect(Rect(x: 1, y: 2, width: 3, height: 4))])], artboards: []))
+    #expect(!none.contains("Gradient") && !none.contains("url("), "the control: no gradient, no standard element")
+}
+/// I1b-2: when an element carries BOTH a `jas:` gradient and a standard
+/// `url(#id)`, the jas attribute is the lossless record and wins (the twin of
+/// Rust's `the_jas_gradient_attribute_wins_over_a_standard_url`).
+@Test func svgJasGradientAttributeWinsOverAStandardUrl() {
+    let jas = "{&quot;angle&quot;:90.0,&quot;aspect_ratio&quot;:100.0,&quot;dither&quot;:false,&quot;method&quot;:&quot;classic&quot;,&quot;nodes&quot;:[],&quot;stops&quot;:[{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:0.0,&quot;g&quot;:0.0,&quot;r&quot;:0.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:0.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0},{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:1.0,&quot;g&quot;:1.0,&quot;r&quot;:1.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:100.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0}],&quot;stroke_sub_mode&quot;:&quot;within&quot;,&quot;type&quot;:&quot;linear&quot;}"
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+      <defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs>
+      <g><rect jas:fill-gradient="\(jas)" x="0" y="0" width="96" height="96" fill="url(#g) rgb(0,0,0)"/></g></svg>
+    """
+    let g = svgToDocument(svg).layers.first?.children.first?.fillGradient
+    #expect(g?.angle == 90, "the jas attribute's angle, not the url's: \(String(describing: g?.angle))")
+}
 /// I1b-1: a FREEFORM fill gradient survives this port's SVG round trip (the
 /// twin of Rust's `a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip`,
 /// minus the hsb stop, which this port's hex colour cannot hold). Not in the SVG
