@@ -185,6 +185,14 @@ if ($selCount -eq 1 -and (Test-Path $openDoc)) {
 
 $shotSha = if (Test-Path $shot) { (Get-FileHash $shot -Algorithm SHA256).Hash.Substring(0, 16).ToLower() } else { 'NONE' }
 $commit = (& git -C $repo rev-parse --short=12 HEAD).Trim()
+# docs/TESTING.md section 3: a certificate's key is SPEC HASH x BUILD SHA x PLATFORM,
+# with the spec hash computed exactly as scripts/yaml_coverage_census.py does
+# (sha256 of the compiled workspace/workspace.json, first 16 hex) and the build
+# as git's short-8.
+$specSha = (Get-FileHash (Join-Path $repo 'workspace\workspace.json') -Algorithm SHA256).Hash.Substring(0, 16).ToLower()
+$build = (& git -C $repo rev-parse --short=8 HEAD).Trim()
+$os = [System.Environment]::OSVersion.Version
+$platform = "windows-winui-$($os.Major).$($os.Minor).$($os.Build)"
 $dirty = if ((& git -C $repo status --porcelain -- jas_dioxus/src prototypes/sb_winui | Measure-Object -Line).Lines -gt 0) { '+dirty' } else { '' }
 $reading = [ordered]@{
     item = $item; surface = $r.surface; frame_hash = $r.frame_hash; doc_sha = $r.doc_sha
@@ -217,7 +225,7 @@ $tree = if ($r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha) { 
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
-$line = "E2E-CERT v1 item=$item commit=$commit$dirty drive=SendInput(session=1,pid=$appPid,moves=$moves):$drive " +
+$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves):$drive " +
         "spec=$moved core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
