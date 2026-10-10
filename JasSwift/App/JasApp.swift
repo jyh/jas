@@ -25,6 +25,8 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
     /// Retained so the main-queue read source isn't cancelled when
     /// applicationDidFinishLaunching returns.
     var testFifoSource: DispatchSourceRead?
+    /// The agent API's socket (gated behind --mcp-socket PATH; McpSocket.swift).
+    var mcpServer: McpSocketServer?
 
     /// Promote the process to a regular foreground app and steal the
     /// menu bar before any window is shown. When we relied on
@@ -75,6 +77,10 @@ class JasAppDelegate: NSObject, NSApplicationDelegate {
         // TestFifo.swift for the protocol + dispatch.
         if let path = JasAppDelegate.testFifoPath {
             setupTestFifo(path: path)
+        }
+        // The agent API's socket (A4 (ii)), gated the same way.
+        if let path = JasAppDelegate.mcpSocketPath {
+            setupMcpSocket(path: path)
         }
     }
 
