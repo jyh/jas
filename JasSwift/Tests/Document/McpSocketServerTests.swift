@@ -111,3 +111,26 @@ private func emptyModel() -> Model {
     server.stop()
     #expect(!FileManager.default.fileExists(atPath: path))
 }
+
+/// A4 (iv)(b), end to end over the socket: an ORDINARY edit to the model (not
+/// through the session) withdraws the client's proposal, and the client is told.
+@Test func mcpSocketServerTellsTheClientAnOrdinaryEditWithdrewItsProposal() throws {
+    let path = tempSocketPath()
+    let queue = DispatchQueue(label: "mcp-socket-test")
+    let model = Model(document: svgToDocument(#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><g><rect x="10" y="10" width="20" height="20" fill="red"/></g></svg>"#))
+    let server = try McpSocketServer(path: path, queue: queue) { McpSession(model: model) }
+    defer { server.stop() }
+    let client = try #require(LineClient(path: path))
+    client.send(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"propose","arguments":{"name":"nudge","ops":[{"op":"select_rect","x":0,"y":0,"width":50,"height":50,"extend":false},{"op":"move_selection","dx":5,"dy":0}]}}}"#)
+    let answer = try #require(client.readLine(), "the propose is answered")
+    #expect(answer.contains("p-0"), "\(answer)")
+    queue.sync {
+        model.withTxn {
+            let c = Controller(model: model)
+            _ = opApply(model, c, ["op": "select_rect", "x": 0, "y": 0, "width": 50, "height": 50, "extend": false])
+            _ = opApply(model, c, ["op": "move_selection", "dx": 1, "dy": 1])
+        }
+    }
+    let line = try #require(client.readLine(), "the withdrawal reaches the client")
+    #expect(line.contains("withdrawn") && line.contains("p-0"), "\(line)")
+}
