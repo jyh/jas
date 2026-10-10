@@ -315,6 +315,15 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
     engine.with_document(|doc| {
         crate::document::paint::emit_document(p, doc, crate::geometry::live::DEFAULT_PRECISION);
     });
+    // The SELECTION HIGHLIGHT, between the document and the tool's overlay --
+    // the web canvas's order. Drawn whether or not a tool is set (a selection
+    // made from the menu shows too), and it draws nothing when nothing is
+    // selected, so an unselected frame is still exactly a document.
+    engine.with_document(|doc| {
+        let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
+        crate::painter::selection_overlay::draw_selection_overlays(&mut ctx, doc);
+        ctx.finish();
+    });
     let mut slot = engine.tool_slot();
     if let Some((_, tool)) = slot.as_mut() {
         let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
@@ -704,6 +713,47 @@ mod tests {
         // wrong on a screen.
         assert_eq!(&cmds[..doc_only], &bare.commands()[..doc_only],
                    "the document half is unchanged and comes FIRST");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⭐ A CLICKED ELEMENT SHOWS ITS ANCHOR POINTS. Found by the first
+    /// hand-test of the Windows app, 2026-10-10: *"Anchor points do not show selection."* The
+    /// frame drew the document and the tool's overlay and never the selection
+    /// highlight, which lived only in the web canvas. Driven through the same
+    /// exports the shell calls: click the seeded 100x80 rect at (20,30), and the
+    /// frame must carry a square at each corner -- after the document, so on top.
+    #[test]
+    fn a_clicked_rect_shows_its_anchor_squares_in_the_frame() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::{Command, RecordingPainter};
+        use crate::tool_consts::HANDLE_DRAW_SIZE;
+
+        let e = jas_engine_new();
+        seed(e);
+        let mut bare = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut bare);
+        let doc_only = bare.commands().len();
+
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+        }
+        assert_eq!(unsafe { &*e }.with_model(|m| m.document().selection.len()), 1,
+                   "the click selected the rect");
+        let mut framed = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut framed);
+        let cmds = framed.commands();
+        assert_eq!(&cmds[..doc_only], bare.commands(), "the document comes first, unchanged");
+        let h = HANDLE_DRAW_SIZE / 2.0;
+        let mut corners: Vec<(f64, f64)> = cmds[doc_only..].iter().filter_map(|c| match c {
+            Command::FillRect { rect, .. } if rect.w == HANDLE_DRAW_SIZE && rect.h == HANDLE_DRAW_SIZE =>
+                Some((rect.x + h, rect.y + h)),
+            _ => None,
+        }).collect();
+        corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(corners, vec![(20.0, 30.0), (20.0, 110.0), (120.0, 30.0), (120.0, 110.0)],
+                   "one anchor square per corner, on top of the document");
         unsafe { jas_engine_free(e) };
     }
 

@@ -196,6 +196,14 @@ LEDGER: dict[str, dict[str, str]] = {
             "`is_text_like` (Text | TextPath). The CONTAINER arm beside it "
             "was reachable and is resolved (GROUPPHANTOM, this stone).",
     },
+    # The native port of canvas/render.rs's selection highlight: the same
+    # site, the same verdict, because it is the same code.
+    "painter/selection_overlay.rs": {
+        "let (bx, by, bw, bh) = elem.bounds();":
+            "NOT REACHABLE — the text-like selection outline, guarded by "
+            "`is_text_like` (Text | TextPath), as in canvas/render.rs. The "
+            "CONTAINER arm beside it is resolved (`resolved_bounds_with`).",
+    },
 }
 
 # Files whose bounds calls are all inside `mod tests`, or which are test-only
