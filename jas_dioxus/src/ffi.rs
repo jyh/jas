@@ -237,6 +237,15 @@ impl JasEngine {
         self.tool.borrow_mut()
     }
 
+    /// The workspace's `active_tool` state (the toolbar's `checked` binding
+    /// reads it, `select_tool` writes it), as a string; `None` when unset.
+    pub(crate) fn active_tool_state(&self) -> Option<String> {
+        self.store.borrow().get("active_tool").as_str().map(str::to_string)
+    }
+    pub(crate) fn set_active_tool_state(&self, name: &str) {
+        self.store.borrow_mut().set("active_tool", serde_json::Value::String(name.to_string()));
+    }
+
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
     }
@@ -872,6 +881,8 @@ pub unsafe extern "C" fn jas_panel_behavior(
         Ok(ran) => ran,
         Err(r) => return refuse(r),
     };
+    // A toolbar click wrote `active_tool`; the pointer must now drive that tool.
+    let tool = crate::ffi_pointer::sync_tool_to_state(engine);
     // A behavior writes the store's copy of the colour slice's three
     // `state.*` keys (Swatches' `set_active_color`); every scope reads the
     // slice, so the slice adopts the write and the copy is re-synced from it.
@@ -882,7 +893,9 @@ pub unsafe extern "C" fn jas_panel_behavior(
     let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
-    if ran.doc_changed || ran.state_changed || moved {
+    // A tool write that was REFUSED was also undone, so it changed nothing.
+    let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
+    if ran.doc_changed || state_changed || moved {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
@@ -2130,6 +2143,76 @@ mod tests {
             jas_panel_behavior(e, panel.as_ptr(), panel.len(), event.as_ptr(), event.len())
         });
         (reply, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    // -----------------------------------------------------------------------
+    // THE TOOLBAR: a layout pane, addressed like a panel (the first hand-test
+    // of the Windows app, 2026-10-10: "We need a toolbar")
+    // -----------------------------------------------------------------------
+
+    const TOOLBAR: &str = "toolbar_pane";
+
+    fn slot_tool(e: *mut JasEngine) -> Option<&'static str> {
+        unsafe { &*e }.tool_slot().as_ref().map(|(i, _)| crate::ffi_pointer::TOOL_IDS[*i])
+    }
+
+    /// ⛔ PINNED GAP, not a pass: the toolbar's `tool_grid` is `type: grid` with
+    /// `cols: 2` and a `grid: {row, col}` per child. The shared layout pass
+    /// (`panel_layout`, byte-gated across the reference, Rust and Swift) knows
+    /// `grid` only as Bootstrap-12 `col` spans, so the grid is omitted and its
+    /// thirteen buttons with it -- in every port. Spec and corpus first, then
+    /// the ports; un-ignore when they land.
+    #[test]
+    #[ignore = "panel_layout has no `type: grid` + `cols` form in any port (spec-first)"]
+    fn the_toolbar_pane_plans_like_a_panel() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan = plan_of(e, TOOLBAR, 72, 900);
+        for id in ["btn_selection", "btn_shape_slot", "btn_line", "btn_pen_slot"] {
+            assert!(plan.contains(id), "the toolbar plan carries {id}: {}", &plan[..plan.len().min(400)]);
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// What IS true today: the pane plans (its fill/stroke widget is there),
+    /// so the lookup reaches it; only the grid's buttons are missing (above).
+    #[test]
+    fn the_toolbar_pane_is_addressable_like_a_panel() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan = plan_of(e, TOOLBAR, 72, 900);
+        assert!(plan.contains("fill_swatch") && plan.contains("swap_btn"), "{}", &plan[..plan.len().min(300)]);
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_toolbar_click_selects_the_tool_the_pointer_drives() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        assert_eq!(unsafe { crate::ffi_pointer::jas_set_tool(e, 0) }, JasStatus::Ok);
+        let (reply, _) = behave(e, TOOLBAR, r#"{"widget":"btn_shape_slot","event":"click"}"#);
+        assert!(!reply.is_empty(), "the click ran: {}", take(unsafe { jas_last_error_json(e) }));
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("rect"));
+        assert_eq!(slot_tool(e), Some("rect"), "the pointer now drives the rect tool");
+        let (_, _) = behave(e, TOOLBAR, r#"{"widget":"btn_selection","event":"click"}"#);
+        assert_eq!(slot_tool(e), Some("selection"), "and back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The Type button names a tool no shell tool answers yet (the type tools
+    /// are native). Its checked state must not claim a tool the pointer is not
+    /// driving: `active_tool` stays the real tool, and the click says Unchanged.
+    #[test]
+    fn a_toolbar_click_on_a_tool_the_shell_lacks_changes_nothing() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        assert_eq!(unsafe { crate::ffi_pointer::jas_set_tool(e, 0) }, JasStatus::Ok);
+        let (_, err) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
+        assert_eq!(slot_tool(e), Some("selection"));
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"),
+                   "the toolbar's checked button stays the tool the pointer drives");
+        assert!(err.contains("Unchanged"), "{err}");
+        unsafe { jas_engine_free(e) };
     }
 
     fn refusal(class: &str, detail: &str) -> String {

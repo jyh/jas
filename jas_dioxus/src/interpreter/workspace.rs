@@ -39,9 +39,22 @@ impl Workspace {
         self.data.get("panels").unwrap_or(&serde_json::Value::Null)
     }
 
-    /// Get a specific panel spec by content id.
+    /// Get a specific panel spec by content id -- or, when no panel has that
+    /// id, a PANE of the layout that does (the toolbar, `toolbar_pane`). A pane
+    /// carries `id` and `content` exactly as a panel does, so a native shell
+    /// plans and drives it through the same calls, with nothing pane-specific.
     pub fn panel(&self, content_id: &str) -> Option<&serde_json::Value> {
-        self.data.get("panels")?.get(content_id)
+        if let Some(p) = self.data.get("panels").and_then(|ps| ps.get(content_id)) {
+            return Some(p);
+        }
+        self.layout_pane(content_id)
+    }
+
+    /// A direct child of the layout root with this `id` that has `content`.
+    pub fn layout_pane(&self, id: &str) -> Option<&serde_json::Value> {
+        self.data.get("layout")?.get("children")?.as_array()?.iter().find(|c| {
+            c.get("id").and_then(|v| v.as_str()) == Some(id) && c.get("content").is_some()
+        })
     }
 
     /// Get a concept pack by id from the concept registry (CONCEPTS.md):
