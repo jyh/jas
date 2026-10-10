@@ -9,6 +9,10 @@ mod canvas;
 #[cfg(test)]
 mod cross_language_test;
 mod document;
+// The bin never calls the MCP core; it is declared here because this crate also
+// compiles `cross_language_test`, whose transport corpus runner (A4) names it.
+#[allow(dead_code)]
+mod mcp;
 mod geometry;
 mod interpreter;
 mod painter;
