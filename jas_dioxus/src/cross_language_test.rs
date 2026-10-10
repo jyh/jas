@@ -1350,70 +1350,163 @@ mod tests {
         out
     }
 
-    /// A3b slice 2 PROBE (temporary): drop each argument of each corpus op and
-    /// see whether the observable changes.
-    fn a3b_observe(tc: &serde_json::Value) -> (String, Vec<String>) {
+    /// A3b slice 2: what one corpus case does, as an agent would observe it —
+    /// the document it leaves (canonical test JSON) and each op's result class
+    /// (`Ok` or the error class name, the S3 cross-language contract). It calls
+    /// `op_apply` directly, NOT `apply_op`: the harness shim asserts
+    /// `expected_error`, and a case whose argument was dropped is supposed to be
+    /// allowed to behave differently.
+    fn op_case_observation(tc: &serde_json::Value) -> (String, Vec<String>) {
         let mut model = Model::new(setup_document(tc), None);
         let mut results = Vec::new();
         let mut run = |model: &mut Model, op: &serde_json::Value| {
-            let r = crate::document::op_apply::op_apply(model, op);
-            results.push(match r { Ok(()) => "Ok".to_string(), Err(e) => e.class_name().to_string() });
+            results.push(match crate::document::op_apply::op_apply(model, op) {
+                Ok(()) => "Ok".to_string(),
+                Err(e) => e.class_name().to_string(),
+            });
         };
         if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
             for txn in txns {
                 model.begin_txn();
-                for op in txn["ops"].as_array().unwrap() { run(&mut model, op); }
+                for op in txn["ops"].as_array().unwrap() {
+                    run(&mut model, op);
+                }
                 model.commit_txn();
             }
         } else {
             model.begin_txn();
-            for op in tc["ops"].as_array().unwrap() { run(&mut model, op); }
+            for op in tc["ops"].as_array().unwrap() {
+                run(&mut model, op);
+            }
             model.commit_txn();
         }
         (<DocumentOps as OpWorld>::to_test_json(&model), results)
     }
 
-    #[test]
-    #[ignore]
-    fn a3b_probe() {
+    /// Keys the corpus puts on an op for the HARNESS, not for `op_apply`. They
+    /// are excluded from the derivation and must stay inert: if dropping one
+    /// ever changes what `op_apply` does, it is an argument and this list is
+    /// wrong.
+    const OP_HARNESS_KEYS: &[&str] = &["expected_error"];
+
+    /// A3b slice 2, each op's ARGUMENTS, DERIVED by running the corpus: for
+    /// every op instance in every operations fixture, drop each key in turn and
+    /// re-run the case. A key whose drop changes the observation even once is
+    /// `witnessed`; a key the corpus carries whose drop never changed anything
+    /// is `inert` (an argument whose corpus value equals its default reads this
+    /// way, as does a key `op_apply` never reads — the corpus cannot tell them
+    /// apart, and the file says so). Returns the file's canonical JSON text.
+    fn derive_op_arguments() -> String {
         use std::collections::{BTreeMap, BTreeSet};
-        let mut eff: BTreeMap<String, BTreeMap<String, (usize, usize)>> = BTreeMap::new();
-        let mut instances = 0usize;
+        let vocab: serde_json::Value =
+            serde_json::from_str(&read_fixture("operations/op_vocabulary.json")).unwrap();
+        let verbs: BTreeSet<String> = vocab["verbs"].as_object().unwrap().keys().cloned().collect();
+        let mut args: BTreeMap<String, BTreeMap<String, bool>> = BTreeMap::new();
+        let mut harness: BTreeMap<String, bool> = BTreeMap::new();
+        let (mut cases, mut instances) = (0usize, 0usize);
         for fixture in operation_fixtures() {
             let tests: serde_json::Value = serde_json::from_str(&read_fixture(&fixture)).unwrap();
             for tc in tests.as_array().unwrap() {
-                let base = a3b_observe(tc);
-                // every op location: (txn index or None, op index)
-                let mut locs = Vec::new();
+                cases += 1;
+                let base = op_case_observation(tc);
+                let mut locs: Vec<serde_json::Value> = Vec::new();
                 if let Some(txns) = tc.get("txns").and_then(|v| v.as_array()) {
                     for (ti, txn) in txns.iter().enumerate() {
-                        for oi in 0..txn["ops"].as_array().unwrap().len() { locs.push((Some(ti), oi)); }
+                        for oi in 0..txn["ops"].as_array().unwrap().len() {
+                            locs.push(serde_json::json!(["txns", ti, "ops", oi]));
+                        }
                     }
                 } else {
-                    for oi in 0..tc["ops"].as_array().unwrap().len() { locs.push((None, oi)); }
+                    for oi in 0..tc["ops"].as_array().unwrap().len() {
+                        locs.push(serde_json::json!(["ops", oi]));
+                    }
                 }
-                for (ti, oi) in locs {
-                    let op = match ti { Some(t) => &tc["txns"][t]["ops"][oi], None => &tc["ops"][oi] };
-                    let verb = op["op"].as_str().unwrap().to_string();
+                for loc in locs {
+                    let ptr: String = loc.as_array().unwrap().iter()
+                        .map(|s| format!("/{}", s.as_str().map(str::to_string).unwrap_or_else(|| s.to_string())))
+                        .collect();
+                    let op = tc.pointer(&ptr).unwrap();
+                    let Some(verb) = op["op"].as_str() else { continue };
+                    if !verbs.contains(verb) {
+                        continue; // history ops in a flat `ops` list carry no arguments
+                    }
                     instances += 1;
-                    let keys: BTreeSet<String> = op.as_object().unwrap().keys().filter(|k| *k != "op").cloned().collect();
-                    for k in keys {
+                    let entry = args.entry(verb.to_string()).or_default();
+                    for k in op.as_object().unwrap().keys().filter(|k| *k != "op") {
                         let mut m = tc.clone();
-                        let o = match ti { Some(t) => &mut m["txns"][t]["ops"][oi], None => &mut m["ops"][oi] };
-                        o.as_object_mut().unwrap().remove(&k);
-                        let changed = std::panic::catch_unwind(|| a3b_observe(&m)).map(|r| r != base).unwrap_or(true);
-                        let e = eff.entry(verb.clone()).or_default().entry(k).or_insert((0, 0));
-                        e.1 += 1;
-                        if changed { e.0 += 1; }
+                        m.pointer_mut(&ptr).unwrap().as_object_mut().unwrap().remove(k);
+                        let changed = op_case_observation(&m) != base;
+                        let slot = if OP_HARNESS_KEYS.contains(&k.as_str()) {
+                            harness.entry(format!("{verb}.{k}")).or_insert(false)
+                        } else {
+                            entry.entry(k.clone()).or_insert(false)
+                        };
+                        *slot |= changed;
                     }
                 }
             }
         }
-        eprintln!("A3B-PROBE instances={instances}");
-        for (v, ks) in &eff {
-            let s: Vec<String> = ks.iter().map(|(k, (c, n))| format!("{k}={c}/{n}")).collect();
-            eprintln!("A3B {v:28} {}", s.join(" "));
-        }
+        // FAIL CLOSED: an empty derivation would write an empty file and agree with it.
+        assert!(cases >= 100 && instances >= 300 && args.len() >= 40,
+            "op-argument derivation read {cases} case(s), {instances} op instance(s), {} verb(s): \
+             below the floor, so the scan is broken or the corpus moved", args.len());
+        let live: Vec<&String> = harness.iter().filter(|(_, c)| **c).map(|(k, _)| k).collect();
+        assert!(live.is_empty(), "a HARNESS key changed what op_apply does, so it is an argument: {live:?}");
+        let unwitnessed: Vec<&String> = verbs.iter().filter(|v| !args.contains_key(*v)).collect();
+        let arguments: serde_json::Map<String, serde_json::Value> = args.iter().map(|(v, ks)| {
+            let m: serde_json::Map<String, serde_json::Value> = ks.iter()
+                .map(|(k, c)| (k.clone(), serde_json::json!(if *c { "witnessed" } else { "inert" })))
+                .collect();
+            (v.clone(), serde_json::Value::Object(m))
+        }).collect();
+        let doc = serde_json::json!({
+            "_doc": OP_ARGUMENTS_DOC,
+            "harness_keys": OP_HARNESS_KEYS,
+            "arguments": arguments,
+            "verbs_with_no_corpus_instance": unwitnessed,
+        });
+        serde_json::to_string_pretty(&doc).unwrap() + "\n"
+    }
+
+    const OP_ARGUMENTS_DOC: &[&str] = &[
+        "THE OP ARGUMENTS -- each op's argument keys, DERIVED by running the operations corpus (node A3b slice 2,",
+        "docs/AGENT_API.md section 4). GENERATED: never edit by hand; regenerate with",
+        "`cargo test generate_op_arguments -- --ignored` from jas_dioxus/.",
+        "",
+        "HOW. For every op instance in every operations fixture, each key is dropped in turn and the case re-run through",
+        "`op_apply`; the observation is the document left behind and each op's result class. `witnessed`: dropping the key",
+        "changed the observation at least once. `inert`: the corpus carries the key and no drop changed anything.",
+        "",
+        "WHAT `inert` DOES NOT MEAN. It does not mean `op_apply` ignores the key: an argument whose corpus value equals its",
+        "default reads `inert` too. The corpus cannot tell those apart, so this file does not claim to.",
+        "",
+        "WHAT IS ASSERTED. Rust and Swift each re-derive this file from the same corpus and must equal it byte for byte",
+        "(jas_dioxus/src/cross_language_test.rs `op_arguments_file_matches_the_corpus`, JasSwift/Tests/",
+        "CrossLanguageTests.swift `opArgumentsFileMatchesTheCorpus`), so the two ports agree on every witnessed argument.",
+        "`harness_keys` are corpus keys for the test harness, excluded here and asserted inert in every verb.",
+        "",
+        "WHAT IT DOES NOT COVER. An argument the corpus never carries is absent. The verbs listed under",
+        "`verbs_with_no_corpus_instance` have no entry at all.",
+    ];
+
+    /// The derived argument table equals the committed file. Not ignored.
+    #[test]
+    fn op_arguments_file_matches_the_corpus() {
+        let derived = derive_op_arguments();
+        let committed = read_fixture("operations/op_arguments.json");
+        assert!(derived == committed,
+            "operations/op_arguments.json is not what the corpus derives. If an op's arguments or the \
+             corpus changed on purpose, regenerate it (`cargo test generate_op_arguments -- --ignored`) \
+             and read the diff: a key moving from `witnessed` to `inert` means a test stopped exercising it.");
+    }
+
+    /// Regenerates `operations/op_arguments.json` from the corpus.
+    #[test]
+    #[ignore]
+    fn generate_op_arguments() {
+        let path = format!("{}/operations/op_arguments.json", FIXTURES);
+        std::fs::write(&path, derive_op_arguments()).unwrap();
+        eprintln!("generate_op_arguments: wrote {path}");
     }
 
     /// Bootstrap helper: generate expected JSON for operation tests.
