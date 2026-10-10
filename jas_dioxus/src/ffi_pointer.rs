@@ -862,6 +862,21 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The coupling a KEY must honour too (W5-3a): `P` switches through the
+    /// same switch, so the toolbar's checked button follows a keyboard switch.
+    #[test]
+    fn a_tool_key_writes_active_tool() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"));
+        assert_eq!(unsafe { jas_key_event(e, 'p' as u32, 0) }, JasStatus::Ok);
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("pen"),
+                   "a key switch lights the pen button, not the old one");
+        assert_eq!(unsafe { &*e }.tool_slot().as_ref().map(|(i, _)| TOOL_IDS[*i]), Some("pen"));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The other direction: a tool picked by index is the toolbar's checked one.
     #[test]
     fn jas_set_tool_writes_active_tool() {
