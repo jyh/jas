@@ -1,0 +1,790 @@
+{
+  "_doc": [
+    "MCP EXCHANGES -- the agent API's transport (docs/AGENT_API.md section 4, node A3/A4), replayed by BOTH active ports:",
+    "Rust's mcp::Session and Swift's McpSession. One case = a setup document and an ordered list of steps.",
+    "A `client` step sends one JSON-RPC message and expects exactly the listed outgoing messages, in order.",
+    "An `artist` step is the artist's act in the app (accept / reject a proposal, or an `edit` that runs `ops` in one",
+    "transaction) and expects the notifications the client is sent.",
+    "MATCHING: objects match as a SUBSET (keys the expectation names must match; others may be present), arrays match",
+    "element-wise with equal length, scalars exactly. \"<any>\" matches any value. An expected OBJECT against an actual",
+    "STRING parses the string as JSON first (resources/read's `text`). \"<settled>\" matches the canonical test JSON of the",
+    "case's setup document, so a pending preview that leaked into the resource reds.",
+    "A proposal's ERROR TEXT for a failing op is not pinned here: it carries each port's own op-error wording."
+  ],
+  "cases": [
+    {
+      "name": "initialize declares tools and a subscribable resource",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+              "protocolVersion": "2025-06-18",
+              "capabilities": {},
+              "clientInfo": {
+                "name": "t",
+                "version": "0"
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {
+                  "tools": {},
+                  "resources": {
+                    "subscribe": true
+                  }
+                },
+                "serverInfo": {
+                  "name": "jas",
+                  "version": "<any>"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized"
+          },
+          "expect": []
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "ping"
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the tools are propose and withdraw_proposal, and never accept",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "tools": [
+                  {
+                    "name": "propose"
+                  },
+                  {
+                    "name": "withdraw_proposal"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a proposal is pending and the settled document is unchanged",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://document"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://document",
+                    "mimeType": "application/json",
+                    "text": {
+                      "pending_proposal": "p-0",
+                      "document": "<settled>"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the artist accepts: the proposal lands and a subscriber is told",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "resources/subscribe",
+            "params": {
+              "uri": "jas://document"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {}
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "artist": "accept",
+          "proposal": "p-0",
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/jas/proposal",
+              "params": {
+                "proposal": "p-0",
+                "state": "accepted"
+              }
+            },
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/resources/updated",
+              "params": {
+                "uri": "jas://document"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://document"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "result": {
+                "contents": [
+                  {
+                    "uri": "jas://document",
+                    "mimeType": "application/json",
+                    "text": {
+                      "pending_proposal": null
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the artist rejects: nothing changes, so a subscriber hears only the fate",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "resources/subscribe",
+            "params": {
+              "uri": "jas://document"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {}
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "artist": "reject",
+          "proposal": "p-0",
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/jas/proposal",
+              "params": {
+                "proposal": "p-0",
+                "state": "rejected"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "an artist edit withdraws the pending proposal",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "resources/subscribe",
+            "params": {
+              "uri": "jas://document"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {}
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "artist": "edit",
+          "ops": [
+            {
+              "op": "select_rect",
+              "x": 0,
+              "y": 0,
+              "width": 200,
+              "height": 200,
+              "extend": false
+            },
+            {
+              "op": "move_selection",
+              "dx": 1,
+              "dy": 1
+            }
+          ],
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/jas/proposal",
+              "params": {
+                "proposal": "p-0",
+                "state": "withdrawn"
+              }
+            },
+            {
+              "jsonrpc": "2.0",
+              "method": "notifications/resources/updated",
+              "params": {
+                "uri": "jas://document"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the client withdraws its own proposal; a second withdraw is refused",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "withdraw_proposal",
+              "arguments": {
+                "proposal": "p-0"
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 withdrawn"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+              "name": "withdraw_proposal",
+              "arguments": {
+                "proposal": "p-0"
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "refused: proposal p-0 is not pending"
+                  }
+                ],
+                "structuredContent": {
+                  "refused": "refused: proposal p-0 is not pending"
+                },
+                "isError": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a second proposal while one is pending is refused",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "nudge",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "proposal p-0 is shown to the artist; it lands only if the artist accepts it"
+                  }
+                ],
+                "structuredContent": {
+                  "proposal": "p-0"
+                },
+                "isError": false
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "again",
+                "ops": [
+                  {
+                    "op": "select_rect",
+                    "x": 0,
+                    "y": 0,
+                    "width": 50,
+                    "height": 50,
+                    "extend": false
+                  },
+                  {
+                    "op": "move_selection",
+                    "dx": 10,
+                    "dy": 20
+                  }
+                ]
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "result": {
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "refused: proposal p-0 is still pending"
+                  }
+                ],
+                "structuredContent": {
+                  "refused": "refused: proposal p-0 is still pending"
+                },
+                "isError": true
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "protocol errors are named",
+      "setup_svg": "two_rects.svg",
+      "steps": [
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "no/such/method"
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 1,
+              "error": {
+                "code": -32601,
+                "message": "method not found: no/such/method"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "resources/read",
+            "params": {
+              "uri": "jas://elsewhere"
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 2,
+              "error": {
+                "code": -32602,
+                "message": "unknown resource uri"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+              "name": "accept",
+              "arguments": {}
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 3,
+              "error": {
+                "code": -32602,
+                "message": "unknown tool: accept"
+              }
+            }
+          ]
+        },
+        {
+          "client": {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+              "name": "propose",
+              "arguments": {
+                "name": "x"
+              }
+            }
+          },
+          "expect": [
+            {
+              "jsonrpc": "2.0",
+              "id": 4,
+              "error": {
+                "code": -32602,
+                "message": "propose needs `name` (string) and `ops` (array)"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

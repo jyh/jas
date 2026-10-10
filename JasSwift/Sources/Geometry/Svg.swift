@@ -569,7 +569,52 @@ private func tspanSvg(_ t: Tspan) -> String {
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
 
+/// An element's gradients as `jas:fill-gradient` / `jas:stroke-gradient` (I1b-1).
+///
+/// The value is the canonical test-JSON gradient (`gradientJson`), the one form
+/// both ports already write byte-identically and parse. Standard SVG gradients
+/// cannot carry `midpoint_to_next`, `aspect_ratio`, `method`, `dither`,
+/// `stroke_sub_mode` or a freeform gradient's nodes, and a round trip may not
+/// narrow anything, so this attribute is the record.
+private func gradientAttrs(_ elem: Element) -> String {
+    var s = ""
+    if let g = elem.fillGradient {
+        s += " jas:fill-gradient=\"\(escapeXml(gradientJson(g)))\""
+    }
+    if let g = elem.strokeGradient {
+        s += " jas:stroke-gradient=\"\(escapeXml(gradientJson(g)))\""
+    }
+    return s
+}
+
+/// The inverse of ``gradientAttrs(_:)``: an attribute that does not parse is
+/// ignored, as every other unreadable `jas:` attribute is.
+private func applyGradientAttrs(_ node: XMLElement, _ elem: Element) -> Element {
+    func read(_ key: String) -> Gradient? {
+        guard let raw = node.attribute(forName: key)?.stringValue,
+              let data = raw.data(using: .utf8),
+              let v = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return parseGradient(v)
+    }
+    var out = elem
+    if let g = read("jas:fill-gradient") { out = withFillGradient(out, fillGradient: g) }
+    if let g = read("jas:stroke-gradient") { out = withStrokeGradient(out, strokeGradient: g) }
+    return out
+}
+
 public func elementSvg(_ elem: Element, indent: String) -> String {
+    let out = elementSvgBody(elem, indent: indent)
+    let attrs = gradientAttrs(elem)
+    if attrs.isEmpty { return out }
+    // Inserted right after the tag name, in both ports, so the two writers
+    // agree on where the attribute sits.
+    let chars = Array(out)
+    var i = indent.count + 1
+    while i < chars.count, chars[i].isASCII, chars[i].isLetter || chars[i].isNumber { i += 1 }
+    return String(chars[..<i]) + attrs + String(chars[i...])
+}
+
+private func elementSvgBody(_ elem: Element, indent: String) -> String {
     switch elem {
     case .line(let v):
         // A Line carries a width profile (the Width tool and the eyedropper
@@ -1758,7 +1803,7 @@ private func parseElement(_ node: XMLNode) -> Element? {
     guard let parsed = parseElementBody(node) else { return nil }
     guard let elem = node as? XMLElement else { return parsed }
     let locked = elem.attribute(forName: "jas:locked")?.stringValue == "true"
-    return parsed.withLocked(locked)
+    return applyGradientAttrs(elem, parsed.withLocked(locked))
 }
 
 private func parseElementBody(_ node: XMLNode) -> Element? {

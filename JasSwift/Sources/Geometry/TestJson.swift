@@ -232,7 +232,7 @@ private func strokeAlignStr(_ a: StrokeAlign) -> String {
 /// may not narrow anything. The cost is stated rather than hidden: a shared
 /// fixture can only carry a stop colour THIS port can express, because the
 /// reader below converts the object back to hex.
-private func gradientJson(_ g: Gradient) -> String {
+func gradientJson(_ g: Gradient) -> String {
     let o = JsonObj()
     o.num("angle", g.angle)
     o.num("aspect_ratio", g.aspectRatio)
@@ -1041,7 +1041,7 @@ private func parseStroke(_ v: Any?) -> Stroke? {
                   opacity: opacity)
 }
 
-private func parseGradient(_ v: Any?) -> Gradient? {
+func parseGradient(_ v: Any?) -> Gradient? {
     guard let d = v as? [String: Any] else { return nil }
     let stops = (d["stops"] as? [[String: Any]] ?? []).map { s in
         GradientStop(color: "#" + parseColor(s["color"]).toHex(),

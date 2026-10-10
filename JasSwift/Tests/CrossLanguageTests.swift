@@ -111,6 +111,21 @@ private func assertSvgRoundtrip(_ name: String) {
 
 @Test func svgParseLineBasic() { assertSvgParse("line_basic") }
 @Test func svgParseRectBasic() { assertSvgParse("rect_basic") }
+@Test func svgParseGradientFillAndStroke() { assertSvgParse("gradient_fill_and_stroke") }
+/// I1b-1: a FREEFORM fill gradient survives this port's SVG round trip (the
+/// twin of Rust's `a_freeform_fill_and_an_hsb_stroke_stop_survive_the_svg_round_trip`,
+/// minus the hsb stop, which this port's hex colour cannot hold). Not in the SVG
+/// corpus, because a freeform gradient takes the legacy path on Windows.
+@Test func svgRoundTripKeepsAFreeformFillGradient() {
+    let g = Gradient(type: .freeform, angle: 0, aspectRatio: 100, method: .points, dither: false,
+                     strokeSubMode: .within, stops: [],
+                     nodes: [GradientNode(x: 0.25, y: 0.5, color: "#ff8000", opacity: 80, spread: 30),
+                             GradientNode(x: 0.75, y: 0.2, color: "#0000ff", opacity: 100, spread: 10)])
+    let path = Element.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10), .closePath],
+                                 fill: Fill(color: .black), fillGradient: g, fillRule: .nonzero))
+    let back = svgToDocument(documentToSvg(Document(layers: [Layer(children: [path])], artboards: [])))
+    #expect(back.layers.first?.children.first?.fillGradient == g)
+}
 @Test func svgParseRectWithStroke() { assertSvgParse("rect_with_stroke") }
 @Test func svgParseCircleBasic() { assertSvgParse("circle_basic") }
 @Test func svgParseEllipseBasic() { assertSvgParse("ellipse_basic") }
@@ -1658,6 +1673,113 @@ private func journalWithoutActors(_ model: Model) -> String {
     var journal = Array(model.journal[0..<model.journalHeadValue])
     for i in journal.indices { journal[i].actor = "-" }
     return journalToTestJson(journal)
+}
+
+private func mcpIsBool(_ v: Any) -> Bool {
+    guard let n = v as? NSNumber else { return false }
+    return CFGetTypeID(n) == CFBooleanGetTypeID()
+}
+
+private func mcpCanonical(_ v: Any) -> String {
+    let d = try! JSONSerialization.data(withJSONObject: v, options: [.sortedKeys, .fragmentsAllowed])
+    return String(data: d, encoding: .utf8)!
+}
+
+/// The `mcp_exchanges.json` matcher (its `_doc` states the rules), the twin of
+/// Rust's `mcp_match`. Records an Issue naming the path on any mismatch.
+private func mcpMatch(_ want: Any, _ got: Any, _ settled: Any, _ at: String) {
+    if let w = want as? String, w == "<any>" { return }
+    if let w = want as? String, w == "<settled>" {
+        if mcpCanonical(got) != mcpCanonical(settled) { Issue.record("\(at): not the settled document") }
+        return
+    }
+    if let wm = want as? [String: Any] {
+        var g: Any = got
+        if let t = got as? String, let d = t.data(using: .utf8), let parsed = try? JSONSerialization.jsonObject(with: d) { g = parsed }
+        guard let gm = g as? [String: Any] else { Issue.record("\(at): expected an object, got \(got)"); return }
+        for (k, wv) in wm {
+            guard let gv = gm[k] else { Issue.record("\(at): missing key `\(k)`"); continue }
+            mcpMatch(wv, gv, settled, "\(at).\(k)")
+        }
+        return
+    }
+    if let wa = want as? [Any] {
+        guard let ga = got as? [Any], ga.count == wa.count else { Issue.record("\(at): array length, got \(got)"); return }
+        for (i, (wv, gv)) in zip(wa, ga).enumerated() { mcpMatch(wv, gv, settled, "\(at)[\(i)]") }
+        return
+    }
+    if want is NSNull { if !(got is NSNull) { Issue.record("\(at): expected null, got \(got)") }; return }
+    if mcpIsBool(want) || mcpIsBool(got) {
+        if !(mcpIsBool(want) && mcpIsBool(got) && (want as! Bool) == (got as! Bool)) { Issue.record("\(at): \(want) != \(got)") }
+        return
+    }
+    if let wn = want as? NSNumber, let gn = got as? NSNumber {
+        if wn.doubleValue != gn.doubleValue { Issue.record("\(at): \(wn) != \(gn)") }
+        return
+    }
+    if let ws = want as? String, let gs = got as? String {
+        if ws != gs { Issue.record("\(at): \"\(ws)\" != \"\(gs)\"") }
+        return
+    }
+    Issue.record("\(at): \(want) != \(got)")
+}
+
+/// A3b in Swift, the twin of Rust's `propose_declares_the_op_vocabulary_as_an_enum`:
+/// `propose`'s `op` is an enum of the declared vocabulary. The expectation is
+/// read from the FILE, not from `McpSession`, and its size is asserted.
+@Test func mcpProposeDeclaresTheOpVocabularyAsAnEnum() throws {
+    let out = McpSession(model: Model(document: Document(layers: [Layer(children: [])], artboards: [])))
+        .handle(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+    let msg = try JSONSerialization.jsonObject(with: Data(out[0].utf8)) as! [String: Any]
+    let tools = (msg["result"] as! [String: Any])["tools"] as! [[String: Any]]
+    let propose = tools.first { $0["name"] as? String == "propose" }!
+    let schema = propose["inputSchema"] as! [String: Any]
+    let ops = (schema["properties"] as! [String: Any])["ops"] as! [String: Any]
+    let op = ((ops["items"] as! [String: Any])["properties"] as! [String: Any])["op"] as! [String: Any]
+    let got = op["enum"] as? [String] ?? []
+    let file = try JSONSerialization.jsonObject(with: readFixture("operations/op_vocabulary.json").data(using: .utf8)!) as! [String: Any]
+    let want = (file["verbs"] as! [String: Any]).keys.sorted()
+    #expect(want.count >= 40, "the vocabulary file is not vacuous: \(want.count)")
+    #expect(got == want)
+}
+
+/// A4 (i), the transport conformance corpus: every case of
+/// `operations/mcp_exchanges.json` replayed through `McpSession`, the twin of
+/// Rust's `mcp_exchanges`.
+@Test func mcpExchanges() throws {
+    let json = readFixture("operations/mcp_exchanges.json")
+    let file = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let cases = file["cases"] as! [[String: Any]]
+    #expect(cases.count >= 8, "mcp_exchanges has \(cases.count) cases")
+    for c in cases {
+        let name = c["name"] as! String
+        let doc = svgToDocument(readFixture("svg/\(c["setup_svg"] as! String)"))
+        let settled = try JSONSerialization.jsonObject(with: Data(documentToTestJson(doc).utf8))
+        let session = McpSession(model: Model(document: doc))
+        for (i, step) in (c["steps"] as! [[String: Any]]).enumerated() {
+            var out: [String]
+            if let msg = step["client"] {
+                out = session.handle(mcpCanonical(msg))
+            } else {
+                let pid = step["proposal"] as? String ?? ""
+                switch step["artist"] as! String {
+                case "accept": out = session.artistAccept(pid)
+                case "reject": out = session.artistReject(pid)
+                case "edit":
+                    let ops = step["ops"] as! [[String: Any]]
+                    out = session.artistEdit { m in
+                        let ctl = Controller(model: m)
+                        for op in ops { if let e = opApply(m, ctl, op) { Issue.record("\(name): an edit op failed: \(e)") } }
+                    }
+                default: Issue.record("\(name): unknown artist act"); out = []
+                }
+            }
+            let got = out.map { try! JSONSerialization.jsonObject(with: Data($0.utf8)) }
+            let want = step["expect"] as! [Any]
+            #expect(want.count == got.count, "\(name) step \(i): outgoing count; got \(out)")
+            for (k, (w, g)) in zip(want, got).enumerated() { mcpMatch(w, g, settled, "\(name) step \(i) message \(k)") }
+        }
+    }
 }
 
 /// A3b, at runtime, the twin of Rust's `op_vocabulary_tests`: every verb
