@@ -6,8 +6,8 @@ WHY THIS EXISTS
 A proposal (docs/AGENT_API.md) carries primitive document ops. Until A3b those
 ops were declared nowhere but as two `match` statements, one per active port,
 so the vocabulary an agent may use was a property of the code, not of the
-spec, and nothing said the two matches agreed. They did (51 and 51, the same
-set, measured 2026-10-09), which is exactly the state that rots unwatched:
+spec, and nothing said the two matches agreed. They did (59 and 59, the same
+set; the first count, 2026-10-09, read 51 because it skipped computed arms), which is exactly the state that rots unwatched:
 adding a verb to one port is a complete, compiling, green change.
 
 WHAT IT ASSERTS
@@ -25,8 +25,13 @@ WHAT IT DOES NOT COVER
 * Each op's ARGUMENTS (the file says why they are not declared yet).
 * The `history` class is checked against the file only. Neither port names
   that set in one place, so there is nothing to compare it with.
-* It reads source text. A verb dispatched by a computed string, rather than
-  a literal match arm, is invisible to it.
+* It reads source text. A COMPUTED arm (`v if NAME.contains(&v) =>` in Rust,
+  `case let v where NAME.contains(v):` in Swift) is resolved against the list
+  constant it names; any other computed arm makes it REFUSE. Until 2026-10-10
+  it skipped computed arms silently, and the eight print-config setters
+  (`PRINT_CONFIG_VERBS`, the same eight in both ports) were missing from the
+  vocabulary: 51 declared, 59 accepted. A drop-one-key probe of the operations
+  corpus (A3b slice 2) found them by running `op_apply`, not by reading it.
 """
 import json
 import re
@@ -160,10 +165,24 @@ def _self_test():
         ("a declared verb no port accepts", (VOCAB, '"verbs": {', '"verbs": {\n    "zz_declared": "edit",'), "rust op_apply lacks `zz_declared`"),
         ("a selection verb moved to edit", (VOCAB, '"select_all": "selection"', '"select_all": "edit"'), "rust is_selection_only_verb accepts `select_all`"),
         ("an unknown class", (VOCAB, '"paste": "edit"', '"paste": "editing"'), "unknown class for paste"),
+        ("a verb only Rust's computed list holds", (RUST, '    "set_advanced_field",\n];', '    "set_advanced_field",\n    "zz_rust_list_only",\n];'), "rust op_apply accepts `zz_rust_list_only`"),
+        ("a verb only Swift's computed list holds", (SWIFT, '    "set_advanced_field",\n]', '    "set_advanced_field",\n    "zz_swift_list_only",\n]'), "swift opApply accepts `zz_swift_list_only`"),
     ]
     for name, edit, needle in arms:
         got, _ = check(scratch(edit))
         assert any(needle in f for f in got), f"self-test arm '{name}' did not red: {got}"
+    # A computed arm the scanner cannot resolve, or whose list it cannot find, must
+    # REFUSE: silently skipping it is how 8 verbs were missed until 2026-10-10.
+    refusals = [
+        ("an unresolvable computed arm", (RUST, "v if PRINT_CONFIG_VERBS.contains(&v) =>", "v if v.starts_with(\"set_\") =>")),
+        ("a computed arm whose list is gone", (SWIFT, "let PRINT_CONFIG_VERBS: Set<String> = [", "let PRINT_CONFIG_VERBS_RENAMED: Set<String> = [")),
+    ]
+    for name, edit in refusals:
+        try:
+            check(scratch(edit))
+            raise AssertionError(f"self-test refusal arm '{name}' did not refuse")
+        except Refusal:
+            pass
     # The anti-vacuity floor: a scanner that matches nothing must REFUSE, not agree.
     try:
         check(scratch((RUST, "pub fn op_apply(model", "pub fn op_apply_renamed(model")))
@@ -171,7 +190,7 @@ def _self_test():
     except Refusal:
         pass
     print(f"check_op_vocabulary SELF-TEST: OK ({len(arms)} planted defects redded, "
-          f"1 unreadable subject refused, the real tree clean: {counts})")
+          f"{len(refusals) + 1} unreadable subjects refused, the real tree clean: {counts})")
 
 
 def main(argv):
@@ -189,7 +208,7 @@ def main(argv):
         print(f"check_op_vocabulary: FAIL ({len(findings)} finding(s))")
         return 1
     print(f"check_op_vocabulary: OK ({counts}). Not covered: op arguments; the history class "
-          f"beyond the file; a verb dispatched by a computed string.")
+          f"beyond the file. Computed arms resolved against their list constants.")
     return 0
 
 
