@@ -226,9 +226,23 @@ internal sealed class QuitCmd : Cmd
 {
 }
 
-/// <summary>Open the TOOLBAR pane: read its plan and publish it (the pane registry).</summary>
-internal sealed class ToolbarOpenCmd : Cmd
+/// <summary>
+/// Open a pane of the registry (the toolbar, or a dock group) on a panel: read
+/// its plan and publish it under the pane's KEY. Re-opening a key switches its
+/// panel (a dock group's tab).
+/// </summary>
+internal sealed class DockOpenCmd : Cmd
 {
+    internal string Name = "";
+    internal long AvailW;
+}
+
+/// <summary>A dock layout as the core answered it, with the panel list its tabs are labelled from.</summary>
+internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson);
+
+internal sealed class PaneOpenCmd : Cmd
+{
+    internal string Key = "";
     internal string PanelId = "";
     internal long AvailW;
 }
@@ -1128,8 +1142,12 @@ internal sealed unsafe class Canvas : IDisposable
                     ApplyPanelOpen(po);
                     break;
 
-                case ToolbarOpenCmd to:
-                    ApplyToolbarOpen(to);
+                case PaneOpenCmd pn:
+                    ApplyPaneOpen(pn);
+                    break;
+
+                case DockOpenCmd dk:
+                    ApplyDockOpen(dk);
                     break;
 
                 case PanelClickCmd pc:
@@ -1159,7 +1177,7 @@ internal sealed unsafe class Canvas : IDisposable
             // The toolbar's `checked` follows `active_tool`, which a gesture's
             // tool can move; it is re-read with the dock, never inside the
             // dock's own refresh (Q6.2 counts the dock open's crossings).
-            ApplyToolbarRefresh(cause);
+            ApplyPanesRefresh(cause);
         }
 
         if (dirty && _swapChain is not null)
@@ -3970,52 +3988,149 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Something in this drain may have moved the document. Render thread only.</summary>
     private bool _panelStale;
 
-    /// <summary>The TOOLBAR pane's plan, published like <see cref="Panel"/>.</summary>
-    internal volatile PanelSnapshot? Toolbar;
+    // =======================================================================
+    // THE PANE REGISTRY (2026-10-10): every pane beside the legacy dock pane --
+    // the toolbar, and under SB_DOCK the dock's tab groups -- keyed, each with
+    // its own panel, width and sequence. Each is re-read with the dock, never
+    // inside the dock's own refresh (Q6.2 counts the dock open's crossings).
+    // =======================================================================
 
-    /// <summary>A new <see cref="Toolbar"/> has been published. Raised on the UI thread.</summary>
-    internal Action? ToolbarChanged { get; set; }
+    /// <summary>The key the toolbar pane is registered under.</summary>
+    internal const string ToolbarPaneKey = "toolbar";
 
-    /// <summary>The toolbar pane's id, or null when no toolbar is open. Render thread only.</summary>
-    private string? _toolbarId;
-    private long _toolbarAvailW;
-    private long _toolbarSeq;
+    private sealed class PaneChannel
+    {
+        internal string PanelId = "";
+        internal long AvailW;
+        internal long Seq;
+    }
 
-    internal void OpenToolbar(string panelId, long availW) =>
-        _queue.Add(new ToolbarOpenCmd { PanelId = panelId, AvailW = availW });
+    /// <summary>The open panes, by key. Render thread only.</summary>
+    private readonly Dictionary<string, PaneChannel> _panes = new(StringComparer.Ordinal);
 
-    private void ApplyToolbarOpen(ToolbarOpenCmd open)
+    /// <summary>Each pane's newest plan, published by the render thread for the UI thread.</summary>
+    internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, PanelSnapshot> Panes =
+        new(StringComparer.Ordinal);
+
+    /// <summary>A new plan for the pane with this key was published. Raised on the UI thread.</summary>
+    internal Action<string>? PaneChanged { get; set; }
+
+    internal void OpenPane(string key, string panelId, long availW) =>
+        _queue.Add(new PaneOpenCmd { Key = key, PanelId = panelId, AvailW = availW });
+
+    /// <summary>The row prefix a pane reports under: the toolbar keeps its own name.</summary>
+    private static string PaneNoun(string key) =>
+        key == ToolbarPaneKey ? "TOOLBAR" : "PANE";
+
+    private void ApplyPaneOpen(PaneOpenCmd open)
     {
         if (_engine == IntPtr.Zero)
         {
-            _report($"RUSTFAIL TOOLBAR REFUSED panel={open.PanelId} cause=open -- no engine {Tids()}");
+            _report($"RUSTFAIL {PaneNoun(open.Key)} REFUSED {PaneHead(open.Key)}panel={open.PanelId} cause=open "
+                  + $"-- no engine {Tids()}");
             return;
         }
-        _toolbarId = open.PanelId;
-        _toolbarAvailW = open.AvailW;
-        var plan = ApplyToolbarRefresh("open");
+        var seq = _panes.TryGetValue(open.Key, out var old) ? old.Seq : 0;
+        _panes[open.Key] = new PaneChannel { PanelId = open.PanelId, AvailW = open.AvailW, Seq = seq };
+        var plan = ApplyPaneRefresh(open.Key, "open");
         if (plan is null) { return; }
-        _report($"TOOLBAR OPEN panel={open.PanelId} avail-w={open.AvailW} {PlanReading(plan)} "
-              + $"seq={_toolbarSeq} {Tids()}");
+        _report($"{PaneNoun(open.Key)} OPEN {PaneHead(open.Key)}panel={open.PanelId} avail-w={open.AvailW} "
+              + $"{PlanReading(plan)} seq={_panes[open.Key].Seq} {Tids()}");
     }
 
-    /// <summary>Read the toolbar's plan and publish it; null when none is open or the core refused.</summary>
-    private string? ApplyToolbarRefresh(string cause)
+    /// <summary>`key=dock0 ` for a dock group; nothing for the toolbar, whose rows predate keys.</summary>
+    private static string PaneHead(string key) => key == ToolbarPaneKey ? "" : $"key={key} ";
+
+    /// <summary>Read one pane's plan and publish it; null when it is not open or the core refused.</summary>
+    private string? ApplyPaneRefresh(string key, string cause)
     {
-        if (_engine == IntPtr.Zero || _toolbarId is null) { return null; }
-        var id = System.Text.Encoding.UTF8.GetBytes(_toolbarId);
+        if (_engine == IntPtr.Zero || !_panes.TryGetValue(key, out var ch)) { return null; }
+        var id = System.Text.Encoding.UTF8.GetBytes(ch.PanelId);
         var plan = JasCore.TakeString(
-            JasCore.jas_panel_plan(_engine, id, (nuint)id.Length, _toolbarAvailW, 0));
+            JasCore.jas_panel_plan(_engine, id, (nuint)id.Length, ch.AvailW, 0));
         if (plan.Length == 0)
         {
-            _report($"RUSTFAIL TOOLBAR REFUSED panel={_toolbarId} cause={cause} -- jas_panel_plan "
-                  + $"returned the empty span {Tids()}");
+            _report($"RUSTFAIL {PaneNoun(key)} REFUSED {PaneHead(key)}panel={ch.PanelId} cause={cause} "
+                  + $"-- jas_panel_plan returned the empty span {Tids()}");
             return null;
         }
-        _toolbarSeq++;
-        Toolbar = new PanelSnapshot(_toolbarId, plan, _toolbarSeq, cause);
-        PostToUi(() => ToolbarChanged?.Invoke());
+        ch.Seq++;
+        Panes[key] = new PanelSnapshot(ch.PanelId, plan, ch.Seq, cause);
+        PostToUi(() => PaneChanged?.Invoke(key));
         return plan;
+    }
+
+    /// <summary>Re-read every open pane; returns each one's plan by key (null where refused).</summary>
+    private Dictionary<string, string?> ApplyPanesRefresh(string cause)
+    {
+        var plans = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var key in _panes.Keys.ToList()) { plans[key] = ApplyPaneRefresh(key, cause); }
+        return plans;
+    }
+
+    /// <summary>The dock layout the UI builds its group frames from, published before any group's plan.</summary>
+    internal volatile DockSnapshot? Dock;
+
+    /// <summary>A <see cref="Dock"/> was published. Raised on the UI thread.</summary>
+    internal Action? DockChanged { get; set; }
+
+    internal void OpenDock(string name, long availW) =>
+        _queue.Add(new DockOpenCmd { Name = name, AvailW = availW });
+
+    /// <summary>The key a dock group's pane is registered under.</summary>
+    internal static string DockPaneKey(int group) => $"dock{group}";
+
+    private void ApplyDockOpen(DockOpenCmd open)
+    {
+        if (_engine == IntPtr.Zero)
+        {
+            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- no engine {Tids()}");
+            return;
+        }
+        var name = System.Text.Encoding.UTF8.GetBytes(open.Name);
+        var layout = JasCore.TakeString(JasCore.jas_dock_layout(name, (nuint)name.Length));
+        if (layout.Length == 0)
+        {
+            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- jas_dock_layout returned the empty span {Tids()}");
+            return;
+        }
+        if (PanelList is null) { PanelList = JasCore.TakeString(JasCore.jas_panel_list()); }
+        var groups = new List<(string Active, int Count)>();
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(layout);
+            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
+            {
+                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
+                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
+                if (ids.Count == 0) { continue; }
+                groups.Add((ids[Math.Clamp(active, 0, ids.Count - 1)], ids.Count));
+            }
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} {ex.GetType().Name} {Tids()}");
+            return;
+        }
+        // Published FIRST, so the UI has built every group's frame before any
+        // group's plan arrives (one thread, one dispatcher queue: in order).
+        Dock = new DockSnapshot(open.Name, layout, PanelList);
+        PostToUi(() => DockChanged?.Invoke());
+        _report($"DOCK OPEN name={open.Name} groups={groups.Count} panels={groups.Sum(g => g.Count)} {Tids()}");
+        for (var i = 0; i < groups.Count; i++)
+        {
+            ApplyPaneOpen(new PaneOpenCmd { Key = DockPaneKey(i), PanelId = groups[i].Active, AvailW = open.AvailW });
+        }
+    }
+
+    /// <summary>The key of the open pane showing this panel, or null.</summary>
+    private string? PaneKeyOf(string panelId)
+    {
+        foreach (var (key, ch) in _panes)
+        {
+            if (string.Equals(ch.PanelId, panelId, StringComparison.Ordinal)) { return key; }
+        }
+        return null;
     }
 
     internal void OpenPanel(string panelId, long availW, string via) =>
@@ -4192,9 +4307,8 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_engine == IntPtr.Zero) { return false; }
         var head = ClickHead(click);
-        var toToolbar = _toolbarId is not null
-            && string.Equals(click.PanelId, _toolbarId, StringComparison.Ordinal);
-        if (!toToolbar && !string.Equals(click.PanelId, _panelId, StringComparison.Ordinal))
+        var paneKey = PaneKeyOf(click.PanelId);
+        if (paneKey is null && !string.Equals(click.PanelId, _panelId, StringComparison.Ordinal))
         {
             // A person used a control of the pane they were LOOKING AT, and the
             // selector's open ran first. Its reply rows could not be checked
@@ -4245,9 +4359,9 @@ internal sealed unsafe class Canvas : IDisposable
         // a dock click can move what the toolbar shows (and the reverse). The
         // reply's rows are checked against the plan of the pane that was clicked.
         var dockPlan = ApplyPanelRefresh(click.Event);
-        var toolbarPlan = ApplyToolbarRefresh(click.Event);
+        var panePlans = ApplyPanesRefresh(click.Event);
         _panelStale = false;
-        var plan = toToolbar ? toolbarPlan : dockPlan;
+        var plan = paneKey is null ? dockPlan : panePlans.GetValueOrDefault(paneKey);
         var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
         var outcome = channel.Length == 0 ? "changed" : "unchanged";
         var row = $"PANEL CLICK {head} outcome={outcome} "

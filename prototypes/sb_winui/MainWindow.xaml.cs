@@ -220,18 +220,124 @@ public sealed partial class MainWindow : Window
     private const long ToolbarAvailW = 72;
 
     private bool _toolbarWanted;
-    private bool _toolbarRefused;
 
-    /// <summary>A new toolbar plan was published. Draw it, on the UI thread.</summary>
-    private void OnToolbarChanged()
+    // =======================================================================
+    // THE DOCK (2026-10-10): `default_layouts.yaml`'s tab groups, under SB_DOCK.
+    // The core answers the groups (`jas_dock_layout`); each group is a
+    // PaneView with a tab strip, and a tab re-opens that group's pane on the
+    // chosen panel. Nothing here names a panel: the ids and the tab labels are
+    // the core's (`jas_panel_list` summaries, the id where it sends none).
+    // =======================================================================
+
+    private bool _dockWanted;
+    private string _dockName = "";
+    private StackPanel? _dockStack;
+
+    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs);
+    private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
+
+    private PaneView? DockGroupView(string key) => _dockGroups.TryGetValue(key, out var g) ? g.View : null;
+
+    /// <summary>Show which tab of a group is the panel its pane now holds.</summary>
+    private void MarkDockTab(string key, string panelId)
     {
-        var snap = _canvas.Toolbar;
-        if (snap is null) { return; }
-        try { _toolbar.DrawPane(snap); }
+        if (!_dockGroups.TryGetValue(key, out var g)) { return; }
+        foreach (var (id, tab) in g.Tabs)
+        {
+            var on = string.Equals(id, panelId, StringComparison.Ordinal);
+            tab.FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
+            tab.Opacity = on ? 1.0 : 0.6;
+        }
+    }
+
+    /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
+    private void OnDockChanged()
+    {
+        var snap = _canvas.Dock;
+        if (snap is null || _dockStack is null) { return; }
+        try
+        {
+            var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (snap.PanelListJson.Length > 0)
+            {
+                using var list = System.Text.Json.JsonDocument.Parse(snap.PanelListJson);
+                foreach (var row in list.RootElement.EnumerateArray())
+                {
+                    var id = row.GetProperty("id").GetString() ?? "";
+                    var sum = row.GetProperty("summary");
+                    labels[id] = sum.ValueKind == System.Text.Json.JsonValueKind.String ? sum.GetString() ?? id : id;
+                }
+            }
+            using var doc = System.Text.Json.JsonDocument.Parse(snap.LayoutJson);
+            _dockStack.Children.Clear();
+            _dockGroups.Clear();
+            var i = 0;
+            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
+            {
+                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
+                if (ids.Count == 0) { continue; }
+                var key = SbWinUi.Canvas.DockPaneKey(i++);
+                var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 4, 4, 0) };
+                var tabList = new List<(string, Button)>();
+                foreach (var id in ids)
+                {
+                    var panelId = id;
+                    var tab = new Button
+                    {
+                        Content = labels.TryGetValue(id, out var l) ? l : id,
+                        FontSize = 11,
+                        Padding = new Thickness(6, 2, 6, 2),
+                        Margin = new Thickness(0, 0, 2, 0),
+                        MinWidth = 0,
+                        MinHeight = 0,
+                    };
+                    tab.Click += (_, _) => _canvas.OpenPane(key, panelId, PaneAvailW);
+                    tabs.Children.Add(tab);
+                    tabList.Add((id, tab));
+                }
+                var scroll = new ScrollViewer
+                {
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                };
+                var body = new StackPanel();
+                body.Children.Add(tabs);
+                body.Children.Add(scroll);
+                var frame = new Border
+                {
+                    BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                        Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xC8, 0xC8, 0xC8)),
+                    BorderThickness = new Thickness(0, 0, 0, 1),
+                    Child = body,
+                };
+                _dockStack.Children.Add(frame);
+                var active = g.TryGetProperty("active", out var a) ? Math.Clamp(a.GetInt32(), 0, ids.Count - 1) : 0;
+                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList);
+                MarkDockTab(key, ids[active]);
+            }
+            Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
+                 + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
+        }
         catch (Exception ex)
         {
-            Report($"RUSTFAIL TOOLBAR DRAW threw {ex.GetType().Name}: {ex.Message}");
+            Report($"RUSTFAIL DOCK DRAW threw {ex.GetType().Name}: {ex.Message}");
         }
+    }
+    private bool _toolbarRefused;
+
+    /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
+    private void OnPaneChanged(string key)
+    {
+        if (!_canvas.Panes.TryGetValue(key, out var snap)) { return; }
+        var view = key == SbWinUi.Canvas.ToolbarPaneKey ? _toolbar : DockGroupView(key);
+        if (view is null) { return; }
+        try { view.DrawPane(snap); }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL {(key == SbWinUi.Canvas.ToolbarPaneKey ? "TOOLBAR" : $"PANE key={key}")} DRAW threw "
+                 + $"{ex.GetType().Name}: {ex.Message}");
+        }
+        if (key != SbWinUi.Canvas.ToolbarPaneKey) { MarkDockTab(key, snap.PanelId); }
     }
 
     public MainWindow()
@@ -251,7 +357,8 @@ public sealed partial class MainWindow : Window
         _canvas.DocumentDirtyChanged = OnDocumentDirtyChanged;
         _canvas.HashTaken = OnHashTaken;
         _canvas.PanelChanged = OnPanelChanged;
-        _canvas.ToolbarChanged = OnToolbarChanged;
+        _canvas.PaneChanged = OnPaneChanged;
+        _canvas.DockChanged = OnDockChanged;
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
         // (W2-5, stop 5). Shown here, its column is already taken when the
@@ -271,6 +378,21 @@ public sealed partial class MainWindow : Window
             // THE TOOLBAR PANE, behind its knob until the harness proves its
             // pane verdicts read the dock alone beside it. The SAME predicate
             // as the other pane knobs (whitespace is unset).
+            // THE DOCK's tab groups, behind SB_DOCK=<layout name> (e.g. Default):
+            // the dock column then holds the groups instead of the one pane.
+            var dockKnob = Environment.GetEnvironmentVariable("SB_DOCK");
+            if (!string.IsNullOrWhiteSpace(dockKnob))
+            {
+                _dockWanted = true;
+                _dockName = dockKnob.Trim();
+                _dockStack = new StackPanel();
+                PaneHost.Child = new ScrollViewer
+                {
+                    HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                    VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                    Content = _dockStack,
+                };
+            }
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
             {
                 _toolbarWanted = true;
@@ -993,10 +1115,23 @@ public sealed partial class MainWindow : Window
             // AFTER the scene, so the app's own preload has landed and the plan
             // is read against the document a person will actually see. The
             // queue is ordered, so this is a sequence, not a race.
-            if (_paneWanted) { _canvas.OpenPanel(firstPanel, PaneAvailW, "app"); }
+            if (_dockWanted)
+            {
+                _canvas.OpenDock(_dockName, PaneAvailW);
+                // SB_DOCK_SWITCH=<key>:<content id>: one tab switch, queued after the
+                // dock opens, exactly as a tab's click queues it.
+                var sw = Environment.GetEnvironmentVariable("SB_DOCK_SWITCH");
+                if (!string.IsNullOrWhiteSpace(sw))
+                {
+                    var at = sw.IndexOf(':');
+                    if (at <= 0) { Report($"RUSTFAIL DOCK SWITCH REFUSED -- SB_DOCK_SWITCH='{sw}' is not <key>:<panel>"); }
+                    else { _canvas.OpenPane(sw[..at].Trim(), sw[(at + 1)..].Trim(), PaneAvailW); }
+                }
+            }
+            else if (_paneWanted) { _canvas.OpenPanel(firstPanel, PaneAvailW, "app"); }
             if (_toolbarWanted)
             {
-                _canvas.OpenToolbar(ToolbarPanelId, ToolbarAvailW);
+                _canvas.OpenPane(SbWinUi.Canvas.ToolbarPaneKey, ToolbarPanelId, ToolbarAvailW);
                 // SB_TOOLBAR_SYNTH=<widget>: one click on a toolbar control, queued
                 // after the open, through the method a person's click reaches --
                 // the toolbar's twin of SB_PANEL_SYNTH, so its routing is driven.
