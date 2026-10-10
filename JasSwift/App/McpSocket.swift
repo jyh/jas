@@ -8,11 +8,12 @@ import JasLib
 // `jas_mcp --attach PATH`. Gated entirely behind the flag, like --test-fifo:
 // no flag, no socket.
 //
-// ⚠️ NOT YET WIRED, and stated so that nobody reads it as done: the artist's
-// side. Accept and Reject need the overlay (A4 (iv)), and an artist edit made
-// through the app's ordinary paths does not pass through
-// `McpSession.artistEdit`, so the client is not told its proposal was
-// withdrawn. The model DOES withdraw it; only the notification is missing.
+// An artist edit made through the app's ordinary paths reaches the client
+// through the model's hooks (A4 (iv)(b)): a withdrawn proposal and, for a
+// subscriber, a settled-document change.
+// ⚠️ NOT YET WIRED, and stated so that nobody reads it as done: Accept and
+// Reject. They need the overlay (A4 (iv)(a)); until it exists the first
+// observable is not reachable from the app.
 extension JasAppDelegate {
     /// Parse `--mcp-socket <path>`, the same shape as `--test-fifo`.
     static var mcpSocketPath: String? {
