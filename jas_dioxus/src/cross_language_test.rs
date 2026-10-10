@@ -3739,6 +3739,145 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // Agent proposals (docs/AGENT_API.md §3). The laws are RELATIONAL: a
+    // case's `steps` must equal its `equals_steps` in the canonical document
+    // AND in the journal with every `actor` blanked; the actors are then
+    // checked on their own, so "accept equals hand" and "accept is attributed"
+    // are two separate claims that can fail separately.
+    // ---------------------------------------------------------------
+
+    /// Run one proposal-law step list. Returns the model and, in order, the
+    /// proposal ids each refused call named.
+    fn run_proposal_steps(setup_svg: &str, steps: &[serde_json::Value]) -> (Model, Vec<String>) {
+        let doc = svg_to_document(&read_fixture(&format!("svg/{setup_svg}")));
+        let mut model = Model::new(doc, None);
+        let mut refused = Vec::new();
+        for step in steps {
+            let obj = step.as_object().expect("a step is an object");
+            assert_eq!(obj.len(), 1, "a step has exactly one verb: {step}");
+            let (verb, arg) = obj.iter().next().unwrap();
+            let outcome = match verb.as_str() {
+                "txn" => {
+                    model.begin_txn();
+                    if let Some(name) = arg["name"].as_str() {
+                        model.name_txn(name);
+                    }
+                    for op in arg["ops"].as_array().unwrap() {
+                        apply_op(&mut model, op);
+                    }
+                    model.commit_txn();
+                    Ok(())
+                }
+                "propose" => model
+                    .propose(
+                        arg["id"].as_str().unwrap(),
+                        arg["actor"].as_str().unwrap(),
+                        arg["name"].as_str().unwrap(),
+                        arg["ops"].as_array().unwrap(),
+                    )
+                    .map_err(|e| (arg["id"].as_str().unwrap().to_string(), e)),
+                "accept" => {
+                    let id = arg.as_str().unwrap();
+                    model.accept_proposal(id).map_err(|e| (id.to_string(), e))
+                }
+                "reject" => {
+                    let id = arg.as_str().unwrap();
+                    model.reject_proposal(id).map_err(|e| (id.to_string(), e))
+                }
+                "history" => {
+                    match arg.as_str() {
+                        Some("undo") => model.undo(),
+                        Some("redo") => model.redo(),
+                        other => panic!("unknown history directive: {other:?}"),
+                    }
+                    Ok(())
+                }
+                other => panic!("unknown proposal-law step verb: {other}"),
+            };
+            if let Err((id, _why)) = outcome {
+                refused.push(id);
+            }
+        }
+        (model, refused)
+    }
+
+    fn journal_without_actors(model: &Model) -> String {
+        let mut journal = model.journal()[..model.journal_head()].to_vec();
+        for t in &mut journal {
+            t.actor = "-".to_string();
+        }
+        journal_to_test_json(&journal)
+    }
+
+    #[test]
+    fn proposal_laws() {
+        let tests: serde_json::Value =
+            serde_json::from_str(&read_fixture("operations/proposal_laws.json")).unwrap();
+        let cases = tests.as_array().unwrap();
+        // Anti-vacuity: the law file is not empty, and every case below asserts.
+        assert!(cases.len() >= 8, "proposal_laws.json has {} cases, expected >= 8", cases.len());
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            let setup = tc["setup_svg"].as_str().unwrap();
+            let (model, refused) = run_proposal_steps(setup, tc["steps"].as_array().unwrap());
+            let (hand, hand_refused) =
+                run_proposal_steps(setup, tc["equals_steps"].as_array().unwrap());
+            assert!(hand_refused.is_empty(), "{name}: equals_steps must not refuse");
+            // A pending proposal shows on the canvas and is in no transaction,
+            // so its document and its journal are compared against different
+            // step lists: `journal_equals_steps` when given, else `equals_steps`.
+            let journal_ref = match tc.get("journal_equals_steps").and_then(|v| v.as_array()) {
+                Some(steps) => run_proposal_steps(setup, steps).0,
+                None => run_proposal_steps(setup, tc["equals_steps"].as_array().unwrap()).0,
+            };
+
+            let actual = <DocumentOps as OpWorld>::to_test_json(&model);
+            let expected = <DocumentOps as OpWorld>::to_test_json(&hand);
+            assert_eq!(actual, expected, "{name}: document differs from equals_steps");
+            assert_eq!(
+                journal_without_actors(&model),
+                journal_without_actors(&journal_ref),
+                "{name}: journal differs from its reference steps (actors blanked)"
+            );
+            let actors: Vec<&str> = model.journal()[..model.journal_head()]
+                .iter()
+                .map(|t| t.actor.as_str())
+                .collect();
+            let want_actors: Vec<&str> = tc["expect_actors"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            assert_eq!(actors, want_actors, "{name}: journal actors");
+            let want_refused: Vec<String> = tc["expect_refused"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            assert_eq!(refused, want_refused, "{name}: refused calls");
+            let want_pending = tc
+                .get("expect_pending")
+                .and_then(|v| v.as_array())
+                .and_then(|a| a.first())
+                .and_then(|v| v.as_str());
+            assert_eq!(model.pending_proposal_id(), want_pending, "{name}: pending proposal");
+
+            // checkpoint_equivalence (OP_LOG.md §6), extended: the journal
+            // replays to the document WITHOUT the preview, because a preview
+            // is not history.
+            let replayed = replay_journal(setup, model.journal(), model.journal_head());
+            let settled = Model::new(model.document_without_preview().clone(), None);
+            assert_eq!(
+                replayed,
+                <DocumentOps as OpWorld>::to_test_json(&settled),
+                "{name}: checkpoint_equivalence (journal replay vs the un-previewed document)"
+            );
+        }
+    }
+
+    // ---------------------------------------------------------------
     // Production op-capture cross-language fixture (OP_LOG.md §9,
     // Increment 3b-B). The 3b-B production logic already ships in Rust
     // (effects.rs `run_doc_effect` routing the three replay-safe verbs +
