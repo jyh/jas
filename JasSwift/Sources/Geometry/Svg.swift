@@ -663,7 +663,7 @@ private func stdGradientToJas(_ def: StdGradientDef, _ bbox: GradientBBox) -> Gr
         let (x1, y1) = (at(num("x2", 1), bx, bw), at(num("y2", 0), by, bh))
         let d = ((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0)).squareRoot()
         guard d > 0 else { return nil }
-        let angle = atan2(-(y1 - y0), x1 - x0) * 180 / Double.pi + 0.0  // -0.0 -> 0.0, as Rust
+        let angle = atan2(-(y1 - y0), x1 - x0) * (180 / Double.pi) + 0.0  // -0.0 -> 0.0, as Rust
         let side = d / 2.0.squareRoot()
         let parent: GradientBBox = ((x0 + x1) / 2 - side / 2, (y0 + y1) / 2 - side / 2, side, side)
         let stops = remapLinearStops(def.stops, angleDeg: angle, parent: parent, fragment: bbox)
@@ -694,7 +694,7 @@ private func standardGradientXml(_ id: String, _ g: Gradient, _ bbox: GradientBB
     var xml: String
     if g.type == .linear {
         let hd = (bw * bw + bh * bh).squareRoot() / 2
-        let rad = g.angle * Double.pi / 180
+        let rad = g.angle * (Double.pi / 180)
         let (dx, dy) = (cos(rad) * hd, -sin(rad) * hd)
         xml = "    <linearGradient id=\"\(id)\" gradientUnits=\"userSpaceOnUse\" x1=\"\(fmtFull(px(cx - dx)))\" y1=\"\(fmtFull(px(cy - dy)))\" x2=\"\(fmtFull(px(cx + dx)))\" y2=\"\(fmtFull(px(cy + dy)))\">\n"
     } else {
