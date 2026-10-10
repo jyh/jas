@@ -587,6 +587,229 @@ fn escape_xml(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// A standard `<linearGradient>` / `<radialGradient>` read from the file
+/// (I1b-2): its geometry attributes as written, and its stops resolved.
+#[derive(Clone)]
+struct StdGradientDef {
+    radial: bool,
+    user_space: bool,
+    attrs: HashMap<String, String>,
+    stops: Vec<GradientStop>,
+}
+
+thread_local! {
+    /// The standard gradients of the import in progress, by `id`. Set only for
+    /// the duration of [`try_svg_to_document`] by [`StdGradientScope`], exactly
+    /// as [`USER_UNIT_PT`] is, so one import cannot leak into the next.
+    static STD_GRADIENTS: std::cell::RefCell<HashMap<String, StdGradientDef>> =
+        std::cell::RefCell::new(HashMap::new());
+}
+
+struct StdGradientScope(HashMap<String, StdGradientDef>);
+
+impl StdGradientScope {
+    fn enter(root: &XmlNode) -> Self {
+        let mut found = HashMap::new();
+        collect_std_gradients(root, &mut found);
+        StdGradientScope(STD_GRADIENTS.with(|c| c.replace(found)))
+    }
+}
+
+impl Drop for StdGradientScope {
+    fn drop(&mut self) {
+        STD_GRADIENTS.with(|c| *c.borrow_mut() = std::mem::take(&mut self.0));
+    }
+}
+
+fn collect_std_gradients(node: &XmlNode, out: &mut HashMap<String, StdGradientDef>) {
+    let tag = strip_ns(&node.tag);
+    if tag == "linearGradient" || tag == "radialGradient" {
+        if let Some(id) = node.attrs.get("id") {
+            let stops = node.children.iter()
+                .filter(|c| strip_ns(&c.tag) == "stop")
+                .filter_map(|c| {
+                    let raw = c.attrs.get("offset").map(String::as_str).unwrap_or("0");
+                    let offset = match raw.trim().strip_suffix('%') {
+                        Some(pct) => pct.trim().parse::<f64>().ok()? / 100.0,
+                        None => raw.trim().parse::<f64>().ok()?,
+                    }.clamp(0.0, 1.0);
+                    let color = parse_color(c.attrs.get("stop-color").map(String::as_str).unwrap_or("black"))?;
+                    let opacity = get_f(c, "stop-opacity", 1.0).clamp(0.0, 1.0);
+                    Some(GradientStop { color, opacity: opacity * 100.0, location: offset * 100.0,
+                                        midpoint_to_next: 50.0 })
+                })
+                .collect();
+            out.insert(id.clone(), StdGradientDef {
+                radial: tag == "radialGradient",
+                user_space: node.attrs.get("gradientUnits").map(String::as_str) == Some("userSpaceOnUse"),
+                attrs: node.attrs.clone(),
+                stops,
+            });
+        }
+    }
+    for c in &node.children {
+        collect_std_gradients(c, out);
+    }
+}
+
+/// The `id` in a paint value of the form `url(#id)` or `url(#id) <fallback>`.
+fn paint_url_id(v: &str) -> Option<&str> {
+    let rest = v.trim().strip_prefix("url(")?;
+    let end = rest.find(')')?;
+    rest[..end].trim().strip_prefix('#')
+}
+
+/// A standard gradient as the jas gradient that PAINTS THE SAME RAMP on
+/// `bbox` (I1b-2). The painter resolves a jas linear gradient as a ramp from
+/// `centre - hd*u` to `centre + hd*u` (hd = half the bbox diagonal), and the
+/// file's vector `P0 -> P1` is in general shorter and offset. That vector is
+/// exactly the ramp of a square box of side `|P1-P0|/sqrt(2)` centred on its
+/// midpoint, so `gradient_remap::remap_linear_stops` re-expresses the stops
+/// on the element's own box, clipping with interpolated end colours.
+/// RADIAL is re-centred on the bbox (JYH 2026-07-26: the model has no anchor),
+/// and its radius maps to `aspect_ratio`. `gradientTransform`, `spreadMethod`,
+/// `fx`/`fy` and `href` inheritance are not read.
+fn std_gradient_to_jas(def: &StdGradientDef, bbox: (f64, f64, f64, f64)) -> Option<Gradient> {
+    if def.stops.len() < 2 {
+        return None;
+    }
+    let (bx, by, bw, bh) = bbox;
+    let num = |k: &str, d: f64| -> f64 {
+        match def.attrs.get(k).map(|v| v.trim()) {
+            Some(v) => match v.strip_suffix('%') {
+                Some(p) => p.parse::<f64>().map(|x| x / 100.0).unwrap_or(d),
+                None => v.parse::<f64>().unwrap_or(d),
+            },
+            None => d,
+        }
+    };
+    let px_or_frac = |v: f64, origin: f64, extent: f64| {
+        if def.user_space { pt(v) } else { origin + v * extent }
+    };
+    if !def.radial {
+        let (x0, y0) = (px_or_frac(num("x1", 0.0), bx, bw), px_or_frac(num("y1", 0.0), by, bh));
+        let (x1, y1) = (px_or_frac(num("x2", 1.0), bx, bw), px_or_frac(num("y2", 0.0), by, bh));
+        let d = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+        if d <= 0.0 {
+            return None;
+        }
+        // `+ 0.0` turns the -0.0 a horizontal vector yields into 0.0.
+        let angle = (-(y1 - y0)).atan2(x1 - x0).to_degrees() + 0.0;
+        let side = d / std::f64::consts::SQRT_2;
+        let parent = ((x0 + x1) / 2.0 - side / 2.0, (y0 + y1) / 2.0 - side / 2.0, side, side);
+        let stops = crate::algorithms::gradient_remap::remap_linear_stops(&def.stops, angle, parent, bbox);
+        return Some(Gradient { gtype: GradientType::Linear, angle, stops, ..Gradient::default() });
+    }
+    let half = bw.max(bh) / 2.0;
+    let r = if def.user_space { pt(num("r", 0.5)) } else { num("r", 0.5) * bw.max(bh) };
+    let aspect_ratio = if half > 0.0 { (100.0 * r / half).clamp(1.0, 1000.0) } else { 100.0 };
+    Some(Gradient { gtype: GradientType::Radial, aspect_ratio, stops: def.stops.clone(), ..Gradient::default() })
+}
+
+thread_local! {
+    /// The standard gradient elements the export in progress has written, so
+    /// `document_to_svg` can put them in a `<defs>` (I1b-2b). `None` outside
+    /// an export, so a bare `element_svg` call writes no `url(#…)` it could
+    /// not define.
+    static EXPORT_DEFS: std::cell::RefCell<Option<Vec<String>>> = const { std::cell::RefCell::new(None) };
+}
+
+struct ExportDefsScope(Option<Vec<String>>);
+
+impl ExportDefsScope {
+    fn enter() -> Self {
+        ExportDefsScope(EXPORT_DEFS.with(|c| c.replace(Some(Vec::new()))))
+    }
+    fn take(&self) -> Vec<String> {
+        EXPORT_DEFS.with(|c| c.borrow_mut().as_mut().map(std::mem::take).unwrap_or_default())
+    }
+}
+
+impl Drop for ExportDefsScope {
+    fn drop(&mut self) {
+        EXPORT_DEFS.with(|c| *c.borrow_mut() = self.0.take());
+    }
+}
+
+/// A jas gradient as the standard SVG element that paints the same ramp on
+/// `bbox` (pt), or `None` for a freeform gradient or fewer than two stops,
+/// which the painter does not draw either. The geometry is the painter's
+/// (`element_render::resolve_gradient`): linear from `centre - hd*u` to
+/// `centre + hd*u`, radial on the centre with `r = max(w,h)/2 * aspect/100`,
+/// in the element's own user space. A stop's opacity is the painter's too:
+/// the stop's `opacity` when it is not 100, else the colour's alpha.
+/// Coordinates are written at full precision, because the importer inverts
+/// them and four decimals would move the angle.
+fn standard_gradient_xml(id: &str, g: &Gradient, bbox: (f64, f64, f64, f64)) -> Option<String> {
+    if g.stops.len() < 2 || g.gtype == GradientType::Freeform {
+        return None;
+    }
+    let (bx, by, bw, bh) = bbox;
+    let (cx, cy) = (bx + bw / 2.0, by + bh / 2.0);
+    let open = match g.gtype {
+        GradientType::Linear => {
+            let hd = (bw * bw + bh * bh).sqrt() / 2.0;
+            let rad = g.angle.to_radians();
+            let (dx, dy) = (rad.cos() * hd, -rad.sin() * hd);
+            format!("<linearGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" x1=\"{}\" y1=\"{}\" x2=\"{}\" y2=\"{}\">",
+                    id, fmt_full(px(cx - dx)), fmt_full(px(cy - dy)), fmt_full(px(cx + dx)), fmt_full(px(cy + dy)))
+        }
+        _ => {
+            let r = (bw.max(bh) / 2.0) * (g.aspect_ratio / 100.0).max(0.01);
+            format!("<radialGradient id=\"{}\" gradientUnits=\"userSpaceOnUse\" cx=\"{}\" cy=\"{}\" r=\"{}\">",
+                    id, fmt_full(px(cx)), fmt_full(px(cy)), fmt_full(px(r)))
+        }
+    };
+    let mut xml = format!("    {open}\n");
+    for st in &g.stops {
+        let (r, gr, b, a) = st.color.to_rgba();
+        let alpha = if st.opacity == 100.0 { a } else { st.opacity / 100.0 };
+        let mut stop = format!("      <stop offset=\"{}\" stop-color=\"rgb({},{},{})\"",
+                               fmt_full(st.location / 100.0),
+                               (r * 255.0).round() as u8, (gr * 255.0).round() as u8, (b * 255.0).round() as u8);
+        if alpha < 1.0 {
+            stop += &format!(" stop-opacity=\"{}\"", fmt_full(alpha));
+        }
+        xml += &stop;
+        xml += "/>\n";
+    }
+    xml += if g.gtype == GradientType::Linear { "    </linearGradient>" } else { "    </radialGradient>" };
+    Some(xml)
+}
+
+/// Point the opening tag's `key` paint at `url(#id)`, keeping the colour as
+/// SVG's fallback (`none` becomes the bare url, because SVG's fallback paint
+/// cannot be `none` and the jas element has no fill to keep).
+fn point_paint_at(out: &str, key: &str, id: &str) -> String {
+    let tag_end = out.find('>').unwrap_or(out.len());
+    let needle = format!(" {key}=\"");
+    let Some(i) = out[..tag_end].find(&needle) else { return out.to_string() };
+    let v0 = i + needle.len();
+    let Some(len) = out[v0..].find('"') else { return out.to_string() };
+    let val = &out[v0..v0 + len];
+    let paint = if val == "none" { format!("url(#{id})") } else { format!("url(#{id}) {val}") };
+    format!("{}{}{}", &out[..v0], paint, &out[v0 + len..])
+}
+
+/// During an export, write each of the element's linear or radial gradients
+/// as a standard element and point its paint at it (I1b-2b).
+fn add_standard_gradients(elem: &Element, out: String) -> String {
+    let active = EXPORT_DEFS.with(|c| c.borrow().is_some());
+    if !active {
+        return out;
+    }
+    let bbox = crate::painter::element_render::gradient_bbox(elem);
+    let mut out = out;
+    for (key, g) in [("fill", elem.fill_gradient()), ("stroke", elem.stroke_gradient())] {
+        let Some(g) = g else { continue };
+        let id = EXPORT_DEFS.with(|c| format!("jas-g{}", c.borrow().as_ref().map_or(0, Vec::len) + 1));
+        let Some(xml) = standard_gradient_xml(&id, g, bbox) else { continue };
+        EXPORT_DEFS.with(|c| c.borrow_mut().as_mut().map(|d| d.push(xml)));
+        out = point_paint_at(&out, key, &id);
+    }
+    out
+}
+
 /// An element's gradients as `jas:fill-gradient` / `jas:stroke-gradient` (I1b-1).
 ///
 /// The value is the canonical test-JSON gradient (`test_json::gradient_json`),
@@ -617,11 +840,18 @@ fn apply_gradient_attrs(node: &XmlNode, elem: Element) -> Element {
             .and_then(|v| serde_json::from_str::<serde_json::Value>(&unescape_xml(v)).ok())
             .and_then(|v| crate::geometry::test_json::parse_gradient(&v))
     };
+    // A standard `url(#id)` paint (I1b-2), used only when the element carries
+    // no `jas:` gradient: the jas attribute is the lossless record and wins.
+    let standard = |key: &str, elem: &Element| {
+        let id = node.attrs.get(key).and_then(|v| paint_url_id(v))?;
+        let def = STD_GRADIENTS.with(|c| c.borrow().get(id).cloned())?;
+        std_gradient_to_jas(&def, crate::painter::element_render::gradient_bbox(elem)).map(Box::new)
+    };
     let mut elem = elem;
-    if let Some(g) = read("jas:fill-gradient") {
+    if let Some(g) = read("jas:fill-gradient").or_else(|| standard("fill", &elem)) {
         elem = crate::geometry::element::with_fill_gradient(&elem, Some(g));
     }
-    if let Some(g) = read("jas:stroke-gradient") {
+    if let Some(g) = read("jas:stroke-gradient").or_else(|| standard("stroke", &elem)) {
         elem = crate::geometry::element::with_stroke_gradient(&elem, Some(g));
     }
     elem
@@ -633,6 +863,7 @@ pub fn element_svg(elem: &Element, indent: &str) -> String {
     if attrs.is_empty() {
         return out;
     }
+    let out = add_standard_gradients(elem, out);
     // Inserted right after the tag name, in both ports, so the two writers
     // agree on where the attribute sits.
     let open = indent.len() + 1;
@@ -1122,8 +1353,20 @@ pub fn document_to_svg(doc: &Document) -> String {
         }
         lines.push("  </defs>".to_string());
     }
+    let defs = ExportDefsScope::enter();
+    let at = lines.len();
     for layer in &doc.layers {
         lines.push(element_svg(layer, "  "));
+    }
+    // The standard gradients the layers referred to (I1b-2b), written ahead
+    // of the layers. Empty for a document with no gradient, so its SVG is
+    // byte-identical to before.
+    let gradients = defs.take();
+    if !gradients.is_empty() {
+        let mut block = vec!["  <defs>".to_string()];
+        block.extend(gradients);
+        block.push("  </defs>".to_string());
+        lines.splice(at..at, block);
     }
     lines.push("</svg>".to_string());
     lines.join("\n")
@@ -1632,6 +1875,12 @@ fn parse_fill(node: &XmlNode) -> Option<Fill> {
         return None;
     }
     let opacity = get_f(node, "fill-opacity", 1.0);
+    // `url(#g) <colour>`: the colour is SVG's fallback paint and is the
+    // element's own fill; a bare `url(#g)` has none (I1b-2).
+    let val = match paint_url_id(val) {
+        Some(_) => val[val.find(')')? + 1..].trim(),
+        None => val.as_str(),
+    };
     Some(Fill { color: parse_color(val)?, opacity })
 }
 
@@ -1640,7 +1889,13 @@ fn parse_stroke(node: &XmlNode) -> Option<Stroke> {
     if val == "none" {
         return None;
     }
-    let color = parse_color(val)?;
+    // `url(#g) <colour>` strokes with a gradient whose WIDTH, caps and joins
+    // live on the Stroke, so a bare `url(#g)` still yields one: its colour is
+    // the fallback when given, else black (I1b-2).
+    let color = match paint_url_id(val) {
+        Some(_) => parse_color(val[val.find(')')? + 1..].trim()).unwrap_or(Color::BLACK),
+        None => parse_color(val)?,
+    };
     let width = pt(get_f(node, "stroke-width", 1.0));
     let lc = match get_s(node, "stroke-linecap", "butt") {
         "round" => LineCap::Round,
@@ -2679,6 +2934,7 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
     let mut root = parse_xml(svg)?;
     apply_style_sheet(&mut root);
     let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
+    let _gradients = StdGradientScope::enter(&root);
     let artboards = parse_artboards(&root);
     let (document_setup, print_preferences) = parse_jas_print_blocks(&root);
     let mut layers: Vec<Element> = Vec::new();
@@ -3519,6 +3775,232 @@ mod tests {
         let el = &layer.children[0];
         assert_eq!(el.fill_gradient(), Some(&fill), "the freeform fill came back equal");
         assert_eq!(el.stroke_gradient(), Some(&stroke), "the hsb stroke stop came back equal");
+    }
+
+    /// The colour a jas gradient paints at absolute position `x` along a
+    /// LINEAR ramp at angle 0 on `bbox`, computed here from the painter's
+    /// published geometry (ramp = centre ± half-diagonal), NOT by calling the
+    /// importer's own helper: an oracle that shares the subject's code agrees
+    /// by construction.
+    fn jas_linear_r_at(g: &Gradient, bbox: (f64, f64, f64, f64), x: f64) -> f64 {
+        let (bx, _, bw, bh) = bbox;
+        let hd = (bw * bw + bh * bh).sqrt() / 2.0;
+        let l = 50.0 * ((x - (bx + bw / 2.0)) / hd + 1.0);
+        let r = |c: &Color| c.to_rgba().0;
+        let st = &g.stops;
+        if l <= st[0].location { return r(&st[0].color); }
+        for w in st.windows(2) {
+            if l <= w[1].location {
+                let t = (l - w[0].location) / (w[1].location - w[0].location);
+                return r(&w[0].color) + t * (r(&w[1].color) - r(&w[0].color));
+            }
+        }
+        r(&st[st.len() - 1].color)
+    }
+
+    /// ⭐ I1b-2: a standard `<linearGradient>` in `<defs>`, referenced by
+    /// `fill="url(#g)"`, imports as a jas gradient that PAINTS THE SAME RAMP:
+    /// sampled at eleven points across the element, the red channel the jas
+    /// gradient paints equals the one the SVG gradient paints there. The SVG
+    /// vector runs edge to edge (objectBoundingBox), which is SHORTER than the
+    /// jas ramp (the bbox diagonal), so a naive copy of the offsets would be
+    /// visibly wrong. And the fallback colour after `url(#g)` is the element's
+    /// own fill.
+    #[test]
+    fn a_standard_linear_gradient_imports_as_the_same_painted_ramp() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+          </linearGradient></defs>
+          <g><rect x="0" y="0" width="96" height="48" fill="url(#g) rgb(0,255,0)"/></g></svg>"##;
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let el = &layer.children[0];
+        let g = el.fill_gradient().expect("the url(#g) fill imports as a gradient");
+        assert_eq!(g.gtype, GradientType::Linear);
+        assert!(g.angle.abs() < 1e-9, "a left-to-right vector is angle 0: {}", g.angle);
+        let Element::Rect(r) = &**el else { panic!("a rect") };
+        assert_eq!(r.fill.as_ref().map(|f| f.color.to_rgba()), Some((0.0, 1.0, 0.0, 1.0)),
+                   "the colour after url(#g) is the element's fill");
+        let bbox = el.bounds();
+        for k in 0..=10 {
+            let t = k as f64 / 10.0;
+            let x = bbox.0 + t * bbox.2;
+            let want = 1.0 - t; // red falls linearly from the left edge to the right
+            let got = jas_linear_r_at(g, bbox, x);
+            assert!((got - want).abs() < 1e-9, "at t={t}: the jas ramp paints r={got}, the SVG ramp r={want}");
+        }
+    }
+
+    /// I1b-2: the box a gradient is mapped onto is the one the PAINTER
+    /// resolves it on, which for a Rect is its raw `(x, y, w, h)`, not its
+    /// stroke-inflated `bounds()`. A stroked rect is the case that tells them
+    /// apart; the unstroked arm above cannot.
+    #[test]
+    fn a_standard_linear_gradient_on_a_stroked_rect_maps_onto_the_painted_box() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+          <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="rgb(255,0,0)"/><stop offset="1" stop-color="rgb(0,0,255)"/>
+          </linearGradient></defs>
+          <g><rect x="0" y="0" width="96" height="48" fill="url(#g)" stroke="black" stroke-width="16"/></g></svg>"##;
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let Element::Rect(r) = &*layer.children[0] else { panic!("a rect") };
+        let g = r.fill_gradient.as_deref().expect("a gradient");
+        let bbox = (r.x, r.y, r.width, r.height);
+        for k in 0..=10 {
+            let t = k as f64 / 10.0;
+            let got = jas_linear_r_at(g, bbox, bbox.0 + t * bbox.2);
+            assert!((got - (1.0 - t)).abs() < 1e-9, "at t={t}: r={got}, the SVG ramp paints {}", 1.0 - t);
+        }
+    }
+
+    /// I1b-2: a bare `stroke="url(#g)"` keeps its Stroke (the width lives
+    /// there) and gains a radial stroke gradient, re-centred, with the radius
+    /// mapped to `aspect_ratio` and the stops' offsets and opacities kept.
+    #[test]
+    fn a_standard_radial_stroke_gradient_imports_with_its_stroke() {
+        let svg = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96">
+          <defs><radialGradient id="r" cx="0.5" cy="0.5" r="0.25">
+            <stop offset="20%" stop-color="#ff0000" stop-opacity="0.5"/><stop offset="100%" stop-color="#0000ff"/>
+          </radialGradient></defs>
+          <g><rect x="0" y="0" width="96" height="96" fill="none" stroke="url(#r)" stroke-width="8"/></g></svg>"##;
+        let doc = svg_to_document(svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let Element::Rect(r) = &*layer.children[0] else { panic!("a rect") };
+        let s = r.stroke.as_ref().expect("a bare url(#r) stroke keeps its Stroke");
+        assert!((s.width - 6.0).abs() < 1e-9, "8 px is 6 pt: {}", s.width);
+        let g = r.stroke_gradient.as_deref().expect("and gains the gradient");
+        assert_eq!(g.gtype, GradientType::Radial);
+        // r = 0.25 of max(w, h) = a quarter of the box; the jas radius is
+        // max(w, h)/2 * aspect/100, so aspect = 50.
+        assert!((g.aspect_ratio - 50.0).abs() < 1e-9, "aspect {}", g.aspect_ratio);
+        assert_eq!(g.stops.len(), 2);
+        assert!((g.stops[0].location - 20.0).abs() < 1e-9 && (g.stops[0].opacity - 50.0).abs() < 1e-9);
+        assert!(r.fill.is_none() && r.fill_gradient.is_none(), "fill=none stays none");
+    }
+
+    /// I1b-2: when an element carries BOTH a `jas:` gradient and a standard
+    /// `url(#id)`, the jas attribute is the lossless record and wins.
+    #[test]
+    fn the_jas_gradient_attribute_wins_over_a_standard_url() {
+        let jas = r#"{&quot;angle&quot;:90.0,&quot;aspect_ratio&quot;:100.0,&quot;dither&quot;:false,&quot;method&quot;:&quot;classic&quot;,&quot;nodes&quot;:[],&quot;stops&quot;:[{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:0.0,&quot;g&quot;:0.0,&quot;r&quot;:0.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:0.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0},{&quot;color&quot;:{&quot;a&quot;:1.0,&quot;b&quot;:1.0,&quot;g&quot;:1.0,&quot;r&quot;:1.0,&quot;space&quot;:&quot;rgb&quot;},&quot;location&quot;:100.0,&quot;midpoint_to_next&quot;:50.0,&quot;opacity&quot;:100.0}],&quot;stroke_sub_mode&quot;:&quot;within&quot;,&quot;type&quot;:&quot;linear&quot;}"#;
+        let svg = format!(r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" viewBox="0 0 96 96" width="96" height="96">
+          <defs><linearGradient id="g"><stop offset="0" stop-color="red"/><stop offset="1" stop-color="blue"/></linearGradient></defs>
+          <g><rect jas:fill-gradient="{jas}" x="0" y="0" width="96" height="96" fill="url(#g) rgb(0,0,0)"/></g></svg>"##);
+        let doc = svg_to_document(&svg);
+        let Element::Layer(layer) = &doc.layers[0] else { panic!("a layer") };
+        let g = layer.children[0].fill_gradient().expect("a gradient");
+        assert!((g.angle - 90.0).abs() < 1e-9, "the jas attribute's angle, not the url's: {}", g.angle);
+    }
+
+    /// Drop every `jas:*-gradient` attribute, which is what an app that does
+    /// not know the `jas:` namespace reads.
+    fn without_jas_gradients(svg: &str) -> String {
+        let mut out = String::new();
+        let mut rest = svg;
+        while let Some(i) = rest.find(" jas:").filter(|&i| rest[i..].starts_with(" jas:fill-gradient=\"")
+                                                       || rest[i..].starts_with(" jas:stroke-gradient=\"")) {
+            out.push_str(&rest[..i]);
+            let after = &rest[i + 1..];
+            let q = after.find('"').unwrap();
+            let close = after[q + 1..].find('"').unwrap();
+            rest = &after[q + 1 + close + 1..];
+        }
+        out.push_str(rest);
+        out
+    }
+
+    /// ⭐ I1b-2b: the SVG a jas gradient is saved as carries a STANDARD
+    /// gradient beside the `jas:` record, so another app draws it. The oracle:
+    /// strip the `jas:` attribute (what that app sees), re-import, and the
+    /// standard element alone gives back the same angle and stops, because it
+    /// was written at the exact ends of the ramp the painter draws. A stroked,
+    /// non-square rect and an off-axis angle make the box and the projection
+    /// both load-bearing.
+    #[test]
+    fn a_linear_gradient_is_saved_as_a_standard_one_another_app_can_draw() {
+        let g = Gradient {
+            gtype: GradientType::Linear,
+            angle: 30.0,
+            stops: vec![
+                GradientStop { color: Color::rgb(1.0, 0.0, 0.0), opacity: 100.0, location: 20.0, midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(0.0, 0.0, 1.0), opacity: 40.0, location: 80.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        };
+        let mut rect = make_rect(10.0, 20.0, 60.0, 30.0);
+        if let Element::Rect(r) = &mut rect {
+            r.stroke = Some(Stroke::new(Color::BLACK, 6.0));
+            r.fill_gradient = Some(Box::new(g.clone()));
+        }
+        let svg = document_to_svg(&make_doc(vec![rect]));
+        assert!(svg.contains("<linearGradient id=\"jas-g1\""), "a standard element is written:\n{svg}");
+        assert!(svg.contains("fill=\"url(#jas-g1) rgb(255,0,0)\""), "the fill refers to it, keeping its own colour:\n{svg}");
+        let plain = without_jas_gradients(&svg);
+        assert!(!plain.contains("jas:fill-gradient"), "the control: the jas record is gone");
+        let back = svg_to_document(&plain);
+        let Element::Layer(layer) = &back.layers[0] else { panic!("a layer") };
+        let got = layer.children[0].fill_gradient().expect("the standard element alone imports");
+        // TOLERANCE 1e-3: the root's own `viewBox`/`width` are written at four
+        // decimals and the importer's user unit is derived from them, which
+        // moves every re-imported length by ~5e-7 relative (measured: stop
+        // locations off by 5e-5). That floor predates I1b and is not this
+        // code's to fix; 1e-3 is twenty times above it and far below any
+        // visible change.
+        assert!((got.angle - 30.0).abs() < 1e-3, "angle {}", got.angle);
+        let locs: Vec<f64> = got.stops.iter().map(|s| s.location).collect();
+        // The remap pads FLAT end samples at 0 and 100 (the colour beyond a
+        // ramp's last stop is that stop's), so the original stops are found
+        // by location, and each padded end must equal its neighbour.
+        for want in &g.stops {
+            let hit = got.stops.iter().find(|s| (s.location - want.location).abs() < 1e-3)
+                .unwrap_or_else(|| panic!("no stop at {} in {locs:?}", want.location));
+            assert!((hit.opacity - want.opacity).abs() < 1e-3 && hit.color.to_rgba() == want.color.to_rgba());
+        }
+        let (first, last) = (&got.stops[0], &got.stops[got.stops.len() - 1]);
+        assert!(first.color.to_rgba() == g.stops[0].color.to_rgba() && last.color.to_rgba() == g.stops[1].color.to_rgba(),
+                "the padded ends are flat: {locs:?}");
+    }
+
+    /// I1b-2b: a radial gradient is saved centred on the painter's box with
+    /// the radius the painter draws, so it re-imports with the same aspect.
+    /// It is on a STROKE, which is written `stroke="url(#…) <colour>"`.
+    #[test]
+    fn a_radial_stroke_gradient_is_saved_as_a_standard_one() {
+        let g = Gradient {
+            gtype: GradientType::Radial,
+            aspect_ratio: 70.0,
+            stops: vec![
+                GradientStop { color: Color::rgb(0.0, 1.0, 0.0), opacity: 100.0, location: 0.0, midpoint_to_next: 50.0 },
+                GradientStop { color: Color::rgb(1.0, 0.0, 1.0), opacity: 100.0, location: 100.0, midpoint_to_next: 50.0 },
+            ],
+            ..Gradient::default()
+        };
+        let mut rect = make_rect(0.0, 0.0, 40.0, 20.0);
+        if let Element::Rect(r) = &mut rect {
+            r.fill = None;
+            r.stroke = Some(Stroke::new(Color::BLACK, 2.0));
+            r.stroke_gradient = Some(Box::new(g.clone()));
+        }
+        let svg = document_to_svg(&make_doc(vec![rect]));
+        assert!(svg.contains("<radialGradient id=\"jas-g1\""), "{svg}");
+        assert!(svg.contains("stroke=\"url(#jas-g1) rgb(0,0,0)\""), "{svg}");
+        assert!(svg.contains("fill=\"none\""), "an unfilled rect stays unfilled: {svg}");
+        let back = svg_to_document(&without_jas_gradients(&svg));
+        let Element::Layer(layer) = &back.layers[0] else { panic!("a layer") };
+        let got = layer.children[0].stroke_gradient().expect("a radial gradient");
+        assert_eq!(got.gtype, GradientType::Radial);
+        // 1e-3, for the root-precision floor the linear arm above documents.
+        assert!((got.aspect_ratio - 70.0).abs() < 1e-3, "aspect {}", got.aspect_ratio);
+    }
+
+    /// The control for I1b-2b: a document with no gradient writes no standard
+    /// gradient element and no `url(`, so every existing SVG is byte-identical.
+    #[test]
+    fn a_document_with_no_gradient_writes_no_standard_gradient() {
+        let svg = document_to_svg(&make_doc(vec![make_rect(1.0, 2.0, 3.0, 4.0)]));
+        assert!(!svg.contains("Gradient") && !svg.contains("url("), "{svg}");
     }
 
     /// The control: an element with no gradient writes no gradient attribute,

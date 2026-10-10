@@ -566,6 +566,17 @@ mod tests {
         assert_svg_parse("gradient_fill_and_stroke");
     }
 
+    /// I1b-2: standard `<linearGradient>` / `<radialGradient>` paints import
+    /// to the same canonical JSON in both ports: an objectBoundingBox linear
+    /// fill on a STROKED rect (the box is the painter's, not the inflated
+    /// bounds), a userSpaceOnUse linear fill, and a bare `url(#)` radial
+    /// stroke. Each SVG span lies inside the jas ramp, so no stop is clipped
+    /// and no colour is interpolated (JasSwift's hex stop cannot carry one).
+    #[test]
+    fn svg_parse_gradient_standard_import() {
+        assert_svg_parse("gradient_standard_import");
+    }
+
     /// A3b, at runtime: every verb `operations/op_vocabulary.json` declares
     /// reaches an arm of `op_apply` (its error, if any, is about its arguments,
     /// never `UnknownVerb`), and a verb the file does not declare is
