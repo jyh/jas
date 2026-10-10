@@ -63,14 +63,41 @@ def _names(groups):
     return out
 
 
+def _const_list(src, decl, name, label):
+    """The string literals of the list constant `name`, declared by `decl` (a regex
+    that ends where the list's opening bracket is)."""
+    m = re.search(decl % re.escape(name), src)
+    if not m:
+        raise Refusal(f"{label}: a computed arm names `{name}`, and its declaration cannot be found")
+    j = src.find("]", m.end())
+    got = _names([src[m.end():j]])
+    if not got:
+        raise Refusal(f"{label}: `{name}` resolved to no verbs")
+    return got
+
+
 def rust_verbs(src):
     body = _body(src, "pub fn op_apply(model", "rust op_apply")
-    return _names(re.findall(r'^\s*((?:"[a-z_0-9.]+"\s*\|?\s*)+)(?:if [^=]*)?=>', body, re.M))
+    out = _names(re.findall(r'^\s*((?:"[a-z_0-9.]+"\s*\|?\s*)+)(?:if [^=]*)?=>', body, re.M))
+    # A COMPUTED arm (`v if NAME.contains(&v) =>`) accepts every verb of a list
+    # constant. Resolve it, and refuse any other computed arm rather than miss it.
+    for m in re.finditer(r'^\s*[a-z_]\w* if ([^=]*)=>', body, re.M):
+        c = re.fullmatch(r'\s*([A-Z_][A-Z0-9_]*)\.contains\(&\w+\)\s*', m.group(1))
+        if not c:
+            raise Refusal(f"rust op_apply: a computed arm this scanner cannot resolve: {m.group(0).strip()!r}")
+        out |= _const_list(src, r'pub const %s:\s*&\[&str\]\s*=\s*&\[', c.group(1), "rust op_apply")
+    return out
 
 
 def swift_verbs(src):
     body = _body(src, "public func opApply(", "swift opApply")
-    return _names(re.findall(r'^\s*case\s+((?:"[a-z_0-9.]+"\s*,?\s*)+):', body, re.M))
+    out = _names(re.findall(r'^\s*case\s+((?:"[a-z_0-9.]+"\s*,?\s*)+):', body, re.M))
+    for m in re.finditer(r'^\s*case\s+let\s+\w+\s+where\s+([^:]*):', body, re.M):
+        c = re.fullmatch(r'\s*([A-Z_][A-Z0-9_]*)\.contains\(\w+\)\s*', m.group(1))
+        if not c:
+            raise Refusal(f"swift opApply: a computed arm this scanner cannot resolve: {m.group(0).strip()!r}")
+        out |= _const_list(src, r'let %s:\s*Set<String>\s*=\s*\[', c.group(1), "swift opApply")
+    return out
 
 
 def rust_selection(src):
