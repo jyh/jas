@@ -163,9 +163,24 @@ impl Session {
     }
 }
 
-/// The tool list. The edit vocabulary is the `op_apply` primitive ops, passed
-/// through and validated by the model (a failing op refuses the proposal).
-/// Generating per-action schemas is node A3b (docs/AGENT_API.md §4).
+/// The declared op vocabulary (A3b): every verb `op_apply` accepts, as data.
+/// `scripts/check_op_vocabulary.py` asserts both ports' matches equal it.
+const OP_VOCABULARY: &str = include_str!("../../test_fixtures/operations/op_vocabulary.json");
+
+/// The verbs of [`OP_VOCABULARY`], sorted. Empty only if the embedded file is
+/// malformed, which `propose_declares_the_op_vocabulary_as_an_enum` reds.
+fn op_verbs() -> Vec<String> {
+    let mut v: Vec<String> = serde_json::from_str::<Value>(OP_VOCABULARY).ok()
+        .and_then(|f| f["verbs"].as_object().map(|o| o.keys().cloned().collect()))
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// The tool list. The edit vocabulary is the `op_apply` primitive ops: each
+/// op's `op` is an enum of the declared verbs (A3b, docs/AGENT_API.md §4), and
+/// the model still validates every op (a failing op refuses the proposal).
+/// An op's ARGUMENTS are not declared yet, so the items stay open objects.
 fn tool_list() -> Value {
     json!([
         {
@@ -175,7 +190,9 @@ fn tool_list() -> Value {
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "the action verb that names this edit"},
-                    "ops": {"type": "array", "items": {"type": "object", "required": ["op"]},
+                    "ops": {"type": "array",
+                            "items": {"type": "object", "required": ["op"],
+                                      "properties": {"op": {"type": "string", "enum": op_verbs()}}},
                             "description": "primitive document ops, applied in order"}
                 },
                 "required": ["name", "ops"]

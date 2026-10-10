@@ -115,14 +115,14 @@ def _self_test():
         for rel in (VOCAB, RUST, SWIFT):
             p = d / rel
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text((ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8")
+            p.write_text((ROOT / rel).read_text(encoding="utf-8"), encoding="utf-8", newline="")
         if edit:
             rel, old, new = edit
             p = d / rel
             s = p.read_text(encoding="utf-8")
             if s.count(old) != 1:
                 raise AssertionError(f"self-test anchor not unique in {rel}: {old!r}")
-            p.write_text(s.replace(old, new), encoding="utf-8")
+            p.write_text(s.replace(old, new), encoding="utf-8", newline="")
         return d
 
     findings, counts = check(scratch(None))

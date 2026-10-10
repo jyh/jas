@@ -1660,6 +1660,27 @@ private func journalWithoutActors(_ model: Model) -> String {
     return journalToTestJson(journal)
 }
 
+/// A3b, at runtime, the twin of Rust's `op_vocabulary_tests`: every verb
+/// `operations/op_vocabulary.json` declares reaches an arm of `opApply` (its
+/// error, if any, is about its arguments, never `unknownVerb`), and a verb the
+/// file does not declare is `unknownVerb`.
+@Test func opVocabularyEveryDeclaredVerbReachesAnArm() throws {
+    let json = readFixture("operations/op_vocabulary.json")
+    let file = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let verbs = (file["verbs"] as! [String: Any]).keys.sorted()
+    #expect(verbs.count >= 40, "the vocabulary file is not vacuous: \(verbs.count)")
+    for v in verbs {
+        let model = Model(document: Document(layers: [Layer(children: [])], artboards: []))
+        let controller = Controller(model: model)
+        if case .unknownVerb = opApply(model, controller, ["op": v]) {
+            Issue.record("\(v) is declared and opApply does not know it")
+        }
+    }
+    let model = Model(document: Document(layers: [Layer(children: [])], artboards: []))
+    let r = opApply(model, Controller(model: model), ["op": "zz_not_a_verb"])
+    if case .unknownVerb = r {} else { Issue.record("the control: an undeclared verb is refused, got \(String(describing: r))") }
+}
+
 @Test func proposalLaws() throws {
     let json = readFixture("operations/proposal_laws.json")
     let cases = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
