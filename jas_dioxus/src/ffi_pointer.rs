@@ -384,6 +384,31 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// ⛔ W5-1: THE SHELL CAN SELECT EVERY TOOL THE ENGINE CAN BUILD, AND THE
+    /// INDEXES IT ALREADY USES DO NOT MOVE. The tool list is ABI (an index is
+    /// what crosses), so it grows by APPENDING: the first nine ids are pinned
+    /// here by position, deliberately, because a reorder would silently repoint
+    /// a shell that sends `6` for the pen. The SET is derived from the
+    /// workspace bundle, never typed, so a tool added to `workspace/tools/`
+    /// without a row here reds.
+    #[test]
+    fn the_tool_list_is_every_workspace_tool_and_appends_only() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace bundle");
+        let mut want: Vec<String> = ws.data()["tools"].as_object().expect("tools").keys().cloned().collect();
+        want.sort();
+        let mut got: Vec<String> = TOOL_IDS.iter().map(|s| s.to_string()).collect();
+        got.sort();
+        assert!(want.len() >= 20, "the workspace's tool set is not vacuous: {}", want.len());
+        assert_eq!(got, want, "TOOL_IDS is exactly the workspace's tools");
+        assert_eq!(TOOL_IDS.len(), want.len(), "no id twice");
+        assert_eq!(&TOOL_IDS[..9],
+                   &["selection", "interior_selection", "partial_selection", "rect", "ellipse", "line", "pen", "pencil", "zoom"],
+                   "the nine indexes a shell may already send keep their meaning");
+        for (i, id) in TOOL_IDS.iter().enumerate() {
+            assert!(build_tool(id).is_some(), "index {i} ({id}) builds in this engine");
+        }
+    }
+
     /// ⛔ THE REFUSAL LANE, BOTH SHAPES. A null engine and an unknown kind are
     /// REFUSED BY NAME, not absorbed — the fail-closed doctrine this seat has
     /// applied to every other crossing.
