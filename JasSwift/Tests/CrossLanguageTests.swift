@@ -1932,6 +1932,45 @@ private func jsonTypeName(_ v: Any) -> String {
     #expect(noInstance == (file["verbs_with_no_corpus_instance"] as! [String]))
 }
 
+/// A3b slice 3 in Swift, the twin of Rust's `propose_declares_each_ops_arguments`:
+/// `ops.items` carries one `anyOf` branch per declared verb, `op` as a `const`,
+/// the other properties exactly `op_arguments.json`'s keys for that verb, typed
+/// with its `argument_types`; nothing `required`. Read from the FILES.
+@Test func mcpProposeDeclaresEachOpsArguments() throws {
+    let out = McpSession(model: Model(document: Document(layers: [Layer(children: [])], artboards: [])))
+        .handle(#"{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}"#)
+    let msg = try JSONSerialization.jsonObject(with: Data(out[0].utf8)) as! [String: Any]
+    let tools = (msg["result"] as! [String: Any])["tools"] as! [[String: Any]]
+    let propose = tools.first { $0["name"] as? String == "propose" }!
+    let ops = ((propose["inputSchema"] as! [String: Any])["properties"] as! [String: Any])["ops"] as! [String: Any]
+    let branches = (ops["items"] as! [String: Any])["anyOf"] as? [[String: Any]] ?? []
+    let vocab = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_vocabulary.json").utf8)) as! [String: Any]
+    let file = try JSONSerialization.jsonObject(with: Data(readFixture("operations/op_arguments.json").utf8)) as! [String: Any]
+    let verbs = (vocab["verbs"] as! [String: Any]).keys.sorted()
+    let types = file["argument_types"] as! [String: [String: [String]]]
+    #expect(verbs.count >= 40, "the vocabulary file is not vacuous: \(verbs.count)")
+    #expect(branches.count == verbs.count, "one branch per declared verb: \(branches.count)")
+    var typed = 0
+    for verb in verbs {
+        guard let b = branches.first(where: { (($0["properties"] as? [String: Any])?["op"] as? [String: Any])?["const"] as? String == verb })
+        else { Issue.record("no branch for `\(verb)`"); continue }
+        #expect(b["required"] == nil, "`\(verb)`: no argument is required")
+        let props = b["properties"] as! [String: Any]
+        let want = types[verb] ?? [:]
+        #expect(Set(props.keys).subtracting(["op"]) == Set(want.keys), "`\(verb)`: the branch's keys are the file's")
+        for (k, ts) in want {
+            let got = (props[k] as? [String: Any])?["type"]
+            if ts.count == 1 {
+                #expect(got as? String == ts[0], "`\(verb).\(k)`'s type")
+            } else {
+                #expect(got as? [String] == ts, "`\(verb).\(k)`'s types")
+            }
+            typed += 1
+        }
+    }
+    #expect(typed >= 100, "the branches typed only \(typed) argument(s)")
+}
+
 /// A4 (i), the transport conformance corpus: every case of
 /// `operations/mcp_exchanges.json` replayed through `McpSession`, the twin of
 /// Rust's `mcp_exchanges`.
