@@ -740,8 +740,7 @@ fn apply_gradient_attrs(node: &XmlNode, elem: Element) -> Element {
     let standard = |key: &str, elem: &Element| {
         let id = node.attrs.get(key).and_then(|v| paint_url_id(v))?;
         let def = STD_GRADIENTS.with(|c| c.borrow().get(id).cloned())?;
-        let b = elem.bounds();
-        std_gradient_to_jas(&def, (b.0, b.1, b.2, b.3)).map(Box::new)
+        std_gradient_to_jas(&def, crate::painter::element_render::gradient_bbox(elem)).map(Box::new)
     };
     let mut elem = elem;
     if let Some(g) = read("jas:fill-gradient").or_else(|| standard("fill", &elem)) {
