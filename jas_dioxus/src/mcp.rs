@@ -275,7 +275,7 @@ where
     down.join().map_err(|_| std::io::Error::other("the socket reader panicked"))?
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod attach_tests {
     use std::io::{BufRead, BufReader, Write};
     use std::os::unix::net::UnixListener;

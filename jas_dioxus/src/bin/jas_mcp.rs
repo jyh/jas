@@ -27,6 +27,9 @@ enum Event {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    // `--attach` reaches a Unix-domain socket, so it exists only on unix; the
+    // Mac app is its one host today (A4).
+    #[cfg(unix)]
     if args.get(1).map(String::as_str) == Some("--attach") {
         let Some(path) = args.get(2) else {
             eprintln!("jas_mcp: --attach needs the app's socket path");
