@@ -235,12 +235,12 @@ pub unsafe extern "C" fn jas_pointer_event(
 /// (`workspace/keyboard.rs`):
 ///   1. Escape, Enter, Delete and Backspace go to the ACTIVE TOOL's
 ///      `on_key_event` (Escape cancels a marquee, Enter commits the pen).
-///   2. A character without `MOD_CMD` is resolved against
-///      `workspace/shortcuts.yaml` IN THE CORE (`resolve_key`); a
-///      `select_tool` result switches the tool as [`jas_set_tool`] does.
+///   2. A character is resolved against `workspace/shortcuts.yaml` IN THE
+///      CORE (`resolve_key`). Without `MOD_CMD`, a `select_tool` result
+///      switches the tool as [`jas_set_tool`] does. With `MOD_CMD`, only
+///      `undo` and `redo` act (W5-3c); other command chords stay the menu's.
 /// Returns `Ok` when the key was handled and `UnknownVerb` when nothing
 /// handled it, so the shell can let the key fall through to its own default.
-/// Menu chords (`MOD_CMD`) are not acted on here yet.
 ///
 /// # Safety
 /// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
@@ -266,12 +266,19 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
         let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
         return if handled { JasStatus::Ok } else { JasStatus::UnknownVerb };
     }
-    if km.ctrl {
-        return JasStatus::UnknownVerb;
-    }
     let Some(ch) = char::from_u32(code) else { return JasStatus::BadParamType };
-    let chord = crate::workspace::resolve_key::KeyChord::new(&ch.to_string(), false, km.shift, km.alt, false);
+    let chord = crate::workspace::resolve_key::KeyChord::new(&ch.to_string(), km.ctrl, km.shift, km.alt, false);
     let Some(cmd) = crate::workspace::resolve_key::resolve_key(&chord) else { return JasStatus::UnknownVerb };
+    // W5-3c: a COMMAND chord acts only where the engine can do the action
+    // itself. Undo and redo are the model's (his finding 2026-10-10, "Ctrl-Z is
+    // not working"); every other chord stays the menu's, so it is not handled.
+    if km.ctrl {
+        return match cmd.action.as_str() {
+            "undo" => { engine.with_model_mut(|m| m.undo()); JasStatus::Ok }
+            "redo" => { engine.with_model_mut(|m| m.redo()); JasStatus::Ok }
+            _ => JasStatus::UnknownVerb,
+        };
+    }
     if cmd.action != "select_tool" {
         return JasStatus::UnknownVerb;
     }
@@ -852,6 +859,47 @@ mod tests {
             assert_eq!(jas_key_event(e, 'p' as u32, MOD_ALT), JasStatus::UnknownVerb);
             assert_eq!(jas_key_event(e, 'j' as u32, 0), JasStatus::UnknownVerb);
             assert_eq!(active_tool(e), Some(tool_at("add_anchor_point")));
+            jas_engine_free(e);
+        }
+    }
+
+    /// W5-3c, his finding 2026-10-10 ("Ctrl-Z is not working"): a COMMAND chord
+    /// resolves through `shortcuts.yaml` in the core like a tool letter does.
+    /// Ctrl+Z undoes a drag that moved the rect, back to the document byte for
+    /// byte; Ctrl+Shift+Z redoes it, back to the moved document byte for byte.
+    #[test]
+    fn ctrl_z_undoes_a_move_and_ctrl_shift_z_redoes_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
+            crate::geometry::test_json::document_to_test_json(d)
+        });
+        let e = jas_engine_new();
+        seed(e);
+        // The oracle is the document after a plain CLICK: the selection is a
+        // non-journaled channel (OP_LOG), so undo restores the geometry and
+        // leaves the selection the click made.
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+        }
+        let before = doc(e);
+        unsafe {
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 110.0, 90.0, MOD_DRAGGING);
+            jas_pointer_event(e, KIND_RELEASE, 110.0, 90.0, 0);
+        }
+        let moved = doc(e);
+        assert_ne!(moved, before, "the control: the drag moved the rect");
+        unsafe {
+            assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
+            assert_eq!(doc(e), before, "Ctrl+Z restores the document");
+            assert_eq!(jas_key_event(e, 'Z' as u32, MOD_CMD | MOD_SHIFT), JasStatus::Ok);
+            assert_eq!(doc(e), moved, "Ctrl+Shift+Z restores the move");
+            // A chord the table binds to something the engine does not do yet is
+            // NOT handled, and changes nothing.
+            assert_eq!(jas_key_event(e, 'n' as u32, MOD_CMD), JasStatus::UnknownVerb);
+            assert_eq!(doc(e), moved);
             jas_engine_free(e);
         }
     }
