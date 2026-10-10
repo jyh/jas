@@ -12,6 +12,12 @@ private final class LineClient {
     init?(path: String) {
         fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return nil }
+        // A write to a socket the server has CLOSED (the refused second
+        // client) raises SIGPIPE, which kills the whole test process rather
+        // than failing one test. It crashed CI's Swift lane once, when the
+        // server's close won the race; locally the write had won it.
+        var one: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         _ = withUnsafeMutableBytes(of: &addr.sun_path) { raw in
