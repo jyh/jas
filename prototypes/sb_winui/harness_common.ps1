@@ -2843,3 +2843,19 @@ function Compare-SbReadBack([string]$Got, [string]$Want) {
     $w = $Want.Substring($i, [math]::Min(24, $Want.Length - $i))
     return "FAIL(at byte $i of got=$($Got.Length) want=$($Want.Length): got `"$g`" want `"$w`")"
 }
+
+# ---------------------------------------------------------------------------
+# The cdylib lane: the ONE cargo invocation that builds the jas_dioxus.dll the
+# shell loads. sitting.ps1 and prove_e2e.ps1 both read it, because the last lane
+# to touch target/ decides what the shell loads, and a second spelling that
+# drifts builds a dll neither certificate names (#335).
+# ---------------------------------------------------------------------------
+$SbCdylibLane = @('build', '--no-default-features', '--features', 'd2d,ffi', '--lib')
+
+# The path of a build log in $Dir, creating $Dir first: on a fresh clone the
+# shell's output directory does not exist until dotnet builds it, and cmd's
+# redirect into a missing directory fails before cargo runs.
+function New-SbBuildLog([string]$Dir, [string]$Name) {
+  New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+  Join-Path $Dir $Name
+}

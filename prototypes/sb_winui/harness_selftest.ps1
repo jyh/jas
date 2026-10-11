@@ -2068,6 +2068,22 @@ Test-Case 'px: the 10-10 wallpaper desktop is real' { Test-SbDesktopPixels 142.5
 Test-Case 'px: CONTROL -- the old floor of 100 colours FAILED the live 10-11 desktop' { if (71 -gt 100) { 'ok' } else { 'FAIL' } } 'FAIL'
 
 # ---------------------------------------------------------------------------
+# The cdylib lane is ONE constant: sitting.ps1 and prove_e2e.ps1 both build it,
+# and the last lane to touch target/ decides what the shell loads (#335).
+# ---------------------------------------------------------------------------
+$SbLaneLiteral = '--features d2d,ffi --lib'
+function Get-SbLaneHardcoders {
+  @(Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' | Where-Object { $_.Name -ne 'harness_selftest.ps1' } |
+    Where-Object { (Get-Content $_.FullName -Raw).Contains($SbLaneLiteral) } | ForEach-Object { $_.Name })
+}
+Test-Case 'lane: the cdylib lane is the d2d+ffi library' { $SbCdylibLane -join ' ' } 'build --no-default-features --features d2d,ffi --lib'
+Test-Case 'lane: no script spells the lane out instead of reading $SbCdylibLane' { (Get-SbLaneHardcoders) -join ',' } ''
+Test-Case 'lane: CONTROL -- the census literal matches the old spelled-out line' { 'cargo build --no-default-features --features d2d,ffi --lib'.Contains($SbLaneLiteral) } $true
+$SbLogProbe = Join-Path ([IO.Path]::GetTempPath()) ('sb-lane-' + [guid]::NewGuid().ToString('N'))
+Test-Case 'lane: the build log names a file in a directory that now exists (fresh clone)' { $l = New-SbBuildLog $SbLogProbe 'b.txt'; "$((Split-Path $l -Leaf)) $(Test-Path (Split-Path $l -Parent))" } 'b.txt True'
+Remove-Item $SbLogProbe -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
