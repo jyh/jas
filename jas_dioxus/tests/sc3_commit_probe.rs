@@ -105,7 +105,10 @@ fn control_the_panel_event_channel_is_alive() {
     serialised(|| {
         let e = jas_engine_new();
         let _ = rows(e); // enrol the panel
-        let (reply, _) = panel_event(e, r#"{"widget":"cp_h","key":"bind.value","value":210}"#);
+        // SATURATION, not hue: the engine starts from the spec's white, where a
+        // hue drag moves nothing (saturation 0); S to 50 moves any start colour
+        // whose saturation is not already 50 (the old #664040 start's is 37.5).
+        let (reply, _) = panel_event(e, r#"{"widget":"cp_s","key":"bind.value","value":50}"#);
         let changed: serde_json::Value = serde_json::from_str(&reply).unwrap();
         assert!(
             !changed.as_array().unwrap().is_empty(),

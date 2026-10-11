@@ -410,6 +410,30 @@ jobs:
           wasm-pack test --headless --chrome jas_dioxus 2>&1 | tee /tmp/wasm.log
           python3 scripts/check_wasm_canvas_count.py --log /tmp/wasm.log
 
+  baseline-spec:
+    name: Frozen baselines change only with the spec
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
+      # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
+      # so the range is the PR's own delta against main; on main itself that degenerates, and
+      # the shared picker supplies the push's range instead.
+      - name: A baseline changes only with the spec
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/check_baseline_spec_change.py --self-test
+          MB="$(git merge-base origin/main HEAD)" || exit 1
+          if [ "$MB" != "$(git rev-parse HEAD)" ]; then RANGE="$MB..HEAD"; else RANGE="$(sh scripts/pick_scan_range.sh)" || exit 1; fi
+          python scripts/check_baseline_spec_change.py --range "$RANGE"
+
   genericity:
     name: Genericity policy
     runs-on: ubuntu-latest
@@ -624,6 +648,20 @@ jobs:
           python scripts/check_commit_trailers.py
           python scripts/check_scrub_trigger.py --self-test
           python scripts/check_scrub_trigger.py
+
+      # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
+      # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
+      # so the range is the PR's own delta against main; on main itself that degenerates, and
+      # the shared picker supplies the push's range instead.
+      - name: A baseline changes only with the spec (Windows lane)
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/check_baseline_spec_change.py --self-test
+          MB="$(git merge-base origin/main HEAD)" || exit 1
+          if [ "$MB" != "$(git rev-parse HEAD)" ]; then RANGE="$MB..HEAD"; else RANGE="$(sh scripts/pick_scan_range.sh)" || exit 1; fi
+          python scripts/check_baseline_spec_change.py --range "$RANGE"
 
       # check_private_paths.py ALSO BELONGS ON THIS LANE, and the lane-coverage
       # gate is what said so: it landed wired to ubuntu only, and main went red

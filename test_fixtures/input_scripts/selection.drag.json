@@ -1,0 +1,14 @@
+{
+  "item": "selection.drag",
+  "spec": "workspace/tools/selection.yaml",
+  "setup_svg": "complex_document.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 36},
+    {"kind": "move", "x": 72, "y": 60, "dragging": true},
+    {"kind": "release", "x": 72, "y": 60},
+    {"read": "document"}
+  ],
+  "expected_json": "selection.drag.expected.json"
+}
