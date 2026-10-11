@@ -1466,7 +1466,21 @@ pub(crate) fn apply_set_panel_state_with_ctx(
             "profile_flipped": sp.profile_flipped,
             "dash_align_anchors": sp.dash_align_anchors,
         });
-        let ctx = serde_json::json!({"panel": panel_json, "state": {}});
+        // The ACTION's ctx underneath (`param`, `state`, ...), the panel's
+        // live values on top, exactly as the panel-named arm above builds
+        // it. This ctx used to be `{panel, state: {}}` alone, so a value
+        // naming the action's parameter -- `set_stroke_cap`'s "param.cap",
+        // `set_stroke_join`'s "param.join" -- resolved to null, the field
+        // kept the typed slot's default, and the apply below wrote THAT
+        // default (butt, miter) onto the selection. Found by the action
+        // corpus's first stroke cases (2026-10-10).
+        let mut ctx = match action_ctx {
+            Some(serde_json::Value::Object(m)) => m.clone(),
+            _ => serde_json::Map::new(),
+        };
+        ctx.insert("panel".to_string(), panel_json);
+        ctx.entry("state".to_string()).or_insert_with(|| serde_json::json!({}));
+        let ctx = serde_json::Value::Object(ctx);
         let result = super::expr::eval(expr_str, &ctx);
         super::effects::value_to_json(&result)
     } else {
