@@ -1586,13 +1586,25 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
-    /// Set width profile points on selected Path and Line elements.
-    pub fn set_selection_width_profile(model: &mut Model, width_points: Vec<StrokeWidthPoint>) {
+    /// Set each selected element's width profile, THROUGH CONTAINERS, with
+    /// the points computed PER LEAF by `points_for` -- so a profile scales by
+    /// the stroke it is drawn on. It used to take one point list, computed
+    /// from the FIRST selected element's stroke width: a group (no stroke)
+    /// gave every line the default 1 pt, and two lines of different widths got
+    /// the first one's taper. Both found by the group-equals-member relation
+    /// on the first profile cases (`stroke_profile_actions.json`, 2026-10-11).
+    pub fn set_selection_width_profile(
+        model: &mut Model, points_for: impl Fn(&Element) -> Vec<StrokeWidthPoint>,
+    ) {
         let doc = model.document().clone();
         let mut new_doc = doc.clone();
         for es in &doc.selection {
             if let Some(elem) = doc.get_element(&es.path) {
-                new_doc = new_doc.replace_element(&es.path, with_width_points(elem, width_points.clone()));
+                new_doc = new_doc.replace_element(
+                    &es.path,
+                    crate::geometry::element::map_paintable(
+                        elem, &|leaf| with_width_points(leaf, points_for(leaf))),
+                );
             }
         }
         model.edit_document(new_doc);

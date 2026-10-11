@@ -33,13 +33,33 @@ private func joinName(_ j: LineJoin) -> String {
 /// own `checked: panel.dashed` source of truth) so `state.stroke_dashed`
 /// tracks `panel.dashed` and the two effects toggle in lockstep. Mirrors the
 /// Rust dock `build_live_state_map` stroke block.
+///
+/// EVERY stroke field, not only the three toggles (2026-10-11): the panel's
+/// `init` reads `state.stroke_*`, and align / profile / arrow align stayed at
+/// the workspace defaults after a verb had moved them. The panel-key → state-key
+/// pairs are DERIVED from the Stroke panel's own `init` block (`align_stroke:
+/// "state.stroke_align"`), never listed here. `stroke_width` is skipped: both
+/// ports take it from the stroke itself. Mirrors Rust `stroke_state_entries`.
 public func strokePanelStateOverrides(store: StateStore) -> [String: Any] {
     let ps = store.getPanelState("stroke_panel_content")
     var out: [String: Any] = [:]
-    if let d = ps["dashed"] { out["stroke_dashed"] = d }
-    if let l = ps["link_arrowhead_scale"] { out["stroke_link_arrowhead_scale"] = l }
-    if let f = ps["profile_flipped"] { out["stroke_profile_flipped"] = f }
+    for (panelKey, stateKey) in strokePanelStateKeys() where stateKey != "stroke_width" {
+        if let v = ps[panelKey] { out[stateKey] = v }
+    }
     return out
+}
+
+/// `(panel key, state key)` for each `init` entry of the Stroke panel that
+/// reads a bare `state.<key>`.
+private func strokePanelStateKeys() -> [(String, String)] {
+    guard let panels = WorkspaceData.load()?.data["panels"] as? [String: Any],
+          let stroke = panels["stroke_panel_content"] as? [String: Any],
+          let initMap = stroke["init"] as? [String: Any]
+    else { return [] }
+    return initMap.compactMap { panelKey, expr in
+        guard let e = expr as? String, e.hasPrefix("state.") else { return nil }
+        return (panelKey, String(e.dropFirst("state.".count)))
+    }
 }
 
 /// LINKSCALE gap closure. The Stroke panel's arrowhead-scale combos
