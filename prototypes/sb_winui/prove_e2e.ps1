@@ -19,6 +19,12 @@
 # CERTIFIED only when every level matches. A surface that differs from the
 # baseline's is NOT COMPARABLE, never a pass and never a fail.
 #
+# `pixels` is an EXACT hash of the back buffer, so a baseline is pinned to the
+# box that froze it: its DPI, its graphics driver, and its desktop -- the
+# window's height follows the desktop's state (this box's root measured 992.67
+# DIPs one morning and 987.33 after a reboot, same build, 8 device pixels at
+# 1.5x). Re-freeze only from a clean run on the box that certifies.
+#
 # -Script <path> drives an INPUT SCRIPT (docs/TESTING.md section 6) instead of
 # the built-in gesture: its press/move/release become the SendInput drag, its
 # setup_svg the document, and its read=document is compared BYTE FOR BYTE with
