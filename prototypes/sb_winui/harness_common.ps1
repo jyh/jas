@@ -1813,7 +1813,7 @@ function Test-SbSynthAsked([string]$Synth) {
 # THAT ROW IS NEVER COMING -- AND ON NOTHING ELSE. A click's delta-mismatch red
 # says nothing about whether the pane was drawn, and ending there would read a
 # drawn pane as absent. The replay is waited for first: it finishes later.
-function Get-SbPaneWaits([string]$Scene, [string]$Synth) {
+function Get-SbPaneWaits([string]$Scene, [string]$Synth, [string]$Dock = '') {
     $waits = @()
     if ($Scene -ne $SbPaneScene) { return $waits }
     if (Test-SbSynthAsked $Synth) {
@@ -1822,6 +1822,16 @@ function Get-SbPaneWaits([string]$Scene, [string]$Synth) {
             Patterns = @((Get-SbRowPattern 'PANEL SYNTH DONE' ' panel='), 'RUSTFAIL PANEL SYNTH ')
             Timeout  = 60
         }
+    }
+    # Under SB_DOCK the dock replaces the one pane and no PANEL DRAWN is ever
+    # written: wait on the dock's own last row, or its failure (Q6.D reads both).
+    if (-not [string]::IsNullOrWhiteSpace($Dock)) {
+        $waits += @{
+            Label    = 'the DOCK DRAWN row'
+            Patterns = @((Get-SbRowPattern 'DOCK DRAWN' ' name='), 'RUSTFAIL DOCK ', 'RUSTFAIL PANE ', 'RUSTFAIL render thread died')
+            Timeout  = 60
+        }
+        return $waits
     }
     $waits += @{
         Label    = 'the PANEL DRAWN row'
@@ -2217,6 +2227,78 @@ function Get-SbPaneResizeVerdict($Rows, [string]$Scene, [string]$Synth) {
     return New-SbVerdict $name 'FAIL' ("$facts. A resize arrived on a run no hand touched: the pane now opens into an " +
         "already-laid-out canvas, which is W2-5's regression and not the canvas's (freeze stop 5). " +
         'A display-scale change writes SCALE CHANGED; rule that out first') $repaints[-1]
+}
+
+# ---------------------------------------------------------------------------
+# Q6.D -- THE DOCK OPENED AND DREW EVERY TAB GROUP (#316's review, item 1)
+# ---------------------------------------------------------------------------
+#
+# Under SB_DOCK the seven Q6 clauses are NOT RUN: the dock's tab groups replace
+# the one pane they read. Until this clause NOTHING read the dock's own rows, so
+# a refused dock -- `RUSTFAIL DOCK REFUSED`, a render thread that died on a
+# missing entry point -- read 0 FAIL. This is the precondition for SB_DOCK
+# becoming the default.
+#
+# PASS needs all of: a DOCK OPEN row (groups=N), one `PANE OPEN key=dock<i>`
+# for every i < N, a DOCK DRAWN row with the same groups=N, and no failure row
+# of the dock's own: `RUSTFAIL DOCK `, `RUSTFAIL PANE ` (a dock group's pane;
+# the toolbar's say TOOLBAR) or the render thread dying. SB_DOCK is read as the
+# shell reads it (whitespace is unset), and the shell reads it only on the pane
+# scene, so a dock asked for anywhere else is a FAIL, never a quiet NOT RUN.
+
+$SbDockName = 'Q6.D the dock opened and drew every tab group'
+
+# The dock's rows have no single last one: DOCK DRAWN is written when the group
+# FRAMES exist, and each group's PANE OPEN key=dock<i> follows it (measured live,
+# 2026-10-11). Polled after the DOCK DRAWN wait, as `Test-SbMenuSettled` is.
+function Test-SbDockSettled($Rows) {
+    if ($null -ne (Select-SbRow $Rows "`tRUSTFAIL (?:DOCK |PANE |render thread died)")) { return $true }
+    $open = Select-SbRow $Rows (Get-SbRowPattern 'DOCK OPEN' ' name=')
+    if ($null -eq $open) { return $true }
+    $groups = Get-SbField $open 'groups'
+    if ($groups -notmatch '^[0-9]+$' -or [int]$groups -lt 1) { return $true }
+    foreach ($i in 0..([int]$groups - 1)) {
+        if ($null -eq (Select-SbRow $Rows (Get-SbRowPattern 'PANE OPEN' " key=dock$i "))) { return $false }
+    }
+    return $true
+}
+
+function Get-SbDockVerdict($Rows, [string]$Scene, [string]$Dock) {
+    $name = $SbDockName
+    if ([string]::IsNullOrWhiteSpace($Dock)) {
+        return New-SbVerdict $name 'NOT RUN' 'SB_DOCK is unset: no dock was asked for, and the one pane is Q6.1-Q6.3''s'
+    }
+    $Dock = $Dock.Trim()
+    if ($Scene -ne $SbPaneScene) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK='$Dock' was set on scene '$Scene', which opens no pane; the shell reads the knob only on '$SbPaneScene', so no dock could open"
+    }
+    $bad = Select-SbRow $Rows "`tRUSTFAIL (?:DOCK |PANE |render thread died)"
+    if ($null -ne $bad) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK='$Dock': the shell reported a dock failure (the row)" $bad
+    }
+    $open = Select-SbRow $Rows (Get-SbRowPattern 'DOCK OPEN' ' name=')
+    if ($null -eq $open) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK='$Dock' and no DOCK OPEN row: the dock never opened, and the shell wrote no refusal saying why"
+    }
+    $groups = Get-SbField $open 'groups'
+    if ($groups -notmatch '^[0-9]+$' -or [int]$groups -lt 1) {
+        return New-SbVerdict $name 'FAIL' "DOCK OPEN carries groups=$groups; a dock is at least one group" $open
+    }
+    $n = [int]$groups
+    $missing = @(0..($n - 1) | Where-Object { $null -eq (Select-SbRow $Rows (Get-SbRowPattern 'PANE OPEN' " key=dock$_ ")) } | ForEach-Object { "dock$_" })
+    if ($missing.Count -gt 0) {
+        return New-SbVerdict $name 'FAIL' "DOCK OPEN groups=$n, and no PANE OPEN row for $($missing -join ', '): a group with no pane" $open
+    }
+    $drawn = Select-SbRow $Rows (Get-SbRowPattern 'DOCK DRAWN' ' name=')
+    if ($null -eq $drawn) {
+        return New-SbVerdict $name 'FAIL' "DOCK OPEN groups=$n and every group's pane opened, but no DOCK DRAWN row: the UI never drew the dock" $open
+    }
+    $dg = Get-SbField $drawn 'groups'
+    if ($dg -ne $groups) {
+        return New-SbVerdict $name 'FAIL' "DOCK DRAWN groups=$dg against DOCK OPEN groups=$($n): the UI drew a partial dock" $drawn
+    }
+    return New-SbVerdict $name 'PASS' ("SB_DOCK='$Dock': DOCK OPEN groups=$n panels=$(Get-SbField $open 'panels'), a PANE OPEN for dock0-dock$($n - 1), " +
+        "DOCK DRAWN groups=$dg tabs=$(Get-SbField $drawn 'tabs'), and no dock failure row") $drawn
 }
 
 # ===========================================================================
