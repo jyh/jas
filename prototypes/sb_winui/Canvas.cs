@@ -605,6 +605,11 @@ internal sealed unsafe class Canvas : IDisposable
                 + "}";
             var full = System.IO.Path.Combine(AppContext.BaseDirectory, ProbePath);
             System.IO.File.WriteAllText(full, body);
+            // docs/TESTING.md section 6: the read-back is compared BYTE FOR BYTE with
+            // the script's expected document, so the core's bytes are also written
+            // ALONE: pulling `doc` back out of the body through a JSON parser would
+            // re-serialize it (1.0 becomes 1) and compare a different document.
+            System.IO.File.WriteAllText(System.IO.Path.ChangeExtension(full, ".doc.json"), doc);
             _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} "
                   + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} "
                   + $"-> {ProbePath} {Tids()}");
