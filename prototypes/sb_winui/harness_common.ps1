@@ -1895,13 +1895,16 @@ function Get-SbChannelClass([string]$Row) {
 
 # Q6.1-Q6.3 and the four replay clauses, as `New-SbVerdict` objects in the
 # order of `$SbQ6Names`. `$Scene` is the run's scene; `$Synth` the knob.
-function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth) {
+function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth, [string]$Dock = '') {
     $n = $SbQ6Names
     $out = New-Object System.Collections.Generic.List[object]
     $asked = Test-SbSynthAsked $Synth
+    # SB_DOCK replaces the ONE pane these clauses read with the dock's tab groups.
+    $docked = ($Scene -eq $SbPaneScene) -and -not [string]::IsNullOrWhiteSpace($Dock)
 
-    if ($Scene -ne $SbPaneScene) {
-        $why = "this run is scene '$Scene'; only '$SbPaneScene' opens the pane"
+    if ($Scene -ne $SbPaneScene -or $docked) {
+        $why = if ($docked) { "SB_DOCK='$Dock': the dock's tab groups replace the one pane these clauses read" }
+               else { "this run is scene '$Scene'; only '$SbPaneScene' opens the pane" }
         $out.Add((New-SbVerdict $n.Open 'NOT RUN' $why))
         $out.Add((New-SbVerdict $n.Cross 'NOT RUN' $why))
         $out.Add((New-SbVerdict $n.Drawn 'NOT RUN' $why))
