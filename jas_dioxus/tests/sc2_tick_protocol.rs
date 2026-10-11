@@ -167,6 +167,16 @@ fn tick(e: *mut JasEngine, widget: &str, value: f64) -> (usize, usize) {
     (rows.as_array().map(|a| a.len()).unwrap_or(0), bytes)
 }
 
+/// Put the fill at `#664040`, the colour the engine STARTED with until
+/// 2026-10-10 and so the colour C1's published figure (REPORT-C1.md) was
+/// measured on. The engine now starts from the spec's `#ffffff`, whose HSB
+/// text differs in length and whose zero saturation makes a hue drag move
+/// nothing; a test that depends on the old start colour states it here.
+fn seed_report_colour(e: *mut JasEngine) {
+    let ev = r#"{"widget":"cp_hex","value":"664040"}"#;
+    let _ = take(unsafe { jas_panel_event(e, COLOUR.as_ptr(), COLOUR.len(), ev.as_ptr(), ev.len()) });
+}
+
 fn whole_panel_bytes(e: *mut JasEngine) -> usize {
     take(unsafe { jas_bind_values(e, COLOUR.as_ptr(), COLOUR.len()) }).len()
 }
@@ -195,6 +205,7 @@ fn c1_is_unchanged_by_the_scope_growth() {
         || {
             let e = jas_engine_new();
             assert!(!e.is_null());
+            seed_report_colour(e);
             e
         },
         // Reset falls AFTER the engine exists: C1 is the cost of opening a
@@ -229,6 +240,7 @@ fn c1_does_not_move_when_the_document_is_large() {
     let (e, nodes, c) = measure(
         || {
             let e = jas_engine_new();
+            seed_report_colour(e);
             grow_document(e, LARGE);
             e
         },
@@ -250,6 +262,7 @@ fn one_tick_is_two_crossings() {
     let (e, (rows, bytes), c) = measure(
         || {
             let e = jas_engine_new();
+            seed_report_colour(e);
             grow_document(e, SMALL);
             open(e, COLOUR);
             open(e, ARTBOARDS);
@@ -282,6 +295,7 @@ fn one_tick_is_two_crossings() {
 fn a_tick_that_moves_nothing_says_so_rather_than_looking_cheap() {
     serialised(|| {
         let e = jas_engine_new();
+        seed_report_colour(e);
         open(e, COLOUR);
 
         // Read the current hue out of the panel's own rows, then drag to it.
@@ -320,6 +334,7 @@ fn a_tick_that_moves_nothing_says_so_rather_than_looking_cheap() {
 fn an_unknown_widget_is_refused() {
     serialised(|| {
         let e = jas_engine_new();
+        seed_report_colour(e);
         open(e, COLOUR);
         assert_eq!(tick(e, "cp_not_a_widget", 1.0), (0, 0));
         let err = take(unsafe { jas_last_error_json(e) });
@@ -345,6 +360,7 @@ fn arm(artboards: usize) -> Arm {
     let (e, (widgets, rows), c) = measure(
         || {
             let e = jas_engine_new();
+            seed_report_colour(e);
             grow_document(e, artboards);
             let w = open(e, COLOUR) + open(e, ARTBOARDS);
             (e, w)
@@ -434,6 +450,7 @@ fn the_tick_is_flat_across_two_document_sizes_and_the_engine_is_not() {
 fn the_naive_re_read_is_not_a_constant_and_exceeds_the_ceiling() {
     serialised(|| {
         let e = jas_engine_new();
+        seed_report_colour(e);
         open(e, COLOUR);
 
         // At the seed, the ceiling's own number.
