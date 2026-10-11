@@ -72,10 +72,10 @@ def self_test():
         with tempfile.TemporaryDirectory() as d:
             os.makedirs(os.path.join(d, os.path.dirname(PIN_FILE)))
             os.makedirs(os.path.join(d, SVG_DIR))
-            open(os.path.join(d, PIN_FILE), "w").write(rust.format(a=a, b=b))
+            open(os.path.join(d, PIN_FILE), "w", encoding="utf-8", newline="").write(rust.format(a=a, b=b))
             for i in range(n_svg):
-                open(os.path.join(d, SVG_DIR, f"f{i}.svg"), "w").write("<svg/>")
-            open(os.path.join(d, SVG_DIR, "not_an_svg.json"), "w").write("{}")
+                open(os.path.join(d, SVG_DIR, f"f{i}.svg"), "w", encoding="utf-8", newline="").write("<svg/>")
+            open(os.path.join(d, SVG_DIR, "not_an_svg.json"), "w", encoding="utf-8", newline="").write("{}")
             got = len(check(d))
         ok = got == want
         failed += not ok
@@ -83,8 +83,8 @@ def self_test():
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, os.path.dirname(PIN_FILE)))
         os.makedirs(os.path.join(d, SVG_DIR))
-        open(os.path.join(d, PIN_FILE), "w").write("// no pins at all\n")
-        open(os.path.join(d, SVG_DIR, "a.svg"), "w").write("<svg/>")
+        open(os.path.join(d, PIN_FILE), "w", encoding="utf-8", newline="").write("// no pins at all\n")
+        open(os.path.join(d, SVG_DIR, "a.svg"), "w", encoding="utf-8", newline="").write("<svg/>")
         got = len(check(d))
         ok = got == 2
         failed += not ok
