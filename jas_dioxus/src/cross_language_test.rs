@@ -6769,6 +6769,27 @@ mod tests {
     // Panel widget-TREE (structural snapshot) algorithm test vectors
     // ---------------------------------------------------------------
 
+    /// The INITIAL STATE MAP: the map the web app starts from (no document, no
+    /// override), against the reference's spec defaults over EVERY `state:`
+    /// variable (`initial_state_map.json`). Names every variable that differs.
+    /// The web app's `AppState` exists only with the `web` feature; the engine's
+    /// twin is `ffi.rs`'s `the_engine_starts_from_the_spec_defaults_...`.
+    #[cfg(feature = "web")]
+    #[test]
+    fn algorithm_initial_state_map() {
+        let json_str = read_fixture("algorithms/initial_state_map.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let expected = tests[0]["expected"].as_object().unwrap();
+        assert!(expected.len() > 100, "the golden carries every state variable: {}", expected.len());
+        let st = crate::workspace::app_state::AppState::new();
+        let live = crate::workspace::dock_panel::build_live_state_map(&st);
+        let diffs: Vec<String> = expected.iter()
+            .filter(|(k, v)| live.get(*k) != Some(*v))
+            .map(|(k, v)| format!("{k}: spec {v} vs app {}", live.get(k).map_or("ABSENT".into(), |x| x.to_string())))
+            .collect();
+        assert!(diffs.is_empty(), "{} of {} differ:\n{}", diffs.len(), expected.len(), diffs.join("\n"));
+    }
+
     #[test]
     fn algorithm_widget_tree_vectors() {
         use crate::interpreter::widget_tree::widget_tree;
