@@ -6764,6 +6764,35 @@ mod tests {
         }
     }
 
+    /// Every DIALOG through the same widget-tree pass, from its own golden
+    /// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+    #[test]
+    fn algorithm_dialog_widget_tree_vectors() {
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let json_str = read_fixture("algorithms/dialog_widget_tree.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let dialogs = bundle["dialogs"].as_object().unwrap();
+        let cases = tests.as_array().unwrap();
+        assert_eq!(cases.len(), dialogs.len(), "one vector per dialog in the bundle");
+
+        let mut failed = vec![];
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("widget_tree"), "{name}");
+            let dialog_id = tc["args"]["dialog"].as_str().unwrap();
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            if widget_tree(&dialogs[dialog_id], ctx) != tc["expected"] {
+                failed.push(name.to_string());
+            }
+        }
+        assert!(failed.is_empty(), "dialog widget trees mismatch: {failed:?}");
+    }
+
     // ---------------------------------------------------------------
     // Panel bind-VALUE (resolved snapshot) algorithm test vectors
     // ---------------------------------------------------------------
