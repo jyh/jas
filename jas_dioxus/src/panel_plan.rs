@@ -510,9 +510,10 @@ pub fn panel_list(panels: &Value) -> Value {
 /// ["<content id>"...], "active": <index>}...]}` in the layout's order. The
 /// layout names a panel by its short id (`color`); a shell plans it by its
 /// content id (`color_panel_content`), so this answers content ids. `None` --
-/// never a partial or repaired dock -- for a layout the bundle lacks, a group
-/// that is not a non-empty list of names, an `active` that is not an index into
-/// its group, or a docked panel the bundle does not hold.
+/// never a partial or repaired dock -- for a layout the bundle lacks, a layout
+/// with no groups, a group that is not a non-empty list of names, an `active`
+/// that is not an index into its group, or a docked panel the bundle does not
+/// hold.
 pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
     let groups = data.get("default_layouts")?.get(name)?.get("dock")?
         .get("dock_main")?.get("groups")?.as_array()?;
@@ -534,6 +535,8 @@ pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
         };
         out.push(json!({"panels": ids, "active": active}));
     }
+    // A dock with no groups is no dock: a shell would draw an empty column.
+    if out.is_empty() { return None; }
     Some(json!({"groups": out}))
 }
 
@@ -2182,8 +2185,8 @@ mod tests {
 }
 
 /// `dock_layout` refuses rather than repairs: an `active` index outside its
-/// group, a group with no panels, or a panel the bundle lacks is `None` -- a
-/// shell then never has a value to clamp into range.
+/// group, a layout with no groups, a group with no panels, or a panel the
+/// bundle lacks is `None` -- a shell then never has a value to clamp into range.
 #[cfg(test)]
 mod dock_layout_tests {
     use super::dock_layout;
@@ -2212,5 +2215,12 @@ mod dock_layout_tests {
     fn an_empty_group_and_an_unknown_panel_are_refused() {
         assert!(dock_layout(&bundle(json!([{"panels": [], "active": 0}])), "L").is_none());
         assert!(dock_layout(&bundle(json!([{"panels": ["nope"], "active": 0}])), "L").is_none());
+    }
+
+    /// A dock with no groups is no dock: `{"groups":[]}` would hand a shell an
+    /// empty column to draw and call it opened (#316's review, item 2).
+    #[test]
+    fn a_dock_with_no_groups_is_refused() {
+        assert!(dock_layout(&bundle(json!([])), "L").is_none());
     }
 }
