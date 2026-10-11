@@ -862,31 +862,25 @@ public enum LayersPanel {
                 return nil
             }
         }
-        // Boolean panel operations (BOOLEAN.md), LIFTED from the panel's own
-        // table, never restated. Each verb fires a same-named platform effect
-        // (actions.yaml: effects [snapshot, {boolean_crop: true}, {set:
-        // {last_boolean_op: "crop"}}]). This table used to register FOUR of them
-        // by hand (union, subtract_front, intersection, exclude), so on this
-        // route -- the menu and keyboard (``ViewActions``), the test FIFO, the
-        // dialogs, and the action corpus -- the other nine destructive ops, the
-        // four compound-creating variants, Release / Expand Compound Shape and
-        // Repeat were skipped by `runEffects` without a word, while the same
-        // verb clicked in the Boolean panel, or chosen from its own menu, worked
-        // (`alignPlatformEffects` has them all). No menubar item or shortcut
-        // dispatches a boolean verb today, so a person never met this; the
-        // test FIFO (the Mac's level-2 action channel) and the corpus did.
-        // Rust has one effect match for both routes. The four it had also
-        // ignored the Boolean Options precision the panel's table reads.
-        // Measured by the `boolean.json` action cases added with this lift.
-        let panelEffects = alignPlatformEffects(model: model)
-        let booleanKeys = panelEffects.keys.filter { $0.hasPrefix("boolean_") }
-            + ["release_compound_shape", "expand_compound_shape",
-               "repeat_boolean_operation", "reset_boolean_panel"]
-        for key in booleanKeys {
-            guard let handler = panelEffects[key] else {
-                assertionFailure("boolean effect '\(key)' vanished from the panel table")
-                continue
-            }
+        // EVERY key the panel's table (`alignPlatformEffects`) registers is
+        // reachable from this route too; a key this table already defines keeps
+        // its own handler. This route serves the menu and keyboard
+        // (``ViewActions``), the test FIFO (the Mac's level-2 action channel),
+        // the dialogs and the action corpus, and it used to restate the panel
+        // table's keys BY HAND. Each one it missed was a verb skipped by
+        // `runEffects` without a word here while the same verb worked from its
+        // panel. Measured on 2026-10-10 by the action corpus:
+        //   * nine of the thirteen boolean ops, Release / Expand Compound Shape
+        //     and Repeat (`boolean.json`), and the four it did have ignored the
+        //     Boolean Options precision;
+        //   * `notify_panel_state_changed`, so a Stroke panel verb (cap, join,
+        //     dashed) wrote the panel and never reached the selection
+        //     (`stroke_actions.json`) -- the CAPREACH defect, fixed in the
+        //     panel's table on 2026-08-05 and never in this one.
+        // Rust has one effect match for both routes; this overlay is the one
+        // table this port can have without moving every handler.
+        for (key, handler) in alignPlatformEffects(model: model)
+            where platformEffects[key] == nil {
             platformEffects[key] = handler
         }
         // VIEW-STATE effects (VIEWSEED). actions.yaml's six View verbs —
