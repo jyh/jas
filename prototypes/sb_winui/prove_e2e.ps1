@@ -23,7 +23,10 @@
 # box that froze it: its DPI, its graphics driver, and its desktop -- the
 # window's height follows the desktop's state (this box's root measured 992.67
 # DIPs one morning and 987.33 after a reboot, same build, 8 device pixels at
-# 1.5x). Re-freeze only from a clean run on the box that certifies.
+# 1.5x). Re-freeze only from a clean run on the box that certifies, and commit
+# the new baseline with a `Baseline-Refreeze: <item>: <reason>` line unless the
+# spec item changed in the same PR: scripts/check_baseline_spec_change.py reds a
+# baseline that moves on its own (docs/TESTING.md section 2).
 #
 # The gesture is an INPUT SCRIPT (docs/TESTING.md section 6), always: -Script
 # <path> names one, and the default is test_fixtures/input_scripts/
