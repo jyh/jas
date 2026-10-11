@@ -1,0 +1,202 @@
+[
+  {
+    "name": "set_stroke_align_inside",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_align",
+        "params": {
+          "align": "inside"
+        }
+      }
+    ],
+    "expected_json": "set_stroke_align_inside_expected.json",
+    "expected_panel_state": {
+      "stroke_align": "inside"
+    }
+  },
+  {
+    "name": "set_stroke_profile_taper_end_on_a_line",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_profile",
+        "params": {
+          "profile": "taper_end"
+        }
+      }
+    ],
+    "expected_json": "set_stroke_profile_taper_end_expected.json",
+    "expected_panel_state": {
+      "stroke_profile": "taper_end"
+    }
+  },
+  {
+    "name": "flip_stroke_profile_mirrors_a_taper_end",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_profile",
+        "params": {
+          "profile": "taper_end"
+        }
+      },
+      {
+        "action": "flip_stroke_profile",
+        "params": {}
+      }
+    ],
+    "expected_json": "flip_stroke_profile_taper_end_expected.json",
+    "expected_panel_state": {
+      "stroke_profile": "taper_end",
+      "stroke_profile_flipped": true
+    }
+  },
+  {
+    "name": "reset_stroke_profile_after_a_flipped_taper",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_profile",
+        "params": {
+          "profile": "taper_end"
+        }
+      },
+      {
+        "action": "flip_stroke_profile",
+        "params": {}
+      },
+      {
+        "action": "reset_stroke_profile",
+        "params": {}
+      }
+    ],
+    "expected_json": "reset_stroke_profile_expected.json",
+    "expected_panel_state": {
+      "stroke_profile": "uniform",
+      "stroke_profile_flipped": false
+    }
+  },
+  {
+    "name": "set_arrow_align_center_at_end",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_arrow_align",
+        "params": {
+          "align": "center_at_end"
+        }
+      }
+    ],
+    "expected_json": "set_arrow_align_center_at_end_expected.json",
+    "expected_panel_state": {
+      "stroke_arrow_align": "center_at_end"
+    }
+  },
+  {
+    "name": "toggle_link_arrowhead_scale_links",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "toggle_link_arrowhead_scale",
+        "params": {}
+      }
+    ],
+    "expected_json": "toggle_link_arrowhead_scale_expected.json",
+    "expected_panel_state": {
+      "stroke_link_arrowhead_scale": true
+    }
+  },
+  {
+    "name": "flip_stroke_profile_twice_restores_the_taper",
+    "setup_svg": "line_basic.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_profile",
+        "params": {
+          "profile": "taper_end"
+        }
+      },
+      {
+        "action": "flip_stroke_profile",
+        "params": {}
+      },
+      {
+        "action": "flip_stroke_profile",
+        "params": {}
+      }
+    ],
+    "expected_json": "set_stroke_profile_taper_end_expected.json",
+    "expected_panel_state": {
+      "stroke_profile_flipped": false
+    }
+  },
+  {
+    "name": "set_stroke_profile_scales_each_line_by_its_own_width",
+    "setup_svg": "two_lines_two_widths.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_profile",
+        "params": {
+          "profile": "taper_end"
+        }
+      }
+    ],
+    "expected_json": "set_stroke_profile_two_widths_expected.json",
+    "expected_panel_state": {
+      "stroke_profile": "taper_end"
+    }
+  }
+]

@@ -2678,12 +2678,17 @@ public class Controller {
         return out
     }
 
-    public func setSelectionWidthProfile(_ widthPoints: [StrokeWidthPoint]) {
+    /// Set each selected element's width profile, THROUGH CONTAINERS, with the
+    /// points computed PER LEAF by `pointsFor`, so a profile scales by the
+    /// stroke it is drawn on. Mirrors Rust `set_selection_width_profile`
+    /// (2026-10-11): one list from the first selection's width gave a group's
+    /// lines the default 1 pt and two lines of different widths one taper.
+    public func setSelectionWidthProfile(_ pointsFor: (Element) -> [StrokeWidthPoint]) {
         var doc = model.document
         if doc.selection.isEmpty { return }
         for es in doc.selection {
             let elem = doc.getElement(es.path)
-            let newElem = withWidthPoints(elem, widthPoints: widthPoints)
+            let newElem = elem.mapPaintable { withWidthPoints($0, widthPoints: pointsFor($0)) }
             doc = doc.replaceElement(es.path, with: newElem)
         }
         model.editDocument(doc)

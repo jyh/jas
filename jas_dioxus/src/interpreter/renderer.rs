@@ -1738,27 +1738,11 @@ fn build_appstate_ctx(
         "tab_count": st.tabs.len(),
         "active_tab": st.active_tab,
         "stroke_width": stroke_width,
-        "stroke_cap": sp.cap,
-        "stroke_join": sp.join,
-        "stroke_miter_limit": sp.miter_limit,
-        "stroke_align": sp.align,
-        "stroke_dashed": sp.dashed,
-        "stroke_dash_1": sp.dash_1,
-        "stroke_gap_1": sp.gap_1,
-        "stroke_dash_2": sp.dash_2,
-        "stroke_gap_2": sp.gap_2,
-        "stroke_dash_3": sp.dash_3,
-        "stroke_gap_3": sp.gap_3,
-        "stroke_dash_align_anchors": sp.dash_align_anchors,
-        "stroke_start_arrowhead": sp.start_arrowhead,
-        "stroke_end_arrowhead": sp.end_arrowhead,
-        "stroke_start_arrowhead_scale": sp.start_arrowhead_scale,
-        "stroke_end_arrowhead_scale": sp.end_arrowhead_scale,
-        "stroke_link_arrowhead_scale": sp.link_arrowhead_scale,
-        "stroke_arrow_align": sp.arrow_align,
-        "stroke_profile": sp.profile,
-        "stroke_profile_flipped": sp.profile_flipped,
     });
+    let mut state = state;
+    if let Some(m) = state.as_object_mut() {
+        m.extend(crate::workspace::dock_panel::stroke_state_entries(sp));
+    }
     // Panel namespace: expose layers_panel_selection as a list of path
     // markers so YAML actions (delete/duplicate_layer_selection) can
     // iterate it.

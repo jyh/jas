@@ -394,11 +394,11 @@ pub fn apply_stroke_panel_to_selection(
     // profile shape / flip, or the weight they scale with.
     let profile_edit = matches!(group, StrokeEditGroup::Width | StrokeEditGroup::Profile);
     if !model.document().selection.is_empty() {
-        let profile_width = if group == StrokeEditGroup::Width {
-            committed_width
-        } else {
-            sel_stroke.map(|s| s.width).unwrap_or(committed_width)
-        };
+        // A weight edit gives every leaf the committed width, so the profile
+        // scales by it; any other edit leaves each leaf its own width, so the
+        // profile scales by THAT (per leaf, in the setter).
+        let width_override = (group == StrokeEditGroup::Width).then_some(committed_width);
+        let fallback_width = sel_stroke.map(|s| s.width).unwrap_or(committed_width);
         // Join a transaction the caller already opened (the engine's batch),
         // or bracket this edit as its own undo step. Not `with_txn`: it
         // commits unconditionally, so inside an open transaction it would
@@ -410,10 +410,12 @@ pub fn apply_stroke_panel_to_selection(
             Some(stroke_with_group(base, sp, group, committed_width))
         });
         if profile_edit {
-            let width_pts = crate::geometry::element::profile_to_width_points(
-                &sp.profile, profile_width, sp.profile_flipped,
-            );
-            Controller::set_selection_width_profile(model, width_pts);
+            Controller::set_selection_width_profile(model, |leaf| {
+                let w = width_override
+                    .or_else(|| leaf.stroke().map(|s| s.width))
+                    .unwrap_or(fallback_width);
+                crate::geometry::element::profile_to_width_points(&sp.profile, w, sp.profile_flipped)
+            });
         }
         if opened {
             model.commit_txn();

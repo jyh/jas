@@ -260,7 +260,12 @@ private func evalExpr(_ expr: Any?, store: StateStore, ctx: [String: Any]) -> Va
     if let s = expr as? String {
         exprStr = s
     } else if let n = expr as? NSNumber {
-        exprStr = n.stringValue
+        // A JSON `true` / `false` is an NSNumber too, and its `stringValue` is
+        // "1" / "0": `reset_stroke_profile`'s `value: false` evaluated as the
+        // NUMBER 0 and the panel published `0` where the reference holds
+        // `false` (`stroke_profile_actions.json`, 2026-10-11).
+        exprStr = CFGetTypeID(n) == CFBooleanGetTypeID()
+            ? (n.boolValue ? "true" : "false") : n.stringValue
     } else {
         exprStr = ""
     }
@@ -588,7 +593,22 @@ private func runOne(
     // set_panel_state: { key, value, panel? }
     if let sps = effect["set_panel_state"] as? [String: Any] {
         let key = sps["key"] as? String ?? ""
-        let value = evalExpr(sps["value"], store: store, ctx: ctx)
+        // `panel.*` in the value means the NAMED panel's fields (Rust evaluates
+        // against that panel's own state). The action route's ctx carries a
+        // `panel` dict for the Layers and Artboards selections only, so
+        // `not panel.profile_flipped` read null and Flip Profile could never
+        // unflip (`stroke_profile_actions.json`, 2026-10-11). The named panel's
+        // stored fields fill only the keys the ctx lacks, so a dock panel's
+        // live display values still win.
+        var valueCtx = ctx
+        if let raw = sps["panel"] as? String {
+            var p = ctx["panel"] as? [String: Any] ?? [:]
+            for (k, v) in store.getPanelState(StateStore.panelContentId(raw)) where p[k] == nil {
+                p[k] = v
+            }
+            valueCtx["panel"] = p
+        }
+        let value = evalExpr(sps["value"], store: store, ctx: valueCtx)
         let writtenPanel: String?
         if let rawPanelId = sps["panel"] as? String {
             // YAML actions name panels by their short kind ("swatches",
@@ -894,9 +914,11 @@ func applyStrokePanelToSelection(
         // Width profiles are re-derived only when the edit can change
         // them: the profile shape / flip, or the weight they scale with.
         let profileEdit = group == .width || group == .profile
-        let profileWidth = group == .width
-            ? committedWidth
-            : (selStroke?.width ?? committedWidth)
+        // A weight edit gives every leaf the committed width, so the profile
+        // scales by it; any other edit leaves each leaf its own width, so the
+        // profile scales by THAT (per leaf, in the setter). Mirrors Rust.
+        let widthOverride: Double? = group == .width ? committedWidth : nil
+        let fallbackWidth = selStroke?.width ?? committedWidth
         // Stroke + width-profile as ONE undo step: withTxn opens the
         // bracket, each Controller mutator's editDocument joins it.
         controller.model.withTxn {
@@ -907,8 +929,12 @@ func applyStrokePanelToSelection(
             if profileEdit {
                 let profile = strokePanelField(store, "profile") as? String ?? "uniform"
                 let flipped = strokePanelField(store, "profile_flipped") as? Bool ?? false
-                controller.setSelectionWidthProfile(profileToWidthPoints(
-                    profile: profile, width: profileWidth, flipped: flipped))
+                controller.setSelectionWidthProfile { leaf in
+                    profileToWidthPoints(
+                        profile: profile,
+                        width: widthOverride ?? leaf.stroke?.width ?? fallbackWidth,
+                        flipped: flipped)
+                }
             }
         }
     }

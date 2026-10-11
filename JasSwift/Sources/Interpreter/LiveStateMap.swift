@@ -159,6 +159,13 @@ public func liveAppStateOverrides(model: Model?) -> [String: Any] {
 func buildLiveStateMap(ws: WorkspaceData, model: Model?) -> [String: Any] {
     var m = ws.stateDefaults()
     for (k, v) in liveAppStateOverrides(model: model) { m[k] = v }
+    // The Stroke panel's live fields, as Rust's map overlays them. The dock's
+    // panel ctx already did this (DASHFIX); the ACTION route reads this map,
+    // so a menu or shortcut Flip Profile read a stale `false` and could never
+    // unflip (`stroke_profile_actions.json`, 2026-10-11).
+    if let model = model {
+        for (k, v) in strokePanelStateOverrides(store: model.stateStore) { m[k] = v }
+    }
     return m
 }
 

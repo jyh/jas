@@ -714,12 +714,51 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
     // `not state.stroke_dashed` reads the current bool instead of a stale
     // workspace default — otherwise the read is `not null`/`not false` on
     // every click and the checkbox latches on (DASHFIX). Paired with the
-    // stroke keys in build_panel_state_subset.
-    let sp = &st.stroke_panel;
-    m.insert("stroke_dashed".into(), J::Bool(sp.dashed));
-    m.insert("stroke_link_arrowhead_scale".into(), J::Bool(sp.link_arrowhead_scale));
-    m.insert("stroke_profile_flipped".into(), J::Bool(sp.profile_flipped));
+    // stroke keys in build_panel_state_subset. EVERY stroke field, not only
+    // the three toggles: the Stroke panel's `init` reads `state.stroke_*`, and
+    // align / profile / arrow align stayed at the workspace defaults after a
+    // verb had moved them (`stroke_profile_actions.json`, 2026-10-11).
+    m.extend(stroke_state_entries(&st.stroke_panel));
 
+    m
+}
+
+/// The Stroke panel's fields as `state.stroke_*`, from the one struct that
+/// holds them. Read by the panel-render map above and by the action ctx
+/// (`build_appstate_ctx`), so the two cannot publish different stroke lists.
+/// `stroke_width` is not here: both readers take it from the stroke itself.
+pub(crate) fn stroke_state_entries(
+    sp: &crate::workspace::app_state::StrokePanelState,
+) -> serde_json::Map<String, serde_json::Value> {
+    let mut m = serde_json::Map::new();
+    m.insert("stroke_cap".into(), serde_json::json!(sp.cap));
+    m.insert("stroke_join".into(), serde_json::json!(sp.join));
+    m.insert("stroke_miter_limit".into(), serde_json::json!(sp.miter_limit));
+    m.insert("stroke_align".into(), serde_json::json!(sp.align));
+    m.insert("stroke_dashed".into(), serde_json::json!(sp.dashed));
+    m.insert("stroke_dash_1".into(), serde_json::json!(sp.dash_1));
+    m.insert("stroke_gap_1".into(), serde_json::json!(sp.gap_1));
+    m.insert("stroke_dash_2".into(), serde_json::json!(sp.dash_2));
+    m.insert("stroke_gap_2".into(), serde_json::json!(sp.gap_2));
+    m.insert("stroke_dash_3".into(), serde_json::json!(sp.dash_3));
+    m.insert("stroke_gap_3".into(), serde_json::json!(sp.gap_3));
+    m.insert("stroke_dash_align_anchors".into(), serde_json::json!(sp.dash_align_anchors));
+    m.insert("stroke_start_arrowhead".into(), serde_json::json!(sp.start_arrowhead));
+    m.insert("stroke_end_arrowhead".into(), serde_json::json!(sp.end_arrowhead));
+    m.insert("stroke_start_arrowhead_scale".into(), serde_json::json!(sp.start_arrowhead_scale));
+    m.insert("stroke_end_arrowhead_scale".into(), serde_json::json!(sp.end_arrowhead_scale));
+    m.insert("stroke_link_arrowhead_scale".into(), serde_json::json!(sp.link_arrowhead_scale));
+    m.insert("stroke_arrow_align".into(), serde_json::json!(sp.arrow_align));
+    m.insert("stroke_profile".into(), serde_json::json!(sp.profile));
+    m.insert("stroke_profile_flipped".into(), serde_json::json!(sp.profile_flipped));
+    // The struct holds every number as f64; the spec's defaults are integers
+    // (`stroke_dash_1: 12`), and JSON 12.0 != 12. Publish an integral value as
+    // an integer, as the workspace defaults this overlays already are.
+    for v in m.values_mut() {
+        if let Some(f) = v.as_f64().filter(|f| v.is_f64() && f.is_finite() && f.fract() == 0.0 && f.abs() < 1e15) {
+            *v = serde_json::json!(f as i64);
+        }
+    }
     m
 }
 

@@ -5373,6 +5373,9 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-11): the Layers-panel selection verbs, with
     // each case's layers_panel_selection standing in for the native row click.
     "layer_actions.json",
+    // YAML coverage census (2026-10-11): the Stroke panel alignment, profile and
+    // arrow verbs, pinning the panel-render state beside the document.
+    "stroke_profile_actions.json",
     // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
     // inherited lock. `actions.yaml` §select_all always said "locked objects
     // are excluded" without saying WHOSE flag, and the two ports answered
