@@ -150,6 +150,12 @@ public enum LayersPanel {
             : (model.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
                 .compactMap { $0 as? String } ?? []
 
+        // The Layers panel's selection, likewise: the caller's, or else the one
+        // the panel publishes into the store (`layersPanelSelection(model:)`,
+        // which the hamburger menu's `enabled_when` rows already read).
+        let panelSelection: [[Int]] = !panelSelection.isEmpty
+            ? panelSelection : layersPanelSelection(model: model)
+
         let activeDoc = buildActiveDocumentView(
             model: model,
             layersPanelSelection: panelSelection,

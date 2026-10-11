@@ -212,6 +212,17 @@ pub(crate) fn run_action_case(
             .collect();
         Controller::set_selection(&mut st.tabs[st.active_tab].model, entries);
     }
+    // Optional Layers-panel selection (rows the artist picked in the panel,
+    // which no verb sets: the native row click does). The verbs that read
+    // `panel.layers_panel_selection` -- delete / duplicate layer selection,
+    // new_group -- consume it. Mirrors run_action_model in Swift (2026-10-11).
+    if let Some(rows) = tc.get("layers_panel_selection").and_then(|v| v.as_array()) {
+        st.layers_panel_selection = rows
+            .iter()
+            .filter_map(|p| p.as_array())
+            .map(|p| p.iter().filter_map(|n| n.as_u64().map(|u| u as usize)).collect())
+            .collect();
+    }
 
     for step in tc["actions"].as_array().unwrap() {
         let action = step["action"].as_str().unwrap();

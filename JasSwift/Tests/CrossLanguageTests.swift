@@ -5370,6 +5370,9 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
     // artboards_panel_select, which is itself a verb with no other case.
     "artboard_actions.json",
+    // YAML coverage census (2026-10-11): the Layers-panel selection verbs, with
+    // each case's layers_panel_selection standing in for the native row click.
+    "layer_actions.json",
     // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
     // inherited lock. `actions.yaml` §select_all always said "locked objects
     // are excluded" without saying WHOSE flag, and the two ports answered
@@ -5510,6 +5513,13 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
         for pid in panels.keys.sorted() {
             model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid))
         }
+    }
+    // Optional Layers-panel selection, published where the live panel publishes
+    // it (`YamlPanelBodyView`'s mirror into `layers_panel_content`). No verb
+    // sets it: the native row click does. Mirrors Rust `run_action_case`.
+    if let rows = tc["layers_panel_selection"] as? [[Any]] {
+        let paths = rows.map { $0.map { ($0 as! NSNumber).intValue } }
+        model.stateStore.setPanel("layers_panel_content", "layers_panel_selection", paths)
     }
 
     // Install the deterministic id source for the dispatch below: a per-char
