@@ -28,13 +28,17 @@
 # spec item changed in the same PR: scripts/check_baseline_spec_change.py reds a
 # baseline that moves on its own (docs/TESTING.md section 2).
 #
-# -Script <path> drives an INPUT SCRIPT (docs/TESTING.md section 6) instead of
-# the built-in gesture: its press/move/release become the SendInput drag, its
-# setup_svg the document, and its read=document is compared BYTE FOR BYTE with
-# its expected_json (`readback=`). A script this driver cannot deliver exactly
-# is refused by name (`Read-SbInputScript`), never approximated. In this mode
-# `core` is the read-back against the script's expected document, which the
-# ports agree on at level 1, and no baseline is needed for it.
+# The gesture is an INPUT SCRIPT (docs/TESTING.md section 6), always: -Script
+# <path> names one, and the default is test_fixtures/input_scripts/
+# selection.drag.json, the gesture e2e_baselines/selection.drag is frozen from.
+# There is no built-in gesture: one gesture, one baseline. A relative path is
+# tried from the current directory, then from the repo root. Its press/move/
+# release become the SendInput drag, its setup_svg the document, and its
+# read=document is compared BYTE FOR BYTE with its expected_json (`readback=`).
+# A script this driver cannot deliver exactly is refused by name
+# (`Read-SbInputScript`), never approximated. `core` is the read-back against
+# the script's expected document, which the ports agree on at level 1, and no
+# baseline is needed for it.
 #
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
@@ -57,35 +61,32 @@ $shot    = Join-Path $exeDir 'sb-e2e-shot.png'
 $repo    = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $capExe  = Join-Path $repo 'jas_dioxus\target\debug\capture_desktop.exe'
 $probeDoc = [System.IO.Path]::ChangeExtension($probe, '.doc.json')
-$svgArgs = @()
-$expectedPath = $null
-if ($Script -ne '') {
-    if (-not (Test-Path $Script)) {
-        Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: no input script at that path"
-        exit 2
-    }
-    $scriptFull = (Resolve-Path $Script).Path
-    $sc = Read-SbInputScript ([System.IO.File]::ReadAllText($scriptFull, [System.Text.Encoding]::UTF8))
-    if ($null -ne $sc.Refusal) {
-        Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: $($sc.Refusal)"
-        exit 2
-    }
-    $item = $sc.Item
-    $expectedPath = Join-Path (Split-Path $scriptFull -Parent) $sc.Expected
-    if (-not (Test-Path $expectedPath)) {
-        Write-Host "E2E-CERT v1 item=$item verdict=NOT RUN -- the script's expected_json is not at $expectedPath"
-        exit 2
-    }
-    $svgArgs = @('-Svg', "test_fixtures\svg\$($sc.Svg)")
+if ($Script -eq '') { $Script = 'test_fixtures\input_scripts\selection.drag.json' }
+$scriptFull = if (Test-Path $Script) { (Resolve-Path $Script).Path }
+              elseif (-not [System.IO.Path]::IsPathRooted($Script) -and (Test-Path (Join-Path $repo $Script))) { (Resolve-Path (Join-Path $repo $Script)).Path }
+              else { $null }
+if ($null -eq $scriptFull) {
+    Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: no input script at that path (from here or from the repo root)"
+    exit 2
 }
+$sc = Read-SbInputScript ([System.IO.File]::ReadAllText($scriptFull, [System.Text.Encoding]::UTF8))
+if ($null -ne $sc.Refusal) {
+    Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: $($sc.Refusal)"
+    exit 2
+}
+$item = $sc.Item
+$expectedPath = Join-Path (Split-Path $scriptFull -Parent) $sc.Expected
+if (-not (Test-Path $expectedPath)) {
+    Write-Host "E2E-CERT v1 item=$item verdict=NOT RUN -- the script's expected_json is not at $expectedPath"
+    exit 2
+}
+$svgArgs = @('-Svg', "test_fixtures\svg\$($sc.Svg)")
 # Harness-local data beside its only consumer: test_fixtures/ is the cross-language
 # corpus, whose consumers are the ports and scripts/, and this is neither.
 if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item" }
 
-# The gesture: press inside the sample's rect (document units), drag it by the
-# same delta the harness's pointer arm uses.
-$docX = 36; $docY = 36; $dx = 37; $dy = 23; $moves = 7
-if ($Script -ne '') { $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves }
+# The gesture, in document units, exactly as the script states it.
+$docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -169,11 +170,8 @@ finally {
 $selCount = @($r.selection).Count
 
 # ---- the INPUT SCRIPT's read-back, byte for byte (docs/TESTING.md section 6) --
-$readback = 'n/a(no -Script)'
-if ($Script -ne '') {
-    $got = if (Test-Path $probeDoc) { [System.IO.File]::ReadAllText($probeDoc, [System.Text.Encoding]::UTF8) } else { '' }
-    $readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($expectedPath, [System.Text.Encoding]::UTF8))
-}
+$got = if (Test-Path $probeDoc) { [System.IO.File]::ReadAllText($probeDoc, [System.Text.Encoding]::UTF8) } else { '' }
+$readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($expectedPath, [System.Text.Encoding]::UTF8))
 
 # ---- DRIVE INTEGRITY: did the shell receive exactly the gesture we sent? --
 # A real mouse moving during the run interleaves with the injected one, and the
@@ -248,7 +246,7 @@ $reading = [ordered]@{
 }
 
 if ($Freeze) {
-    if ($drive -notlike 'PASS*' -or $moved -notlike 'PASS*' -or ($Script -ne '' -and $readback -notlike 'PASS*')) {
+    if ($drive -notlike 'PASS*' -or $moved -notlike 'PASS*' -or $readback -notlike 'PASS*') {
         Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
         exit 7
     }
@@ -268,15 +266,13 @@ if (-not (Test-Path $bfile)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN 
 $b = Get-Content $bfile -Raw | ConvertFrom-Json
 
 # The spec's own observable, independent of any baseline: one element selected.
-$core = if ($Script -ne '') {
-            if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
-        } elseif ($moved -like 'PASS*' -and $selCount -eq 1 -and $r.doc_sha -eq $b.doc_sha) { 'PASS' } else { "FAIL(selection=$selCount doc-sha=$($r.doc_sha) want=$($b.doc_sha))" }
+$core = if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
 $tree = if ($r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha) { 'PASS' } else { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves):$drive " +
-        "spec=$moved $(if ($Script -ne '') { "script=$Script readback=$readback " })core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
+        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
 Add-Content -Path (Join-Path $exeDir 'e2e-certificates.log') -Value $line -Encoding ascii
