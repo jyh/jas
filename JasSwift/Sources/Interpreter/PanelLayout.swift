@@ -22,7 +22,7 @@ import Foundation
 public enum PanelLayout {
     public static let charWidth = 10
 
-    private static let containerTypes: Set<String> = ["container", "row", "col", "panel"]
+    private static let containerTypes: Set<String> = ["container", "row", "col", "panel", "grid"]
 
     private static let fillKinds: Set<String> = [
         "select", "number_input", "text_input", "length_input",
@@ -172,6 +172,36 @@ public enum PanelLayout {
 
     private static func styleI(_ n: [String: Any], _ key: String) -> Int? {
         asInt(style(n)[key])
+    }
+
+    /// A JSON integer, as the reference's `isinstance(v, int)` reads one: a
+    /// float (`1.0`) is NOT an integer here, so a `grid` cell given as a float
+    /// falls back to reading order, as in the reference and Rust.
+    private static func strictInt(_ v: Any?) -> Int? {
+        guard let n = v as? NSNumber, !CFNumberIsFloatType(n),
+              CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        return n.intValue
+    }
+
+    /// A number (int or float, truncated), as the reference's
+    /// `isinstance(v, (int, float))` reads one: never a string.
+    private static func numI(_ v: Any?) -> Int? {
+        guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        return n.intValue
+    }
+
+    /// A container's gap: `style.gap`, else (B.7) a 2-D grid's own `gap` key,
+    /// the toolbar's form. The reference's `_gap`, read in both `measure` and
+    /// `natural_w`.
+    private static func gap(_ n: [String: Any]) -> Int {
+        if let g = styleI(n, "gap") { return g }
+        if nodeType(n) == "grid", let g = numI(n["gap"]) { return g }
+        return 0
+    }
+
+    /// B.7: a 2-D grid's column count, at least 1.
+    private static func gridCols(_ n: [String: Any]) -> Int {
+        max(numI(n["cols"]) ?? 1, 1)
     }
 
     /// Resolve a style dimension to integer px, or nil to ignore. Numbers
@@ -405,7 +435,7 @@ public enum PanelLayout {
         // has nothing to resolve against here and is ignored, as a leaf's is.
         if let declared = resolveDim(st["width"], -1) { return declared }
         let (_, pr, _, pl) = parsePadding(st["padding"])
-        let gap = styleI(node, "gap") ?? 0
+        let gap = gap(node)
         if nodeType(node) == "disclosure" {
             let kids = visibleChildren(node)
             let inner = kids.map { naturalW($0.1, ctx) }.max() ?? 0
@@ -440,7 +470,7 @@ public enum PanelLayout {
                                availH: Int, ctx: [String: Any]) -> (Int, Int, [MItem]) {
         let st = style(n)
         let (pt, pr, pb, pl) = parsePadding(st["padding"])
-        let gap = styleI(n, "gap") ?? 0
+        let gap = gap(n)
         // B.5: a container's declared width is honoured as its height is (B.4),
         // clamped to the width it is given; its children are laid out in it.
         var availW = availW
@@ -459,6 +489,9 @@ public enum PanelLayout {
             } else if let fe = n["foreach"] as? [String: Any], n["do"] != nil {
                 (chItems, contentH) = foreach(n, foreachSpec: fe, path: path,
                                               innerW: innerW, gap: gap, ctx: ctx)
+            } else if nodeType(n) == "grid" {
+                (chItems, contentH) = grid2d(visibleChildren(n), path: path, innerW: innerW,
+                                             gap: gap, cols: gridCols(n), ctx: ctx)
             } else {
                 let children = visibleChildren(n)
                 let lay = resolvedLayout(n)
@@ -694,6 +727,61 @@ public enum PanelLayout {
     /// body (children, column) below a fixed-height header (assumed expanded);
     /// the header is drawn by the widget itself (no separate rect). The body's
     /// inner foreach (swatch / brush grids) expands through the normal recursion.
+    /// B.7: a 2-D `type: grid` -- `cols` columns, `gap` between cells. The
+    /// reference's `_grid2d` and Rust's `grid_2d`, line for line: cell width
+    /// `(innerW - gap*(cols-1)) / cols` (floored, never below 0); the cell at
+    /// column `c` starts at `c * (cw + gap)`; a child's cell is its
+    /// `grid: {row, col}` (the column clamped), else the next cell in reading
+    /// order after the previous child's; a row is as tall as its tallest child;
+    /// rows are `gap` apart, top to bottom by row number, and a row number no
+    /// child uses takes no space.
+    private static func grid2d(_ children: [(Int, [String: Any])], path: [Int],
+                               innerW: Int, gap: Int, cols: Int,
+                               ctx: [String: Any]) -> ([MItem], Int) {
+        func floorDiv(_ a: Int, _ b: Int) -> Int {
+            let q = a / b
+            return (a % b != 0 && (a < 0) != (b < 0)) ? q - 1 : q
+        }
+        let cw = innerW > 0 ? max(floorDiv(innerW - gap * (cols - 1), cols), 0) : 0
+        var placed: [(r: Int, k: Int, i: Int, c: [String: Any])] = []
+        var next = 0
+        for (i, c) in children {
+            let r: Int, k: Int
+            if let g = c["grid"] as? [String: Any], let gr = strictInt(g["row"]),
+               let gc = strictInt(g["col"]) {
+                r = gr
+                k = min(max(gc, 0), cols - 1)
+            } else {
+                r = floorDiv(next, cols)
+                k = next - r * cols
+            }
+            next = r * cols + k + 1
+            placed.append((r, k, i, c))
+        }
+        var measured: [(r: Int, k: Int, h: Int, items: [MItem])] = []
+        for p in placed {
+            let (_, h, items) = measure(p.c, path: path + [p.i], availW: cw, availH: 0, ctx: ctx)
+            measured.append((p.r, p.k, h, items))
+        }
+        let rows = Array(Set(measured.map { $0.r })).sorted()
+        var rowY: [Int: Int] = [:]
+        var y = 0
+        for r in rows {
+            rowY[r] = y
+            y += (measured.filter { $0.r == r }.map { $0.h }.max() ?? 0) + gap
+        }
+        let contentH = rows.isEmpty ? 0 : y - gap
+        var out: [MItem] = []
+        for m in measured {
+            for var it in m.items {
+                it.x += m.k * (cw + gap)
+                it.y += rowY[m.r] ?? 0
+                out.append(it)
+            }
+        }
+        return (out, contentH)
+    }
+
     private static func disclosure(_ node: [String: Any], path: [Int],
                                   innerW: Int, gap: Int, ctx: [String: Any]) -> ([MItem], Int) {
         let children = visibleChildren(node)

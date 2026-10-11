@@ -6732,6 +6732,39 @@ mod tests {
         }
     }
 
+    /// Layout PANES (the toolbar) through the same pass, from their own golden:
+    /// `pane_layout.json` (PATH_B_DESIGN B.7; the toolbar's tool grid is a 2-D
+    /// grid). A pane is the layout child with that `id` and a `content`.
+    #[test]
+    fn algorithm_pane_layout_vectors() {
+        use crate::interpreter::panel_layout::layout_panel;
+
+        let json_str = read_fixture("algorithms/pane_layout.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panes = bundle["layout"]["children"].as_array().unwrap();
+        let cases = tests.as_array().unwrap();
+        assert!(!cases.is_empty(), "pane_layout.json has no vectors");
+
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("layout_panel"), "{name}");
+            let pane_id = tc["args"]["pane"].as_str().unwrap();
+            let pane = panes
+                .iter()
+                .find(|c| c["id"].as_str() == Some(pane_id) && c.get("content").is_some())
+                .unwrap_or_else(|| panic!("no layout pane '{pane_id}' with content"));
+            let avail_w = tc["args"]["avail_w"].as_i64().unwrap();
+            let avail_h = tc["args"]["avail_h"].as_i64().unwrap_or(0);
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let actual = layout_panel(pane, avail_w, avail_h, ctx);
+            assert_eq!(&actual, &tc["expected"], "Pane layout '{}' mismatch", name);
+        }
+    }
+
     // ---------------------------------------------------------------
     // Panel widget-TREE (structural snapshot) algorithm test vectors
     // ---------------------------------------------------------------
