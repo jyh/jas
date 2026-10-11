@@ -8,9 +8,12 @@ namespace SbWinUi;
 internal static class PointerWire
 {
     /// <summary>How far from a whole physical pixel a reading may be and still
-    /// BE that pixel. WinRT's `Point` is two floats: at canvas coordinates in
-    /// the thousands a float's step is about 1e-4, so this is ten of them, and a
-    /// thousandth of a pixel is far below anything a pen can mean.</summary>
+    /// BE that pixel. A thousandth of a pixel is far below anything a pen can
+    /// mean. ⛔ THE BOUND: WinRT's `Point` is two floats, and a float's step
+    /// grows with magnitude (about 2.4e-4 px near 4,096 px, about 1e-3 px near
+    /// 16,384 px), so this window covers the noise only for canvas coordinates
+    /// under about 8k physical pixels. Today's displays are well inside that; a
+    /// canvas past it would see the noise again, unsnapped.</summary>
     internal const double SnapWindow = 1e-3;
 
     /// <summary>
