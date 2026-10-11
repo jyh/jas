@@ -198,9 +198,9 @@
         "why_not_closed": "The other campaign field (name-any-element), varied in 67 of 69 families -- mostly because every document has a Layer and every Layer is named. Kept exact for the same reason as fill: it is the shape of a field that WAS looked at, and the contrast is the finding."
       },
       "families_varying:id": {
-        "value": 35,
+        "value": 36,
         "improves": "up",
-        "why_not_closed": "34 families, and the healthiest of the newer fields because the element-identity campaign is recent. Two cells are obligated. Left as debt because id is emitted ONLY when set, so a port that stopped writing ids would lose the key rather than change its value -- and key-absence reads as the default here, by design and by the writer's convention."
+        "why_not_closed": "34 families, and the healthiest of the newer fields because the element-identity campaign is recent. Two cells are obligated. Left as debt because id is emitted ONLY when set, so a port that stopped writing ids would lose the key rather than change its value -- and key-absence reads as the default here, by design and by the writer's convention. RESTATED 35 -> 36 (jas, 2026-10-10): actions/boolean_divide_overlapping_rects_expected.json carries the two fresh ids DIVIDE mints for the fragments of a split operand, which is the identity law working, not a campaign paying down this debt."
       }
     },
 
