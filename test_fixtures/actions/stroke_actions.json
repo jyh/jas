@@ -1,0 +1,57 @@
+[
+  {
+    "name": "set_stroke_cap_square",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_cap",
+        "params": {
+          "cap": "square"
+        }
+      }
+    ],
+    "expected_json": "set_stroke_cap_square_expected.json"
+  },
+  {
+    "name": "set_stroke_join_round",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "set_stroke_join",
+        "params": {
+          "join": "round"
+        }
+      }
+    ],
+    "expected_json": "set_stroke_join_round_expected.json"
+  },
+  {
+    "name": "toggle_dashed_line_on",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "toggle_dashed_line",
+        "params": {}
+      }
+    ],
+    "expected_json": "toggle_dashed_line_on_expected.json"
+  }
+]

@@ -2786,6 +2786,9 @@ mod tests {
         // `menu_group_two_rects` in menu_object_ops.json, which R1 must leave
         // byte-identical.
         "group_flatten.json",
+        // YAML coverage census (2026-10-10): the Stroke panel cap, join and
+        // a dashed toggle, dispatched with a stroked rect selected.
+        "stroke_actions.json",
         // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
         // inherited lock. `actions.yaml` §select_all always said "locked
         // objects are excluded" without saying WHOSE flag, and the two ports
