@@ -5739,6 +5739,14 @@ private let seedExempt: [String: String] = [
 /// the wrapper — which is a different element from the leaf underneath it.
 private let seedKnown: Set<String> = [
     "make_compound_shape.json::make_compound_shape_two_rects",
+    // The four Alt+click compound-creating variants: make_compound_shape with
+    // another operation, so the wrappers survive as the compound's operands,
+    // which the unwrap cannot reach. Same artifact as the row above; Rust's
+    // twin lists the same four (2026-10-10).
+    "boolean.json::boolean_union_compound_overlapping_rects",
+    "boolean.json::boolean_subtract_front_compound_overlapping_rects",
+    "boolean.json::boolean_intersection_compound_overlapping_rects",
+    "boolean.json::boolean_exclude_compound_overlapping_rects",
     "menu_object_ops.json::menu_lock_two_rects",
     "menu_object_ops.json::menu_hide_two_rects",
 ]

@@ -862,20 +862,32 @@ public enum LayersPanel {
                 return nil
             }
         }
-        // Boolean panel operations (BOOLEAN.md). Each destructive verb fires a
-        // same-named platform effect (actions.yaml: effects [snapshot,
-        // {boolean_union: true}, {set: {last_boolean_op: "union"}}]); the handler
-        // routes to applyDestructiveBoolean, a self-bracketing edit that joins
-        // the txn the `snapshot` effect opened (mirrors makeCompoundShape and the
-        // align ops). The trailing `set: last_boolean_op` is handled by runEffects.
-        for (key, op) in [("boolean_union", "union"),
-                          ("boolean_subtract_front", "subtract_front"),
-                          ("boolean_intersection", "intersection"),
-                          ("boolean_exclude", "exclude")] {
-            platformEffects[key] = { _, _, _ in
-                controller.applyDestructiveBoolean(op)
-                return nil
+        // Boolean panel operations (BOOLEAN.md), LIFTED from the panel's own
+        // table, never restated. Each verb fires a same-named platform effect
+        // (actions.yaml: effects [snapshot, {boolean_crop: true}, {set:
+        // {last_boolean_op: "crop"}}]). This table used to register FOUR of them
+        // by hand (union, subtract_front, intersection, exclude), so on this
+        // route -- the menu and keyboard (``ViewActions``), the test FIFO, the
+        // dialogs, and the action corpus -- the other nine destructive ops, the
+        // four compound-creating variants, Release / Expand Compound Shape and
+        // Repeat were skipped by `runEffects` without a word, while the same
+        // verb clicked in the Boolean panel, or chosen from its own menu, worked
+        // (`alignPlatformEffects` has them all). No menubar item or shortcut
+        // dispatches a boolean verb today, so a person never met this; the
+        // test FIFO (the Mac's level-2 action channel) and the corpus did.
+        // Rust has one effect match for both routes. The four it had also
+        // ignored the Boolean Options precision the panel's table reads.
+        // Measured by the `boolean.json` action cases added with this lift.
+        let panelEffects = alignPlatformEffects(model: model)
+        let booleanKeys = panelEffects.keys.filter { $0.hasPrefix("boolean_") }
+            + ["release_compound_shape", "expand_compound_shape",
+               "repeat_boolean_operation", "reset_boolean_panel"]
+        for key in booleanKeys {
+            guard let handler = panelEffects[key] else {
+                assertionFailure("boolean effect '\(key)' vanished from the panel table")
+                continue
             }
+            platformEffects[key] = handler
         }
         // VIEW-STATE effects (VIEWSEED). actions.yaml's six View verbs —
         // zoom_in, zoom_out, zoom_to_actual_size, fit_in_window,
