@@ -1,0 +1,16 @@
+[
+  {
+    "name": "lasso_around_rect",
+    "setup_svg": "three_rects.svg",
+    "tool": "lasso",
+    "events": [
+      {"kind": "press", "x": 70, "y": 48},
+      {"kind": "move", "x": 110, "y": 48, "dragging": true},
+      {"kind": "move", "x": 110, "y": 88, "dragging": true},
+      {"kind": "move", "x": 70, "y": 88, "dragging": true},
+      {"kind": "move", "x": 70, "y": 50, "dragging": true},
+      {"kind": "release", "x": 70, "y": 50}
+    ],
+    "expected_json": "lasso_around_rect_expected.json"
+  }
+]

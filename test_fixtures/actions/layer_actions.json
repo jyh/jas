@@ -1,0 +1,51 @@
+[
+  {
+    "name": "delete_layer_selection_foreground",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [
+      [
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "delete_layer_selection",
+        "params": {}
+      }
+    ],
+    "expected_json": "delete_layer_selection_foreground_expected.json"
+  },
+  {
+    "name": "duplicate_layer_selection_foreground",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [
+      [
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "duplicate_layer_selection",
+        "params": {}
+      }
+    ],
+    "expected_json": "duplicate_layer_selection_foreground_expected.json"
+  },
+  {
+    "name": "new_group_from_layer_row_circle",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [
+      [
+        1,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "new_group",
+        "params": {}
+      }
+    ],
+    "expected_json": "new_group_from_layer_row_circle_expected.json"
+  }
+]

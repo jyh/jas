@@ -193,6 +193,21 @@
       },
       "notes": "conformance.json compiled from workspace/tests/expressions.yaml. The reference gates the SOURCE yaml directly (test_expr.py), not this compiled artifact — so 'reference' is intentionally not required here but IS required on the workspace/tests/expressions.yaml row."
     },
+    "test_fixtures/input_scripts": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "SEAM 2, as the gesture corpus: the scripts replay through the same in-process gesture runner in both ports.",
+      "claim_style": {
+        "rust": "name-list (SCRIPT_FIXTURES) + data references",
+        "swift": "name-list (scriptFixtures) + data references"
+      },
+      "notes": "The input scripts (docs/TESTING.md section 6): one per spec item, shared by level 1 (each port's core supplies the EXPECTED read-back) and level 2 (each live app). Goldens claimed transitively."
+    },
     "test_fixtures/gestures": {
       "kind": "fixtures",
       "required_consumers": [

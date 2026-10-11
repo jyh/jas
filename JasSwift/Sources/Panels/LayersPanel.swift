@@ -136,6 +136,26 @@ public enum LayersPanel {
         // three-verb blast radius.
         let params = mergeDeclaredParamDefaults(params, actionDef: actionDef)
 
+        // The Artboards panel's selection: the caller's, or else the panel
+        // scope's own -- what `ArtboardsPanel.dispatch` reads and passes. This
+        // used to default to `[]`, so every OTHER caller (`ViewActions`, the
+        // test FIFO, the dialogs, the action corpus) ran `delete_artboards`,
+        // `duplicate_artboards` and `move_artboard_up/down` against an empty
+        // selection: a no-op, while Rust reads the store. Found by
+        // `artboard_actions.json` (2026-10-11).
+        // (An empty argument and an empty panel scope read the same, so the
+        // fallback changes no caller that passes one.)
+        let artboardsPanelSelection: [String] = !artboardsPanelSelection.isEmpty
+            ? artboardsPanelSelection
+            : (model.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
+                .compactMap { $0 as? String } ?? []
+
+        // The Layers panel's selection, likewise: the caller's, or else the one
+        // the panel publishes into the store (`layersPanelSelection(model:)`,
+        // which the hamburger menu's `enabled_when` rows already read).
+        let panelSelection: [[Int]] = !panelSelection.isEmpty
+            ? panelSelection : layersPanelSelection(model: model)
+
         let activeDoc = buildActiveDocumentView(
             model: model,
             layersPanelSelection: panelSelection,
@@ -862,20 +882,26 @@ public enum LayersPanel {
                 return nil
             }
         }
-        // Boolean panel operations (BOOLEAN.md). Each destructive verb fires a
-        // same-named platform effect (actions.yaml: effects [snapshot,
-        // {boolean_union: true}, {set: {last_boolean_op: "union"}}]); the handler
-        // routes to applyDestructiveBoolean, a self-bracketing edit that joins
-        // the txn the `snapshot` effect opened (mirrors makeCompoundShape and the
-        // align ops). The trailing `set: last_boolean_op` is handled by runEffects.
-        for (key, op) in [("boolean_union", "union"),
-                          ("boolean_subtract_front", "subtract_front"),
-                          ("boolean_intersection", "intersection"),
-                          ("boolean_exclude", "exclude")] {
-            platformEffects[key] = { _, _, _ in
-                controller.applyDestructiveBoolean(op)
-                return nil
-            }
+        // EVERY key the panel's table (`alignPlatformEffects`) registers is
+        // reachable from this route too; a key this table already defines keeps
+        // its own handler. This route serves the menu and keyboard
+        // (``ViewActions``), the test FIFO (the Mac's level-2 action channel),
+        // the dialogs and the action corpus, and it used to restate the panel
+        // table's keys BY HAND. Each one it missed was a verb skipped by
+        // `runEffects` without a word here while the same verb worked from its
+        // panel. Measured on 2026-10-10 by the action corpus:
+        //   * nine of the thirteen boolean ops, Release / Expand Compound Shape
+        //     and Repeat (`boolean.json`), and the four it did have ignored the
+        //     Boolean Options precision;
+        //   * `notify_panel_state_changed`, so a Stroke panel verb (cap, join,
+        //     dashed) wrote the panel and never reached the selection
+        //     (`stroke_actions.json`) -- the CAPREACH defect, fixed in the
+        //     panel's table on 2026-08-05 and never in this one.
+        // Rust has one effect match for both routes; this overlay is the one
+        // table this port can have without moving every handler.
+        for (key, handler) in alignPlatformEffects(model: model)
+            where platformEffects[key] == nil {
+            platformEffects[key] = handler
         }
         // VIEW-STATE effects (VIEWSEED). actions.yaml's six View verbs —
         // zoom_in, zoom_out, zoom_to_actual_size, fit_in_window,

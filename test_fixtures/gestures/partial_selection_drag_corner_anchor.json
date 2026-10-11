@@ -1,0 +1,13 @@
+[
+  {
+    "name": "partial_selection_drag_corner_anchor",
+    "setup_svg": "three_rects.svg",
+    "tool": "partial_selection",
+    "events": [
+      {"kind": "press", "x": 76, "y": 54},
+      {"kind": "move", "x": 86, "y": 64, "dragging": true},
+      {"kind": "release", "x": 86, "y": 64}
+    ],
+    "expected_json": "partial_selection_drag_corner_anchor_expected.json"
+  }
+]
