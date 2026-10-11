@@ -2015,24 +2015,43 @@ public class Controller {
                 if !remaining.isEmpty { newAcc.append((remaining, i)) }
                 accumulator = newAcc
             }
+            // §3.6's DIVIDE row / §3.2 (splits), the twin of Rust's arm. This
+            // loop used to copy the designated operand's whole common onto
+            // every fragment, ID INCLUDED, under a comment saying Rust did the
+            // same; Rust had fixed its side (BOOLEAN.md, wave 2), so an
+            // operand cut in two left two live elements wearing one id here
+            // only. Found when the action corpus first ran divide through this
+            // port (`boolean_divide_overlapping_rects`).
+            //
+            // The arrow is counted PER DESIGNATED OPERAND, off the partition:
+            //   one region   -> 1 -> 1: identity is preserved;
+            //   two or more  -> 1 -> N: a FRESH id per fragment, minted
+            //                   through the shared loop, UNCONDITIONALLY,
+            //                   including for an id-less operand (the named
+            //                   delta from the N -> 1 arm, recorded in Rust).
+            var regionCounts = [Int](repeating: 0, count: elements.count)
+            for (_, idx) in accumulator { regionCounts[idx] += 1 }
+            // Built ONCE from the pre-edit document, so fragments of
+            // different operands cannot collide with each other either.
+            var existingIds = doc.elementIds
             for (region, paintIdx) in accumulator {
-                // KNOWN OPEN, and identical in Rust
-                // (`src.common().clone()` at the same arm): DIVIDE is 1 → N
-                // per designated operand, so §3.6's DIVIDE row calls for a
-                // FRESH mint per fragment. Both ports instead copy the
-                // operand's whole common, which repeats its id across every
-                // fragment it was cut into. Deliberately left port-identical
-                // rather than fixed one-sidedly — the repair must land in both
-                // ports in one commit, exactly as the transform-blind class is
-                // scheduled to.
                 let src = paintSources[paintIdx]
+                var common = BooleanCommon(survivor: elements[paintIdx])
+                if regionCounts[paintIdx] > 1 {
+                    guard let minted = mintUniqueIds(1, existing: &existingIds,
+                                                     mint: { generateElementId() })
+                    else {
+                        // A failed mint aborts the whole edit — never a
+                        // half-identified split.
+                        return
+                    }
+                    common.id = minted[0]
+                }
                 // DIVIDE splits: a piece is not a 1 -> 1 survivor, and a
                 // width profile is parameterised along the WHOLE path, so
                 // copying it onto each piece would invent a shape the artist
                 // never drew.
-                outputs.append((region, src.fill, src.stroke,
-                                BooleanCommon(survivor: elements[paintIdx]),
-                                nil))
+                outputs.append((region, src.fill, src.stroke, common, nil))
             }
         case "trim", "merge":
             let operandSets = elements.map { elementToPolygonSet($0, precision: precision) }

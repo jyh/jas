@@ -34,5 +34,86 @@
       {"action": "boolean_exclude", "params": {}}
     ],
     "expected_json": "boolean_exclude_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_crop_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_crop", "params": {}}
+    ],
+    "expected_json": "boolean_crop_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_divide_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_divide", "params": {}}
+    ],
+    "expected_json": "boolean_divide_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_trim_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_trim", "params": {}}
+    ],
+    "expected_json": "boolean_trim_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_merge_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_merge", "params": {}}
+    ],
+    "expected_json": "boolean_merge_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_subtract_back_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_subtract_back", "params": {}}
+    ],
+    "expected_json": "boolean_subtract_back_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_union_compound_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_union_compound", "params": {}}
+    ],
+    "expected_json": "boolean_union_compound_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_subtract_front_compound_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_subtract_front_compound", "params": {}}
+    ],
+    "expected_json": "boolean_subtract_front_compound_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_intersection_compound_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_intersection_compound", "params": {}}
+    ],
+    "expected_json": "boolean_intersection_compound_overlapping_rects_expected.json"
+  },
+  {
+    "name": "boolean_exclude_compound_overlapping_rects",
+    "setup_svg": "overlapping_rects.svg",
+    "selection": [[0, 0], [0, 1]],
+    "actions": [
+      {"action": "boolean_exclude_compound", "params": {}}
+    ],
+    "expected_json": "boolean_exclude_compound_overlapping_rects_expected.json"
   }
 ]
