@@ -171,7 +171,8 @@ def gather_evidence(root):
                 ev["menu_paths"].add(tuple(r.get("path", [])))
     wt = os.path.join(root, "test_fixtures", "algorithms", "panel_widget_tree.json")
     ev["tree_panels"] = {c["name"] for c in _load(wt)} if os.path.exists(wt) else set()
-    ev["dialog_trees"] = set()  # no dialog widget-tree golden exists (2026-10-10)
+    dt = os.path.join(root, "test_fixtures", "algorithms", "dialog_widget_tree.json")
+    ev["dialog_trees"] = {c["name"] for c in _load(dt)} if os.path.exists(dt) else set()
     ev["icon_baselines"] = set()  # the rsvg references are NOT committed
     return ev
 
@@ -266,7 +267,8 @@ def census(spec, ev):
 
     for did, d in spec.get("dialogs", {}).items():
         if did in ev["dialog_trees"]:
-            rows.append(_row("dialogs", did, TREE, COVERED, "dialog widget-tree golden"))
+            rows.append(_row("dialogs", did, TREE, COVERED,
+                             "test_fixtures/algorithms/dialog_widget_tree.json (the PLAN)"))
         elif not d.get("content"):
             rows.append(_row("dialogs", did, TREE, UNDERSPECIFIED, "no content"))
         else:
@@ -389,6 +391,7 @@ def self_test():
                 {"path": [0, 0], "action": "new_document", "enabled": True, "checked": None},
                 {"path": [0, 4, 0], "action": "in_sub", "enabled": True, "checked": None}]}])
         put("test_fixtures/algorithms/panel_widget_tree.json", [{"name": "p1"}])
+        put("test_fixtures/algorithms/dialog_widget_tree.json", [{"name": "d0"}])
         spec = {
             "actions": {
                 "covered_act": {"effects": [{"log": "x"}]},
@@ -413,7 +416,7 @@ def self_test():
                     {"id": "m_in_sub", "action": "in_sub", "label": "In"}]},
                 {"id": "m_golden_only", "action": "golden_only", "label": "G"}]}],
             "panels": {"p1": {}, "p2": {}},
-            "dialogs": {"d1": {"content": {"type": "col"}}, "d2": {}},
+            "dialogs": {"d0": {"content": {"type": "col"}}, "d1": {"content": {"type": "col"}}, "d2": {}},
             "icons": {"i1": {}},
             "elements": {"e": 1},
         }
@@ -451,6 +454,7 @@ def self_test():
         expect(("panels", "p1"), COVERED)
         expect(("panels", "p2"), NOT_YET_BUILT)
         expect(("panel_pixels", "p1"), NOT_YET_BUILT)
+        expect(("dialogs", "d0"), COVERED)
         expect(("dialogs", "d1"), NOT_YET_BUILT)
         expect(("dialogs", "d2"), UNDERSPECIFIED)
         expect(("icons", "i1"), NOT_YET_BUILT)

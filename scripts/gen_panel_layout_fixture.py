@@ -7,6 +7,7 @@ workspace bundle and writes their pinned goldens:
   * ``layout_panel``  -> test_fixtures/algorithms/panel_layout.json
   * ``widget_tree``   -> test_fixtures/algorithms/panel_widget_tree.json
   * ``bind_values``   -> test_fixtures/algorithms/panel_bind_values.json
+  * ``widget_tree`` over every DIALOG -> test_fixtures/algorithms/dialog_widget_tree.json
 
 Every app's cross_language_test asserts its own implementation against these
 files (Template A — pinned vectors, in-suite, byte-exact).
@@ -417,6 +418,22 @@ def main() -> int:
         f.write("\n")
     rows = sum(len(c["expected"]) for c in bv_cases)
     print(f"wrote {len(bv_cases)} cases ({rows} rows) -> {bv_path}")
+
+    # Dialog widget-tree golden: EVERY dialog in the bundle, sorted by id, with
+    # an empty data scope. Derived from the bundle, never a typed list, so a new
+    # dialog enters the golden when it enters the spec.
+    dialogs = bundle["dialogs"]
+    dt_cases = [{
+        "name": dialog_id,
+        "function": "widget_tree",
+        "args": {"dialog": dialog_id, "ctx": {}},
+        "expected": widget_tree(dialogs[dialog_id], {}),
+    } for dialog_id in sorted(dialogs)]
+    dt_path = os.path.join(ROOT, "test_fixtures", "algorithms", "dialog_widget_tree.json")
+    with open(dt_path, "w", encoding="utf-8", newline="") as f:
+        json.dump(dt_cases, f, indent=2)
+        f.write("\n")
+    print(f"wrote {len(dt_cases)} cases -> {dt_path}")
     return 0
 
 
