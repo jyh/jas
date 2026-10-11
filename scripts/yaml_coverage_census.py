@@ -169,6 +169,11 @@ def gather_evidence(root):
         for case in _load(mst):
             for r in case.get("expected", []):
                 ev["menu_paths"].add(tuple(r.get("path", [])))
+    # The map each app STARTS from, which Rust (web app and engine) and Swift
+    # compare with the reference's spec defaults over every state variable.
+    ism = os.path.join(root, "test_fixtures", "algorithms", "initial_state_map.json")
+    ev["initial_state"] = (set(_load(ism)[0].get("expected", {}))
+                           if os.path.exists(ism) else set())
     wt = os.path.join(root, "test_fixtures", "algorithms", "panel_widget_tree.json")
     ev["tree_panels"] = {c["name"] for c in _load(wt)} if os.path.exists(wt) else set()
     ev["dialog_trees"] = set()  # no dialog widget-tree golden exists (2026-10-10)
@@ -236,7 +241,11 @@ def census(spec, ev):
     # and reads no port's store. The observable is each app's initial LIVE
     # state map (defaults overlaid by live values), which nothing compares yet.
     for k, v in spec.get("state", {}).items():
-        if isinstance(v, dict) and not v.get("description"):
+        if k in ev["initial_state"]:
+            rows.append(_row("state", k, STATE, COVERED,
+                             "test_fixtures/algorithms/initial_state_map.json (the "
+                             "starting value: Rust web app, Rust engine, Swift)"))
+        elif isinstance(v, dict) and not v.get("description"):
             rows.append(_row("state", k, STATE, UNDERSPECIFIED, "no description"))
         else:
             rows.append(_row("state", k, STATE, NOT_YET_BUILT,
@@ -389,6 +398,9 @@ def self_test():
                 {"path": [0, 0], "action": "new_document", "enabled": True, "checked": None},
                 {"path": [0, 4, 0], "action": "in_sub", "enabled": True, "checked": None}]}])
         put("test_fixtures/algorithms/panel_widget_tree.json", [{"name": "p1"}])
+        put("test_fixtures/algorithms/initial_state_map.json",
+            [{"name": "no_document", "function": "initial_state_map", "args": {},
+              "expected": {"started": 1}}])
         spec = {
             "actions": {
                 "covered_act": {"effects": [{"log": "x"}]},
@@ -402,7 +414,7 @@ def self_test():
                       "pen": {"handlers": {"a": 1}}},
             "shortcuts": [{"key": "Ctrl+N", "action": "new"}, {"key": "Ctrl+Shift+N", "action": "x"},
                           {"key": "Ctrl+W", "action": "not_close"}],
-            "state": {"fill": {"description": "d"}, "bare": {"default": 1},
+            "state": {"started": {"description": "d"}, "fill": {"description": "d"}, "bare": {"default": 1},
                       "described": {"description": "d"}},
             "menubar": [{"id": "file", "items": [
                 {"id": "m_new", "action": "new_document", "label": "&New"},
@@ -439,6 +451,7 @@ def self_test():
         expect(("shortcuts", "Ctrl+Shift+N -> x"), NOT_YET_BUILT)  # a modifier distinguishes
         expect(("shortcuts", "Ctrl+W -> not_close"), NOT_YET_BUILT)  # the chord resolves elsewhere
         expect(("state", "fill"), NOT_YET_BUILT)  # a typed-literal golden is not evidence
+        expect(("state", "started"), COVERED)  # the initial state map names it
         expect(("state", "bare"), UNDERSPECIFIED)
         expect(("state", "described"), NOT_YET_BUILT)
         expect(("menu_items", "m_new"), COVERED)
