@@ -2162,14 +2162,9 @@ mod tests {
         unsafe { &*e }.tool_slot().as_ref().map(|(i, _)| crate::ffi_pointer::TOOL_IDS[*i])
     }
 
-    /// ⛔ PINNED GAP, not a pass: the toolbar's `tool_grid` is `type: grid` with
-    /// `cols: 2` and a `grid: {row, col}` per child. The shared layout pass
-    /// (`panel_layout`, byte-gated across the reference, Rust and Swift) knows
-    /// `grid` only as Bootstrap-12 `col` spans, so the grid is omitted and its
-    /// thirteen buttons with it -- in every port. Spec and corpus first, then
-    /// the ports; un-ignore when they land.
+    /// The toolbar's `tool_grid` (`type: grid`, `cols: 2`, a `grid: {row, col}`
+    /// per child) is laid out by PATH_B_DESIGN B.7, so its buttons are in the plan.
     #[test]
-    #[ignore = "panel_layout has no `type: grid` + `cols` form in any port (spec-first)"]
     fn the_toolbar_pane_plans_like_a_panel() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
