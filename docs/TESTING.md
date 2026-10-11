@@ -120,3 +120,57 @@ What level 2 needs, in the order the census prices it:
    change.
 4. Corpus cases for the uncovered actions, tools and state (the NOT_YET_BUILT bin), and a restatement of the
    UNDERSPECIFIED bin.
+
+## 6. The input script: the one artifact both platforms share
+
+**Ruled 2026-10-10 by the port owner, on the Windows shell author's proposal.** Parity is differential, so "the same
+input" must be one artifact, not two people's readings of a spec item.
+
+A script is a JSON file in `test_fixtures/scripts/`, one per spec item. **It extends the gesture corpus's case shape**
+(`test_fixtures/gestures/*.json`), so the same script replays at level 1 in each port's core and at level 2 through
+each live app:
+
+```json
+{
+  "item": "selection.drag",
+  "spec": "workspace/tools/selection.yaml",
+  "setup_svg": "complex_document.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press",   "x": 36, "y": 36},
+    {"kind": "move",    "x": 73, "y": 59, "dragging": true},
+    {"kind": "release", "x": 73, "y": 59},
+    {"key": "Z", "ctrl": true},
+    {"panel": "align_panel_content", "widget": "align_left_button", "event": "click"},
+    {"panel": "magic_wand_panel_content", "widget": "fill_tolerance", "event": "commit", "value": "40"},
+    {"read": "document"}
+  ]
+}
+```
+
+* **Pointer steps** are the gesture corpus's events, unchanged: `kind`, document coordinates `x`/`y`, `dragging`, and
+  the named modifiers `shift`/`alt`/`ctrl`/`meta`, each `false` when absent. A driver converts document units to device
+  pixels **itself**, and delivers whatever its injector quantises to. **The read-back is compared, never the input.**
+* **Key steps** use the key corpus's chord form (`test_fixtures/keys/`): `key` is the canonical token.
+* **Panel steps** name a panel content id and a widget id, which are the ids the widget-tree pass emits, the Mac app
+  exposes as accessibility identifiers, and WinUI exposes as `AutomationId`. `event` is `click` or `commit`, with
+  `value` the text a person entered (the widget-event corpus's form).
+* **`read` steps** say what is compared at that point:
+  * `document` is the canonical test JSON (`document_to_test_json`), the cross-language form, never a port's own
+    serialisation;
+  * `tree` is the rendered widget tree;
+  * `pixels` is a window-only capture.
+
+  A script without a `read` step asserts nothing and is refused.
+
+**Who replays it:**
+1. **Level 1:** each port's core, through the corpus runner. This is the EXPECTED read-back.
+2. **Level 2 on the Mac:** `jas_gui_harness.py` for pointer and key steps; a panel step by accessibility identifier.
+3. **Level 2 on Windows:** `send_hand.ps1` and its key injector; a panel step by UI Automation.
+
+A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
+comparison, with the Mac's live read-back as the other side.
+
+**What is not ruled here:** the pixel tolerance, and the tool that refuses a baseline change with no spec change. Both
+come with the first pixel baselines.
