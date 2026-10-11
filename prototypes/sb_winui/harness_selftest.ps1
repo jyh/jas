@@ -1455,6 +1455,8 @@ Test-Case 'P4.4 REPLAY: Q6''s knob alone runs a replay' { "$(Test-SbPaneReplayAs
 Test-Case 'P4.4 REPLAY: both value knobs run a replay' { "$(Test-SbPaneReplayAsked '' 'w:1' 'p')" } 'True'
 Test-Case 'P4.4 REPLAY: one value knob alone runs none -- the shell refuses it' { "$(Test-SbPaneReplayAsked '' 'w:1' '') $(Test-SbPaneReplayAsked '' '' 'p')" } 'False False'
 Test-Case 'P4.4 REPLAY: no knob runs none, and whitespace is unset' { "$(Test-SbPaneReplayAsked ' ' ' ' ' ')" } 'False'
+Test-Case 'P4.4 REPLAY: the toolbar''s knob runs a replay (a toolbar click republishes the menu too)' { "$(Test-SbPaneReplayAsked '' '' '' 'btn_shape_slot')" } 'True'
+Test-Case 'P4.4 REPLAY: a whitespace toolbar knob is unset' { "$(Test-SbPaneReplayAsked '' '' '' ' ')" } 'False'
 
 # ---- V3's grammar: which texts the core writes back byte for byte -----------
 Test-Case 'V3 GRAMMAR: an integer is canonical' { "$(Test-SbCanonicalNumber '40')" } 'True'

@@ -1529,7 +1529,7 @@ if ($menuRows.Count -eq 0) {
         $m = Get-SbMenuRowReading $r
         if ($m.Ok -and $m.Seq -gt $lastSeq) { $lastSeq = $m.Seq }
     }
-    if (Test-SbPaneReplayAsked $env:SB_PANEL_SYNTH $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS) {
+    if (Test-SbPaneReplayAsked $env:SB_PANEL_SYNTH $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS $env:SB_TOOLBAR_SYNTH) {
         # ⛔ NOT A PASS AND NOT A FAIL. Q6's replay clicks and runs ops, and each
         # moves the core's menu answer (can-undo, the selection-gated items) a
         # number of times that no knob of this run predicts -- a derivation
@@ -1537,7 +1537,7 @@ if ($menuRows.Count -eq 0) {
         # W2b-3's value replay is the same case: every click the core answers
         # republishes the menu (`Canvas.ApplyPanelClick`).
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
-            "a pane replay is set (SB_PANEL_SYNTH, or SB_PANEL_COMMIT with SB_PANEL_PRESS): its clicks move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
+            "a pane replay is set (SB_PANEL_SYNTH, or SB_PANEL_COMMIT with SB_PANEL_PRESS, or SB_TOOLBAR_SYNTH): its clicks move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
     } elseif ($lastSeq -lt 0) {
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
             'no MENU row carried a readable seq=' -Row $menuRows[-1]

@@ -16,9 +16,32 @@
           no width, so every measurement scene keeps the surface it always had.
         -->
         <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
+
+        <!--
+          THE TOOLBAR PANE (the pane registry, 2026-10-10): `layout.yaml`'s
+          `toolbar_pane`, planned by the core and drawn by a second PaneView,
+          exactly as the dock pane is. Nothing here names a tool. Collapsed
+          unless SB_TOOLBAR=1 under SB_SCENE=app, until the harness's pane
+          verdicts are proven to read the dock pane alone beside it.
+        -->
+        <Border
+            x:Name="ToolbarHost"
+            Grid.Row="1"
+            Grid.Column="0"
+            Background="#FFF3F3F3"
+            BorderBrush="#FF2A2F36"
+            BorderThickness="0,0,1,0"
+            RequestedTheme="Light"
+            Visibility="Collapsed">
+            <ScrollViewer
+                x:Name="ToolbarScroll"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto" />
+        </Border>
 
         <!--
           THE MENUBAR, AND IT IS EMPTY IN THIS FILE ON PURPOSE.
@@ -34,7 +57,7 @@
           So this element is a MOUNT POINT. If it ever gains a child in this
           file, that gate should be the thing that says so.
         -->
-        <MenuBar x:Name="Menu" Grid.Row="0" Grid.ColumnSpan="2" />
+        <MenuBar x:Name="Menu" Grid.Row="0" Grid.ColumnSpan="3" />
 
         <!--
           The canvas the Rust core draws into. Everything inside it is painted by
@@ -46,7 +69,7 @@
           height gives the panel ZERO, and `SizeChanged` fires with height 0
           through the real window manager rather than through a test hook.
         -->
-        <SwapChainPanel x:Name="Canvas" Grid.Row="1" Grid.Column="0" />
+        <SwapChainPanel x:Name="Canvas" Grid.Row="1" Grid.Column="1" />
 
         <!--
           ⚠️ THE HIT-TESTABILITY FALLBACK, AND IT IS COLLAPSED BY DEFAULT.
@@ -67,7 +90,7 @@
         <Border
             x:Name="HitShield"
             Grid.Row="1"
-            Grid.Column="0"
+            Grid.Column="1"
             Background="Transparent"
             Visibility="Collapsed" />
 
@@ -89,7 +112,7 @@
         <Border
             x:Name="PaneHost"
             Grid.Row="1"
-            Grid.Column="1"
+            Grid.Column="2"
             Background="#FFF3F3F3"
             BorderBrush="#FF2A2F36"
             BorderThickness="1,0,0,0"
@@ -128,7 +151,7 @@
         <TextBlock
             x:Name="StatusLine"
             Grid.Row="2"
-            Grid.ColumnSpan="2"
+            Grid.ColumnSpan="3"
             Margin="12,8"
             FontSize="14"
             Foreground="#CCFFFFFF"
