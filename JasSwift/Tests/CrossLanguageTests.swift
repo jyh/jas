@@ -3054,6 +3054,37 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 
 // MARK: - Panel widget-TREE (Path B structural snapshot) algorithm vectors
 
+/// Every DIALOG through the same widget-tree pass, from its own golden
+/// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+@Test func testAlgorithmDialogWidgetTree() throws {
+    let json = readFixture("algorithms/dialog_widget_tree.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let dialogs = (bundle["dialogs"] as? [String: Any]) ?? [:]
+    #expect(tests.count == dialogs.count, "one vector per dialog in the bundle")
+    var failed: [String] = []
+    for tc in tests {
+        let name = tc["name"] as! String
+        let args = tc["args"] as! [String: Any]
+        guard let dialog = dialogs[args["dialog"] as! String] as? [String: Any] else {
+            failed.append("\(name) (not in the bundle)")
+            continue
+        }
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let actual = try JSONSerialization.data(
+            withJSONObject: WidgetTree.widgetTree(dialog, ctx: ctx), options: [.sortedKeys])
+        let expected = try JSONSerialization.data(withJSONObject: tc["expected"]!, options: [.sortedKeys])
+        if actual != expected { failed.append(name) }
+    }
+    #expect(failed.isEmpty, "dialog widget trees mismatch: \(failed)")
+}
+
 @Test func testAlgorithmWidgetTree() throws {
     let json = readFixture("algorithms/panel_widget_tree.json")
     let data = json.data(using: .utf8)!
