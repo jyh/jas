@@ -107,6 +107,21 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
         tool.sync_global_state(app_state);
     }
 
+    // The action runner's deterministic id source, for the same reason: a
+    // tool that mints (the Artboard tool's drag creates an artboard with an
+    // id) otherwise draws platform entropy, so its golden changed on every
+    // generation and no port could match it. No gesture case minted before
+    // `artboard_drag` (2026-10-10). Cleared after the run.
+    {
+        use crate::document::artboard::set_test_id_rng;
+        let mut counter: u32 = 0;
+        set_test_id_rng(Some(Box::new(move || {
+            let v = counter;
+            counter = counter.wrapping_add(1);
+            v
+        })));
+    }
+
     for ev in tc["events"].as_array().unwrap() {
         let x = ev["x"].as_f64().unwrap();
         let y = ev["y"].as_f64().unwrap();
@@ -123,6 +138,7 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
             other => panic!("unknown gesture event kind: {other:?}"),
         }
     }
+    crate::document::artboard::set_test_id_rng(None);
     model
 }
 

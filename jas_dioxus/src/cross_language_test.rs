@@ -1774,6 +1774,14 @@ mod tests {
         // field-list test (`assert_only_d_changed`) still passes: they graft
         // the source's `d` onto the output and never look at it.
         "blob_transform_merge.json",
+        // YAML coverage census, NOT_YET_BUILT tools (2026-10-10): the first
+        // gesture case for five tools that need no prior selection.
+        "pencil_drag.json",
+        "lasso_around_rect.json",
+        "magic_wand_click.json",
+        "partial_selection_marquee_corner.json",
+        "partial_selection_drag_corner_anchor.json",
+        "artboard_drag.json",
     ];
 
     #[cfg(feature = "web")]
