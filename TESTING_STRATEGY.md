@@ -17,6 +17,11 @@ spine), and `ARCH.md` (the MVC seams). Where those describe *mechanisms*, this d
 > framework layout pixels, focus / IME, OS-native chrome, and key→action binding —
 > falls to per-app goldens or manual testing.**
 
+> ⚠️ **2026-10-10:** for **Windows parity against the Mac only**, the owner ruled a
+> differential screenshot comparison within tolerance, beside the state and widget-tree
+> comparisons. The "never as cross-app pixels" clause above still governs every other
+> pair of apps. The process is in `docs/TESTING.md`.
+
 Every decision below is the same move: take something currently "verified by eyeballing
 five framework renderings" and push it down to a shared, deterministic, byte-comparable
 artifact — the way `document_to_test_json` and the operations corpus already work. A
