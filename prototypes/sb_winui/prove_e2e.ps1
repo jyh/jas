@@ -90,6 +90,22 @@ $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Mov
 
 function Out-Line([string]$s) { Write-Host $s }
 
+# ---- BUILD WHAT THE CERTIFICATE NAMES, first, every time --------------------
+# The line below says build=<HEAD>, so the shell and the cdylib it loads must BE
+# HEAD. Neither is rebuilt by launching (sitting.ps1 runs -NoRebuild here, since
+# its build would race the wait below), and a stale cdylib still certifies a
+# gesture it never exercised: on 2026-10-11 the loaded jas_dioxus.dll was 16 h
+# and several merges older than the build= it was certified as, found only when
+# a dock run died on `jas_dock_layout`. The native lane is sitting.ps1's (see
+# its header: the last lane to touch target/ decides what the shell loads).
+# Through cmd so a build's stderr is a log line, never a PowerShell error.
+$buildLog = Join-Path $exeDir 'sb-e2e-build.txt'
+$sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
+& cmd /c "cd /d `"$(Join-Path $repo 'jas_dioxus')`" && cargo build --no-default-features --features d2d,ffi --lib > `"$buildLog`" 2>&1"
+if ($LASTEXITCODE -ne 0) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the cdylib did not build (cargo exit $LASTEXITCODE; see $buildLog)"; exit 2 }
+& cmd /c "`"$sdk`" build `"$(Join-Path $PSScriptRoot 'SbWinUi.csproj')`" -nologo >> `"$buildLog`" 2>&1"
+if ($LASTEXITCODE -ne 0) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the shell did not build (dotnet exit $LASTEXITCODE; see $buildLog)"; exit 2 }
+
 foreach ($p in @($probe, $probeDoc, $receipt, $shot)) { Remove-Item $p -ErrorAction SilentlyContinue }
 $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
