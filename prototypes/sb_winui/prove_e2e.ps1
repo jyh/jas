@@ -19,10 +19,25 @@
 # CERTIFIED only when every level matches. A surface that differs from the
 # baseline's is NOT COMPARABLE, never a pass and never a fail.
 #
+# `pixels` is an EXACT hash of the back buffer, so a baseline is pinned to the
+# box that froze it: its DPI, its graphics driver, and its desktop -- the
+# window's height follows the desktop's state (this box's root measured 992.67
+# DIPs one morning and 987.33 after a reboot, same build, 8 device pixels at
+# 1.5x). Re-freeze only from a clean run on the box that certifies.
+#
+# -Script <path> drives an INPUT SCRIPT (docs/TESTING.md section 6) instead of
+# the built-in gesture: its press/move/release become the SendInput drag, its
+# setup_svg the document, and its read=document is compared BYTE FOR BYTE with
+# its expected_json (`readback=`). A script this driver cannot deliver exactly
+# is refused by name (`Read-SbInputScript`), never approximated. In this mode
+# `core` is the read-back against the script's expected document, which the
+# ports agree on at level 1, and no baseline is needed for it.
+#
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
 param(
     [string]$Baseline = '',
+    [string]$Script = '',
     [switch]$Freeze,
     [int]$TimeoutSeconds = 60
 )
@@ -38,6 +53,28 @@ $receipt = Join-Path $exeDir 'sb-e2e-hand.json'
 $shot    = Join-Path $exeDir 'sb-e2e-shot.png'
 $repo    = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $capExe  = Join-Path $repo 'jas_dioxus\target\debug\capture_desktop.exe'
+$probeDoc = [System.IO.Path]::ChangeExtension($probe, '.doc.json')
+$svgArgs = @()
+$expectedPath = $null
+if ($Script -ne '') {
+    if (-not (Test-Path $Script)) {
+        Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: no input script at that path"
+        exit 2
+    }
+    $scriptFull = (Resolve-Path $Script).Path
+    $sc = Read-SbInputScript ([System.IO.File]::ReadAllText($scriptFull, [System.Text.Encoding]::UTF8))
+    if ($null -ne $sc.Refusal) {
+        Write-Host "E2E-CERT v1 script=$Script verdict=NOT RUN -- REFUSED: $($sc.Refusal)"
+        exit 2
+    }
+    $item = $sc.Item
+    $expectedPath = Join-Path (Split-Path $scriptFull -Parent) $sc.Expected
+    if (-not (Test-Path $expectedPath)) {
+        Write-Host "E2E-CERT v1 item=$item verdict=NOT RUN -- the script's expected_json is not at $expectedPath"
+        exit 2
+    }
+    $svgArgs = @('-Svg', "test_fixtures\svg\$($sc.Svg)")
+}
 # Harness-local data beside its only consumer: test_fixtures/ is the cross-language
 # corpus, whose consumers are the ports and scripts/, and this is neither.
 if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item" }
@@ -45,10 +82,11 @@ if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item
 # The gesture: press inside the sample's rect (document units), drag it by the
 # same delta the harness's pointer arm uses.
 $docX = 36; $docY = 36; $dx = 37; $dy = 23; $moves = 7
+if ($Script -ne '') { $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves }
 
 function Out-Line([string]$s) { Write-Host $s }
 
-foreach ($p in @($probe, $receipt, $shot)) { Remove-Item $p -ErrorAction SilentlyContinue }
+foreach ($p in @($probe, $probeDoc, $receipt, $shot)) { Remove-Item $p -ErrorAction SilentlyContinue }
 $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
@@ -57,7 +95,7 @@ $env:SB_PROBE = 'sb-probe.json'
 # is 90 s whatever happens, and a dead window must fail in seconds, not then.
 $stayOut = Join-Path $exeDir 'sb-e2e-stay.txt'
 $launcher = Start-Process -FilePath 'powershell.exe' -PassThru -WindowStyle Hidden -RedirectStandardOutput $stayOut `
-    -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'sitting.ps1'), '-Stay', '-Scene', 'app', '-NoRebuild')
+    -ArgumentList (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $PSScriptRoot 'sitting.ps1'), '-Stay', '-Scene', 'app', '-NoRebuild') + $svgArgs)
 $exePath = (Join-Path $exeDir 'SbWinUi.exe')
 function Stop-OurApps {
     # Only THIS tree's executable, found by path: never another tree's, never a person's.
@@ -126,6 +164,13 @@ finally {
 }
 
 $selCount = @($r.selection).Count
+
+# ---- the INPUT SCRIPT's read-back, byte for byte (docs/TESTING.md section 6) --
+$readback = 'n/a(no -Script)'
+if ($Script -ne '') {
+    $got = if (Test-Path $probeDoc) { [System.IO.File]::ReadAllText($probeDoc, [System.Text.Encoding]::UTF8) } else { '' }
+    $readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($expectedPath, [System.Text.Encoding]::UTF8))
+}
 
 # ---- DRIVE INTEGRITY: did the shell receive exactly the gesture we sent? --
 # A real mouse moving during the run interleaves with the injected one, and the
@@ -200,8 +245,8 @@ $reading = [ordered]@{
 }
 
 if ($Freeze) {
-    if ($drive -notlike 'PASS*' -or $moved -notlike 'PASS*') {
-        Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved"
+    if ($drive -notlike 'PASS*' -or $moved -notlike 'PASS*' -or ($Script -ne '' -and $readback -notlike 'PASS*')) {
+        Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
         exit 7
     }
     New-Item -ItemType Directory -Force -Path $Baseline | Out-Null
@@ -211,7 +256,7 @@ if ($Freeze) {
     # of the person's screen (other windows, URLs) and the baseline is
     # committed to a public repo. It stays in bin/ (git-ignored); the
     # certificate carries its hash only.
-    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved surface=$($r.surface) frame=$($r.frame_hash) doc-sha=$($r.doc_sha) plan-sha=$($r.plan_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
+    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) doc-sha=$($r.doc_sha) plan-sha=$($r.plan_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
     exit 0
 }
 
@@ -220,13 +265,15 @@ if (-not (Test-Path $bfile)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN 
 $b = Get-Content $bfile -Raw | ConvertFrom-Json
 
 # The spec's own observable, independent of any baseline: one element selected.
-$core = if ($moved -like 'PASS*' -and $selCount -eq 1 -and $r.doc_sha -eq $b.doc_sha) { 'PASS' } else { "FAIL(selection=$selCount doc-sha=$($r.doc_sha) want=$($b.doc_sha))" }
+$core = if ($Script -ne '') {
+            if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
+        } elseif ($moved -like 'PASS*' -and $selCount -eq 1 -and $r.doc_sha -eq $b.doc_sha) { 'PASS' } else { "FAIL(selection=$selCount doc-sha=$($r.doc_sha) want=$($b.doc_sha))" }
 $tree = if ($r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha) { 'PASS' } else { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves):$drive " +
-        "spec=$moved core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
+        "spec=$moved $(if ($Script -ne '') { "script=$Script readback=$readback " })core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
 Add-Content -Path (Join-Path $exeDir 'e2e-certificates.log') -Value $line -Encoding ascii
