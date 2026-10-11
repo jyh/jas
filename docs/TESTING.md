@@ -126,7 +126,7 @@ What level 2 needs, in the order the census prices it:
 **Ruled 2026-10-10 by the port owner, on the Windows shell author's proposal.** Parity is differential, so "the same
 input" must be one artifact, not two people's readings of a spec item.
 
-A script is a JSON file in `test_fixtures/scripts/`, one per spec item. **It extends the gesture corpus's case shape**
+A script is a JSON file in `test_fixtures/input_scripts/`, one per spec item. **It extends the gesture corpus's case shape**
 (`test_fixtures/gestures/*.json`), so the same script replays at level 1 in each port's core and at level 2 through
 each live app:
 
@@ -139,8 +139,8 @@ each live app:
   "app_state": {},
   "steps": [
     {"kind": "press",   "x": 36, "y": 36},
-    {"kind": "move",    "x": 73, "y": 59, "dragging": true},
-    {"kind": "release", "x": 73, "y": 59},
+    {"kind": "move",    "x": 72, "y": 60, "dragging": true},
+    {"kind": "release", "x": 72, "y": 60},
     {"key": "Z", "ctrl": true},
     {"panel": "align_panel_content", "widget": "align_left_button", "event": "click"},
     {"panel": "magic_wand_panel_content", "widget": "fill_tolerance", "event": "commit", "value": "40"},
@@ -152,6 +152,9 @@ each live app:
 * **Pointer steps** are the gesture corpus's events, unchanged: `kind`, document coordinates `x`/`y`, `dragging`, and
   the named modifiers `shift`/`alt`/`ctrl`/`meta`, each `false` when absent. A driver converts document units to device
   pixels **itself**, and delivers whatever its injector quantises to. **The read-back is compared, never the input.**
+  ⚠️ So a script's coordinates are **even document units**, which convert to whole device pixels at 1×, 1.5× and 2×.
+  An odd or fractional unit lands a fraction off at 1.5×: a drag asked as (37, 23) was delivered as (36.67, 22.67),
+  and an exact comparison then fails for a reason that is not the app's.
 * **Key steps** use the key corpus's chord form (`test_fixtures/keys/`): `key` is the canonical token.
 * **Panel steps** name a panel content id and a widget id, which are the ids the widget-tree pass emits, the Mac app
   exposes as accessibility identifiers, and WinUI exposes as `AutomationId`. `event` is `click` or `commit`, with
