@@ -4382,6 +4382,14 @@ private let gestureFixtures = [
     // still passes: they graft the source's `d` onto the output and never look
     // at it.
     "blob_transform_merge.json",
+    // YAML coverage census, NOT_YET_BUILT tools (2026-10-10): the first
+    // gesture case for five tools that need no prior selection.
+    "pencil_drag.json",
+    "lasso_around_rect.json",
+    "magic_wand_click.json",
+    "partial_selection_marquee_corner.json",
+    "partial_selection_drag_corner_anchor.json",
+    "artboard_drag.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -4447,6 +4455,14 @@ private func gestureToolContext(_ model: Model) -> ToolContext {
 private func runGestureModel(_ tc: [String: Any]) -> Model {
     let setupSvg = readFixture("svg/\(tc["setup_svg"] as! String)")
     let model = Model(document: svgToDocument(setupSvg))
+
+    // The action runner's deterministic id source, for the same reason: a tool
+    // that mints (the Artboard tool's drag) otherwise draws entropy, and no
+    // golden could match it. Mirrors Rust `run_gesture_case` (2026-10-10).
+    // Cleared when this function returns, after the last event.
+    var ctr = 0
+    setTestIdRng({ defer { ctr += 1 }; return ctr })
+    defer { setTestIdRng(nil) }
 
     let toolId = tc["tool"] as! String
     guard let ws = WorkspaceData.load() else {
