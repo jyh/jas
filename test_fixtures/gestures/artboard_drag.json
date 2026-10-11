@@ -1,0 +1,13 @@
+[
+  {
+    "name": "artboard_drag",
+    "setup_svg": "circle_basic.svg",
+    "tool": "artboard",
+    "events": [
+      {"kind": "press", "x": 200, "y": 200},
+      {"kind": "move", "x": 300, "y": 260, "dragging": true},
+      {"kind": "release", "x": 300, "y": 260}
+    ],
+    "expected_json": "artboard_drag_expected.json"
+  }
+]
