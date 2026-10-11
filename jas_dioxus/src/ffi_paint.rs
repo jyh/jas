@@ -2178,7 +2178,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 76, "the fixture corpus changed size");
+        assert_eq!(total, 77, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2228,6 +2228,12 @@ mod tests {
         // Both pins bumped in the same edit. Expected to present; this lane is
         // the measurement.
         //
+        // ⛔ 76 → 77 (jas, 2026-10-11, the colour verbs): `rect_muted_fill.svg`,
+        // one rect, rgb(200,100,50) over a black stroke. Both pins bumped in
+        // the same edit. Found the way this comment says it would be: green on
+        // every Mac lane, red here. Expected to present; this lane is the
+        // measurement.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2238,6 +2244,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 76, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 77, "the whole corpus presents");
     }
 }
