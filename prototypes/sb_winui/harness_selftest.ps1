@@ -2052,6 +2052,22 @@ Test-Case 'Q6.D SETTLED: no DOCK OPEN at all is settled -- nothing more is comin
 Test-Case 'Q6.D: CONTROL -- the live ORDER, read before it settles, FAILS (what the first live run did)' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0])).Verdict } 'FAIL'
 
 # ---------------------------------------------------------------------------
+# THE DESKTOP-PIXELS ARM: "an empty station is near-uniform black" (verify_window).
+# The floor was 100 colours, and on 2026-10-11 every `app` sitting FAILED it on
+# a real desktop: the capture (viewed) held the app window, the drawn document
+# and the desktop icons, at mean luma 200.0 with 71 colours -- a solid-black
+# desktop beside a solid-white canvas leaves only the anti-aliasing. History
+# read 900 to 10,500 colours over a wallpaper. The rule now names what it means.
+Test-Case 'px: a uniform black frame is an empty station' { Test-SbDesktopPixels 0.0 1 } 'FAIL'
+Test-Case 'px: black with a cursor sprite is an empty station' { Test-SbDesktopPixels 2.1 9 } 'FAIL'
+Test-Case 'px: near-black noise is an empty station' { Test-SbDesktopPixels 3.0 5000 } 'FAIL'
+Test-Case 'px: a uniform frame of ANY colour is not a desktop' { Test-SbDesktopPixels 255.0 1 } 'FAIL'
+Test-Case 'px: the live 10-11 desktop (black background, white canvas) is real' { Test-SbDesktopPixels 200.0 71 } 'ok'
+Test-Case 'px: the live 10-11 docked desktop is real' { Test-SbDesktopPixels 155.7 70 } 'ok'
+Test-Case 'px: the 10-10 wallpaper desktop is real' { Test-SbDesktopPixels 142.5 10494 } 'ok'
+Test-Case 'px: CONTROL -- the old floor of 100 colours FAILED the live 10-11 desktop' { if (71 -gt 100) { 'ok' } else { 'FAIL' } } 'FAIL'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

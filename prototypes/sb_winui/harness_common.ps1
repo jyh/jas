@@ -1324,6 +1324,17 @@ function Test-SbMoveIdentity {
 # the verdict being the RUN's. So the title's shape changed and THIS FUNCTION
 # DID NOT -- it is still the substring rule, in one place a self-test can drive,
 # and `harness_selftest.ps1` now drives it against BOTH shapes.
+# The desktop-pixels arm's rule (verify_window): an EMPTY STATION is a capture
+# with nothing on it -- near-black (luma <= 5) or near-uniform in any colour
+# (<= 16 distinct colours on the 17-px grid: one flat frame and a cursor
+# sprite). It used to require > 100 colours, and a real desktop with a solid
+# background beside the white canvas read 70-71 (2026-10-11, viewed): a
+# colour COUNT measures the wallpaper, not whether a desktop is there.
+function Test-SbDesktopPixels([double]$Luma, [int]$Colours) {
+    if ($Luma -le 5 -or $Colours -le 16) { return 'FAIL' }
+    return 'ok'
+}
+
 function Select-SbTitleMatch($Titles, [string]$Required) {
     if ($null -eq $Titles) { return @() }
     return @($Titles | Where-Object { $_ -like "*$Required*" })
