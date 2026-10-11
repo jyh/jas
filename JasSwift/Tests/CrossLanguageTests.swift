@@ -5367,6 +5367,9 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-10): the Stroke panel cap, join and
     // a dashed toggle, dispatched with a stroked rect selected.
     "stroke_actions.json",
+    // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
+    // artboards_panel_select, which is itself a verb with no other case.
+    "artboard_actions.json",
     // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
     // inherited lock. `actions.yaml` §select_all always said "locked objects
     // are excluded" without saying WHOSE flag, and the two ports answered
@@ -5493,6 +5496,21 @@ private func runActionModel(_ tc: [String: Any], svgText: String? = nil) -> Mode
     // Optional non-identity view seed (VIEWSEED) — must precede the dispatch
     // loop, since a view action reads the live zoom/pan.
     seedCaseView(model, tc)
+
+    // Every panel's scope, initialized from its YAML defaults, as an app whose
+    // panels are docked has them (`DockPanelView` initializes a scope when its
+    // panel renders). A fresh Model has none, and `set_panel_state` on an
+    // uninitialized scope is a no-op (as in the reference's StateStore), so a
+    // case that panel-selects first -- `artboards_panel_select` before
+    // `delete_artboards` -- recorded nothing here and every verb after it was a
+    // no-op, while Rust's AppState seeds a scope lazily and passed. A corpus
+    // SETUP gap, not an app defect: in the app the selection exists only while
+    // the panel is open. Found by `artboard_actions.json` (2026-10-11).
+    if let ws = WorkspaceData.load(), let panels = ws.panels() {
+        for pid in panels.keys.sorted() {
+            model.stateStore.initPanel(pid, defaults: ws.panelStateDefaults(pid))
+        }
+    }
 
     // Install the deterministic id source for the dispatch below: a per-char
     // counter (0,1,2,…) so the FIRST minted id is "01234567" (each char =
