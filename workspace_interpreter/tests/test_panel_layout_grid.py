@@ -74,3 +74,17 @@ def test_a_hidden_child_takes_no_cell():
     r = _rects(_grid([hidden, _btn()]))
     assert (1,) in r and (0,) not in r
     assert (r[(1,)]["x"], r[(1,)]["y"]) == (0, 0)
+
+
+def test_a_row_number_no_child_uses_takes_no_space():
+    # Rows 0 and 2: row 2 sits directly below row 0, one gap down.
+    r = _rects(_grid([_btn(0, 0), _btn(2, 0)]))
+    assert r[(1,)]["y"] == 24 + 2
+
+
+def test_a_float_cell_falls_back_to_reading_order():
+    # `{row: 1.0, col: 1.0}` is not a JSON integer cell; the child takes the
+    # next cell after the previous child's (0, 0), which is (0, 1).
+    floaty = {"type": "icon_button", "icon": "x", "grid": {"row": 1.0, "col": 1.0}}
+    r = _rects(_grid([_btn(0, 0), floaty]))
+    assert (r[(1,)]["x"], r[(1,)]["y"]) == (37, 0)

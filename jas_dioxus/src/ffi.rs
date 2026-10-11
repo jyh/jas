@@ -251,13 +251,19 @@ impl JasEngine {
     }
 
     fn new() -> Self {
-        let panel = PanelState::default();
+        let mut panel = PanelState::default();
         let mut store = StateStore::new();
         if let Some(ws) = Workspace::load() {
             for (k, v) in ws.state_defaults() {
                 store.set(&k, v);
             }
         }
+        // The colour slice starts from the SPEC's colours (`state.fill_color`,
+        // `state.stroke_color`, `state.fill_on_top`), never its own constants:
+        // the sync below writes the slice over the store, so a slice default
+        // would replace the spec's white with the slice's (#664040 until
+        // 2026-10-10, measured by the initial-state-map corpus).
+        panel.adopt_store_state(&store);
         crate::panel_scope::sync_colour_state(&mut store, &panel);
         crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
@@ -1782,9 +1788,9 @@ mod tests {
         let a = read(e);
         let hex_key = a
             .iter()
-            .find(|(k, v)| k.ends_with("|bind.value") && v.as_str() == "664040")
+            .find(|(k, v)| k.ends_with("|bind.value") && v.as_str() == "ffffff")
             .map(|(k, _)| k.clone())
-            .expect("the engine's seed displays 664040");
+            .expect("the engine's seed displays the spec's ffffff");
 
         let ev = r#"{"widget":"cp_hex","value":"664141"}"#;
         let _ = take(unsafe { jas_panel_event(e, id.as_ptr(), id.len(), ev.as_ptr(), ev.len()) });
@@ -3710,6 +3716,27 @@ mod tests {
 
     /// A panel that binds global `state.*` reads the workspace's defaults
     /// through the engine. Before the engine had a store these were null.
+    /// The INITIAL STATE MAP the engine starts from (the Windows shell's), against
+    /// the reference's spec defaults over EVERY `state:` variable
+    /// (`test_fixtures/algorithms/initial_state_map.json`).
+    #[test]
+    fn the_engine_starts_from_the_spec_defaults_for_every_state_variable() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/algorithms/initial_state_map.json");
+        let tests: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let expected = tests[0]["expected"].as_object().unwrap();
+        assert!(expected.len() > 100, "the golden carries every state variable: {}", expected.len());
+        let e = jas_engine_new();
+        let store = unsafe { &*e }.store.borrow();
+        let diffs: Vec<String> = expected.iter()
+            .filter(|(k, v)| store.get(k) != *v)
+            .map(|(k, v)| format!("{k}: spec {v} vs engine {}", store.get(k)))
+            .collect();
+        drop(store);
+        unsafe { jas_engine_free(e) };
+        assert!(diffs.is_empty(), "{} of {} differ:\n{}", diffs.len(), expected.len(), diffs.join("\n"));
+    }
+
     #[test]
     fn a_panel_reads_the_global_state_defaults() {
         let _counters = crate::ffi_instr::test_lock::lock();

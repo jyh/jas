@@ -2972,6 +2972,41 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 
 // MARK: - Panel widget-layout (Path B) algorithm vectors
 
+/// Layout PANES (the toolbar) through the same pass, from their own golden:
+/// `pane_layout.json` (PATH_B_DESIGN B.7; the toolbar's tool grid is a 2-D
+/// grid). A pane is the layout child with that `id` and a `content`.
+@Test func testAlgorithmPaneLayout() throws {
+    let json = readFixture("algorithms/pane_layout.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    #expect(!tests.isEmpty, "pane_layout.json has no vectors")
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let panes = ((bundle["layout"] as? [String: Any])?["children"] as? [[String: Any]]) ?? []
+    for tc in tests {
+        let name = tc["name"] as! String
+        #expect(tc["function"] as? String == "layout_panel", "\(name)")
+        let args = tc["args"] as! [String: Any]
+        let paneId = args["pane"] as! String
+        guard let pane = panes.first(where: { ($0["id"] as? String) == paneId && $0["content"] != nil }) else {
+            Issue.record("no layout pane '\(paneId)' with content")
+            continue
+        }
+        let availW = (args["avail_w"] as! NSNumber).intValue
+        let availH = (args["avail_h"] as? NSNumber)?.intValue ?? 0
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let actual = PanelLayout.layoutPanel(pane, availW: availW, availH: availH, ctx: ctx)
+        let actualBytes = try JSONSerialization.data(withJSONObject: actual, options: [.sortedKeys])
+        let expectedBytes = try JSONSerialization.data(withJSONObject: tc["expected"]!, options: [.sortedKeys])
+        #expect(actualBytes == expectedBytes,
+                "Pane layout '\(name)' mismatch:\n  expected: \(String(data: expectedBytes, encoding: .utf8)!)\n  actual:   \(String(data: actualBytes, encoding: .utf8)!)")
+    }
+}
+
 @Test func testAlgorithmPanelLayout() throws {
     let json = readFixture("algorithms/panel_layout.json")
     let data = json.data(using: .utf8)!
@@ -3018,6 +3053,66 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 }
 
 // MARK: - Panel widget-TREE (Path B structural snapshot) algorithm vectors
+
+/// The INITIAL STATE MAP the app starts from (no document, no override): the
+/// panel-render `state.*` scope ``buildLiveStateMap`` builds, against the
+/// reference's spec defaults over EVERY `state:` variable
+/// (`initial_state_map.json`). Names every variable that differs.
+@Test func testAlgorithmInitialStateMap() throws {
+    let json = readFixture("algorithms/initial_state_map.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    let expected = tests[0]["expected"] as! [String: Any]
+    #expect(expected.count > 100, "the golden carries every state variable: \(expected.count)")
+    guard let ws = WorkspaceData.load() else {
+        Issue.record("no workspace bundle")
+        return
+    }
+    let live = buildLiveStateMap(ws: ws, model: nil)
+    func canon(_ v: Any?) -> String {
+        guard let v = v else { return "ABSENT" }
+        if v is NSNull { return "null" }
+        if let d = try? JSONSerialization.data(withJSONObject: [v], options: [.sortedKeys]) {
+            return String(data: d, encoding: .utf8) ?? "?"
+        }
+        return "\(v)"
+    }
+    var diffs: [String] = []
+    for k in expected.keys.sorted() where canon(live[k]) != canon(expected[k]) {
+        diffs.append("\(k): spec \(canon(expected[k])) vs app \(canon(live[k]))")
+    }
+    #expect(diffs.isEmpty, "\(diffs.count) of \(expected.count) differ:\n\(diffs.joined(separator: "\n"))")
+}
+
+/// Every DIALOG through the same widget-tree pass, from its own golden
+/// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+@Test func testAlgorithmDialogWidgetTree() throws {
+    let json = readFixture("algorithms/dialog_widget_tree.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let dialogs = (bundle["dialogs"] as? [String: Any]) ?? [:]
+    #expect(tests.count == dialogs.count, "one vector per dialog in the bundle")
+    var failed: [String] = []
+    for tc in tests {
+        let name = tc["name"] as! String
+        let args = tc["args"] as! [String: Any]
+        guard let dialog = dialogs[args["dialog"] as! String] as? [String: Any] else {
+            failed.append("\(name) (not in the bundle)")
+            continue
+        }
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let actual = try JSONSerialization.data(
+            withJSONObject: WidgetTree.widgetTree(dialog, ctx: ctx), options: [.sortedKeys])
+        let expected = try JSONSerialization.data(withJSONObject: tc["expected"]!, options: [.sortedKeys])
+        if actual != expected { failed.append(name) }
+    }
+    #expect(failed.isEmpty, "dialog widget trees mismatch: \(failed)")
+}
 
 @Test func testAlgorithmWidgetTree() throws {
     let json = readFixture("algorithms/panel_widget_tree.json")
@@ -4493,6 +4588,42 @@ private func assertGestureTest(_ tc: [String: Any]) {
         for tc in tests {
             assertGestureTest(tc)
         }
+    }
+}
+
+// MARK: - The input scripts (docs/TESTING.md section 6)
+//
+// One script per spec item, shared by level 1 (each port's core, here) and
+// level 2 (each live app). Its pointer steps are gesture events, so it replays
+// through the gesture runner; any other step is REFUSED by name until this
+// runner can replay it, and a script must end on a document read.
+private let scriptFixtures = ["selection.drag.json"]
+
+@Test func scriptCorpus() throws {
+    #expect(!scriptFixtures.isEmpty)
+    for fixture in scriptFixtures {
+        let script = try JSONSerialization.jsonObject(
+            with: readFixture("input_scripts/\(fixture)").data(using: .utf8)!) as! [String: Any]
+        let item = script["item"] as! String
+        let steps = script["steps"] as! [[String: Any]]
+        guard let last = steps.last, last.count == 1, last["read"] as? String == "document" else {
+            Issue.record("script \(item): must end on a document read")
+            continue
+        }
+        var events: [[String: Any]] = []
+        for (i, st) in steps.dropLast().enumerated() {
+            guard let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) else {
+                Issue.record("script \(item): step \(i) is not replayable at level 1 yet (pointer steps only)")
+                continue
+            }
+            events.append(st)
+        }
+        let tc: [String: Any] = ["name": item, "setup_svg": script["setup_svg"]!, "tool": script["tool"]!,
+                                 "app_state": script["app_state"] ?? [:], "events": events]
+        let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let actual = documentToTestJson(runGestureModel(tc).document)
+        #expect(actual == expected, "script \(item): the level-1 read-back differs from the expected")
     }
 }
 

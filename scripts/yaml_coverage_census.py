@@ -97,17 +97,19 @@ def _normalize_chord(text):
 
 
 def _menu_items(menus):
-    """Every menu item that has an id, recursively (submenus included)."""
+    """Every menu item that has an id, recursively (submenus included), with
+    its PATH: [menu index, item index, ...], where every list position counts,
+    separators included (the scheme menu_state.json's rows use)."""
     out = []
 
-    def walk(items):
-        for it in items or []:
+    def walk(items, path):
+        for i, it in enumerate(items or []):
             if isinstance(it, dict):
                 if it.get("id"):
-                    out.append(it)
-                walk(it.get("items"))
-    for m in menus:
-        walk(m.get("items"))
+                    out.append((path + [i], it))
+                walk(it.get("items"), path + [i])
+    for mi, m in enumerate(menus):
+        walk(m.get("items"), [mi])
     return out
 
 
@@ -157,27 +159,25 @@ def gather_evidence(root):
                          bool(ch.get("shift")), bool(ch.get("alt")), bool(ch.get("meta"))),
                         resolved.get(c.get("name"))))
     ev["key_chords"] = chords
-    sd = os.path.join(root, "test_fixtures", "expected", "state_defaults.json")
-    # {"count": N, "variables": [{"name": ..., "default": ...}, ...]}
-    ev["state_defaults"] = ({v["name"] for v in _load(sd).get("variables", [])}
-                            if os.path.exists(sd) else set())
-    ms = os.path.join(root, "test_fixtures", "expected", "menu_structure.json")
-    # {"menus": [{"label": ..., "items": [{"action", "label", "shortcut"} |
-    # {"separator": true} | {"label", "submenu": [...]}, ...]}]}: an item is
-    # keyed by (action, label), not id; a submenu parent has no action.
-    ev["menu_items"] = set()
-    if os.path.exists(ms):
-        def walk_ms(items):
-            for it in items or []:
-                if isinstance(it, dict):
-                    if "action" in it or "submenu" in it:
-                        ev["menu_items"].add((it.get("action"), it.get("label")))
-                    walk_ms(it.get("submenu"))
-        for m in _load(ms).get("menus", []):
-            walk_ms(m.get("items"))
+    # Menu items: algorithms/menu_state.json, which Rust AND Swift replay, has a
+    # row per actionable item: {path, action, enabled, checked}.
+    # expected/menu_structure.json is NOT evidence: only a script compares it,
+    # bundle against golden (scripts/check_menu_structure.py), and no port reads it.
+    ev["menu_paths"] = set()
+    mst = os.path.join(root, "test_fixtures", "algorithms", "menu_state.json")
+    if os.path.exists(mst):
+        for case in _load(mst):
+            for r in case.get("expected", []):
+                ev["menu_paths"].add(tuple(r.get("path", [])))
+    # The map each app STARTS from, which Rust (web app and engine) and Swift
+    # compare with the reference's spec defaults over every state variable.
+    ism = os.path.join(root, "test_fixtures", "algorithms", "initial_state_map.json")
+    ev["initial_state"] = (set(_load(ism)[0].get("expected", {}))
+                           if os.path.exists(ism) else set())
     wt = os.path.join(root, "test_fixtures", "algorithms", "panel_widget_tree.json")
     ev["tree_panels"] = {c["name"] for c in _load(wt)} if os.path.exists(wt) else set()
-    ev["dialog_trees"] = set()  # no dialog widget-tree golden exists (2026-10-10)
+    dt = os.path.join(root, "test_fixtures", "algorithms", "dialog_widget_tree.json")
+    ev["dialog_trees"] = {c["name"] for c in _load(dt)} if os.path.exists(dt) else set()
     ev["icon_baselines"] = set()  # the rsvg references are NOT committed
     return ev
 
@@ -235,22 +235,35 @@ def census(spec, ev):
             rows.append(_row("shortcuts", sid, STATE, NOT_YET_BUILT,
                              "no key-resolution case for this chord"))
 
+    # test_fixtures/expected/state_defaults.json is NOT evidence: both ports
+    # emit it from a HAND-TYPED literal of 12 variables (state_defaults_json in
+    # jas_dioxus/src/workspace/test_json.rs, stateDefaultsJson in
+    # WorkspaceTestJson.swift), so it compares a typed list with a typed list
+    # and reads no port's store. The observable is each app's initial LIVE
+    # state map (defaults overlaid by live values), which nothing compares yet.
     for k, v in spec.get("state", {}).items():
-        if k in ev["state_defaults"]:
+        if k in ev["initial_state"]:
             rows.append(_row("state", k, STATE, COVERED,
-                             "test_fixtures/expected/state_defaults.json (default value only)"))
+                             "test_fixtures/algorithms/initial_state_map.json (the "
+                             "starting value: Rust web app, Rust engine, Swift)"))
         elif isinstance(v, dict) and not v.get("description"):
             rows.append(_row("state", k, STATE, UNDERSPECIFIED, "no description"))
         else:
-            rows.append(_row("state", k, STATE, NOT_YET_BUILT, "not in state_defaults"))
+            rows.append(_row("state", k, STATE, NOT_YET_BUILT,
+                             "no check reads a port's live initial state map (the "
+                             "state_defaults golden is a typed literal in both ports)"))
 
-    for it in _menu_items(spec.get("menubar", [])):
-        if (it.get("action"), it.get("label")) in ev["menu_items"]:
+    for path, it in _menu_items(spec.get("menubar", [])):
+        if tuple(path) in ev["menu_paths"]:
             rows.append(_row("menu_items", it["id"], TREE, COVERED,
-                             "test_fixtures/expected/menu_structure.json (Rust consumes it)"))
+                             "test_fixtures/algorithms/menu_state.json (Rust + Swift)"))
+        elif "items" in it:
+            rows.append(_row("menu_items", it["id"], TREE, NOT_YET_BUILT,
+                             "a submenu parent has no state row; only a bundle "
+                             "snapshot script checks it"))
         else:
             rows.append(_row("menu_items", it["id"], TREE, NOT_YET_BUILT,
-                             "not in menu_structure.json"))
+                             "no menu_state row at this path"))
 
     for pid, p in spec.get("panels", {}).items():
         if pid in ev["tree_panels"]:
@@ -263,7 +276,8 @@ def census(spec, ev):
 
     for did, d in spec.get("dialogs", {}).items():
         if did in ev["dialog_trees"]:
-            rows.append(_row("dialogs", did, TREE, COVERED, "dialog widget-tree golden"))
+            rows.append(_row("dialogs", did, TREE, COVERED,
+                             "test_fixtures/algorithms/dialog_widget_tree.json (the PLAN)"))
         elif not d.get("content"):
             rows.append(_row("dialogs", did, TREE, UNDERSPECIFIED, "no content"))
         else:
@@ -330,8 +344,10 @@ def render(spec, rows, provenance, ev=None):
                  "description is asserted, nor that a live app window was driven; "
                  "`tree` coverage is the shared interpreter's PLAN, not the "
                  "rendered widgets; widgets are censused at their panel's or "
-                 "dialog's granularity, not one by one; menu_structure.json is "
-                 "consumed by Rust only (an ORACLE, not a Rust-Swift comparison).")
+                 "dialog's granularity, not one by one; a submenu parent "
+                 "is checked only by a bundle-snapshot script; goldens that only "
+                 "a script compares with the bundle, or that a port emits from a "
+                 "typed literal, are not counted.")
     return "\n".join(lines)
 
 
@@ -372,15 +388,22 @@ def self_test():
             [{"name": "c1", "result": {"action": "new", "params": {}}},
              {"name": "c2", "result": {"action": "close", "params": {}}}])
         # Both shapes copied from the real files' own lines, never invented.
+        # A DECOY: the state golden is present and must NOT count (see census()).
         put("test_fixtures/expected/state_defaults.json",
             {"count": 1, "variables": [{"default": 1, "name": "fill", "type": "number"}]})
+        # A DECOY: a script-only golden naming `golden_only` must NOT count.
         put("test_fixtures/expected/menu_structure.json",
             {"menus": [{"label": "&File", "items": [
-                {"action": "new_document", "label": "&New", "shortcut": "Ctrl+N"},
-                {"separator": True},
-                {"label": "Sub", "submenu": [
-                    {"action": "in_sub", "label": "In", "shortcut": ""}]}]}]})
+                {"action": "golden_only", "label": "G", "shortcut": ""}]}]})
+        put("test_fixtures/algorithms/menu_state.json",
+            [{"name": "x", "function": "menu_state", "args": {}, "expected": [
+                {"path": [0, 0], "action": "new_document", "enabled": True, "checked": None},
+                {"path": [0, 4, 0], "action": "in_sub", "enabled": True, "checked": None}]}])
         put("test_fixtures/algorithms/panel_widget_tree.json", [{"name": "p1"}])
+        put("test_fixtures/algorithms/initial_state_map.json",
+            [{"name": "no_document", "function": "initial_state_map", "args": {},
+              "expected": {"started": 1}}])
+        put("test_fixtures/algorithms/dialog_widget_tree.json", [{"name": "d0"}])
         spec = {
             "actions": {
                 "covered_act": {"effects": [{"log": "x"}]},
@@ -394,7 +417,7 @@ def self_test():
                       "pen": {"handlers": {"a": 1}}},
             "shortcuts": [{"key": "Ctrl+N", "action": "new"}, {"key": "Ctrl+Shift+N", "action": "x"},
                           {"key": "Ctrl+W", "action": "not_close"}],
-            "state": {"fill": {"description": "d"}, "bare": {"default": 1},
+            "state": {"started": {"description": "d"}, "fill": {"description": "d"}, "bare": {"default": 1},
                       "described": {"description": "d"}},
             "menubar": [{"id": "file", "items": [
                 {"id": "m_new", "action": "new_document", "label": "&New"},
@@ -402,9 +425,10 @@ def self_test():
                 "separator",
                 {"id": "sub", "items": [{"id": "m_deep", "action": "deep", "label": "D"}]},
                 {"id": "sub2", "label": "Sub", "items": [
-                    {"id": "m_in_sub", "action": "in_sub", "label": "In"}]}]}],
+                    {"id": "m_in_sub", "action": "in_sub", "label": "In"}]},
+                {"id": "m_golden_only", "action": "golden_only", "label": "G"}]}],
             "panels": {"p1": {}, "p2": {}},
-            "dialogs": {"d1": {"content": {"type": "col"}}, "d2": {}},
+            "dialogs": {"d0": {"content": {"type": "col"}}, "d1": {"content": {"type": "col"}}, "d2": {}},
             "icons": {"i1": {}},
             "elements": {"e": 1},
         }
@@ -429,18 +453,21 @@ def self_test():
         expect(("shortcuts", "Ctrl+N -> new"), COVERED)
         expect(("shortcuts", "Ctrl+Shift+N -> x"), NOT_YET_BUILT)  # a modifier distinguishes
         expect(("shortcuts", "Ctrl+W -> not_close"), NOT_YET_BUILT)  # the chord resolves elsewhere
-        expect(("state", "fill"), COVERED)
+        expect(("state", "fill"), NOT_YET_BUILT)  # a typed-literal golden is not evidence
+        expect(("state", "started"), COVERED)  # the initial state map names it
         expect(("state", "bare"), UNDERSPECIFIED)
         expect(("state", "described"), NOT_YET_BUILT)
         expect(("menu_items", "m_new"), COVERED)
         expect(("menu_items", "m_deep"), NOT_YET_BUILT)  # a submenu item is censused
-        expect(("menu_items", "m_relabel"), NOT_YET_BUILT)  # the label is part of the key
-        expect(("menu_items", "sub2"), COVERED)  # a submenu parent, keyed by its label
-        expect(("menu_items", "m_in_sub"), COVERED)  # the golden nests under `submenu`
+        expect(("menu_items", "m_relabel"), NOT_YET_BUILT)  # no row at its path
+        expect(("menu_items", "sub2"), NOT_YET_BUILT)  # a submenu parent has no state row
+        expect(("menu_items", "m_in_sub"), COVERED)  # [0,4,0]: the separator counts
+        expect(("menu_items", "m_golden_only"), NOT_YET_BUILT)  # a script-only golden
         expect(("menu_items", "file"), None)  # a top-level menu is not an item
         expect(("panels", "p1"), COVERED)
         expect(("panels", "p2"), NOT_YET_BUILT)
         expect(("panel_pixels", "p1"), NOT_YET_BUILT)
+        expect(("dialogs", "d0"), COVERED)
         expect(("dialogs", "d1"), NOT_YET_BUILT)
         expect(("dialogs", "d2"), UNDERSPECIFIED)
         expect(("icons", "i1"), NOT_YET_BUILT)

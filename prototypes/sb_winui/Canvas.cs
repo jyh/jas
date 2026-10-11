@@ -561,6 +561,67 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>Set by a <see cref="HashCmd"/>; consumed by the next paint.</summary>
     private string? _hashLabel;
 
+    // =======================================================================
+    // SB_PROBE (2026-10-10): THE UNATTENDED END-TO-END READING. After each
+    // pointer release the render thread writes ONE file holding what the
+    // gesture produced at every level a harness can judge without a person:
+    // the core's document (and its selection), the open panel's resolved plan
+    // (the widget tree as the core resolved it), and the hash of the frame now
+    // on screen. It decides nothing; `prove_e2e.ps1` compares it with frozen
+    // baselines and writes the certificate.
+    // =======================================================================
+
+    /// <summary>Where the probe is written (beside the exe), or null when the knob is unset.</summary>
+    private static readonly string? ProbePath =
+        Environment.GetEnvironmentVariable("SB_PROBE") is { } probe && !string.IsNullOrWhiteSpace(probe)
+            ? probe.Trim()
+            : null;
+
+    private bool _probePending;
+    private int _probeSeq;
+    private string? _lastHash;
+    private string _lastHashSurface = "";
+
+    private void ApplyProbe()
+    {
+        if (_engine == IntPtr.Zero || ProbePath is null) { return; }
+        _probeSeq++;
+        PaintAndHash("PROBE");
+        try
+        {
+            var doc = JasCore.TakeString(JasCore.jas_document_json(_engine));
+            var plan = Panel?.PlanJson ?? "";
+            string selection;
+            using (var d = System.Text.Json.JsonDocument.Parse(doc.Length == 0 ? "{}" : doc))
+            {
+                selection = d.RootElement.TryGetProperty("selection", out var sel) ? sel.GetRawText() : "null";
+            }
+            var docSha = doc.Length == 0 ? "EMPTY" : Sha256Of(doc);
+            var planSha = plan.Length == 0 ? "NONE" : Sha256Of(plan);
+            var frame = _lastHash ?? "NONE";
+            var body = "{"
+                + $"\"seq\":{_probeSeq},"
+                + $"\"surface\":\"{_lastHashSurface}\","
+                + $"\"frame_hash\":\"{frame}\","
+                + $"\"doc_sha\":\"{docSha}\","
+                + $"\"selection\":{selection},"
+                + $"\"plan_panel\":\"{Panel?.PanelId ?? ""}\","
+                + $"\"plan_sha\":\"{planSha}\","
+                + $"\"doc\":{(doc.Length == 0 ? "null" : doc)},"
+                + $"\"plan\":{(plan.Length == 0 ? "null" : plan)}"
+                + "}";
+            var full = System.IO.Path.Combine(AppContext.BaseDirectory, ProbePath);
+            System.IO.File.WriteAllText(full, body);
+            _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} "
+                  + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} "
+                  + $"-> {ProbePath} {Tids()}");
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL PROBE threw {ex.GetType().Name}: {ex.Message} {Tids()}");
+        }
+    }
+
     // ---- N3's scenes: the latches the drain has to know about --------------
     //
     // ⛔ EVERY ONE OF THESE IS TOUCHED ONLY ON THE RENDER THREAD. They are the
@@ -1079,7 +1140,11 @@ internal sealed unsafe class Canvas : IDisposable
                     cause = "pointer";
                     // A release is where a gesture lands on the document (a
                     // selection, a move), so an open panel's plan is re-read.
-                    if (p.Kind == JasCore.PointerRelease) { _panelStale = true; }
+                    if (p.Kind == JasCore.PointerRelease)
+                    {
+                        _panelStale = true;
+                        if (ProbePath is not null) { _probePending = true; }
+                    }
                     break;
 
                 case KeyCmd k:
@@ -1187,6 +1252,10 @@ internal sealed unsafe class Canvas : IDisposable
             // event becomes one frame per BATCH of events.
             RepaintOnce(cause, resizes);
         }
+
+        // SB_PROBE: after a gesture lands, AFTER the plan re-read and the
+        // repaint above, so every reading describes the same moment.
+        if (_probePending) { _probePending = false; ApplyProbe(); }
 
         // O3's row, written HERE and not at the end of the sleep, because the
         // two facts it has to carry -- what was requested during the stall and
@@ -1959,6 +2028,8 @@ internal sealed unsafe class Canvas : IDisposable
             // the o6 squeeze) were FAILED by the oracle. The rule is right; the
             // completion rows were missing the field it reads.
             var hashVerdict = (hash is null || failure is not null) ? "RUSTFAIL" : "RUSTOK";
+            _lastHash = failure is null ? hash : null;
+            _lastHashSurface = $"{_width}x{_height}";
             _report(
                 $"{hashVerdict} {label} surface={_width}x{_height} hash={hash ?? "n/a"} "
               + $"engines-created={created} engines-freed={freed} loads(shell)={_loadsShell} "

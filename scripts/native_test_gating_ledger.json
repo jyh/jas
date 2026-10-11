@@ -201,6 +201,20 @@
     "jas_dioxus/src/interpreter/effects.rs::brush_tile_click_applies_composed_brush_id_via_action": {
       "kind": "frontend",
       "reason": "Genuinely frontend, and it says so in its own comment: it drives AppState/TabState and renderer::dispatch_action, i.e. the app shell and the Dioxus renderer. There is no frontend in a --no-default-features build for it to drive, and every other test in that module runs natively. This is what a legitimate item-level gate looks like."
+    },
+    "jas_dioxus/src/cross_language_test.rs::algorithm_initial_state_map": {
+      "kind": "frontend",
+      "reason": "THE WEB APP'S starting state map: build_live_state_map over a new AppState, which is the web shell's state and will not come home. The NATIVE build's starting map is checked by its twin, ffi.rs::the_engine_starts_from_the_spec_defaults_for_every_state_variable, against the same golden (algorithms/initial_state_map.json)."
+    },
+    "jas_dioxus/src/cross_language_test.rs::script_corpus": {
+      "kind": "debt",
+      "reason": "THE INPUT-SCRIPT CORPUS (docs/TESTING.md section 6). Pure fixture replay through the gesture runner; it drives no frontend of its own.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, as gesture_corpus: it drives tools::tool::CanvasTool and comes home with the `tools` split."
+    },
+    "jas_dioxus/src/cross_language_test.rs::generate_script_expected": {
+      "kind": "debt",
+      "reason": "The bootstrap that writes the input scripts' expected read-backs, through the same gesture runner.",
+      "blocked_by": "crate::recorder::replay::run_gesture_case, as gesture_corpus: it drives tools::tool::CanvasTool and comes home with the `tools` split."
     }
   }
 }

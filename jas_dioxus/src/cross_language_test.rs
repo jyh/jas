@@ -1896,6 +1896,60 @@ mod tests {
         }
     }
 
+    /// THE INPUT SCRIPTS (docs/TESTING.md section 6): one per spec item, shared
+    /// by level 1 (each port's core, here) and level 2 (each live app). Level 1
+    /// supplies the EXPECTED read-back. A script is a gesture case with `steps`:
+    /// its pointer steps are the gesture events; any other step this runner
+    /// cannot replay yet is REFUSED by name, never skipped; and the script must
+    /// end on `{"read": "document"}`, or it asserts nothing.
+    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json"];
+
+    #[cfg(feature = "web")]
+    fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
+        let item = script["item"].as_str().expect("a script names its spec item");
+        let steps = script["steps"].as_array().expect("a script has steps");
+        assert_eq!(steps.last(), Some(&serde_json::json!({"read": "document"})),
+                   "script {item}: must end on a document read");
+        let mut events = vec![];
+        for (i, st) in steps[..steps.len() - 1].iter().enumerate() {
+            match st.get("kind").and_then(|k| k.as_str()) {
+                Some("press" | "move" | "release") => events.push(st.clone()),
+                _ => panic!("script {item}: step {i} {st} is not replayable at level 1 yet (pointer steps only)"),
+            }
+        }
+        serde_json::json!({
+            "name": item, "setup_svg": script["setup_svg"], "tool": script["tool"],
+            "app_state": script.get("app_state").cloned().unwrap_or(serde_json::json!({})),
+            "events": events,
+        })
+    }
+
+    #[cfg(feature = "web")]
+    #[test]
+    fn script_corpus() {
+        assert!(!SCRIPT_FIXTURES.is_empty());
+        for f in SCRIPT_FIXTURES {
+            let script: serde_json::Value =
+                serde_json::from_str(&read_fixture(&format!("input_scripts/{f}"))).unwrap();
+            let expected = read_fixture(&format!("input_scripts/{}", script["expected_json"].as_str().unwrap()));
+            let actual = run_gesture_test(&script_as_gesture_case(&script));
+            assert_eq!(actual, expected.trim(), "script {f}: the level-1 read-back moved");
+        }
+    }
+
+    #[cfg(feature = "web")]
+    /// Bootstrap: cargo test generate_script_expected -- --ignored
+    #[test]
+    #[ignore]
+    fn generate_script_expected() {
+        for f in SCRIPT_FIXTURES {
+            let script: serde_json::Value =
+                serde_json::from_str(&read_fixture(&format!("input_scripts/{f}"))).unwrap();
+            let path = format!("{}/input_scripts/{}", FIXTURES, script["expected_json"].as_str().unwrap());
+            std::fs::write(&path, run_gesture_test(&script_as_gesture_case(&script))).unwrap();
+        }
+    }
+
     #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for gesture tests.
     /// Run with: cargo test generate_gesture_expected -- --ignored --nocapture
@@ -6678,9 +6732,63 @@ mod tests {
         }
     }
 
+    /// Layout PANES (the toolbar) through the same pass, from their own golden:
+    /// `pane_layout.json` (PATH_B_DESIGN B.7; the toolbar's tool grid is a 2-D
+    /// grid). A pane is the layout child with that `id` and a `content`.
+    #[test]
+    fn algorithm_pane_layout_vectors() {
+        use crate::interpreter::panel_layout::layout_panel;
+
+        let json_str = read_fixture("algorithms/pane_layout.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let panes = bundle["layout"]["children"].as_array().unwrap();
+        let cases = tests.as_array().unwrap();
+        assert!(!cases.is_empty(), "pane_layout.json has no vectors");
+
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("layout_panel"), "{name}");
+            let pane_id = tc["args"]["pane"].as_str().unwrap();
+            let pane = panes
+                .iter()
+                .find(|c| c["id"].as_str() == Some(pane_id) && c.get("content").is_some())
+                .unwrap_or_else(|| panic!("no layout pane '{pane_id}' with content"));
+            let avail_w = tc["args"]["avail_w"].as_i64().unwrap();
+            let avail_h = tc["args"]["avail_h"].as_i64().unwrap_or(0);
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            let actual = layout_panel(pane, avail_w, avail_h, ctx);
+            assert_eq!(&actual, &tc["expected"], "Pane layout '{}' mismatch", name);
+        }
+    }
+
     // ---------------------------------------------------------------
     // Panel widget-TREE (structural snapshot) algorithm test vectors
     // ---------------------------------------------------------------
+
+    /// The INITIAL STATE MAP: the map the web app starts from (no document, no
+    /// override), against the reference's spec defaults over EVERY `state:`
+    /// variable (`initial_state_map.json`). Names every variable that differs.
+    /// The web app's `AppState` exists only with the `web` feature; the engine's
+    /// twin is `ffi.rs`'s `the_engine_starts_from_the_spec_defaults_...`.
+    #[cfg(feature = "web")]
+    #[test]
+    fn algorithm_initial_state_map() {
+        let json_str = read_fixture("algorithms/initial_state_map.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let expected = tests[0]["expected"].as_object().unwrap();
+        assert!(expected.len() > 100, "the golden carries every state variable: {}", expected.len());
+        let st = crate::workspace::app_state::AppState::new();
+        let live = crate::workspace::dock_panel::build_live_state_map(&st);
+        let diffs: Vec<String> = expected.iter()
+            .filter(|(k, v)| live.get(*k) != Some(*v))
+            .map(|(k, v)| format!("{k}: spec {v} vs app {}", live.get(k).map_or("ABSENT".into(), |x| x.to_string())))
+            .collect();
+        assert!(diffs.is_empty(), "{} of {} differ:\n{}", diffs.len(), expected.len(), diffs.join("\n"));
+    }
 
     #[test]
     fn algorithm_widget_tree_vectors() {
@@ -6708,6 +6816,35 @@ mod tests {
             let actual = widget_tree(&panels[panel_id], ctx);
             assert_eq!(&actual, expected, "Panel widget tree '{}' mismatch", name);
         }
+    }
+
+    /// Every DIALOG through the same widget-tree pass, from its own golden
+    /// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+    #[test]
+    fn algorithm_dialog_widget_tree_vectors() {
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let json_str = read_fixture("algorithms/dialog_widget_tree.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let dialogs = bundle["dialogs"].as_object().unwrap();
+        let cases = tests.as_array().unwrap();
+        assert_eq!(cases.len(), dialogs.len(), "one vector per dialog in the bundle");
+
+        let mut failed = vec![];
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("widget_tree"), "{name}");
+            let dialog_id = tc["args"]["dialog"].as_str().unwrap();
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            if widget_tree(&dialogs[dialog_id], ctx) != tc["expected"] {
+                failed.push(name.to_string());
+            }
+        }
+        assert!(failed.is_empty(), "dialog widget trees mismatch: {failed:?}");
     }
 
     // ---------------------------------------------------------------
