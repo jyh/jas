@@ -2584,3 +2584,82 @@ function Add-SbValueReplayVerdicts($Out, $Rows, [string]$Commit, [string]$Press,
     # ---- V6 ------------------------------------------------------------------
     $Out.Add((New-SbVerdict $n.Done 'PASS' "one done row for commit=$doneCommit press=$donePress panel=$donePanel; $values, every reading a value" $done))
 }
+
+# ---------------------------------------------------------------------------
+# docs/TESTING.md section 6: an INPUT SCRIPT, mapped onto what send_hand.ps1
+# can deliver EXACTLY -- one press, k post-press moves at i/k of the
+# press->release line, one release -- or REFUSED BY NAME. A gesture this
+# driver cannot deliver is never approximated: its read-back would be compared
+# against an expected one it did not earn. Returns { Refusal; Item; Svg; Tool;
+# DocX; DocY; Dx; Dy; Moves; Read; Expected }.
+# ---------------------------------------------------------------------------
+function Read-SbInputScript([string]$Json) {
+    $no = { param($why) [pscustomobject]@{ Refusal = $why } }
+    try { $s = $Json | ConvertFrom-Json } catch { return (& $no 'the script does not parse') }
+    if ($null -eq $s) { return (& $no 'the script does not parse') }
+    if ("$($s.tool)" -ne 'selection') {
+        return (& $no "tool '$($s.tool)': this driver runs only the shell's default tool, selection")
+    }
+    if ($null -ne $s.app_state) {
+        $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($keys.Count -gt 0) { return (& $no "app_state sets $($keys -join ','): this driver cannot seed state") }
+    }
+    $steps = @($s.steps)
+    $acts = New-Object System.Collections.Generic.List[object]
+    $reads = New-Object System.Collections.Generic.List[string]
+    for ($i = 0; $i -lt $steps.Count; $i++) {
+        $st = $steps[$i]
+        $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($names -contains 'read') { $reads.Add("$($st.read)"); continue }
+        if (@('press', 'move', 'release') -notcontains "$($st.kind)") {
+            return (& $no "step $i kind '$($st.kind)': this driver delivers only press, move, release")
+        }
+        if ($names -contains 'mods' -and @($st.mods).Count -gt 0) {
+            return (& $no "step $i carries modifiers ($(@($st.mods) -join ',')): send_hand.ps1 injects none")
+        }
+        $acts.Add($st)
+    }
+    if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
+    foreach ($r in $reads) {
+        if ($r -ne 'document') { return (& $no "read '$r': this driver compares only read=document") }
+    }
+    if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+        return (& $no 'the gesture is not one press, at least one move, one release')
+    }
+    $moves = @($acts | Select-Object -Skip 1 -First ($acts.Count - 2))
+    if (@($moves | Where-Object { "$($_.kind)" -ne 'move' }).Count -gt 0) {
+        return (& $no 'the gesture is not one press, at least one move, one release')
+    }
+    $px = [double]$acts[0].x; $py = [double]$acts[0].y
+    $rel = $acts[$acts.Count - 1]; $last = $moves[$moves.Count - 1]
+    if ([double]$rel.x -ne [double]$last.x -or [double]$rel.y -ne [double]$last.y) {
+        return (& $no "release at ($($rel.x),$($rel.y)) is not where the last move ended ($($last.x),$($last.y))")
+    }
+    $dx = [double]$rel.x - $px; $dy = [double]$rel.y - $py
+    $k = $moves.Count
+    for ($i = 1; $i -le $k; $i++) {
+        $wx = $px + $dx * $i / $k; $wy = $py + $dy * $i / $k
+        $m = $moves[$i - 1]
+        if ([math]::Abs([double]$m.x - $wx) -gt 1e-9 -or [math]::Abs([double]$m.y - $wy) -gt 1e-9) {
+            return (& $no "move $i of $k at ($($m.x),$($m.y)) is not at $i/$k of the press->release line ($wx,$wy); send_hand.ps1 delivers only evenly spaced moves")
+        }
+    }
+    [pscustomobject]@{
+        Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
+        DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
+    }
+}
+
+# The level-2 oracle: the core's document BYTES against the expected BYTES.
+# Never a parsed comparison: `1` against `1.0` is a different read-back, and a
+# numeric equality would certify it. The first differing byte is named.
+function Compare-SbReadBack([string]$Got, [string]$Want) {
+    if ([string]::IsNullOrEmpty($Got)) { return 'NOT RUN(empty read-back)' }
+    if ($Got -ceq $Want) { return "PASS(bytes=$($Got.Length))" }
+    $n = [math]::Min($Got.Length, $Want.Length)
+    $i = 0
+    while ($i -lt $n -and $Got[$i] -ceq $Want[$i]) { $i++ }
+    $g = $Got.Substring($i, [math]::Min(24, $Got.Length - $i))
+    $w = $Want.Substring($i, [math]::Min(24, $Want.Length - $i))
+    return "FAIL(at byte $i of got=$($Got.Length) want=$($Want.Length): got `"$g`" want `"$w`")"
+}

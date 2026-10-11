@@ -1822,6 +1822,81 @@ Test-Case 'o6: CONTROL -- the HAND CLOSED fixture is matched by the pointer tabl
 } 'True'
 
 # ---------------------------------------------------------------------------
+# docs/TESTING.md section 6: the INPUT SCRIPT, as this driver reads it.
+# `Read-SbInputScript` maps a script onto what send_hand.ps1 can deliver --
+# one press, k moves evenly spaced on the press->release line, one release --
+# and REFUSES BY NAME whatever it cannot deliver exactly, rather than deliver
+# a different gesture and compare its read-back. `Compare-SbReadBack` is the
+# level-2 oracle: the core's document bytes against the expected bytes.
+# ---------------------------------------------------------------------------
+function New-SbScript([object[]]$Steps, [string]$Tool = 'selection', $AppState = @{}) {
+    [ordered]@{ item = 'selection.drag'; setup_svg = 'complex_document.svg'; tool = $Tool
+                app_state = $AppState; steps = $Steps; expected_json = 'selection.drag.expected.json' } |
+        ConvertTo-Json -Depth 6
+}
+$sPress = [ordered]@{ kind = 'press'; x = 36; y = 36 }
+$sMove = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true }
+$sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
+$sRead = [ordered]@{ read = 'document' }
+function Show-SbScript($s) {
+    if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
+    "$($s.Item) svg=$($s.Svg) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)"
+}
+
+Test-Case 'is: the first script maps onto one drag, k=1' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
+} 'selection.drag svg=complex_document.svg at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+Test-Case 'is: moves evenly spaced on the line map onto k=3' {
+    $m1 = [ordered]@{ kind = 'move'; x = 48; y = 44; dragging = $true }
+    $m2 = [ordered]@{ kind = 'move'; x = 60; y = 52; dragging = $true }
+    (Read-SbInputScript (New-SbScript @($sPress, $m1, $m2, $sMove, $sRelease, $sRead))).Moves
+} '3'
+Test-Case 'is: a move OFF the line is refused, never delivered as a straight drag' {
+    $m1 = [ordered]@{ kind = 'move'; x = 40; y = 58; dragging = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $m1, $sMove, $sRelease, $sRead)))
+} 'REFUSED: move 1 of 2 at (40,58) is not at 1/2 of the press->release line (54,48); send_hand.ps1 delivers only evenly spaced moves'
+Test-Case 'is: a script with no read step is refused (section 6)' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease)))
+} 'REFUSED: no read step: a script that reads nothing proves nothing'
+Test-Case 'is: a read this driver cannot take is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, [ordered]@{ read = 'pixels' })))
+} "REFUSED: read 'pixels': this driver compares only read=document"
+Test-Case 'is: a release away from the last move is refused' {
+    $r2 = [ordered]@{ kind = 'release'; x = 80; y = 60 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $r2, $sRead)))
+} 'REFUSED: release at (80,60) is not where the last move ended (72,60)'
+Test-Case 'is: a modifier is refused, never dropped' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; mods = @('shift') }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (shift): send_hand.ps1 injects none'
+Test-Case 'is: a key or panel step is refused by name' {
+    $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
+Test-Case 'is: a tool other than the default is refused (SB_TOOL is an index, not a name)' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'pen'))
+} "REFUSED: tool 'pen': this driver runs only the shell's default tool, selection"
+Test-Case 'is: a non-empty app_state is refused, never ignored' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -AppState @{ fill_color = '#ff0000' }))
+} 'REFUSED: app_state sets fill_color: this driver cannot seed state'
+Test-Case 'is: a script that does not parse is refused' {
+    Show-SbScript (Read-SbInputScript '{not json')
+} 'REFUSED: the script does not parse'
+
+Test-Case 'rb: equal bytes PASS, with the count' {
+    Compare-SbReadBack -Got '{"a":1.0}' -Want '{"a":1.0}'
+} 'PASS(bytes=9)'
+Test-Case 'rb: 1.0 against 1 is a FAIL at the byte, never a numeric equality' {
+    Compare-SbReadBack -Got '{"a":1}' -Want '{"a":1.0}'
+} 'FAIL(at byte 6 of got=7 want=9: got "}" want ".0}")'
+Test-Case 'rb: an empty read-back is NOT RUN, never a FAIL or a PASS' {
+    Compare-SbReadBack -Got '' -Want '{"a":1.0}'
+} 'NOT RUN(empty read-back)'
+Test-Case 'rb: a longer read-back FAILS where the expected ends' {
+    Compare-SbReadBack -Got '{"a":1.0}x' -Want '{"a":1.0}'
+} 'FAIL(at byte 9 of got=10 want=9: got "x" want "")'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
