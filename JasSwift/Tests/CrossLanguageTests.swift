@@ -3019,6 +3019,66 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 
 // MARK: - Panel widget-TREE (Path B structural snapshot) algorithm vectors
 
+/// The INITIAL STATE MAP the app starts from (no document, no override): the
+/// panel-render `state.*` scope ``buildLiveStateMap`` builds, against the
+/// reference's spec defaults over EVERY `state:` variable
+/// (`initial_state_map.json`). Names every variable that differs.
+@Test func testAlgorithmInitialStateMap() throws {
+    let json = readFixture("algorithms/initial_state_map.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    let expected = tests[0]["expected"] as! [String: Any]
+    #expect(expected.count > 100, "the golden carries every state variable: \(expected.count)")
+    guard let ws = WorkspaceData.load() else {
+        Issue.record("no workspace bundle")
+        return
+    }
+    let live = buildLiveStateMap(ws: ws, model: nil)
+    func canon(_ v: Any?) -> String {
+        guard let v = v else { return "ABSENT" }
+        if v is NSNull { return "null" }
+        if let d = try? JSONSerialization.data(withJSONObject: [v], options: [.sortedKeys]) {
+            return String(data: d, encoding: .utf8) ?? "?"
+        }
+        return "\(v)"
+    }
+    var diffs: [String] = []
+    for k in expected.keys.sorted() where canon(live[k]) != canon(expected[k]) {
+        diffs.append("\(k): spec \(canon(expected[k])) vs app \(canon(live[k]))")
+    }
+    #expect(diffs.isEmpty, "\(diffs.count) of \(expected.count) differ:\n\(diffs.joined(separator: "\n"))")
+}
+
+/// Every DIALOG through the same widget-tree pass, from its own golden
+/// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+@Test func testAlgorithmDialogWidgetTree() throws {
+    let json = readFixture("algorithms/dialog_widget_tree.json")
+    let tests = try JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [[String: Any]]
+    let bundlePath = ((fixturesPath() as NSString)
+        .appendingPathComponent("../workspace/workspace.json") as NSString).standardizingPath
+    guard let bundleData = FileManager.default.contents(atPath: bundlePath) else {
+        Issue.record("Failed to read workspace bundle: \(bundlePath)")
+        return
+    }
+    let bundle = try JSONSerialization.jsonObject(with: bundleData) as! [String: Any]
+    let dialogs = (bundle["dialogs"] as? [String: Any]) ?? [:]
+    #expect(tests.count == dialogs.count, "one vector per dialog in the bundle")
+    var failed: [String] = []
+    for tc in tests {
+        let name = tc["name"] as! String
+        let args = tc["args"] as! [String: Any]
+        guard let dialog = dialogs[args["dialog"] as! String] as? [String: Any] else {
+            failed.append("\(name) (not in the bundle)")
+            continue
+        }
+        let ctx = (args["ctx"] as? [String: Any]) ?? [:]
+        let actual = try JSONSerialization.data(
+            withJSONObject: WidgetTree.widgetTree(dialog, ctx: ctx), options: [.sortedKeys])
+        let expected = try JSONSerialization.data(withJSONObject: tc["expected"]!, options: [.sortedKeys])
+        if actual != expected { failed.append(name) }
+    }
+    #expect(failed.isEmpty, "dialog widget trees mismatch: \(failed)")
+}
+
 @Test func testAlgorithmWidgetTree() throws {
     let json = readFixture("algorithms/panel_widget_tree.json")
     let data = json.data(using: .utf8)!

@@ -6736,6 +6736,27 @@ mod tests {
     // Panel widget-TREE (structural snapshot) algorithm test vectors
     // ---------------------------------------------------------------
 
+    /// The INITIAL STATE MAP: the map the web app starts from (no document, no
+    /// override), against the reference's spec defaults over EVERY `state:`
+    /// variable (`initial_state_map.json`). Names every variable that differs.
+    /// The web app's `AppState` exists only with the `web` feature; the engine's
+    /// twin is `ffi.rs`'s `the_engine_starts_from_the_spec_defaults_...`.
+    #[cfg(feature = "web")]
+    #[test]
+    fn algorithm_initial_state_map() {
+        let json_str = read_fixture("algorithms/initial_state_map.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let expected = tests[0]["expected"].as_object().unwrap();
+        assert!(expected.len() > 100, "the golden carries every state variable: {}", expected.len());
+        let st = crate::workspace::app_state::AppState::new();
+        let live = crate::workspace::dock_panel::build_live_state_map(&st);
+        let diffs: Vec<String> = expected.iter()
+            .filter(|(k, v)| live.get(*k) != Some(*v))
+            .map(|(k, v)| format!("{k}: spec {v} vs app {}", live.get(k).map_or("ABSENT".into(), |x| x.to_string())))
+            .collect();
+        assert!(diffs.is_empty(), "{} of {} differ:\n{}", diffs.len(), expected.len(), diffs.join("\n"));
+    }
+
     #[test]
     fn algorithm_widget_tree_vectors() {
         use crate::interpreter::widget_tree::widget_tree;
@@ -6762,6 +6783,35 @@ mod tests {
             let actual = widget_tree(&panels[panel_id], ctx);
             assert_eq!(&actual, expected, "Panel widget tree '{}' mismatch", name);
         }
+    }
+
+    /// Every DIALOG through the same widget-tree pass, from its own golden
+    /// (`dialog_widget_tree.json`, generated from the bundle's whole dialog set).
+    #[test]
+    fn algorithm_dialog_widget_tree_vectors() {
+        use crate::interpreter::widget_tree::widget_tree;
+
+        let json_str = read_fixture("algorithms/dialog_widget_tree.json");
+        let tests: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        let bundle_str =
+            std::fs::read_to_string(format!("{}/../workspace/workspace.json", FIXTURES)).unwrap();
+        let bundle: serde_json::Value = serde_json::from_str(&bundle_str).unwrap();
+        let dialogs = bundle["dialogs"].as_object().unwrap();
+        let cases = tests.as_array().unwrap();
+        assert_eq!(cases.len(), dialogs.len(), "one vector per dialog in the bundle");
+
+        let mut failed = vec![];
+        for tc in cases {
+            let name = tc["name"].as_str().unwrap();
+            assert_eq!(tc["function"].as_str(), Some("widget_tree"), "{name}");
+            let dialog_id = tc["args"]["dialog"].as_str().unwrap();
+            let empty = serde_json::json!({});
+            let ctx = tc["args"].get("ctx").unwrap_or(&empty);
+            if widget_tree(&dialogs[dialog_id], ctx) != tc["expected"] {
+                failed.push(name.to_string());
+            }
+        }
+        assert!(failed.is_empty(), "dialog widget trees mismatch: {failed:?}");
     }
 
     // ---------------------------------------------------------------
