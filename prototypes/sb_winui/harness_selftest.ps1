@@ -1981,6 +1981,77 @@ Test-Case 'rb: a longer read-back FAILS where the expected ends' {
 } 'FAIL(at byte 9 of got=10 want=9: got "x" want "")'
 
 # ---------------------------------------------------------------------------
+# Q6.D -- THE DOCK OPENED AND DREW EVERY TAB GROUP (jas's #316 review, item 1)
+#
+# Under SB_DOCK the seven Q6 clauses go NOT RUN (the dock replaces the one pane
+# they read), and before this clause nothing read the dock's own rows: a
+# refused dock read 0 FAIL. The rows below are a live `SB_DOCK=Default` run and
+# a live `SB_DOCK=NoSuchLayout` run on the Windows box, 2026-10-11, at main
+# cbebdc56 on a freshly built cdylib.
+$dkOpen  = "DOCK OPEN name=Default groups=5 panels=11 $q6Tids"
+$dkDrawn = 'DOCK DRAWN name=Default groups=5 tabs=11'
+$dkPanes = @(
+    "PANE OPEN key=dock0 panel=color_panel_content avail-w=228 leaves=80 chrome=0 containers=5 unjoined=0 withheld=0 icons=5 icons-missing=0 height=400 seq=1 $q6Tids",
+    "PANE OPEN key=dock1 panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=168 seq=1 $q6Tids",
+    "PANE OPEN key=dock2 panel=character_panel_content avail-w=228 leaves=37 chrome=0 containers=0 unjoined=0 withheld=0 icons=22 icons-missing=0 height=284 seq=1 $q6Tids",
+    "PANE OPEN key=dock3 panel=stroke_panel_content avail-w=228 leaves=46 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=315 seq=1 $q6Tids",
+    "PANE OPEN key=dock4 panel=artboards_panel_content avail-w=228 leaves=11 chrome=1 containers=0 unjoined=0 withheld=0 icons=6 icons-missing=0 height=57 seq=1 $q6Tids")
+$dkRefused = "RUSTFAIL DOCK REFUSED name=NoSuchLayout -- jas_dock_layout returned the empty span $q6Tids"
+function New-SbDockRows([string[]]$Statuses) { return @($Statuses | ForEach-Object { New-SbQ6Row $_ }) }
+$dkHealthy = @($dkOpen, $dkDrawn) + $dkPanes
+function Get-SbDk([string[]]$Statuses, [string]$Scene = 'app', [string]$Dock = 'Default') {
+    return (Get-SbDockVerdict (New-SbDockRows $Statuses) $Scene $Dock)
+}
+
+Test-Case 'Q6.D: the live Default dock PASSES' { (Get-SbDk $dkHealthy).Verdict } 'PASS'
+Test-Case 'Q6.D: ...and the detail names the groups, panels, panes and tabs it read' {
+    $d = (Get-SbDk $dkHealthy).Detail
+    if ($d -match 'groups=5' -and $d -match 'panels=11' -and $d -match 'tabs=11' -and $d -match 'dock0-dock4') { 'named' } else { $d }
+} 'named'
+Test-Case 'Q6.D: SB_DOCK unset is NOT RUN, by name' { (Get-SbDk $dkHealthy 'app' '').Verdict } 'NOT RUN'
+Test-Case 'Q6.D: SB_DOCK of whitespace is unset, as the shell reads it' { (Get-SbDk $dkHealthy 'app' '  ').Verdict } 'NOT RUN'
+Test-Case 'Q6.D: the live REFUSED dock FAILS -- the defect this clause exists for' { (Get-SbDk @($dkRefused)).Verdict } 'FAIL'
+Test-Case 'Q6.D: ...and quotes the refusal row' { (Get-SbDk @($dkRefused)).Row -match 'RUSTFAIL DOCK REFUSED name=NoSuchLayout' } 'True'
+Test-Case 'Q6.D: CONTROL -- the refused run carries no DOCK OPEN, PANE OPEN or DOCK DRAWN row' {
+    @((New-SbDockRows @($dkRefused)) | Where-Object { $_ -match "`t(DOCK OPEN|DOCK DRAWN|PANE OPEN) " }).Count
+} '0'
+Test-Case 'Q6.D: a dock asked for and a shell that wrote NOTHING FAILS' { (Get-SbDk @()).Verdict } 'FAIL'
+Test-Case 'Q6.D: DOCK OPEN with no DOCK DRAWN FAILS' { (Get-SbDk (@($dkOpen) + $dkPanes)).Verdict } 'FAIL'
+Test-Case 'Q6.D: DOCK DRAWN short of a group FAILS' { (Get-SbDk (@($dkOpen, 'DOCK DRAWN name=Default groups=4 tabs=9') + $dkPanes)).Verdict } 'FAIL'
+Test-Case 'Q6.D: a group whose pane never opened FAILS' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0..3])).Verdict } 'FAIL'
+Test-Case 'Q6.D: ...and names the missing key' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0..3])).Detail -match 'dock4' } 'True'
+Test-Case 'Q6.D: a group pane the core refused FAILS beside an otherwise healthy run' {
+    (Get-SbDk ($dkHealthy + "RUSTFAIL PANE REFUSED key=dock2 panel=character_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids")).Verdict
+} 'FAIL'
+Test-Case 'Q6.D: a group frame the UI refused to draw FAILS' { (Get-SbDk ($dkHealthy + 'RUSTFAIL DOCK DRAW refused -- dock3 has 2 panel(s) and active=5')).Verdict } 'FAIL'
+Test-Case 'Q6.D: a group pane whose draw threw FAILS' { (Get-SbDk ($dkHealthy + 'RUSTFAIL PANE key=dock1 DRAW threw InvalidOperationException: x')).Verdict } 'FAIL'
+Test-Case 'Q6.D: the render thread dying FAILS (the stale-cdylib run that found this gap)' {
+    (Get-SbDk @("RUSTFAIL render thread died: EntryPointNotFoundException: Unable to find an entry point named 'jas_dock_layout' in DLL 'jas_dioxus'. $q6Tids")).Verdict
+} 'FAIL'
+Test-Case 'Q6.D: CONTROL -- a TOOLBAR failure is not the dock''s' { (Get-SbDk ($dkHealthy + 'RUSTFAIL TOOLBAR DRAW threw InvalidOperationException: x')).Verdict } 'PASS'
+Test-Case 'Q6.D: SB_DOCK set on a scene that opens no pane FAILS -- the shell ignores the knob there' { (Get-SbDk @() 'retained').Verdict } 'FAIL'
+# ...and the WAIT: a docked run writes no PANEL DRAWN, so waiting on it timed out
+# (60 s) and the clause above read whatever had arrived by then.
+Test-Case 'Q6.D WAIT: a docked run waits on DOCK DRAWN, not PANEL DRAWN' { (@(Get-SbPaneWaits 'app' '' 'Default') | ForEach-Object { $_.Label }) -join ' | ' } 'the DOCK DRAWN row'
+Test-Case 'Q6.D WAIT: CONTROL -- an undocked run still waits on PANEL DRAWN' { (@(Get-SbPaneWaits 'app' '' '  ') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL DRAWN row'
+Test-Case 'Q6.D WAIT: ends on the live healthy dock' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows $dkHealthy) } 'ENDS'
+Test-Case 'Q6.D WAIT: ends on the live refused dock' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'NoSuchLayout')[0]) (New-SbDockRows @($dkRefused)) } 'ENDS'
+Test-Case 'Q6.D WAIT: ends on the render thread dying' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows @("RUSTFAIL render thread died: EntryPointNotFoundException: x $q6Tids")) } 'ENDS'
+Test-Case 'Q6.D WAIT: WAITS on DOCK OPEN alone' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows (@($dkOpen) + $dkPanes)) } 'WAITS'
+# ⛔ DOCK DRAWN IS NOT THE DOCK's LAST ROW. Measured live (sitting, SB_DOCK=Default):
+# the UI writes DOCK DRAWN when the group FRAMES exist, and each group's
+# PANE OPEN key=dock<i> follows it, so the first live run read dock1-dock4 as
+# missing and FAILED a healthy dock. `Test-SbDockSettled` is polled after the
+# wait, as `Test-SbMenuSettled` is: settled when every group's pane opened,
+# when a dock failure row arrived, or when no DOCK OPEN came at all.
+Test-Case 'Q6.D SETTLED: the live healthy dock is settled' { Test-SbDockSettled (New-SbDockRows $dkHealthy) } 'True'
+Test-Case 'Q6.D SETTLED: the live ORDER -- DOCK DRAWN with dock1-dock4 still to come -- is NOT settled' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn) + $dkPanes[0])) } 'False'
+Test-Case 'Q6.D SETTLED: settled in any key order' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn) + $dkPanes[4,2,0,3,1])) } 'True'
+Test-Case 'Q6.D SETTLED: a dock failure row settles it' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn, "RUSTFAIL PANE REFUSED key=dock2 panel=x cause=open -- y $q6Tids") + $dkPanes[0])) } 'True'
+Test-Case 'Q6.D SETTLED: no DOCK OPEN at all is settled -- nothing more is coming' { Test-SbDockSettled (New-SbDockRows @($dkRefused)) } 'True'
+Test-Case 'Q6.D: CONTROL -- the live ORDER, read before it settles, FAILS (what the first live run did)' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0])).Verdict } 'FAIL'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
