@@ -2795,6 +2795,9 @@ mod tests {
         // YAML coverage census (2026-10-11): the Layers-panel selection verbs, with
         // each case's layers_panel_selection standing in for the native row click.
         "layer_actions.json",
+        // YAML coverage census (2026-10-11): Release / Expand Compound Shape, Repeat,
+        // and the Layers panel's Collect in New Layer and Flatten Artwork.
+        "compound_layer_actions.json",
         // YAML coverage census (2026-10-11): the Stroke panel alignment, profile and
         // arrow verbs, pinning the panel-render state beside the document.
         "stroke_profile_actions.json",
@@ -8630,6 +8633,13 @@ mod tests {
             "boolean.json::boolean_exclude_compound_overlapping_rects",
             "menu_object_ops.json::menu_lock_two_rects",
             "menu_object_ops.json::menu_hide_two_rects",
+            // A SELECTION artifact of this relation, MEASURED (2026-10-11): once
+            // Release reached a compound inside a selected group, the two
+            // documents' LAYERS are byte-equal after unwrapping, and only
+            // `selection` differs -- the released operands are selected at
+            // [0,1,0],[0,1,1] inside the wrapper, and `unwrap_seeds` remaps
+            // layers but not selection paths. Mirrors Swift's `seedKnown`.
+            "compound_layer_actions.json::release_compound_shape_restores_its_operands",
         ];
 
         let mut checked = 0usize;

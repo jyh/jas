@@ -5373,6 +5373,9 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-11): the Layers-panel selection verbs, with
     // each case's layers_panel_selection standing in for the native row click.
     "layer_actions.json",
+    // YAML coverage census (2026-10-11): Release / Expand Compound Shape, Repeat,
+    // and the Layers panel's Collect in New Layer and Flatten Artwork.
+    "compound_layer_actions.json",
     // YAML coverage census (2026-10-11): the Stroke panel alignment, profile and
     // arrow verbs, pinning the panel-render state beside the document.
     "stroke_profile_actions.json",
@@ -5802,6 +5805,12 @@ private let seedKnown: Set<String> = [
     "boolean.json::boolean_exclude_compound_overlapping_rects",
     "menu_object_ops.json::menu_lock_two_rects",
     "menu_object_ops.json::menu_hide_two_rects",
+    // A SELECTION artifact of the relation, MEASURED (2026-10-11): once Release
+    // reached a compound inside a selected group, the two documents' layers are
+    // equal after unwrapping, and only `selection` differs (the operands are
+    // selected inside the wrapper, and the unwrap does not remap selection
+    // paths). Mirrors Rust's KNOWN.
+    "compound_layer_actions.json::release_compound_shape_restores_its_operands",
 ]
 
 /// Anti-vacuity floor: the number of cases the corpus can actually seed today
