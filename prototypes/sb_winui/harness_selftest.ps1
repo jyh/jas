@@ -1826,6 +1826,86 @@ Test-Case 'o6: CONTROL -- the HAND CLOSED fixture is matched by the pointer tabl
 } 'True'
 
 # ---------------------------------------------------------------------------
+# #323's open half: the RENDERED tree's STATE against the plan's, one reading
+# each, the same selection. `Compare-SbRenderedTree` reads the core's plan bytes
+# (SB_PLAN_OUT) and uia_tree.ps1's dump; it owns the RULE, the shell owns
+# nothing here. Visible => the id is on the tree; hidden => absent or offscreen
+# (WinUI drops a Collapsed control from UIA); enabled is `bind.disabled` !=
+# "true", the only true. An id on only one side is named, never skipped.
+# ---------------------------------------------------------------------------
+function New-SbPlanLeaf([string]$Id, [hashtable]$Values) {
+    [ordered]@{ path = @(0); type = 'button'; id = $Id; values = $Values }
+}
+$rtPlan = Get-SbFixture { [ordered]@{ leaves = @(
+    (New-SbPlanLeaf 'a' @{ 'bind.disabled' = 'false' }),
+    (New-SbPlanLeaf 'b' @{ 'bind.disabled' = 'true' }),
+    (New-SbPlanLeaf 'c' @{ 'bind.visible' = 'false' }),
+    (New-SbPlanLeaf ''  @{})
+) } | ConvertTo-Json -Depth 6 }
+function New-SbUiaDump($Rows) {
+    [ordered]@{ pid = 1; session = 1; error = $null; count = @($Rows).Count; rows = @($Rows) } |
+        ConvertTo-Json -Depth 4
+}
+function New-SbUiaRow([string]$Id, [bool]$Enabled, [bool]$Offscreen) {
+    [ordered]@{ id = $Id; type = 'Button'; enabled = $Enabled; offscreen = $Offscreen; name = '' }
+}
+$rtAgree = Get-SbFixture { New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false)) }
+
+Test-Case 'rt: a tree that agrees with its plan has no mismatch, and counts what it compared' {
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $rtAgree).Verdict
+} 'compared=3 mismatches=0'
+Test-Case 'rt: a hidden leaf read OFFSCREEN still agrees' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $true))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Verdict
+} 'compared=3 mismatches=0'
+Test-Case 'rt: a control enabled against a disabled plan is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'b enabled: plan=false rendered=true'
+Test-Case 'rt: a hidden leaf that is ON SCREEN is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'c visible: plan=false rendered=true'
+Test-Case 'rt: a visible leaf missing from the tree is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'b' $false $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'a visible: plan=true rendered=ABSENT'
+Test-Case 'rt: an id the plan does not hold is named, not skipped' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'zz' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'zz extra: plan=ABSENT rendered=present'
+Test-Case 'rt: a reader that FAILED is a refusal, never a vacuous agreement' {
+    $u = [ordered]@{ pid = 1; session = 0; error = 'no top-level UIA element'; count = 0; rows = @() } | ConvertTo-Json
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Verdict
+} 'REFUSED: uia error: no top-level UIA element'
+Test-Case 'rt: an EMPTY plan is a refusal, never compared=0 mismatches=0' {
+    (Compare-SbRenderedTree -Plan '{"leaves":[]}' -Uia $rtAgree).Verdict
+} 'REFUSED: the plan has no addressable leaf'
+Test-Case 'rt: an id rendered more often than the plan holds it is named ONCE, with both counts' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'a count: plan=1 rendered=2'
+# Measured on Windows, concepts_panel_content: the plan itself repeats
+# `concept_name` four times (a repeater's rows), and the tree holds four. The
+# first form of this rule named each as a duplicate -- four false mismatches.
+$rtRepeat = Get-SbFixture { [ordered]@{ leaves = @(
+    (New-SbPlanLeaf 'r' @{ 'bind.disabled' = 'false' }),
+    (New-SbPlanLeaf 'r' @{ 'bind.disabled' = 'true' })
+) } | ConvertTo-Json -Depth 6 }
+Test-Case 'rt: an id the PLAN repeats agrees when the tree repeats it as often' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $true $false), (New-SbUiaRow 'r' $false $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Verdict
+} 'compared=2 mismatches=0'
+Test-Case 'rt: a repeated id is paired IN ORDER, so a swapped state is named by its index' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $false $false), (New-SbUiaRow 'r' $true $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Mismatches -join ';'
+} 'r[0] enabled: plan=true rendered=false;r[1] enabled: plan=false rendered=true'
+Test-Case 'rt: a repeated id rendered fewer times than planned is named once' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $true $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Mismatches -join ';'
+} 'r count: plan=2 rendered=1'
+
+# ---------------------------------------------------------------------------
 # docs/TESTING.md section 6: the INPUT SCRIPT, as this driver reads it.
 # `Read-SbInputScript` maps a script onto what send_hand.ps1 can deliver --
 # one press, k moves evenly spaced on the press->release line, one release --
@@ -1899,6 +1979,93 @@ Test-Case 'rb: an empty read-back is NOT RUN, never a FAIL or a PASS' {
 Test-Case 'rb: a longer read-back FAILS where the expected ends' {
     Compare-SbReadBack -Got '{"a":1.0}x' -Want '{"a":1.0}'
 } 'FAIL(at byte 9 of got=10 want=9: got "x" want "")'
+
+# ---------------------------------------------------------------------------
+# Q6.D -- THE DOCK OPENED AND DREW EVERY TAB GROUP (jas's #316 review, item 1)
+#
+# Under SB_DOCK the seven Q6 clauses go NOT RUN (the dock replaces the one pane
+# they read), and before this clause nothing read the dock's own rows: a
+# refused dock read 0 FAIL. The rows below are a live `SB_DOCK=Default` run and
+# a live `SB_DOCK=NoSuchLayout` run on the Windows box, 2026-10-11, at main
+# cbebdc56 on a freshly built cdylib.
+$dkOpen  = "DOCK OPEN name=Default groups=5 panels=11 $q6Tids"
+$dkDrawn = 'DOCK DRAWN name=Default groups=5 tabs=11'
+$dkPanes = @(
+    "PANE OPEN key=dock0 panel=color_panel_content avail-w=228 leaves=80 chrome=0 containers=5 unjoined=0 withheld=0 icons=5 icons-missing=0 height=400 seq=1 $q6Tids",
+    "PANE OPEN key=dock1 panel=align_panel_content avail-w=228 leaves=22 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=168 seq=1 $q6Tids",
+    "PANE OPEN key=dock2 panel=character_panel_content avail-w=228 leaves=37 chrome=0 containers=0 unjoined=0 withheld=0 icons=22 icons-missing=0 height=284 seq=1 $q6Tids",
+    "PANE OPEN key=dock3 panel=stroke_panel_content avail-w=228 leaves=46 chrome=0 containers=0 unjoined=0 withheld=0 icons=17 icons-missing=0 height=315 seq=1 $q6Tids",
+    "PANE OPEN key=dock4 panel=artboards_panel_content avail-w=228 leaves=11 chrome=1 containers=0 unjoined=0 withheld=0 icons=6 icons-missing=0 height=57 seq=1 $q6Tids")
+$dkRefused = "RUSTFAIL DOCK REFUSED name=NoSuchLayout -- jas_dock_layout returned the empty span $q6Tids"
+function New-SbDockRows([string[]]$Statuses) { return @($Statuses | ForEach-Object { New-SbQ6Row $_ }) }
+$dkHealthy = @($dkOpen, $dkDrawn) + $dkPanes
+function Get-SbDk([string[]]$Statuses, [string]$Scene = 'app', [string]$Dock = 'Default') {
+    return (Get-SbDockVerdict (New-SbDockRows $Statuses) $Scene $Dock)
+}
+
+Test-Case 'Q6.D: the live Default dock PASSES' { (Get-SbDk $dkHealthy).Verdict } 'PASS'
+Test-Case 'Q6.D: ...and the detail names the groups, panels, panes and tabs it read' {
+    $d = (Get-SbDk $dkHealthy).Detail
+    if ($d -match 'groups=5' -and $d -match 'panels=11' -and $d -match 'tabs=11' -and $d -match 'dock0-dock4') { 'named' } else { $d }
+} 'named'
+Test-Case 'Q6.D: SB_DOCK unset is NOT RUN, by name' { (Get-SbDk $dkHealthy 'app' '').Verdict } 'NOT RUN'
+Test-Case 'Q6.D: SB_DOCK of whitespace is unset, as the shell reads it' { (Get-SbDk $dkHealthy 'app' '  ').Verdict } 'NOT RUN'
+Test-Case 'Q6.D: the live REFUSED dock FAILS -- the defect this clause exists for' { (Get-SbDk @($dkRefused)).Verdict } 'FAIL'
+Test-Case 'Q6.D: ...and quotes the refusal row' { (Get-SbDk @($dkRefused)).Row -match 'RUSTFAIL DOCK REFUSED name=NoSuchLayout' } 'True'
+Test-Case 'Q6.D: CONTROL -- the refused run carries no DOCK OPEN, PANE OPEN or DOCK DRAWN row' {
+    @((New-SbDockRows @($dkRefused)) | Where-Object { $_ -match "`t(DOCK OPEN|DOCK DRAWN|PANE OPEN) " }).Count
+} '0'
+Test-Case 'Q6.D: a dock asked for and a shell that wrote NOTHING FAILS' { (Get-SbDk @()).Verdict } 'FAIL'
+Test-Case 'Q6.D: DOCK OPEN with no DOCK DRAWN FAILS' { (Get-SbDk (@($dkOpen) + $dkPanes)).Verdict } 'FAIL'
+Test-Case 'Q6.D: DOCK DRAWN short of a group FAILS' { (Get-SbDk (@($dkOpen, 'DOCK DRAWN name=Default groups=4 tabs=9') + $dkPanes)).Verdict } 'FAIL'
+Test-Case 'Q6.D: a group whose pane never opened FAILS' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0..3])).Verdict } 'FAIL'
+Test-Case 'Q6.D: ...and names the missing key' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0..3])).Detail -match 'dock4' } 'True'
+Test-Case 'Q6.D: a group pane the core refused FAILS beside an otherwise healthy run' {
+    (Get-SbDk ($dkHealthy + "RUSTFAIL PANE REFUSED key=dock2 panel=character_panel_content cause=open -- jas_panel_plan returned the empty span $q6Tids")).Verdict
+} 'FAIL'
+Test-Case 'Q6.D: a group frame the UI refused to draw FAILS' { (Get-SbDk ($dkHealthy + 'RUSTFAIL DOCK DRAW refused -- dock3 has 2 panel(s) and active=5')).Verdict } 'FAIL'
+Test-Case 'Q6.D: a group pane whose draw threw FAILS' { (Get-SbDk ($dkHealthy + 'RUSTFAIL PANE key=dock1 DRAW threw InvalidOperationException: x')).Verdict } 'FAIL'
+Test-Case 'Q6.D: the render thread dying FAILS (the stale-cdylib run that found this gap)' {
+    (Get-SbDk @("RUSTFAIL render thread died: EntryPointNotFoundException: Unable to find an entry point named 'jas_dock_layout' in DLL 'jas_dioxus'. $q6Tids")).Verdict
+} 'FAIL'
+Test-Case 'Q6.D: CONTROL -- a TOOLBAR failure is not the dock''s' { (Get-SbDk ($dkHealthy + 'RUSTFAIL TOOLBAR DRAW threw InvalidOperationException: x')).Verdict } 'PASS'
+Test-Case 'Q6.D: SB_DOCK set on a scene that opens no pane FAILS -- the shell ignores the knob there' { (Get-SbDk @() 'retained').Verdict } 'FAIL'
+# ...and the WAIT: a docked run writes no PANEL DRAWN, so waiting on it timed out
+# (60 s) and the clause above read whatever had arrived by then.
+Test-Case 'Q6.D WAIT: a docked run waits on DOCK DRAWN, not PANEL DRAWN' { (@(Get-SbPaneWaits 'app' '' 'Default') | ForEach-Object { $_.Label }) -join ' | ' } 'the DOCK DRAWN row'
+Test-Case 'Q6.D WAIT: CONTROL -- an undocked run still waits on PANEL DRAWN' { (@(Get-SbPaneWaits 'app' '' '  ') | ForEach-Object { $_.Label }) -join ' | ' } 'the PANEL DRAWN row'
+Test-Case 'Q6.D WAIT: ends on the live healthy dock' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows $dkHealthy) } 'ENDS'
+Test-Case 'Q6.D WAIT: ends on the live refused dock' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'NoSuchLayout')[0]) (New-SbDockRows @($dkRefused)) } 'ENDS'
+Test-Case 'Q6.D WAIT: ends on the render thread dying' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows @("RUSTFAIL render thread died: EntryPointNotFoundException: x $q6Tids")) } 'ENDS'
+Test-Case 'Q6.D WAIT: WAITS on DOCK OPEN alone' { Test-SbQ6WaitEnds (@(Get-SbPaneWaits 'app' '' 'Default')[0]) (New-SbDockRows (@($dkOpen) + $dkPanes)) } 'WAITS'
+# ⛔ DOCK DRAWN IS NOT THE DOCK's LAST ROW. Measured live (sitting, SB_DOCK=Default):
+# the UI writes DOCK DRAWN when the group FRAMES exist, and each group's
+# PANE OPEN key=dock<i> follows it, so the first live run read dock1-dock4 as
+# missing and FAILED a healthy dock. `Test-SbDockSettled` is polled after the
+# wait, as `Test-SbMenuSettled` is: settled when every group's pane opened,
+# when a dock failure row arrived, or when no DOCK OPEN came at all.
+Test-Case 'Q6.D SETTLED: the live healthy dock is settled' { Test-SbDockSettled (New-SbDockRows $dkHealthy) } 'True'
+Test-Case 'Q6.D SETTLED: the live ORDER -- DOCK DRAWN with dock1-dock4 still to come -- is NOT settled' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn) + $dkPanes[0])) } 'False'
+Test-Case 'Q6.D SETTLED: settled in any key order' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn) + $dkPanes[4,2,0,3,1])) } 'True'
+Test-Case 'Q6.D SETTLED: a dock failure row settles it' { Test-SbDockSettled (New-SbDockRows (@($dkOpen, $dkDrawn, "RUSTFAIL PANE REFUSED key=dock2 panel=x cause=open -- y $q6Tids") + $dkPanes[0])) } 'True'
+Test-Case 'Q6.D SETTLED: no DOCK OPEN at all is settled -- nothing more is coming' { Test-SbDockSettled (New-SbDockRows @($dkRefused)) } 'True'
+Test-Case 'Q6.D: CONTROL -- the live ORDER, read before it settles, FAILS (what the first live run did)' { (Get-SbDk (@($dkOpen, $dkDrawn) + $dkPanes[0])).Verdict } 'FAIL'
+
+# ---------------------------------------------------------------------------
+# THE DESKTOP-PIXELS ARM: "an empty station is near-uniform black" (verify_window).
+# The floor was 100 colours, and on 2026-10-11 every `app` sitting FAILED it on
+# a real desktop: the capture (viewed) held the app window, the drawn document
+# and the desktop icons, at mean luma 200.0 with 71 colours -- a solid-black
+# desktop beside a solid-white canvas leaves only the anti-aliasing. History
+# read 900 to 10,500 colours over a wallpaper. The rule now names what it means.
+Test-Case 'px: a uniform black frame is an empty station' { Test-SbDesktopPixels 0.0 1 } 'FAIL'
+Test-Case 'px: black with a cursor sprite is an empty station' { Test-SbDesktopPixels 2.1 9 } 'FAIL'
+Test-Case 'px: near-black noise is an empty station' { Test-SbDesktopPixels 3.0 5000 } 'FAIL'
+Test-Case 'px: a uniform frame of ANY colour is not a desktop' { Test-SbDesktopPixels 255.0 1 } 'FAIL'
+Test-Case 'px: the live 10-11 desktop (black background, white canvas) is real' { Test-SbDesktopPixels 200.0 71 } 'ok'
+Test-Case 'px: the live 10-11 docked desktop is real' { Test-SbDesktopPixels 155.7 70 } 'ok'
+Test-Case 'px: the 10-10 wallpaper desktop is real' { Test-SbDesktopPixels 142.5 10494 } 'ok'
+Test-Case 'px: CONTROL -- the old floor of 100 colours FAILED the live 10-11 desktop' { if (71 -gt 100) { 'ok' } else { 'FAIL' } } 'FAIL'
 
 # ---------------------------------------------------------------------------
 Write-Host ""

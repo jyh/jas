@@ -2795,6 +2795,9 @@ mod tests {
         // YAML coverage census (2026-10-11): the Layers-panel selection verbs, with
         // each case's layers_panel_selection standing in for the native row click.
         "layer_actions.json",
+        // YAML coverage census (2026-10-11): the Stroke panel alignment, profile and
+        // arrow verbs, pinning the panel-render state beside the document.
+        "stroke_profile_actions.json",
         // YAML coverage census (2026-10-11): the fill/stroke colour verbs, each after a
         // select_all, pinning the panel-render state as well as the document.
         "color_actions.json",

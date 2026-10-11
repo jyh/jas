@@ -756,7 +756,7 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
     # W2b-3's value replay runs after Q6's and finishes last, so its wait goes
     # first, as Q6's replay wait goes before the pane's.
     $valueWaits = @(Get-SbValueWaits $Scene $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS)
-    $paneWaits = $valueWaits + @(Get-SbPaneWaits $Scene $env:SB_PANEL_SYNTH)
+    $paneWaits = $valueWaits + @(Get-SbPaneWaits $Scene $env:SB_PANEL_SYNTH $env:SB_DOCK)
     foreach ($pw in $paneWaits) {
         $pd = Wait-SbRow -Log $log -Mark $logMark -Patterns $pw.Patterns -TimeoutSeconds $pw.Timeout
         $rows = $pd.Rows
@@ -765,6 +765,18 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
         } else {
             $verdicts += "ok  : $($pw.Label) arrived after $($pd.Waited)s"
         }
+    }
+    # ⛔ DOCK DRAWN IS NOT THE DOCK's LAST ROW: each group's PANE OPEN key=dock<i>
+    # follows it. Bounded, as the menu poll below is; a timeout leaves Q6.D to
+    # judge what arrived, which by then is a real loss.
+    if (-not [string]::IsNullOrWhiteSpace($env:SB_DOCK) -and $Scene -eq $SbPaneScene) {
+        $dw = [System.Diagnostics.Stopwatch]::StartNew()
+        while (-not (Test-SbDockSettled $rows) -and $dw.Elapsed.TotalSeconds -lt 30) {
+            Start-Sleep -Milliseconds 250
+            $rows = Read-SbRows $log $logMark
+        }
+        if (Test-SbDockSettled $rows) { $verdicts += "ok  : every dock group's PANE OPEN (or a dock failure) after $([math]::Round($dw.Elapsed.TotalSeconds, 1))s more" }
+        else { $verdicts += "note: the dock's group panes did not all open within $([math]::Round($dw.Elapsed.TotalSeconds, 1))s; Q6.D judges what arrived" }
     }
 }
 
@@ -880,7 +892,7 @@ if (-not (Test-Path "$png.json")) {
     }
 }
 
-# Pixels, as the independent second arm. An empty station is near-uniform black;
+# Pixels, as the independent second arm (`Test-SbDesktopPixels`). An empty station is near-uniform black;
 # a real desktop is not. This does NOT prove the app drew correctly -- it proves
 # the capture is of a real desktop, so the window verdict above means something.
 if (Test-Path $png) {
@@ -896,7 +908,7 @@ if (Test-Path $png) {
     }
     $bmp.Dispose()
     $luma = $sum / $n
-    if ($luma -gt 5 -and $colors.Count -gt 100) {
+    if ((Test-SbDesktopPixels $luma $colors.Count) -eq 'ok') {
         $verdicts += ("ok  : real desktop pixels (mean luma {0:N1}, {1} colours)" -f $luma, $colors.Count)
     } else {
         $verdicts += ("FAIL: capture looks like an empty station (mean luma {0:N1}, {1} colours)" -f $luma, $colors.Count)

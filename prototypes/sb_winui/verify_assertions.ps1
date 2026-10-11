@@ -1610,6 +1610,16 @@ if ($s5.Verdict -eq 'NOT RUN') {
     Add-Assert -Name $s5.Name -Verdict $s5.Verdict -Detail $s5.Detail -Row $s5.Row
 }
 
+# Q6.D -- THE DOCK, read off its own rows (#316's review, item 1). One clause
+# on every scene, decided in `Get-SbDockVerdict` for Q6's reason: NOT RUN
+# without SB_DOCK, and a refused dock is a FAIL, never the 0 FAIL it read before.
+$qd = Get-SbDockVerdict $rows $Scene $env:SB_DOCK
+if ($qd.Verdict -eq 'NOT RUN') {
+    Add-NotRun $qd.Name $qd.Detail -Row $qd.Row
+} else {
+    Add-Assert -Name $qd.Name -Verdict $qd.Verdict -Detail $qd.Detail -Row $qd.Row
+}
+
 # ===========================================================================
 # O6 -- 0xH REFUSED THROUGH THE REAL LINK, AND THE ACCEPT ARM BESIDE IT
 # ===========================================================================
