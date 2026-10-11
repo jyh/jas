@@ -4562,6 +4562,42 @@ private func assertGestureTest(_ tc: [String: Any]) {
     }
 }
 
+// MARK: - The input scripts (docs/TESTING.md section 6)
+//
+// One script per spec item, shared by level 1 (each port's core, here) and
+// level 2 (each live app). Its pointer steps are gesture events, so it replays
+// through the gesture runner; any other step is REFUSED by name until this
+// runner can replay it, and a script must end on a document read.
+private let scriptFixtures = ["selection.drag.json"]
+
+@Test func scriptCorpus() throws {
+    #expect(!scriptFixtures.isEmpty)
+    for fixture in scriptFixtures {
+        let script = try JSONSerialization.jsonObject(
+            with: readFixture("input_scripts/\(fixture)").data(using: .utf8)!) as! [String: Any]
+        let item = script["item"] as! String
+        let steps = script["steps"] as! [[String: Any]]
+        guard let last = steps.last, last.count == 1, last["read"] as? String == "document" else {
+            Issue.record("script \(item): must end on a document read")
+            continue
+        }
+        var events: [[String: Any]] = []
+        for (i, st) in steps.dropLast().enumerated() {
+            guard let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) else {
+                Issue.record("script \(item): step \(i) is not replayable at level 1 yet (pointer steps only)")
+                continue
+            }
+            events.append(st)
+        }
+        let tc: [String: Any] = ["name": item, "setup_svg": script["setup_svg"]!, "tool": script["tool"]!,
+                                 "app_state": script["app_state"] ?? [:], "events": events]
+        let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let actual = documentToTestJson(runGestureModel(tc).document)
+        #expect(actual == expected, "script \(item): the level-1 read-back differs from the expected")
+    }
+}
+
 // ===============================================================
 // THE CIRCLE INVARIANT — a Shift-constrained draw is SQUARE
 // BIT-EXACTLY, at any zoom and any pan.
