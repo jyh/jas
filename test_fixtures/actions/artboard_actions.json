@@ -1,0 +1,85 @@
+[
+  {
+    "name": "duplicate_artboards_second",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "artboards_panel_select",
+        "params": {
+          "artboard_id": "ab2",
+          "modifier": "none"
+        }
+      },
+      {
+        "action": "duplicate_artboards",
+        "params": {}
+      }
+    ],
+    "expected_json": "duplicate_artboards_second_expected.json"
+  },
+  {
+    "name": "delete_artboards_second",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "artboards_panel_select",
+        "params": {
+          "artboard_id": "ab2",
+          "modifier": "none"
+        }
+      },
+      {
+        "action": "delete_artboards",
+        "params": {}
+      }
+    ],
+    "expected_json": "delete_artboards_second_expected.json"
+  },
+  {
+    "name": "move_artboard_up_third",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "artboards_panel_select",
+        "params": {
+          "artboard_id": "ab3",
+          "modifier": "none"
+        }
+      },
+      {
+        "action": "move_artboard_up",
+        "params": {}
+      }
+    ],
+    "expected_json": "move_artboard_up_third_expected.json"
+  },
+  {
+    "name": "move_artboard_down_first",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "artboards_panel_select",
+        "params": {
+          "artboard_id": "ab1",
+          "modifier": "none"
+        }
+      },
+      {
+        "action": "move_artboard_down",
+        "params": {}
+      }
+    ],
+    "expected_json": "move_artboard_down_first_expected.json"
+  },
+  {
+    "name": "delete_empty_artboards_all",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "delete_empty_artboards",
+        "params": {}
+      }
+    ],
+    "expected_json": "delete_empty_artboards_all_expected.json"
+  }
+]

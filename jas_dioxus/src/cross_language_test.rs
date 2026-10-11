@@ -2789,6 +2789,9 @@ mod tests {
         // YAML coverage census (2026-10-10): the Stroke panel cap, join and
         // a dashed toggle, dispatched with a stroked rect selected.
         "stroke_actions.json",
+        // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
+        // artboards_panel_select, which is itself a verb with no other case.
+        "artboard_actions.json",
         // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
         // inherited lock. `actions.yaml` §select_all always said "locked
         // objects are excluded" without saying WHOSE flag, and the two ports
