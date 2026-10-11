@@ -417,6 +417,13 @@ private func runOne(
            let hook = platformEffects["apply_active_tool"] {
             _ = hook("", ctx, store)
         }
+        // A `fill_on_top` write (toggle_fill_on_top) moves which swatch is in
+        // front; the host mirrors it into `model.fillOnTop`, which every later
+        // action's `state.fill_on_top` reads (Rust's `set_app_state_field`).
+        if pairs.keys.contains("fill_on_top"),
+           let hook = platformEffects["apply_fill_on_top"] {
+            _ = hook("", ctx, store)
+        }
         // Stroke render-key writes also trigger the stroke apply
         // pipeline. The notify hook uses stroke_panel_content as the
         // panel id; notifyPanelStateChanged dispatches to
@@ -453,6 +460,30 @@ private func runOne(
                 store.set(target, lst)
             }
         }
+        return
+    }
+
+    // toggle / swap ARE a `set:` -- `toggle: k` is `set: {k: "not state.k"}`
+    // and `swap: [a, b]` is `set: {a: "state.b", b: "state.a"}` (a set
+    // evaluates every right-hand side before it writes). Run as one, they read
+    // the SELECTION-AWARE `state.*` the action ctx carries and fire the same
+    // apply hooks a set does. Written directly to the store, they read the
+    // store's defaults and reached nothing: `toggle_fill_on_top` never moved
+    // `model.fillOnTop`, and `swap_fill_stroke` left the selection unchanged
+    // (`color_actions.json`, 2026-10-11). Rust's runner agrees. A constructed
+    // `{{...}}` key keeps the store path below.
+    if let key = effect["toggle"] as? String, !key.contains("{{") {
+        runOne(["set": [key: "not state.\(key)"]], ctx: ctx, store: store,
+               actions: actions, dialogs: dialogs, platformEffects: platformEffects,
+               schema: schema, model: model, diagnostics: &diagnostics)
+        return
+    }
+    if let keys = effect["swap"] as? [String], keys.count == 2,
+       !keys.contains(where: { $0.contains("{{") }) {
+        runOne(["set": [keys[0]: "state.\(keys[1])", keys[1]: "state.\(keys[0])"]],
+               ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+               platformEffects: platformEffects, schema: schema, model: model,
+               diagnostics: &diagnostics)
         return
     }
 
@@ -2734,6 +2765,10 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
             if let s = store.get("active_tool") as? String {
                 model.onActiveToolChange?(s)
             }
+            return nil
+        },
+        "apply_fill_on_top": { _, _, store in
+            if let b = store.get("fill_on_top") as? Bool { model.fillOnTop = b }
             return nil
         },
     ]

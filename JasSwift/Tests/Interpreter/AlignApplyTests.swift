@@ -109,6 +109,9 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         // active_tool (the toolbar's tool-alternates flyout) so the
         // live canvas tool switches. See ContentView's BundleToolbarPane.
         "apply_active_tool",
+        // Fill-on-top mirror hook: fires when a YAML set: (or the toggle that
+        // runs as one) writes fill_on_top, so model.fillOnTop moves.
+        "apply_fill_on_top",
         "align_left", "align_horizontal_center", "align_right",
         "align_top", "align_vertical_center", "align_bottom",
         "distribute_left", "distribute_horizontal_center", "distribute_right",
