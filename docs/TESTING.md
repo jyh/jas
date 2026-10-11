@@ -34,7 +34,12 @@ missing selection highlight, for example, is a level-1 or level-2 catch.
 | **LOOK, pixels** | a **SCREENSHOT** | compared against a **FROZEN baseline**, within a stated tolerance |
 
 **A baseline changes only with the spec, never on its own.** A PR that changes a pixel baseline must also change the
-spec item that baseline renders, and a tool must enforce this. **No such tool exists yet (§5).**
+spec item that baseline renders, and a tool must enforce this: `scripts/check_baseline_spec_change.py`, run in CI on
+every PR's own delta. A baseline is any file under an `e2e_baselines/<item>/` directory; its item maps to the spec
+through the input script naming that item (§6). A baseline that changes with no change to that spec passes only when
+a commit in the PR declares why, on its own line: `Baseline-Refreeze: <item>: <reason>`. A spec is not the only honest
+cause: `selection.drag` was re-frozen once because the app had been wrong, and once because the box's desktop moved
+the window. The declaration makes that a named act a reviewer reads, never a silent one.
 
 **Windows parity is DIFFERENTIAL against the Mac**, fully automated at levels 1 and 2: the same input script must give
 the same core state, the same widget tree, and a screenshot within tolerance of the Mac's render.
@@ -104,20 +109,22 @@ What exists:
   * `jas_gui_harness.py` injects OS events (Quartz `CGEventPost`).
   * `screencapture -l <window>` captures a window. It needs an unlocked, awake console.
 * **LOOK-structure:** the shared panel layout and widget-tree passes (`panel_layout`, `widget_tree`), byte-gated across
-  the reference, Rust and Swift for all 16 panels. Dialogs are not yet in the pass. The Mac app attaches an
+  the reference, Rust and Swift for all 16 panels and all 33 dialogs. The Mac app attaches an
   accessibility identifier to every rendered widget (`YamlPanelBodyView`), but nothing reads them yet.
-* **LOOK-pixels:** no baselines exist. The canvas is compared as a display list (`TESTING_STRATEGY.md` §2), not as
-  pixels.
+* **LOOK-pixels:** one baseline exists, `selection.drag` on Windows (`prototypes/sb_winui/e2e_baselines/`): an EXACT
+  hash of the back buffer, pinned to the box that froze it, run by hand there and never in CI. The canvas is
+  otherwise compared as a display list (`TESTING_STRATEGY.md` §2), not as pixels.
 * **CI:** levels 1 and the below-the-app half of 2, on macOS, Linux and Windows. No CI job launches an app or compares
   a screenshot.
 
 What level 2 needs, in the order the census prices it:
-1. An input script driven through the **live** app, with the document read back. The read-back exists
+1. An input script driven through the **live** app, with the document read back. On Windows it runs:
+   `prove_e2e.ps1 -Script` replays `selection.drag` and reads it back byte for byte. On the Mac the read-back exists
    (`jas://document`); a channel for the input does not.
-2. **Dialogs** in the widget-tree pass, and a reader of the **rendered** tree: accessibility identifiers on macOS, UI
-   Automation on Windows.
-3. **Pixel baselines** for panels, dialogs and icons, frozen by a tool that refuses a baseline change with no spec
-   change.
+2. A reader of the **rendered** widget tree: accessibility identifiers on macOS, UI Automation on Windows. (Dialogs
+   are in the widget-tree pass.)
+3. **Pixel baselines** for panels, dialogs and icons. The tool that refuses a baseline change with no spec change
+   exists (§2); beyond `selection.drag`'s, the baselines do not.
 4. Corpus cases for the uncovered actions, tools and state (the NOT_YET_BUILT bin), and a restatement of the
    UNDERSPECIFIED bin.
 
@@ -175,5 +182,5 @@ each live app:
 A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
 comparison, with the Mac's live read-back as the other side.
 
-**What is not ruled here:** the pixel tolerance, and the tool that refuses a baseline change with no spec change. Both
-come with the first pixel baselines.
+**What is not ruled here:** the pixel tolerance. It comes with the first pixel baselines. (The tool that refuses a
+baseline change with no spec change is built; §2.)
