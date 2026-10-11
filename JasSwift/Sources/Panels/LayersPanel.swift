@@ -136,6 +136,20 @@ public enum LayersPanel {
         // three-verb blast radius.
         let params = mergeDeclaredParamDefaults(params, actionDef: actionDef)
 
+        // The Artboards panel's selection: the caller's, or else the panel
+        // scope's own -- what `ArtboardsPanel.dispatch` reads and passes. This
+        // used to default to `[]`, so every OTHER caller (`ViewActions`, the
+        // test FIFO, the dialogs, the action corpus) ran `delete_artboards`,
+        // `duplicate_artboards` and `move_artboard_up/down` against an empty
+        // selection: a no-op, while Rust reads the store. Found by
+        // `artboard_actions.json` (2026-10-11).
+        // (An empty argument and an empty panel scope read the same, so the
+        // fallback changes no caller that passes one.)
+        let artboardsPanelSelection: [String] = !artboardsPanelSelection.isEmpty
+            ? artboardsPanelSelection
+            : (model.stateStore.getPanelState("artboards")["artboards_panel_selection"] as? [Any])?
+                .compactMap { $0 as? String } ?? []
+
         let activeDoc = buildActiveDocumentView(
             model: model,
             layersPanelSelection: panelSelection,
