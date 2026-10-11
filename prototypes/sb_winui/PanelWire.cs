@@ -498,3 +498,23 @@ internal sealed record PaneOptions(List<PaneOption> Rows, int Refused)
 
 /// <summary>The panels the pane can show, in the core's order, and how many rows could not be offered.</summary>
 internal sealed record PanelChoices(List<(string Id, string Label)> Rows, int Skipped);
+
+/// <summary>
+/// Step 3 (2026-10-11): which panes a run opens, from its knobs. Pure, so
+/// `sb_winui_tests` drives it.
+/// </summary>
+internal static class PaneKnobs
+{
+    /// <summary>The toolbar is ON BY DEFAULT under `app`: `SB_TOOLBAR=0` is the
+    /// one way off, and any other value, or none, is on. Off `app` a value that
+    /// asks for it is "refused" (refused by name, never ignored), and `0`, which
+    /// asks for nothing, is "off". Blank is unset, the same predicate as every
+    /// other pane knob.</summary>
+    internal static string Toolbar(string? knob, bool appScene)
+    {
+        var v = string.IsNullOrWhiteSpace(knob) ? null : knob.Trim();
+        if (v == "0") return "off";
+        if (appScene) return "on";
+        return v is null ? "off" : "refused";
+    }
+}

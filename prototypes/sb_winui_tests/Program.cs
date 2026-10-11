@@ -709,6 +709,18 @@ static class Program
         Eq("snap: a pen's sub-pixel position is kept", "54.25", PointerWire.Snap(54.25).ToString("R"));
         Eq("snap: just outside the window is kept", "54.002", PointerWire.Snap(54.002).ToString("R"));
         Eq("snap: a negative position (a drag off the canvas) snaps too", "-3", PointerWire.Snap(-3.000004).ToString("R"));
+        // -- STEP 3: THE TOOLBAR IS ON BY DEFAULT under `app` (2026-10-11) -----
+        // `SB_TOOLBAR=0` is the one way off; any other value, or none, is on.
+        // Off `app` the old refusal stands for a value that ASKS for it, and
+        // `0` (asking for nothing) is never refused.
+        Eq("toolbar: unset under app is ON (the default)", "on", PaneKnobs.Toolbar(null, true));
+        Eq("toolbar: blank under app is unset, so ON", "on", PaneKnobs.Toolbar("  ", true));
+        Eq("toolbar: 0 under app is OFF", "off", PaneKnobs.Toolbar("0", true));
+        Eq("toolbar: 0 with whitespace under app is OFF", "off", PaneKnobs.Toolbar(" 0 ", true));
+        Eq("toolbar: 1 under app is ON", "on", PaneKnobs.Toolbar("1", true));
+        Eq("toolbar: unset off app is OFF, never refused", "off", PaneKnobs.Toolbar(null, false));
+        Eq("toolbar: 0 off app is OFF, never refused", "off", PaneKnobs.Toolbar("0", false));
+        Eq("toolbar: 1 off app is REFUSED by name, as before", "refused", PaneKnobs.Toolbar("1", false));
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

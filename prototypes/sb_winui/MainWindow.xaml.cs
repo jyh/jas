@@ -210,7 +210,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The dock pane (the right-hand panel). See PaneView.cs.</summary>
     private PaneView _dock = null!;
 
-    /// <summary>The toolbar pane (the left-hand column), under SB_TOOLBAR. See PaneView.cs.</summary>
+    /// <summary>The toolbar pane (the left-hand column), on under `app` unless SB_TOOLBAR=0. See PaneView.cs.</summary>
     private PaneView _toolbar = null!;
 
     /// <summary>`layout.yaml`'s toolbar, by its pane id; the core plans it like a panel.</summary>
@@ -381,9 +381,9 @@ public sealed partial class MainWindow : Window
             _paneWanted = true;
             PaneHost.Width = PaneAvailW + 2 * PanePad + PaneHost.BorderThickness.Left;
             PaneHost.Visibility = Visibility.Visible;
-            // THE TOOLBAR PANE, behind its knob until the harness proves its
-            // pane verdicts read the dock alone beside it. The SAME predicate
-            // as the other pane knobs (whitespace is unset).
+            // THE TOOLBAR PANE, ON BY DEFAULT since step 3 (2026-10-11), once
+            // the pane verdicts were shown to read their own pane beside it
+            // (#343). `SB_TOOLBAR=0` turns it off; `PaneKnobs.Toolbar` decides.
             // THE DOCK's tab groups, behind SB_DOCK=<layout name> (e.g. Default):
             // the dock column then holds the groups instead of the one pane.
             var dockKnob = Environment.GetEnvironmentVariable("SB_DOCK");
@@ -399,14 +399,14 @@ public sealed partial class MainWindow : Window
                     Content = _dockStack,
                 };
             }
-            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+            if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), true) == "on")
             {
                 _toolbarWanted = true;
                 ToolbarHost.Width = ToolbarAvailW + 2 * PanePad + ToolbarHost.BorderThickness.Right;
                 ToolbarHost.Visibility = Visibility.Visible;
             }
         }
-        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+        else if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), false) == "refused")
         {
             // Refused, never ignored: only `app` opens panes.
             _toolbarRefused = true;
@@ -1220,7 +1220,7 @@ public sealed partial class MainWindow : Window
                 && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR_SYNTH")))
             {
                 // Refused, never ignored: a toolbar click with no toolbar open.
-                Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs SB_TOOLBAR=1 under SB_SCENE=app");
+                Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs the toolbar open: SB_SCENE=app and SB_TOOLBAR not 0");
             }
             if (_toolbarRefused)
             {
