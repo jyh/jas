@@ -4125,6 +4125,20 @@ internal sealed unsafe class Canvas : IDisposable
                   + $"-- no engine {Tids()}");
             return;
         }
+        // A dock group shows only its own tabs: a switch (SB_DOCK_SWITCH, or a
+        // tab's click) to a panel that is not one of them is refused by name,
+        // never opened into a group that does not hold it (#316's review, item 3).
+        if (_dockTabs is { } tabs && open.Key.StartsWith("dock", StringComparison.Ordinal))
+        {
+            var g = int.TryParse(open.Key.AsSpan(4), out var gi) && gi >= 0 && gi < tabs.Count ? tabs[gi] : null;
+            if (g is null || !g.Contains(open.PanelId))
+            {
+                _report($"RUSTFAIL DOCK SWITCH REFUSED key={open.Key} panel={open.PanelId} -- "
+                      + (g is null ? $"the dock has {tabs.Count} group(s)" : $"not a tab of that group (tabs={string.Join(",", g)})")
+                      + $" {Tids()}");
+                return;
+            }
+        }
         var seq = _panes.TryGetValue(open.Key, out var old) ? old.Seq : 0;
         _panes[open.Key] = new PaneChannel { PanelId = open.PanelId, AvailW = open.AvailW, Seq = seq };
         var plan = ApplyPaneRefresh(open.Key, "open");
@@ -4163,6 +4177,9 @@ internal sealed unsafe class Canvas : IDisposable
         return plans;
     }
 
+    /// <summary>Each dock group's tabs (content ids), in group order, once a dock opened. Render thread only.</summary>
+    private List<List<string>>? _dockTabs;
+
     /// <summary>The dock layout the UI builds its group frames from, published before any group's plan.</summary>
     internal volatile DockSnapshot? Dock;
 
@@ -4191,6 +4208,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         if (PanelList is null) { PanelList = JasCore.TakeString(JasCore.jas_panel_list()); }
         var groups = new List<(string Active, int Count)>();
+        var tabsRead = new List<List<string>>();
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(layout);
@@ -4207,6 +4225,7 @@ internal sealed unsafe class Canvas : IDisposable
                     return;
                 }
                 groups.Add((ids[active], ids.Count));
+                tabsRead.Add(ids);
             }
         }
         catch (Exception ex)
@@ -4216,6 +4235,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         // Published FIRST, so the UI has built every group's frame before any
         // group's plan arrives (one thread, one dispatcher queue: in order).
+        _dockTabs = tabsRead;
         Dock = new DockSnapshot(open.Name, layout, PanelList);
         PostToUi(() => DockChanged?.Invoke());
         _report($"DOCK OPEN name={open.Name} groups={groups.Count} panels={groups.Sum(g => g.Count)} {Tids()}");
