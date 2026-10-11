@@ -1769,41 +1769,67 @@ public class Controller {
     public func releaseCompoundShape() {
         let doc = model.document
         guard !doc.selection.isEmpty else { return }
+        // Every compound shape the selection holds, THROUGH groups and layers
+        // (never into a compound): a group selected around a compound releases
+        // it, as its sole member would. Deduplicated. Mirrors Rust.
+        func compounds(_ elem: Element, _ path: ElementPath, _ out: inout [ElementPath]) {
+            switch elem {
+            case .live(.compoundShape): out.append(path)
+            case .group(let g): for (i, c) in g.children.enumerated() { compounds(c, path + [i], &out) }
+            case .layer(let l): for (i, c) in l.children.enumerated() { compounds(c, path + [i], &out) }
+            default: break
+            }
+        }
         var csPaths: [ElementPath] = []
         for es in doc.selection {
-            if case .live = doc.getElement(es.path) {
-                csPaths.append(es.path)
-            }
+            compounds(doc.getElement(es.path), es.path, &csPaths)
         }
         guard !csPaths.isEmpty else { return }
         csPaths.sort { $0.lexicographicallyPrecedes($1) }
+        csPaths = csPaths.enumerated().filter { $0.offset == 0 || csPaths[$0.offset - 1] != $0.element }.map { $0.element }
         var newDoc = doc
         for csPath in csPaths.reversed() {
-            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath) else { continue }
-            newDoc = newDoc.deleteElement(csPath)
-            let layerIdx = csPath[0]
-            let childIdx = csPath.count > 1 ? csPath[1] : 0
-            let layer = newDoc.layers[layerIdx]
-            var newChildren = layer.children
-            newChildren.insert(contentsOf: cs.operands, at: childIdx)
-            // T4 bystander clause: see `addElement`. Same four-of-eleven
-            // literal, same seven fields lost, once per iteration.
-            let newLayer = layer.withChildren(newChildren)
-            var newLayers = newDoc.layers
-            newLayers[layerIdx] = newLayer
-            newDoc = newDoc.replacing(layers: newLayers, selection: [])
+            guard case .live(.compoundShape(let cs)) = newDoc.getElement(csPath),
+                  csPath.count >= 2, let idx = csPath.last else { continue }
+            // Into the compound's OWN parent, at its position, at any depth. This
+            // used to splice into `layers[path[0]]` at `path[1]`, so a compound
+            // inside a group spilled its operands into the LAYER, out of the
+            // group (`compound_layer_actions.json`, 2026-10-11). Mirrors Rust.
+            let parent = Array(csPath.dropLast())
+            func spliced(_ children: [Element]) -> [Element] {
+                var c = children
+                c.remove(at: idx)
+                c.insert(contentsOf: cs.operands, at: idx)
+                return c
+            }
+            if parent.count == 1 {
+                let layer = newDoc.layers[parent[0]]
+                // T4 bystander clause: see `addElement`. Same four-of-eleven
+                // literal, same seven fields lost, once per iteration.
+                var newLayers = newDoc.layers
+                newLayers[parent[0]] = layer.withChildren(spliced(layer.children))
+                newDoc = newDoc.replacing(layers: newLayers, selection: [])
+            } else if case .group(let g) = newDoc.getElement(parent) {
+                newDoc = newDoc.replaceElement(parent, with: .group(g.withChildren(spliced(g.children))))
+            }
+        }
+        // Each earlier released compound IN THE SAME PARENT shifted this one by
+        // (its operand count - 1); one in another parent did not.
+        func operandCount(_ p: ElementPath) -> Int? {
+            if case .live(.compoundShape(let cs)) = doc.getElement(p) { return cs.operands.count }
+            return nil
         }
         var newSelection: Selection = []
-        var offset = 0
-        for csPath in csPaths {
-            guard case .live(.compoundShape(let cs)) = doc.getElement(csPath) else { continue }
-            let n = cs.operands.count
-            let layerIdx = csPath[0]
-            let childIdx = (csPath.count > 1 ? csPath[1] : 0) + offset
+        for (k, csPath) in csPaths.enumerated() {
+            guard let n = operandCount(csPath), csPath.count >= 2, let last = csPath.last else { continue }
+            let parent = Array(csPath.dropLast())
+            let offset = csPaths[..<k]
+                .filter { $0.count == csPath.count && Array($0.dropLast()) == parent }
+                .compactMap { operandCount($0).map { $0 - 1 } }
+                .reduce(0, +)
             for j in 0..<n {
-                newSelection.append(ElementSelection.all([layerIdx, childIdx + j]))
+                newSelection.append(ElementSelection.all(parent + [last + offset + j]))
             }
-            offset += n - 1
         }
         model.editDocument(newDoc.replacing(selection: newSelection))
     }

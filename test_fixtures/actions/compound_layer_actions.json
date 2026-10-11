@@ -1,0 +1,167 @@
+[
+  {
+    "name": "release_compound_shape_restores_its_operands",
+    "setup_svg": "compound_and_rect.svg",
+    "selection": [
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "release_compound_shape",
+        "params": {}
+      }
+    ],
+    "expected_json": "release_compound_shape_compound_and_rect_expected.json"
+  },
+  {
+    "name": "release_after_make_round_trips_two_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "make_compound_shape",
+        "params": {}
+      },
+      {
+        "action": "release_compound_shape",
+        "params": {}
+      }
+    ],
+    "expected_json": "release_after_make_two_rects_expected.json"
+  },
+  {
+    "name": "release_compound_shape_inside_a_group_stays_in_the_group",
+    "setup_svg": "group_with_compound.svg",
+    "selection": [
+      [
+        0,
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "release_compound_shape",
+        "params": {}
+      }
+    ],
+    "expected_json": "release_compound_shape_inside_a_group_expected.json"
+  },
+  {
+    "name": "release_compound_shape_reaches_a_compound_inside_a_selected_group",
+    "setup_svg": "group_with_compound.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "release_compound_shape",
+        "params": {}
+      }
+    ],
+    "expected_json": "release_compound_shape_through_a_group_expected.json"
+  },
+  {
+    "name": "expand_compound_shape_bakes_a_made_union_in_its_paint",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "make_compound_shape",
+        "params": {}
+      },
+      {
+        "action": "expand_compound_shape",
+        "params": {}
+      }
+    ],
+    "expected_json": "expand_compound_shape_after_make_expected.json"
+  },
+  {
+    "name": "repeat_boolean_operation_unions_again_after_select_all",
+    "setup_svg": "three_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "boolean_union",
+        "params": {}
+      },
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "repeat_boolean_operation",
+        "params": {}
+      }
+    ],
+    "expected_json": "repeat_boolean_operation_three_rects_expected.json"
+  },
+  {
+    "name": "collect_in_new_layer_moves_the_panel_selection_up",
+    "setup_svg": "multi_layer.svg",
+    "layers_panel_selection": [
+      [
+        1,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "collect_in_new_layer",
+        "params": {}
+      }
+    ],
+    "expected_json": "collect_in_new_layer_multi_layer_expected.json"
+  },
+  {
+    "name": "flatten_artwork_dissolves_the_selected_group",
+    "setup_svg": "group_nested.svg",
+    "layers_panel_selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "flatten_artwork",
+        "params": {}
+      }
+    ],
+    "expected_json": "flatten_artwork_group_nested_expected.json"
+  }
+]
