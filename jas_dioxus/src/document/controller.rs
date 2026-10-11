@@ -2008,18 +2008,34 @@ impl Controller {
         if doc.selection.is_empty() {
             return;
         }
+        // Every compound shape the selection holds, THROUGH groups and layers
+        // (never into a compound): a group selected around a compound releases
+        // it, as its sole member would (the group-equals-member relation fired
+        // here; boolean ops already admit a group as an operand). Deduplicated,
+        // so a group and its own compound selected together release it once.
+        fn compounds(elem: &Element, path: &ElementPath, out: &mut Vec<ElementPath>) {
+            match elem {
+                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(_)) => out.push(path.clone()),
+                Element::Group(g) => for (i, c) in g.children.iter().enumerate() {
+                    let mut p = path.clone(); p.push(i); compounds(c, &p, out);
+                },
+                Element::Layer(l) => for (i, c) in l.children.iter().enumerate() {
+                    let mut p = path.clone(); p.push(i); compounds(c, &p, out);
+                },
+                _ => {}
+            }
+        }
         let mut cs_paths: Vec<ElementPath> = Vec::new();
         for es in &doc.selection {
-            if let Some(elem) = doc.get_element(&es.path)
-                && matches!(elem, Element::Live(_))
-            {
-                cs_paths.push(es.path.clone());
+            if let Some(elem) = doc.get_element(&es.path) {
+                compounds(elem, &es.path, &mut cs_paths);
             }
         }
         if cs_paths.is_empty() {
             return;
         }
         cs_paths.sort();
+        cs_paths.dedup();
 
         let orig_doc = doc.clone();
         let mut new_doc = doc.clone();
@@ -2036,47 +2052,45 @@ impl Controller {
                 _ => continue,
             };
             new_doc = new_doc.delete_element(cs_path);
+            // Into the compound's OWN parent, at its position, at any depth. This
+            // used to insert into `layers[path[0]]` at `path[1]`, so a compound
+            // inside a group spilled its operands into the LAYER, out of the
+            // group (`compound_layer_actions.json`, 2026-10-11).
             if cs_path.len() >= 2 {
-                let layer_idx = cs_path[0];
-                let child_idx = cs_path[1];
-                if let Some(layer_children) = new_doc.layers[layer_idx].children_mut() {
-                    for (j, op) in operands.iter().enumerate() {
-                        let insert_idx = child_idx + j;
-                        if insert_idx <= layer_children.len() {
-                            layer_children.insert(insert_idx, op.clone());
-                        } else {
-                            layer_children.push(op.clone());
-                        }
-                    }
+                let (last, parent) = cs_path.split_last().unwrap();
+                for (j, op) in operands.iter().enumerate() {
+                    let mut at = parent.to_vec();
+                    at.push(last + j);
+                    new_doc = new_doc.insert_element_at(&at, (**op).clone());
                 }
             }
         }
 
-        // Build selection of released operands.
+        // Build selection of released operands. Each earlier released compound
+        // IN THE SAME PARENT shifted this one right by (its operand count - 1);
+        // one in another parent did not (the old running offset counted every
+        // compound, as if all shared one layer).
+        let operand_count = |p: &ElementPath| match orig_doc.get_element(p) {
+            Some(Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs))) => Some(cs.operands.len()),
+            _ => None,
+        };
         let mut new_selection = Vec::new();
-        let mut offset: i64 = 0;
-        for cs_path in &cs_paths {
-            let orig_elem = match orig_doc.get_element(cs_path) {
-                Some(e) => e,
-                None => continue,
-            };
-            let n = match orig_elem {
-                Element::Live(crate::geometry::live::LiveVariant::CompoundShape(cs)) => {
-                    cs.operands.len()
-                }
-                _ => continue,
-            };
-            if cs_path.len() >= 2 {
-                let layer_idx = cs_path[0];
-                let child_idx = (cs_path[1] as i64 + offset) as usize;
-                for j in 0..n {
-                    let path = vec![layer_idx, child_idx + j];
-                    if new_doc.get_element(&path).is_some() {
-                        new_selection.push(ElementSelection::all(path));
-                    }
+        for (k, cs_path) in cs_paths.iter().enumerate() {
+            let Some(n) = operand_count(cs_path) else { continue };
+            let Some((last, parent)) = cs_path.split_last() else { continue };
+            if parent.is_empty() { continue; }
+            let offset: i64 = cs_paths[..k].iter()
+                .filter(|p| p.len() == cs_path.len() && p[..p.len() - 1] == *parent)
+                .filter_map(|p| operand_count(p).map(|m| m as i64 - 1))
+                .sum();
+            let first = (*last as i64 + offset) as usize;
+            for j in 0..n {
+                let mut path = parent.to_vec();
+                path.push(first + j);
+                if new_doc.get_element(&path).is_some() {
+                    new_selection.push(ElementSelection::all(path));
                 }
             }
-            offset += n as i64 - 1;
         }
         new_doc.selection = new_selection;
         model.edit_document(new_doc);

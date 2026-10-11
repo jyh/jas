@@ -246,7 +246,7 @@ if (-not $NoRebuild -and -not $DryRun) {
     Write-Host "== rebuilding the cdylib on the native lane (see the header) ==" -ForegroundColor Cyan
     Push-Location (Join-Path $repo 'jas_dioxus')
     try {
-        & cargo build --no-default-features --features d2d,ffi --lib
+        & cargo @SbCdylibLane
         if ($LASTEXITCODE -ne 0) {
             Write-Host "REFUSED: the cdylib did not build. Nothing below would mean anything." -ForegroundColor Red
             exit 5

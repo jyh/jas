@@ -1127,6 +1127,35 @@ $q6Grow = @(New-SbQ6Fixture) + @(
     (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=2 cause=click missed=0 rebuilt=true controls=23 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'))
 Test-Case 'Q6.3: a rebuild that GROWS the plan, drawn whole, PASSES' `
     { Format-SbQ6 (Get-SbPaneVerdicts $q6Grow 'app' 'align_left_button') } $q6AllPass
+# ---- Q6.3 BESIDE THE TOOLBAR (step 3's gate, 2026-10-11): under SB_TOOLBAR
+# the toolbar is a second pane writing its own PANEL BUILT / PANEL DRAWN rows
+# into the same log. Live, `-Scenes mw` with SB_TOOLBAR=1 read the Magic Wand
+# draws (13 controls) against the TOOLBAR's build (22 leaves) and FAILED Q6.3
+# on a healthy pane. Q6.3 judges the pane its PANEL OPEN names, and only that
+# one. The rows are that run's, verbatim and in its order. (The Align fixture
+# cannot show this: Align has 22 leaves, the same count as the toolbar.)
+$mwOpen = 'PANEL OPEN panel=magic_wand_panel_content via=app avail-w=228 leaves=13 chrome=0 containers=0 unjoined=0 withheld=0 icons=0 icons-missing=0 height=164 crossings=2 bytes=2778 plan-bytes=2778 seq=1 ui-tid=2 render-tid=4 paint-tid=4 present-tid=4 render-has-dispatcher=false'
+$mwBuilt = 'PANEL BUILT panel=magic_wand_panel_content build=1 leaves=13 texts=4 buttons=0 inputs=4 toggles=5 glyphs=0 swatches=0 spacers=0 previews=0 preview-empty=0 unmaterialized=0 unaddressable=0 icon-loads=0 icon-text=0 options-refused=0 menus=0 items-refused=0'
+$tbBuilt = 'PANEL BUILT panel=toolbar_pane build=1 leaves=22 texts=0 buttons=18 inputs=0 toggles=0 glyphs=0 swatches=2 spacers=2 previews=0 preview-empty=0 unmaterialized=0 unaddressable=0 icon-loads=18 icon-text=0 options-refused=0 menus=0 items-refused=0'
+function New-SbMwDraw([int]$Seq, [string]$Cause, [int]$Controls = 13) {
+    "PANEL DRAWN panel=magic_wand_panel_content seq=$Seq cause=$Cause missed=0 rebuilt=false controls=$Controls disabled=0 checked=4 hidden=0 editing=0 pane-dips=237x913 canvas-dips=1587x913"
+}
+function New-SbTbDraw([int]$Seq, [string]$Cause) {
+    "PANEL DRAWN panel=toolbar_pane seq=$Seq cause=$Cause missed=0 rebuilt=false controls=22 disabled=1 checked=1 hidden=0 editing=0 pane-dips=81x913 canvas-dips=1587x913"
+}
+function Get-SbQ63([string[]]$Statuses) {
+    $rows = @($Statuses | ForEach-Object { New-SbQ6Row $_ })
+    $v = @(Get-SbPaneVerdicts $rows 'app' '' | Where-Object { $_.Name -like 'Q6.3*' })[0]
+    return $v.Verdict
+}
+Test-Case 'Q6.3: the live mw-beside-the-toolbar order PASSES -- the toolbar''s build is not the pane''s' `
+    { Get-SbQ63 @($mwOpen, $mwBuilt, (New-SbMwDraw 1 'open'), $tbBuilt, (New-SbTbDraw 1 'open'), (New-SbMwDraw 3 'commit'), (New-SbTbDraw 2 'commit'), (New-SbMwDraw 4 'click')) } 'PASS'
+Test-Case 'Q6.3: the toolbar built FIRST is not build 1 of the pane -- PASSES' `
+    { Get-SbQ63 @($mwOpen, $tbBuilt, (New-SbTbDraw 1 'open'), $mwBuilt, (New-SbMwDraw 1 'open')) } 'PASS'
+Test-Case 'Q6.3: CONTROL -- a pane draw one control short still FAILS beside the toolbar' `
+    { Get-SbQ63 @($mwOpen, $mwBuilt, (New-SbMwDraw 1 'open'), $tbBuilt, (New-SbTbDraw 1 'open'), (New-SbMwDraw 3 'commit' 12)) } 'FAIL'
+Test-Case 'Q6.3: CONTROL -- the same rows with NO toolbar PASS (the fixture is healthy alone)' `
+    { Get-SbQ63 @($mwOpen, $mwBuilt, (New-SbMwDraw 1 'open'), (New-SbMwDraw 3 'commit'), (New-SbMwDraw 4 'click')) } 'PASS'
 $q6GrowShort = @(New-SbQ6Fixture) + @(
     (New-SbQ6Row 'PANEL BUILT panel=align_panel_content build=2 leaves=23 texts=4 buttons=18 inputs=1 unmaterialized=0 unaddressable=0 icon-loads=17 icon-text=0'),
     (New-SbQ6Row 'PANEL DRAWN panel=align_panel_content seq=2 cause=click missed=0 rebuilt=true controls=22 disabled=15 checked=1 hidden=0 pane-dips=236x1350 canvas-dips=1668x900'))
@@ -2066,6 +2095,22 @@ Test-Case 'px: the live 10-11 desktop (black background, white canvas) is real' 
 Test-Case 'px: the live 10-11 docked desktop is real' { Test-SbDesktopPixels 155.7 70 } 'ok'
 Test-Case 'px: the 10-10 wallpaper desktop is real' { Test-SbDesktopPixels 142.5 10494 } 'ok'
 Test-Case 'px: CONTROL -- the old floor of 100 colours FAILED the live 10-11 desktop' { if (71 -gt 100) { 'ok' } else { 'FAIL' } } 'FAIL'
+
+# ---------------------------------------------------------------------------
+# The cdylib lane is ONE constant: sitting.ps1 and prove_e2e.ps1 both build it,
+# and the last lane to touch target/ decides what the shell loads (#335).
+# ---------------------------------------------------------------------------
+$SbLaneLiteral = '--features d2d,ffi --lib'
+function Get-SbLaneHardcoders {
+  @(Get-ChildItem -Path $PSScriptRoot -Filter '*.ps1' | Where-Object { $_.Name -ne 'harness_selftest.ps1' } |
+    Where-Object { (Get-Content $_.FullName -Raw).Contains($SbLaneLiteral) } | ForEach-Object { $_.Name })
+}
+Test-Case 'lane: the cdylib lane is the d2d+ffi library' { $SbCdylibLane -join ' ' } 'build --no-default-features --features d2d,ffi --lib'
+Test-Case 'lane: no script spells the lane out instead of reading $SbCdylibLane' { (Get-SbLaneHardcoders) -join ',' } ''
+Test-Case 'lane: CONTROL -- the census literal matches the old spelled-out line' { 'cargo build --no-default-features --features d2d,ffi --lib'.Contains($SbLaneLiteral) } $true
+$SbLogProbe = Join-Path ([IO.Path]::GetTempPath()) ('sb-lane-' + [guid]::NewGuid().ToString('N'))
+Test-Case 'lane: the build log names a file in a directory that now exists (fresh clone)' { $l = New-SbBuildLog $SbLogProbe 'b.txt'; "$((Split-Path $l -Leaf)) $(Test-Path (Split-Path $l -Parent))" } 'b.txt True'
+Remove-Item $SbLogProbe -Recurse -Force -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
 Write-Host ""

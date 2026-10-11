@@ -388,11 +388,13 @@ public enum LayersPanel {
                 }
             }
             if normalized.isEmpty { return nil }
-            // Top-level only (Swift's top level is [Layer]).
-            let topLevelIndices = normalized.compactMap { p -> Int? in
-                p.count == 1 ? p[0] : nil
-            }
-            if topLevelIndices.count != normalized.count { return nil }
+            // ANY depth, as the reference (`effects.py` doc.wrap_in_layer) and
+            // Rust take it: Collect in New Layer moves "all panel-selected
+            // items", and a panel row is as often an element as a layer. This
+            // handler used to refuse unless every path was a top-level layer, so
+            // collecting an element was a silent no-op (2026-10-11,
+            // `compound_layer_actions.json`). `applyWrapInLayer` already
+            // collected any depth.
             // Resolve the name FIRST (against the live doc) and journal the LITERAL.
             let nameExpr = (spec["name"] as? String) ?? "'Layer'"
             let nameVal = evaluate(nameExpr, context: callCtx)

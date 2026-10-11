@@ -1973,10 +1973,17 @@ function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth, [string]$Dock
             $out.Add((New-SbVerdict $n.Cross 'NOT RUN' "crossings=$($cx): the shell could not read the core's counters, so there is no count to compare" $open))
         }
 
-        $built = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL BUILT' ' panel='))
-        $drawn = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL DRAWN' ' panel='))
+        # ⛔ ONLY THE PANE THE OPEN NAMES. Under SB_TOOLBAR the toolbar is a
+        # second pane writing its own PANEL BUILT / PANEL DRAWN rows to the same
+        # log; read unscoped, the toolbar's build (22 leaves) became the "build"
+        # a Magic Wand draw (13) was judged by, and a healthy pane FAILED
+        # (2026-10-11, step 3's gate). A draw that THREW names no panel, so it
+        # stays log-wide: a throw in any pane is still this clause's FAIL.
+        $own = ' panel=' + [regex]::Escape((Get-SbField $open 'panel')) + '(?:\s|$)'
+        $built = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL BUILT' $own))
+        $drawn = @(Select-SbRows $Rows (Get-SbRowPattern 'PANEL DRAWN' $own))
         $drawFail = Select-SbRow $Rows 'RUSTFAIL PANEL DRAW '
-        $icons = Select-SbRow $Rows (Get-SbRowPattern 'PANEL ICONS' ' panel=')
+        $icons = Select-SbRow $Rows (Get-SbRowPattern 'PANEL ICONS' $own)
         $iconText = 'no PANEL ICONS row'
         if ($null -ne $icons) {
             $iconText = "icons svg=$(Get-SbField $icons 'svg') text=$(Get-SbField $icons 'text') failed=$(Get-SbField $icons 'failed') icon=$(Get-SbField $icons 'icon')"
@@ -2000,10 +2007,10 @@ function Get-SbPaneVerdicts($Rows, [string]$Scene, [string]$Synth, [string]$Dock
             $bad = New-Object System.Collections.Generic.List[string]
             if ($firstBuild -ne [string]$leaves) { $bad.Add("build 1 placed $firstBuild of the open's $leaves") }
             $current = $null
-            $paneRows = @(Select-SbRows $Rows ('(?:' + (Get-SbRowPattern 'PANEL BUILT' ' panel=') + ')|(?:' +
-                                               (Get-SbRowPattern 'PANEL DRAWN' ' panel=') + ')'))
+            $paneRows = @(Select-SbRows $Rows ('(?:' + (Get-SbRowPattern 'PANEL BUILT' $own) + ')|(?:' +
+                                               (Get-SbRowPattern 'PANEL DRAWN' $own) + ')'))
             foreach ($r in $paneRows) {
-                if ($r -match (Get-SbRowPattern 'PANEL BUILT' ' panel=')) {
+                if ($r -match (Get-SbRowPattern 'PANEL BUILT' $own)) {
                     $current = Get-SbField $r 'leaves'
                 } elseif ($null -eq $current) {
                     $bad.Add("draw seq=$(Get-SbField $r 'seq') came before any build")
@@ -2842,4 +2849,20 @@ function Compare-SbReadBack([string]$Got, [string]$Want) {
     $g = $Got.Substring($i, [math]::Min(24, $Got.Length - $i))
     $w = $Want.Substring($i, [math]::Min(24, $Want.Length - $i))
     return "FAIL(at byte $i of got=$($Got.Length) want=$($Want.Length): got `"$g`" want `"$w`")"
+}
+
+# ---------------------------------------------------------------------------
+# The cdylib lane: the ONE cargo invocation that builds the jas_dioxus.dll the
+# shell loads. sitting.ps1 and prove_e2e.ps1 both read it, because the last lane
+# to touch target/ decides what the shell loads, and a second spelling that
+# drifts builds a dll neither certificate names (#335).
+# ---------------------------------------------------------------------------
+$SbCdylibLane = @('build', '--no-default-features', '--features', 'd2d,ffi', '--lib')
+
+# The path of a build log in $Dir, creating $Dir first: on a fresh clone the
+# shell's output directory does not exist until dotnet builds it, and cmd's
+# redirect into a missing directory fails before cargo runs.
+function New-SbBuildLog([string]$Dir, [string]$Name) {
+  New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+  Join-Path $Dir $Name
 }

@@ -99,9 +99,9 @@ function Out-Line([string]$s) { Write-Host $s }
 # a dock run died on `jas_dock_layout`. The native lane is sitting.ps1's (see
 # its header: the last lane to touch target/ decides what the shell loads).
 # Through cmd so a build's stderr is a log line, never a PowerShell error.
-$buildLog = Join-Path $exeDir 'sb-e2e-build.txt'
+$buildLog = New-SbBuildLog $exeDir 'sb-e2e-build.txt'
 $sdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet\dotnet.exe'
-& cmd /c "cd /d `"$(Join-Path $repo 'jas_dioxus')`" && cargo build --no-default-features --features d2d,ffi --lib > `"$buildLog`" 2>&1"
+& cmd /c "cd /d `"$(Join-Path $repo 'jas_dioxus')`" && cargo $($SbCdylibLane -join ' ') > `"$buildLog`" 2>&1"
 if ($LASTEXITCODE -ne 0) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the cdylib did not build (cargo exit $LASTEXITCODE; see $buildLog)"; exit 2 }
 & cmd /c "`"$sdk`" build `"$(Join-Path $PSScriptRoot 'SbWinUi.csproj')`" -nologo >> `"$buildLog`" 2>&1"
 if ($LASTEXITCODE -ne 0) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the shell did not build (dotnet exit $LASTEXITCODE; see $buildLog)"; exit 2 }
