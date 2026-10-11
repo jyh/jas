@@ -1896,6 +1896,60 @@ mod tests {
         }
     }
 
+    /// THE INPUT SCRIPTS (docs/TESTING.md section 6): one per spec item, shared
+    /// by level 1 (each port's core, here) and level 2 (each live app). Level 1
+    /// supplies the EXPECTED read-back. A script is a gesture case with `steps`:
+    /// its pointer steps are the gesture events; any other step this runner
+    /// cannot replay yet is REFUSED by name, never skipped; and the script must
+    /// end on `{"read": "document"}`, or it asserts nothing.
+    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json"];
+
+    #[cfg(feature = "web")]
+    fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
+        let item = script["item"].as_str().expect("a script names its spec item");
+        let steps = script["steps"].as_array().expect("a script has steps");
+        assert_eq!(steps.last(), Some(&serde_json::json!({"read": "document"})),
+                   "script {item}: must end on a document read");
+        let mut events = vec![];
+        for (i, st) in steps[..steps.len() - 1].iter().enumerate() {
+            match st.get("kind").and_then(|k| k.as_str()) {
+                Some("press" | "move" | "release") => events.push(st.clone()),
+                _ => panic!("script {item}: step {i} {st} is not replayable at level 1 yet (pointer steps only)"),
+            }
+        }
+        serde_json::json!({
+            "name": item, "setup_svg": script["setup_svg"], "tool": script["tool"],
+            "app_state": script.get("app_state").cloned().unwrap_or(serde_json::json!({})),
+            "events": events,
+        })
+    }
+
+    #[cfg(feature = "web")]
+    #[test]
+    fn script_corpus() {
+        assert!(!SCRIPT_FIXTURES.is_empty());
+        for f in SCRIPT_FIXTURES {
+            let script: serde_json::Value =
+                serde_json::from_str(&read_fixture(&format!("input_scripts/{f}"))).unwrap();
+            let expected = read_fixture(&format!("input_scripts/{}", script["expected_json"].as_str().unwrap()));
+            let actual = run_gesture_test(&script_as_gesture_case(&script));
+            assert_eq!(actual, expected.trim(), "script {f}: the level-1 read-back moved");
+        }
+    }
+
+    #[cfg(feature = "web")]
+    /// Bootstrap: cargo test generate_script_expected -- --ignored
+    #[test]
+    #[ignore]
+    fn generate_script_expected() {
+        for f in SCRIPT_FIXTURES {
+            let script: serde_json::Value =
+                serde_json::from_str(&read_fixture(&format!("input_scripts/{f}"))).unwrap();
+            let path = format!("{}/input_scripts/{}", FIXTURES, script["expected_json"].as_str().unwrap());
+            std::fs::write(&path, run_gesture_test(&script_as_gesture_case(&script))).unwrap();
+        }
+    }
+
     #[cfg(feature = "web")]
     /// Bootstrap helper: generate expected JSON for gesture tests.
     /// Run with: cargo test generate_gesture_expected -- --ignored --nocapture
