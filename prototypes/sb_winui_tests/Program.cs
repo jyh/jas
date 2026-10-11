@@ -692,6 +692,24 @@ static class Program
         Check("W-b: a changed label changes the signature",
             relabeled is not null && op is not null && relabeled.Signature != op.Signature, "a relabel would not rebuild");
 
+        // -- A POINTER POSITION IS FLOAT32 NOISE AROUND A WHOLE PIXEL (2026-10-11) --
+        // WinRT's `Point` is two floats. With the canvas at a layout-rounded
+        // physical origin that is not a whole DIP (122 px = 81.333... DIPs, the
+        // toolbar column), `GetCurrentPoint(Canvas)` subtracts two inexact
+        // floats, and a mouse on a whole pixel came back a hair off it: the E2E
+        // drag landed x1=5.999992 for the spec's 6.0. The mechanism, rebuilt
+        // on that drag's own release (canvas x 108 px, origin 122 px):
+        float winDip = 230f / 1.5f, originDip = 122f / 1.5f;
+        double raw = (double)(winDip - originDip) * 1.5;
+        Check("snap: CONTROL -- the float32 route really is off the whole pixel", raw != 108.0, $"raw={raw:R}");
+        Eq("snap: ...and the snap returns the whole pixel", "108", PointerWire.Snap(raw).ToString("R"));
+        Eq("snap: just above a whole pixel snaps down", "54", PointerWire.Snap(54.00001).ToString("R"));
+        Eq("snap: just below a whole pixel snaps up", "54", PointerWire.Snap(53.99999).ToString("R"));
+        Eq("snap: a half pixel is a real position, kept", "54.5", PointerWire.Snap(54.5).ToString("R"));
+        Eq("snap: a pen's sub-pixel position is kept", "54.25", PointerWire.Snap(54.25).ToString("R"));
+        Eq("snap: just outside the window is kept", "54.002", PointerWire.Snap(54.002).ToString("R"));
+        Eq("snap: a negative position (a drag off the canvas) snaps too", "-3", PointerWire.Snap(-3.000004).ToString("R"));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

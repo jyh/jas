@@ -825,8 +825,10 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private (double X, double Y) Physical(PointerRoutedEventArgs e)
     {
+        // `PointerWire.Snap`: WinRT's Point is float32, and a whole pixel must
+        // reach the core as one (the noise moved an E2E drag off the spec).
         var p = e.GetCurrentPoint(this.Canvas).Position;
-        return (p.X * this.Canvas.CompositionScaleX, p.Y * this.Canvas.CompositionScaleY);
+        return (PointerWire.Snap(p.X * this.Canvas.CompositionScaleX), PointerWire.Snap(p.Y * this.Canvas.CompositionScaleY));
     }
 
     /// <summary>
