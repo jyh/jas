@@ -433,6 +433,14 @@ jobs:
           MB="$(git merge-base origin/main HEAD)" || exit 1
           if [ "$MB" != "$(git rev-parse HEAD)" ]; then RANGE="$MB..HEAD"; else RANGE="$(sh scripts/pick_scan_range.sh)" || exit 1; fi
           python scripts/check_baseline_spec_change.py --range "$RANGE"
+      # ffi_paint.rs pins the SVG corpus count, and that test runs ONLY on the
+      # Windows Direct2D lane, so a new SVG fixture used to go red there and
+      # green everywhere its author could run. This reads the pin on every lane.
+      - name: The SVG corpus count pinned for the Windows lane is current
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_svg_corpus_pin.py --self-test
+          python scripts/check_svg_corpus_pin.py
 
   genericity:
     name: Genericity policy
@@ -648,6 +656,12 @@ jobs:
           python scripts/check_commit_trailers.py
           python scripts/check_scrub_trigger.py --self-test
           python scripts/check_scrub_trigger.py
+
+      - name: The SVG corpus count pinned for this lane is current (Windows lane)
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_svg_corpus_pin.py --self-test
+          python scripts/check_svg_corpus_pin.py
 
       # docs/TESTING.md section 2: a frozen baseline changes only with the spec item it renders,
       # or with a `Baseline-Refreeze: <item>: <reason>` trailer. The rule is about a WHOLE PR,
