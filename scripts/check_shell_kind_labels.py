@@ -18,7 +18,7 @@ degenerate controls that make a placeholder dishonest. So this asserts only
 SOUNDNESS -- every label the shell switches on is real -- and never coverage.
 
 ⚠️ WHAT THIS GATE DOES NOT COVER, stated beside its verdict rather than
-inferred: it reads `MainWindow.xaml.cs` as plain `utf-8` (the house
+inferred: it reads `PaneView.cs` as plain `utf-8` (the house
 convention for `.cs`) and that file CARRIES A BOM -- harmless here because
 nothing below depends on byte 0, and driven green against the real file.
 There is no CRLF axis at all: `.gitattributes` sets `* text=auto eol=lf`
@@ -37,7 +37,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SHELL = ROOT / "prototypes" / "sb_winui" / "MainWindow.xaml.cs"
+# The pane builder moved into PaneView.cs (one instance per pane, 2026-10-10).
+SHELL = ROOT / "prototypes" / "sb_winui" / "PaneView.cs"
 SPEC = ROOT / "workspace_interpreter" / "widget_event.py"
 WORKSPACE = ROOT / "workspace" / "workspace.json"
 

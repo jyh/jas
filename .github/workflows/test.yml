@@ -1028,9 +1028,10 @@ jobs:
           python scripts/check_shell_widget_kinds.py --self-test
           python scripts/check_shell_widget_kinds.py
           # Same reason, one file over: `check_shell_kind_labels.py` reads
-          # `MainWindow.xaml.cs`, which SHIPS to Windows. A gate that cannot
+          # `PaneView.cs` (the pane builder, moved out of `MainWindow.xaml.cs`
+          # 2026-10-10), which SHIPS to Windows. A gate that cannot
           # fail on the platform its subject runs on is not watching there.
-          # (Not CRLF -- see above. `MainWindow.xaml.cs` carries a BOM and is
+          # (Not CRLF -- see above. `PaneView.cs` carries a BOM and is
           # read as plain `utf-8`, the house convention for `.cs`; nothing in
           # that gate depends on byte 0, and it is driven green against the
           # real BOM-bearing file.)
