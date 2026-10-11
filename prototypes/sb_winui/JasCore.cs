@@ -491,6 +491,14 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_panel_list();
 
+    /// <summary>
+    /// The dock's tab groups for a named layout (`jas_dock_layout`):
+    /// `{"groups":[{"panels":["<content id>"...],"active"}]}`. Takes no engine,
+    /// like <see cref="jas_panel_list"/>. An empty span is a refusal.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_dock_layout(byte[] name, nuint len);
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>

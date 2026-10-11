@@ -506,6 +506,37 @@ pub fn panel_list(panels: &Value) -> Value {
     )
 }
 
+/// The dock of a named layout (`default_layouts.yaml`): `{"groups":[{"panels":
+/// ["<content id>"...], "active": <index>}...]}` in the layout's order. The
+/// layout names a panel by its short id (`color`); a shell plans it by its
+/// content id (`color_panel_content`), so this answers content ids. `None` --
+/// never a partial or repaired dock -- for a layout the bundle lacks, a group
+/// that is not a non-empty list of names, an `active` that is not an index into
+/// its group, or a docked panel the bundle does not hold.
+pub fn dock_layout(data: &Value, name: &str) -> Option<Value> {
+    let groups = data.get("default_layouts")?.get(name)?.get("dock")?
+        .get("dock_main")?.get("groups")?.as_array()?;
+    let panels = data.get("panels")?;
+    let mut out = vec![];
+    for g in groups {
+        let mut ids = vec![];
+        for short in g.get("panels")?.as_array()? {
+            let id = format!("{}_panel_content", short.as_str()?);
+            panels.get(&id)?;
+            ids.push(Value::String(id));
+        }
+        // Refused, never repaired: an empty group, or an `active` that is not an
+        // index into the group. A shell is then never handed a value to clamp.
+        if ids.is_empty() { return None; }
+        let active = match g.get("active") {
+            None => 0,
+            Some(v) => v.as_i64().filter(|a| (0..ids.len() as i64).contains(a))?,
+        };
+        out.push(json!({"panels": ids, "active": active}));
+    }
+    Some(json!({"groups": out}))
+}
+
 /// The observables' oracles, shared by this module's tests and the ABI tests in
 /// `ffi.rs`. Each returns `Err` naming what it found, so a negative control can
 /// assert WHICH defect was reported, not merely that something was.
@@ -2148,4 +2179,38 @@ mod tests {
         assert_eq!(reached.len(), 2, "vacuous: reached {reached:?}");
     }
 
+}
+
+/// `dock_layout` refuses rather than repairs: an `active` index outside its
+/// group, a group with no panels, or a panel the bundle lacks is `None` -- a
+/// shell then never has a value to clamp into range.
+#[cfg(test)]
+mod dock_layout_tests {
+    use super::dock_layout;
+    use serde_json::json;
+
+    fn bundle(groups: serde_json::Value) -> serde_json::Value {
+        json!({
+            "panels": {"color_panel_content": {}, "align_panel_content": {}},
+            "default_layouts": {"L": {"dock": {"dock_main": {"groups": groups}}}}
+        })
+    }
+
+    #[test]
+    fn a_valid_dock_is_answered_in_content_ids() {
+        let d = dock_layout(&bundle(json!([{"panels": ["color", "align"], "active": 1}])), "L").unwrap();
+        assert_eq!(d, json!({"groups": [{"panels": ["color_panel_content", "align_panel_content"], "active": 1}]}));
+    }
+
+    #[test]
+    fn an_active_index_outside_its_group_is_refused_not_clamped() {
+        assert!(dock_layout(&bundle(json!([{"panels": ["color"], "active": 1}])), "L").is_none());
+        assert!(dock_layout(&bundle(json!([{"panels": ["color"], "active": -1}])), "L").is_none());
+    }
+
+    #[test]
+    fn an_empty_group_and_an_unknown_panel_are_refused() {
+        assert!(dock_layout(&bundle(json!([{"panels": [], "active": 0}])), "L").is_none());
+        assert!(dock_layout(&bundle(json!([{"panels": ["nope"], "active": 0}])), "L").is_none());
+    }
 }
