@@ -1,0 +1,126 @@
+[
+  {
+    "name": "set_active_color_none_clears_the_fill_when_fill_is_on_top",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "set_active_color_none",
+        "params": {}
+      }
+    ],
+    "expected_json": "set_active_color_none_fill_expected.json",
+    "expected_panel_state": {
+      "fill_color": null,
+      "stroke_color": "#000000",
+      "fill_on_top": true
+    }
+  },
+  {
+    "name": "toggle_fill_on_top_then_set_active_color_none_clears_the_stroke",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "toggle_fill_on_top",
+        "params": {}
+      },
+      {
+        "action": "set_active_color_none",
+        "params": {}
+      }
+    ],
+    "expected_json": "set_active_color_none_stroke_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#0000ff",
+      "stroke_color": null,
+      "fill_on_top": false
+    }
+  },
+  {
+    "name": "invert_active_color_inverts_the_fill",
+    "setup_svg": "rect_muted_fill.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "invert_active_color",
+        "params": {}
+      }
+    ],
+    "expected_json": "invert_active_color_fill_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#379bcd",
+      "stroke_color": "#000000"
+    }
+  },
+  {
+    "name": "invert_active_color_inverts_the_stroke_when_stroke_is_on_top",
+    "setup_svg": "rect_muted_fill.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "toggle_fill_on_top",
+        "params": {}
+      },
+      {
+        "action": "invert_active_color",
+        "params": {}
+      }
+    ],
+    "expected_json": "invert_active_color_stroke_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#c86432",
+      "stroke_color": "#ffffff"
+    }
+  },
+  {
+    "name": "complement_active_color_rotates_the_fill_hue_by_180",
+    "setup_svg": "rect_muted_fill.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "complement_active_color",
+        "params": {}
+      }
+    ],
+    "expected_json": "complement_active_color_fill_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#3295c7",
+      "stroke_color": "#000000"
+    }
+  },
+  {
+    "name": "swap_fill_stroke_swaps_the_selections_colors",
+    "setup_svg": "rect_muted_fill.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "swap_fill_stroke",
+        "params": {}
+      }
+    ],
+    "expected_json": "swap_fill_stroke_expected.json",
+    "expected_panel_state": {
+      "fill_color": "#000000",
+      "stroke_color": "#c86432"
+    }
+  }
+]

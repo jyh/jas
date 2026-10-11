@@ -3147,13 +3147,30 @@ fn run_yaml_effect(
         return deferred;
     }
 
+    // An effect's `state.<key>` is the SELECTION-AWARE value the action ctx
+    // carries (`build_appstate_ctx`), exactly what a `set` expression reads;
+    // the app-state field is the fallback for a ctx without the key.
+    let read_state = |key: &str, st: &crate::workspace::app_state::AppState| {
+        eval_ctx.get("state").and_then(|s| s.get(key)).cloned()
+            .unwrap_or_else(|| get_app_state_field(key, st))
+    };
+
+    // toggle: key -- flip a boolean app-state field (`{{...}}` interpolated,
+    // as the reference does).
+    if let Some(key) = eff.get("toggle").and_then(|v| v.as_str()) {
+        let key = if key.contains("{{") { super::expr::eval_text(key, eval_ctx) } else { key.to_string() };
+        let cur = read_state(&key, st).as_bool().unwrap_or(false);
+        set_app_state_field(&key, &serde_json::Value::Bool(!cur), st);
+        return deferred;
+    }
+
     // swap: [key_a, key_b]
     if let Some(serde_json::Value::Array(keys)) = eff.get("swap") {
         if keys.len() == 2 {
             let a = keys[0].as_str().unwrap_or("").to_string();
             let b = keys[1].as_str().unwrap_or("").to_string();
-            let a_val = get_app_state_field(&a, st);
-            let b_val = get_app_state_field(&b, st);
+            let a_val = read_state(&a, st);
+            let b_val = read_state(&b, st);
             set_app_state_field(&a, &b_val, st);
             set_app_state_field(&b, &a_val, st);
         }
@@ -10604,6 +10621,37 @@ mod tests {
         let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
         assert_eq!(fill_hex, Some("#0000ff".to_string()));
         assert!(st.app_default_stroke.is_none());
+    }
+
+    /// `swap` reads the SELECTION-AWARE `state.*` the action ctx carries,
+    /// exactly as a `set` expression does (the ruling quoted at
+    /// `build_appstate_ctx`). It used to read the app defaults alone, so with a
+    /// blue-filled rect selected Swap gave black fill and WHITE stroke (the
+    /// default fill), while Invert on the same selection read the blue.
+    #[test]
+    fn swap_reads_the_selection_aware_state_in_the_ctx() {
+        let mut st = make_state_with_colors("ffffff", "000000");
+        let effects = vec![serde_json::json!({"swap": ["fill_color", "stroke_color"]})];
+        let ctx = serde_json::json!({"state": {"fill_color": "#0000ff", "stroke_color": "#000000"}});
+        run_yaml_effects(&effects, &ctx, &mut st);
+        let fill_hex = st.app_default_fill.map(|f| format!("#{}", f.color.to_hex()));
+        let stroke_hex = st.app_default_stroke.map(|s| format!("#{}", s.color.to_hex()));
+        assert_eq!(fill_hex, Some("#000000".to_string()));
+        assert_eq!(stroke_hex, Some("#0000ff".to_string()), "the stroke takes the selection's fill");
+    }
+
+    /// `toggle: <key>` flips a boolean app-state field. This runner had no
+    /// `toggle` arm, so `toggle_fill_on_top` (`actions.yaml`) was a silent
+    /// no-op on every dispatch_action route.
+    #[test]
+    fn toggle_flips_fill_on_top_both_ways() {
+        let mut st = AppState::new();
+        assert!(st.fill_on_top);
+        let effects = vec![serde_json::json!({"toggle": "fill_on_top"})];
+        run_yaml_effects(&effects, &serde_json::json!({}), &mut st);
+        assert!(!st.fill_on_top, "true -> false");
+        run_yaml_effects(&effects, &serde_json::json!({}), &mut st);
+        assert!(st.fill_on_top, "false -> true");
     }
 
     // ── Stroke panel: Dashed-Line checkbox toggles both ways ──────────
