@@ -1826,6 +1826,86 @@ Test-Case 'o6: CONTROL -- the HAND CLOSED fixture is matched by the pointer tabl
 } 'True'
 
 # ---------------------------------------------------------------------------
+# #323's open half: the RENDERED tree's STATE against the plan's, one reading
+# each, the same selection. `Compare-SbRenderedTree` reads the core's plan bytes
+# (SB_PLAN_OUT) and uia_tree.ps1's dump; it owns the RULE, the shell owns
+# nothing here. Visible => the id is on the tree; hidden => absent or offscreen
+# (WinUI drops a Collapsed control from UIA); enabled is `bind.disabled` !=
+# "true", the only true. An id on only one side is named, never skipped.
+# ---------------------------------------------------------------------------
+function New-SbPlanLeaf([string]$Id, [hashtable]$Values) {
+    [ordered]@{ path = @(0); type = 'button'; id = $Id; values = $Values }
+}
+$rtPlan = Get-SbFixture { [ordered]@{ leaves = @(
+    (New-SbPlanLeaf 'a' @{ 'bind.disabled' = 'false' }),
+    (New-SbPlanLeaf 'b' @{ 'bind.disabled' = 'true' }),
+    (New-SbPlanLeaf 'c' @{ 'bind.visible' = 'false' }),
+    (New-SbPlanLeaf ''  @{})
+) } | ConvertTo-Json -Depth 6 }
+function New-SbUiaDump($Rows) {
+    [ordered]@{ pid = 1; session = 1; error = $null; count = @($Rows).Count; rows = @($Rows) } |
+        ConvertTo-Json -Depth 4
+}
+function New-SbUiaRow([string]$Id, [bool]$Enabled, [bool]$Offscreen) {
+    [ordered]@{ id = $Id; type = 'Button'; enabled = $Enabled; offscreen = $Offscreen; name = '' }
+}
+$rtAgree = Get-SbFixture { New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false)) }
+
+Test-Case 'rt: a tree that agrees with its plan has no mismatch, and counts what it compared' {
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $rtAgree).Verdict
+} 'compared=3 mismatches=0'
+Test-Case 'rt: a hidden leaf read OFFSCREEN still agrees' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $true))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Verdict
+} 'compared=3 mismatches=0'
+Test-Case 'rt: a control enabled against a disabled plan is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'b enabled: plan=false rendered=true'
+Test-Case 'rt: a hidden leaf that is ON SCREEN is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'c' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'c visible: plan=false rendered=true'
+Test-Case 'rt: a visible leaf missing from the tree is named' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'b' $false $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'a visible: plan=true rendered=ABSENT'
+Test-Case 'rt: an id the plan does not hold is named, not skipped' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false), (New-SbUiaRow 'zz' $true $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'zz extra: plan=ABSENT rendered=present'
+Test-Case 'rt: a reader that FAILED is a refusal, never a vacuous agreement' {
+    $u = [ordered]@{ pid = 1; session = 0; error = 'no top-level UIA element'; count = 0; rows = @() } | ConvertTo-Json
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Verdict
+} 'REFUSED: uia error: no top-level UIA element'
+Test-Case 'rt: an EMPTY plan is a refusal, never compared=0 mismatches=0' {
+    (Compare-SbRenderedTree -Plan '{"leaves":[]}' -Uia $rtAgree).Verdict
+} 'REFUSED: the plan has no addressable leaf'
+Test-Case 'rt: an id rendered more often than the plan holds it is named ONCE, with both counts' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'a' $true $false), (New-SbUiaRow 'b' $false $false))
+    (Compare-SbRenderedTree -Plan $rtPlan -Uia $u).Mismatches -join ';'
+} 'a count: plan=1 rendered=2'
+# Measured on Windows, concepts_panel_content: the plan itself repeats
+# `concept_name` four times (a repeater's rows), and the tree holds four. The
+# first form of this rule named each as a duplicate -- four false mismatches.
+$rtRepeat = Get-SbFixture { [ordered]@{ leaves = @(
+    (New-SbPlanLeaf 'r' @{ 'bind.disabled' = 'false' }),
+    (New-SbPlanLeaf 'r' @{ 'bind.disabled' = 'true' })
+) } | ConvertTo-Json -Depth 6 }
+Test-Case 'rt: an id the PLAN repeats agrees when the tree repeats it as often' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $true $false), (New-SbUiaRow 'r' $false $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Verdict
+} 'compared=2 mismatches=0'
+Test-Case 'rt: a repeated id is paired IN ORDER, so a swapped state is named by its index' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $false $false), (New-SbUiaRow 'r' $true $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Mismatches -join ';'
+} 'r[0] enabled: plan=true rendered=false;r[1] enabled: plan=false rendered=true'
+Test-Case 'rt: a repeated id rendered fewer times than planned is named once' {
+    $u = New-SbUiaDump @((New-SbUiaRow 'r' $true $false))
+    (Compare-SbRenderedTree -Plan $rtRepeat -Uia $u).Mismatches -join ';'
+} 'r count: plan=2 rendered=1'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""

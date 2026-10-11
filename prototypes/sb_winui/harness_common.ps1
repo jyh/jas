@@ -2589,3 +2589,85 @@ function Add-SbValueReplayVerdicts($Out, $Rows, [string]$Commit, [string]$Press,
     # ---- V6 ------------------------------------------------------------------
     $Out.Add((New-SbVerdict $n.Done 'PASS' "one done row for commit=$doneCommit press=$donePress panel=$donePanel; $values, every reading a value" $done))
 }
+
+# ---------------------------------------------------------------------------
+# #323's open half: the RENDERED tree's STATE against the plan's, read from
+# the SAME selection. -Plan is the core's plan bytes as the shell drew them
+# (SB_PLAN_OUT); -Uia is uia_tree.ps1's dump of the live window. The rule is
+# the shell's own, stated once here so the comparison does not ask the shell:
+#
+#   visible  = (bind.visible ?? visible) != "false"   -> the id is on the tree
+#   hidden                                             -> absent, or offscreen
+#   enabled  = bind.disabled != "true"                 -> UIA IsEnabled
+#
+# A visible leaf may be OFFSCREEN (scrolled out of the pane), so on-screen is
+# not asserted for it. Returns { Compared; Mismatches; Verdict }.
+#
+# ⛔ A FAILED READ OR AN EMPTY PLAN IS A REFUSAL, never `mismatches=0`: an
+# empty side agrees with everything, which is a vacuous green.
+# ---------------------------------------------------------------------------
+function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
+    $refuse = { param($why) [pscustomobject]@{ Compared = 0; Mismatches = @(); Verdict = "REFUSED: $why" } }
+    try { $p = $Plan | ConvertFrom-Json } catch { return (& $refuse 'the plan does not parse') }
+    try { $u = $Uia | ConvertFrom-Json } catch { return (& $refuse 'the uia dump does not parse') }
+    if ($null -ne $u.error -and "$($u.error)" -ne '') { return (& $refuse "uia error: $($u.error)") }
+
+    $leaves = @($p.leaves | Where-Object { $null -ne $_ -and "$($_.id)" -ne '' })
+    if ($leaves.Count -eq 0) { return (& $refuse 'the plan has no addressable leaf') }
+
+    $rendered = @{}
+    foreach ($r in @($u.rows)) {
+        if ($null -eq $r) { continue }
+        if (-not $rendered.ContainsKey($r.id)) { $rendered[$r.id] = New-Object System.Collections.ArrayList }
+        [void]$rendered[$r.id].Add($r)
+    }
+
+    # An id may repeat IN THE PLAN (a repeater's rows: concepts_panel_content
+    # carries `concept_name` four times), so the unit is the id's LIST of
+    # leaves. Equal counts pair in order (plan leaf order == tree order); a
+    # count that differs is named once and not paired, since pairing would guess.
+    $miss = New-Object System.Collections.Generic.List[string]
+    $planIds = [ordered]@{}
+    foreach ($leaf in $leaves) {
+        $id = "$($leaf.id)"
+        if (-not $planIds.Contains($id)) { $planIds[$id] = New-Object System.Collections.ArrayList }
+        [void]$planIds[$id].Add($leaf)
+    }
+    foreach ($id in $planIds.Keys) {
+        $planned = $planIds[$id]
+        $rows = $rendered[$id]
+        $n = if ($null -eq $rows) { 0 } else { $rows.Count }
+        if ($n -gt 0 -and $n -ne $planned.Count) {
+            $miss.Add("$id count: plan=$($planned.Count) rendered=$n")
+            continue
+        }
+        for ($i = 0; $i -lt $planned.Count; $i++) {
+            $v = $planned[$i].values
+            $vis = $v.'bind.visible'
+            if ($null -eq $vis) { $vis = $v.visible }
+            $visible = "$vis" -ne 'false'
+            $enabled = "$($v.'bind.disabled')" -ne 'true'
+            $name = if ($planned.Count -gt 1) { "$id[$i]" } else { $id }
+            if ($n -eq 0) {
+                if ($visible) { $miss.Add("$name visible: plan=true rendered=ABSENT") }
+                continue
+            }
+            $row = $rows[$i]
+            if (-not $visible) {
+                if (-not [bool]$row.offscreen) { $miss.Add("$name visible: plan=false rendered=true") }
+                continue
+            }
+            if ([bool]$row.enabled -ne $enabled) {
+                $miss.Add(("$name enabled: plan={0} rendered={1}" -f "$enabled".ToLower(), "$([bool]$row.enabled)".ToLower()))
+            }
+        }
+    }
+    foreach ($id in ($rendered.Keys | Sort-Object)) {
+        if (-not $planIds.Contains($id)) { $miss.Add("$id extra: plan=ABSENT rendered=present") }
+    }
+    [pscustomobject]@{
+        Compared   = $leaves.Count
+        Mismatches = @($miss)
+        Verdict    = "compared=$($leaves.Count) mismatches=$($miss.Count)"
+    }
+}
