@@ -406,9 +406,11 @@ Test-Case 'CONTROL: RUSTOK loose in the LAST-ROW half does not pass a failed run
 #
 # The fixture is the kenai document's shape: a 72x72 filled rect at the origin
 # (the LARGEST filled shape, so the aim lands at its centre) and, LATER IN
-# DOCUMENT ORDER, a group whose line spans the same region. The app's hit test
-# returns the topmost top-level layer child over the point -- `[0,2]` -- and the
-# after-dump says so in `selection[0].path`.
+# DOCUMENT ORDER, a group whose line spans the same region. Under the retired
+# BOX law the app returned the group `[0,2]` (its box covers the aim); the
+# after-dump below still says so, and the delta cases read it. Since #355 the
+# law is PAINTED GEOMETRY: the line (0,150)-(200,0) passes 69.6 units from
+# (36,36), so the press hits the rect `[0,0]`, and the chooser targets it.
 $beforeJson = @'
 {"layers":[{"type":"layer","id":"L","children":[
   {"type":"rect","id":"big","x":0,"y":0,"width":72,"height":72,"fill":"#ff0000"},
@@ -426,18 +428,22 @@ $afterJson = @'
 '@
 # The same after-dump with the app naming a DIFFERENT element: O1.2c's FAIL arm.
 $afterJsonOther = $afterJson.Replace('"path":[0,2]', '"path":[0,1]')
+# The painted law's answer for the same press: the rect.
+$afterJsonPainted = $afterJson.Replace('"path":[0,2]', '"path":[0,0]')
 
 $beforeDoc = $beforeJson | ConvertFrom-Json
 $afterDoc = $afterJson | ConvertFrom-Json
 $afterDocOther = $afterJsonOther | ConvertFrom-Json
+$afterDocPainted = $afterJsonPainted | ConvertFrom-Json
 $target = Get-SbFixture { Get-SbHitTargetFromDoc $beforeDoc }
 
 Test-Case 'F-B: the chooser AIMS at the largest filled shape' { $target.AimPath } '$.layers[0].children[0]'
 Test-Case 'F-B: the aim point is that shape''s centre' { "$($target.X),$($target.Y)" } '36,36'
-Test-Case 'F-B: but it TARGETS the topmost element over that point, as the app does' { $target.Path } '$.layers[0].children[2]'
+Test-Case 'F-B: and TARGETS the rect itself: nothing later can paint at the aim (#355)' { $target.Path } '$.layers[0].children[0]'
 Test-Case 'F-B: the app''s own answer is read from selection[0].path' { Get-SbSelectionPathFromDoc $afterDoc } '$.layers[0].children[2]'
-Test-Case 'F-B: O1.2c -- the chooser and the app agree' { ((Get-SbSelectionPathFromDoc $afterDoc) -eq $target.Path) } 'True'
+Test-Case 'F-B: O1.2c -- the chooser and the painted-law app agree' { ((Get-SbSelectionPathFromDoc $afterDocPainted) -eq $target.Path) } 'True'
 Test-Case 'F-B: O1.2c REPORTS a mismatch instead of charging it to the app' { ((Get-SbSelectionPathFromDoc $afterDocOther) -eq $target.Path) } 'False'
+Test-Case 'F-B: ...and the RETIRED box-law answer is a mismatch too' { ((Get-SbSelectionPathFromDoc $afterDoc) -eq $target.Path) } 'False'
 
 # ⛔ THE TWO READINGS SIDE BY SIDE, WHICH IS THE WHOLE DEFECT. Read at the app's
 # selected path the delta is the asked one; read at the harness's OLD choice the
@@ -505,9 +511,92 @@ $corpusTarget = Get-SbFixture { if ($null -eq $corpusDoc) { $null } else { Get-S
 
 Test-Case 'O1.2c: the live-hit-test corpus vector is on disk' { $corpusState } 'read'
 Test-Case 'O1.2c: the PORT selected the group, measured (not transcribed)' { Get-SbSelectionPathFromDoc $corpusDoc } '$.layers[0].children[2]'
-Test-Case 'O1.2c: the chooser AIMS elsewhere -- so this document discriminates' { $corpusTarget.AimPath } '$.layers[0].children[0]'
-Test-Case 'O1.2c: ⭐ THE CHOOSER AGREES WITH THE PORT''S LIVE HIT TEST' { ((Get-SbSelectionPathFromDoc $corpusDoc) -eq $corpusTarget.Path) } 'True'
-Test-Case 'O1.2c: CONTROL -- aim and answer really are different paths here' { ($corpusTarget.AimPath -eq $corpusTarget.Path) } 'False'
+# ⭐ SINCE #355 THE CHOOSER AIMS ONLY WHERE THE PAINTED ANSWER IS DECIDED. The
+# vector's press (36,36) lies ON the group's line (x + y = 72), so the line may
+# paint there and the chooser will not aim at the big rect: it takes the next
+# filled shape, the 24x24 rect, whose centre nothing later can paint. What the
+# port measured at (36,36) is still read, as the mirror's soundness check: the
+# element the port selected is one the mirror says MAY paint there.
+Test-Case 'O1.2c: ⭐ the mirror says the PORT''S answer may paint at its press' {
+    Test-SbMayPaint (Get-SbElementByPathFromDoc $corpusDoc '$.layers[0].children[2]') 36 36 } 'True'
+Test-Case 'O1.2c: so the chooser will NOT aim at the rect the line crosses' { $corpusTarget.AimPath } '$.layers[0].children[1]'
+Test-Case 'O1.2c: ...it aims at the next filled shape''s centre' { "$($corpusTarget.X),$($corpusTarget.Y)" } '132,132'
+Test-Case 'O1.2c: ...and targets that shape, nothing later painting there' { $corpusTarget.Path } '$.layers[0].children[1]'
+
+# ---------------------------------------------------------------------------
+# THE CHOOSER UNDER THE PAINTED-GEOMETRY HIT TEST (#355, 2026-10-12)
+# ---------------------------------------------------------------------------
+#
+# The law is `transcripts/SELECTION_TOOL.md` § Hit test: painted geometry. This
+# harness does NOT port it. It aims only at the centre of a FILLED shape that
+# nothing LATER in the scan may paint over, where "may paint" over-approximates
+# the law (`Test-SbMayPaint`): a line within its stroke width + 3 units, a text
+# within a box of two em per character and two em each side of its y, anything
+# with a transform or unreadable geometry ANYWHERE, everything else within its
+# box grown by stroke width + 3. At such a point the box rule and the painted
+# rule give the same answer by construction, and the corpus arm below is what
+# keeps the over-approximation honest.
+function New-SbChooserDoc([string]$Later) {
+    ('{"layers":[{"type":"layer","id":"L","children":[' +
+     '{"type":"rect","id":"big","x":0,"y":0,"width":72,"height":72,"fill":"#ff0000"},' +
+     '{"type":"rect","id":"small","x":300,"y":300,"width":10,"height":10,"fill":"#00ff00"}' +
+     $(if ($Later) { ',' + $Later } else { '' }) + ']}]}') | ConvertFrom-Json
+}
+function Get-SbAimOf($Doc) { $t = Get-SbHitTargetFromDoc $Doc; if ($null -eq $t) { 'REFUSED' } else { "$($t.AimPath) -> $($t.Path)" } }
+$big = '$.layers[0].children[0] -> $.layers[0].children[0]'
+$small = '$.layers[0].children[1] -> $.layers[0].children[1]'
+Test-Case 'painted: CONTROL -- nothing later, the largest filled shape' { Get-SbAimOf (New-SbChooserDoc '') } $big
+Test-Case 'painted: a later line THROUGH the aim blocks it; the next shape is taken' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"line","x1":0,"y1":72,"x2":72,"y2":0}') } $small
+Test-Case 'painted: an unstroked line 5 units off is clear (reach 3)' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"line","x1":-100,"y1":41,"x2":100,"y2":41}') } $big
+Test-Case 'painted: ...stroked 4 wide, the same line blocks (reach 4 + 3)' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"line","x1":-100,"y1":41,"x2":100,"y2":41,"stroke":{"width":4}}') } $small
+Test-Case 'painted: a later group is read through its children' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"group","children":[{"type":"line","x1":0,"y1":72,"x2":72,"y2":0}]}') } $small
+Test-Case 'painted: a later text near the aim blocks (its box is the font''s, not the dump''s 0x0)' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"text","x":30,"y":40,"width":0,"height":0,"font_size":10,"tspans":[{"content":"A"}]}') } $small
+Test-Case 'painted: ...and the same text far away is clear' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"text","x":200,"y":200,"width":0,"height":0,"font_size":10,"tspans":[{"content":"A"}]}') } $big
+Test-Case 'painted: a later TRANSFORMED element blocks wherever it is (unbounded)' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"rect","x":500,"y":500,"width":1,"height":1,"fill":"#000","transform":{"a":1,"b":0,"c":0,"d":1,"e":0,"f":0}}') } 'REFUSED'
+Test-Case 'painted: a later LOCKED line over the aim does not block (the law skips it)' {
+    Get-SbAimOf (New-SbChooserDoc '{"type":"line","locked":true,"x1":0,"y1":72,"x2":72,"y2":0}') } $big
+Test-Case 'painted: an UNFILLED shape is never aimed at (its interior is not painted)' {
+    Get-SbAimOf ('{"layers":[{"type":"layer","children":[{"type":"ellipse","cx":50,"cy":50,"rx":20,"ry":20,"fill":null}]}]}' | ConvertFrom-Json) } 'REFUSED'
+$cdPath = Join-Path $PSScriptRoot '..\..\test_fixtures\expected\complex_document.json'
+$cdTarget = Get-SbFixture { if (Test-Path $cdPath) { Get-SbHitTargetFromDoc (Get-Content -Raw -LiteralPath $cdPath | ConvertFrom-Json) } else { $null } }
+Test-Case 'painted: the REAL document -- aim at the rect''s centre, as the E2E drag presses' { "$($cdTarget.AimPath) at $($cdTarget.X),$($cdTarget.Y)" } '$.layers[0].children[0] at 36,36'
+Test-Case 'painted: ...and target the rect, as the reference''s hit_test answers there' { $cdTarget.Path } '$.layers[0].children[0]'
+
+# ⭐ THE CORPUS ARM: the over-approximation is SOUND on the law's own shared
+# corpus. Every non-deep case whose expected hit is [li,ci] must have the mirror
+# say that child MAY paint at the point; one miss means the chooser could aim
+# where the painted answer differs. The control proves the mirror is not just
+# "always true": it says NO for some child on some case.
+$phPath = Join-Path $PSScriptRoot '..\..\test_fixtures\algorithms\painted_hit.json'
+$phChecked = 0; $phMiss = @(); $phNo = 0
+if (Test-Path $phPath) {
+    foreach ($c in @((Get-Content -Raw -LiteralPath $phPath | ConvertFrom-Json).cases)) {
+        if ($c.deep) { continue }
+        for ($li = 0; $li -lt @($c.document.layers).Count; $li++) {
+            $ch = @($c.document.layers[$li].children)
+            for ($ci = 0; $ci -lt $ch.Count; $ci++) {
+                $may = Test-SbMayPaint $ch[$ci] ([double]$c.x) ([double]$c.y)
+                if (-not $may) { $phNo++ }
+                if ($null -ne $c.expect -and [int]$c.expect[0] -eq $li -and [int]$c.expect[1] -eq $ci) {
+                    $phChecked++
+                    if (-not $may) { $phMiss += $c.name }
+                }
+            }
+        }
+    }
+}
+Test-Case 'painted: CORPUS -- the shared painted-hit corpus was read and has hits to check' { $phChecked -ge 20 } 'True'
+Test-Case 'painted: CORPUS -- every expected hit is one the mirror says MAY paint' { $phMiss -join ',' } ''
+# Measured 2026-10-12: 45 non-deep cases, 25 expected hits all cleared, and 5
+# children the mirror says cannot paint (the corpus is boundary-heavy by design).
+Test-Case 'painted: CORPUS CONTROL -- the mirror says NO somewhere (it is not always true)' { $phNo -ge 1 } 'True'
 
 # ---------------------------------------------------------------------------
 # `dup-frames=` MUST NOT BE READ AS `frames=`
