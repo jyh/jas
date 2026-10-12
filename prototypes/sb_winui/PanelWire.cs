@@ -518,3 +518,32 @@ internal static class PaneKnobs
         return v is null ? "off" : "refused";
     }
 }
+
+/// <summary>
+/// A menu label as `menubar.yaml` writes it, as WinUI must show it. Pure, so
+/// `sb_winui_tests` drives it.
+/// </summary>
+internal static class MenuWire
+{
+    /// <summary>`&File` is "File" with access key "F". `&&` is a literal `&`;
+    /// the FIRST single `&` before a character marks the key; a trailing `&`
+    /// marks nothing and is kept. WinUI parses none of this itself, so without
+    /// it the in-window MenuBar showed `&File` (his note 4a, 2026-10-11).</summary>
+    internal static (string Text, string Key) Label(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return ("", "");
+        var text = new System.Text.StringBuilder(raw.Length);
+        var key = "";
+        for (var i = 0; i < raw.Length; i++)
+        {
+            if (raw[i] == '&' && i + 1 < raw.Length)
+            {
+                if (raw[i + 1] == '&') { text.Append('&'); i++; continue; }
+                if (key == "") key = raw[i + 1].ToString().ToUpperInvariant();
+                continue;
+            }
+            text.Append(raw[i]);
+        }
+        return (text.ToString(), key);
+    }
+}

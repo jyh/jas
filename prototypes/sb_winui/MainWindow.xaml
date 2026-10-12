@@ -57,7 +57,14 @@
           So this element is a MOUNT POINT. If it ever gains a child in this
           file, that gate should be the thing that says so.
         -->
-        <MenuBar x:Name="Menu" Grid.Row="0" Grid.ColumnSpan="3" />
+        <!--
+          LEGIBLE ON THE DARK WINDOW (his note 4a, 2026-10-11, "I can't see the
+          menus"): the MenuBar had no theme of its own, so on the root grid's
+          #FF101418 it drew dark text on near-black. It takes the panes' look,
+          Light on #FFF3F3F3, so the menu row reads like the chrome beside it.
+        -->
+        <MenuBar x:Name="Menu" Grid.Row="0" Grid.ColumnSpan="3"
+                 Background="#FFF3F3F3" RequestedTheme="Light" />
 
         <!--
           The canvas the Rust core draws into. Everything inside it is painted by
