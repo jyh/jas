@@ -692,6 +692,31 @@ static class Program
         Check("W-b: a changed label changes the signature",
             relabeled is not null && op is not null && relabeled.Signature != op.Signature, "a relabel would not rebuild");
 
+        // -- HIS NOTE 4a (2026-10-11, over VNC): "I can't see the menus" ----------
+        // `menubar.yaml` writes mnemonics as `&File`; WinUI does not parse `&`, so
+        // the in-window MenuBar showed `&File` literally. `MenuWire.Label` gives
+        // the text to show and the access key, `&&` being a literal ampersand.
+        static string ML(string? raw) { var (t, k) = MenuWire.Label(raw); return t + "|" + k; }
+        Eq("menu: &File is File, key F", "File|F", ML("&File"));
+        Eq("menu: &Open... is Open..., key O", "Open...|O", ML("&Open..."));
+        Eq("menu: a mid-word marker, Save &As...", "Save As...|A", ML("Save &As..."));
+        Eq("menu: && is a literal ampersand, and no key", "Fish & Chips|", ML("Fish && Chips"));
+        Eq("menu: no marker, no key", "Plain|", ML("Plain"));
+        Eq("menu: null is empty, never a throw", "|", ML(null));
+        Eq("menu: a trailing & marks nothing and is kept", "Trail&|", ML("Trail&"));
+        Eq("menu: only the FIRST marker is the key", "AB|A", ML("&A&B"));
+        // Over the REAL spec: every `label:` in menubar.yaml, shown, carries no
+        // `&` marker -- and the read found labels at all (an empty read passes
+        // nothing, so it is counted).
+        var mbDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (mbDir is not null && !File.Exists(Path.Combine(mbDir.FullName, "workspace", "menubar.yaml"))) { mbDir = mbDir.Parent; }
+        var mbLabels = mbDir is null ? new List<string>() : System.Text.RegularExpressions.Regex
+            .Matches(File.ReadAllText(Path.Combine(mbDir.FullName, "workspace", "menubar.yaml")), "label:\\s*\"([^\"]*)\"")
+            .Select(m => m.Groups[1].Value).ToList();
+        Check("menu: the spec's menubar.yaml was read, with its labels", mbLabels.Count >= 40, $"read {mbLabels.Count} label(s)");
+        var mbMarked = mbLabels.Where(l => System.Text.RegularExpressions.Regex.IsMatch(MenuWire.Label(l).Text, "&[^&\\s]")).ToList();
+        Eq("menu: no shown menubar.yaml label keeps an & marker", "", string.Join(",", mbMarked));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

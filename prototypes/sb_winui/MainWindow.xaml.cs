@@ -1819,7 +1819,8 @@ public sealed partial class MainWindow : Window
 
             if (kind == "menu")
             {
-                top = new MenuBarItem { Title = label ?? "" };
+                var (topText, topKey) = MenuWire.Label(label);
+                top = new MenuBarItem { Title = topText, AccessKey = topKey };
                 Menu.Items.Add(top);
                 sub = null;
                 continue;
@@ -1846,7 +1847,8 @@ public sealed partial class MainWindow : Window
                     break;
 
                 case "submenu":
-                    var node_sub = new MenuFlyoutSubItem { Text = label ?? "" };
+                    var (subText, subKey) = MenuWire.Label(label);
+                    var node_sub = new MenuFlyoutSubItem { Text = subText, AccessKey = subKey };
                     AddTo(top, sub, node_sub);
                     sub = node_sub;
                     subPath = PathKey(path);
@@ -1857,9 +1859,11 @@ public sealed partial class MainWindow : Window
                     var isOn = enabled.TryGetValue(PathKey(path), out var on) && on;
                     items++;
                     if (isOn) { onCount++; }
+                    var (itemText, itemKey) = MenuWire.Label(label);
                     var item = new MenuFlyoutItem
                     {
-                        Text = label ?? "",
+                        Text = itemText,
+                        AccessKey = itemKey,
                         // ⛔ THE BOOLEAN IS THE CORE'S. This shell evaluates no
                         // `enabled_when`; it reads the answer.
                         IsEnabled = isOn,
