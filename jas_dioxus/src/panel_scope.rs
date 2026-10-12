@@ -32,6 +32,9 @@ use crate::interpreter::state_store::StateStore;
 /// store's.
 pub const COLOUR_PANEL: &str = "color_panel_content";
 
+/// The colour panel's declared modes (`color.yaml`, `state.mode.values`).
+pub const COLOUR_MODES: [&str; 5] = ["grayscale", "rgb", "hsb", "cmyk", "web_safe_rgb"];
+
 /// The minimum a materialized panel needs. **Deliberately not a general state
 /// store**: this is the spike's slice, not an app-state design.
 #[derive(Debug, Clone)]
@@ -192,6 +195,13 @@ impl PanelState {
             self.fill_on_top = b;
             moved = true;
         }
+        // The panel's mode, when an action moved it in the store (see
+        // `seed_colour_mode`). An undeclared mode is not adopted.
+        let mode = store.get_panel(COLOUR_PANEL, "mode").as_str().map(str::to_string);
+        if let Some(m) = mode.filter(|m| *m != self.mode && COLOUR_MODES.contains(&m.as_str())) {
+            self.mode = m;
+            moved = true;
+        }
         moved
     }
 
@@ -301,6 +311,25 @@ pub fn sync_colour_state(store: &mut StateStore, slice: &PanelState) {
     for (k, v) in slice.state_keys() {
         store.set(&k, v);
     }
+    // The ONE store-backed colour-panel key (`mode`), kept equal to the slice in
+    // both directions: here after an edit, in `adopt_store_state` after an
+    // action. A no-op until `seed_colour_mode` has given the panel its scope.
+    store.set_panel(COLOUR_PANEL, "mode", Value::String(slice.mode.clone()));
+}
+
+/// Give the colour panel a store scope holding ONLY `mode`, the one key a
+/// workspace action writes (`set_color_panel_mode`, `set_panel_state: {panel:
+/// color, key: mode}`). `StateStore::set_panel` drops a write to a panel with
+/// no scope, silently, so before this every mode switch on the engine route
+/// wrote nowhere (flask, 2026-10-12, on #360). Only `mode`: `engine_scope`
+/// lays a panel's store scope over the slice, so a full set of defaults here
+/// would hide the slice's channels behind stale ones.
+pub fn seed_colour_mode(slice: &PanelState, store: &mut StateStore) {
+    if !store.has_panel(COLOUR_PANEL) {
+        let mut scope = std::collections::HashMap::new();
+        scope.insert("mode".to_string(), Value::String(slice.mode.clone()));
+        store.init_panel(COLOUR_PANEL, scope);
+    }
 }
 
 /// The scope panel `panel_id`'s bindings resolve against, in the engine
@@ -311,9 +340,9 @@ pub fn sync_colour_state(store: &mut StateStore, slice: &PanelState) {
 ///   The store holds a copy of those three ([`sync_colour_state`]), so the
 ///   overlay changes nothing when the copy is current.
 /// * `panel` — the slice's, with the panel's own store scope over it. The
-///   colour panel never HAS a store scope (the engine never seeds one), so
-///   its `panel.*` is the slice's alone. That is one guard, at the seeding,
-///   and an arm holds it.
+///   colour panel's store scope holds `mode` alone (`seed_colour_mode`),
+///   kept equal to the slice's in both directions, so its `panel.*` is the
+///   slice's. An arm holds both halves.
 /// * `active_document` — the slice's, plus [`document_facts`].
 /// * The Properties panel's eight fields are DERIVED from the selection
 ///   (`properties_host::live_values`) over its store scope, as the web app
