@@ -210,7 +210,7 @@ public sealed partial class MainWindow : Window
     /// <summary>The dock pane (the right-hand panel). See PaneView.cs.</summary>
     private PaneView _dock = null!;
 
-    /// <summary>The toolbar pane (the left-hand column), under SB_TOOLBAR. See PaneView.cs.</summary>
+    /// <summary>The toolbar pane (the left-hand column), on under `app` unless SB_TOOLBAR=0. See PaneView.cs.</summary>
     private PaneView _toolbar = null!;
 
     /// <summary>`layout.yaml`'s toolbar, by its pane id; the core plans it like a panel.</summary>
@@ -230,10 +230,11 @@ public sealed partial class MainWindow : Window
     // =======================================================================
 
     private bool _dockWanted;
+    private bool _dockCollapseDone;
     private string _dockName = "";
     private StackPanel? _dockStack;
 
-    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs);
+    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron);
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
 
     private PaneView? DockGroupView(string key) => _dockGroups.TryGetValue(key, out var g) ? g.View : null;
@@ -248,6 +249,22 @@ public sealed partial class MainWindow : Window
             tab.FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
             tab.Opacity = on ? 1.0 : 0.6;
         }
+    }
+
+    /// <summary>
+    /// A group's collapse chevron (the owner's note 3, 2026-10-11): collapsed hides
+    /// the group's body and keeps its header, as the dock model's
+    /// `panel_group.collapsed` does on the Mac. The state is the dock model's, the
+    /// shell's own, never the core's. The row READS the body's visibility after
+    /// the toggle, so a chevron that hides nothing says so (Q6.DC).
+    /// </summary>
+    private void SetDockCollapsed(string key, bool collapsed, string via)
+    {
+        if (!_dockGroups.TryGetValue(key, out var g)) { return; }
+        g.Body.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        g.Chevron.Content = collapsed ? "▸" : "▾";
+        var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
+        Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
     }
 
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
@@ -300,6 +317,19 @@ public sealed partial class MainWindow : Window
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 };
+                var groupKey = key;
+                var chevron = new Button
+                {
+                    Content = "▾",
+                    FontSize = 11,
+                    Padding = new Thickness(6, 2, 6, 2),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
+                ToolTipService.SetToolTip(chevron, "Collapse/Expand");
+                chevron.Click += (_, _) => SetDockCollapsed(groupKey, scroll.Visibility == Visibility.Visible, "hand");
+                tabs.Children.Add(chevron);
                 var body = new StackPanel();
                 body.Children.Add(tabs);
                 body.Children.Add(scroll);
@@ -318,11 +348,28 @@ public sealed partial class MainWindow : Window
                     Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
                     continue;
                 }
-                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList);
+                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron);
                 MarkDockTab(key, ids[active]);
             }
             Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
                  + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
+            // SB_DOCK_COLLAPSE=<group key>: the chevron replayed through its own
+            // method, collapse then expand (Q6.DC). An unknown key is refused by name.
+            var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");
+            if (!_dockCollapseDone && !string.IsNullOrWhiteSpace(collapseKnob))
+            {
+                _dockCollapseDone = true;
+                var ck = collapseKnob.Trim();
+                if (_dockGroups.ContainsKey(ck))
+                {
+                    SetDockCollapsed(ck, true, "synth");
+                    SetDockCollapsed(ck, false, "synth");
+                }
+                else
+                {
+                    Report($"RUSTFAIL DOCK COLLAPSE REFUSED key={ck} -- the dock has {_dockGroups.Count} group(s)");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -381,9 +428,9 @@ public sealed partial class MainWindow : Window
             _paneWanted = true;
             PaneHost.Width = PaneAvailW + 2 * PanePad + PaneHost.BorderThickness.Left;
             PaneHost.Visibility = Visibility.Visible;
-            // THE TOOLBAR PANE, behind its knob until the harness proves its
-            // pane verdicts read the dock alone beside it. The SAME predicate
-            // as the other pane knobs (whitespace is unset).
+            // THE TOOLBAR PANE, ON BY DEFAULT since step 3 (2026-10-11), once
+            // the pane verdicts were shown to read their own pane beside it
+            // (#343). `SB_TOOLBAR=0` turns it off; `PaneKnobs.Toolbar` decides.
             // THE DOCK's tab groups, behind SB_DOCK=<layout name> (e.g. Default):
             // the dock column then holds the groups instead of the one pane.
             var dockKnob = Environment.GetEnvironmentVariable("SB_DOCK");
@@ -399,14 +446,14 @@ public sealed partial class MainWindow : Window
                     Content = _dockStack,
                 };
             }
-            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+            if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), true) == "on")
             {
                 _toolbarWanted = true;
                 ToolbarHost.Width = ToolbarAvailW + 2 * PanePad + ToolbarHost.BorderThickness.Right;
                 ToolbarHost.Visibility = Visibility.Visible;
             }
         }
-        else if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR")))
+        else if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), false) == "refused")
         {
             // Refused, never ignored: only `app` opens panes.
             _toolbarRefused = true;
@@ -1085,19 +1132,9 @@ public sealed partial class MainWindow : Window
             // ⛔ A VALUE THAT IS NOT AN INDEX IS REFUSED BY NAME: a run that asked
             // for a tool and silently got selection would report a gesture the
             // tool never saw.
-            var tool = Environment.GetEnvironmentVariable("SB_TOOL");
-            if (!string.IsNullOrWhiteSpace(tool))
-            {
-                var count = (ulong)JasCore.jas_tool_count();
-                if (!ulong.TryParse(tool.Trim(), out var index) || index >= count)
-                {
-                    StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is not a tool index";
-                    Report($"RUSTFAIL SB_TOOL='{tool}' is refused: not an index below the "
-                         + $"core's {count} tool(s)");
-                    return;
-                }
-                _canvas.ToolIndex = (nuint)index;
-            }
+            // SB_TOOL is resolved AFTER `JasCore.Bind()` below: it calls the core,
+            // and before Bind the DLL is not found (every SB_TOOL run died so, 10-10
+            // to 10-11, unseen until an input script named its tool).
 
             // SB_SIZE=WxH -- A MEASUREMENT INPUT, AND DELIBERATELY NOT THE FIX
             // for jas#16. `e.NewSize` is in DIPs; at 150% scaling a 3840x2160
@@ -1126,6 +1163,30 @@ public sealed partial class MainWindow : Window
             }
 
             JasCore.Bind();
+
+            // SB_TOOL is an index OR a tool name (an input script names its tool),
+            // resolved against the core's own list (`ToolKnob.Resolve`), so no tool
+            // list is copied into the shell.
+            var tool = Environment.GetEnvironmentVariable("SB_TOOL");
+            if (!string.IsNullOrWhiteSpace(tool))
+            {
+                var count = (int)JasCore.jas_tool_count();
+                var names = new List<string>(count);
+                for (var t = 0; t < count; t++)
+                {
+                    var ptr = JasCore.jas_tool_name((nuint)t, out var len);
+                    names.Add(ptr == IntPtr.Zero ? "" : System.Runtime.InteropServices.Marshal.PtrToStringUTF8(ptr, (int)len));
+                }
+                var index = ToolKnob.Resolve(tool, names);
+                if (index < 0)
+                {
+                    StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is not a tool";
+                    Report($"RUSTFAIL SB_TOOL='{tool}' is refused: not an index below the "
+                         + $"core's {count} tool(s), nor one of their names");
+                    return;
+                }
+                _canvas.ToolIndex = (nuint)index;
+            }
 
             // `original`'s referent, RECORDED rather than recomputed later. It is
             // an AppWindow size (what SB_RESIZE sets), not a surface size (what
@@ -1220,7 +1281,7 @@ public sealed partial class MainWindow : Window
                 && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR_SYNTH")))
             {
                 // Refused, never ignored: a toolbar click with no toolbar open.
-                Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs SB_TOOLBAR=1 under SB_SCENE=app");
+                Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs the toolbar open: SB_SCENE=app and SB_TOOLBAR not 0");
             }
             if (_toolbarRefused)
             {
@@ -1767,6 +1828,26 @@ public sealed partial class MainWindow : Window
                  + $"delivered={_menuDelivered} coalesced={_menuCoalesced} "
                  + $"shortcuts-unparsed={_shortcutsUnparsed}");
             _menuDrawnSeq = snap.Seq;
+
+            // SB_MENU_SYNTH=<menu item id>: ONE choice of that item, after the
+            // first menubar is built, through the method a person's click
+            // reaches (`Invoke`). An id the menubar does not hold is refused by
+            // name, never ignored.
+            var menuSynth = Environment.GetEnvironmentVariable("SB_MENU_SYNTH");
+            if (!_menuSynthDone && !string.IsNullOrWhiteSpace(menuSynth))
+            {
+                _menuSynthDone = true;
+                var synthId = menuSynth.Trim();
+                if (_menuActions.TryGetValue(synthId, out var synthAction))
+                {
+                    Report($"MENU SYNTH item={synthId} action={synthAction}");
+                    Invoke(synthAction, synthId);
+                }
+                else
+                {
+                    Report($"RUSTFAIL MENU SYNTH REFUSED item={synthId} -- the menubar holds no such item ({_menuActions.Count} items)");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -1785,6 +1866,10 @@ public sealed partial class MainWindow : Window
     /// checked}`. A `path` of length 1 is a top-level menu, length 2 an entry in
     /// it, length 3 an entry in a submenu.
     /// </summary>
+    /// <summary>Each built menu item's action, by its id: what SB_MENU_SYNTH reads.</summary>
+    private readonly Dictionary<string, string> _menuActions = new(StringComparer.Ordinal);
+    private bool _menuSynthDone;
+
     private (int Items, int Enabled) BuildMenu(MenuSnapshot snap)
     {
         // PER REBUILD, not cumulative: the row reports what THIS menubar could
@@ -1821,7 +1906,8 @@ public sealed partial class MainWindow : Window
 
             if (kind == "menu")
             {
-                top = new MenuBarItem { Title = label ?? "" };
+                var (topText, topKey) = MenuWire.Label(label);
+                top = new MenuBarItem { Title = topText, AccessKey = topKey };
                 Menu.Items.Add(top);
                 sub = null;
                 continue;
@@ -1848,7 +1934,8 @@ public sealed partial class MainWindow : Window
                     break;
 
                 case "submenu":
-                    var node_sub = new MenuFlyoutSubItem { Text = label ?? "" };
+                    var (subText, subKey) = MenuWire.Label(label);
+                    var node_sub = new MenuFlyoutSubItem { Text = subText, AccessKey = subKey };
                     AddTo(top, sub, node_sub);
                     sub = node_sub;
                     subPath = PathKey(path);
@@ -1859,16 +1946,20 @@ public sealed partial class MainWindow : Window
                     var isOn = enabled.TryGetValue(PathKey(path), out var on) && on;
                     items++;
                     if (isOn) { onCount++; }
+                    var (itemText, itemKey) = MenuWire.Label(label);
                     var item = new MenuFlyoutItem
                     {
-                        Text = label ?? "",
+                        Text = itemText,
+                        AccessKey = itemKey,
                         // ⛔ THE BOOLEAN IS THE CORE'S. This shell evaluates no
                         // `enabled_when`; it reads the answer.
                         IsEnabled = isOn,
                     };
                     var accel = Accelerator(Str(node, "shortcut"));
                     if (accel is not null) { item.KeyboardAccelerators.Add(accel); }
-                    item.Click += (_, _) => Invoke(action);
+                    var itemId = Str(node, "id") ?? "";
+                    if (itemId.Length > 0) { _menuActions[itemId] = action; }
+                    item.Click += (_, _) => Invoke(action, itemId);
                     AddTo(top, sub, item);
                     break;
 
@@ -1958,7 +2049,7 @@ public sealed partial class MainWindow : Window
     /// evaluating an `enabled_when`; the core decided what is enabled before
     /// this item was ever drawn.
     /// </summary>
-    private void Invoke(string action)
+    private void Invoke(string action, string itemId = "")
     {
         switch (action)
         {
@@ -1980,7 +2071,11 @@ public sealed partial class MainWindow : Window
                 Close();
                 break;
             default:
-                Report($"ACTION UNIMPLEMENTED {action}");
+                // Every other item runs IN THE ENGINE by its id (the owner's notes,
+                // 2026-10-11: the menus drew live and ran five items). What the
+                // engine cannot run is refused by class on its own row.
+                if (itemId.Length == 0) { Report($"ACTION UNIMPLEMENTED {action} -- no menu item id"); break; }
+                _canvas.MenuAction(new MenuActionCmd { ItemId = itemId, Action = action });
                 break;
         }
     }

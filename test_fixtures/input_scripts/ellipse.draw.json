@@ -1,0 +1,14 @@
+{
+  "item": "ellipse.draw",
+  "spec": "workspace/tools/ellipse.yaml",
+  "setup_svg": "circle_basic.svg",
+  "tool": "ellipse",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 10, "y": 20},
+    {"kind": "move", "x": 110, "y": 70, "dragging": true},
+    {"kind": "release", "x": 110, "y": 70},
+    {"read": "document"}
+  ],
+  "expected_json": "ellipse.draw.expected.json"
+}

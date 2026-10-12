@@ -1953,12 +1953,12 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)"
 }
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
-} 'selection.drag svg=complex_document.svg at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
 Test-Case 'is: moves evenly spaced on the line map onto k=3' {
     $m1 = [ordered]@{ kind = 'move'; x = 48; y = 44; dragging = $true }
     $m2 = [ordered]@{ kind = 'move'; x = 60; y = 52; dragging = $true }
@@ -1986,9 +1986,12 @@ Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
 } "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
-Test-Case 'is: a tool other than the default is refused (SB_TOOL is an index, not a name)' {
-    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'pen'))
-} "REFUSED: tool 'pen': this driver runs only the shell's default tool, selection"
+Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
+} 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+Test-Case 'is: a script that names no tool is refused, never defaulted to selection' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool ''))
+} "REFUSED: the script names no tool"
 Test-Case 'is: a non-empty app_state is refused, never ignored' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -AppState @{ fill_color = '#ff0000' }))
 } 'REFUSED: app_state sets fill_color: this driver cannot seed state'
@@ -2058,6 +2061,36 @@ Test-Case 'Q6.D: the render thread dying FAILS (the stale-cdylib run that found 
     (Get-SbDk @("RUSTFAIL render thread died: EntryPointNotFoundException: Unable to find an entry point named 'jas_dock_layout' in DLL 'jas_dioxus'. $q6Tids")).Verdict
 } 'FAIL'
 Test-Case 'Q6.D: CONTROL -- a TOOLBAR failure is not the dock''s' { (Get-SbDk ($dkHealthy + 'RUSTFAIL TOOLBAR DRAW threw InvalidOperationException: x')).Verdict } 'PASS'
+
+# ---- Q6.DC: A DOCK GROUP COLLAPSES AND EXPANDS (the owner's note 3, 2026-10-11:
+# "we don't yet have the panel controls for collapsing panel groups"). The shell
+# replays SB_DOCK_COLLAPSE=<key> through the chevron's own method, collapse then
+# expand, and each row READS the body's visibility after the toggle.
+$dcDown = 'DOCK GROUP key=dock1 collapsed=true body=hidden via=synth'
+$dcUp   = 'DOCK GROUP key=dock1 collapsed=false body=visible via=synth'
+function Get-SbDc([string[]]$Extra, [string]$Collapse = 'dock1', [string]$Dock = 'Default', [string]$Scene = 'app') {
+    return (Get-SbDockCollapseVerdict (New-SbDockRows ($dkHealthy + $Extra)) $Scene $Dock $Collapse)
+}
+Test-Case 'Q6.DC: collapse then expand, each read off the body, PASSES' { (Get-SbDc @($dcDown, $dcUp)).Verdict } 'PASS'
+Test-Case 'Q6.DC: SB_DOCK_COLLAPSE unset is NOT RUN, by name' { (Get-SbDc @() '').Verdict } 'NOT RUN'
+Test-Case 'Q6.DC: the knob with no dock FAILS -- there is no group to collapse' { (Get-SbDc @() 'dock1' '').Verdict } 'FAIL'
+Test-Case 'Q6.DC: the knob off app FAILS' { (Get-SbDc @() 'dock1' 'Default' 'document').Verdict } 'FAIL'
+Test-Case 'Q6.DC: no DOCK GROUP row FAILS -- the chevron was never driven' { (Get-SbDc @()).Verdict } 'FAIL'
+Test-Case 'Q6.DC: a collapse whose body stayed VISIBLE FAILS -- the chevron that hides nothing' { (Get-SbDc @('DOCK GROUP key=dock1 collapsed=true body=visible via=synth', $dcUp)).Verdict } 'FAIL'
+Test-Case 'Q6.DC: an expand whose body stayed HIDDEN FAILS -- a group that will not come back' { (Get-SbDc @($dcDown, 'DOCK GROUP key=dock1 collapsed=false body=hidden via=synth')).Verdict } 'FAIL'
+Test-Case 'Q6.DC: a collapse with no expand FAILS' { (Get-SbDc @($dcDown)).Verdict } 'FAIL'
+Test-Case 'Q6.DC: rows for ANOTHER group FAIL -- the knob named dock1' { (Get-SbDc @(($dcDown -replace 'dock1', 'dock2'), ($dcUp -replace 'dock1', 'dock2'))).Verdict } 'FAIL'
+Test-Case 'Q6.DC: the shell''s refusal FAILS and is quoted' {
+    $v = Get-SbDc @('RUSTFAIL DOCK COLLAPSE REFUSED key=dock9 -- the dock has 5 group(s)') 'dock9'
+    "$($v.Verdict) $($v.Row -match 'dock9')"
+} 'FAIL True'
+Test-Case 'Q6.D: a refused COLLAPSE knob is Q6.DC''s, not a broken dock -- Q6.D still PASSES' {
+    (Get-SbDk ($dkHealthy + 'RUSTFAIL DOCK COLLAPSE REFUSED key=dock9 -- the dock has 5 group(s)')).Verdict
+} 'PASS'
+Test-Case 'Q6.D: CONTROL -- a refused DOCK itself still FAILS beside it' {
+    (Get-SbDk ($dkHealthy + 'RUSTFAIL DOCK DRAW threw InvalidOperationException: x')).Verdict
+} 'FAIL'
+Test-Case 'Q6.DC: CONTROL -- a HAND chevron row is not the replay' { (Get-SbDc @(($dcDown -replace 'synth', 'hand'), ($dcUp -replace 'synth', 'hand'))).Verdict } 'FAIL'
 Test-Case 'Q6.D: SB_DOCK set on a scene that opens no pane FAILS -- the shell ignores the knob there' { (Get-SbDk @() 'retained').Verdict } 'FAIL'
 # ...and the WAIT: a docked run writes no PANEL DRAWN, so waiting on it timed out
 # (60 s) and the clause above read whatever had arrived by then.

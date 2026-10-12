@@ -1619,6 +1619,13 @@ if ($qd.Verdict -eq 'NOT RUN') {
 } else {
     Add-Assert -Name $qd.Name -Verdict $qd.Verdict -Detail $qd.Detail -Row $qd.Row
 }
+# Q6.DC -- a dock group's chevron, replayed by SB_DOCK_COLLAPSE (note 3).
+$qdc = Get-SbDockCollapseVerdict $rows $Scene $env:SB_DOCK $env:SB_DOCK_COLLAPSE
+if ($qdc.Verdict -eq 'NOT RUN') {
+    Add-NotRun $qdc.Name $qdc.Detail -Row $qdc.Row
+} else {
+    Add-Assert -Name $qdc.Name -Verdict $qdc.Verdict -Detail $qdc.Detail -Row $qdc.Row
+}
 
 # ===========================================================================
 # O6 -- 0xH REFUSED THROUGH THE REAL LINK, AND THE ACCEPT ARM BESIDE IT

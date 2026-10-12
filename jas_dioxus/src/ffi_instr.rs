@@ -115,6 +115,10 @@ pub enum Crossing {
     /// The dock's tab groups for a named layout (`default_layouts.yaml`). Read
     /// once per layout, as `PanelList` is.
     DockLayout = 17,
+    /// A workspace ACTION run by id, as a menu item runs it (the owner's notes,
+    /// 2026-10-11). Counted apart from `PanelBehavior`: that one runs a
+    /// widget's behaviors, this one runs one action no panel owns.
+    DispatchAction = 18,
 }
 
 impl Crossing {
@@ -139,6 +143,7 @@ impl Crossing {
         "jas_panel_behavior",
         "jas_panel_list",
         "jas_dock_layout",
+        "jas_dispatch_action",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -148,7 +153,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 18;
+    pub(crate) const COUNT: usize = 19;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -174,6 +179,7 @@ impl Crossing {
         Crossing::PanelBehavior,
         Crossing::PanelList,
         Crossing::DockLayout,
+        Crossing::DispatchAction,
     ];
 
     pub fn name(self) -> &'static str {

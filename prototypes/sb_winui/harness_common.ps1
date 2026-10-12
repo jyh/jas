@@ -2270,7 +2270,7 @@ $SbDockName = 'Q6.D the dock opened and drew every tab group'
 # FRAMES exist, and each group's PANE OPEN key=dock<i> follows it (measured live,
 # 2026-10-11). Polled after the DOCK DRAWN wait, as `Test-SbMenuSettled` is.
 function Test-SbDockSettled($Rows) {
-    if ($null -ne (Select-SbRow $Rows "`tRUSTFAIL (?:DOCK |PANE |render thread died)")) { return $true }
+    if ($null -ne (Select-SbRow $Rows "`tRUSTFAIL (?:DOCK (?!COLLAPSE )|PANE |render thread died)")) { return $true }
     $open = Select-SbRow $Rows (Get-SbRowPattern 'DOCK OPEN' ' name=')
     if ($null -eq $open) { return $true }
     $groups = Get-SbField $open 'groups'
@@ -2290,7 +2290,8 @@ function Get-SbDockVerdict($Rows, [string]$Scene, [string]$Dock) {
     if ($Scene -ne $SbPaneScene) {
         return New-SbVerdict $name 'FAIL' "SB_DOCK='$Dock' was set on scene '$Scene', which opens no pane; the shell reads the knob only on '$SbPaneScene', so no dock could open"
     }
-    $bad = Select-SbRow $Rows "`tRUSTFAIL (?:DOCK |PANE |render thread died)"
+    # A refused SB_DOCK_COLLAPSE is Q6.DC's (the knob's), not a broken dock.
+    $bad = Select-SbRow $Rows "`tRUSTFAIL (?:DOCK (?!COLLAPSE )|PANE |render thread died)"
     if ($null -ne $bad) {
         return New-SbVerdict $name 'FAIL' "SB_DOCK='$Dock': the shell reported a dock failure (the row)" $bad
     }
@@ -2317,6 +2318,44 @@ function Get-SbDockVerdict($Rows, [string]$Scene, [string]$Dock) {
     }
     return New-SbVerdict $name 'PASS' ("SB_DOCK='$Dock': DOCK OPEN groups=$n panels=$(Get-SbField $open 'panels'), a PANE OPEN for dock0-dock$($n - 1), " +
         "DOCK DRAWN groups=$dg tabs=$(Get-SbField $drawn 'tabs'), and no dock failure row") $drawn
+}
+
+# Q6.DC -- A DOCK GROUP COLLAPSES AND EXPANDS (the owner's note 3, 2026-10-11).
+# SB_DOCK_COLLAPSE=<group key> makes the shell replay the group's chevron, through
+# the method a click reaches: collapse, then expand. Each `DOCK GROUP` row READS
+# the body's visibility after the toggle, so a chevron that hides nothing, or a
+# group that will not come back, is a FAIL. Only the replay's rows (`via=synth`)
+# are read; a person's chevron is not this run's evidence.
+$SbDockCollapseName = 'Q6.DC a dock group collapsed and expanded, its body hidden then shown'
+
+function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string]$Collapse) {
+    $name = $SbDockCollapseName
+    if ([string]::IsNullOrWhiteSpace($Collapse)) {
+        return New-SbVerdict $name 'NOT RUN' 'SB_DOCK_COLLAPSE is unset: no group collapse was asked for'
+    }
+    $key = $Collapse.Trim()
+    if ($Scene -ne $SbPaneScene -or [string]::IsNullOrWhiteSpace($Dock)) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK_COLLAPSE='$key' needs a dock (SB_DOCK) under '$SbPaneScene'; this run is scene '$Scene' with SB_DOCK='$Dock', so there is no group to collapse"
+    }
+    $refused = Select-SbRow $Rows "`tRUSTFAIL DOCK COLLAPSE "
+    if ($null -ne $refused) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK_COLLAPSE='$key': the shell refused it (the row)" $refused
+    }
+    $down = Select-SbRow $Rows (Get-SbRowPattern 'DOCK GROUP' " key=$([regex]::Escape($key)) collapsed=true body=[a-z]+ via=synth")
+    $up = Select-SbRow $Rows (Get-SbRowPattern 'DOCK GROUP' " key=$([regex]::Escape($key)) collapsed=false body=[a-z]+ via=synth")
+    if ($null -eq $down) {
+        return New-SbVerdict $name 'FAIL' "SB_DOCK_COLLAPSE='$key' and no replayed collapse row for $($key): the chevron was never driven"
+    }
+    if ((Get-SbField $down 'body') -ne 'hidden') {
+        return New-SbVerdict $name 'FAIL' "the collapse of $key left its body $(Get-SbField $down 'body'): a chevron that hides nothing" $down
+    }
+    if ($null -eq $up) {
+        return New-SbVerdict $name 'FAIL' "$key collapsed and no replayed expand row followed" $down
+    }
+    if ((Get-SbField $up 'body') -ne 'visible') {
+        return New-SbVerdict $name 'FAIL' "the expand of $key left its body $(Get-SbField $up 'body'): a group that will not come back" $up
+    }
+    return New-SbVerdict $name 'PASS' "$($key): collapsed with its body hidden, then expanded with it visible, both read off the body after the toggle" $up
 }
 
 # ===========================================================================
@@ -2784,8 +2823,10 @@ function Read-SbInputScript([string]$Json) {
     $no = { param($why) [pscustomobject]@{ Refusal = $why } }
     try { $s = $Json | ConvertFrom-Json } catch { return (& $no 'the script does not parse') }
     if ($null -eq $s) { return (& $no 'the script does not parse') }
-    if ("$($s.tool)" -ne 'selection') {
-        return (& $no "tool '$($s.tool)': this driver runs only the shell's default tool, selection")
+    # Any NAMED tool: the shell resolves it against the core's own list
+    # (SB_TOOL by name, `ToolKnob.Resolve`) and refuses an unknown one by name.
+    if ([string]::IsNullOrWhiteSpace("$($s.tool)")) {
+        return (& $no 'the script names no tool')
     }
     if ($null -ne $s.app_state) {
         $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })
