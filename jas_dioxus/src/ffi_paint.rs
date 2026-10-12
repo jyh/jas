@@ -2178,7 +2178,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 79, "the fixture corpus changed size");
+        assert_eq!(total, 81, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2245,6 +2245,12 @@ mod tests {
         // rects) and a rect. Both pins bumped; `check_svg_corpus_pin.py` agreed
         // on a Mac before this lane ran. Expected to present.
         //
+        // ⛔ 79 → 81 (jas, 2026-10-12, the last twelve tools' gesture cases):
+        // `corner_path.svg` (an open three-point path with a corner) and
+        // `zigzag_path.svg` (a 16-segment open zigzag). Both are plain
+        // stroked paths with no fill. Both pins bumped; `check_svg_corpus_pin.py`
+        // agreed on a Mac before this lane ran. Expected to present.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2255,6 +2261,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 79, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 81, "the whole corpus presents");
     }
 }

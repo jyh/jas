@@ -1,0 +1,27 @@
+[
+ {
+  "_doc": "The anchor at (50,50) has an out-handle at (66.67,0) away from it, so the Convert tool reads it as SMOOTH (ANCHOR_POINT_TOOLS.md, press-time priority 2): the commit collapses it to a corner, and the out-handle moves onto the anchor. The drag does not matter for a smooth anchor. Named for what it does; the corner-to-smooth case is anchor_point_drag_corner_to_smooth.",
+  "name": "anchor_point_press_smooth_collapses",
+  "setup_svg": "path_all_commands.svg",
+  "tool": "anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 50,
+    "y": 50
+   },
+   {
+    "kind": "move",
+    "x": 70,
+    "y": 50,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 70,
+    "y": 50
+   }
+  ],
+  "expected_json": "anchor_point_press_smooth_collapses_expected.json"
+ }
+]

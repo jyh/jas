@@ -39,8 +39,10 @@ For each unlocked Path in the document:
    delete the whole element.
 6. Otherwise, run `split_path_at_eraser`:
    - Open paths → 0-2 sub-paths (before the entry, after the
-     exit). Each sub-path with ≥ 2 commands becomes a new
-     Path element; curves are preserved by
+     exit). Each sub-path that has length (some command ends
+     away from its start) becomes a new Path element. A press
+     ON the path's first point enters the eraser there, so the
+     "before" sub-path is `M p L p` and is dropped; curves are preserved by
      `split_cubic_cmd_at` / `split_quad_cmd_at`.
    - Closed paths → single open path that runs from the exit
      point around the non-erased side back to the entry point.

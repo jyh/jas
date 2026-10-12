@@ -66,7 +66,11 @@ use crate::geometry::element::*;
 // ---------------------------------------------------------------------------
 
 fn fmt(v: f64) -> String {
-    let rounded = (v * 1000000.0).round() / 1000000.0;
+    // `+ 0.0` turns a -0.0 into +0.0 (IEEE round-to-nearest) and leaves every
+    // other value alone: a value that rounds to zero is written `0.0`, never
+    // `-0.0`, because its sign is below the precision and is platform noise. The
+    // reference's floor(x + 0.5) already writes `0.0`; Swift's `fmt` does the same.
+    let rounded = (v * 1000000.0).round() / 1000000.0 + 0.0;
     // Ensure there is always a decimal point.
     if rounded == rounded.trunc() {
         format!("{:.1}", rounded)
@@ -2136,6 +2140,21 @@ pub fn test_json_to_document(json: &str) -> Document {
 mod tests {
     use super::*;
     use std::rc::Rc;
+
+    /// A value that rounds to zero at six decimals is written `0.0`, never
+    /// `-0.0`: the sign of a value smaller than the precision is platform noise
+    /// (the shear case's translation came out as -0.0 on the Windows lane and
+    /// 0.0 on macOS), and the reference (`jas/geometry/test_json.py::_fmt`,
+    /// which rounds with floor(x + 0.5)) already writes `0.0` for it.
+    #[test]
+    fn a_value_that_rounds_to_zero_is_written_without_a_sign() {
+        for v in [-0.0, -1e-9, -4e-7] {
+            assert_eq!(fmt(v), "0.0", "fmt({v:e})");
+        }
+        // Controls: a value past the precision keeps its sign; +0 is unchanged.
+        assert_eq!(fmt(-6e-7), "-0.000001");
+        assert_eq!(fmt(0.0), "0.0");
+    }
 
     #[test]
     fn empty_document() {

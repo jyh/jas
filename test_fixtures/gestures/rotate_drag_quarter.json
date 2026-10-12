@@ -1,0 +1,33 @@
+[
+ {
+  "_doc": "The selected 72x72 rect (reference point: its centre, 36,36) is dragged from due east of the centre to due south: a quarter turn clockwise in y-down document space.",
+  "name": "rotate_drag_quarter",
+  "setup_svg": "rect_basic.svg",
+  "tool": "rotate",
+  "selection": [
+   [
+    0,
+    0
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 72,
+    "y": 36
+   },
+   {
+    "kind": "move",
+    "x": 36,
+    "y": 72,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 36,
+    "y": 72
+   }
+  ],
+  "expected_json": "rotate_drag_quarter_expected.json"
+ }
+]

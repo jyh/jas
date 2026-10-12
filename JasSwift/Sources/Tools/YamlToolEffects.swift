@@ -2430,7 +2430,19 @@ private func pathSmoothAtCursor(
             }
         }
         guard let fh = firstHit, let lh = lastHit else { continue }
-        let firstCmd = cmdMap[fh], lastCmd = cmdMap[lh]
+        // The refit never replaces a MoveTo (SMOOTH_TOOL.md § Algorithm, step
+        // 3): the range starts at command 1 at the earliest, so the MoveTo
+        // survives as the prefix, and it stops before a later MoveTo, so two
+        // subpaths are never refitted into one. Mirrors Rust.
+        let firstCmd = max(cmdMap[fh], 1)
+        var lastCmd = cmdMap[lh]
+        if firstCmd + 1 <= lastCmd,
+           let m = (firstCmd + 1...lastCmd).first(where: { i in
+               if i < pe.d.count, case .moveTo = pe.d[i] { return true }
+               return false
+           }) {
+            lastCmd = m - 1
+        }
         guard firstCmd < lastCmd else { continue }
         let rangeFlat: [(Double, Double)] = flat.enumerated()
             .filter { (i, _) in cmdMap[i] >= firstCmd && cmdMap[i] <= lastCmd }

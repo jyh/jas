@@ -23,7 +23,11 @@ import Foundation
 /// this layer as the hazard — and the property it protected is already pinned
 /// harder, by `to_bits()` comparison across all 360 rotations.
 private func fmt(_ v: Double) -> String {
-    let rounded = (v * 1000000.0).rounded() / 1000000.0
+    // `+ 0.0` turns a -0.0 into +0.0 and leaves every other value alone: a value
+    // that rounds to zero is written `0.0`, never `-0.0`, because its sign is
+    // below the precision and is platform noise. Mirrors Rust `fmt`; the
+    // reference's floor(x + 0.5) already writes `0.0`.
+    let rounded = (v * 1000000.0).rounded() / 1000000.0 + 0.0
     if rounded == rounded.rounded(.towardZero) && rounded.truncatingRemainder(dividingBy: 1) == 0 {
         return String(format: "%.1f", rounded)
     }
