@@ -550,6 +550,8 @@ fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::
 /// holds.
 fn seed_panel(engine: &JasEngine, ws: &Workspace, panel_id: &str) {
     if panel_id == crate::panel_scope::COLOUR_PANEL {
+        // Only `mode` (see `seed_colour_mode`): the slice owns the rest.
+        crate::panel_scope::seed_colour_mode(&engine.panel.borrow(), &mut engine.store.borrow_mut());
         return;
     }
     let mut store = engine.store.borrow_mut();
@@ -1006,6 +1008,15 @@ pub unsafe extern "C" fn jas_dispatch_action(
         return JasBytes::empty();
     };
     let params = source.get("params");
+    // Every panel gets its store scope first: an action may write a panel the
+    // shell has never opened (`set_brush_view_mode`, the colour panel's mode),
+    // and `StateStore::set_panel` drops a write to a panel with no scope.
+    // Swift's action runner seeds every panel for the same reason.
+    if let Some(ids) = ws.panels().as_object() {
+        for pid in ids.keys() {
+            seed_panel(engine, &ws, pid);
+        }
+    }
     // The app's scope, no panel's: `engine_scope` with no panel id reads the
     // state and the active document and seeds nothing.
     let scope = crate::panel_scope::engine_scope(
@@ -2331,6 +2342,53 @@ mod tests {
         assert_ne!(before, after, "the toggle moved state.toolbar_visible");
         let _ = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
         assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "and back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE COLOUR PANEL'S MODE SWITCH REACHES THE PLAN (flask's measurement on
+    /// #360, 2026-10-12). `set_color_panel_mode` writes `panel.mode` through
+    /// the store, but the engine gave the colour panel no store scope (its
+    /// state is `PanelState`'s), and `StateStore::set_panel` drops a write to
+    /// a panel with no scope, silently. So every mode switch ran, changed
+    /// nothing, and the plan kept the HSB group.
+    #[test]
+    fn dispatch_set_color_panel_mode_moves_the_plans_slider_group() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let group = |e| -> Vec<String> {
+            let plan: serde_json::Value =
+                serde_json::from_str(&plan_of(e, id, 228, 0)).expect("plan JSON");
+            plan["leaves"].as_array().unwrap().iter()
+                .filter_map(|l| l["id"].as_str())
+                .filter(|i| ["cp_k", "cp_h", "cp_r", "cp_c", "cp_r_ws"].contains(i))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(group(e), ["cp_h"], "the default mode, hsb, before any switch");
+        for (mode, first) in [("rgb", "cp_r"), ("cmyk", "cp_c"), ("grayscale", "cp_k"),
+                              ("web_safe_rgb", "cp_r_ws"), ("hsb", "cp_h")] {
+            let (reply, err) = dispatch(
+                e, &format!(r#"{{"action":"set_color_panel_mode","params":{{"mode":"{mode}"}}}}"#));
+            assert!(!reply.is_empty(), "{mode}: the action ran (error: {err})");
+            assert!(err.is_empty(), "{mode}: a switch that moved the mode is not Unchanged: {err}");
+            assert_eq!(group(e), [first], "{mode}: the plan carries that mode's group alone");
+        }
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The same silent drop, for any panel the shell has not opened: a menu
+    /// action that writes a panel's scope before its plan was ever read wrote
+    /// nowhere. The dispatch now seeds every panel's scope before it runs.
+    #[test]
+    fn dispatch_writes_the_scope_of_a_panel_never_opened() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (reply, err) = dispatch(
+            e, r#"{"action":"set_brush_view_mode","params":{"view_mode":"list"}}"#);
+        assert!(!reply.is_empty(), "the action ran (error: {err})");
+        assert_eq!(engine_of(e).store.borrow().get_panel("brushes_panel_content", "view_mode"),
+                   &serde_json::json!("list"));
         unsafe { jas_engine_free(e) };
     }
 
@@ -3919,10 +3977,12 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The colour panel's `panel.*` is the slice's, and nothing the engine does
-    /// gives it a second home in the store.
+    /// The colour panel's `panel.*` is the slice's. Its store scope holds ONE
+    /// key, `mode` (the key a workspace action writes; `seed_colour_mode`), and
+    /// that key always equals the slice's. Until 2026-10-12 the panel had no
+    /// store scope at all, and every `set_color_panel_mode` was dropped.
     #[test]
-    fn the_colour_panel_never_gets_a_store_scope() {
+    fn the_colour_panels_store_scope_is_mode_alone_and_agrees_with_the_slice() {
         let _counters = crate::ffi_instr::test_lock::lock();
         let id = crate::panel_scope::COLOUR_PANEL;
         let e = jas_engine_new();
@@ -3931,7 +3991,16 @@ mod tests {
         colour_tick(e, "cp_h", serde_json::json!(90));
         let _ = behave(e, id, r#"{"widget":"cp_h","event":"click"}"#);
         let _ = take(unsafe { jas_widget_tree(e, id.as_ptr(), id.len(), std::ptr::null(), 0) });
-        assert!(!engine_of(e).store.borrow().has_panel(id));
+        let scope = |e| engine_of(e).store.borrow().panel_scope(id).cloned().expect("a scope");
+        let keys: Vec<String> = scope(e).keys().cloned().collect();
+        assert_eq!(keys, ["mode"], "no channel gets a second home in the store");
+        // Both directions: an edit through the slice reaches the store, and the
+        // store's value is the slice's.
+        assert_eq!(engine_of(e).panel.borrow_mut().apply_edit("panel.mode", &serde_json::json!("cmyk")),
+                   crate::panel_scope::EditOutcome::Changed);
+        crate::panel_scope::sync_colour_state(&mut engine_of(e).store.borrow_mut(), &engine_of(e).panel.borrow());
+        assert_eq!(scope(e)["mode"], serde_json::json!("cmyk"));
+        assert_eq!(engine_of(e).panel.borrow().mode, "cmyk");
         // The control: the same calls on another panel DO seed it.
         let _ = plan_of(e, ALIGN, 228, 0);
         assert!(engine_of(e).store.borrow().has_panel(ALIGN));
