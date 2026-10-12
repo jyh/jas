@@ -373,6 +373,17 @@ pub fn find_eraser_hit(
 /// De Casteljau). Closed paths are "unwrapped" into a single open
 /// path that runs from the exit point around the non-erased
 /// portion back to the entry point.
+/// Whether an eraser fragment has any length: some command ends away from
+/// the fragment's start. A press that lands ON an open path's first point
+/// enters the eraser at that point, and the "before the entry" fragment is
+/// then `M p L p`, two commands and no length; keeping it left an invisible,
+/// zero-length element behind every such erase (PATH_ERASER_TOOL.md
+/// § Algorithm, step 6). Mirrors the reference's `_fragment_has_extent`.
+fn fragment_has_extent(frag: &[PathCommand]) -> bool {
+    let Some(start) = frag.first().and_then(cmd_endpoint) else { return false };
+    frag.iter().skip(1).filter_map(cmd_endpoint).any(|p| p != start)
+}
+
 pub fn split_path_at_eraser(
     cmds: &[PathCommand],
     hit: &EraserHit,
@@ -454,12 +465,10 @@ pub fn split_path_at_eraser(
             }
         }
         let mut result = Vec::new();
-        if part1.len() >= 2
-            && part1.iter().any(|c| !matches!(c, PathCommand::MoveTo { .. }))
-        {
+        if fragment_has_extent(&part1) {
             result.push(part1);
         }
-        if part2.len() >= 2 {
+        if fragment_has_extent(&part2) {
             result.push(part2);
         }
         result

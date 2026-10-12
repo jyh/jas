@@ -1,0 +1,32 @@
+[
+ {
+  "_doc": "A drag of (+30, +15) screen pixels at zoom 1 pans the view by the same amount. The document does not change; expected_view pins the offsets.",
+  "name": "hand_drag_pans",
+  "setup_svg": "rect_basic.svg",
+  "tool": "hand",
+  "expected_view": {
+   "zoom_level": 1.0,
+   "view_offset_x": 30.0,
+   "view_offset_y": 15.0
+  },
+  "events": [
+   {
+    "kind": "press",
+    "x": 10,
+    "y": 10
+   },
+   {
+    "kind": "move",
+    "x": 40,
+    "y": 25,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 40,
+    "y": 25
+   }
+  ],
+  "expected_json": "hand_drag_pans_expected.json"
+ }
+]

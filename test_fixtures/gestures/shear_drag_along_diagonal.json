@@ -1,0 +1,33 @@
+[
+ {
+  "_doc": "The press at the selected rect's bottom-right corner (72,72) sets the shear AXIS from the reference point (36,36) to the press: the diagonal u = (1,1)/sqrt2 (SHEAR_TOOL.md, Drag). The drag of (+36, 0) has component -36/sqrt2 along perp(u) = (-1,1)/sqrt2, over an axis length of 36*sqrt2, so k = -0.5, and the matrix I + k*u*perp^T is [[1.25, -0.25], [0.25, 0.75]] about (36,36): a = 1.25, b = 0.25, c = -0.25, d = 0.75, e = f = 0.",
+  "name": "shear_drag_along_diagonal",
+  "setup_svg": "rect_basic.svg",
+  "tool": "shear",
+  "selection": [
+   [
+    0,
+    0
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 72,
+    "y": 72
+   },
+   {
+    "kind": "move",
+    "x": 108,
+    "y": 72,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 108,
+    "y": 72
+   }
+  ],
+  "expected_json": "shear_drag_along_diagonal_expected.json"
+ }
+]
