@@ -510,6 +510,25 @@ fn live_panel_state(
             "selected_concept",
             st.concepts_selected.clone().map(J::String).unwrap_or(J::Null),
         )],
+        // The Artboards panel's four keys live in typed slots, written by the
+        // artboards route in `renderer.rs` and read by its body
+        // (`"reference_point": st.artboards_reference_point`). Until 2026-10-12
+        // this scope published none of them, so it read the declared defaults
+        // (`reference_point` "center") after a write had moved them. Nothing
+        // in the panel's menu reads them today; the action corpus's
+        // `expected_panel_scope` did, and found it.
+        "artboards_panel_content" => vec![
+            (
+                "artboards_panel_selection",
+                J::Array(st.artboards_panel_selection.iter().cloned().map(J::String).collect()),
+            ),
+            (
+                "panel_selection_anchor",
+                st.artboards_panel_anchor.clone().map(J::String).unwrap_or(J::Null),
+            ),
+            ("reference_point", s(&st.artboards_reference_point)),
+            ("rearrange_dirty", b(st.artboards_rearrange_dirty)),
+        ],
         "layers_panel_content" => {
             // A HashSet has no order and the bundle's only expression that
             // indexes this list guards on `length == 1`
