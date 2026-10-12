@@ -128,14 +128,18 @@ LEDGER: dict[str, dict[str, str]] = {
         "let (min_x, min_y, w, h) = eye.bounds();":
             "TEST — an assertion inside `mod tests`, not a production reader.",
     },
-    "interpreter/doc_primitives.rs": {
-        "let (bx, by, bw, bh) = child.bounds();":
-            "REACHABLE, UNCONVERTED — click hit-testing, and already on "
-            "BOARD-urgent-two-regressions as half of the TRANSFORM family "
-            "(it also ignores `common.transform`). Both halves are one stone; "
-            "converting only the resolver half would leave it still wrong.",
+    "interpreter/hit_law.rs": {
         "let (bx, by, bw, bh) = elem.bounds();":
-            "REACHABLE, UNCONVERTED — same function, recursive arm.",
+            "REACHABLE, UNCONVERTED — the hit test's box arm (`box_contains`), "
+            "taken only by the leaves the painted-geometry law hits by their "
+            "box: text, and the resolver-backed live kinds. Text carries its "
+            "own coordinates, so it is right there. An instance (Reference / "
+            "Recorded / Generated) still reads its unresolved box, because the "
+            "hit test carries no resolver (SELECTION_TOOL.md § Hit test: "
+            "painted geometry names it as a limit). This row REPLACES the two "
+            "`doc_primitives.rs` rows: their TRANSFORM half is converted (the "
+            "law maps the point through every transform), and the resolver "
+            "half is this one site.",
     },
     "painter/element_render.rs": {
         "elem.bounds()":

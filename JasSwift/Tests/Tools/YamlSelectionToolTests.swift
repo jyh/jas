@@ -18,7 +18,9 @@ private func selectionTool() -> YamlTool? {
 }
 
 private func makeRect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Element {
-    .rect(Rect(x: x, y: y, width: w, height: h))
+    // Filled: the hit test hits PAINTED geometry (SELECTION_TOOL.md
+    // § Hit test: painted geometry), and these cases click inside.
+    .rect(Rect(x: x, y: y, width: w, height: h, fill: Fill(color: .black)))
 }
 
 private func twoRectModel() -> Model {

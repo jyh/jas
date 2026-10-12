@@ -9,7 +9,10 @@ import Foundation
 // MARK: - DocPrimitives
 
 private func docWithRect() -> Document {
-    let rect = Element.rect(Rect(x: 10, y: 10, width: 20, height: 20))
+    // Filled: the hit test hits PAINTED geometry (SELECTION_TOOL.md § Hit
+    // test: painted geometry), and these cases hit inside the rect.
+    let rect = Element.rect(Rect(x: 10, y: 10, width: 20, height: 20,
+                                 fill: Fill(color: .black)))
     return Document(
         layers: [Layer(children: [rect])],
         selectedLayer: 0, selection: []

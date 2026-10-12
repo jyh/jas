@@ -13,6 +13,7 @@ pub mod expr;
 pub mod state_store;
 pub mod effects;
 pub mod doc_primitives;
+pub mod hit_law;
 pub mod point_buffers;
 pub mod anchor_buffers;
 pub mod schema;

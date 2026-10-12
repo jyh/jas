@@ -64,41 +64,36 @@ where
     })
 }
 
-/// `hit_test(x, y)` → `Path | null`. Returns the path of the topmost
-/// unlocked, visible element whose bounding box contains the point.
-/// Matches `hitTestImpl` in `jas_flask/static/js/engine/geometry.mjs`.
+/// `hit_test(x, y)` → `Path | null`. Returns `[li, ci]` of the topmost
+/// unlocked, visible layer child whose PAINTED geometry is under the
+/// point. The law is [`super::hit_law`] (SELECTION_TOOL.md § Hit test:
+/// painted geometry); a group is hit when any child is.
 ///
 /// This is the "flat" variant — stops at direct layer children without
 /// recursing into groups. Selection tool uses it because it wants to
 /// select whole groups on click. For the per-element-through-groups
 /// behavior (used by InteriorSelection), see [`hit_test_deep`].
 pub fn hit_test(x: f64, y: f64) -> Value {
+    use super::hit_law;
+    use crate::geometry::element::Visibility;
     with_doc(Value::Null, |doc| {
-        use crate::geometry::element::Visibility;
         // Top-down over LAYERS too, not just over each layer's children: the
         // last layer in document order paints last, so it is the one under
         // the cursor. Mirrors JasSwift `docHitTest` and the live reference
         // `workspace_interpreter/doc_primitives.hit_test`.
         for (li, layer) in doc.layers.iter().enumerate().rev() {
             // A locked layer makes its whole subtree non-interactable by
-            // inheritance (the lock is NOT materialized onto children); skip
-            // it like the invisible case. Mirrors Swift/OCaml/Python.
-            if layer.locked() || layer.visibility() == Visibility::Invisible {
+            // inheritance (the lock is NOT materialized onto children).
+            let Some(vis) = hit_law::blocks_hit(layer, Visibility::Preview) else {
                 continue;
-            }
+            };
+            let Some((lx, ly)) = hit_law::to_local(layer, x, y) else {
+                continue;
+            };
             if let Some(children) = layer.children() {
                 // Top-down: last-drawn element is hit first.
                 for (ci, child) in children.iter().enumerate().rev() {
-                    if child.locked() {
-                        continue;
-                    }
-                    if std::cmp::min(layer.visibility(), child.visibility())
-                        == Visibility::Invisible
-                    {
-                        continue;
-                    }
-                    let (bx, by, bw, bh) = child.bounds();
-                    if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
+                    if hit_law::painted_hit(child, lx, ly, vis) {
                         return Value::Path(vec![li, ci]);
                     }
                 }
@@ -109,71 +104,15 @@ pub fn hit_test(x: f64, y: f64) -> Value {
 }
 
 /// `hit_test_deep(x, y)` → `Path | null`. Recurses into groups so the
-/// returned path points at the deepest leaf element under the cursor.
-/// Matches `hit_recursive` in the deleted
-/// `jas_dioxus/src/tools/interior_selection_tool.rs`.
+/// returned path points at the deepest PAINTED leaf under the cursor.
 pub fn hit_test_deep(x: f64, y: f64) -> Value {
-    use crate::geometry::element::{Element, Visibility};
-    fn recurse(
-        elem: &Element,
-        path: Vec<usize>,
-        ancestor_vis: Visibility,
-        x: f64,
-        y: f64,
-    ) -> Option<Vec<usize>> {
-        let effective = std::cmp::min(ancestor_vis, elem.visibility());
-        if effective == Visibility::Invisible {
-            return None;
-        }
-        if elem.is_group_or_layer() {
-            if let Some(children) = elem.children() {
-                for (i, child) in children.iter().enumerate().rev() {
-                    if child.locked() {
-                        continue;
-                    }
-                    let mut child_path = path.clone();
-                    child_path.push(i);
-                    if let Some(result) =
-                        recurse(child, child_path, effective, x, y)
-                    {
-                        return Some(result);
-                    }
-                }
-            }
-            return None;
-        }
-        let (bx, by, bw, bh) = elem.bounds();
-        if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
-            Some(path)
-        } else {
-            None
-        }
-    }
+    use super::hit_law;
+    use crate::geometry::element::Visibility;
     with_doc(Value::Null, |doc| {
-        // Top-down over LAYERS too — see the note in `hit_test`. Mirrors
-        // JasSwift `docHitTestDeep` and the live Python reference.
+        // Top-down over LAYERS too — see the note in `hit_test`.
         for (li, layer) in doc.layers.iter().enumerate().rev() {
-            let layer_vis = layer.visibility();
-            // A locked layer's subtree is non-interactable by inheritance
-            // (lock is not materialized onto children); skip the whole layer.
-            if layer.locked() || layer_vis == Visibility::Invisible {
-                continue;
-            }
-            if let Some(children) = layer.children() {
-                for (ci, child) in children.iter().enumerate().rev() {
-                    if child.locked() {
-                        continue;
-                    }
-                    let child_vis = std::cmp::min(layer_vis, child.visibility());
-                    if child_vis == Visibility::Invisible {
-                        continue;
-                    }
-                    if let Some(path) =
-                        recurse(child, vec![li, ci], child_vis, x, y)
-                    {
-                        return Value::Path(path);
-                    }
-                }
+            if let Some(path) = hit_law::deep_hit(layer, vec![li], x, y, Visibility::Preview) {
+                return Value::Path(path);
             }
         }
         Value::Null

@@ -6687,7 +6687,7 @@ mod tests {
     //
     // Fixture: source rect [0,0] = green fill (0,0.6,0.2), target rect
     // [0,1] = empty fill, both at the identity view so screen (5,5) hits
-    // the source and screen (25,5) hits the target.
+    // the source and screen (21,5) hits the target's stroke.
 
     /// Load the real Eyedropper tool from the embedded workspace bundle.
     fn eyedropper_yaml_tool() -> Option<YamlTool> {
@@ -6784,10 +6784,13 @@ mod tests {
             "a sample with no selection must not mutate other elements",
         );
 
-        // Now Alt+click the empty target [0,1] at screen (25,5) →
-        // apply_loaded writes the cached green into the target.
-        tool.on_press(&mut model, 25.0, 5.0, false, true);
-        tool.on_release(&mut model, 25.0, 5.0, false, true);
+        // Now Alt+click the empty target [0,1] ON ITS STROKE at screen
+        // (21,5) → apply_loaded writes the cached green into the target.
+        // The hit test hits painted geometry (SELECTION_TOOL.md § Hit
+        // test: painted geometry), so the unfilled target's middle,
+        // (25,5), is not a hit.
+        tool.on_press(&mut model, 21.0, 5.0, false, true);
+        tool.on_release(&mut model, 21.0, 5.0, false, true);
 
         let target = model.document().get_element(&vec![0, 1]).unwrap();
         let fill = target.fill().expect("apply_loaded wrote the cached fill");

@@ -1244,7 +1244,7 @@ SVG-invisible.
 persistence, not a gap this stone left.** `workspace_interpreter/` has **no SVG
 codec at all** — measured: `svg` appears in four files and every occurrence is
 prose in a comment. It *does* model lock (`common.locked` on its document dicts,
-read by `doc_primitives._child_is_locked` and reachable from expressions as
+read by `hit_law.blocks_hit` (formerly `doc_primitives._child_is_locked`) and reachable from expressions as
 `element_at(path(0)).common.locked`), so it can adjudicate lock SEMANTICS and
 already prunes locked subtrees in `hit_test`. It cannot adjudicate lock
 PERSISTENCE, in this or any codec. For Stone 4 that is fine: enforcement is
