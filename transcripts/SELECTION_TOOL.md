@@ -8,9 +8,61 @@ what granularity of selection a marquee produces.
 
 | Tool                | Shortcut | Hit-test                    | Marquee granularity       |
 |---------------------|----------|-----------------------------|---------------------------|
-| Selection           | V        | Top-level layer children    | Whole elements            |
-| Interior Selection  | —        | Recurses into groups        | Whole elements            |
+| Selection           | V        | Top-level layer children, painted geometry | Whole elements |
+| Interior Selection  | —        | Recurses into groups, painted geometry     | Whole elements |
 | Partial Selection   | A        | Handles + control points    | Control points            |
+
+## Hit test: painted geometry
+
+A click hits what is painted, not a bounding box. This is the rule
+for `hit_test` (Selection, Magic Wand, Eyedropper) and `hit_test_deep`
+(Interior Selection). In the owner's words: *"the hit is on painted
+geometry, not bounding box. In normal mode, this includes fills, but
+for example, clicking in the middle of an unfilled rectangle will not
+select it. In outline display mode, there are no displayed fills, only
+strokes and anchor points can be selected."*
+
+The point is in document coordinates. Elements are tried topmost
+first: layers in reverse order, and the children of each layer or
+group in reverse order. An element that is locked, or whose effective
+visibility (the minimum of its own and its ancestors') is invisible,
+is never hit, and neither is anything inside it.
+
+- **Transforms.** Each element's own transform, and every ancestor's,
+  places its geometry. The point is mapped back through them before
+  the tests below, so the tolerance is measured in the element's own
+  coordinates.
+- **Group, Layer.** Hit when any child is hit. The group's empty
+  interior is not painted, so a click there passes through to what
+  lies below.
+- **Fill (preview mode only).** An element with a fill or a fill
+  gradient is hit when the point is inside its filled area: a rect,
+  circle, ellipse or polygon by its interior; a path or polyline as if
+  each subpath were closed, using the path's fill rule (nonzero by
+  default; even-odd leaves holes). A line has no fill.
+- **Stroke (preview mode).** An element with a stroke is hit when the point is within `HIT_TOLERANCE` of the
+  painted band: within `width / 2` of the outline for a centred
+  stroke, within `width` for an inside or outside stroke.
+- **Outline mode.** No fills and no stroke widths are displayed, so
+  only the outline itself is hit: within `HIT_TOLERANCE` of it, paint
+  or no paint. Anchor points lie on the outline, so they are covered.
+- **Text, text on a path.** Hit by their bounding box in both modes;
+  text renders as preview even in outline mode.
+- **Compound shape.** Its evaluated rings stand in for its outline,
+  with the compound's own fill and stroke, even-odd.
+- **Reference, recorded and generated elements.** Hit by their
+  bounding box. These need a resolver to know their geometry, and the
+  hit test does not carry one.
+
+`HIT_TOLERANCE` is 3 document units. Curves are flattened with the
+path flattener's 20 steps per segment; ellipses and circles are tested
+analytically for the fill and as a 64-sided polygon for the outline.
+
+**Known limits** (deliberate, so a reader does not fill them in): the
+rounded corners of a rect are tested as square corners; dashes, caps,
+joins, arrowheads and variable-width profiles do not change the
+stroke band; the tolerance is in document units, so it looks smaller
+on screen when zoomed out.
 
 ## Selection tool
 

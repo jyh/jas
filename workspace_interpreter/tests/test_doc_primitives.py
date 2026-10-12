@@ -37,11 +37,18 @@ class TestMath:
 # ── Doc primitives ───────────────────────────────────────
 
 
+# The hit test hits PAINTED geometry (SELECTION_TOOL.md § Hit test:
+# painted geometry), so a rect these cases hit inside carries a fill.
+def _paint():
+    from geometry.element import Color, Fill
+    return Fill(color=Color.BLACK)
+
+
 def _doc_with_rect():
     from document.document import Document
     from geometry.element import Layer, Rect as RectElem
     layer = Layer(name="L", children=(
-        RectElem(x=10.0, y=10.0, width=20.0, height=20.0),
+        RectElem(x=10.0, y=10.0, width=20.0, height=20.0, fill=_paint()),
     ))
     return Document(layers=(layer,))
 
@@ -58,10 +65,10 @@ def _doc_two_overlapping_layers():
     from document.document import Document
     from geometry.element import Layer, Rect as RectElem
     bottom = Layer(name="Background", children=(
-        RectElem(x=0.0, y=0.0, width=40.0, height=40.0),
+        RectElem(x=0.0, y=0.0, width=40.0, height=40.0, fill=_paint()),
     ))
     top = Layer(name="Foreground", children=(
-        RectElem(x=10.0, y=10.0, width=20.0, height=20.0),
+        RectElem(x=10.0, y=10.0, width=20.0, height=20.0, fill=_paint()),
     ))
     return Document(layers=(bottom, top))
 

@@ -66,90 +66,46 @@ class with_doc:
         return False
 
 
-def _child_is_locked(elem) -> bool:
-    # Elements expose ``.locked`` consistently via their CommonProps.
-    try:
-        return bool(elem.locked)
-    except AttributeError:
-        return False
-
-
-def _child_visibility_invisible(elem) -> bool:
-    try:
-        from geometry.element import Visibility
-        return elem.visibility == Visibility.INVISIBLE
-    except Exception:
-        return False
-
-
-def _child_bounds(elem):
-    try:
-        return elem.bounds()
-    except TypeError:
-        return elem.bounds
-
-
 def hit_test(x: float, y: float):
-    """Top-level layer-child scan. Returns ``[li, ci]`` path or
-    ``None`` on miss / no registered doc."""
+    """Top-level layer-child scan. Returns ``[li, ci]`` of the topmost
+    child whose PAINTED geometry is under the point, or ``None`` on
+    miss / no registered doc. The law is ``hit_law`` (SELECTION_TOOL.md
+    § Hit test: painted geometry); a group is hit when any child is."""
+    from workspace_interpreter import hit_law
     if _current is None:
         return None
-    doc = _current
-    layers = doc.layers
+    layers = _current.layers
     for li in range(len(layers) - 1, -1, -1):
         layer = layers[li]
-        if _child_is_locked(layer) or _child_visibility_invisible(layer):
+        vis = hit_law.blocks_hit(layer, _layer_cap())
+        if vis is None:
+            continue
+        local = hit_law.to_local(layer, x, y)
+        if local is None:
             continue
         children = getattr(layer, "children", ())
         for ci in range(len(children) - 1, -1, -1):
-            child = children[ci]
-            if _child_is_locked(child) or _child_visibility_invisible(child):
-                continue
-            b = _child_bounds(child)
-            bx, by, bw, bh = b[0], b[1], b[2], b[3]
-            if bx <= x <= bx + bw and by <= y <= by + bh:
+            if hit_law.painted_hit(children[ci], local[0], local[1], vis):
                 return [li, ci]
     return None
 
 
-def _recurse_deep(path: list[int], elem, x: float, y: float):
-    if _child_is_locked(elem) or _child_visibility_invisible(elem):
-        return None
-    children = getattr(elem, "children", None)
-    if children is not None and len(children) > 0 and not _elem_is_leaf(elem):
-        for i in range(len(children) - 1, -1, -1):
-            r = _recurse_deep(path + [i], children[i], x, y)
-            if r is not None:
-                return r
-        return None
-    b = _child_bounds(elem)
-    bx, by, bw, bh = b[0], b[1], b[2], b[3]
-    if bx <= x <= bx + bw and by <= y <= by + bh:
-        return path
-    return None
-
-
-def _elem_is_leaf(elem) -> bool:
-    # Group and Layer are the only containers; treat everything else
-    # as a leaf even if it happens to expose a `.children` attr.
-    try:
-        from geometry.element import Group, Layer
-        return not isinstance(elem, (Group, Layer))
-    except Exception:
-        return True
-
-
 def hit_test_deep(x: float, y: float):
-    """Recurse into groups; returns the deepest-leaf path."""
+    """Recurse into groups; returns the path of the deepest painted leaf."""
+    from workspace_interpreter import hit_law
     if _current is None:
         return None
-    doc = _current
-    layers = doc.layers
+    layers = _current.layers
     for li in range(len(layers) - 1, -1, -1):
-        r = _recurse_deep([li], layers[li], x, y)
+        r = hit_law.deep_hit(layers[li], [li], x, y, _layer_cap())
         if r is not None:
             return r
     return None
+
+
+def _layer_cap():
+    from geometry.element import Visibility
+    return Visibility.PREVIEW
 
 
 def selection_contains(path) -> bool:
