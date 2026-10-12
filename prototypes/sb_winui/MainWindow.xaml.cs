@@ -230,10 +230,11 @@ public sealed partial class MainWindow : Window
     // =======================================================================
 
     private bool _dockWanted;
+    private bool _dockCollapseDone;
     private string _dockName = "";
     private StackPanel? _dockStack;
 
-    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs);
+    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron);
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
 
     private PaneView? DockGroupView(string key) => _dockGroups.TryGetValue(key, out var g) ? g.View : null;
@@ -248,6 +249,22 @@ public sealed partial class MainWindow : Window
             tab.FontWeight = on ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal;
             tab.Opacity = on ? 1.0 : 0.6;
         }
+    }
+
+    /// <summary>
+    /// A group's collapse chevron (the owner's note 3, 2026-10-11): collapsed hides
+    /// the group's body and keeps its header, as the dock model's
+    /// `panel_group.collapsed` does on the Mac. The state is the dock model's, the
+    /// shell's own, never the core's. The row READS the body's visibility after
+    /// the toggle, so a chevron that hides nothing says so (Q6.DC).
+    /// </summary>
+    private void SetDockCollapsed(string key, bool collapsed, string via)
+    {
+        if (!_dockGroups.TryGetValue(key, out var g)) { return; }
+        g.Body.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        g.Chevron.Content = collapsed ? "▸" : "▾";
+        var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
+        Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
     }
 
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
@@ -300,6 +317,19 @@ public sealed partial class MainWindow : Window
                     HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
                     VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
                 };
+                var groupKey = key;
+                var chevron = new Button
+                {
+                    Content = "▾",
+                    FontSize = 11,
+                    Padding = new Thickness(6, 2, 6, 2),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
+                ToolTipService.SetToolTip(chevron, "Collapse/Expand");
+                chevron.Click += (_, _) => SetDockCollapsed(groupKey, scroll.Visibility == Visibility.Visible, "hand");
+                tabs.Children.Add(chevron);
                 var body = new StackPanel();
                 body.Children.Add(tabs);
                 body.Children.Add(scroll);
@@ -318,11 +348,28 @@ public sealed partial class MainWindow : Window
                     Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
                     continue;
                 }
-                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList);
+                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron);
                 MarkDockTab(key, ids[active]);
             }
             Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
                  + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
+            // SB_DOCK_COLLAPSE=<group key>: the chevron replayed through its own
+            // method, collapse then expand (Q6.DC). An unknown key is refused by name.
+            var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");
+            if (!_dockCollapseDone && !string.IsNullOrWhiteSpace(collapseKnob))
+            {
+                _dockCollapseDone = true;
+                var ck = collapseKnob.Trim();
+                if (_dockGroups.ContainsKey(ck))
+                {
+                    SetDockCollapsed(ck, true, "synth");
+                    SetDockCollapsed(ck, false, "synth");
+                }
+                else
+                {
+                    Report($"RUSTFAIL DOCK COLLAPSE REFUSED key={ck} -- the dock has {_dockGroups.Count} group(s)");
+                }
+            }
         }
         catch (Exception ex)
         {
