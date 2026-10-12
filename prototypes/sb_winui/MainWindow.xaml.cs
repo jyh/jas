@@ -1767,6 +1767,26 @@ public sealed partial class MainWindow : Window
                  + $"delivered={_menuDelivered} coalesced={_menuCoalesced} "
                  + $"shortcuts-unparsed={_shortcutsUnparsed}");
             _menuDrawnSeq = snap.Seq;
+
+            // SB_MENU_SYNTH=<menu item id>: ONE choice of that item, after the
+            // first menubar is built, through the method a person's click
+            // reaches (`Invoke`). An id the menubar does not hold is refused by
+            // name, never ignored.
+            var menuSynth = Environment.GetEnvironmentVariable("SB_MENU_SYNTH");
+            if (!_menuSynthDone && !string.IsNullOrWhiteSpace(menuSynth))
+            {
+                _menuSynthDone = true;
+                var synthId = menuSynth.Trim();
+                if (_menuActions.TryGetValue(synthId, out var synthAction))
+                {
+                    Report($"MENU SYNTH item={synthId} action={synthAction}");
+                    Invoke(synthAction, synthId);
+                }
+                else
+                {
+                    Report($"RUSTFAIL MENU SYNTH REFUSED item={synthId} -- the menubar holds no such item ({_menuActions.Count} items)");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -1785,6 +1805,10 @@ public sealed partial class MainWindow : Window
     /// checked}`. A `path` of length 1 is a top-level menu, length 2 an entry in
     /// it, length 3 an entry in a submenu.
     /// </summary>
+    /// <summary>Each built menu item's action, by its id: what SB_MENU_SYNTH reads.</summary>
+    private readonly Dictionary<string, string> _menuActions = new(StringComparer.Ordinal);
+    private bool _menuSynthDone;
+
     private (int Items, int Enabled) BuildMenu(MenuSnapshot snap)
     {
         // PER REBUILD, not cumulative: the row reports what THIS menubar could
@@ -1872,7 +1896,9 @@ public sealed partial class MainWindow : Window
                     };
                     var accel = Accelerator(Str(node, "shortcut"));
                     if (accel is not null) { item.KeyboardAccelerators.Add(accel); }
-                    item.Click += (_, _) => Invoke(action);
+                    var itemId = Str(node, "id") ?? "";
+                    if (itemId.Length > 0) { _menuActions[itemId] = action; }
+                    item.Click += (_, _) => Invoke(action, itemId);
                     AddTo(top, sub, item);
                     break;
 
@@ -1962,7 +1988,7 @@ public sealed partial class MainWindow : Window
     /// evaluating an `enabled_when`; the core decided what is enabled before
     /// this item was ever drawn.
     /// </summary>
-    private void Invoke(string action)
+    private void Invoke(string action, string itemId = "")
     {
         switch (action)
         {
@@ -1984,7 +2010,11 @@ public sealed partial class MainWindow : Window
                 Close();
                 break;
             default:
-                Report($"ACTION UNIMPLEMENTED {action}");
+                // Every other item runs IN THE ENGINE by its id (the owner's notes,
+                // 2026-10-11: the menus drew live and ran five items). What the
+                // engine cannot run is refused by class on its own row.
+                if (itemId.Length == 0) { Report($"ACTION UNIMPLEMENTED {action} -- no menu item id"); break; }
+                _canvas.MenuAction(new MenuActionCmd { ItemId = itemId, Action = action });
                 break;
         }
     }
