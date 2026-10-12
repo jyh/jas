@@ -498,3 +498,78 @@ internal sealed record PaneOptions(List<PaneOption> Rows, int Refused)
 
 /// <summary>The panels the pane can show, in the core's order, and how many rows could not be offered.</summary>
 internal sealed record PanelChoices(List<(string Id, string Label)> Rows, int Skipped);
+
+/// <summary>
+/// Step 3 (2026-10-11): which panes a run opens, from its knobs. Pure, so
+/// `sb_winui_tests` drives it.
+/// </summary>
+internal static class PaneKnobs
+{
+    /// <summary>The toolbar is ON BY DEFAULT under `app`: `SB_TOOLBAR=0` is the
+    /// one way off, and any other value, or none, is on. Off `app` a value that
+    /// asks for it is "refused" (refused by name, never ignored), and `0`, which
+    /// asks for nothing, is "off". Blank is unset, the same predicate as every
+    /// other pane knob.</summary>
+    internal static string Toolbar(string? knob, bool appScene)
+    {
+        var v = string.IsNullOrWhiteSpace(knob) ? null : knob.Trim();
+        if (v == "0") return "off";
+        if (appScene) return "on";
+        return v is null ? "off" : "refused";
+    }
+}
+
+/// <summary>
+/// A menu label as `menubar.yaml` writes it, as WinUI must show it. Pure, so
+/// `sb_winui_tests` drives it.
+/// </summary>
+internal static class MenuWire
+{
+    /// <summary>`&File` is "File" with access key "F". `&&` is a literal `&`;
+    /// the FIRST single `&` before a character marks the key; a trailing `&`
+    /// marks nothing and is kept. WinUI parses none of this itself, so without
+    /// it the in-window MenuBar showed `&File` (his note 4a, 2026-10-11).</summary>
+    internal static (string Text, string Key) Label(string? raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return ("", "");
+        var text = new System.Text.StringBuilder(raw.Length);
+        var key = "";
+        for (var i = 0; i < raw.Length; i++)
+        {
+            if (raw[i] == '&' && i + 1 < raw.Length)
+            {
+                if (raw[i + 1] == '&') { text.Append('&'); i++; continue; }
+                if (key == "") key = raw[i + 1].ToString().ToUpperInvariant();
+                continue;
+            }
+            text.Append(raw[i]);
+        }
+        return (text.ToString(), key);
+    }
+}
+
+/// <summary>
+/// SB_TOOL, read against the core's own tool list. Pure, so `sb_winui_tests`
+/// drives it.
+/// </summary>
+internal static class ToolKnob
+{
+    /// <summary>The index `knob` names in `names` (the core's `jas_tool_name`
+    /// list): a decimal index below the count, or a tool name compared
+    /// ordinally. -1 refuses it, and the caller refuses the run by name; a run
+    /// that asked for a tool must never silently get selection.</summary>
+    internal static int Resolve(string? knob, IReadOnlyList<string> names)
+    {
+        var v = knob?.Trim() ?? "";
+        if (v.Length == 0) return -1;
+        if (v.All(char.IsAsciiDigit))
+        {
+            return int.TryParse(v, out var i) && i < names.Count ? i : -1;
+        }
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], v, StringComparison.Ordinal)) return i;
+        }
+        return -1;
+    }
+}

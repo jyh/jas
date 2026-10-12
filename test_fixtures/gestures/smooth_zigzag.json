@@ -1,0 +1,33 @@
+[
+ {
+  "_doc": "The selected path is a 16-segment zigzag of straight lines, 6 units high. Every point is within the 100-unit smoothing radius, so the pass refits the run with error 8. The path keeps its MoveTo (the refit never replaces one; before this case it did, and the smoothed path started from an implied origin) and ends with fewer commands than it had: 17 become 15.",
+  "name": "smooth_zigzag",
+  "setup_svg": "zigzag_path.svg",
+  "tool": "smooth",
+  "selection": [
+   [
+    0,
+    0
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 60,
+    "y": 27
+   },
+   {
+    "kind": "move",
+    "x": 62,
+    "y": 27,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 62,
+    "y": 27
+   }
+  ],
+  "expected_json": "smooth_zigzag_expected.json"
+ }
+]

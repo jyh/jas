@@ -541,15 +541,18 @@ pub fn run_widget_behavior(
     if chosen == 0 {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(panel_id, &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
+    run_batch(Some(panel_id), &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
               host)
 }
 
 /// Pre-flight `batch` on copies, then run it for real (module doc, steps 4
-/// and 5). `event` is what the batch reads as `event.*`.
+/// and 5). `event` is what the batch reads as `event.*`. `panel_id` is the
+/// panel whose widget ran it, made the ACTIVE panel; `None` for a batch no
+/// panel ran (a menu action, [`run_action`]), which leaves the active panel
+/// as it was.
 #[allow(clippy::too_many_arguments)]
 fn run_batch(
-    panel_id: &str,
+    panel_id: Option<&str>,
     batch: &[Value],
     event: Value,
     scope: &Value,
@@ -577,7 +580,7 @@ fn run_batch(
     // pre-flight and on the live store only once the pre-flight passes: a
     // refusal changes nothing, not even which panel is active.
     let mut dry_store = store.clone();
-    dry_store.set_active_panel(Some(panel_id));
+    if panel_id.is_some() { dry_store.set_active_panel(panel_id); }
     let mut dry_model = model.clone();
     let preflight = run_effects_hosted(batch, &ctx, &mut dry_store, Some(&mut dry_model),
                                        Some(actions), Some(dialogs), None, &mut *host);
@@ -585,7 +588,7 @@ fn run_batch(
         return Err(Refusal::new("PlatformEffect", unhandled_detail(first)));
     }
 
-    store.set_active_panel(Some(panel_id));
+    if panel_id.is_some() { store.set_active_panel(panel_id); }
     let state_before = store.eval_context();
     let generation = model.generation();
     let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
@@ -650,6 +653,34 @@ fn bind_write(node: &Value, spec: &Value, panel_id: &str) -> Vec<Value> {
     out
 }
 
+/// Run one workspace ACTION by id, as a menu item runs it: the one-step batch
+/// `[{"dispatch": {action, params}}]`, through the same pre-flight and run as
+/// a widget's behavior ([`run_batch`]), with no panel made active. An id the
+/// workspace does not define is refused as `UnknownAction` before anything
+/// runs, naming it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_action(
+    action: &str,
+    params: Option<&Value>,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    if actions.get(action).is_none() {
+        return Err(Refusal::new("UnknownAction", action.to_string()));
+    }
+    let mut d = Map::new();
+    d.insert("action".into(), Value::String(action.to_string()));
+    if let Some(p) = params {
+        d.insert("params".into(), p.clone());
+    }
+    let batch = vec![json!({"dispatch": Value::Object(d)})];
+    run_batch(None, &batch, json!({}), scope, store, model, actions, dialogs, host)
+}
+
 /// `event.*` for a value event: the modifiers, plus `value`.
 fn value_event(ev: &UserEvent, value: Value) -> Value {
     let mut event = ev.modifiers.clone();
@@ -692,7 +723,7 @@ fn commit_value(
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+    run_batch(Some(panel_id), &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
 }
 
@@ -724,7 +755,7 @@ fn press(
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+    run_batch(Some(panel_id), &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
 }
 
@@ -785,7 +816,7 @@ fn pick(
             r.insert("item".into(), item.clone());
         }
     }
-    run_batch(panel_id, &batch, value_event(ev, Value::String(named.clone())), &item_scope,
+    run_batch(Some(panel_id), &batch, value_event(ev, Value::String(named.clone())), &item_scope,
               store, model, actions, dialogs, host)
 }
 

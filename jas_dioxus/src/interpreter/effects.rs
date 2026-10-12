@@ -479,9 +479,18 @@ fn run_one<'h>(
     // toggle: state_key
     if let Some(key_val) = effect.get("toggle") {
         let key = key_val.as_str().unwrap_or("");
-        // Handle text interpolation for constructed keys like {{param.pane}}_visible
+        // Handle text interpolation for constructed keys like {{param.pane}}_visible,
+        // against the store AND the effect's context (`param`, `event`), as the
+        // reference does (`store.eval_context(ctx)`) and as `eval_expr` merges:
+        // against the store alone `param.pane` was empty and the key "_visible".
         let resolved_key = if key.contains("{{") {
-            super::expr::eval_text(key, &store.eval_context())
+            let mut text_ctx = store.eval_context();
+            if let (serde_json::Value::Object(base), serde_json::Value::Object(extra)) = (&mut text_ctx, ctx) {
+                for (k, v) in extra {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+            super::expr::eval_text(key, &text_ctx)
         } else {
             key.to_string()
         };
@@ -6343,8 +6352,19 @@ fn path_smooth_at_cursor(
             (Some(f), Some(l)) => (f, l),
             _ => continue,
         };
-        let first_cmd = cmd_map[first_flat];
-        let last_cmd = cmd_map[last_flat];
+        // The refit never replaces a MoveTo (SMOOTH_TOOL.md § Algorithm,
+        // step 3): when the cursor reaches a path's first point the range
+        // starts at command 1, so the MoveTo survives as the prefix. Before
+        // this the range began at 0 and the smoothed path lost its MoveTo.
+        // Likewise it stops before a later MoveTo, so two subpaths are
+        // never refitted into one.
+        let first_cmd = cmd_map[first_flat].max(1);
+        let mut last_cmd = cmd_map[last_flat];
+        if let Some(m) = (first_cmd + 1..=last_cmd)
+            .find(|&i| matches!(path_elem.d.get(i), Some(PathCommand::MoveTo { .. })))
+        {
+            last_cmd = m - 1;
+        }
         if first_cmd >= last_cmd {
             continue;
         }
@@ -6924,6 +6944,21 @@ mod tests {
         let effects = vec![serde_json::json!({"toggle": "flag"})];
         run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
         assert_eq!(store.get("flag"), &serde_json::json!(false));
+    }
+
+    #[test]
+    fn toggle_interpolates_its_key_against_the_effect_context_as_the_reference_does() {
+        // `toggle_pane`'s effect is `toggle: "{{param.pane}}_visible"`. The
+        // reference evaluates the key with `store.eval_context(ctx)`, so the
+        // action's `param` is seen; read against the store alone it resolved
+        // to "_visible" and Window > Toolbar toggled nothing (2026-10-11).
+        let mut store = StateStore::new();
+        store.set("toolbar_visible", serde_json::json!(true));
+        let effects = vec![serde_json::json!({"toggle": "{{param.pane}}_visible"})];
+        run_effects(&effects, &serde_json::json!({"param": {"pane": "toolbar"}}), &mut store,
+                    None, None, None, None);
+        assert_eq!(store.get("toolbar_visible"), &serde_json::json!(false));
+        assert_eq!(store.get("_visible"), &serde_json::Value::Null, "no key built from an empty param");
     }
 
     #[test]

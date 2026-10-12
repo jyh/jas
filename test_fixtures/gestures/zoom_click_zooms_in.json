@@ -1,0 +1,26 @@
+[
+ {
+  "_doc": "A plain click zooms in by the preference zoom_step (1.2) anchored at the click, so the document point under the cursor stays put: offset = 40 - 40 * 1.2 = -8 on each axis.",
+  "name": "zoom_click_zooms_in",
+  "setup_svg": "rect_basic.svg",
+  "tool": "zoom",
+  "expected_view": {
+   "zoom_level": 1.2,
+   "view_offset_x": -8.0,
+   "view_offset_y": -8.0
+  },
+  "events": [
+   {
+    "kind": "press",
+    "x": 40,
+    "y": 40
+   },
+   {
+    "kind": "release",
+    "x": 40,
+    "y": 40
+   }
+  ],
+  "expected_json": "zoom_click_zooms_in_expected.json"
+ }
+]

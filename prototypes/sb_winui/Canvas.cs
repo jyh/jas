@@ -271,6 +271,16 @@ internal sealed class PanelOpenCmd : Cmd
 /// A person clicked a panel control. The shell reports WHICH control and the
 /// modifier keys; the engine runs what the panel spec declares (BL1, A6).
 /// </summary>
+/// <summary>
+/// A person chose a menu item the shell does not run itself. The shell reports
+/// WHICH item; the engine runs its action (`jas_dispatch_action`, BL1).
+/// </summary>
+internal sealed class MenuActionCmd : Cmd
+{
+    internal string ItemId = "";
+    internal string Action = "";
+}
+
 internal sealed class PanelClickCmd : Cmd
 {
     internal string PanelId = "";
@@ -1241,6 +1251,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
+                    break;
+
+                case MenuActionCmd ma:
+                    if (ApplyMenuAction(ma)) { dirty = true; cause = "menu"; }
                     break;
 
                 case PanelSynthCmd ps:
@@ -4266,6 +4280,53 @@ internal sealed unsafe class Canvas : IDisposable
     internal volatile string? PanelList;
 
     internal void PanelClick(PanelClickCmd click) => _queue.Add(click);
+
+    internal void MenuAction(MenuActionCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>
+    /// A menu item's action, run by the ENGINE (`jas_dispatch_action`). A refusal
+    /// is written by its class (an action the spec gives only a `log:`, a dialog
+    /// the shell does not build, an effect no engine runs), never as a silent
+    /// no-op; a run re-reads the menus and every pane, as a click does.
+    /// </summary>
+    private bool ApplyMenuAction(MenuActionCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        var head = $"item={cmd.ItemId} action={cmd.Action}";
+        var json = System.Text.Encoding.UTF8.GetBytes(
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["menu_item"] = cmd.ItemId }));
+        var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
+        var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+        if (reply.Length == 0)
+        {
+            _report(channel.Length == 0
+                ? $"RUSTFAIL MENU ACTION SILENT {head} -- an empty reply and an empty error channel {Tids()}"
+                : $"MENU ACTION REFUSED {head} channel={channel} {Tids()}");
+            return false;
+        }
+        bool docChanged;
+        int changedRows;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
+            changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL MENU ACTION REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
+            return false;
+        }
+        if (docChanged) { SetDirty(true); }
+        ApplyMenuRefresh("menu");
+        ApplyPanelRefresh("menu");
+        ApplyPanesRefresh("menu");
+        _panelStale = false;
+        _report($"MENU ACTION RAN {head} outcome={(channel.Length == 0 ? "changed" : "unchanged")} "
+              + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
+              + $"channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
+        return docChanged;
+    }
 
     /// <summary>Queue Q6's replay on <paramref name="widget"/> (W2-6). See <see cref="ApplyPanelSynth"/>.</summary>
     internal void PanelSynth(string panelId, string widget) =>

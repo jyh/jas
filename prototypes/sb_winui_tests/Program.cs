@@ -709,6 +709,53 @@ static class Program
         Eq("snap: a pen's sub-pixel position is kept", "54.25", PointerWire.Snap(54.25).ToString("R"));
         Eq("snap: just outside the window is kept", "54.002", PointerWire.Snap(54.002).ToString("R"));
         Eq("snap: a negative position (a drag off the canvas) snaps too", "-3", PointerWire.Snap(-3.000004).ToString("R"));
+        // -- STEP 3: THE TOOLBAR IS ON BY DEFAULT under `app` (2026-10-11) -----
+        // `SB_TOOLBAR=0` is the one way off; any other value, or none, is on.
+        // Off `app` the old refusal stands for a value that ASKS for it, and
+        // `0` (asking for nothing) is never refused.
+        Eq("toolbar: unset under app is ON (the default)", "on", PaneKnobs.Toolbar(null, true));
+        Eq("toolbar: blank under app is unset, so ON", "on", PaneKnobs.Toolbar("  ", true));
+        Eq("toolbar: 0 under app is OFF", "off", PaneKnobs.Toolbar("0", true));
+        Eq("toolbar: 0 with whitespace under app is OFF", "off", PaneKnobs.Toolbar(" 0 ", true));
+        Eq("toolbar: 1 under app is ON", "on", PaneKnobs.Toolbar("1", true));
+        Eq("toolbar: unset off app is OFF, never refused", "off", PaneKnobs.Toolbar(null, false));
+        Eq("toolbar: 0 off app is OFF, never refused", "off", PaneKnobs.Toolbar("0", false));
+        Eq("toolbar: 1 off app is REFUSED by name, as before", "refused", PaneKnobs.Toolbar("1", false));
+        // -- HIS NOTE 4a (2026-10-11, over VNC): "I can't see the menus" ----------
+        // `menubar.yaml` writes mnemonics as `&File`; WinUI does not parse `&`, so
+        // the in-window MenuBar showed `&File` literally. `MenuWire.Label` gives
+        // the text to show and the access key, `&&` being a literal ampersand.
+        static string ML(string? raw) { var (t, k) = MenuWire.Label(raw); return t + "|" + k; }
+        Eq("menu: &File is File, key F", "File|F", ML("&File"));
+        Eq("menu: &Open... is Open..., key O", "Open...|O", ML("&Open..."));
+        Eq("menu: a mid-word marker, Save &As...", "Save As...|A", ML("Save &As..."));
+        Eq("menu: && is a literal ampersand, and no key", "Fish & Chips|", ML("Fish && Chips"));
+        Eq("menu: no marker, no key", "Plain|", ML("Plain"));
+        Eq("menu: null is empty, never a throw", "|", ML(null));
+        Eq("menu: a trailing & marks nothing and is kept", "Trail&|", ML("Trail&"));
+        Eq("menu: only the FIRST marker is the key", "AB|A", ML("&A&B"));
+        // Over the REAL spec: every `label:` in menubar.yaml, shown, carries no
+        // `&` marker -- and the read found labels at all (an empty read passes
+        // nothing, so it is counted).
+        var mbDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (mbDir is not null && !File.Exists(Path.Combine(mbDir.FullName, "workspace", "menubar.yaml"))) { mbDir = mbDir.Parent; }
+        var mbLabels = mbDir is null ? new List<string>() : System.Text.RegularExpressions.Regex
+            .Matches(File.ReadAllText(Path.Combine(mbDir.FullName, "workspace", "menubar.yaml")), "label:\\s*\"([^\"]*)\"")
+            .Select(m => m.Groups[1].Value).ToList();
+        Check("menu: the spec's menubar.yaml was read, with its labels", mbLabels.Count >= 40, $"read {mbLabels.Count} label(s)");
+        var mbMarked = mbLabels.Where(l => System.Text.RegularExpressions.Regex.IsMatch(MenuWire.Label(l).Text, "&[^&\\s]")).ToList();
+        Eq("menu: no shown menubar.yaml label keeps an & marker", "", string.Join(",", mbMarked));
+        // -- SB_TOOL BY NAME (2026-10-11): an input script names its tool
+        // (`"tool": "rect"`); the shell resolves it against the CORE's own list
+        // (`jas_tool_name`), so no list is copied here. An index still works.
+        var tools = new[] { "selection", "partial_selection", "rect", "ellipse" };
+        Eq("tool: a name is its index in the core's list", "2", ToolKnob.Resolve("rect", tools).ToString());
+        Eq("tool: an index below the count is itself", "1", ToolKnob.Resolve("1", tools).ToString());
+        Eq("tool: whitespace around a name is trimmed", "3", ToolKnob.Resolve(" ellipse ", tools).ToString());
+        Eq("tool: an unknown name is refused (-1), never selection", "-1", ToolKnob.Resolve("rectangle", tools).ToString());
+        Eq("tool: an index past the count is refused", "-1", ToolKnob.Resolve("4", tools).ToString());
+        Eq("tool: names compare ordinally, so Rect is not rect", "-1", ToolKnob.Resolve("Rect", tools).ToString());
+        Eq("tool: a negative number is refused", "-1", ToolKnob.Resolve("-1", tools).ToString());
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

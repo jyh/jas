@@ -1782,6 +1782,22 @@ mod tests {
         "partial_selection_marquee_corner.json",
         "partial_selection_drag_corner_anchor.json",
         "artboard_drag.json",
+        // YAML coverage census, NOT_YET_BUILT tools (2026-10-12): the first
+        // gesture case for the last twelve tools. Most act on a selection, which
+        // the case seeds (`selection`); Hand and Zoom pin `expected_view`.
+        "rotate_drag_quarter.json",
+        "scale_drag_double.json",
+        "shear_drag_along_diagonal.json",
+        "eyedropper_click_copies_to_selection.json",
+        "pen_closed_triangle.json",
+        "add_anchor_point_on_line.json",
+        "delete_anchor_point_corner.json",
+        "anchor_point_drag_corner_to_smooth.json",
+        "anchor_point_press_smooth_collapses.json",
+        "smooth_zigzag.json",
+        "path_eraser_cuts_line.json",
+        "hand_drag_pans.json",
+        "zoom_click_zooms_in.json",
     ];
 
     #[cfg(feature = "web")]
@@ -1889,6 +1905,7 @@ mod tests {
         }
 
         assert_gesture_exact(tc, model.document());
+        assert_view_triple(tc, &model);
     }
 
     #[cfg(feature = "web")]
@@ -1910,7 +1927,7 @@ mod tests {
     /// its pointer steps are the gesture events; any other step this runner
     /// cannot replay yet is REFUSED by name, never skipped; and the script must
     /// end on `{"read": "document"}`, or it asserts nothing.
-    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json"];
+    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json"];
 
     #[cfg(feature = "web")]
     fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
@@ -2909,12 +2926,19 @@ mod tests {
     fn assert_action_view(
         tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
     ) {
+        // Read the triple straight off the Model the run produced: view
+        // state is NOT document content, so the golden cannot carry it.
+        assert_view_triple(tc, &st.tabs[st.active_tab].model);
+    }
+
+    #[cfg(feature = "web")]
+    /// The `expected_view` check itself, shared by the action corpus and the
+    /// gesture corpus (the Hand and Zoom tools change only the view, so a
+    /// document golden cannot witness them). Mirrors Swift `assertActionView`.
+    fn assert_view_triple(tc: &serde_json::Value, model: &Model) {
         let Some(expected) = tc.get("expected_view").and_then(|v| v.as_object())
         else { return };
         let name = tc["name"].as_str().unwrap();
-        // Read the triple straight off the Model the run produced: view
-        // state is NOT document content, so the golden cannot carry it.
-        let model = &st.tabs[st.active_tab].model;
         let (zoom, offx, offy) =
             (model.zoom_level, model.view_offset_x, model.view_offset_y);
         for (key, want) in expected {

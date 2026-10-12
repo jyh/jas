@@ -777,6 +777,18 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
         }
         if (Test-SbDockSettled $rows) { $verdicts += "ok  : every dock group's PANE OPEN (or a dock failure) after $([math]::Round($dw.Elapsed.TotalSeconds, 1))s more" }
         else { $verdicts += "note: the dock's group panes did not all open within $([math]::Round($dw.Elapsed.TotalSeconds, 1))s; Q6.D judges what arrived" }
+        # SB_DOCK_COLLAPSE's replay (Q6.DC) runs after the dock is drawn; its
+        # last row is the expand, or the shell's refusal.
+        if (-not [string]::IsNullOrWhiteSpace($env:SB_DOCK_COLLAPSE)) {
+            $cw = [System.Diagnostics.Stopwatch]::StartNew()
+            $done = { param($r) $null -ne (Select-SbRow $r 'DOCK GROUP key=\S+ collapsed=false body=\S+ via=synth|RUSTFAIL DOCK COLLAPSE') }
+            while (-not (& $done $rows) -and $cw.Elapsed.TotalSeconds -lt 30) {
+                Start-Sleep -Milliseconds 250
+                $rows = Read-SbRows $log $logMark
+            }
+            if (& $done $rows) { $verdicts += "ok  : the dock-collapse replay finished after $([math]::Round($cw.Elapsed.TotalSeconds, 1))s more" }
+            else { $verdicts += "note: the dock-collapse replay did not finish within $([math]::Round($cw.Elapsed.TotalSeconds, 1))s; Q6.DC judges what arrived" }
+        }
     }
 }
 
