@@ -6687,7 +6687,7 @@ mod tests {
     //
     // Fixture: source rect [0,0] = green fill (0,0.6,0.2), target rect
     // [0,1] = empty fill, both at the identity view so screen (5,5) hits
-    // the source and screen (25,5) hits the target.
+    // the source and screen (21,5) hits the target's stroke.
 
     /// Load the real Eyedropper tool from the embedded workspace bundle.
     fn eyedropper_yaml_tool() -> Option<YamlTool> {

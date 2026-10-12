@@ -274,7 +274,10 @@ private func selectionTool() -> CanvasTool {
 
 @Test func selectionToolMoveSelection() {
     let tool = selectionTool()
+    // Filled: the press at (60,60) is in the rect's middle, and the hit
+    // test hits PAINTED geometry (SELECTION_TOOL.md § Hit test).
     let rect: Element = .rect(Rect(x: 50, y: 50, width: 20, height: 20,
+                                   fill: Fill(color: .black),
                                    stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1)))
     let layer = Layer(name: "L", children: [rect])
     let doc = Document(layers: [layer])
