@@ -1083,19 +1083,9 @@ public sealed partial class MainWindow : Window
             // ⛔ A VALUE THAT IS NOT AN INDEX IS REFUSED BY NAME: a run that asked
             // for a tool and silently got selection would report a gesture the
             // tool never saw.
-            var tool = Environment.GetEnvironmentVariable("SB_TOOL");
-            if (!string.IsNullOrWhiteSpace(tool))
-            {
-                var count = (ulong)JasCore.jas_tool_count();
-                if (!ulong.TryParse(tool.Trim(), out var index) || index >= count)
-                {
-                    StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is not a tool index";
-                    Report($"RUSTFAIL SB_TOOL='{tool}' is refused: not an index below the "
-                         + $"core's {count} tool(s)");
-                    return;
-                }
-                _canvas.ToolIndex = (nuint)index;
-            }
+            // SB_TOOL is resolved AFTER `JasCore.Bind()` below: it calls the core,
+            // and before Bind the DLL is not found (every SB_TOOL run died so, 10-10
+            // to 10-11, unseen until an input script named its tool).
 
             // SB_SIZE=WxH -- A MEASUREMENT INPUT, AND DELIBERATELY NOT THE FIX
             // for jas#16. `e.NewSize` is in DIPs; at 150% scaling a 3840x2160
@@ -1124,6 +1114,30 @@ public sealed partial class MainWindow : Window
             }
 
             JasCore.Bind();
+
+            // SB_TOOL is an index OR a tool name (an input script names its tool),
+            // resolved against the core's own list (`ToolKnob.Resolve`), so no tool
+            // list is copied into the shell.
+            var tool = Environment.GetEnvironmentVariable("SB_TOOL");
+            if (!string.IsNullOrWhiteSpace(tool))
+            {
+                var count = (int)JasCore.jas_tool_count();
+                var names = new List<string>(count);
+                for (var t = 0; t < count; t++)
+                {
+                    var ptr = JasCore.jas_tool_name((nuint)t, out var len);
+                    names.Add(ptr == IntPtr.Zero ? "" : System.Runtime.InteropServices.Marshal.PtrToStringUTF8(ptr, (int)len));
+                }
+                var index = ToolKnob.Resolve(tool, names);
+                if (index < 0)
+                {
+                    StatusLine.Text = $"FAILED - SB_TOOL='{tool}' is not a tool";
+                    Report($"RUSTFAIL SB_TOOL='{tool}' is refused: not an index below the "
+                         + $"core's {count} tool(s), nor one of their names");
+                    return;
+                }
+                _canvas.ToolIndex = (nuint)index;
+            }
 
             // `original`'s referent, RECORDED rather than recomputed later. It is
             // an AppWindow size (what SB_RESIZE sets), not a surface size (what
