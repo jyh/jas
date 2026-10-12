@@ -745,6 +745,17 @@ static class Program
         Check("menu: the spec's menubar.yaml was read, with its labels", mbLabels.Count >= 40, $"read {mbLabels.Count} label(s)");
         var mbMarked = mbLabels.Where(l => System.Text.RegularExpressions.Regex.IsMatch(MenuWire.Label(l).Text, "&[^&\\s]")).ToList();
         Eq("menu: no shown menubar.yaml label keeps an & marker", "", string.Join(",", mbMarked));
+        // -- SB_TOOL BY NAME (2026-10-11): an input script names its tool
+        // (`"tool": "rect"`); the shell resolves it against the CORE's own list
+        // (`jas_tool_name`), so no list is copied here. An index still works.
+        var tools = new[] { "selection", "partial_selection", "rect", "ellipse" };
+        Eq("tool: a name is its index in the core's list", "2", ToolKnob.Resolve("rect", tools).ToString());
+        Eq("tool: an index below the count is itself", "1", ToolKnob.Resolve("1", tools).ToString());
+        Eq("tool: whitespace around a name is trimmed", "3", ToolKnob.Resolve(" ellipse ", tools).ToString());
+        Eq("tool: an unknown name is refused (-1), never selection", "-1", ToolKnob.Resolve("rectangle", tools).ToString());
+        Eq("tool: an index past the count is refused", "-1", ToolKnob.Resolve("4", tools).ToString());
+        Eq("tool: names compare ordinally, so Rect is not rect", "-1", ToolKnob.Resolve("Rect", tools).ToString());
+        Eq("tool: a negative number is refused", "-1", ToolKnob.Resolve("-1", tools).ToString());
 
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");

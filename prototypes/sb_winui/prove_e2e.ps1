@@ -75,6 +75,8 @@ if ($null -ne $sc.Refusal) {
     exit 2
 }
 $item = $sc.Item
+# Captured here: `$sc` is reused below for the display scale.
+$tool = $sc.Tool
 $expectedPath = Join-Path (Split-Path $scriptFull -Parent) $sc.Expected
 if (-not (Test-Path $expectedPath)) {
     Write-Host "E2E-CERT v1 item=$item verdict=NOT RUN -- the script's expected_json is not at $expectedPath"
@@ -111,6 +113,11 @@ $mark = if (Test-Path $log) { (Get-Item $log).Length } else { 0 }
 
 # ---- launch, holding, with the probe on ------------------------------------
 $env:SB_PROBE = 'sb-probe.json'
+# The script's tool, by NAME: the shell resolves it against the core's list and
+# refuses an unknown one by name (`ToolKnob.Resolve`). Selection is the shell's
+# default, so the selection script launches exactly as it always has.
+$isSelection = $tool -eq 'selection'
+if (-not $isSelection) { $env:SB_TOOL = $tool }
 # The launcher runs in the BACKGROUND and the log is watched HERE: its own wait
 # is 90 s whatever happens, and a dead window must fail in seconds, not then.
 $stayOut = Join-Path $exeDir 'sb-e2e-stay.txt'
@@ -124,6 +131,7 @@ function Stop-OurApps {
 }
 $up = Wait-SbRow -Log $log -Mark $mark -Patterns @('RUSTOK APP pid=', 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
 Remove-Item Env:\SB_PROBE
+Remove-Item Env:\SB_TOOL -ErrorAction SilentlyContinue
 if ($null -eq $up.Row -or $up.Row -match 'RUSTFAIL ') {
     Stop-OurApps
     if (-not $launcher.HasExited) { $launcher | Stop-Process -Force -ErrorAction SilentlyContinue }
@@ -232,7 +240,10 @@ function Get-SbCoords($node, [string]$pfx, $acc) {
 $moved = 'UNREADABLE'
 if ($drive -notlike 'PASS*') { $ddx = [double]::NaN; $ddy = [double]::NaN }
 $openDoc = Join-Path $exeDir 'sb-doc-open.json'
-if ($selCount -eq 1 -and (Test-Path $openDoc)) {
+# The moved-by-delta arm is a SECOND METHOD for a selection drag only: another
+# tool's gesture draws or edits, and its whole claim is the read-back below.
+if (-not $isSelection) { $moved = "NOT APPLICABLE(tool=$($tool): the moved-by-delta arm is the selection tool's)" }
+elseif ($selCount -eq 1 -and (Test-Path $openDoc)) {
     $selPath = @($r.selection)[0].path
     $before = @{}; $after = @{}
     Get-SbCoords (Get-SbAtPath (Get-Content $openDoc -Raw | ConvertFrom-Json) $selPath) '' $before
@@ -262,7 +273,7 @@ $reading = [ordered]@{
 }
 
 if ($Freeze) {
-    if ($drive -notlike 'PASS*' -or $moved -notlike 'PASS*' -or $readback -notlike 'PASS*') {
+    if ($drive -notlike 'PASS*' -or ($isSelection -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*') {
         Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
         exit 7
     }
@@ -282,7 +293,11 @@ if (-not (Test-Path $bfile)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN 
 $b = Get-Content $bfile -Raw | ConvertFrom-Json
 
 # The spec's own observable, independent of any baseline: one element selected.
-$core = if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
+$core = if ($isSelection) {
+    if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
+} else {
+    if ($readback -like 'PASS*') { 'PASS' } else { "FAIL(readback=$readback)" }
+}
 $tree = if ($r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha) { 'PASS' } else { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }

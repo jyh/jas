@@ -1953,12 +1953,12 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)"
 }
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
-} 'selection.drag svg=complex_document.svg at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
 Test-Case 'is: moves evenly spaced on the line map onto k=3' {
     $m1 = [ordered]@{ kind = 'move'; x = 48; y = 44; dragging = $true }
     $m2 = [ordered]@{ kind = 'move'; x = 60; y = 52; dragging = $true }
@@ -1986,9 +1986,12 @@ Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
 } "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
-Test-Case 'is: a tool other than the default is refused (SB_TOOL is an index, not a name)' {
-    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'pen'))
-} "REFUSED: tool 'pen': this driver runs only the shell's default tool, selection"
+Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
+} 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
+Test-Case 'is: a script that names no tool is refused, never defaulted to selection' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool ''))
+} "REFUSED: the script names no tool"
 Test-Case 'is: a non-empty app_state is refused, never ignored' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -AppState @{ fill_color = '#ff0000' }))
 } 'REFUSED: app_state sets fill_color: this driver cannot seed state'

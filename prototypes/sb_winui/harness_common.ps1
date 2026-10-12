@@ -2823,8 +2823,10 @@ function Read-SbInputScript([string]$Json) {
     $no = { param($why) [pscustomobject]@{ Refusal = $why } }
     try { $s = $Json | ConvertFrom-Json } catch { return (& $no 'the script does not parse') }
     if ($null -eq $s) { return (& $no 'the script does not parse') }
-    if ("$($s.tool)" -ne 'selection') {
-        return (& $no "tool '$($s.tool)': this driver runs only the shell's default tool, selection")
+    # Any NAMED tool: the shell resolves it against the core's own list
+    # (SB_TOOL by name, `ToolKnob.Resolve`) and refuses an unknown one by name.
+    if ([string]::IsNullOrWhiteSpace("$($s.tool)")) {
+        return (& $no 'the script names no tool')
     }
     if ($null -ne $s.app_state) {
         $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })

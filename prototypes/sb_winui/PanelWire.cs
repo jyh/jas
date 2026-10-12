@@ -547,3 +547,29 @@ internal static class MenuWire
         return (text.ToString(), key);
     }
 }
+
+/// <summary>
+/// SB_TOOL, read against the core's own tool list. Pure, so `sb_winui_tests`
+/// drives it.
+/// </summary>
+internal static class ToolKnob
+{
+    /// <summary>The index `knob` names in `names` (the core's `jas_tool_name`
+    /// list): a decimal index below the count, or a tool name compared
+    /// ordinally. -1 refuses it, and the caller refuses the run by name; a run
+    /// that asked for a tool must never silently get selection.</summary>
+    internal static int Resolve(string? knob, IReadOnlyList<string> names)
+    {
+        var v = knob?.Trim() ?? "";
+        if (v.Length == 0) return -1;
+        if (v.All(char.IsAsciiDigit))
+        {
+            return int.TryParse(v, out var i) && i < names.Count ? i : -1;
+        }
+        for (var i = 0; i < names.Count; i++)
+        {
+            if (string.Equals(names[i], v, StringComparison.Ordinal)) return i;
+        }
+        return -1;
+    }
+}
