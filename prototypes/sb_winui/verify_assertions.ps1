@@ -1529,7 +1529,7 @@ if ($menuRows.Count -eq 0) {
         $m = Get-SbMenuRowReading $r
         if ($m.Ok -and $m.Seq -gt $lastSeq) { $lastSeq = $m.Seq }
     }
-    if (Test-SbPaneReplayAsked $env:SB_PANEL_SYNTH $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS $env:SB_TOOLBAR_SYNTH) {
+    if (Test-SbPaneReplayAsked $env:SB_PANEL_SYNTH $env:SB_PANEL_COMMIT $env:SB_PANEL_PRESS $env:SB_TOOLBAR_SYNTH $env:SB_PANEL_MENU_SYNTH) {
         # ⛔ NOT A PASS AND NOT A FAIL. Q6's replay clicks and runs ops, and each
         # moves the core's menu answer (can-undo, the selection-gated items) a
         # number of times that no knob of this run predicts -- a derivation
@@ -1537,7 +1537,7 @@ if ($menuRows.Count -eq 0) {
         # W2b-3's value replay is the same case: every click the core answers
         # republishes the menu (`Canvas.ApplyPanelClick`).
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
-            "a pane replay is set (SB_PANEL_SYNTH, or SB_PANEL_COMMIT with SB_PANEL_PRESS, or SB_TOOLBAR_SYNTH): its clicks move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
+            "a pane replay is set (SB_PANEL_SYNTH, or SB_PANEL_COMMIT with SB_PANEL_PRESS, or SB_TOOLBAR_SYNTH, or SB_PANEL_MENU_SYNTH): its clicks move the core's menu answer, so this run's rebuild count has no derivation (seq reached $lastSeq). A plain app run measures P4.4" -Row $menuRows[-1]
     } elseif ($lastSeq -lt 0) {
         Add-NotRun 'P4.4 the menubar rebuilt once per CORE answer, not per frame' `
             'no MENU row carried a readable seq=' -Row $menuRows[-1]
@@ -1625,6 +1625,13 @@ if ($qdc.Verdict -eq 'NOT RUN') {
     Add-NotRun $qdc.Name $qdc.Detail -Row $qdc.Row
 } else {
     Add-Assert -Name $qdc.Name -Verdict $qdc.Verdict -Detail $qdc.Detail -Row $qdc.Row
+}
+# Q6.PM -- a dock group's panel menu, replayed by SB_PANEL_MENU_SYNTH (note 3).
+$qpm = Get-SbPanelMenuVerdict $rows $Scene $env:SB_DOCK $env:SB_PANEL_MENU_SYNTH
+if ($qpm.Verdict -eq 'NOT RUN') {
+    Add-NotRun $qpm.Name $qpm.Detail -Row $qpm.Row
+} else {
+    Add-Assert -Name $qpm.Name -Verdict $qpm.Verdict -Detail $qpm.Detail -Row $qpm.Row
 }
 
 # ===========================================================================

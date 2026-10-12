@@ -281,6 +281,21 @@ internal sealed class MenuActionCmd : Cmd
     internal string Action = "";
 }
 
+/// <summary>
+/// A dock group's panel menu (the owner's note 3, 2026-10-12). `Index` &lt; 0
+/// READS the menu (`jas_panel_menu`) and posts its rows to the UI thread to
+/// draw; `Index` &gt;= 0 RUNS that item in the engine with its panel active
+/// (`jas_dispatch_action`, `{"panel","menu_index"}`). The shell names the
+/// panel and the index; the core reads the item's action and params.
+/// </summary>
+internal sealed class PanelMenuCmd : Cmd
+{
+    internal string Group = "";
+    internal string PanelId = "";
+    internal int Index = -1;
+    internal string Via = "hand";
+}
+
 internal sealed class PanelClickCmd : Cmd
 {
     internal string PanelId = "";
@@ -1255,6 +1270,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case MenuActionCmd ma:
                     if (ApplyMenuAction(ma)) { dirty = true; cause = "menu"; }
+                    break;
+
+                case PanelMenuCmd pm:
+                    if (ApplyPanelMenu(pm)) { dirty = true; cause = "panel-menu"; }
                     break;
 
                 case PanelSynthCmd ps:
@@ -4282,6 +4301,76 @@ internal sealed unsafe class Canvas : IDisposable
     internal void PanelClick(PanelClickCmd click) => _queue.Add(click);
 
     internal void MenuAction(MenuActionCmd cmd) => _queue.Add(cmd);
+
+    internal void PanelMenu(PanelMenuCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>Raised on the UI thread with a READ's group, panel, via and rows
+    /// (`jas_panel_menu`'s JSON), for the window to draw the flyout.</summary>
+    internal Action<string, string, string, string>? PanelMenuRead { get; set; }
+
+    /// <summary>
+    /// A panel menu, READ or RUN in the engine. Every outcome is a row: `PANEL
+    /// MENU READ` names the count and which rows the core checked; a run writes
+    /// `PANEL MENU RAN` or `PANEL MENU REFUSED` with the channel, never a silent
+    /// no-op; a run re-reads the menus and every pane, as a click does.
+    /// </summary>
+    private bool ApplyPanelMenu(PanelMenuCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        var head = $"group={cmd.Group} panel={cmd.PanelId}";
+        if (cmd.Index < 0)
+        {
+            var pid = System.Text.Encoding.UTF8.GetBytes(cmd.PanelId);
+            var rowsJson = JasCore.TakeString(JasCore.jas_panel_menu(_engine, pid, (nuint)pid.Length));
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            if (rowsJson.Length == 0)
+            {
+                _report($"PANEL MENU REFUSED {head} read channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+                return false;
+            }
+            var rows = PanelMenuWire.Parse(rowsJson);
+            var on = rows.Where(r => r.Checked == true).Select(r => r.Index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            _report($"PANEL MENU READ {head} via={cmd.Via} items={rows.Count(r => r.Kind == "item")} "
+                  + $"separators={rows.Count(r => r.Kind == "separator")} checked=[{string.Join(",", on)}] {Tids()}");
+            var g = cmd.Group; var p = cmd.PanelId; var v = cmd.Via;
+            PostToUi(() => PanelMenuRead?.Invoke(g, p, v, rowsJson));
+            return false;
+        }
+        var runHead = $"{head} index={cmd.Index} via={cmd.Via}";
+        var json = System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(
+            new Dictionary<string, object> { ["panel"] = cmd.PanelId, ["menu_index"] = cmd.Index }));
+        var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
+        var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+        if (reply.Length == 0)
+        {
+            _report(channel.Length == 0
+                ? $"RUSTFAIL PANEL MENU SILENT {runHead} -- an empty reply and an empty error channel {Tids()}"
+                : $"PANEL MENU REFUSED {runHead} channel={channel} {Tids()}");
+            return false;
+        }
+        bool docChanged;
+        int changedRows;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
+            changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL PANEL MENU REPLY UNREADABLE {runHead} {ex.GetType().Name} {Tids()}");
+            return false;
+        }
+        if (docChanged) { SetDirty(true); }
+        ApplyMenuRefresh("panel-menu");
+        ApplyPanelRefresh("panel-menu");
+        ApplyPanesRefresh("panel-menu");
+        _panelStale = false;
+        _report($"PANEL MENU RAN {runHead} outcome={(channel.Length == 0 ? "changed" : "unchanged")} "
+              + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
+              + $"channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
+        return docChanged;
+    }
 
     /// <summary>
     /// A menu item's action, run by the ENGINE (`jas_dispatch_action`). A refusal
