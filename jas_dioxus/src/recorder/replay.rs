@@ -79,6 +79,33 @@ fn seed_case_view(model: &mut Model, tc: &Value) {
 }
 
 #[cfg(feature = "web")]
+/// Seed the case's optional `selection` (a list of element paths, each
+/// selected whole) before the tool activates. A tool that acts ON a
+/// selection (rotate, scale, shear, smooth, the anchor tools) does
+/// nothing without one, and an SVG cannot carry a selection, so before
+/// this key such a tool had no gesture case at all (the YAML coverage
+/// census, 2026-10-12). Cases without the key are unaffected. Mirrors
+/// Swift's `seedCaseSelection`.
+fn seed_case_selection(model: &mut Model, tc: &Value) {
+    use crate::document::controller::Controller;
+    use crate::document::document::ElementSelection;
+    let Some(paths) = tc.get("selection").and_then(|v| v.as_array()) else { return };
+    let sel = paths
+        .iter()
+        .map(|p| {
+            ElementSelection::all(
+                p.as_array()
+                    .expect("selection entries are paths")
+                    .iter()
+                    .map(|i| i.as_u64().expect("path indices are integers") as usize)
+                    .collect(),
+            )
+        })
+        .collect();
+    Controller::set_selection(model, sel);
+}
+
+#[cfg(feature = "web")]
 /// Run a gesture case against `setup_svg` CONTENT and return the
 /// resulting Model. Loads the setup into a Model (identity view unless
 /// the case names a `view` block — see [`seed_case_view`]), builds the
@@ -93,6 +120,7 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
     let mut model = Model::new(doc, None);
     // Before `activate`: a tool's on_enter may snapshot the view.
     seed_case_view(&mut model, tc);
+    seed_case_selection(&mut model, tc);
 
     let tool_id = tc["tool"].as_str().unwrap();
     let mut tool = build_gesture_tool(tool_id);

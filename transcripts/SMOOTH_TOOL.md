@@ -33,7 +33,10 @@ For each selected unlocked Path element:
 2. Find the contiguous range of flat points within
    `SMOOTH_SIZE` (default 100 px) of the cursor.
 3. Map the first / last flat indices back to command indices
-   via the parallel cmap.
+   via the parallel cmap. The range never includes a MoveTo:
+   it starts at command 1 at the earliest (the MoveTo stays as
+   the prefix) and ends before any later MoveTo (two subpaths
+   are never refitted into one).
 4. Collect the flat points of the affected command range,
    prepended with the start-point of the first affected
    command so the refit curve connects seamlessly with the

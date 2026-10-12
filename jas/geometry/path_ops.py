@@ -632,12 +632,27 @@ def split_path_at_eraser(cmds, hit: EraserHit, is_closed: bool) -> list[list]:
             if not isinstance(c, ClosePath):
                 part2.append(c)
     result: list[list] = []
-    part1_has_non_move = any(not isinstance(c, MoveTo) for c in part1)
-    if len(part1) >= 2 and part1_has_non_move:
+    if _fragment_has_extent(part1):
         result.append(part1)
-    if len(part2) >= 2:
+    if _fragment_has_extent(part2):
         result.append(part2)
     return result
+
+
+def _fragment_has_extent(frag: list) -> bool:
+    """Whether an eraser fragment has any length: some command ends away
+    from the fragment's start. A press that lands ON an open path's first
+    point enters the eraser at that point, and the "before the entry"
+    fragment is then ``M p L p``, two commands and no length; keeping it
+    left an invisible, zero-length element behind every such erase
+    (PATH_ERASER_TOOL.md § Algorithm, step 6)."""
+    if not frag:
+        return False
+    start = cmd_endpoint(frag[0])
+    if start is None:
+        return False
+    return any(p is not None and p != start
+               for p in (cmd_endpoint(c) for c in frag[1:]))
 
 
 # Path / PolygonSet adapters.

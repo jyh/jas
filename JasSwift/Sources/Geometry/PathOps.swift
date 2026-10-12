@@ -611,6 +611,19 @@ public func exitCmd(
 /// Cut `cmds` at the eraser hit. Open paths produce 0–2 sub-paths;
 /// closed paths are unwrapped into a single open path running from the
 /// exit point around the non-erased side back to the entry point.
+/// Whether an eraser fragment has any length: some command ends away from the
+/// fragment's start. A press ON an open path's first point makes the "before
+/// the entry" fragment `M p L p`, two commands and no length, which used to be
+/// kept as an invisible element (PATH_ERASER_TOOL.md § Algorithm, step 6).
+/// Mirrors Rust `fragment_has_extent`.
+private func fragmentHasExtent(_ frag: [PathCommand]) -> Bool {
+    guard let start = frag.first?.endpoint else { return false }
+    return frag.dropFirst().contains { cmd in
+        guard let p = cmd.endpoint else { return false }
+        return p.0 != start.0 || p.1 != start.1
+    }
+}
+
 public func splitPathAtEraser(
     _ cmds: [PathCommand], _ hit: EraserHit, _ isClosed: Bool
 ) -> [[PathCommand]] {
@@ -672,12 +685,8 @@ public func splitPathAtEraser(
             }
         }
         var result: [[PathCommand]] = []
-        let part1HasNonMove = part1.contains {
-            if case .moveTo = $0 { return false }
-            return true
-        }
-        if part1.count >= 2 && part1HasNonMove { result.append(part1) }
-        if part2.count >= 2 { result.append(part2) }
+        if fragmentHasExtent(part1) { result.append(part1) }
+        if fragmentHasExtent(part2) { result.append(part2) }
         return result
     }
 }
