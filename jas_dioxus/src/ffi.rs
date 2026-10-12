@@ -939,6 +939,128 @@ pub unsafe extern "C" fn jas_panel_behavior(
     out
 }
 
+/// Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
+/// item's own `action` and `params` read from the menubar (the shell names WHICH
+/// item was chosen, BL1, and never authors params; the menu structure carries
+/// none), or `{"action": <id>, "params": {...}}` directly, `params` optional.
+/// The core runs the action's effects as `jas_panel_behavior` runs a widget's,
+/// with no panel made active.
+///
+/// The owner's notes (2026-10-11): the Windows menus drew every item live and
+/// ran five; File > New made no tab, because nothing ran `new_document`.
+///
+/// # The reply
+///
+/// [`jas_panel_behavior`]'s: `{"changed": [<row>...], "doc_changed": <bool>}`,
+/// so the shell repaints and re-reads exactly as after a click.
+///
+/// # ⛔ A refusal runs NOTHING
+///
+/// The empty span, and [`jas_last_error_json`] reads `{"panel_event":
+/// "<class>","detail":"<detail>"}`: `BadUtf8`, `BadJson`, `UnknownMenuItem` (a
+/// menu item id the menubar does not hold, named), `MissingAction` (no
+/// `action` string), `UnknownAction` (an id the workspace does not define,
+/// named), or `PlatformEffect` (an effect only the shell can run, such as a
+/// native dialog, found by the pre-flight before anything moved). An action
+/// that ran and changed nothing replies normally and ALSO reads `Unchanged`.
+///
+/// **BL4**: copy the span, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or live; the span must be NULL or valid for its length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dispatch_action(
+    e: *mut JasEngine,
+    action_json: *const u8,
+    action_len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::DispatchAction, action_len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(raw) = (unsafe { utf8(action_json, action_len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(req) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    let Some(ws) = Workspace::load() else {
+        return JasBytes::empty();
+    };
+    // `{"menu_item": <id>}`: the item's own action and params, from the menubar.
+    let item = match req.get("menu_item").and_then(serde_json::Value::as_str) {
+        None => None,
+        Some(id) => match find_menu_item(&ws.data()["menubar"], id) {
+            Some(item) => Some(item),
+            None => {
+                set_panel_event_error(engine, "UnknownMenuItem", id);
+                return JasBytes::empty();
+            }
+        },
+    };
+    let source = item.unwrap_or(&req);
+    let Some(action) = source.get("action").and_then(serde_json::Value::as_str) else {
+        set_panel_event_error(engine, "MissingAction", "");
+        return JasBytes::empty();
+    };
+    let params = source.get("params");
+    // The app's scope, no panel's: `engine_scope` with no panel id reads the
+    // state and the active document and seeds nothing.
+    let scope = crate::panel_scope::engine_scope(
+        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    let ran = {
+        let mut store = engine.store.borrow_mut();
+        let mut model = engine.model.borrow_mut();
+        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+        crate::panel_behavior::run_action(
+            action, params, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(),
+            &mut host)
+    };
+    let ran = match ran {
+        Ok(ran) => ran,
+        Err(r) => {
+            set_panel_event_error(engine, r.class, &r.detail);
+            return JasBytes::empty();
+        }
+    };
+    // The same aftermath as a click: the tool, the colour slice, every open
+    // panel's rows.
+    let tool = crate::ffi_pointer::sync_tool_to_state(engine);
+    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow()) {
+        crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+    }
+    let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
+    ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
+    let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
+    let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
+    if ran.doc_changed || state_changed || moved {
+        *engine.last_error.borrow_mut() = None;
+    } else {
+        set_panel_event_error(engine, "Unchanged", action);
+    }
+    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": ran.doc_changed});
+    let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
+    ffi_instr::record_out(Crossing::DispatchAction, out.len);
+    out
+}
+
+/// The menubar item whose `id` is `id`, at any depth (a menu's `items`, a
+/// submenu's), or `None`.
+fn find_menu_item<'a>(node: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    match node {
+        serde_json::Value::Array(xs) => xs.iter().find_map(|x| find_menu_item(x, id)),
+        serde_json::Value::Object(m) => {
+            if m.get("id").and_then(serde_json::Value::as_str) == Some(id) && m.contains_key("action") {
+                return Some(node);
+            }
+            m.values().find_map(|v| find_menu_item(v, id))
+        }
+        _ => None,
+    }
+}
+
 /// The panel-event channel's diagnostic, in the same shape
 /// [`jas_last_error_json`] already serves.
 ///
@@ -2176,6 +2298,89 @@ mod tests {
             jas_panel_behavior(e, panel.as_ptr(), panel.len(), event.as_ptr(), event.len())
         });
         (reply, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    // -----------------------------------------------------------------------
+    // A MENU ACTION, RUN BY THE CORE (the owner's notes, 2026-10-11: the
+    // Windows menus drew every item live, and every item but five wrote
+    // `ACTION UNIMPLEMENTED`; File > New made no tab).
+    // -----------------------------------------------------------------------
+
+    /// (reply, error channel) for one action crossing.
+    fn dispatch(e: *mut JasEngine, json: &str) -> (String, String) {
+        let reply = take(unsafe { jas_dispatch_action(e, json.as_ptr(), json.len()) });
+        (reply, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    #[test]
+    fn dispatch_action_runs_a_menu_action_and_its_state_moves() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        // Window > Toolbar, as the menu structure names it.
+        let e = jas_engine_new();
+        let before = engine_of(e).store.borrow().get("toolbar_visible").clone();
+        let (reply, err) = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
+        assert!(!reply.is_empty(), "toggle_pane ran (error: {err})");
+        assert!(err.is_empty(), "a run that moved state clears the channel: {err}");
+        let after = engine_of(e).store.borrow().get("toolbar_visible").clone();
+        assert_ne!(before, after, "the toggle moved state.toolbar_visible");
+        let _ = dispatch(e, r#"{"action":"toggle_pane","params":{"pane":"toolbar"}}"#);
+        assert_eq!(engine_of(e).store.borrow().get("toolbar_visible"), &before, "and back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn dispatch_action_runs_a_menu_item_by_its_id_with_the_menubars_params() {
+        // The shell sends WHICH item was chosen; the core reads that item's
+        // action and params from the menubar it already parses (the menu
+        // structure carries no params, and a shell must not author them).
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let before = engine_of(e).store.borrow().get("toolbar_visible").clone();
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_toolbar"}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "Window > Toolbar ran: {err}");
+        assert_ne!(engine_of(e).store.borrow().get("toolbar_visible"), &before);
+        let (reply2, err2) = dispatch(e, r#"{"menu_item":"zz_no_such_item"}"#);
+        assert!(reply2.is_empty() && err2.contains("UnknownMenuItem") && err2.contains("zz_no_such_item"), "{err2}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn dispatch_action_refuses_new_document_by_its_missing_effect_and_runs_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        // `new_document` is spec'd with `create_child`, which no port's engine
+        // runs yet (the owner's note 4b, 2026-10-11: no canvas tab). Refused,
+        // never a half run: no tab, and the tab bar stays hidden.
+        let e = jas_engine_new();
+        let (reply, err) = dispatch(e, r#"{"action":"new_document"}"#);
+        assert!(reply.is_empty(), "a refused action replies nothing: {reply}");
+        assert!(err.contains("PlatformEffect") && err.contains("create_child"), "{err}");
+        let plan = plan_of(e, "canvas_pane", 1600, 900);
+        assert!(!plan.contains("canvas_tab_0"), "nothing ran: {plan}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn dispatch_action_refuses_an_unknown_action_and_runs_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (reply, err) = dispatch(e, r#"{"action":"zz_no_such_action"}"#);
+        assert!(reply.is_empty(), "an unknown action replies nothing: {reply}");
+        assert!(err.contains("zz_no_such_action"), "the refusal names the action: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn dispatch_action_refuses_bad_json_and_a_null_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (reply, err) = dispatch(e, "{not json");
+        assert!(reply.is_empty());
+        assert!(err.contains("BadJson"), "{err}");
+        let (reply2, _) = dispatch(e, r#"{"params":{}}"#);
+        assert!(reply2.is_empty(), "no action field is refused");
+        let j = r#"{"action":"new_document"}"#;
+        assert!(take(unsafe { jas_dispatch_action(std::ptr::null_mut(), j.as_ptr(), j.len()) }).is_empty());
+        unsafe { jas_engine_free(e) };
     }
 
     // -----------------------------------------------------------------------

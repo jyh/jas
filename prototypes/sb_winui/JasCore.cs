@@ -482,6 +482,16 @@ internal static unsafe class JasCore
         IntPtr engine, byte[] panelId, nuint panelLen, byte[] eventJson, nuint eventLen);
 
     /// <summary>
+    /// Run a menu item's ACTION in the engine (`jas_dispatch_action`).
+    /// `actionJson` is `{"menu_item":"<id>"}`: the shell names WHICH item was
+    /// chosen and the core reads its action and params from the menubar. The
+    /// reply is <see cref="jas_panel_behavior"/>'s; ⛔ a refusal is the empty
+    /// span and runs nothing, its class in <see cref="jas_last_error_json"/>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_dispatch_action(IntPtr engine, byte[] actionJson, nuint actionLen);
+
+    /// <summary>
     /// The panels the pane can offer (`jas_panel_list`, W2b-2):
     /// `[{"id","summary"}]`, sorted by content id, `summary` null where the
     /// core will not send one. Takes no engine, like

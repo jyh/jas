@@ -724,6 +724,41 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
                                    uintptr_t event_len);
 
 /**
+ * Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
+ * item's own `action` and `params` read from the menubar (the shell names WHICH
+ * item was chosen, BL1, and never authors params; the menu structure carries
+ * none), or `{"action": <id>, "params": {...}}` directly, `params` optional.
+ * The core runs the action's effects as `jas_panel_behavior` runs a widget's,
+ * with no panel made active.
+ *
+ * The owner's notes (2026-10-11): the Windows menus drew every item live and
+ * ran five; File > New made no tab, because nothing ran `new_document`.
+ *
+ * # The reply
+ *
+ * [`jas_panel_behavior`]'s: `{"changed": [<row>...], "doc_changed": <bool>}`,
+ * so the shell repaints and re-reads exactly as after a click.
+ *
+ * # ⛔ A refusal runs NOTHING
+ *
+ * The empty span, and [`jas_last_error_json`] reads `{"panel_event":
+ * "<class>","detail":"<detail>"}`: `BadUtf8`, `BadJson`, `UnknownMenuItem` (a
+ * menu item id the menubar does not hold, named), `MissingAction` (no
+ * `action` string), `UnknownAction` (an id the workspace does not define,
+ * named), or `PlatformEffect` (an effect only the shell can run, such as a
+ * native dialog, found by the pre-flight before anything moved). An action
+ * that ran and changed nothing replies normally and ALSO reads `Unchanged`.
+ *
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; the span must be NULL or valid for its length.
+ */
+struct JasBytes jas_dispatch_action(struct JasEngine *e,
+                                    const uint8_t *action_json,
+                                    uintptr_t action_len);
+
+/**
  * Zero every boundary counter. Call at the START of a named interaction so the
  * dump that follows describes that interaction alone.
  */
