@@ -77,20 +77,19 @@ private func withDoc<R>(_ default_: R, _ f: (Document) -> R) -> R {
 
 // MARK: - Primitives
 
-/// `hit_test(x, y)` — topmost unlocked, visible element whose bounding
-/// box contains the point. Stops at direct layer children (doesn't
-/// recurse into groups).
+/// `hit_test(x, y)` — `[li, ci]` of the topmost unlocked, visible layer
+/// child whose PAINTED geometry is under the point. The law is
+/// `HitLaw.swift` (SELECTION_TOOL.md § Hit test: painted geometry); a
+/// group is hit when any child is. Layers are tried topmost first too.
 func docHitTest(_ x: Double, _ y: Double) -> Value {
     withDoc(.null) { doc in
         for (li, layer) in doc.layers.enumerated().reversed() {
-            if layer.locked || layer.visibility == .invisible { continue }
-            for (ci, child) in layer.children.enumerated().reversed() {
-                if child.isLocked || child.visibility == .invisible { continue }
-                let b = child.bounds
-                if x >= b.x && x <= b.x + b.width
-                    && y >= b.y && y <= b.y + b.height {
-                    return .path([li, ci])
-                }
+            let le = Element.layer(layer)
+            guard let vis = hitLawBlocksHit(le, .preview),
+                  let (lx, ly) = hitLawToLocal(le, x, y) else { continue }
+            for (ci, child) in layer.children.enumerated().reversed()
+            where hitLawPaintedHit(child, lx, ly, vis) {
+                return .path([li, ci])
             }
         }
         return .null
@@ -98,39 +97,12 @@ func docHitTest(_ x: Double, _ y: Double) -> Value {
 }
 
 /// `hit_test_deep(x, y)` — recurses into groups so the returned path
-/// points at the deepest leaf.
+/// points at the deepest PAINTED leaf.
 func docHitTestDeep(_ x: Double, _ y: Double) -> Value {
-    func recurse(_ elem: Element, _ path: [Int],
-                 _ x: Double, _ y: Double) -> [Int]? {
-        if elem.isLocked || elem.visibility == .invisible { return nil }
-        let children: [Element]
-        switch elem {
-        case .group(let g): children = g.children
-        case .layer(let l): children = l.children
-        default:
-            let b = elem.bounds
-            if x >= b.x && x <= b.x + b.width
-                && y >= b.y && y <= b.y + b.height {
-                return path
-            }
-            return nil
-        }
-        for (i, child) in children.enumerated().reversed() {
-            if child.isLocked { continue }
-            var childPath = path
-            childPath.append(i)
-            if let r = recurse(child, childPath, x, y) { return r }
-        }
-        return nil
-    }
-    return withDoc(.null) { doc in
+    withDoc(.null) { doc in
         for (li, layer) in doc.layers.enumerated().reversed() {
-            if layer.locked || layer.visibility == .invisible { continue }
-            for (ci, child) in layer.children.enumerated().reversed() {
-                if child.isLocked { continue }
-                if let r = recurse(child, [li, ci], x, y) {
-                    return .path(r)
-                }
+            if let r = hitLawDeepHit(.layer(layer), [li], x, y, .preview) {
+                return .path(r)
             }
         }
         return .null

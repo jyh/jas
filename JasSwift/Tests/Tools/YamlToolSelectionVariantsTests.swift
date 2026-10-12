@@ -55,7 +55,9 @@ private func interiorSelectionTool() -> YamlTool? {
 // MARK: - Fixtures
 
 private func makeRect(_ x: Double, _ y: Double, _ w: Double, _ h: Double) -> Element {
-    .rect(Rect(x: x, y: y, width: w, height: h))
+    // Filled: the hit test hits PAINTED geometry (SELECTION_TOOL.md
+    // § Hit test: painted geometry), and these cases click inside.
+    .rect(Rect(x: x, y: y, width: w, height: h, fill: Fill(color: .black)))
 }
 
 /// Rect at (0, 0) 10x10 — control points 0=(0,0), 1=(10,0),

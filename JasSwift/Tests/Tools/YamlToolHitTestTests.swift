@@ -97,7 +97,7 @@ private let eyedropperSourceColor = Color(r: 0, g: 0.6, b: 0.2)
 
 /// Two rects in one layer: source [0,0] green-filled, target [0,1]
 /// fill-less. Both 10x10 at the identity view, side by side — screen
-/// (5,5) hits the source, screen (25,5) hits the target. Mirrors the Rust
+/// (5,5) hits the source, screen (21,5) hits the target's stroke. Mirrors the Rust
 /// `eyedropper_seam_model`.
 private func eyedropperSeamModel() -> Model {
     let green = Fill(color: eyedropperSourceColor)
@@ -264,10 +264,12 @@ private func selectionPaths(_ model: Model) -> Set<[Int]> {
     tool.onRelease(ctx, x: 5, y: 5, shift: false, alt: false)
     #expect(model.document.getElement([0, 1]).fill == nil)
 
-    // Now Alt+click the empty target [0,1] at screen (25,5) →
-    // apply_loaded writes the cached green into the target.
-    tool.onPress(ctx, x: 25, y: 5, shift: false, alt: true)
-    tool.onRelease(ctx, x: 25, y: 5, shift: false, alt: true)
+    // Now Alt+click the empty target [0,1] ON ITS STROKE at screen (21,5)
+    // → apply_loaded writes the cached green into the target. The hit
+    // test hits painted geometry (SELECTION_TOOL.md § Hit test: painted
+    // geometry), so the unfilled target's middle, (25,5), is not a hit.
+    tool.onPress(ctx, x: 21, y: 5, shift: false, alt: true)
+    tool.onRelease(ctx, x: 21, y: 5, shift: false, alt: true)
 
     let fill = try #require(model.document.getElement([0, 1]).fill)
     #expect(fill.color == eyedropperSourceColor)

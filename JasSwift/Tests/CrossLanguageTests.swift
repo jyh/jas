@@ -4390,6 +4390,22 @@ private let gestureFixtures = [
     "partial_selection_marquee_corner.json",
     "partial_selection_drag_corner_anchor.json",
     "artboard_drag.json",
+    // YAML coverage census, NOT_YET_BUILT tools (2026-10-12): the first
+    // gesture case for the last twelve tools. Most act on a selection, which
+    // the case seeds (`selection`); Hand and Zoom pin `expected_view`.
+    "rotate_drag_quarter.json",
+    "scale_drag_double.json",
+    "shear_drag_along_diagonal.json",
+    "eyedropper_click_copies_to_selection.json",
+    "pen_closed_triangle.json",
+    "add_anchor_point_on_line.json",
+    "delete_anchor_point_corner.json",
+    "anchor_point_drag_corner_to_smooth.json",
+    "anchor_point_press_smooth_collapses.json",
+    "smooth_zigzag.json",
+    "path_eraser_cuts_line.json",
+    "hand_drag_pans.json",
+    "zoom_click_zooms_in.json",
 ]
 
 /// Apply a gesture fixture's optional `app_state` precondition onto the
@@ -4475,6 +4491,7 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     // Optional non-identity view seed (VIEWSEED) — before `activate`, since a
     // tool's on_enter may snapshot the view.
     seedCaseView(model, tc)
+    seedCaseSelection(model, tc)
 
     let ctx = gestureToolContext(model)
     tool.activate(ctx)
@@ -4510,6 +4527,15 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
         }
     }
     return model
+}
+
+/// Seed the case's optional `selection` (a list of element paths, each selected
+/// whole) before the tool activates: a tool that acts ON a selection does
+/// nothing without one, and an SVG cannot carry it. Mirrors Rust
+/// `seed_case_selection`.
+private func seedCaseSelection(_ model: Model, _ tc: [String: Any]) {
+    guard let paths = tc["selection"] as? [[NSNumber]] else { return }
+    Controller(model: model).setSelection(paths.map { ElementSelection.all($0.map { $0.intValue }) })
 }
 
 /// Full-precision value of one named geometry field, for the `expected_exact`
@@ -4579,7 +4605,8 @@ private func assertGestureTest(_ tc: [String: Any]) {
     let expectedFile = tc["expected_json"] as! String
     let expected = readFixture("gestures/\(expectedFile)")
         .trimmingCharacters(in: .whitespacesAndNewlines)
-    let document = runGestureModel(tc).document
+    let model = runGestureModel(tc)
+    let document = model.document
     let actual = documentToTestJson(document)
 
     if actual != expected {
@@ -4591,6 +4618,9 @@ private func assertGestureTest(_ tc: [String: Any]) {
     #expect(actual == expected, "Gesture test '\(name)' failed: canonical JSON mismatch")
 
     assertGestureExact(tc, document)
+    // The Hand and Zoom tools change only the view, which no document golden
+    // can witness. Mirrors Rust `assert_view_triple`.
+    assertActionView(tc, model)
 }
 
 /// Inc-1 of the shared gesture-fixture corpus: replay each fixture's pointer

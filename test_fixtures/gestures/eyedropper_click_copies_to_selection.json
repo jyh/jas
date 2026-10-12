@@ -1,0 +1,27 @@
+[
+ {
+  "_doc": "The blue rect [0,1] is selected; a click on the red rect [0,0] samples its appearance and writes it to the selection, so [0,1] turns red.",
+  "name": "eyedropper_click_copies_to_selection",
+  "setup_svg": "two_rects.svg",
+  "tool": "eyedropper",
+  "selection": [
+   [
+    0,
+    1
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 36,
+    "y": 36
+   },
+   {
+    "kind": "release",
+    "x": 36,
+    "y": 36
+   }
+  ],
+  "expected_json": "eyedropper_click_copies_to_selection_expected.json"
+ }
+]

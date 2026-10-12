@@ -99,7 +99,7 @@ class _FromCorpus:
     ``_geometric_bounds_from``.
 
     The reference implements no element geometry at all — it duck-types
-    ``elem.bounds()`` off the frozen port (``doc_primitives._child_bounds``) and
+    ``elem.bounds()`` off the frozen port (``hit_law._box_contains``) and
     has neither ellipse bounds nor cubic/arc extrema of its own. Hand-copying a
     number into this module would therefore introduce a SECOND, unchecked source
     of truth for the shape's box, which is exactly what the rect-only guard

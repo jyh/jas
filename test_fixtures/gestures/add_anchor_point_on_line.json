@@ -1,0 +1,21 @@
+[
+ {
+  "_doc": "The path's first segment runs straight from (0,0) to (50,50). A click on it at (25,25) inserts one anchor there, splitting the segment in two.",
+  "name": "add_anchor_point_on_line",
+  "setup_svg": "path_all_commands.svg",
+  "tool": "add_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 25,
+    "y": 25
+   },
+   {
+    "kind": "release",
+    "x": 25,
+    "y": 25
+   }
+  ],
+  "expected_json": "add_anchor_point_on_line_expected.json"
+ }
+]

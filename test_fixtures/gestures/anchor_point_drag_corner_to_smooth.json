@@ -1,0 +1,27 @@
+[
+ {
+  "_doc": "The open path (0,0) -> (30,30) -> (60,0) has a CORNER at (30,30): two straight segments meet there. A drag from it to (50,30) converts it to a smooth anchor (ANCHOR_POINT_TOOLS.md, press-time priority 3): the out-handle sits at the release point (50,30), and the in-handle is mirrored through the anchor to (10,30). Both segments become curves.",
+  "name": "anchor_point_drag_corner_to_smooth",
+  "setup_svg": "corner_path.svg",
+  "tool": "anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 30,
+    "y": 30
+   },
+   {
+    "kind": "move",
+    "x": 50,
+    "y": 30,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 50,
+    "y": 30
+   }
+  ],
+  "expected_json": "anchor_point_drag_corner_to_smooth_expected.json"
+ }
+]
