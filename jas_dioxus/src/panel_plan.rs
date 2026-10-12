@@ -27,6 +27,8 @@
 //!  "containers": [entry...],  layout-only containers render_plan omits, that
 //!                             carry at least one bound value
 //!  "unjoined":   [{"path": [...], "key": "..."}...],
+//!  "hidden":     [[...], ...],  paths of nodes whose dynamic visibility resolved
+//!                             false: not placed, and their rows not unjoined
 //!  "withheld":   [{"path": [...], "key": "..."}...],  a value that resolved to a
 //!                             template, a templated display string or id:
 //!                             named, never sent raw
@@ -409,7 +411,12 @@ pub fn panel_plan(
     let panel_id = panel_node.get("id").and_then(Value::as_str).unwrap_or("");
     let acts = PanelActions { panel_id, actions };
     let rows = bind_values(panel_node, ctx);
-    let (plan, omitted) = render_plan_with_omitted(panel_node, avail_w, avail_h, ctx);
+    // A node whose DYNAMIC visibility resolved false is laid out as the static
+    // `visible: false` the layout pass already drops, so a hidden group takes
+    // no room and its widgets are not placed (the shell evaluates nothing, so it
+    // can only show what the plan places).
+    let (laid_out, hidden) = laid_out_node(panel_node, &rows);
+    let (plan, omitted) = render_plan_with_omitted(&laid_out, avail_w, avail_h, ctx);
 
     // A row whose RESOLVED value is itself a template (a binding that yields
     // `{{theme.colors.selection}}`) is withheld by path and key. Its entry is
@@ -440,12 +447,14 @@ pub fn panel_plan(
         .iter()
         .filter_map(|it| by_path.remove(&it.path).map(|v| entry(it, v, &acts, &mut withheld)))
         .collect();
-    // Whatever is left joined nothing. Reported in row order.
+    // Whatever is left joined nothing, except the rows of a hidden node and its
+    // descendants, which are not placed on purpose. Reported in row order.
+    let is_hidden = |p: &[i64]| hidden.iter().any(|h| p.starts_with(h));
     let unjoined: Vec<Value> = rows
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|r| by_path.contains_key(&path_of(&r["path"])))
+        .filter(|r| by_path.contains_key(&path_of(&r["path"])) && !is_hidden(&path_of(&r["path"])))
         .map(|r| json!({"path": r["path"], "key": r["key"]}))
         .collect();
 
@@ -473,11 +482,48 @@ pub fn panel_plan(
         "leaves": leaves,
         "containers": containers,
         "unjoined": unjoined,
+        "hidden": hidden,
         "withheld": withheld,
         "icons": icons,
         "icons_missing": icons_missing,
     });
     (out, rows)
+}
+
+/// `panel_node` as the layout pass should see it in this scope: a clone in which
+/// every node whose dynamic visibility (`bind.visible`, or a string `visible`)
+/// RESOLVED false carries the literal `"visible": false` the layout pass already
+/// drops, plus those nodes' paths. The colour panel's five mode groups are the
+/// case (one is shown at a time); before this every group was placed, stacked,
+/// in every mode.
+///
+/// The hidden set is read from `rows`, the bind values this plan sends, so the
+/// layout and the values cannot disagree about what is hidden. Setting the
+/// literal rather than removing the node keeps every child index, so a path
+/// names the same node in the plan, the rows and the panel events.
+///
+/// ⚠️ A node inside a `foreach` item is not pruned: its row's path counts the
+/// expanded ITEM, which names no child of the template. Such a node is still
+/// placed, as before; no panel in the workspace binds one today.
+pub(crate) fn laid_out_node(panel_node: &Value, rows: &Value) -> (Value, Vec<Vec<i64>>) {
+    let mut node = panel_node.clone();
+    let mut hidden: Vec<Vec<i64>> = vec![];
+    for r in rows.as_array().into_iter().flatten() {
+        let key = r["key"].as_str().unwrap_or("");
+        if !(key == "bind.visible" || key == "visible") || r["value"] != json!("false") {
+            continue;
+        }
+        let path = path_of(&r["path"]);
+        let mut at = node.get_mut("content");
+        for &i in &path {
+            at = at.and_then(|n| n.get_mut("children")).and_then(|c| c.get_mut(i as usize));
+        }
+        if let Some(Value::Object(m)) = at {
+            m.insert("visible".to_string(), Value::Bool(false));
+            hidden.push(path);
+        }
+    }
+    (node, hidden)
 }
 
 /// The panels a shell can offer (W2b-2): `[{"id": "<content id>", "summary":
@@ -549,6 +595,28 @@ pub(crate) mod checks {
     use std::collections::HashMap;
 
     use crate::interpreter::panel_layout::RenderPlan;
+
+    /// What a plan is expected to carry in a scope: the panel as it is laid out
+    /// there (a node whose dynamic visibility resolved false carries
+    /// `visible: false`) and the rows that must be joined (every row except those
+    /// at or under a hidden node). Every oracle below compares against these, so
+    /// it reads the same panel the plan was built from. Pruning itself is checked
+    /// independently, by widget id and height, in
+    /// `a_dynamically_hidden_group_is_not_placed`.
+    pub(crate) fn shown(spec: &Value, rows: &Value) -> (Value, Value) {
+        let (node, hidden) = super::laid_out_node(spec, rows);
+        let keep: Vec<Value> = rows
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|r| {
+                let p = super::path_of(&r["path"]);
+                !hidden.iter().any(|h| p.starts_with(h))
+            })
+            .cloned()
+            .collect();
+        (node, Value::Array(keep))
+    }
 
     /// The three entry lists a plan carries, in the order they are checked.
     pub(crate) const LISTS: [&str; 3] = ["chrome", "leaves", "containers"];
@@ -751,6 +819,55 @@ mod tests {
 
     const SIZES: [(i64, i64); 3] = [(228, 0), (228, 600), (0, 0)];
 
+    /// The engine's scope with the Color panel's `mode` set: the panel the
+    /// owner was looking at when he saw every colour model at once.
+    fn colour_plan(mode: &str) -> Value {
+        let ws = Workspace::load().expect("workspace");
+        let spec = ws.panel("color_panel_content").expect("color panel");
+        let mut ctx = engine_scope();
+        ctx["panel"]["mode"] = json!(mode);
+        panel_plan(spec, 228, 0, &ctx, &json!({}), &Value::Null).0
+    }
+
+    fn leaf_ids(plan: &Value) -> BTreeSet<String> {
+        plan["leaves"].as_array().unwrap().iter()
+            .filter_map(|e| e["id"].as_str().map(str::to_string))
+            .collect()
+    }
+
+    /// THE COLOUR PANEL SHOWS ONE MODEL AT A TIME (the owner's note, 10-11):
+    /// each mode's slider group binds `visible` to `panel.mode`, and a shell
+    /// that evaluates nothing can only show what the plan places. Before this,
+    /// the plan placed all five groups, stacked, in every mode.
+    #[test]
+    fn a_dynamically_hidden_group_is_not_placed() {
+        let hsb = colour_plan("hsb");
+        let rgb = colour_plan("rgb");
+        let (hsb_ids, rgb_ids) = (leaf_ids(&hsb), leaf_ids(&rgb));
+        // Anti-vacuity: the ids this test names exist in the panel at all.
+        for id in ["cp_h", "cp_r"] {
+            assert!(hsb_ids.contains(id) || rgb_ids.contains(id), "no leaf {id}: {hsb_ids:?}");
+        }
+        assert!(hsb_ids.contains("cp_h") && !hsb_ids.contains("cp_r"), "{hsb_ids:?}");
+        assert!(rgb_ids.contains("cp_r") && !rgb_ids.contains("cp_h"), "{rgb_ids:?}");
+        // One group is laid out, so the two three-slider modes are the same height.
+        assert_eq!(hsb["height"], rgb["height"], "hsb and rgb lay out one group each");
+        // The four hidden groups are named, and none of their rows is unjoined.
+        assert_eq!(hsb["hidden"].as_array().map(Vec::len), Some(4), "{}", hsb["hidden"]);
+        assert_eq!(hsb["unjoined"], json!([]), "{}", hsb["unjoined"]);
+    }
+
+    /// The pruned plan is shorter than the stacked one: the layout compacts,
+    /// rather than leaving the hidden groups' rows as gaps.
+    #[test]
+    fn a_hidden_group_leaves_no_gap() {
+        let ws = Workspace::load().expect("workspace");
+        let spec = ws.panel("color_panel_content").expect("color panel");
+        let stacked = render_plan(spec, 228, 0, &engine_scope()).height;
+        let one = colour_plan("rgb")["height"].as_i64().unwrap();
+        assert!(one < stacked, "one group ({one}) must be shorter than five stacked ({stacked})");
+    }
+
     fn sorted_keys(v: Option<&Value>) -> Value {
         let mut k: Vec<String> = v
             .and_then(|x| x.as_object())
@@ -932,8 +1049,10 @@ mod tests {
                     assert_eq!(joined_from, rows, "{at}: the plan must be joined from bind_values' rows");
                     let (values, n) = checks::plan_values(&plan);
                     // A row whose value is a template is WITHHELD, not carried;
-                    // every other row is carried exactly once.
-                    let mut want = checks::row_values(&rows);
+                    // a row of a hidden node is not placed; every other row is
+                    // carried exactly once.
+                    let (pruned, shown_rows) = checks::shown(spec, &rows);
+                    let mut want = checks::row_values(&shown_rows);
                     let before = want.len();
                     want.retain(|_, v| !v.contains("{{"));
                     let held: BTreeSet<String> = plan["withheld"].as_array().unwrap().iter()
@@ -949,7 +1068,7 @@ mod tests {
                     assert_eq!(n, want.len(), "{at}: values carried != bind rows ({before} rows)");
                     assert_eq!(values, want, "{at}: joined values differ from bind_values");
                     assert_eq!(plan["unjoined"], json!([]), "{at}: a bound row joined nothing");
-                    let rp = render_plan(spec, w, h, ctx);
+                    let rp = render_plan(&pruned, w, h, ctx);
                     let rp_paths: BTreeSet<String> = rp
                         .leaves
                         .iter()
@@ -1017,7 +1136,9 @@ mod tests {
                     .iter()
                     .map(|r| (r["path"].to_string(), r.clone()))
                     .collect();
-                let bound: BTreeSet<String> = bind_values(spec, ctx)
+                let all_rows = bind_values(spec, ctx);
+                let (pruned, _) = checks::shown(spec, &all_rows);
+                let bound: BTreeSet<String> = all_rows
                     .as_array()
                     .unwrap()
                     .iter()
@@ -1026,7 +1147,7 @@ mod tests {
                 for (w, h) in SIZES {
                     let at = format!("{pid} {sname} {w}x{h}");
                     let (mut chrome, mut leaves, mut containers) = (vec![], vec![], vec![]);
-                    for e in layout_panel(spec, w, h, ctx).as_array().unwrap() {
+                    for e in layout_panel(&pruned, w, h, ctx).as_array().unwrap() {
                         let p = e["path"].to_string();
                         let rec = &wt[&p];
                         let t = rec["type"].as_str().unwrap_or("");
@@ -1163,7 +1284,7 @@ mod tests {
         let (plan_b, _) = panel_plan(spec, 228, 600, &b, ws.icons(), ws.actions());
 
         let (va, na) = checks::plan_values(&plan_a);
-        let want = checks::row_values(&bind_values(spec, &a));
+        let want = checks::row_values(&checks::shown(spec, &bind_values(spec, &a)).1);
         assert!(na > 0, "vacuous: no value joined");
         assert_eq!(na, want.len(), "every row joined exactly once");
         assert_eq!(va, want, "the plan's values are bind_values' rows");
