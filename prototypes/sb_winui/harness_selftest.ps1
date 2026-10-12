@@ -2124,6 +2124,17 @@ Test-Case 'Q6.PM: a run that moved NOTHING FAILS -- the colour mode switch, meas
     $v = Get-SbPm @(($pmRead -replace 'dock1', 'dock0'), 'PANEL MENU RAN group=dock0 panel=color_panel_content index=0 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids) 'dock0:0'
     "$($v.Verdict) $($v.Detail -match 'set_color_panel_mode')"
 } 'FAIL True'
+Test-Case 'Q6.PM: choosing the item ALREADY CHECKED is NOT RUN -- a no-op by design, measured live (HSB, the default mode)' {
+    $read = ($pmRead -replace 'dock1', 'dock0' -replace 'align_panel_content', 'color_panel_content' -replace 'checked=\[\]', 'checked=[2]')
+    $ran = 'PANEL MENU RAN group=dock0 panel=color_panel_content index=2 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids
+    $v = Get-SbPm @($read, $ran) 'dock0:2'
+    "$($v.Verdict) $($v.Detail -match 'already checked')"
+} 'NOT RUN True'
+Test-Case 'Q6.PM: CONTROL -- an UNCHECKED item that moves nothing still FAILS' {
+    $read = ($pmRead -replace 'dock1', 'dock0' -replace 'align_panel_content', 'color_panel_content' -replace 'checked=\[\]', 'checked=[2]')
+    $ran = 'PANEL MENU RAN group=dock0 panel=color_panel_content index=0 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids
+    (Get-SbPm @($read, $ran) 'dock0:0').Verdict
+} 'FAIL'
 Test-Case 'Q6.PM: a run of ANOTHER index FAILS -- the knob named index 0' { (Get-SbPm @($pmRead, ($pmRan -replace 'index=0', 'index=2'))).Verdict } 'FAIL'
 Test-Case 'Q6.PM: rows for ANOTHER group FAIL -- the knob named dock1' { (Get-SbPm @(($pmRead -replace 'dock1', 'dock2'), ($pmRan -replace 'dock1', 'dock2'))).Verdict } 'FAIL'
 Test-Case 'Q6.PM: CONTROL -- a HAND run is not the replay' { (Get-SbPm @(($pmRead -replace 'synth', 'hand'), ($pmRan -replace 'synth', 'hand'))).Verdict } 'FAIL'

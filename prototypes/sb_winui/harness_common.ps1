@@ -2401,6 +2401,13 @@ function Get-SbPanelMenuVerdict($Rows, [string]$Scene, [string]$Dock, [string]$K
         return New-SbVerdict $name 'FAIL' "$group's menu was read ($items item(s)) and item $index never ran" $read
     }
     if ((Get-SbField $ran 'outcome') -ne 'changed') {
+        # An item the core had ALREADY CHECKED (the current mode of a radio set)
+        # moves nothing by design, so the run cannot test what Q6.PM asserts.
+        # Measured live 2026-10-12: Color > HSB, the panel's default mode.
+        $was = [regex]::Match($read, '\bchecked=\[([0-9,]*)\]').Groups[1].Value -split ','
+        if ($was -contains $index) {
+            return New-SbVerdict $name 'NOT RUN' "$panel's menu item $index was already checked (the READ row's checked=[$($was -join ',')]); choosing it moves nothing by design, so this run cannot test a switch. Name an unchecked item" $ran
+        }
         return New-SbVerdict $name 'FAIL' "$panel's menu item $index ran and the engine answered $(Get-SbField $ran 'channel'): it moved nothing" $ran
     }
     return New-SbVerdict $name 'PASS' "$($group): $panel's menu read with $items item(s), and item index $index ran in the engine and moved state ($(Get-SbField $ran 'changed-rows') panel row(s) changed)" $ran
