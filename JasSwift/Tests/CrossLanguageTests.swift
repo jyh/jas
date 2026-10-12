@@ -5412,6 +5412,9 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-11): the fill/stroke colour verbs, each after a
     // select_all, pinning the panel-render state as well as the document.
     "color_actions.json",
+    // YAML coverage census (2026-10-12): verbs that write a panel's own state,
+    // witnessed by `expected_panel_scope` (or `expected_panel_state`).
+    "panel_scope_actions.json",
     // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
     // inherited lock. `actions.yaml` §select_all always said "locked objects
     // are excluded" without saying WHOSE flag, and the two ports answered
@@ -5681,7 +5684,34 @@ private func assertActionTest(_ tc: [String: Any]) {
     }
     #expect(actual == expected, "Action test '\(name)' failed: canonical JSON mismatch")
     assertActionPanelState(tc, model)
+    assertActionPanelScope(tc, model)
     assertActionView(tc, model)
+}
+
+/// OPTIONAL assertion: `expected_panel_scope`, `{<panel content id>: {<key>:
+/// <value>}}`, a SUBSET of the `panel.*` scope a panel renders against (the
+/// shared panel store's scope for that panel). A verb that writes only a
+/// panel's own state moves neither the document nor `state.*`, so before this
+/// block no case could see it. Values compare as canonical JSON. Mirrors Rust
+/// `assert_action_panel_scope`.
+private func assertActionPanelScope(_ tc: [String: Any], _ model: Model) {
+    guard let expected = tc["expected_panel_scope"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    func canon(_ v: Any?) -> String {
+        let wrapped: [Any] = [v ?? NSNull()]
+        let data = try! JSONSerialization.data(withJSONObject: wrapped, options: [.sortedKeys, .fragmentsAllowed])
+        return String(data: data, encoding: .utf8)!
+    }
+    for (panel, keysAny) in expected {
+        let keys = keysAny as! [String: Any]
+        let scope = model.stateStore.getPanelState(panel)
+        for (key, want) in keys {
+            #expect(scope.keys.contains(key),
+                    "Action test '\(name)': panel \(panel) has no key \(key) in its scope at all")
+            #expect(canon(scope[key]) == canon(want),
+                    "Action test '\(name)': panel \(panel).\(key) is \(canon(scope[key])) but the corpus pins \(canon(want))")
+        }
+    }
 }
 
 // MARK: - Container-seeded metamorphic equivalence
