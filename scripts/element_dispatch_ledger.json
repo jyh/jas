@@ -168,6 +168,26 @@
       "verdict": "leaf_only",
       "reason": "As Rust's gradient_bbox: a container carries no gradient, so the SVG importer asks the box only of a leaf it is attaching a url(#id) gradient to; the default arm returns bounds.",
       "handled_at": "Geometry/Svg.swift::applyGradientAttrs (per parsed element)"
+    },
+    "rust:jas_dioxus/src/interpreter/hit_law.rs::outline": {
+      "verdict": "leaf_only",
+      "reason": "Computes the leaf's outline polylines for the hit test. A container never reaches here: painted_hit and deep_hit test for a group or layer FIRST and recurse into its children (a group is hit when any child is; SELECTION_TOOL.md, Hit test: painted geometry), so only a leaf is passed to the leaf test, which is the sole caller of this function.",
+      "handled_at": "interpreter/hit_law.rs::painted_hit / deep_hit (container arm before leaf_painted_hit)"
+    },
+    "rust:jas_dioxus/src/interpreter/hit_law.rs::inside_fill": {
+      "verdict": "leaf_only",
+      "reason": "Computes the leaf's filled area for the hit test. A container never reaches here: painted_hit and deep_hit test for a group or layer FIRST and recurse into its children (a group is hit when any child is; SELECTION_TOOL.md, Hit test: painted geometry), so only a leaf is passed to the leaf test, which is the sole caller of this function.",
+      "handled_at": "interpreter/hit_law.rs::painted_hit / deep_hit (container arm before leaf_painted_hit)"
+    },
+    "swift:JasSwift/Sources/Interpreter/HitLaw.swift::hitOutline": {
+      "verdict": "leaf_only",
+      "reason": "Computes the leaf's outline polylines for the hit test. A container never reaches here: painted_hit and deep_hit test for a group or layer FIRST and recurse into its children (a group is hit when any child is; SELECTION_TOOL.md, Hit test: painted geometry), so only a leaf is passed to the leaf test, which is the sole caller of this function.",
+      "handled_at": "Interpreter/HitLaw.swift::hitLawPaintedHit / hitLawDeepHit (hitChildren before hitLawLeafPaintedHit)"
+    },
+    "swift:JasSwift/Sources/Interpreter/HitLaw.swift::insideFill": {
+      "verdict": "leaf_only",
+      "reason": "Computes the leaf's filled area for the hit test. A container never reaches here: painted_hit and deep_hit test for a group or layer FIRST and recurse into its children (a group is hit when any child is; SELECTION_TOOL.md, Hit test: painted geometry), so only a leaf is passed to the leaf test, which is the sole caller of this function.",
+      "handled_at": "Interpreter/HitLaw.swift::hitLawPaintedHit / hitLawDeepHit (hitChildren before hitLawLeafPaintedHit)"
     }
   }
 }

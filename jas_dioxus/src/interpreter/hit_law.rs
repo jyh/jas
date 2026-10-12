@@ -13,7 +13,7 @@ use crate::geometry::element::{Element, FillRule, PathCommand, StrokeAlign, Visi
 use crate::geometry::live::{LiveVariant, DEFAULT_PRECISION};
 
 /// How far from a painted edge a click still hits, in document units.
-pub const HIT_TOLERANCE: f64 = 3.0;
+pub(crate) const HIT_TOLERANCE: f64 = 3.0;
 
 /// Line segments per Bezier segment; the path flattener's own count.
 const CURVE_STEPS: usize = 20;

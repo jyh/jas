@@ -298,7 +298,8 @@ def _corpus_text(cases) -> str:
 def test_the_shared_corpus_is_current():
     text = _corpus_text(_record_all())
     if os.environ.get("JAS_WRITE_HIT_CORPUS") == "1":
-        CORPUS.write_text(text)
-    assert CORPUS.read_text() == text, "regenerate: JAS_WRITE_HIT_CORPUS=1 pytest " + __file__
+        with open(CORPUS, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    assert CORPUS.read_text(encoding="utf-8") == text, "regenerate: JAS_WRITE_HIT_CORPUS=1 pytest " + __file__
     # Anti-vacuity: the corpus carries every row this file checks.
     assert len(json.loads(text)["cases"]) >= 49
