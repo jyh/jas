@@ -653,7 +653,6 @@ fn bind_write(node: &Value, spec: &Value, panel_id: &str) -> Vec<Value> {
     out
 }
 
-/// `event.*` for a value event: the modifiers, plus `value`.
 /// Run one workspace ACTION by id, as a menu item runs it: the one-step batch
 /// `[{"dispatch": {action, params}}]`, through the same pre-flight and run as
 /// a widget's behavior ([`run_batch`]), with no panel made active. An id the
@@ -682,6 +681,7 @@ pub(crate) fn run_action(
     run_batch(None, &batch, json!({}), scope, store, model, actions, dialogs, host)
 }
 
+/// `event.*` for a value event: the modifiers, plus `value`.
 fn value_event(ev: &UserEvent, value: Value) -> Value {
     let mut event = ev.modifiers.clone();
     if let Some(m) = event.as_object_mut() {
