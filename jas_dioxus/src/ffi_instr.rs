@@ -119,6 +119,9 @@ pub enum Crossing {
     /// 2026-10-11). Counted apart from `PanelBehavior`: that one runs a
     /// widget's behaviors, this one runs one action no panel owns.
     DispatchAction = 18,
+    /// One panel's menu, labels and state (the owner's note 3, 2026-10-12).
+    /// Read when the shell opens a panel menu, so its count is the menus opened.
+    PanelMenu = 19,
 }
 
 impl Crossing {
@@ -144,6 +147,7 @@ impl Crossing {
         "jas_panel_list",
         "jas_dock_layout",
         "jas_dispatch_action",
+        "jas_panel_menu",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -153,7 +157,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 19;
+    pub(crate) const COUNT: usize = 20;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -180,6 +184,7 @@ impl Crossing {
         Crossing::PanelList,
         Crossing::DockLayout,
         Crossing::DispatchAction,
+        Crossing::PanelMenu,
     ];
 
     pub fn name(self) -> &'static str {
