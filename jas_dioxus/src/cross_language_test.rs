@@ -1910,7 +1910,7 @@ mod tests {
     /// its pointer steps are the gesture events; any other step this runner
     /// cannot replay yet is REFUSED by name, never skipped; and the script must
     /// end on `{"read": "document"}`, or it asserts nothing.
-    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json"];
+    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json"];
 
     #[cfg(feature = "web")]
     fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
