@@ -1,0 +1,33 @@
+[
+ {
+  "_doc": "The eraser passes along the path's first, straight segment: the erased stretch is removed, splitting the path.",
+  "name": "path_eraser_cuts_line",
+  "setup_svg": "path_all_commands.svg",
+  "tool": "path_eraser",
+  "selection": [
+   [
+    0,
+    0
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 20,
+    "y": 20
+   },
+   {
+    "kind": "move",
+    "x": 30,
+    "y": 30,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 30,
+    "y": 30
+   }
+  ],
+  "expected_json": "path_eraser_cuts_line_expected.json"
+ }
+]

@@ -1,0 +1,21 @@
+[
+ {
+  "_doc": "A click on the path's second anchor, at (50,50), deletes it: the path loses one anchor and its first segment now runs to the third.",
+  "name": "delete_anchor_point_corner",
+  "setup_svg": "path_all_commands.svg",
+  "tool": "delete_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 50,
+    "y": 50
+   },
+   {
+    "kind": "release",
+    "x": 50,
+    "y": 50
+   }
+  ],
+  "expected_json": "delete_anchor_point_corner_expected.json"
+ }
+]

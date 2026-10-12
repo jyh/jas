@@ -1,0 +1,33 @@
+[
+ {
+  "_doc": "The selected 72x72 rect is dragged from its bottom-right corner, 36 units from the centre on each axis, to 72 units: both scale factors are 2 about the centre, so the rect becomes 144x144 centred where it was.",
+  "name": "scale_drag_double",
+  "setup_svg": "rect_basic.svg",
+  "tool": "scale",
+  "selection": [
+   [
+    0,
+    0
+   ]
+  ],
+  "events": [
+   {
+    "kind": "press",
+    "x": 72,
+    "y": 72
+   },
+   {
+    "kind": "move",
+    "x": 108,
+    "y": 108,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 108,
+    "y": 108
+   }
+  ],
+  "expected_json": "scale_drag_double_expected.json"
+ }
+]

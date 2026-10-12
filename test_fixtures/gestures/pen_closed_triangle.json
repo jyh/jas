@@ -1,0 +1,51 @@
+[
+ {
+  "_doc": "Three clicks place three corner anchors; a fourth click within the 8 pt close radius of the first closes the path. The result is one closed three-anchor path.",
+  "name": "pen_closed_triangle",
+  "setup_svg": "empty_layer.svg",
+  "tool": "pen",
+  "events": [
+   {
+    "kind": "press",
+    "x": 10,
+    "y": 10
+   },
+   {
+    "kind": "release",
+    "x": 10,
+    "y": 10
+   },
+   {
+    "kind": "press",
+    "x": 90,
+    "y": 10
+   },
+   {
+    "kind": "release",
+    "x": 90,
+    "y": 10
+   },
+   {
+    "kind": "press",
+    "x": 50,
+    "y": 80
+   },
+   {
+    "kind": "release",
+    "x": 50,
+    "y": 80
+   },
+   {
+    "kind": "press",
+    "x": 12,
+    "y": 12
+   },
+   {
+    "kind": "release",
+    "x": 12,
+    "y": 12
+   }
+  ],
+  "expected_json": "pen_closed_triangle_expected.json"
+ }
+]

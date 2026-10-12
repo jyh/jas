@@ -6343,8 +6343,19 @@ fn path_smooth_at_cursor(
             (Some(f), Some(l)) => (f, l),
             _ => continue,
         };
-        let first_cmd = cmd_map[first_flat];
-        let last_cmd = cmd_map[last_flat];
+        // The refit never replaces a MoveTo (SMOOTH_TOOL.md § Algorithm,
+        // step 3): when the cursor reaches a path's first point the range
+        // starts at command 1, so the MoveTo survives as the prefix. Before
+        // this the range began at 0 and the smoothed path lost its MoveTo.
+        // Likewise it stops before a later MoveTo, so two subpaths are
+        // never refitted into one.
+        let first_cmd = cmd_map[first_flat].max(1);
+        let mut last_cmd = cmd_map[last_flat];
+        if let Some(m) = (first_cmd + 1..=last_cmd)
+            .find(|&i| matches!(path_elem.d.get(i), Some(PathCommand::MoveTo { .. })))
+        {
+            last_cmd = m - 1;
+        }
         if first_cmd >= last_cmd {
             continue;
         }
