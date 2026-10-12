@@ -1974,8 +1974,12 @@ mod tests {
                 let plan: serde_json::Value = serde_json::from_str(&got)
                     .unwrap_or_else(|_| panic!("{pid} {w}x{h}: not JSON: {got:?}"));
                 let ctx = panel_ctx(engine, &ws, pid);
-                let layout = crate::interpreter::panel_layout::layout_panel(spec, w, h, &ctx);
-                let rp = crate::interpreter::panel_layout::render_plan(spec, w, h, &ctx);
+                // Laid out as the plan lays it out: a group whose dynamic
+                // visibility resolved false is not placed.
+                let rows = crate::interpreter::bind_values::bind_values(spec, &ctx);
+                let (pruned, _) = crate::panel_plan::checks::shown(spec, &rows);
+                let layout = crate::interpreter::panel_layout::layout_panel(&pruned, w, h, &ctx);
+                let rp = crate::interpreter::panel_layout::render_plan(&pruned, w, h, &ctx);
                 compared += crate::panel_plan::checks::plan_matches_layout(&plan, &layout, &rp)
                     .unwrap_or_else(|err| panic!("{pid} {w}x{h}: {err}"));
                 leaves += rp.leaves.len();
@@ -2029,7 +2033,9 @@ mod tests {
             }))
             .expect("rows JSON");
             let (values, n) = plan_values(&plan);
-            let want = row_values(&rows);
+            // A hidden group's rows are not placed (`checks::shown`).
+            let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+            let want = row_values(&crate::panel_plan::checks::shown(ws.panel(id).unwrap(), &rows).1);
             assert!(n > 0, "vacuous: nothing joined");
             assert_eq!(n, want.len(), "every row joined exactly once");
             assert_eq!(values, want, "plan values != jas_bind_values rows");
