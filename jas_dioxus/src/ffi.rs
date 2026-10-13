@@ -2366,8 +2366,10 @@ mod tests {
             let store = engine_of(e).store.borrow();
             assert_eq!(store.get_panel(P, "selected_swatches"), &serde_json::json!([k]));
             assert_eq!(store.get_panel(P, "selected_library"), &lib);
-            assert_eq!(store.get_panel(P, "recent_colors")[0], colour.as_str());
         }
+        // The recent colour is the DOCUMENT's (`active_document.recent_colors`),
+        // held on the model; until 2026-10-12 it landed in this panel's scope.
+        assert_eq!(engine_of(e).model.borrow().recent_colors.first().map(String::as_str), Some(colour.as_str()));
         // The SLICE, which every scope reads, and the store's copy agree on it.
         let slice_after = engine_of(e).panel.borrow().state_keys();
         assert_eq!(slice_after["fill_color"], colour.as_str(), "the active colour did not move");

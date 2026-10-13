@@ -1959,6 +1959,8 @@ pub(crate) fn build_active_document_view(
             // The Brushes panel's two gates (W2b-18): nothing is selected.
             m.insert("selection_has_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
+            // No document: no recent colours (`active_document.recent_colors`).
+            m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
         }
         return empty;
     };
@@ -2191,6 +2193,11 @@ pub(crate) fn build_active_document_view(
                     .collect(),
             ),
         );
+    }
+    // The per-document recent colours, the one writable document list
+    // (`runtime_contexts.yaml`), which Color and Swatches both read.
+    if let Some(m) = view.as_object_mut() {
+        m.insert("recent_colors".to_string(), serde_json::json!(tab.model.recent_colors));
     }
     view
 }
@@ -3187,7 +3194,7 @@ fn run_yaml_effect(
     // list_push: { target, value, unique, max_length }
     if let Some(lp) = eff.get("list_push").and_then(|v| v.as_object()) {
         let target = lp.get("target").and_then(|v| v.as_str()).unwrap_or("");
-        if target == "panel.recent_colors" {
+        if target == "active_document.recent_colors" {
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
             // Accept both Value::Color (e.g. from a `Color`-typed
@@ -3202,15 +3209,7 @@ fn run_yaml_effect(
                 let unique = lp.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
                 let max_len = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    if unique {
-                        if let Some(pos) = tab.model.recent_colors.iter().position(|c| *c == hex) {
-                            tab.model.recent_colors.remove(pos);
-                        }
-                    }
-                    tab.model.recent_colors.insert(0, hex);
-                    if let Some(max) = max_len {
-                        tab.model.recent_colors.truncate(max);
-                    }
+                    tab.model.push_recent_color(hex, unique, max_len);
                 }
             }
         } else if target == "panel.isolation_stack" {

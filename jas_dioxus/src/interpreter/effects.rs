@@ -715,6 +715,18 @@ fn run_one<'h>(
             if let Some(active) = store.active_panel_id().map(|s| s.to_string()) {
                 store.list_push(&active, parts[1], value_to_json(&value), unique, max_length);
             }
+        } else if parts.len() == 2 && parts[0] == "active_document" {
+            // The one writable document list (`runtime_contexts.yaml`), held
+            // on the model as both apps hold it. Anything else is read-only.
+            if parts[1] != "recent_colors" {
+                report.unhandled.push(Unhandled::NotWritable(target.to_string()));
+            } else if let Some(m) = model.as_deref_mut() {
+                if let serde_json::Value::String(c) = value_to_json(&value) {
+                    m.push_recent_color(c, unique, max_length);
+                }
+            } else {
+                report.unhandled.push(Unhandled::NoModel(target.to_string()));
+            }
         }
         return;
     }

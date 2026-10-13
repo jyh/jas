@@ -517,6 +517,20 @@ impl Model {
         &self.id_index
     }
 
+    /// Push `colour` onto the front of the per-document recent colours,
+    /// `list_push`'s semantics (the target `active_document.recent_colors`):
+    /// with `unique`, an equal entry moves to the front instead of repeating;
+    /// with `max_length`, the list is cut to it. Not undoable, as in both apps.
+    pub fn push_recent_color(&mut self, colour: String, unique: bool, max_length: Option<usize>) {
+        if unique {
+            self.recent_colors.retain(|c| *c != colour);
+        }
+        self.recent_colors.insert(0, colour);
+        if let Some(max) = max_length {
+            self.recent_colors.truncate(max);
+        }
+    }
+
     /// Monotonically increasing counter bumped on every document mutation.
     pub fn generation(&self) -> u64 {
         self.generation
