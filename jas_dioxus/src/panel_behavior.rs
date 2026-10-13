@@ -372,6 +372,7 @@ fn unhandled_detail(u: &Unhandled) -> String {
         Unhandled::EmptyAction(s) => ("EmptyAction", s),
         Unhandled::UnknownDialog(s) => ("UnknownDialog", s),
         Unhandled::Dialog(s) => ("Dialog", s),
+        Unhandled::NotWritable(s) => ("NotWritable", s),
     };
     format!("{kind}:{payload}")
 }

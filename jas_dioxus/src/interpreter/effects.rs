@@ -67,6 +67,10 @@ pub enum Unhandled {
     /// An `open_dialog` that a host refuses because it has no way to show a
     /// dialog (the engine, FB wave 2b A12). Carries the dialog's id.
     Dialog(String),
+    /// A write to a target that is not writable: an `active_document.*`
+    /// property other than the per-document lists (`list_push`). Carries the
+    /// target as written. The reference's `field_not_writable`.
+    NotWritable(String),
 }
 
 /// What a `run_effects` batch did not do, in the order the runner met it,
@@ -12779,6 +12783,33 @@ mod tests {
             ("p_panel_content.recent".to_string(), json!(["a"])),
             ("p_panel_content.cap".to_string(), json!("square")),
         ]);
+    }
+
+    /// `list_push` onto `active_document.recent_colors` writes the MODEL's
+    /// per-document list (the reference's `TestRecentColoursArePerDocument`),
+    /// with no active panel. Any other `active_document.*` target is not
+    /// writable and is reported; with no model there is no document to hold
+    /// the list, and that is reported too.
+    #[test]
+    fn list_push_onto_recent_colours_writes_the_models_list() {
+        use serde_json::json;
+        let push = |v: &str| json!({"list_push": {"target": "active_document.recent_colors",
+                                                  "value": v, "unique": true, "max_length": 3}});
+        let mut store = StateStore::new();
+        let mut model = Model::default();
+        for c in ["\"#000001\"", "\"#000002\"", "\"#000003\"", "\"#000001\"", "\"#000004\""] {
+            let r = run_effects(&[push(c)], &json!({}), &mut store, Some(&mut model), None, None, None);
+            assert!(r.unhandled.is_empty(), "{c}: {:?}", r.unhandled);
+        }
+        assert_eq!(model.recent_colors, vec!["#000004", "#000001", "#000003"]);
+
+        let r = run_effects(&[json!({"list_push": {"target": "active_document.selection_count", "value": "1"}})],
+                            &json!({}), &mut store, Some(&mut model), None, None, None);
+        assert_eq!(r.unhandled, vec![Unhandled::NotWritable("active_document.selection_count".into())]);
+        assert_eq!(model.recent_colors.len(), 3);
+
+        let r = run_effects(&[push("\"#000005\"")], &json!({}), &mut store, None, None, None, None);
+        assert_eq!(r.unhandled, vec![Unhandled::NoModel("active_document.recent_colors".into())]);
     }
 
     // -----------------------------------------------------------------------

@@ -4240,12 +4240,12 @@ mod tests {
     /// because on the default colours it moves nothing) and one with a
     /// literal param (the black swatch's `set_active_color`).
     ///
-    /// ⚠️ The dispatch oracle is NOT the whole truth for `set_active_color`: its
-    /// `list_push {target: "panel.recent_colors"}` writes the ACTIVE panel's
-    /// scope, and a menu dispatch has none, so the dispatch route drops the
-    /// recent colour that the action's description promises. The click (Color
-    /// active) keeps it. So that case allows exactly ONE extra row,
-    /// `cp_recent_0` = the action's own param, and nothing else.
+    /// The two routes now agree EXACTLY. Until 2026-10-12 this test allowed one
+    /// extra row on the click (`cp_recent_0`), because `set_active_color`
+    /// pushed onto the ACTIVE panel's `panel.recent_colors` and a menu dispatch
+    /// has no active panel. The list is per-document now
+    /// (`active_document.recent_colors`), so the dispatch keeps it too, and
+    /// the black swatch's case checks that it does.
     #[test]
     fn a_colour_click_runs_its_action_as_dispatching_it_does() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -4261,6 +4261,12 @@ mod tests {
             assert!(aerr.is_empty() || aerr.contains("Unchanged"), "oracle ran: {aerr}");
             let want = bind_rows(a, id);
             assert_ne!(want, before, "fixture: {action} must move the colour rows");
+            if let Some(c) = recent {
+                let w: Vec<serde_json::Value> = serde_json::from_str(&want).unwrap();
+                let r = w.iter().find(|r| r["id"] == "cp_recent_0" && r["key"] == "bind.color")
+                    .expect("a cp_recent_0 colour row");
+                assert_eq!(r["value"], c, "{action}: the dispatch route dropped the recent colour");
+            }
             unsafe { jas_engine_free(a) };
 
             let b = jas_engine_new();
@@ -4270,19 +4276,6 @@ mod tests {
             assert!(err.is_empty(), "{widget} ran: {err}");
             assert!(!reply.is_empty(), "{widget}: {reply}");
             let got = bind_rows(b, id);
-            let got = match recent {
-                None => got,
-                Some(c) => {
-                    // The one row the dispatch route drops (see above), checked
-                    // and then taken out so the rest must match exactly.
-                    let mut g: Vec<serde_json::Value> = serde_json::from_str(&got).unwrap();
-                    let w: Vec<serde_json::Value> = serde_json::from_str(&want).unwrap();
-                    let i = g.iter().position(|r| r["id"] == "cp_recent_0").expect("a cp_recent_0 row");
-                    assert_eq!(g[i]["value"], c, "{widget}: the recent colour is the action's param");
-                    g[i] = w[i].clone();
-                    serde_json::Value::Array(g).to_string()
-                }
-            };
             if got != want {
                 let (g, w): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
                     (serde_json::from_str(&got).unwrap(), serde_json::from_str(&want).unwrap());
