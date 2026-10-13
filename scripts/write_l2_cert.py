@@ -166,7 +166,7 @@ def self_test():
         shutil.copy(os.path.join(ROOT, "workspace", "workspace.json"), os.path.join(tmp, "workspace"))
         os.makedirs(os.path.join(tmp, "test_fixtures", "input_scripts"))
         for item, tool in (("rect.draw", "rect"), ("selection.drag", "selection")):
-            with open(os.path.join(tmp, "test_fixtures", "input_scripts", f"{item}.json"), "w") as f:
+            with open(os.path.join(tmp, "test_fixtures", "input_scripts", f"{item}.json"), "w", encoding="utf-8", newline="") as f:
                 json.dump({"item": item, "tool": tool}, f)
             os.makedirs(os.path.join(tmp, "prototypes", "sb_winui", "e2e_baselines", item))
         spec = census._load(os.path.join(tmp, "workspace", "workspace.json"))
@@ -231,7 +231,7 @@ def self_test():
         # The reader's own verdict on what the writer wrote: CERTIFIED, not refused.
         rows = census.census(spec, census.gather_evidence(ROOT))
         os.makedirs(os.path.dirname(cert_path(tmp, rect)))
-        with open(cert_path(tmp, rect), "w", encoding="utf-8") as f:
+        with open(cert_path(tmp, rect), "w", encoding="utf-8", newline="") as f:
             json.dump(c, f)
         got, refused = census.read_l2_certs(tmp, spec, rows)
         case("cert: the census READER certifies what the writer wrote",
