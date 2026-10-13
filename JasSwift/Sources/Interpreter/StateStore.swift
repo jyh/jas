@@ -169,8 +169,14 @@ public class StateStore {
         panels[Self.panelContentId(panelId)]?[key]
     }
 
+    /// A nil VALUE is stored as `NSNull`, never as a missing key: assigning an
+    /// optional nil into a dictionary REMOVES the key, so before this a
+    /// `set_panel_state {value: null}` (Escape in an artboard rename) deleted a
+    /// declared key that `initPanel` had seeded as `NSNull`, and the panel's
+    /// scope no longer had it at all. The reference's `set_panel` stores None
+    /// with the key present (the action corpus, `cancel_artboard_rename`).
     public func setPanel(_ panelId: String, _ key: String, _ value: Any?) {
-        panels[Self.panelContentId(panelId)]?[key] = value
+        panels[Self.panelContentId(panelId)]?[key] = value ?? NSNull()
     }
 
     public func getPanelState(_ panelId: String) -> [String: Any] {

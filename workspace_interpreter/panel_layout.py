@@ -271,6 +271,10 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
         w = 20
     else:
         w = 0
+    # B.9: a declared size is the leaf's width and height.
+    size = _size(node)
+    if size is not None:
+        w = size
     rw = _resolve_dim(st.get("width"), avail_w)
     if rw is not None:
         w = rw
@@ -283,7 +287,39 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
 def _leaf_h(node: dict) -> int:
     t = node.get("type")
     h = _resolve_dim(_style(node).get("height"), 0)
-    return h if h is not None else _KIND_HEIGHT.get(t, 20)
+    if h is not None:
+        return h
+    size = _size(node)
+    return size if size is not None else _KIND_HEIGHT.get(t, 20)
+
+
+def _size(node: dict) -> int | None:
+    """B.9: a leaf's ``style.size`` (a number), truncated; else None."""
+    v = _style(node).get("size")
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return int(v)
+    return None
+
+
+def _position(node: dict) -> tuple[int, int] | None:
+    """B.8: a child's ``style.position`` as integer ``(x, y)`` when it is two
+    numbers; else None, and the child stays in its parent's flow."""
+    pos = _style(node).get("position")
+    if not isinstance(pos, dict):
+        return None
+    x, y = pos.get("x"), pos.get("y")
+    for v in (x, y):
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return None
+    return (int(x), int(y))
+
+
+def _split_positioned(children: list) -> tuple[list, list]:
+    """``(flow, positioned)``: B.8 takes a positioned child out of the flow."""
+    flow, placed = [], []
+    for i, c in children:
+        (placed if _position(c) is not None else flow).append((i, c))
+    return flow, placed
 
 
 def _grid_lines(children: list) -> list[list]:
@@ -329,7 +365,15 @@ def _natural_w(node: dict, ctx: dict) -> int:
         return inner + pl + pr
     if isinstance(node.get("foreach"), dict) and node.get("do"):
         return _natural_w(node["do"], ctx) + pl + pr
-    kids = _visible_children(node)
+    kids, placed = _split_positioned(_visible_children(node))
+    # B.8: the natural width reaches the rightmost positioned child.
+    reach = max((_position(c)[0] + _natural_w(c, ctx) for _, c in placed), default=0)
+    return max(_flow_natural_w(node, kids, gap, ctx) + pl + pr, reach + pl)
+
+
+def _flow_natural_w(node: dict, kids: list, gap: int, ctx: dict) -> int:
+    """The natural width of a container's FLOW children (B.8: positioned
+    children are not in it), without padding."""
     lay = _resolved_layout(node)
     if lay == "row" and any(_has_col(c) for _, c in kids):
         best = 0
@@ -337,13 +381,11 @@ def _natural_w(node: dict, ctx: dict) -> int:
             m = len(line)
             line_w = sum(_natural_w(c, ctx) for _, c, _span in line) + gap * (m - 1 if m else 0)
             best = max(best, line_w)
-        return best + pl + pr
+        return best
     if lay == "row":
         n = len(kids)
-        tot = sum(_natural_w(c, ctx) for _, c in kids) + (gap * (n - 1) if n else 0)
-        return tot + pl + pr
-    inner = max((_natural_w(c, ctx) for _, c in kids), default=0)
-    return inner + pl + pr
+        return sum(_natural_w(c, ctx) for _, c in kids) + (gap * (n - 1) if n else 0)
+    return max((_natural_w(c, ctx) for _, c in kids), default=0)
 
 
 def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
@@ -370,7 +412,7 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
             ch_items, content_h = _grid2d(_visible_children(node), path, inner_w,
                                           gap, _grid_cols(node), ctx)
         else:
-            children = _visible_children(node)
+            children, placed = _split_positioned(_visible_children(node))
             lay = _resolved_layout(node)
             if lay == "row" and any(_has_col(c) for _, c in children):
                 ch_items, content_h = _grid(children, path, inner_w, gap, ctx)
@@ -378,6 +420,13 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
                 ch_items, content_h = _flow(children, path, inner_w, gap, ctx)
             else:
                 ch_items, content_h = _column(children, path, inner_w, gap, inner_h, ctx)
+            if placed:
+                p_items, p_bottom = _positioned(placed, path, inner_w, ctx)
+                content_h = max(content_h, p_bottom)
+                # Pre-order in child-index order: each child's items are
+                # contiguous and lead with the child's own path.
+                depth = len(path)
+                ch_items = sorted(ch_items + p_items, key=lambda it: it["path"][depth])
         exp_h = _resolve_dim(st.get("height"), 0)
         # Fill the width given; with no constraint (avail_w <= 0) report the
         # container's natural content width so a parent row can size it.
@@ -401,6 +450,22 @@ def _measure(node: dict, path: list[int], avail_w: int, avail_h: int,
         w = avail_w
     h = _leaf_h(node)
     return (w, h, [{"path": list(path), "x": 0, "y": 0, "w": w, "h": h, "node": node, "ctx": ctx}])
+
+
+def _positioned(placed, path, inner_w, ctx) -> tuple[list[dict], int]:
+    """B.8: each positioned child at its own point, measured at the width to
+    the parent's right edge. Returns its items and the lowest bottom."""
+    items: list[dict] = []
+    bottom = 0
+    for i, c in placed:
+        x, y = _position(c)
+        _cw, ch, cit = _measure(c, path + [i], max(inner_w - x, 0), 0, ctx)
+        for it in cit:
+            it["x"] += x
+            it["y"] += y
+        items.extend(cit)
+        bottom = max(bottom, y + ch)
+    return items, bottom
 
 
 def _column(children, path, inner_w, gap, avail_h, ctx) -> tuple[list[dict], int]:
