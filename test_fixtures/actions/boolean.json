@@ -115,5 +115,18 @@
       {"action": "boolean_exclude_compound", "params": {}}
     ],
     "expected_json": "boolean_exclude_compound_overlapping_rects_expected.json"
+  },
+  {
+    "name": "open_boolean_options_opens_with_the_state_defaults",
+    "setup_svg": "overlapping_rects.svg",
+    "actions": [
+      {"action": "open_boolean_options", "params": {}}
+    ],
+    "expected_json": "open_boolean_options_expected.json",
+    "expected_dialog": {
+      "id": "boolean_options",
+      "params": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5},
+      "state": {"precision": 0.0283, "remove_redundant_points": false, "divide_remove_unpainted": false, "apply_simplify_after_op": false, "simplify_precision": 0.5}
+    }
   }
 ]
