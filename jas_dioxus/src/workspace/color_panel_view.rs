@@ -203,7 +203,7 @@ fn color_bar_element_size(id: &str) -> (f64, f64) {
 // ---------------------------------------------------------------------------
 
 /// Build a data URI for the color bar as a BMP image.
-/// Split y-axis: top half S 0→100%, B 100→80%; bottom half S 100%, B 80→0%.
+/// Each pixel is `color_util::color_bar_rgb` at that pixel, normalized.
 /// Uses a 120x32 image (browser scales smoothly).
 /// Result is cached — the gradient never changes.
 pub(crate) fn build_color_bar_data_uri() -> String {
@@ -215,7 +215,6 @@ pub(crate) fn build_color_bar_data_uri() -> String {
 fn build_color_bar_data_uri_inner() -> String {
     const W: usize = 120;
     const H: usize = 32;
-    let mid_y = H as f64 / 2.0;
 
     // BMP: 54-byte header + W*H*3 pixel data (120*3=360, divisible by 4, no padding)
     let pixel_data_size = W * 3 * H;
@@ -238,21 +237,13 @@ fn build_color_bar_data_uri_inner() -> String {
     // BMP rows are bottom-to-top, so row 0 in the file is the bottom of the image.
     for bmp_row in 0..H {
         let y = (H - 1 - bmp_row) as f64;
-        let (sat, br) = if y <= mid_y {
-            let t = y / mid_y;
-            (t, 1.0 - t * 0.2)
-        } else {
-            let t = (y - mid_y) / (H as f64 - mid_y);
-            (1.0, 0.8 * (1.0 - t))
-        };
         for x in 0..W {
-            let hue = 360.0 * x as f64 / W as f64;
-            let c = Color::hsb(hue, sat, br);
-            let (r, g, b, _) = c.to_rgba();
+            // The picture is the pick's own function, so a click lands on the
+            // colour drawn under it.
+            let (r, g, b) = crate::interpreter::color_util::color_bar_rgb(
+                x as f64 / W as f64, y / H as f64);
             // BMP pixel order is BGR
-            bmp.push((b * 255.0).round() as u8);
-            bmp.push((g * 255.0).round() as u8);
-            bmp.push((r * 255.0).round() as u8);
+            bmp.extend_from_slice(&[b, g, r]);
         }
     }
 

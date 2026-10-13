@@ -1,0 +1,112 @@
+{
+  "_doc": [
+    "The Color panel's colour bar (`cp_color_bar`): a point normalized to",
+    "[0,1]^2 -> the colour the bar shows there, as #rrggbb lowercase.",
+    "`u` runs left to right, `v` top to bottom, each clamped to [0, 1];",
+    "hue is 360 u; the top half ramps saturation 0->100 % with brightness",
+    "100->80 %, the bottom half holds saturation 100 % with brightness",
+    "80->0 % (workspace/panels/color.yaml). ONE function per port maps it,",
+    "and every view of the bar calls it with its own pixel point divided",
+    "by its own size. Goldens are derived from that formula by",
+    "scripts/derive_color_bar_goldens.py, not captured from a port, and",
+    "no vector lands on an exact .5 rounding tie."
+  ],
+  "vectors": [
+    {
+      "name": "top_left_is_white",
+      "u": 0.0,
+      "v": 0.0,
+      "expected": "#ffffff"
+    },
+    {
+      "name": "bottom_left_is_black",
+      "u": 0.0,
+      "v": 1.0,
+      "expected": "#000000"
+    },
+    {
+      "name": "middle_left_is_full_red",
+      "u": 0.0,
+      "v": 0.5,
+      "expected": "#cc0000"
+    },
+    {
+      "name": "middle_third_is_full_green",
+      "u": 0.3333333333333333,
+      "v": 0.5,
+      "expected": "#00cc00"
+    },
+    {
+      "name": "middle_centre_is_full_cyan",
+      "u": 0.5,
+      "v": 0.5,
+      "expected": "#00cccc"
+    },
+    {
+      "name": "middle_right_is_red_again",
+      "u": 1.0,
+      "v": 0.5,
+      "expected": "#cc0000"
+    },
+    {
+      "name": "top_quarter_is_a_pastel",
+      "u": 0.27,
+      "v": 0.23,
+      "expected": "#a6e87d"
+    },
+    {
+      "name": "bottom_quarter_is_a_dark_shade",
+      "u": 0.75,
+      "v": 0.75,
+      "expected": "#330066"
+    },
+    {
+      "name": "interior_top_half",
+      "u": 0.6,
+      "v": 0.1,
+      "expected": "#c4d7f5"
+    },
+    {
+      "name": "interior_bottom_half",
+      "u": 0.15,
+      "v": 0.9,
+      "expected": "#292500"
+    },
+    {
+      "name": "just_above_the_seam",
+      "u": 0.4,
+      "v": 0.49,
+      "expected": "#04cd54"
+    },
+    {
+      "name": "just_below_the_seam",
+      "u": 0.4,
+      "v": 0.51,
+      "expected": "#00c850"
+    },
+    {
+      "name": "left_of_the_bar_clamps_to_hue_0",
+      "u": -0.2,
+      "v": 0.5,
+      "expected": "#cc0000"
+    },
+    {
+      "name": "right_of_the_bar_clamps_to_hue_360",
+      "u": 1.3,
+      "v": 0.5,
+      "expected": "#cc0000"
+    },
+    {
+      "name": "above_the_bar_clamps_to_white",
+      "u": 0.7,
+      "v": -0.4,
+      "expected": "#ffffff"
+    },
+    {
+      "name": "below_the_bar_clamps_to_black",
+      "u": 0.7,
+      "v": 1.6,
+      "expected": "#000000"
+    }
+  ]
+}

@@ -109,6 +109,9 @@ ALGORITHMS = {
     # accepted at all (a null result vs a value) and the clamp landing exactly on
     # the declared bound, so any tolerance would swallow the divergence.
     "number_commit":     ("exact", None),
+    # The colour bar's point -> colour map. EXACT: the result is a hex string
+    # of three u8s, and a one-unit miss is the divergence the family catches.
+    "color_bar":         ("exact", None),
     "boolean":           ("exact_boolean", None),
     "boolean_normalize": ("exact_boolean", None),
     # The harness's OWN region metrics, which every boolean golden is
@@ -608,6 +611,7 @@ LEADING_CLOSE_NO_PATH_INPUT = {
     "color_convert": "colour channels only",
     "path_project": "raw point + segment/cubic coordinate args, not a command list",
     "number_commit": "a widget's commit rule over a string",
+    "color_bar": "a normalized point in a colour gradient; no geometry",
     "boolean": "polygon RINGS (already-flattened point lists), not path commands",
     "boolean_normalize": "polygon rings, as `boolean`",
     "polygon_metrics": "polygon rings, as `boolean`",
@@ -871,6 +875,9 @@ GEOMETRY_CHECKER_GAPS = {
     "length": "as `measure`: a unit-aware string parse/format, no geometry",
     "color_convert": "PHASE 2 -- the round-trip law (rgb->hsb->rgb within one "
                      "panel unit) is a real law at this seam, unwritten",
+    "color_bar": "PHASE 2 -- the seam law (v = 1/2 approached from either "
+                 "half gives the same colour) and hue monotonicity are real "
+                 "laws here, unwritten",
     "number_commit": "a widget's commit rule over strings; the law IS the rule "
                      "table, so it belongs to the declarative tier, not here",
     "element_bounds": "PHASE 2 -- the containment law (every flattened point "

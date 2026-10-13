@@ -7278,20 +7278,10 @@ fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &Re
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
 
-    // Maps an (x, y) inside the bar to an HSB color following the
-    // same gradient convention as build_color_bar_data_uri.
+    // An (x, y) pixel inside the 64 px bar, normalized and mapped by the ONE
+    // colour-bar function every view and the engine share.
     let xy_to_color = |x: f64, y: f64, width: f64| -> Color {
-        let height = 64.0_f64;
-        let hue = (360.0 * x / width.max(1.0)).clamp(0.0, 360.0);
-        let mid_y = height / 2.0;
-        let (sat, br) = if y <= mid_y {
-            let t = (y / mid_y).clamp(0.0, 1.0);
-            (t * 100.0, 100.0 - t * 20.0)
-        } else {
-            let t = ((y - mid_y) / (height - mid_y)).clamp(0.0, 1.0);
-            (100.0, 80.0 * (1.0 - t))
-        };
-        let (r, g, b) = crate::interpreter::color_util::hsb_to_rgb(hue, sat, br);
+        let (r, g, b) = crate::interpreter::color_util::color_bar_rgb(x / width.max(1.0), y / 64.0);
         Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
     };
 

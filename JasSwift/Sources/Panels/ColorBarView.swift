@@ -53,39 +53,17 @@ struct ColorBarView: View {
     }
 
     /// Map a (x, y) pixel inside the bar to the color that the gradient shows at
-    /// that point. Mirrors the algorithm in `render_color_bar` (jas_dioxus);
-    /// internal rather than private so `colorBarProducesTheQuantisedRgbBothPortsStore`
-    /// can hold it to that mirror.
+    /// that point: the point normalized by the bar's own size and mapped by the
+    /// ONE colour-bar function (``colorBarRgb(_:_:)``, Rust's `color_bar_rgb`).
+    /// Internal rather than private so `colorBarProducesTheQuantisedRgbBothPortsStore`
+    /// can hold it. `max(_, 1)` keeps a zero-sized bar from dividing by zero
+    /// (a NaN would reach the colour conversion, whose `Int(floor(nan))` traps).
+    /// The result is the QUANTISED RGB, as every port stores it.
     static func colorAt(
         x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat
     ) -> Color {
-        // Clamp the DERIVED values, not the pixel coordinates — Rust's
-        // `xy_to_color` clamps the hue to 0...360 and the vertical parameter to
-        // 0...1, and the difference shows at the edges: clamping `y` to
-        // `height - 1` left a drag past the bottom edge at 2% brightness where
-        // Rust answers black. `width.max(1)` is Rust's guard too, and here it
-        // also keeps a zero-width bar from handing a NaN hue to
-        // `hsbToRgbComponents`, whose `Int(floor(nan))` would trap.
-        let hue = min(max(360.0 * Double(x) / Double(max(width, 1)), 0.0), 360.0)
-        let midY = height / 2
-        // hsbToRgb takes saturation / brightness in the spec's 0..100% units.
-        let sat: Double
-        let br: Double
-        if y <= midY {
-            let t = min(max(Double(y / midY), 0.0), 1.0)
-            sat = t * 100.0             // 0% → 100%
-            br = 100.0 - t * 20.0       // 100% → 80%
-        } else {
-            let t = min(max(Double((y - midY) / (height - midY)), 0.0), 1.0)
-            sat = 100.0
-            br = 80.0 * (1.0 - t)
-        }
-        // Store the QUANTISED RGB, exactly as Rust's `xy_to_color` does
-        // (`hsb_to_rgb` then `Color::rgb`). Storing `Color.hsb` of the float
-        // triple instead left the two ports holding different colour VALUES for
-        // the same click, and left the panel's overlay a `toHsba()`
-        // short-circuit to read that Rust has no equivalent of.
-        let (r, g, b) = hsbToRgb(hue, sat, br)
+        let (r, g, b) = colorBarRgb(Double(x) / Double(max(width, 1)),
+                                    Double(y) / Double(max(height, 1)))
         return Color.rgb(r: Double(r) / 255.0, g: Double(g) / 255.0,
                          b: Double(b) / 255.0, a: 1.0)
     }

@@ -81,6 +81,7 @@ fn main() {
         "length" => run_length(&vectors),
         "color_convert" => run_color_convert(&vectors),
         "number_commit" => run_number_commit(&vectors),
+        "color_bar" => run_color_bar(&vectors),
         "hit_test" => run_hit_test(&vectors),
         "path_project" => run_path_project(&vectors),
         "boolean" => run_boolean(&vectors),
@@ -170,6 +171,23 @@ fn run_number_commit(vectors: &[Value]) -> Vec<Value> {
             let min = tc.get("min").and_then(|v| v.as_f64());
             let max = tc.get("max").and_then(|v| v.as_f64());
             json!({"name": name, "result": number_input_commit(text, min, max)})
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------
+// color_bar (the Color panel's colour bar: a normalized point -> its colour)
+// ---------------------------------------------------------------
+
+fn run_color_bar(vectors: &[Value]) -> Vec<Value> {
+    use jas_dioxus::interpreter::color_util::color_bar_hex;
+    vectors
+        .iter()
+        .map(|tc| {
+            let name = tc["name"].as_str().unwrap_or("");
+            let u = tc["u"].as_f64().unwrap_or(f64::NAN);
+            let v = tc["v"].as_f64().unwrap_or(f64::NAN);
+            json!({"name": name, "result": color_bar_hex(u, v)})
         })
         .collect()
 }

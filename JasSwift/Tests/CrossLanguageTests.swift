@@ -3639,6 +3639,28 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
     }
 }
 
+// MARK: - Colour bar vectors
+
+/// The colour bar corpus: a point normalized to [0,1]^2 -> the colour the bar
+/// shows there. Goldens derived from the spec's formula
+/// (`scripts/derive_color_bar_goldens.py`). Mirror of Rust's
+/// `algorithm_color_bar_vectors`; run port-against-port by
+/// `scripts/cross_language_algorithms.py --algo color_bar`.
+@Test func algorithmColorBarVectors() throws {
+    let json = readFixture("algorithms/color_bar.json")
+    let doc = try JSONSerialization.jsonObject(with: Data(json.utf8)) as! [String: Any]
+    let vectors = doc["vectors"] as! [[String: Any]]
+    #expect(vectors.count >= 12, "color_bar.json has \(vectors.count) vectors")
+    for tc in vectors {
+        let name = tc["name"] as! String
+        let u = (tc["u"] as! NSNumber).doubleValue
+        let v = (tc["v"] as! NSNumber).doubleValue
+        let expected = tc["expected"] as! String
+        #expect(colorBarHex(u, v) == expected,
+                "color_bar '\(name)': (\(u), \(v)) gave \(colorBarHex(u, v)), corpus pins \(expected)")
+    }
+}
+
 // MARK: - Option rows (SCHEMA.md `options`)
 
 /// The `options` corpus: how a literal list reads, and what a commit of each
