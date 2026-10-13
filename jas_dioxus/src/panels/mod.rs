@@ -114,7 +114,7 @@ pub(crate) fn panel_dynamic_label(
 /// Query whether a toggle/radio command is checked for a panel kind.
 ///
 /// ONE path for every panel: the panel's bundle menu entry is looked up by its
-/// runtime command, its `checked_when:` / `checked:` predicate is evaluated
+/// runtime command, its `checked_when:` predicate is evaluated
 /// against the panel's context, and that is the answer. The fourteen per-panel
 /// native `is_checked` hooks this replaced are gone — with them went a
 /// `return false` in `brushes_panel` whose comment claimed "the generic
@@ -841,7 +841,7 @@ mod tests {
             let mut exprs: Vec<(String, String)> = Vec::new();
             for e in panel.get("menu").and_then(|m| m.as_array()).into_iter().flatten() {
                 let Some(obj) = e.as_object() else { continue };
-                for key in ["enabled_when", "checked_when", "checked"] {
+                for key in ["enabled_when", "checked_when"] {
                     if let Some(expr) = obj.get(key).and_then(|v| v.as_str()) {
                         exprs.push((format!("menu {key}"), expr.to_string()));
                     }

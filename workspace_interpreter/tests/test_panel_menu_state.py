@@ -353,3 +353,55 @@ def test_reference_view_publishes_the_layers_rollups(ws, selection, is_container
     assert rows["collect_in_new_layer"] is (len(selection) > 0)
     assert rows["exit_isolation_mode"] is False
 
+
+
+# The two spellings the shared walk does NOT read. A menu node carrying either
+# is evaluated by no `menu_state` port, so its state comes from whichever
+# per-port reader happens to accept the alias (the web panel menu read
+# `checked:`; the Windows dock's export, which reads the walk, did not: #362).
+_MENU_KEYS_THE_WALK_IGNORES = ("checked", "disabled")
+
+
+def _menu_nodes(items, where):
+    for i, node in enumerate(items or []):
+        if not isinstance(node, dict):
+            continue
+        yield f"{where}[{i}]", node
+        yield from _menu_nodes(node.get("items"), f"{where}[{i}].items")
+
+
+def _misspelled_menu_state(ws):
+    out = []
+    seen = 0
+    for pid, spec in ws["panels"].items():
+        for at, node in _menu_nodes(spec.get("menu"), f"panels.{pid}.menu"):
+            seen += 1
+            out += [f"{at}.{k}" for k in _MENU_KEYS_THE_WALK_IGNORES if k in node]
+    for at, node in _menu_nodes(ws.get("menubar"), "menubar"):
+        seen += 1
+        out += [f"{at}.{k}" for k in _MENU_KEYS_THE_WALK_IGNORES if k in node]
+    return out, seen
+
+
+def test_every_menu_node_spells_its_state_in_the_walks_vocabulary(ws):
+    """A menu node's state is `checked_when` / `enabled_when` (a static disable
+    is `enabled_when: "false"`), because those are the only keys the shared
+    `menu_state` walk evaluates. Applies to every panel menu and the menubar."""
+    bad, seen = _misspelled_menu_state(ws)
+    assert seen >= 100, f"walked only {seen} menu nodes -- the census is not reading the menus"
+    assert not bad, (
+        "menu nodes spelling state outside checked_when / enabled_when "
+        f"(the walk ignores them): {bad}"
+    )
+
+
+def test_the_spelling_census_names_a_planted_alias():
+    """CONTROL: the census must name both forbidden keys, at depth."""
+    ws = {"panels": {"p": {"menu": [
+        {"label": "a", "action": "x", "checked": "panel.a"},
+        "separator",
+        {"label": "s", "items": [{"label": "b", "disabled": True}]},
+    ]}}, "menubar": []}
+    bad, seen = _misspelled_menu_state(ws)
+    assert seen == 3, seen
+    assert bad == ["panels.p.menu[0].checked", "panels.p.menu[2].items[0].disabled"], bad

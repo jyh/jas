@@ -152,7 +152,7 @@ menu:
     enabled_when: "if state.fill_on_top then state.fill_color != null else state.stroke_color != null"
   - separator
   - label: "Create New Swatch..."
-    disabled: true
+    enabled_when: "false"
     description: >
       Disabled. The stated reason USED to be "when the Swatches panel is
       implemented" — that landed, so the reason expired and was corrected
