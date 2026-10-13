@@ -5708,6 +5708,40 @@ private func assertActionTest(_ tc: [String: Any]) {
     assertActionPanelState(tc, model)
     assertActionPanelScope(tc, model)
     assertActionView(tc, model)
+    assertActionDialog(tc, model)
+}
+
+/// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..}, "state":
+/// {..}}`, the dialog the action OPENS; `params` and `state` are SUBSETS.
+/// Swift opens a dialog INTO the model's store (`open_dialog` in
+/// `Effects.swift`), so it is read there. Rust defers it and opens it as the
+/// web does (`assert_action_dialog`). Census lever 2.
+private func assertActionDialog(_ tc: [String: Any], _ model: Model) {
+    guard let expected = tc["expected_dialog"] as? [String: Any] else { return }
+    let name = tc["name"] as! String
+    let store = model.stateStore
+    guard let id = store.getDialogId() else {
+        #expect(Bool(false), "Action test '\(name)': expected_dialog, but no dialog is open")
+        return
+    }
+    #expect(keyCanonValue(id) == keyCanonValue(expected["id"] ?? NSNull()),
+            "Action test '\(name)': the dialog opened is '\(id)'")
+    let sections: [(String, [String: Any])] = [
+        ("params", store.getDialogParams() ?? [:]),
+        ("state", store.getDialogState()),
+    ]
+    for (section, got) in sections {
+        guard let want = expected[section] as? [String: Any] else { continue }
+        for (key, value) in want {
+            // ABSENT is not NULL: the key must be there for a null to pass.
+            guard let have = got[key] else {
+                #expect(Bool(false), "Action test '\(name)': the opened dialog's \(section) has no key '\(key)'")
+                continue
+            }
+            #expect(keyCanonValue(have) == keyCanonValue(value),
+                    "Action test '\(name)': dialog \(section).\(key) is \(keyCanonValue(have)), the corpus pins \(keyCanonValue(value))")
+        }
+    }
 }
 
 /// OPTIONAL assertion: `expected_panel_scope`, `{<panel content id>: {<key>:

@@ -1179,10 +1179,10 @@
           "open_dialog": {
             "id": "swatch_options",
             "params": {
-              "mode": "create",
+              "mode": "'create'",
               "color": "if state.fill_on_top then state.fill_color else state.stroke_color",
-              "color_mode": "rgb",
-              "swatch_name": ""
+              "color_mode": "'rgb'",
+              "swatch_name": "''"
             }
           }
         }

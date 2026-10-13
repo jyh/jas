@@ -187,7 +187,20 @@ pub(crate) fn run_action_case(
     tc: &Value,
     setup_svg: &str,
 ) -> crate::workspace::app_state::AppState {
+    run_action_case_deferred(tc, setup_svg).0
+}
+
+#[cfg(feature = "web")]
+/// [`run_action_case`], also returning every effect the run DEFERRED to the
+/// UI (what `dispatch_action` returns: `open_dialog` / `close_dialog`), in
+/// order. The web performs them after the dispatch; the corpus asserts the
+/// dialog they open (`expected_dialog`).
+pub(crate) fn run_action_case_deferred(
+    tc: &Value,
+    setup_svg: &str,
+) -> (crate::workspace::app_state::AppState, Vec<Value>) {
     use crate::workspace::app_state::{AppState, TabState};
+    let mut deferred: Vec<Value> = Vec::new();
 
     let doc = svg_to_document(setup_svg);
     let mut st = AppState::new();
@@ -270,10 +283,10 @@ pub(crate) fn run_action_case(
         let handled = crate::workspace::menu_native::run(
             action, &mut st.tabs[st.active_tab].model);
         if handled { continue; }
-        crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
+        deferred.extend(crate::interpreter::renderer::dispatch_action(action, &params, &mut st));
     }
     crate::document::artboard::set_test_id_rng(None);
-    st
+    (st, deferred)
 }
 
 #[cfg(feature = "web")]

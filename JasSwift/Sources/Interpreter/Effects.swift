@@ -773,18 +773,28 @@ private func runOne(
         // Pass 1: expressions not referencing dialog.*
         // Pass 2: expressions referencing dialog.*
         if let initMap = dlgDef["init"] as? [String: Any] {
+            // The dialog's own params must win over the outer action's: init
+            // expressions read `param.*` as the DIALOG's params, which the
+            // store binds as `param` once `initDialog` has run. The outer ctx
+            // carries the ACTION's params under the same key and would shadow
+            // them, so it is dropped here, as the reference's `open_dialog`
+            // drops it (`init_ctx`). Until 2026-10-13 New Swatch opened Swatch
+            // Options with no colour, mode or name: every `param.*` read the
+            // action's empty params, and `setDialog(key, nil)` removed the key.
+            var initCtx = ctx
+            initCtx.removeValue(forKey: "param")
             var deferred: [(String, Any)] = []
             for (key, expr) in initMap {
                 let exprStr = expr as? String ?? ""
                 if exprStr.contains("dialog.") {
                     deferred.append((key, expr))
                 } else {
-                    let value = evalExpr(expr, store: store, ctx: ctx)
+                    let value = evalExpr(expr, store: store, ctx: initCtx)
                     store.setDialog(key, valueToAny(value))
                 }
             }
             for (key, expr) in deferred {
-                let value = evalExpr(expr, store: store, ctx: ctx)
+                let value = evalExpr(expr, store: store, ctx: initCtx)
                 store.setDialog(key, valueToAny(value))
             }
         }
