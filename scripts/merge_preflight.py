@@ -52,10 +52,20 @@ human look -- against a bad merge in the other direction.
 
 A LIMIT THAT RIDES WITH EVERY VERDICT: WE ARE STRICTER THAN THE FORGE
 ---------------------------------------------------------------------
-One check-run NAME can carry several RECORDS on a single head sha. Branch
-protection resolves LATEST-WINS PER NAME; this tool counts every record. So a
-stale `cancelled` record beside a fresh `success` for the same name makes this
-tool REFUSE where the forge would merge.
+One check-run NAME can carry several RECORDS on a single head sha. This tool
+counts every record, so a stale `cancelled` record beside a fresh `success`
+makes it REFUSE, and the forge may merge anyway.
+
+⛔ WHETHER THE FORGE MERGES IS NOT DERIVABLE FROM THE RECORDS, SO IT IS READ.
+This file said the forge "resolves LATEST-WINS PER NAME" until 2026-10-13,
+and that day falsified it both ways on required checks: on #392 a `cancelled`
+record on each of the four required checks, beside later successes, left the
+forge BLOCKED ("the base branch policy prohibits the merge") until the
+cancelled run was re-run; on #393 the same shape read CLEAN. A merge was
+attempted, and announced, on the first claim; the first correction of it
+asserted the opposite rule. So the tool now fetches the forge's own
+`mergeable_state`, prints it in every receipt, and says "re-run" only when
+the forge itself reads `blocked`.
 
 That is the conservative direction and it is deliberate, but it is SILENT --
 it reads as a bug in this tool rather than as a policy. So the receipt names
@@ -124,6 +134,9 @@ class State(NamedTuple):
     runs: tuple[Run, ...]
     required: tuple[str, ...]
     base_is_ancestor: bool
+    # The forge's OWN reading (`pulls/{n}`.`mergeable_state`): clean, blocked,
+    # unstable, dirty, unknown. Read, never inferred: see THE FORGE'S READING.
+    forge_state: str = "unknown"
 
 
 class Verdict(NamedTuple):
@@ -162,10 +175,24 @@ def evaluate(state: State) -> Verdict:
         if r.status == "completed" and r.conclusion not in PASS_CONCLUSIONS
     ]
     if non_pass:
+        blocking = sorted({r.name for r in non_pass if r.name in state.required})
         refusals.append(
             f"NON-PASS: {len(non_pass)} of {len(state.runs)} completed check-run(s) "
             "did not conclude `success`: "
             + ", ".join(sorted(f"{r.name}={r.conclusion}" for r in non_pass)[:5])
+            + (
+                (
+                    f" -- {len(blocking)} on a REQUIRED name and the forge reads "
+                    "BLOCKED, so the forge blocks too: re-run that workflow run "
+                    "(`gh run rerun <id>`)"
+                    if state.forge_state == "blocked"
+                    else f" -- {len(blocking)} on a REQUIRED name; the forge reads "
+                    f"`{state.forge_state}`, so they do not block it now (they did "
+                    "on #392, not on #393): this tool still counts every record"
+                )
+                if blocking
+                else ""
+            )
         )
 
     # (5) The set operation, and it is over the GREEN population -- not over
@@ -198,13 +225,15 @@ def evaluate(state: State) -> Verdict:
     dup_note = (
         f"; {PREFIX_NOTE}{len(dup_names)} name(s) duplicated "
         f"({', '.join(dup_names[:3])}{'...' if len(dup_names) > 3 else ''}) -- "
-        "the forge resolves LATEST-WINS per name and this tool counts EVERY "
-        "record, so it refuses where the forge would merge"
+        "this tool counts EVERY record and the forge does not always (read its "
+        "mergeable_state, printed above), so it can refuse where the forge "
+        "would merge"
         if dup_names
         else ""
     )
     receipt = (
         f"conditions ran {len(CONDITIONS)} ({', '.join(CONDITIONS)}); "
+        f"forge mergeable_state={state.forge_state}; "
         f"check-runs {len(state.runs)} record(s) over {len(names)} distinct name(s); "
         f"green {len(green)}/{len(names)} name(s); "
         f"required {len(state.required) - len(missing)}/{len(state.required)} present; "
@@ -262,6 +291,7 @@ def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
     meta = json.loads(_gh("api", f"repos/{repo}/pulls/{pr}"))
     head = require_key(meta, "head", f"pulls/{pr}")["sha"]
     draft = bool(require_key(meta, "draft", f"pulls/{pr}"))
+    forge_state = str(meta.get("mergeable_state") or "unknown")
 
     payload = json.loads(
         _gh("api", f"repos/{repo}/commits/{head}/check-runs?per_page=100")
@@ -296,7 +326,7 @@ def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
         ).returncode
         == 0
     )
-    return State(head, draft, runs, required, ancestor)
+    return State(head, draft, runs, required, ancestor, forge_state)
 
 
 # --------------------------------------------------------------------------
@@ -457,10 +487,10 @@ def self_test(fixture: Path | None = None) -> int:
             f"beside `25 green` reads as 6 failures: {v.receipt!r}"
         )
 
-    # (d4) THE DIVERGENCE FROM THE FORGE, PINNED IN THE SAFE DIRECTION. Branch
-    #      protection resolves LATEST-WINS PER NAME; this tool counts every
-    #      record. A cancelled duplicate beside a success therefore REFUSES
-    #      here and would MERGE at the forge. That is deliberate and it is the
+    # (d4) THE DIVERGENCE FROM THE FORGE, PINNED IN THE SAFE DIRECTION. This
+    #      tool counts every record. A cancelled duplicate beside a success
+    #      therefore REFUSES here, whatever the forge reads ((d4b) is what the
+    #      refusal then SAYS about the forge). That is deliberate and it is the
     #      conservative side -- but it is silent, so the receipt must expose it
     #      or the refusal reads as a bug in this tool.
     declared += 1
@@ -476,6 +506,42 @@ def self_test(fixture: Path | None = None) -> int:
         failures.append("a cancelled duplicate must REFUSE (we are stricter than the forge)")
     elif "duplicated" not in v.receipt:
         failures.append(f"a refusal caused by a duplicate must say so: {v.receipt!r}")
+
+    # (d4b) ⛔ WHAT THE REFUSAL SAYS ABOUT THE FORGE IS THE FORGE'S OWN READING.
+    #       The same records, a cancelled required name beside a success,
+    #       BLOCKED the forge on #392 and read CLEAN on #393. So with the forge
+    #       reading `blocked` the refusal says re-run; reading `clean` it must
+    #       NOT claim a block.
+    declared += 1
+    blocked = evaluate(stale._replace(forge_state="blocked"))
+    said = " ".join(blocked.refusals)
+    if "forge blocks too" not in said or "re-run" not in said:
+        failures.append(f"a required non-pass with the forge BLOCKED must say re-run: {said!r}")
+    declared += 1
+    clean = evaluate(stale._replace(forge_state="clean"))
+    said = " ".join(clean.refusals)
+    if "forge blocks too" in said or "`clean`" not in said:
+        failures.append(f"with the forge CLEAN the refusal must not claim a block, and must quote it: {said!r}")
+    declared += 1
+    if "forge mergeable_state=blocked" not in blocked.receipt:
+        failures.append(f"the receipt must print the forge's reading: {blocked.receipt!r}")
+
+    # (d4c) THE CONTROL FOR (d4b): the same duplicate on a NON-required name is
+    #       the stricter-than-the-forge case, and must not claim the forge blocks.
+    declared += 1
+    other = _state(
+        runs=(
+            Run("required A", "completed", "success"),
+            Run("required B", "completed", "success"),
+            Run("some other job", "completed", "cancelled"),
+            Run("some other job", "completed", "success"),
+        ),
+    )
+    v = evaluate(other)
+    if v.ok:
+        failures.append("a cancelled duplicate on a non-required name must still REFUSE here")
+    elif "forge blocks too" in " ".join(v.refusals):
+        failures.append(f"a non-required duplicate must not claim the forge blocks: {v.refusals!r}")
 
     # (d5) AND THE CONTROL: with no duplicates the receipt must NOT cry wolf.
     declared += 1
