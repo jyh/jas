@@ -4353,6 +4353,78 @@ mod tests {
         }
     }
 
+    /// The reference's `subscribe_active_color` (`effects.py`): a write to
+    /// `state.fill_color` / `state.stroke_color` sets the model's new-element
+    /// default and recolours the selection (a null clears it), by KEY, not by
+    /// `fill_on_top`. The engine had no counterpart, so on Windows every Color
+    /// act moved the panel and never the document (measured 2026-10-12: a
+    /// selected rect, the black swatch, a hex commit and None each left the
+    /// document byte-identical). Driven per route (a swatch click, a hex
+    /// commit, None, a menu action) and per side, then undone in one step.
+    #[test]
+    fn a_colour_act_paints_the_selection_as_the_reference_does() {
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::geometry::element::Color;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        // (side, the colour the act leaves, how)
+        let white = Some(Color::WHITE);
+        let teal = Color::from_hex("12ab34");
+        for fill_side in [true, false] {
+            for (what, ev, want) in [
+                ("swatch", Ok(r#"{"widget":"cp_white_swatch","event":"click"}"#), white),
+                ("hex", Ok(r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#), teal),
+                ("none", Ok(r#"{"widget":"cp_none_swatch","event":"click"}"#), None),
+                ("menu", Err(r##"{"action":"set_active_color","params":{"color":"#ffffff"}}"##), white),
+            ] {
+                let tag = format!("{} {what}", if fill_side { "fill" } else { "stroke" });
+                let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+                if !fill_side {
+                    let (_, err) = dispatch(e, r#"{"action":"toggle_fill_on_top"}"#);
+                    assert!(err.is_empty(), "{tag}: toggle_fill_on_top: {err}");
+                }
+                let el = |e| engine_of(e).model.borrow().document().layers[0].children().unwrap()[0].clone();
+                let (fill0, stroke0) = (el(e).fill().cloned(), el(e).stroke().cloned());
+                // The fixture: a black fill and no stroke, so every act moves one side.
+                assert_eq!(fill0.map(|f| f.color), Some(Color::BLACK), "{tag}: fixture");
+                assert!(stroke0.is_none(), "{tag}: fixture");
+                let before = doc_json(e);
+
+                let (_, err) = match ev {
+                    Ok(ev) => behave(e, id, ev),
+                    Err(action) => dispatch(e, action),
+                };
+                assert!(err.is_empty(), "{tag}: ran: {err}");
+                let got = el(e);
+                let (side, other) = if fill_side {
+                    (got.fill().map(|f| f.color), got.stroke().map(|s| s.color))
+                } else {
+                    (got.stroke().map(|s| s.color), got.fill().map(|f| f.color))
+                };
+                assert_eq!(side, want, "{tag}: the selection was not painted");
+                assert_eq!(other, if fill_side { None } else { Some(Color::BLACK) },
+                           "{tag}: the other side moved");
+                let model = engine_of(e).model.borrow();
+                let default = if fill_side { model.default_fill.map(|f| f.color) }
+                              else { model.default_stroke.map(|s| s.color) };
+                assert_eq!(default, want, "{tag}: the new-element default");
+                drop(model);
+                // One undo step restores the document.
+                undo(e);
+                assert_eq!(doc_json(e), before, "{tag}: one undo did not restore it");
+                unsafe { jas_engine_free(e) };
+            }
+        }
+        // Nothing selected: the default moves and the document does not.
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let before = doc_json(e);
+        let (_, err) = behave(e, id, r#"{"widget":"cp_white_swatch","event":"click"}"#);
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(doc_json(e), before, "an empty selection painted something");
+        assert_eq!(engine_of(e).model.borrow().default_fill.map(|f| f.color), white);
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A Color value still never reaches the store through the generic path:
     /// a commit goes to the slice (above), and the generic value branches
     /// refuse Color by name. Driven on the generic function directly, because
