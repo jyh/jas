@@ -71,7 +71,7 @@ TEXT_ENTRY_EVENTS = ("input", "blur", "keydown")
 
 INPUT_KINDS = frozenset({
     "number_input", "length_input", "text_input",
-    "select", "icon_select", "combo_box", "slider",
+    "select", "icon_select", "combo_box", "slider", "color_bar",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # A plain pick and an Alt pick of one declared item. They carry the ITEM,
@@ -232,6 +232,16 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
         if v is None:
             return refused
         return (True, _clamp(_snap(v, lo, _as_bound(widget.get("step"))), lo, hi))
+
+    if kind == "color_bar":
+        # A point normalized to [0,1]^2 (fork B2): "u,v", each coordinate in
+        # the number grammar, each clamped. The colour is
+        # color_util.color_bar_rgb(u, v); the parse stops at the point.
+        parts = text.split(",")
+        if len(parts) != 2:
+            return refused
+        point = [number_commit(p, 0.0, 1.0) for p in parts]
+        return refused if None in point else (True, point)
 
     if kind in ("select", "icon_select"):
         options = widget.get("options")

@@ -1003,18 +1003,42 @@ fn colour_value_commit(
         Some(serde_json::Value::String(t)) => t.clone(),
         Some(_) => return refuse("BadValue", &ev.widget),
     };
+    // The colour bar (fork B2): `change` is its LIVE drag, which the engine
+    // does not host yet. Refused by name, so a commit never happens by accident.
+    if kind == "color_bar" && ev.event != "commit" {
+        return refuse("LiveNotHosted", &ev.widget);
+    }
     let Some(value) = node.and_then(|n| parse_commit(n, &text)) else {
         return refuse("BadValue", &ev.widget);
     };
-    let Some(target) = crate::panel_scope::binding_of(spec, &ev.widget, "bind.value") else {
-        return refuse("MissingTarget", &ev.widget);
+    let active_key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
+    // The colour bar's point names a colour by the ONE colour-bar function,
+    // committed as is: the slice is not edited first. The panel then reads the
+    // committed colour back from the model (`PanelState::effective`: the
+    // selection's colour, else the default the commit set), so it needs no
+    // adopt step; the test's empty-selection arm is what pins that.
+    let bar_colour = (kind == "color_bar").then(|| {
+        let (u, v) = (value[0].as_f64().unwrap_or(0.0), value[1].as_f64().unwrap_or(0.0));
+        serde_json::json!(crate::interpreter::color_util::color_bar_hex(u, v))
+    });
+    let outcome = if let Some(colour) = &bar_colour {
+        if engine.store.borrow().get(active_key) == colour {
+            EditOutcome::Unchanged
+        } else {
+            EditOutcome::Changed
+        }
+    } else {
+        let Some(target) = crate::panel_scope::binding_of(spec, &ev.widget, "bind.value") else {
+            return refuse("MissingTarget", &ev.widget);
+        };
+        engine.panel.borrow_mut().materialize(&engine.model.borrow());
+        let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
+        if outcome == EditOutcome::NoSuchTarget {
+            return refuse("BadParamType", &target);
+        }
+        crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+        outcome
     };
-    engine.panel.borrow_mut().materialize(&engine.model.borrow());
-    let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
-    if outcome == EditOutcome::NoSuchTarget {
-        return refuse("BadParamType", &target);
-    }
-    crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
     // The slice computed the new colour (by channel and mode); COMMITTING it is
     // `set_active_color`'s, "the commit point for all color changes from the
     // Color Panel: … hex field Enter/Tab" (`actions.yaml`). So it runs here as
@@ -1023,8 +1047,7 @@ fn colour_value_commit(
     // pushed, and the runner owns the one undo step.
     let mut doc_changed = false;
     if outcome == EditOutcome::Changed {
-        let key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
-        let colour = engine.store.borrow().get(key).clone();
+        let colour = bar_colour.clone().unwrap_or_else(|| engine.store.borrow().get(active_key).clone());
         let params = serde_json::json!({"color": colour});
         let scope = panel_ctx(engine, ws, id);
         let ran = {
@@ -4648,6 +4671,67 @@ mod tests {
         let (_, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
         assert!(err.contains("Unchanged"), "{err}");
         assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent, "a repeat pushed");
+        unsafe { jas_engine_free(b) };
+    }
+
+    /// FORK B2: the colour bar's COMMIT carries a point normalized to [0,1]²
+    /// (`"u,v"`), and lands EXACTLY as dispatching `set_active_color` with the
+    /// colour `color_util::color_bar_hex(u, v)` names: the rows, the document
+    /// and the recent list. A repeat is Unchanged. The bar's `change` (live)
+    /// is refused BY NAME until the engine has a live colour path, so a shell
+    /// that sends it is told, and nothing is committed by accident.
+    #[test]
+    fn a_colour_bar_commit_lands_as_set_active_color_does() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let hex = crate::interpreter::color_util::color_bar_hex(0.25, 0.5);
+        assert_eq!(hex, "#66cc00", "fixture: the point's colour (color_bar.json's formula)");
+        let fresh = || engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+        let a = fresh();
+        let _ = bind_rows(a, id);
+        let (_, err) = dispatch(a, &format!(r#"{{"action":"set_active_color","params":{{"color":"{hex}"}}}}"#));
+        assert!(err.is_empty(), "the oracle ran: {err}");
+        let layers = |e| serde_json::from_str::<serde_json::Value>(&doc_json(e)).unwrap()["layers"].clone();
+        let (want_rows, want_doc) = (bind_rows(a, id), layers(a));
+        let want_recent = engine_of(a).model.borrow().recent_colors.clone();
+        assert_eq!(want_recent, vec![hex.clone()], "fixture: the oracle pushes");
+        unsafe { jas_engine_free(a) };
+
+        let b = fresh();
+        let _ = bind_rows(b, id);
+        let before = doc_json(b);
+        let (reply, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.25,0.5"}"#);
+        assert!(err.is_empty(), "the commit ran: {err}");
+        assert!(reply.contains(r#""doc_changed":true"#), "{reply}");
+        assert_eq!(bind_rows(b, id), want_rows, "the rows differ from set_active_color's");
+        assert_eq!(layers(b), want_doc, "the document differs from set_active_color's");
+        assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent);
+        let (_, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.25,0.5"}"#);
+        assert!(err.contains("Unchanged"), "{err}");
+        undo(b);
+        assert_eq!(doc_json(b), before, "one Undo restores the document");
+
+        unsafe { jas_engine_free(b) };
+
+        // Nothing selected: the panel shows the committed colour from the
+        // default the commit set, and the hex reads it.
+        let c = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let (_, err) = behave(c, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.25,0.5"}"#);
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(leaf(c, id, "cp_hex")["values"]["bind.value"], "66cc00");
+        assert_eq!(engine_of(c).model.borrow().recent_colors, vec![hex.clone()]);
+        let b = c;
+
+        // Live is not hosted yet: refused by name, nothing moves.
+        let held = doc_json(b);
+        let (reply, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"change","value":"0.9,0.1"}"#);
+        assert!(reply.is_empty(), "{reply}");
+        assert_eq!(err, refusal("LiveNotHosted", "cp_color_bar"));
+        assert_eq!(doc_json(b), held);
+        // A text outside the point grammar.
+        let (_, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.5"}"#);
+        assert_eq!(err, refusal("BadValue", "cp_color_bar"));
         unsafe { jas_engine_free(b) };
     }
 
