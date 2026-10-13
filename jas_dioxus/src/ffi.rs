@@ -900,11 +900,10 @@ pub unsafe extern "C" fn jas_panel_behavior(
         Err(r) => return refuse(r),
     };
 
-    let scope = if id == crate::panel_scope::COLOUR_PANEL {
-        serde_json::Value::Null
-    } else {
-        panel_ctx(engine, &ws, id)
-    };
+    if id == crate::panel_scope::COLOUR_PANEL {
+        return colour_value_commit(engine, &ws, spec, &ev);
+    }
+    let scope = panel_ctx(engine, &ws, id);
     let ran = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -936,6 +935,67 @@ pub unsafe extern "C" fn jas_panel_behavior(
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
     let reply = serde_json::json!({"changed": sync.changed, "doc_changed": ran.doc_changed});
+    let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
+    ffi_instr::record_out(Crossing::PanelBehavior, out.len);
+    out
+}
+
+/// A Color panel event through the behaviour door (flask §228, 2026-10-12).
+///
+/// The colour panel's `panel.*` is the [`PanelState`] slice, never the store
+/// (`panel_scope`: the eleven channels are DERIVED), which is why the generic
+/// behaviour path refuses it: its bind writes go to the store. A VALUE commit
+/// on a Color input is the S-C.2 edit [`jas_panel_event`] already applies, so
+/// it is applied the same way: parsed by the widget's kind
+/// (`widget_commit::parse_commit`, the generic path's rule), then
+/// `apply_edit` on the widget's `bind.value` binding, then the slice's state
+/// is re-synced into the store. Every OTHER Color event (a click on a chip, a
+/// swatch, the swap button) is still refused by name, `PanelNotHosted`: its
+/// behaviours write the slice through effects, which is the second half.
+///
+/// The reply is the behaviour door's, `{"changed", "doc_changed": false}`:
+/// an S-C.2 edit moves the slice and the store, never the document.
+fn colour_value_commit(
+    engine: &JasEngine,
+    ws: &Workspace,
+    spec: &serde_json::Value,
+    ev: &crate::panel_behavior::UserEvent,
+) -> JasBytes {
+    use crate::interpreter::widget_commit::{parse_commit, COMMIT_EVENTS, INPUT_KINDS};
+    let refuse = |class: &str, detail: &str| {
+        set_panel_event_error(engine, class, detail);
+        JasBytes::empty()
+    };
+    let id = crate::panel_scope::COLOUR_PANEL;
+    let node = crate::panel_behavior::widget_node(spec, &ev.widget);
+    let kind = node.and_then(|n| n.get("type")).and_then(serde_json::Value::as_str).unwrap_or("");
+    if !COMMIT_EVENTS.contains(&ev.event.as_str()) || !INPUT_KINDS.contains(&kind) {
+        return refuse("PanelNotHosted", id);
+    }
+    let text = match &ev.value {
+        None | Some(serde_json::Value::Null) => return refuse("MissingValue", &ev.widget),
+        Some(serde_json::Value::String(t)) => t.clone(),
+        Some(_) => return refuse("BadValue", &ev.widget),
+    };
+    let Some(value) = node.and_then(|n| parse_commit(n, &text)) else {
+        return refuse("BadValue", &ev.widget);
+    };
+    let Some(target) = crate::panel_scope::binding_of(spec, &ev.widget, "bind.value") else {
+        return refuse("MissingTarget", &ev.widget);
+    };
+    let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
+    if outcome == EditOutcome::NoSuchTarget {
+        return refuse("BadParamType", &target);
+    }
+    crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+    let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
+    ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
+    if outcome == EditOutcome::Unchanged {
+        set_panel_event_error(engine, "Unchanged", &ev.widget);
+    } else {
+        *engine.last_error.borrow_mut() = None;
+    }
+    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": false});
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -4114,6 +4174,42 @@ mod tests {
         let _ = take(unsafe {
             jas_panel_event(e, id.as_ptr(), id.len(), ev.as_ptr(), ev.len())
         });
+    }
+
+    /// flask §228 (2026-10-12): the Windows shell commits a typed value
+    /// through the BEHAVIOUR door (`jas_panel_behavior`, `{"widget","event":
+    /// "commit","value":<text>}`), and the core refused every Color widget there
+    /// (`PanelNotHosted`), so Color's hex did nothing on Windows. A value commit
+    /// on a Color input now lands exactly as the same edit through the S-C.2
+    /// door does: the oracle is that door, on a fresh engine.
+    #[test]
+    fn a_colour_commit_through_the_behaviour_door_lands_as_the_s_c2_tick_does() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let a = jas_engine_new();
+        let _ = bind_rows(a, id);
+        colour_tick(a, "cp_hex", serde_json::json!("12ab34"));
+        let want = bind_rows(a, id);
+        unsafe { jas_engine_free(a) };
+
+        let b = jas_engine_new();
+        let before = bind_rows(b, id);
+        assert_ne!(before, want, "fixture: the edit must move the colour rows");
+        let (reply, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.is_empty(), "the commit ran: {err}");
+        assert!(reply.contains(r#""changed":["#) && !reply.contains(r#""changed":[]"#), "{reply}");
+        assert_eq!(bind_rows(b, id), want, "the same rows as the S-C.2 door's");
+        // Committing the same value again moves nothing, and says so.
+        let (_, err2) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err2.contains("Unchanged"), "{err2}");
+        // A commit with no value is refused by name and runs nothing.
+        let (r3, err3) = behave(b, id, r#"{"widget":"cp_hex","event":"commit"}"#);
+        assert!(r3.is_empty() && err3.contains("MissingValue"), "{err3}");
+        // A CLICK on Color is still refused by name: its behaviours write the
+        // colour slice, which the generic path must not reach (the second half).
+        let (r4, err4) = behave(b, id, r#"{"widget":"cp_swap_btn","event":"click"}"#);
+        assert!(r4.is_empty() && err4.contains("PanelNotHosted"), "{err4}");
+        unsafe { jas_engine_free(b) };
     }
 
     /// The colour panel's rows through the engine scope are, byte for byte,

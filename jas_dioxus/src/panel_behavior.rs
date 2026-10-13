@@ -416,6 +416,12 @@ fn resolve_path(content: &Value, path: &[usize], scope: &Value) -> Result<(Value
 
 /// The first node with id `widget` under `node`, and whether it sits under a
 /// `foreach`. First wins, as `panel_scope::binding_of` has it.
+/// The node `widget` names in `spec`'s content, addressed by id (the first
+/// match), or `None`.
+pub(crate) fn widget_node<'a>(spec: &'a Value, widget: &str) -> Option<&'a Value> {
+    find_widget(spec.get("content")?, widget, false).map(|(n, _)| n)
+}
+
 fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&'a Value, bool)> {
     if node.get("id").and_then(Value::as_str) == Some(widget) {
         return Some((node, in_foreach));
