@@ -78,8 +78,11 @@ func advanceNextUntitledPast(_ filenames: [String]) {
 ///   artboard move/resize live-drag (`artboardTranslateFromPreview` /
 ///   `artboardResizeApply`, idempotent restore+re-apply per mousemove) and
 ///   the per-tick color apply during a picker drag (`mapSelectionFillLive` /
-///   `mapSelectionStrokeLive`); undo is captured once at the gesture
-///   boundary.
+///   `mapSelectionStrokeLive`). The colour ticks take no checkpoint at their
+///   start, so their first tick keeps the pre-drag document
+///   (`beginLiveGesture`) and the release's commit checkpoints THAT; the
+///   artboard drags `snapshot` at their threshold instead. Either way the
+///   whole drag is one undo step back to before it.
 /// - ``testOnly`` — test-fixture seeding, routed via the test-target-only
 ///   `setDocumentForTest` extension (so production code cannot reach it; the
 ///   Rust twin additionally debug-asserts `cfg!(test)`).
@@ -766,7 +769,7 @@ public class Model: ObservableObject {
         // Pair the index with the document on the stack so undo/redo restore
         // it in O(1) without a rebuild (TreeDictionary copy is O(1) structure
         // sharing). Mirrors Rust `snapshot` pushing its `checkpoint()`.
-        undoStack.append(checkpoint())
+        undoStack.append(editCheckpoint())
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
         }
@@ -798,6 +801,32 @@ public class Model: ObservableObject {
     /// from the undo stack so preview-driven applies do not
     /// pollute undo history. See SCALE_TOOL.md §Preview.
     private var previewDocSnapshot: Document?
+    /// The document as it stood when a live drag began: taken by
+    /// ``beginLiveGesture()`` at the gesture's first tick, pushed by the next checkpoint (a
+    /// transaction or a `snapshot`) in place of the current document, so the
+    /// release's commit undoes to before the drag, not to its last tick; and
+    /// dropped by undo and redo. Mirrors Rust `Model.live_baseline`.
+    private var liveBaseline: Checkpoint?
+
+    /// Begin (or continue) a live drag that takes no checkpoint of its own at
+    /// its start: keep the document as it is now, unless a baseline is
+    /// already pending, so the drag's commit undoes to here. The colour
+    /// picker's per-tick writes call it (`mapSelectionFillLive`). A drag that
+    /// snapshots at its start, as the artboard tool does, must NOT: its undo
+    /// step is already taken, and a baseline left pending would be spent by
+    /// the NEXT edit, undoing that edit back past the drag. Mirrors Rust
+    /// `begin_live_gesture`.
+    public func beginLiveGesture() {
+        if liveBaseline == nil { liveBaseline = checkpoint() }
+    }
+
+    /// The checkpoint an EDIT pushes: the live drag's baseline when one is
+    /// pending (consumed here), otherwise the current document. Mirrors Rust
+    /// `edit_checkpoint`.
+    private func editCheckpoint() -> Checkpoint {
+        defer { liveBaseline = nil }
+        return liveBaseline ?? checkpoint()
+    }
 
     // MARK: - Agent proposals (docs/AGENT_API.md, OP_LOG.md §8 item 4)
 
@@ -918,6 +947,9 @@ public class Model: ObservableObject {
         // undo). Mirrors Rust `undo` clearing in_txn / pending_txn.
         inTxn = false
         pendingTxn = nil
+        // History navigation abandons a live drag: its baseline describes a
+        // document that is no longer the one being edited. Mirrors Rust.
+        liveBaseline = nil
         guard let prev = undoStack.popLast() else { return }
         redoStack.append(checkpoint())
         // The paste run rides the checkpoint, so undoing a paste restores the
@@ -944,6 +976,7 @@ public class Model: ObservableObject {
         withdrawProposal()
         inTxn = false
         pendingTxn = nil
+        liveBaseline = nil
         guard let next = redoStack.popLast() else { return }
         undoStack.append(checkpoint())
         // Mirror of undo: redo restores the run as it stood after the redone
@@ -994,7 +1027,7 @@ public class Model: ObservableObject {
         // An artist edit withdraws a pending proposal BEFORE its checkpoint is
         // taken (docs/AGENT_API.md §2: withdraw, never rebase). Mirrors Rust.
         withdrawProposal()
-        undoStack.append(checkpoint())
+        undoStack.append(editCheckpoint())
         if undoStack.count > maxUndo {
             undoStack.removeFirst()
         }
