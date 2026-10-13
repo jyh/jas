@@ -863,6 +863,14 @@ static class Program
         Eq("color_bar: a move that names the same point sends nothing", "(null)", Show(PanelWire.ColorBarChange("0.5,0.5", "0.5,0.5")));
         Eq("color_bar: no point, no change", "(null)", Show(PanelWire.ColorBarChange(null, "0.5,0.5")));
 
+        // #397: the dirty flag is the MODEL's answer (`jas_document_modified`),
+        // never a reply's `doc_changed` (a selection repaints and is not an edit).
+        static string Dirty(byte b) => TitleVerdict.DirtyFromModel(b) is { } d ? (d ? "dirty" : "clean") : "(no answer)";
+        Eq("dirty: the model's 1 is modified", "dirty", Dirty(1));
+        Eq("dirty: the model's 0 is saved", "clean", Dirty(0));
+        Eq("dirty: 255 (no engine) is no answer -- never read as saved", "(no answer)", Dirty(255));
+        Eq("dirty: any other byte is no answer, never a guess", "(no answer)", Dirty(2));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

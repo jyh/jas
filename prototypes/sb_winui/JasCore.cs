@@ -375,6 +375,22 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_document_json(IntPtr engine);
 
     /// <summary>
+    /// #397: whether the document is modified, the MODEL's answer
+    /// (`Model::is_modified`): 1 modified, 0 not, 255 for a null engine. A
+    /// reply's `doc_changed` means repaint, and a selection sets it.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_document_modified(IntPtr engine);
+
+    /// <summary>
+    /// The shell wrote the document to disk: the model records that as the
+    /// saved state (`Model::mark_saved`), so <see cref="jas_document_modified"/>
+    /// measures from the save. Call it only after the write succeeded.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_document_mark_saved(IntPtr engine);
+
+    /// <summary>
     /// The session's document as SVG -- the artefact a person SAVES.
     ///
     /// ⛔ NOT <see cref="jas_document_json"/>, AND THE DIFFERENCE IS THE WHOLE
