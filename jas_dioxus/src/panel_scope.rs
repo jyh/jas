@@ -895,12 +895,20 @@ mod tests {
         assert_eq!(st.state_keys()["fill_color"], slice.state_keys()["fill_color"]);
         assert!(!st.fill_on_top);
 
-        // A value the slice cannot hold (no colour) is NOT adopted: the slice
-        // has no "none", and a parse of null is black, which would be a wrong
-        // colour shown as a success. Only `color.yaml` writes one, and the
-        // door does not host that panel.
+        // A null is NONE (`set_active_color_none`), and the slice holds it.
+        // Until 2026-10-12 this arm asserted the opposite ("the slice has no
+        // none"), which pinned the defect flask saw live (§235).
         let mut s = store.clone();
         s.set("fill_color", serde_json::Value::Null);
+        let mut st = slice.clone();
+        assert!(st.adopt_store_state(&s));
+        assert_eq!(st.state_keys()["fill_color"], serde_json::Value::Null);
+        assert_eq!(st.state_keys()["stroke_color"], slice.state_keys()["stroke_color"]);
+
+        // A value that is neither a colour nor none is NOT adopted: a parse of
+        // it would be black, a wrong colour shown as a success.
+        let mut s = store.clone();
+        s.set("fill_color", json!(7));
         let mut st = slice.clone();
         assert!(!st.adopt_store_state(&s));
         assert_eq!(st.state_keys(), slice.state_keys());
