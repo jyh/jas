@@ -1742,6 +1742,17 @@ fn build_appstate_ctx(
     let mut state = state;
     if let Some(m) = state.as_object_mut() {
         m.extend(crate::workspace::dock_panel::stroke_state_entries(sp));
+        // The Boolean panel's options, from their home (`set_app_state_field`
+        // writes them to `st.boolean_panel`), as the panel guards read them.
+        // Until 2026-10-13 they were absent here, so `open_boolean_options`
+        // passed all five to its dialog as null (the action corpus's
+        // `expected_dialog`, census lever 2).
+        let bp = &st.boolean_panel;
+        m.insert("boolean_precision".into(), serde_json::json!(bp.precision));
+        m.insert("boolean_remove_redundant_points".into(), serde_json::json!(bp.remove_redundant_points));
+        m.insert("boolean_divide_remove_unpainted".into(), serde_json::json!(bp.divide_remove_unpainted));
+        m.insert("boolean_apply_simplify_after_op".into(), serde_json::json!(bp.apply_simplify_after_op));
+        m.insert("boolean_simplify_precision".into(), serde_json::json!(bp.simplify_precision));
     }
     // Panel namespace: expose layers_panel_selection as a list of path
     // markers so YAML actions (delete/duplicate_layer_selection) can
