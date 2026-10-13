@@ -57,6 +57,8 @@ pub(crate) mod keyboard;
 pub mod layout_apply;
 // NOT gated: the menu STRUCTURE is data; only its rendering is a view.
 pub mod menu;
+// NOT gated: the menu's model-pure verbs, shared by every route.
+pub mod menu_native;
 #[cfg(feature = "web")]
 pub mod menu_bar;
 // Pane layout API surface includes accessors used externally and a

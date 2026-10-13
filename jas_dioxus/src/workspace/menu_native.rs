@@ -1,0 +1,101 @@
+//! THE MENU'S MODEL-PURE VERBS, ONE TABLE FOR EVERY ROUTE.
+//!
+//! Nine Edit / Object menu actions are `log` stubs in `actions.yaml`: their
+//! behaviour is the menu's own, in every app. The reference routes them
+//! through `_MENU_NATIVE_HANDLERS`, Swift through `MenuActions`. Here the web
+//! menu (`menu_bar`), the action corpus (`recorder::replay`) and the engine's
+//! menu dispatch (`ffi::jas_dispatch_action`, flask STATUS §242: Select All
+//! was refused on Windows) all call [`run`], so no route can hold a verb the
+//! others lack. Not web-gated: the engine has no web.
+//!
+//! This is the UI layer, so [`make_instance`] mints its ids here, never
+//! inside a `Controller` method (see `generate_element_id`'s contract).
+
+use crate::document::controller::Controller;
+use crate::document::model::Model;
+use crate::tools::tool::PASTE_OFFSET;
+
+/// The actions [`run`] handles, in the reference's order.
+pub const VERBS: [&str; 9] = [
+    "select_all", "group", "ungroup", "ungroup_all", "lock", "unlock_all",
+    "hide_selection", "show_all", "make_instance",
+];
+
+/// Run `action` on `model` if it is one of [`VERBS`]; `false` (nothing run)
+/// otherwise. Each edit is ONE undo step; `select_all` writes the selection,
+/// which is not an edit and records none.
+pub fn run(action: &str, model: &mut Model) -> bool {
+    match action {
+        "select_all" => Controller::select_all(model),
+        "group" => model.with_txn(|m| Controller::group_selection(m)),
+        "ungroup" => model.with_txn(|m| Controller::ungroup_selection(m)),
+        "ungroup_all" => model.with_txn(|m| Controller::ungroup_all(m)),
+        "lock" => model.with_txn(|m| Controller::lock_selection(m)),
+        "unlock_all" => model.with_txn(|m| Controller::unlock_all(m)),
+        "hide_selection" => model.with_txn(|m| Controller::hide_selection(m)),
+        "show_all" => model.with_txn(|m| Controller::show_all(m)),
+        "make_instance" => make_instance(model),
+        _ => return false,
+    }
+    true
+}
+
+/// Object > Make Instance, as a headless mutation on a [`Model`].
+///
+/// Replaces the single whole-element selection with a by-id reference to it,
+/// offset by [`PASTE_OFFSET`], under ONE undo transaction. No-op unless
+/// exactly ONE `All`-kind element is selected (the same guard the menu item's
+/// enablement uses).
+///
+/// The two element ids are minted HERE, in the UI layer, through the shared
+/// `mint_unique_ids` loop, then passed in to `create_reference`. Under the
+/// action corpus's deterministic id source that yields the golden-pinned
+/// `"01234567"` / `"89abcdef"`.
+pub fn make_instance(model: &mut Model) {
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
+    use crate::document::document::SelectionKind;
+    // Enabled only when exactly ONE whole element is selected (kind = All; not
+    // a control-point sub-selection). Otherwise no-op, like group's guard.
+    let target_path = {
+        let sel = &model.document().selection;
+        let [es] = sel.as_slice() else { return; };
+        if es.kind != SelectionKind::All { return; }
+        es.path.clone()
+    };
+    // Mint two distinct, collision-free ids against every id already in the
+    // document (see `Document::element_ids`), through the shared mint loop.
+    let mut existing = model.document().element_ids();
+    let Some(ids) =
+        mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))
+    else {
+        return;
+    };
+    let (target_id, ref_id) = (&ids[0], &ids[1]);
+    // create_reference + offset-move under ONE snapshot = a single undo step
+    // (offset rides on the new reference's common.transform via move_selection).
+    model.with_txn(|m| {
+        Controller::create_reference(m, &target_path, &target_id, &ref_id);
+        Controller::move_selection(m, PASTE_OFFSET, PASTE_OFFSET);
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::document::document::Document;
+
+    /// [`VERBS`] is the list the routes and their tests read; [`run`] is what
+    /// runs. Each verb in the list must be one `run` handles, and nothing
+    /// else is, or a route reads a verb as run that ran nothing.
+    #[test]
+    fn every_verb_is_run_and_nothing_else_is() {
+        for verb in VERBS {
+            let mut model = Model::new(Document::default(), None);
+            assert!(run(verb, &mut model), "{verb} is listed and run handles it");
+        }
+        for other in ["copy", "paste", "undo", "hide", "select_all ", ""] {
+            let mut model = Model::new(Document::default(), None);
+            assert!(!run(other, &mut model), "{other:?} is not a menu verb");
+        }
+    }
+}

@@ -262,34 +262,13 @@ pub(crate) fn run_action_case(
             .cloned()
             .unwrap_or_default();
         // Object / Edit menu model-pure verbs are bespoke-native: their
-        // actions.yaml entries are `log` stubs (the real behavior lives in
-        // menu_bar.rs's dispatch — NOT in dispatch_action), so the generic
-        // dispatcher would no-op them. Route each to the SAME headless
-        // mutation path the menu invokes — the Controller methods (and, for
-        // make_instance, the shared menu_bar::make_instance_on_model that
-        // mints ids in the UI layer then calls create_reference +
-        // move_selection) — so the action corpus gates their cross-app
-        // document mutation. Mirrors the Python _MENU_NATIVE_HANDLERS
-        // intercept in _dispatch_action. The verbs self-bracket (the
-        // Controller mutation rides one with_txn, exactly as the menu
-        // closure does); select_all writes the non-undoable selection.
-        let handled = {
-            use crate::document::controller::Controller;
-            let model = &mut st.tabs[st.active_tab].model;
-            match action {
-                "select_all" => { Controller::select_all(model); true }
-                "group" => { model.with_txn(|m| Controller::group_selection(m)); true }
-                "ungroup" => { model.with_txn(|m| Controller::ungroup_selection(m)); true }
-                "ungroup_all" => { model.with_txn(|m| Controller::ungroup_all(m)); true }
-                "lock" => { model.with_txn(|m| Controller::lock_selection(m)); true }
-                "hide_selection" => { model.with_txn(|m| Controller::hide_selection(m)); true }
-                "make_instance" => {
-                    crate::workspace::menu_bar::make_instance_on_model(model);
-                    true
-                }
-                _ => false,
-            }
-        };
+        // actions.yaml entries are `log` stubs, so the generic dispatcher
+        // would no-op them. Route each through the SAME table the menu and
+        // the engine run (`workspace::menu_native`), so the action corpus
+        // gates their cross-app document mutation. Mirrors the Python
+        // _MENU_NATIVE_HANDLERS intercept in _dispatch_action.
+        let handled = crate::workspace::menu_native::run(
+            action, &mut st.tabs[st.active_tab].model);
         if handled { continue; }
         crate::interpreter::renderer::dispatch_action(action, &params, &mut st);
     }
