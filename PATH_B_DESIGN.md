@@ -539,6 +539,61 @@ toolbar is pinned by its own golden, `test_fixtures/algorithms/pane_layout.json`
 three replay. It is a separate file because the frozen Python app's runner replays
 `panel_layout.json` and resolves every vector in `panels`, where a pane is not.
 
+### B.8 A child's `style.position` (ruled 2026-10-12 by the port owner)
+
+A child of a container (`container`, `row`, `col`, `panel`) whose `style.position` is
+`{x, y}`, with both numbers, is placed ABSOLUTELY and takes no part in its parent's flow:
+
+* `x` and `y` resolve as a height does (B.4: truncation, `int(v)`), and the child's rect
+  starts at `(inner_x + x, inner_y + y)`. The child is measured at `avail = inner_w − x`
+  (never below 0), so a fill leaf or an unsized container reaches the parent's right edge.
+* The parent's column, flow row or grid row lays out only its OTHER visible children, so a
+  positioned child moves no sibling and gets no gap.
+* The parent's content height is the larger of the flow's and the lowest positioned child's
+  bottom (`y + h`). Its natural width is the larger of the flow's (with padding) and the
+  rightmost positioned child's `pad.left + x + natural_w`. A declared height (B.4) or width (B.5) still decides
+  over both, so a parent that declares a box too small for its positioned children overflows.
+  This is checked by `test_panel_layout_overlap.py`, not hidden.
+* Output stays pre-order and in child-index order: a positioned child's rects sit between
+  its siblings' rects where its index puts them.
+* A `position` that is not two numbers is not honoured, and the panel gate refuses it
+  (`test_panel_layout_overlap.py`, with a positive control), so it cannot sit silently in
+  the flow.
+* `grid` (B.7), `foreach` (B.3) and `disclosure` do not read `position`. No shipped node
+  puts a positioned child under one, and the same gate refuses one.
+
+**Why:** the `fill_stroke_widget` template (`workspace/templates/fill_stroke_widget.yaml`)
+places its five children at points derived from one `size` param: fill and stroke squares
+that overlap, swap, reset, and the solid/gradient/none row. The web DOM honours that with
+`position: absolute`. No layout pass did, so every port stacked the five children in a
+column 104 px tall inside a 60 px box (Color, `size: 48`). The rows after it were placed
+after the BOX, and the hex row and colour bar overlapped the mode buttons (flask, live on
+the Windows dock, #363). The overlap gate had excluded Color and Swatches for exactly this
+reason, filed as future work.
+
+### B.9 A leaf's `style.size` (ruled 2026-10-12 by the port owner)
+
+A leaf's `style.size`, a number, is its width AND its height (`int(size)` each). It
+replaces the kind's width and height from A.5. `style.width`, `style.min_width` and
+`style.height` still apply after it, as they do to a kind's size.
+
+**Why:** a positioned leaf (B.8) needs its declared size, and the rule cannot be scoped to
+positioned leaves without the contract reading "size counts only when positioned". The
+census of 2026-10-12 (compiled bundle): 91 flow leaves in 11 panels declare a size, and 69
+of them, in 10 panels, differ from their kind's size: icon buttons at 14–20 (the kind
+table says 24), one reserved 20 px spacer slot (Boolean), one 20 px icon dropdown and one
+32 px element preview (Layers). The other 22 are colour swatches at 16, which is the kind
+size. The web drew all of them at their declared size and every port drew the kind size,
+so those ten panels' rects disagreed with the web before this clause. Every such rect
+moves in `panel_layout.json` and `pane_layout.json`.
+
+**Where B.8 and B.9 live:** `_measure` and `_natural_w` (with `_leaf_size` / `_leaf_h`) in
+`workspace_interpreter/panel_layout.py`, their Rust and Swift twins, the regenerated
+goldens, the synthetic arms in `test_panel_layout_position.py` and its ports, and the
+overlap gate, which no longer excludes Color and Swatches. Leaves that overlap INSIDE one
+positioned arrangement are its composition (the overlapping fill and stroke squares), so
+the gate exempts them from each other and from nothing else.
+
 ### A.6 Deferred in v1 — status updated 2026-06-29
 
 **Now implemented** (were deferred when this section was written): `foreach` row/wrap layout

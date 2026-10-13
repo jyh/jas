@@ -412,9 +412,14 @@ fn flex(n: &Value) -> i64 {
 fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
     let t = node_type(n);
     let st = style(n);
+    // B.9: a declared size is the leaf's width and height.
+    let size = size_i(n);
     let h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0)
+        .or(size)
         .unwrap_or_else(|| kind_height(t));
-    let mut w = if is_fill(t) {
+    let mut w = if let Some(sz) = size {
+        sz
+    } else if is_fill(t) {
         if avail_w > 0 {
             avail_w
         } else {
@@ -438,6 +443,46 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
         w = w.max(m);
     }
     (w, h)
+}
+
+/// B.9: a leaf's `style.size` (a number), truncated; else `None`.
+fn size_i(n: &Value) -> Option<i64> {
+    style(n).get("size").and_then(Value::as_f64).map(|f| f as i64)
+}
+
+/// B.8: a child's `style.position` as integer `(x, y)` when it is two numbers;
+/// else `None`, and the child stays in its parent's flow.
+fn position_i(n: &Value) -> Option<(i64, i64)> {
+    let pos = style(n).get("position")?;
+    let x = pos.get("x").and_then(Value::as_f64)?;
+    let y = pos.get("y").and_then(Value::as_f64)?;
+    Some((x as i64, y as i64))
+}
+
+/// `(flow, positioned)`: B.8 takes a positioned child out of the flow.
+#[allow(clippy::type_complexity)]
+fn split_positioned<'a>(children: Vec<(i64, &'a Value)>) -> (Vec<(i64, &'a Value)>, Vec<(i64, &'a Value)>) {
+    children.into_iter().partition(|&(_, c)| position_i(c).is_none())
+}
+
+/// B.8: each positioned child at its own point, measured at the width to the
+/// parent's right edge. Returns its items and the lowest bottom.
+fn positioned(placed: &[(i64, &Value)], path: &[i64], inner_w: i64, ctx: &Value) -> (Vec<MItem>, i64) {
+    let mut items = vec![];
+    let mut bottom = 0i64;
+    for &(i, c) in placed {
+        let (x, y) = position_i(c).expect("split_positioned keeps only positioned children");
+        let mut p = path.to_vec();
+        p.push(i);
+        let (_cw, ch, cit) = measure(c, &p, (inner_w - x).max(0), 0, ctx);
+        for mut it in cit {
+            it.x += x;
+            it.y += y;
+            items.push(it);
+        }
+        bottom = bottom.max(y + ch);
+    }
+    (items, bottom)
 }
 
 /// Group `(i, node)` children into Bootstrap-12 rows by their `col` span.
@@ -489,26 +534,36 @@ fn natural_w(n: &Value, ctx: &Value) -> i64 {
         let template = n.get("do").unwrap_or(&Value::Null);
         return natural_w(template, ctx) + pl + pr;
     }
-    let kids = visible_children(n);
+    let (kids, placed) = split_positioned(visible_children(n));
+    // B.8: the natural width reaches the rightmost positioned child.
+    let reach = placed
+        .iter()
+        .map(|&(_, c)| position_i(c).map_or(0, |(x, _)| x) + natural_w(c, ctx))
+        .max()
+        .unwrap_or(0);
+    (flow_natural_w(n, &kids, gap, ctx) + pl + pr).max(reach + pl)
+}
+
+/// The natural width of a container's FLOW children (B.8: positioned children
+/// are not in it), without padding.
+fn flow_natural_w(n: &Value, kids: &[(i64, &Value)], gap: i64, ctx: &Value) -> i64 {
     let lay = resolved_layout(n);
     if lay == "row" && kids.iter().any(|&(_, c)| has_col(c)) {
         let mut best = 0i64;
-        for line in grid_lines(&kids) {
+        for line in grid_lines(kids) {
             let m = line.len() as i64;
             let line_w: i64 = line.iter().map(|&(_, c, _span)| natural_w(c, ctx)).sum::<i64>()
                 + if m > 0 { gap * (m - 1) } else { 0 };
             best = best.max(line_w);
         }
-        return best + pl + pr;
+        return best;
     }
     if lay == "row" {
         let nk = kids.len() as i64;
-        let tot: i64 = kids.iter().map(|&(_, c)| natural_w(c, ctx)).sum::<i64>()
+        return kids.iter().map(|&(_, c)| natural_w(c, ctx)).sum::<i64>()
             + if nk > 0 { gap * (nk - 1) } else { 0 };
-        return tot + pl + pr;
     }
-    let inner = kids.iter().map(|&(_, c)| natural_w(c, ctx)).max().unwrap_or(0);
-    inner + pl + pr
+    kids.iter().map(|&(_, c)| natural_w(c, ctx)).max().unwrap_or(0)
 }
 
 /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
@@ -545,15 +600,25 @@ fn measure(
         } else if node_type(n) == "grid" {
             grid_2d(&visible_children(n), path, inner_w, gap, grid_cols(n), ctx)
         } else {
-            let children = visible_children(n);
+            let (children, placed) = split_positioned(visible_children(n));
             let lay = resolved_layout(n);
-            if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
+            let (mut items, mut content_h) = if lay == "row" && children.iter().any(|&(_, c)| has_col(c)) {
                 grid(&children, path, inner_w, gap, ctx)
             } else if lay == "row" {
                 flow(&children, path, inner_w, gap, ctx)
             } else {
                 column(&children, path, inner_w, gap, inner_h, ctx)
+            };
+            if !placed.is_empty() {
+                let (p_items, p_bottom) = positioned(&placed, path, inner_w, ctx);
+                content_h = content_h.max(p_bottom);
+                // Pre-order in child-index order: each child's items are
+                // contiguous and lead with the child's own path (a stable sort).
+                items.extend(p_items);
+                let depth = path.len();
+                items.sort_by_key(|it| it.path[depth]);
             }
+            (items, content_h)
         };
         let exp_h = resolve_dim(st.get("height").unwrap_or(&Value::Null), 0);
         // Fill the width given; with no constraint (avail_w <= 0) report the
@@ -1168,5 +1233,138 @@ mod grid_2d_tests {
         let floaty = json!({"type": "icon_button", "icon": "x", "grid": {"row": 1.0, "col": 1.0}});
         let r = rects(grid(vec![btn(Some((0, 0))), floaty], None), 72);
         assert_eq!((r[&vec![1]].0, r[&vec![1]].1), (37, 0));
+    }
+}
+
+/// PATH_B_DESIGN B.8 (a child's `style.position`) and B.9 (a leaf's
+/// `style.size`): the reference's synthetic arms
+/// (`workspace_interpreter/tests/test_panel_layout_position.py`), one for one.
+#[cfg(test)]
+mod position_and_size_tests {
+    use super::layout_panel;
+    use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    fn rects(content: Value, avail_w: i64) -> HashMap<Vec<i64>, (i64, i64, i64, i64)> {
+        let out = layout_panel(&json!({"content": content}), avail_w, 0, &json!({}));
+        out.as_array().unwrap().iter().map(|r| {
+            let p: Vec<i64> = r["path"].as_array().unwrap().iter().map(|v| v.as_i64().unwrap()).collect();
+            let q = &r["rect"];
+            (p, (q["x"].as_i64().unwrap(), q["y"].as_i64().unwrap(), q["w"].as_i64().unwrap(), q["h"].as_i64().unwrap()))
+        }).collect()
+    }
+
+    fn btn(style: Value) -> Value {
+        json!({"type": "icon_button", "style": style})
+    }
+
+    fn at(x: Value, y: Value, mut node: Value) -> Value {
+        let st = node.as_object_mut().unwrap().entry("style").or_insert(json!({}));
+        st["position"] = json!({"x": x, "y": y});
+        node
+    }
+
+    fn col(children: Value) -> Value {
+        json!({"type": "container", "children": children})
+    }
+
+    #[test]
+    fn a_leaf_without_a_size_keeps_its_kind_size() {
+        let r = rects(col(json!([btn(json!({}))])), 200);
+        assert_eq!((r[&vec![0]].2, r[&vec![0]].3), (24, 24));
+    }
+
+    #[test]
+    fn a_leafs_size_is_its_width_and_height() {
+        let r = rects(col(json!([btn(json!({"size": 14.4}))])), 200);
+        assert_eq!((r[&vec![0]].2, r[&vec![0]].3), (14, 14));
+    }
+
+    #[test]
+    fn a_declared_width_and_height_still_apply_after_size() {
+        let r = rects(col(json!([btn(json!({"size": 14, "width": 30, "height": 9}))])), 200);
+        assert_eq!((r[&vec![0]].2, r[&vec![0]].3), (30, 9));
+    }
+
+    #[test]
+    fn a_size_moves_a_flow_rows_next_cell() {
+        let r = rects(json!({"type": "row", "style": {"gap": 2},
+                             "children": [btn(json!({"size": 11.52})), btn(json!({"size": 11.52}))]}), 200);
+        assert_eq!(r[&vec![1]].0, 11 + 2);
+    }
+
+    #[test]
+    fn a_positioned_child_is_placed_at_its_point_inside_the_padding() {
+        let r = rects(json!({"type": "container", "style": {"padding": 5},
+                             "children": [at(json!(4.32), json!(15.84), btn(json!({"size": 10})))]}), 200);
+        assert_eq!((r[&vec![0]].0, r[&vec![0]].1), (5 + 4, 5 + 15));
+    }
+
+    #[test]
+    fn a_positioned_child_takes_no_space_in_a_column() {
+        let r = rects(json!({"type": "container", "style": {"gap": 3},
+                             "children": [at(json!(0), json!(30), btn(json!({"size": 10}))), btn(json!({"size": 10}))]}), 200);
+        assert_eq!(r[&vec![1]].1, 0);
+    }
+
+    #[test]
+    fn a_positioned_child_takes_no_space_in_a_row() {
+        let r = rects(json!({"type": "row", "style": {"gap": 3},
+                             "children": [at(json!(50), json!(0), btn(json!({"size": 10}))), btn(json!({"size": 10}))]}), 200);
+        assert_eq!(r[&vec![1]].0, 0);
+    }
+
+    #[test]
+    fn positioned_children_may_overlap_each_other() {
+        let r = rects(col(json!([at(json!(4), json!(4), btn(json!({"size": 26}))),
+                                 at(json!(15), json!(15), btn(json!({"size": 26})))])), 200);
+        assert_eq!((r[&vec![0]].0, r[&vec![1]].0, r[&vec![0]].1, r[&vec![1]].1), (4, 15, 4, 15));
+    }
+
+    #[test]
+    fn the_parents_height_reaches_its_lowest_positioned_child() {
+        let r = rects(col(json!([
+            col(json!([btn(json!({"size": 10})), at(json!(0), json!(40), btn(json!({"size": 12})))])),
+            btn(json!({"size": 10})),
+        ])), 200);
+        assert_eq!(r[&vec![0]].3, 40 + 12);
+        assert_eq!(r[&vec![1]].1, 40 + 12, "the next row starts after the positioned child");
+    }
+
+    #[test]
+    fn a_declared_height_still_decides() {
+        let r = rects(col(json!([{"type": "container", "style": {"height": 20},
+                                  "children": [at(json!(0), json!(40), btn(json!({"size": 12})))]}])), 200);
+        assert_eq!(r[&vec![0]].3, 20);
+    }
+
+    #[test]
+    fn a_positioned_fill_leaf_reaches_the_parents_right_edge() {
+        let r = rects(col(json!([at(json!(30), json!(0), json!({"type": "separator"}))])), 100);
+        assert_eq!((r[&vec![0]].0, r[&vec![0]].2), (30, 70));
+    }
+
+    #[test]
+    fn a_rows_natural_width_reaches_its_rightmost_positioned_child() {
+        let inner = col(json!([at(json!(30), json!(0), btn(json!({"size": 10})))]));
+        let r = rects(json!({"type": "row", "children": [inner, btn(json!({"size": 10}))]}), 400);
+        assert!(r[&vec![1]].0 >= 30 + 10, "{r:?}");
+    }
+
+    #[test]
+    fn output_is_pre_order_in_child_index_order() {
+        let out = layout_panel(&json!({"content": col(json!([
+            btn(json!({"size": 10})),
+            at(json!(0), json!(40), json!({"type": "row", "children": [btn(json!({"size": 5}))]})),
+            btn(json!({"size": 10})),
+        ]))}), 200, 0, &json!({}));
+        let paths: Vec<Value> = out.as_array().unwrap().iter().map(|r| r["path"].clone()).collect();
+        assert_eq!(paths, vec![json!([]), json!([0]), json!([1]), json!([1, 0]), json!([2])]);
+    }
+
+    #[test]
+    fn a_position_that_is_not_two_numbers_is_not_honoured() {
+        let r = rects(col(json!([btn(json!({"size": 10})), at(json!("50%"), json!(7), btn(json!({"size": 10})))])), 200);
+        assert_eq!(r[&vec![1]].1, 10, "laid out in the flow, after its sibling");
     }
 }

@@ -369,10 +369,14 @@ public enum PanelLayout {
     private static func leafSize(_ n: [String: Any], availW: Int, ctx: [String: Any]) -> (Int, Int, Bool) {
         let t = nodeType(n)
         let st = style(n)
-        let h = resolveDim(st["height"], 0) ?? kindHeight(t)
+        // B.9: a declared size is the leaf's width and height.
+        let size = sizeI(n)
+        let h = resolveDim(st["height"], 0) ?? size ?? kindHeight(t)
         let fill = isFill(t)
         var w: Int
-        if fill {
+        if let sz = size {
+            w = sz
+        } else if fill {
             w = availW > 0 ? availW : kindFallbackW(t)
         } else {
             switch t {
@@ -395,6 +399,45 @@ public enum PanelLayout {
         if let x = resolveDim(st["width"], availW) { w = x }
         if let m = resolveDim(st["min_width"], availW) { w = max(w, m) }
         return (w, h, fill)
+    }
+
+    /// B.9: a leaf's `style.size` (a number), truncated; else nil.
+    private static func sizeI(_ n: [String: Any]) -> Int? {
+        numI(style(n)["size"])
+    }
+
+    /// B.8: a child's `style.position` as integer `(x, y)` when it is two
+    /// numbers; else nil, and the child stays in its parent's flow.
+    private static func positionI(_ n: [String: Any]) -> (Int, Int)? {
+        guard let pos = style(n)["position"] as? [String: Any],
+              let x = numI(pos["x"]), let y = numI(pos["y"]) else { return nil }
+        return (x, y)
+    }
+
+    /// `(flow, positioned)`: B.8 takes a positioned child out of the flow.
+    private static func splitPositioned(_ children: [(Int, [String: Any])])
+        -> ([(Int, [String: Any])], [(Int, [String: Any])]) {
+        (children.filter { positionI($0.1) == nil }, children.filter { positionI($0.1) != nil })
+    }
+
+    /// B.8: each positioned child at its own point, measured at the width to
+    /// the parent's right edge. Returns its items and the lowest bottom.
+    private static func positioned(_ placed: [(Int, [String: Any])], path: [Int], innerW: Int,
+                                   ctx: [String: Any]) -> ([MItem], Int) {
+        var items: [MItem] = []
+        var bottom = 0
+        for (i, c) in placed {
+            guard let (x, y) = positionI(c) else { continue }
+            let (_, ch, cit) = measure(c, path: path + [i], availW: max(innerW - x, 0),
+                                       availH: 0, ctx: ctx)
+            for var it in cit {
+                it.x += x
+                it.y += y
+                items.append(it)
+            }
+            bottom = max(bottom, y + ch)
+        }
+        return (items, bottom)
     }
 
     /// Group `(i, node)` children into Bootstrap-12 rows by their `col` span.
@@ -445,7 +488,16 @@ public enum PanelLayout {
             let template = (node["do"] as? [String: Any]) ?? [:]
             return naturalW(template, ctx) + pl + pr
         }
-        let kids = visibleChildren(node)
+        let (kids, placed) = splitPositioned(visibleChildren(node))
+        // B.8: the natural width reaches the rightmost positioned child.
+        let reach = placed.map { (positionI($0.1)?.0 ?? 0) + naturalW($0.1, ctx) }.max() ?? 0
+        return max(flowNaturalW(node, kids, gap, ctx) + pl + pr, reach + pl)
+    }
+
+    /// The natural width of a container's FLOW children (B.8: positioned
+    /// children are not in it), without padding.
+    private static func flowNaturalW(_ node: [String: Any], _ kids: [(Int, [String: Any])],
+                                     _ gap: Int, _ ctx: [String: Any]) -> Int {
         let lay = resolvedLayout(node)
         if lay == "row" && kids.contains(where: { hasCol($0.1) }) {
             var best = 0
@@ -454,15 +506,13 @@ public enum PanelLayout {
                 let lineW = line.reduce(0) { $0 + naturalW($1.1, ctx) } + gap * (m > 0 ? m - 1 : 0)
                 best = max(best, lineW)
             }
-            return best + pl + pr
+            return best
         }
         if lay == "row" {
             let n = kids.count
-            let tot = kids.reduce(0) { $0 + naturalW($1.1, ctx) } + (n > 0 ? gap * (n - 1) : 0)
-            return tot + pl + pr
+            return kids.reduce(0) { $0 + naturalW($1.1, ctx) } + (n > 0 ? gap * (n - 1) : 0)
         }
-        let inner = kids.map { naturalW($0.1, ctx) }.max() ?? 0
-        return inner + pl + pr
+        return kids.map { naturalW($0.1, ctx) }.max() ?? 0
     }
 
     /// Returns (w, h, items) with item coords RELATIVE to this node's origin.
@@ -493,16 +543,30 @@ public enum PanelLayout {
                 (chItems, contentH) = grid2d(visibleChildren(n), path: path, innerW: innerW,
                                              gap: gap, cols: gridCols(n), ctx: ctx)
             } else {
-                let children = visibleChildren(n)
+                let (children, placed) = splitPositioned(visibleChildren(n))
                 let lay = resolvedLayout(n)
+                var flowItems: [MItem]
+                var flowH: Int
                 if lay == "row" && children.contains(where: { hasCol($0.1) }) {
-                    (chItems, contentH) = grid(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
+                    (flowItems, flowH) = grid(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
                 } else if lay == "row" {
-                    (chItems, contentH) = flow(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
+                    (flowItems, flowH) = flow(children, path: path, innerW: innerW, gap: gap, ctx: ctx)
                 } else {
-                    (chItems, contentH) = column(children, path: path, innerW: innerW,
-                                                 gap: gap, availH: innerH, ctx: ctx)
+                    (flowItems, flowH) = column(children, path: path, innerW: innerW,
+                                                gap: gap, availH: innerH, ctx: ctx)
                 }
+                if !placed.isEmpty {
+                    let (pItems, pBottom) = positioned(placed, path: path, innerW: innerW, ctx: ctx)
+                    flowH = max(flowH, pBottom)
+                    // Pre-order in child-index order: each child's items are
+                    // contiguous and lead with the child's own path. Swift's
+                    // sort is not stable, so the original position breaks ties.
+                    let depth = path.count
+                    flowItems = (flowItems + pItems).enumerated()
+                        .sorted { ($0.element.path[depth], $0.offset) < ($1.element.path[depth], $1.offset) }
+                        .map { $0.element }
+                }
+                (chItems, contentH) = (flowItems, flowH)
             }
             let expH = resolveDim(st["height"], 0)
             // Fill the width given; with no constraint (availW <= 0) report the
