@@ -964,8 +964,49 @@ private func childrenGeometricBounds(_ children: [Element]) -> BBox {
 /// Factored out of `moveControlPoints`: the `.path` and `.textPath` arms held
 /// two byte-identical copies of this walk, which is the shape that lets two
 /// arms of one switch drift apart.
+/// The anchor-index pairs `(start, closing)` of every subpath that is closed
+/// by a segment ending EXACTLY on its own `moveTo`, then `closePath` — the
+/// pen's closed form. The two anchors are one point on the canvas, so
+/// selecting either selects both. A straight `closePath` close has no closing
+/// anchor, and a path with no `closePath` is open, so neither yields a pair.
+/// Twin of Rust's `closed_path_twins`.
+public func closedPathTwins(_ d: [PathCommand]) -> [(Int, Int)] {
+    var out: [(Int, Int)] = []
+    var anchorIdx = 0
+    var start: (idx: Int, x: Double, y: Double)? = nil
+    var last: (idx: Int, x: Double, y: Double)? = nil
+    for cmd in d {
+        let end: (Double, Double)
+        switch cmd {
+        case .closePath:
+            if let s = start, let l = last, l.idx != s.idx, l.x == s.x, l.y == s.y {
+                out.append((s.idx, l.idx))
+            }
+            start = nil
+            last = nil
+            continue
+        case .moveTo(let x, let y):
+            start = (anchorIdx, x, y)
+            end = (x, y)
+        case .lineTo(let x, let y), .curveTo(_, _, _, _, let x, let y):
+            end = (x, y)
+        default:
+            // An anchor whose endpoint the mover does not move can never be a twin.
+            end = (.nan, .nan)
+        }
+        last = (anchorIdx, end.0, end.1)
+        anchorIdx += 1
+    }
+    return out
+}
+
 fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind,
                                        dx: Double, dy: Double) -> [PathCommand] {
+    let twins = closedPathTwins(d)
+    func selected(_ i: Int) -> Bool {
+        kind.contains(i)
+            || twins.contains { (i == $0.0 && kind.contains($0.1)) || (i == $0.1 && kind.contains($0.0)) }
+    }
     var cmds = d
     var anchorIdx = 0
     for ci in 0..<cmds.count {
@@ -975,7 +1016,7 @@ fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind
         default:
             break
         }
-        if kind.contains(anchorIdx) {
+        if selected(anchorIdx) {
             switch cmds[ci] {
             case .moveTo(let x, let y):
                 cmds[ci] = .moveTo(x + dx, y + dy)
@@ -991,6 +1032,12 @@ fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind
                 }
             case .lineTo(let x, let y):
                 cmds[ci] = .lineTo(x + dx, y + dy)
+                // The anchor's out-handle is the next CurveTo's (x1, y1), as
+                // for the other two arms (Rust moves it too).
+                if ci + 1 < cmds.count,
+                   case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                }
             default:
                 break
             }
@@ -2303,9 +2350,14 @@ private func pathAnchorPoints(_ d: [PathCommand]) -> [(Double, Double)] {
 
 /// Return (incoming_handle, outgoing_handle) for a path anchor.
 /// Returns nil for a handle that doesn't exist or coincides with its anchor.
-public func pathHandlePositions(_ d: [PathCommand], anchorIdx: Int)
-    -> ((Double, Double)?, (Double, Double)?) {
-    // Map anchor indices to command indices (skip closePath)
+/// The command indices holding a path anchor's two handles: `(in, out)`, where
+/// `in` is a curve whose (x2, y2) is the anchor's in-handle and `out` a curve
+/// whose (x1, y1) is its out-handle. Normally the anchor's own command and the
+/// next one. A closed path's start and its closing endpoint are TWINS
+/// (`closedPathTwins`) and share their handles: the start's in-handle is on
+/// the closing curve, and the closing endpoint's out-handle is on the first
+/// segment. Twin of Rust's `handle_sites`.
+private func handleSites(_ d: [PathCommand], anchorIdx: Int) -> (in: Int?, out: Int?) {
     var cmdIndices: [Int] = []
     for (ci, cmd) in d.enumerated() {
         if case .closePath = cmd { continue }
@@ -2313,10 +2365,32 @@ public func pathHandlePositions(_ d: [PathCommand], anchorIdx: Int)
     }
     guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return (nil, nil) }
     let ci = cmdIndices[anchorIdx]
-    let cmd = d[ci]
-    // Anchor position
+    func curve(_ c: Int) -> Int? {
+        guard c < d.count, case .curveTo = d[c] else { return nil }
+        return c
+    }
+    let twins = closedPathTwins(d)
+    let inSite: Int?
+    if case .curveTo = d[ci] {
+        inSite = ci
+    } else {
+        inSite = twins.first { $0.0 == anchorIdx }.flatMap { curve(cmdIndices[$0.1]) }
+    }
+    let outSite = curve(ci + 1) ?? twins.first { $0.1 == anchorIdx }.flatMap { curve(cmdIndices[$0.0] + 1) }
+    return (inSite, outSite)
+}
+
+public func pathHandlePositions(_ d: [PathCommand], anchorIdx: Int)
+    -> ((Double, Double)?, (Double, Double)?) {
+    var cmdIndices: [Int] = []
+    for (ci, cmd) in d.enumerated() {
+        if case .closePath = cmd { continue }
+        cmdIndices.append(ci)
+    }
+    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return (nil, nil) }
+    let ci = cmdIndices[anchorIdx]
     let ax: Double, ay: Double
-    switch cmd {
+    switch d[ci] {
     case .moveTo(let x, let y), .lineTo(let x, let y):
         ax = x; ay = y
     case .curveTo(_, _, _, _, let x, let y):
@@ -2324,20 +2398,16 @@ public func pathHandlePositions(_ d: [PathCommand], anchorIdx: Int)
     default:
         return (nil, nil)
     }
-    // Incoming handle: (x2, y2) of this CurveTo
+    func off(_ hx: Double, _ hy: Double) -> (Double, Double)? {
+        (abs(hx - ax) > 0.01 || abs(hy - ay) > 0.01) ? (hx, hy) : nil
+    }
+    let sites = handleSites(d, anchorIdx: anchorIdx)
+    // Incoming handle: (x2, y2) of the in-site curve
     var hIn: (Double, Double)? = nil
-    if case .curveTo(_, _, let x2, let y2, _, _) = cmd {
-        if abs(x2 - ax) > 0.01 || abs(y2 - ay) > 0.01 {
-            hIn = (x2, y2)
-        }
-    }
-    // Outgoing handle: (x1, y1) of next CurveTo
+    if let c = sites.in, case .curveTo(_, _, let x2, let y2, _, _) = d[c] { hIn = off(x2, y2) }
+    // Outgoing handle: (x1, y1) of the out-site curve
     var hOut: (Double, Double)? = nil
-    if ci + 1 < d.count, case .curveTo(let x1, let y1, _, _, _, _) = d[ci + 1] {
-        if abs(x1 - ax) > 0.01 || abs(y1 - ay) > 0.01 {
-            hOut = (x1, y1)
-        }
-    }
+    if let c = sites.out, case .curveTo(let x1, let y1, _, _, _, _) = d[c] { hOut = off(x1, y1) }
     return (hIn, hOut)
 }
 
@@ -2363,10 +2433,8 @@ public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: Strin
     }
     guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
     let ci = cmdIndices[anchorIdx]
-    let cmd = d[ci]
-    // Get anchor position
     let ax: Double, ay: Double
-    switch cmd {
+    switch d[ci] {
     case .moveTo(let x, let y), .lineTo(let x, let y):
         ax = x; ay = y
     case .curveTo(_, _, _, _, let x, let y):
@@ -2374,27 +2442,28 @@ public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: Strin
     default:
         return d
     }
+    let sites = handleSites(d, anchorIdx: anchorIdx)
     var cmds = d
     if handleType == "in" {
-        if case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci] {
+        if let c = sites.in, case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[c] {
             let nhx = x2 + dx, nhy = y2 + dy
-            cmds[ci] = .curveTo(x1: x1, y1: y1, x2: nhx, y2: nhy, x: x, y: y)
+            cmds[c] = .curveTo(x1: x1, y1: y1, x2: nhx, y2: nhy, x: x, y: y)
             // Rotate opposite (out) handle to stay collinear, keep its distance
-            if ci + 1 < cmds.count,
-               case .curveTo(let ox1, let oy1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+            if let o = sites.out,
+               case .curveTo(let ox1, let oy1, let nx2, let ny2, let nx, let ny) = cmds[o] {
                 let (rx, ry) = reflectHandleKeepDistance(ax: ax, ay: ay, nhx: nhx, nhy: nhy, oppHx: ox1, oppHy: oy1)
-                cmds[ci + 1] = .curveTo(x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny)
+                cmds[o] = .curveTo(x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny)
             }
         }
     } else if handleType == "out" {
-        if ci + 1 < cmds.count,
-           case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci + 1] {
+        if let o = sites.out, case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[o] {
             let nhx = x1 + dx, nhy = y1 + dy
-            cmds[ci + 1] = .curveTo(x1: nhx, y1: nhy, x2: x2, y2: y2, x: x, y: y)
+            cmds[o] = .curveTo(x1: nhx, y1: nhy, x2: x2, y2: y2, x: x, y: y)
             // Rotate opposite (in) handle to stay collinear, keep its distance
-            if case .curveTo(let cx1, let cy1, let cx2, let cy2, let cx, let cy) = cmds[ci] {
+            if let c = sites.in,
+               case .curveTo(let cx1, let cy1, let cx2, let cy2, let cx, let cy) = cmds[c] {
                 let (rx, ry) = reflectHandleKeepDistance(ax: ax, ay: ay, nhx: nhx, nhy: nhy, oppHx: cx2, oppHy: cy2)
-                cmds[ci] = .curveTo(x1: cx1, y1: cy1, x2: rx, y2: ry, x: cx, y: cy)
+                cmds[c] = .curveTo(x1: cx1, y1: cy1, x2: rx, y2: ry, x: cx, y: cy)
             }
         }
     }
@@ -2404,22 +2473,15 @@ public func movePathHandle(_ d: [PathCommand], anchorIdx: Int, handleType: Strin
 /// Move a single handle without reflecting the opposite handle (cusp behavior).
 public func movePathHandleIndependent(_ d: [PathCommand], anchorIdx: Int, handleType: String,
                                       dx: Double, dy: Double) -> [PathCommand] {
-    var cmdIndices: [Int] = []
-    for (ci, cmd) in d.enumerated() {
-        if case .closePath = cmd { continue }
-        cmdIndices.append(ci)
-    }
-    guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
-    let ci = cmdIndices[anchorIdx]
+    let sites = handleSites(d, anchorIdx: anchorIdx)
     var cmds = d
     if handleType == "in" {
-        if case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci] {
-            cmds[ci] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x, y: y)
+        if let c = sites.in, case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[c] {
+            cmds[c] = .curveTo(x1: x1, y1: y1, x2: x2 + dx, y2: y2 + dy, x: x, y: y)
         }
     } else if handleType == "out" {
-        if ci + 1 < cmds.count,
-           case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[ci + 1] {
-            cmds[ci + 1] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: x, y: y)
+        if let o = sites.out, case .curveTo(let x1, let y1, let x2, let y2, let x, let y) = cmds[o] {
+            cmds[o] = .curveTo(x1: x1 + dx, y1: y1 + dy, x2: x2, y2: y2, x: x, y: y)
         }
     }
     return cmds
@@ -2443,9 +2505,8 @@ public func convertCornerToSmooth(_ d: [PathCommand], anchorIdx: Int,
     }
     guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
     let ci = cmdIndices[anchorIdx]
-    let cmd = d[ci]
     let ax: Double, ay: Double
-    switch cmd {
+    switch d[ci] {
     case .moveTo(let x, let y), .lineTo(let x, let y):
         ax = x; ay = y
     case .curveTo(_, _, _, _, let x, let y):
@@ -2456,37 +2517,71 @@ public func convertCornerToSmooth(_ d: [PathCommand], anchorIdx: Int,
     // Reflected handle: mirror (hx, hy) through the anchor.
     let rhx = 2.0 * ax - hx
     let rhy = 2.0 * ay - hy
-    var cmds = d
-    // Set incoming handle (x2, y2) on this command to the reflected position.
-    switch cmds[ci] {
-    case .lineTo(let x, let y):
-        // Use previous anchor as x1,y1 if there is one.
-        var px = x, py = y
-        if ci > 0 {
-            switch d[ci - 1] {
-            case .moveTo(let mx, let my), .lineTo(let mx, let my): px = mx; py = my
-            case .curveTo(_, _, _, _, let cxe, let cye): px = cxe; py = cye
-            default: break
-            }
+    func endOf(_ c: Int) -> (Double, Double) {
+        switch d[c] {
+        case .moveTo(let x, let y), .lineTo(let x, let y): return (x, y)
+        case .curveTo(_, _, _, _, let x, let y): return (x, y)
+        default: return (ax, ay)
         }
-        cmds[ci] = .curveTo(x1: px, y1: py, x2: rhx, y2: rhy, x: x, y: y)
-    case .curveTo(let x1, let y1, _, _, let x, let y):
-        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: rhx, y2: rhy, x: x, y: y)
-    case .moveTo:
-        // No incoming handle on a MoveTo; only outgoing handle is set below.
-        break
-    default:
-        break
     }
-    // Set outgoing handle (x1, y1) on the next command to (hx, hy).
-    if ci + 1 < cmds.count {
-        switch cmds[ci + 1] {
+    func segment(_ c: Int) -> Int? {
+        guard c < d.count else { return nil }
+        switch d[c] {
+        case .lineTo, .curveTo: return c
+        default: return nil
+        }
+    }
+    // The segments this anchor's two handles live on (see `handleSites`): its
+    // own command and the next one, except that a closed path's start takes
+    // its in-segment from its twin and the closing endpoint takes its
+    // out-segment from the start. A line segment is converted to a curve.
+    let twins = closedPathTwins(d)
+    let inSeg: Int?
+    if case .moveTo = d[ci] {
+        inSeg = twins.first { $0.0 == anchorIdx }.map { cmdIndices[$0.1] }
+    } else {
+        inSeg = ci
+    }
+    let outSeg = segment(ci + 1) ?? twins.first { $0.1 == anchorIdx }.flatMap { segment(cmdIndices[$0.0] + 1) }
+    var cmds = d
+    // Set the outgoing handle (x1, y1 on the out-segment) to (hx, hy).
+    if let o = outSeg {
+        switch cmds[o] {
         case .lineTo(let x, let y):
-            cmds[ci + 1] = .curveTo(x1: hx, y1: hy, x2: x, y2: y, x: x, y: y)
+            cmds[o] = .curveTo(x1: hx, y1: hy, x2: x, y2: y, x: x, y: y)
         case .curveTo(_, _, let x2, let y2, let x, let y):
-            cmds[ci + 1] = .curveTo(x1: hx, y1: hy, x2: x2, y2: y2, x: x, y: y)
+            cmds[o] = .curveTo(x1: hx, y1: hy, x2: x2, y2: y2, x: x, y: y)
         default:
             break
+        }
+    }
+    // Set the incoming handle (x2, y2 on the in-segment) to the reflection.
+    if let c = inSeg {
+        switch cmds[c] {
+        case .lineTo(let x, let y):
+            // A line's start is the previous anchor, which becomes x1.
+            let (px, py) = c > 0 ? endOf(c - 1) : (ax, ay)
+            cmds[c] = .curveTo(x1: px, y1: py, x2: rhx, y2: rhy, x: x, y: y)
+        case .curveTo(let x1, let y1, _, _, let x, let y):
+            cmds[c] = .curveTo(x1: x1, y1: y1, x2: rhx, y2: rhy, x: x, y: y)
+        default:
+            break
+        }
+    } else if case .moveTo = d[ci] {
+        // A start with no twin: a straight `closePath` close has no segment to
+        // hold the in-handle, so insert the pen's closing curve (from the last
+        // anchor, whose out-handle sits on it) before the `closePath`. An open
+        // path has no `closePath` and its start has no in-handle at all.
+        var close: Int? = nil
+        var c = ci + 1
+        while c < d.count {
+            if case .moveTo = d[c] { break }
+            if case .closePath = d[c] { close = c; break }
+            c += 1
+        }
+        if let close, close > ci + 1 {
+            let (px, py) = endOf(close - 1)
+            cmds.insert(.curveTo(x1: px, y1: py, x2: rhx, y2: rhy, x: ax, y: ay), at: close)
         }
     }
     return cmds
@@ -2501,9 +2596,8 @@ public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCo
     }
     guard anchorIdx >= 0, anchorIdx < cmdIndices.count else { return d }
     let ci = cmdIndices[anchorIdx]
-    let cmd = d[ci]
     let ax: Double, ay: Double
-    switch cmd {
+    switch d[ci] {
     case .moveTo(let x, let y), .lineTo(let x, let y):
         ax = x; ay = y
     case .curveTo(_, _, _, _, let x, let y):
@@ -2511,15 +2605,15 @@ public func convertSmoothToCorner(_ d: [PathCommand], anchorIdx: Int) -> [PathCo
     default:
         return d
     }
+    let sites = handleSites(d, anchorIdx: anchorIdx)
     var cmds = d
-    // Collapse incoming handle (x2, y2) on this command to the anchor.
-    if case .curveTo(let x1, let y1, _, _, let x, let y) = cmds[ci] {
-        cmds[ci] = .curveTo(x1: x1, y1: y1, x2: ax, y2: ay, x: x, y: y)
+    // Collapse the incoming handle (x2, y2) to the anchor.
+    if let c = sites.in, case .curveTo(let x1, let y1, _, _, let x, let y) = cmds[c] {
+        cmds[c] = .curveTo(x1: x1, y1: y1, x2: ax, y2: ay, x: x, y: y)
     }
-    // Collapse outgoing handle (x1, y1) on the next command to the anchor.
-    if ci + 1 < cmds.count,
-       case .curveTo(_, _, let x2, let y2, let x, let y) = cmds[ci + 1] {
-        cmds[ci + 1] = .curveTo(x1: ax, y1: ay, x2: x2, y2: y2, x: x, y: y)
+    // Collapse the outgoing handle (x1, y1) to the anchor.
+    if let o = sites.out, case .curveTo(_, _, let x2, let y2, let x, let y) = cmds[o] {
+        cmds[o] = .curveTo(x1: ax, y1: ay, x2: x2, y2: y2, x: x, y: y)
     }
     return cmds
 }
