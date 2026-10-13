@@ -1251,6 +1251,25 @@ pub unsafe extern "C" fn jas_dispatch_action(
     out
 }
 
+/// Whether the active document is MODIFIED: 1 when it holds an edit since it
+/// was opened or last saved, 0 when it does not, 255 for a null engine.
+///
+/// ⭐ IT EXISTS FOR A SHELL'S DIRTY FLAG (flask STATUS §246, ruled §247). A
+/// reply's `doc_changed` means "repaint the document", and a selection change
+/// sets it, so a shell that marked the document dirty on `doc_changed` made
+/// Select All an edit. This is the model's own answer (`Model::is_modified`):
+/// a selection and a live drag tick are not edits, and Undo back to the saved
+/// state is unmodified again. 255, not 0, for a null engine: 0 would read as
+/// "saved" about a session that does not exist.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_modified(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    u8::from(engine.with_model(|m| m.is_modified()))
+}
+
 /// **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
 /// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
 /// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
@@ -2813,6 +2832,39 @@ mod tests {
                     "{verb} is the menu's own and the engine runs it");
         }
         assert!(ran >= 9, "at least the nine menu verbs ran; {ran} items ran");
+    }
+
+    /// WHETHER THE DOCUMENT IS MODIFIED, FOR A SHELL'S DIRTY FLAG (flask §246,
+    /// ruled §247): `doc_changed` in a reply means REPAINT, and a selection
+    /// change sets it, so a shell that marks the document dirty on it marks
+    /// Select All an edit. The model's own answer is `is_modified`: a selection
+    /// and a live drag tick are not edits, and Undo back to the saved state is
+    /// unmodified again. 255 for a null engine: a bool cannot express "no
+    /// session", and 0 would read as "saved".
+    #[test]
+    fn the_modified_flag_is_the_models_not_the_repaint_signal() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        assert_eq!(unsafe { jas_document_modified(std::ptr::null_mut()) }, 255);
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0), rect(50.0, 20.0, 30.0, 40.0)], &[]));
+        let modified = || unsafe { jas_document_modified(e) };
+        assert_eq!(modified(), 0, "a fresh document");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        assert!(err.is_empty() && reply.contains(r#""doc_changed":true"#), "CONTROL: Select All repaints: {reply}");
+        assert_eq!(modified(), 0, "a selection is not an edit");
+        let _ = dispatch(e, r#"{"action":"group"}"#);
+        assert_eq!(modified(), 1, "Group is an edit");
+        undo(e);
+        assert_eq!(modified(), 0, "Undo back to the saved state is unmodified");
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let (reply, err) = behave(e, id, r#"{"widget":"cp_color_bar","event":"change","value":"0.3,0.3"}"#);
+        assert!(err.is_empty() && reply.contains(r#""doc_changed":true"#),
+                "CONTROL: the live tick ran and repainted: {err} {reply}");
+        assert_eq!(modified(), 0, "a live drag tick is not an edit");
+        let (_, err) = behave(e, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.3,0.3"}"#);
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(modified(), 1, "its release is");
+        unsafe { jas_engine_free(e) };
     }
 
     #[test]
