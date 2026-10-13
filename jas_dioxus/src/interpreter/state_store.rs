@@ -379,6 +379,13 @@ impl StateStore {
     }
 
     /// A panel's whole scope, if it has one.
+    /// Every panel's own scope, keyed by content id. The evaluation context
+    /// carries only the ACTIVE panel's, so a caller asking "did a batch change
+    /// any state?" reads this too (`panel_behavior::run_batch`).
+    pub fn panel_scopes(&self) -> &HashMap<String, HashMap<String, serde_json::Value>> {
+        &self.panels
+    }
+
     pub fn panel_scope(&self, panel_id: &str) -> Option<&HashMap<String, serde_json::Value>> {
         self.panels.get(&panel_content_id(panel_id))
     }
