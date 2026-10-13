@@ -42,6 +42,9 @@ pub mod menu_state;
 pub mod renderer;
 #[cfg(feature = "web")]
 pub mod dialog_view;
+// A dialog's state and its open law. NOT gated: the corpus runner's FFI lane
+// and the engine need it without a window (`dialog_view` holds it in a signal).
+pub mod dialog_state;
 #[cfg(feature = "web")]
 pub mod timer;
 

@@ -122,5 +122,32 @@
       "fill_color": "#000000",
       "stroke_color": "#c86432"
     }
+  },
+  {
+    "name": "new_swatch_opens_swatch_options_with_the_active_fill",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "new_swatch",
+        "params": {}
+      }
+    ],
+    "expected_json": "new_swatch_opens_swatch_options_expected.json",
+    "expected_dialog": {
+      "id": "swatch_options",
+      "params": {
+        "mode": "create",
+        "color": "#0000ff"
+      },
+      "state": {
+        "color": "#0000ff",
+        "color_mode": "rgb",
+        "swatch_name": ""
+      }
+    }
   }
 ]
