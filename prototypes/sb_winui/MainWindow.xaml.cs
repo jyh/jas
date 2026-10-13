@@ -231,13 +231,57 @@ public sealed partial class MainWindow : Window
 
     private bool _dockWanted;
     private bool _dockCollapseDone;
+    private bool _panelMenuSynthDone;
+    /// <summary>The group whose SB_PANEL_MENU_SYNTH run waits on its menu read.</summary>
+    private (string Group, int Index)? _panelMenuSynth;
     private string _dockName = "";
     private StackPanel? _dockStack;
 
-    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron);
+    private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron, Button Menu);
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
 
     private PaneView? DockGroupView(string key) => _dockGroups.TryGetValue(key, out var g) ? g.View : null;
+
+    /// <summary>Ask the render thread for a group's panel menu; the rows come back
+    /// through <see cref="OnPanelMenuRead"/>.</summary>
+    private void RequestPanelMenu(string key, string via)
+    {
+        if (_canvas is null || !_dockGroups.TryGetValue(key, out var g)) { return; }
+        _canvas.PanelMenu(new PanelMenuCmd { Group = key, PanelId = g.View._paneDrawnPanel, Index = -1, Via = via });
+    }
+
+    /// <summary>
+    /// The core's rows for a group's menu, on the UI thread. A hand read opens
+    /// the flyout at the group's button; the synth read runs its item instead.
+    /// The flyout is built from the rows alone: a separator, a toggle item where
+    /// the core gave a check state, a plain item otherwise, enabled as the core
+    /// said, and a click sends the index back.
+    /// </summary>
+    private void OnPanelMenuRead(string key, string panelId, string via, string json)
+    {
+        if (!_dockGroups.TryGetValue(key, out var g)) { return; }
+        if (via == "synth" && _panelMenuSynth is { } s && s.Group == key)
+        {
+            _panelMenuSynth = null;
+            _canvas?.PanelMenu(new PanelMenuCmd { Group = key, PanelId = panelId, Index = s.Index, Via = "synth" });
+            return;
+        }
+        var flyout = new MenuFlyout();
+        foreach (var row in PanelMenuWire.Parse(json))
+        {
+            if (row.Kind == "separator") { flyout.Items.Add(new MenuFlyoutSeparator()); continue; }
+            if (row.Kind != "item") { continue; }
+            var (text, _) = MenuWire.Label(row.Label);
+            MenuFlyoutItem item = row.Checked is bool on
+                ? new ToggleMenuFlyoutItem { Text = text, IsChecked = on }
+                : new MenuFlyoutItem { Text = text };
+            item.IsEnabled = row.Enabled;
+            var index = row.Index;
+            item.Click += (_, _) => _canvas?.PanelMenu(new PanelMenuCmd { Group = key, PanelId = panelId, Index = index, Via = "hand" });
+            flyout.Items.Add(item);
+        }
+        flyout.ShowAt(g.Menu);
+    }
 
     /// <summary>Show which tab of a group is the panel its pane now holds.</summary>
     private void MarkDockTab(string key, string panelId)
@@ -330,6 +374,20 @@ public sealed partial class MainWindow : Window
                 ToolTipService.SetToolTip(chevron, "Collapse/Expand");
                 chevron.Click += (_, _) => SetDockCollapsed(groupKey, scroll.Visibility == Visibility.Visible, "hand");
                 tabs.Children.Add(chevron);
+                // The panel menu (the owner's note 3, 2026-10-12): the core's rows
+                // for the group's CURRENT panel, read when it is opened.
+                var menuButton = new Button
+                {
+                    Content = "≡",
+                    FontSize = 11,
+                    Padding = new Thickness(6, 2, 6, 2),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(menuButton, key + "_menu");
+                ToolTipService.SetToolTip(menuButton, "Panel menu");
+                menuButton.Click += (_, _) => RequestPanelMenu(groupKey, "hand");
+                tabs.Children.Add(menuButton);
                 var body = new StackPanel();
                 body.Children.Add(tabs);
                 body.Children.Add(scroll);
@@ -348,7 +406,7 @@ public sealed partial class MainWindow : Window
                     Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
                     continue;
                 }
-                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron);
+                _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
             }
             Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
@@ -368,6 +426,29 @@ public sealed partial class MainWindow : Window
                 else
                 {
                     Report($"RUSTFAIL DOCK COLLAPSE REFUSED key={ck} -- the dock has {_dockGroups.Count} group(s)");
+                }
+            }
+            // SB_PANEL_MENU_SYNTH=<group key>:<index>: the group's menu read, then
+            // that item run, through the same commands the button and the flyout
+            // send (Q6.PM). Anything it cannot read, or a group the dock lacks, is
+            // refused by name.
+            var menuKnob = Environment.GetEnvironmentVariable("SB_PANEL_MENU_SYNTH");
+            if (!_panelMenuSynthDone && !string.IsNullOrWhiteSpace(menuKnob))
+            {
+                _panelMenuSynthDone = true;
+                var pk = PanelMenuWire.SynthKnob(menuKnob);
+                if (pk is null)
+                {
+                    Report($"RUSTFAIL PANEL MENU SYNTH REFUSED knob='{menuKnob.Trim()}' -- not <group key>:<index>");
+                }
+                else if (!_dockGroups.ContainsKey(pk.Value.Group))
+                {
+                    Report($"RUSTFAIL PANEL MENU SYNTH REFUSED group={pk.Value.Group} -- the dock has {_dockGroups.Count} group(s)");
+                }
+                else
+                {
+                    _panelMenuSynth = pk;
+                    RequestPanelMenu(pk.Value.Group, "synth");
                 }
             }
         }
@@ -411,6 +492,7 @@ public sealed partial class MainWindow : Window
         _canvas.HashTaken = OnHashTaken;
         _canvas.PanelChanged = OnPanelChanged;
         _canvas.PaneChanged = OnPaneChanged;
+        _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP

@@ -759,6 +759,34 @@ struct JasBytes jas_dispatch_action(struct JasEngine *e,
                                     uintptr_t action_len);
 
 /**
+ * **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
+ * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
+ * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
+ * or `separator` (any other node is `unknown`, never guessed at). An item
+ * also carries `label`, `action`, `enabled` and `checked` (a bool for a
+ * checkable item, null otherwise).
+ *
+ * ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
+ * `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's
+ * engine scope, so the shell evaluates nothing and a panel menu reads what
+ * the cross-language corpus (`algorithms/panel_menu_state.json`) pins. That
+ * walk reads `enabled_when` and `checked_when` only, so a node spelled
+ * `checked:` or `disabled: true` reads unchecked and enabled here exactly as
+ * it does there.
+ *
+ * A click goes back by index: `jas_dispatch_action({"panel", "menu_index"})`.
+ * An unknown panel is the empty span with `UnknownPanel` on
+ * [`jas_last_error_json`].
+ *
+ * [`menu_state`]: crate::interpreter::menu_state::menu_state
+ *
+ * # Safety
+ * `e` is null or from [`jas_engine_new`], and `panel_id` is `len` readable
+ * bytes.
+ */
+struct JasBytes jas_panel_menu(struct JasEngine *e, const uint8_t *panel_id, uintptr_t len);
+
+/**
  * Zero every boundary counter. Call at the START of a named interaction so the
  * dump that follows describes that interaction alone.
  */
