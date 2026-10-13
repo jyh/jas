@@ -4585,6 +4585,25 @@ mod tests {
         }
     }
 
+    /// A menu dispatch runs with no active panel, so the batch's change test
+    /// (the store's evaluation context, which carries only the ACTIVE panel's
+    /// scope) could not see a write to a panel's own scope: the Color mode
+    /// moved and the reply said `Unchanged` when no panel had been drawn
+    /// (found 2026-10-13 while arming #383). A repeat of the same switch IS
+    /// unchanged, and must still say so.
+    #[test]
+    fn a_menu_dispatch_that_moves_only_a_panel_scope_is_a_change() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let switch = r#"{"action":"set_color_panel_mode","params":{"mode":"cmyk"}}"#;
+        let (_, err) = dispatch(e, switch);
+        assert_eq!(engine_of(e).panel.borrow().mode, "cmyk", "fixture: the mode moved");
+        assert!(err.is_empty(), "a switch that moved the mode is not Unchanged: {err}");
+        let (_, err) = dispatch(e, switch);
+        assert!(err.contains("Unchanged"), "the repeat moved nothing: {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// `cp_hex`: "In Web Safe RGB mode, the entered value is snapped to the
     /// nearest web-safe color on commit." Both apps snap each channel to the
     /// nearest multiple of 51 (the web's `renderer`, Swift's
