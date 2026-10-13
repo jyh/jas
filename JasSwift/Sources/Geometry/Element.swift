@@ -964,8 +964,49 @@ private func childrenGeometricBounds(_ children: [Element]) -> BBox {
 /// Factored out of `moveControlPoints`: the `.path` and `.textPath` arms held
 /// two byte-identical copies of this walk, which is the shape that lets two
 /// arms of one switch drift apart.
+/// The anchor-index pairs `(start, closing)` of every subpath that is closed
+/// by a segment ending EXACTLY on its own `moveTo`, then `closePath` — the
+/// pen's closed form. The two anchors are one point on the canvas, so
+/// selecting either selects both. A straight `closePath` close has no closing
+/// anchor, and a path with no `closePath` is open, so neither yields a pair.
+/// Twin of Rust's `closed_path_twins`.
+public func closedPathTwins(_ d: [PathCommand]) -> [(Int, Int)] {
+    var out: [(Int, Int)] = []
+    var anchorIdx = 0
+    var start: (idx: Int, x: Double, y: Double)? = nil
+    var last: (idx: Int, x: Double, y: Double)? = nil
+    for cmd in d {
+        let end: (Double, Double)
+        switch cmd {
+        case .closePath:
+            if let s = start, let l = last, l.idx != s.idx, l.x == s.x, l.y == s.y {
+                out.append((s.idx, l.idx))
+            }
+            start = nil
+            last = nil
+            continue
+        case .moveTo(let x, let y):
+            start = (anchorIdx, x, y)
+            end = (x, y)
+        case .lineTo(let x, let y), .curveTo(_, _, _, _, let x, let y):
+            end = (x, y)
+        default:
+            // An anchor whose endpoint the mover does not move can never be a twin.
+            end = (.nan, .nan)
+        }
+        last = (anchorIdx, end.0, end.1)
+        anchorIdx += 1
+    }
+    return out
+}
+
 fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind,
                                        dx: Double, dy: Double) -> [PathCommand] {
+    let twins = closedPathTwins(d)
+    func selected(_ i: Int) -> Bool {
+        kind.contains(i)
+            || twins.contains { (i == $0.0 && kind.contains($0.1)) || (i == $0.1 && kind.contains($0.0)) }
+    }
     var cmds = d
     var anchorIdx = 0
     for ci in 0..<cmds.count {
@@ -975,7 +1016,7 @@ fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind
         default:
             break
         }
-        if kind.contains(anchorIdx) {
+        if selected(anchorIdx) {
             switch cmds[ci] {
             case .moveTo(let x, let y):
                 cmds[ci] = .moveTo(x + dx, y + dy)
@@ -991,6 +1032,12 @@ fileprivate func movePathCommandPoints(_ d: [PathCommand], _ kind: SelectionKind
                 }
             case .lineTo(let x, let y):
                 cmds[ci] = .lineTo(x + dx, y + dy)
+                // The anchor's out-handle is the next CurveTo's (x1, y1), as
+                // for the other two arms (Rust moves it too).
+                if ci + 1 < cmds.count,
+                   case .curveTo(let nx1, let ny1, let nx2, let ny2, let nx, let ny) = cmds[ci + 1] {
+                    cmds[ci + 1] = .curveTo(x1: nx1 + dx, y1: ny1 + dy, x2: nx2, y2: ny2, x: nx, y: ny)
+                }
             default:
                 break
             }

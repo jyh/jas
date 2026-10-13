@@ -2990,19 +2990,63 @@ pub fn is_smooth_point(d: &[PathCommand], anchor_idx: usize) -> bool {
     h_in.is_some() || h_out.is_some()
 }
 
+/// The anchor-index pairs `(start, closing)` of every subpath that is closed
+/// by a segment ending EXACTLY on its own `MoveTo`, then `Z` — the pen's
+/// closed form (`doc.add_path_from_anchor_buffer`). The two anchors are one
+/// point on the canvas, so selecting either selects both. A straight `Z`
+/// close has no closing anchor, and a path with no `Z` is open, so neither
+/// yields a pair.
+pub fn closed_path_twins(d: &[PathCommand]) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut anchor_idx = 0usize;
+    // (anchor index, point) of the current subpath's MoveTo, and of the last
+    // anchor seen in it.
+    let mut start: Option<(usize, (f64, f64))> = None;
+    let mut last: Option<(usize, (f64, f64))> = None;
+    for cmd in d {
+        let end = match *cmd {
+            PathCommand::ClosePath => {
+                if let (Some((si, sp)), Some((li, lp))) = (start, last)
+                    && li != si && lp == sp {
+                        out.push((si, li));
+                    }
+                start = None;
+                last = None;
+                continue;
+            }
+            PathCommand::MoveTo { x, y } => {
+                start = Some((anchor_idx, (x, y)));
+                (x, y)
+            }
+            PathCommand::LineTo { x, y } | PathCommand::CurveTo { x, y, .. } => (x, y),
+            // Any other command is an anchor whose endpoint the movers below
+            // do not move, so it can never be a twin.
+            _ => (f64::NAN, f64::NAN),
+        };
+        last = Some((anchor_idx, end));
+        anchor_idx += 1;
+    }
+    out
+}
+
 fn move_path_command_points(
     d: &[PathCommand],
     kind: &SelectionKind,
     dx: f64,
     dy: f64,
 ) -> Vec<PathCommand> {
+    let twins = closed_path_twins(d);
+    let selected = |i: usize| {
+        kind.contains(i)
+            || twins.iter().any(|&(a, b)| (i == a && kind.contains(b)) || (i == b && kind.contains(a)))
+    };
     let mut new_cmds: Vec<PathCommand> = d.to_vec();
     let mut anchor_idx = 0usize;
     for ci in 0..d.len() {
         if matches!(d[ci], PathCommand::ClosePath) {
             continue;
         }
-        if kind.contains(anchor_idx) {
+        if selected(anchor_idx) {
             match d[ci] {
                 PathCommand::MoveTo { x, y } => {
                     new_cmds[ci] = PathCommand::MoveTo {
@@ -5686,4 +5730,148 @@ mod rect_promotion_preservation_tests {
                    "Inside no longer answers the Center box -- that is the ruling");
     }
 
+}
+
+/// A CLOSED PATH'S START IS ONE POINT, EVEN WHEN IT IS TWO ANCHORS. The pen
+/// closes a path as `MoveTo P0 … CurveTo(…, P0) Z` (`doc.add_path_from_anchor_buffer`),
+/// so the start is anchor 0 AND the closing segment's endpoint, anchor n.
+/// Partial Selection's click picks the first control point in index order, so
+/// a click on the start selects anchor 0 alone. Before these arms, moving it
+/// left the closing endpoint behind and the `Z` drew a stray straight segment.
+/// The closing endpoint is anchor 0's TWIN: selecting either moves both.
+#[cfg(test)]
+mod closed_path_twin_tests {
+    use super::*;
+    use crate::document::document::{SelectionKind, SortedCps};
+
+    fn cps(i: &[usize]) -> SelectionKind {
+        SelectionKind::Partial(SortedCps::from_iter(i.iter().copied()))
+    }
+
+    /// The pen's closed form: anchor 0 = (0,0), anchor 1 = (100,0), anchor 2
+    /// = the closing endpoint, back on (0,0) with in-handle (-10,50).
+    fn pen_closed() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 10.0, y1: -10.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: -10.0, y2: 50.0, x: 0.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]
+    }
+
+    /// The moved form, whichever twin was selected: the start moves with its
+    /// out-handle (cmd 1's x1) AND its in-handle (the closing x2); the
+    /// previous anchor's out-handle (the closing x1) and anchor 1 stay.
+    fn pen_closed_start_moved_by_30() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 30.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 40.0, y1: -10.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: 20.0, y2: 50.0, x: 30.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]
+    }
+
+    #[test]
+    fn moving_the_start_moves_its_closing_twin() {
+        assert_eq!(move_path_command_points(&pen_closed(), &cps(&[0]), 30.0, 0.0),
+                   pen_closed_start_moved_by_30());
+    }
+
+    #[test]
+    fn moving_the_closing_endpoint_moves_the_start() {
+        assert_eq!(move_path_command_points(&pen_closed(), &cps(&[2]), 30.0, 0.0),
+                   pen_closed_start_moved_by_30());
+    }
+
+    /// Both twins selected (a marquee over the start) is the same move, once.
+    #[test]
+    fn selecting_both_twins_moves_the_start_once() {
+        assert_eq!(move_path_command_points(&pen_closed(), &cps(&[0, 2]), 30.0, 0.0),
+                   pen_closed_start_moved_by_30());
+    }
+
+    /// Through the public entry the Partial Selection tool's drag uses.
+    #[test]
+    fn the_element_level_move_keeps_a_pen_closed_path_closed() {
+        let e = Element::Path(PathElem {
+            d: pen_closed(), fill: None, stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(), common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
+            fill_rule: FillRule::NonZero,
+        });
+        let Element::Path(p) = move_control_points(&e, &cps(&[0]), 30.0, 0.0) else {
+            panic!("a path stays a path");
+        };
+        assert_eq!(p.d, pen_closed_start_moved_by_30());
+    }
+
+    /// CONTROL: with no `Z`, a path that ends on its start is OPEN and its two
+    /// ends are two points, so the start moves alone.
+    #[test]
+    fn an_open_path_ending_on_its_start_is_not_linked() {
+        let mut d = pen_closed();
+        d.pop();
+        let got = move_path_command_points(&d, &cps(&[0]), 30.0, 0.0);
+        assert_eq!(got[2], d[2], "the open end did not move");
+        assert_eq!(got[0], PathCommand::MoveTo { x: 30.0, y: 0.0 });
+    }
+
+    /// CONTROL: a straight `Z` close has no closing endpoint; the start moves
+    /// alone and the `Z` follows it, which is already right.
+    #[test]
+    fn a_straight_close_has_no_twin() {
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 80.0 },
+            PathCommand::ClosePath,
+        ];
+        let got = move_path_command_points(&d, &cps(&[0]), 30.0, 0.0);
+        assert_eq!(got, vec![
+            PathCommand::MoveTo { x: 30.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 80.0 },
+            PathCommand::ClosePath,
+        ]);
+    }
+
+    /// Each subpath links its own twins: the second subpath's start (anchor
+    /// 3) and its closing endpoint (anchor 5); the first subpath is untouched.
+    #[test]
+    fn twins_are_per_subpath() {
+        let mut d = pen_closed();
+        d.extend(vec![
+            PathCommand::MoveTo { x: 200.0, y: 0.0 },
+            PathCommand::LineTo { x: 300.0, y: 0.0 },
+            PathCommand::LineTo { x: 200.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]);
+        let got = move_path_command_points(&d, &cps(&[3]), 0.0, 7.0);
+        assert_eq!(&got[..4], &pen_closed()[..], "the first subpath is untouched");
+        assert_eq!(got[4], PathCommand::MoveTo { x: 200.0, y: 7.0 });
+        assert_eq!(got[5], PathCommand::LineTo { x: 300.0, y: 0.0 });
+        assert_eq!(got[6], PathCommand::LineTo { x: 200.0, y: 7.0 });
+        // And the first subpath's start does not drag the second's.
+        let got = move_path_command_points(&d, &cps(&[0]), 30.0, 0.0);
+        assert_eq!(&got[4..], &d[4..]);
+    }
+
+    /// AN ANCHOR REACHED BY A LINE STILL OWNS ITS OUT-HANDLE: the next
+    /// CurveTo's x1 moves with it. Swift's mover did not, so the same drag bent
+    /// the outgoing curve differently in the two ports (Swift's
+    /// `anAnchorReachedByALineMovesItsOutHandle`).
+    #[test]
+    fn an_anchor_reached_by_a_line_moves_its_out_handle() {
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 10.0, x2: 190.0, y2: 10.0, x: 200.0, y: 0.0 },
+        ];
+        assert_eq!(move_path_command_points(&d, &cps(&[1]), 0.0, 5.0), vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 5.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 15.0, x2: 190.0, y2: 10.0, x: 200.0, y: 0.0 },
+        ]);
+    }
 }
