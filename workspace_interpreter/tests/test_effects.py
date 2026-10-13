@@ -454,6 +454,14 @@ class TestRecentColoursArePerDocument:
         assert self._recent(store) == ["#112233"]
 
     def test_unique_moves_to_front_and_max_length_caps(self):
+        # The repeat first lands while the list is SHORT: once the list is
+        # full, a duplicate falls off the end under max_length, so a push
+        # that ignored `unique` would read the same there.
+        store = StateStore()
+        self._push(store, '"#000001"', unique=True, max_length=3)
+        self._push(store, '"#000002"', unique=True, max_length=3)
+        self._push(store, '"#000001"', unique=True, max_length=3)
+        assert self._recent(store) == ["#000001", "#000002"]
         store = StateStore()
         for c in ["#000001", "#000002", "#000003"]:
             self._push(store, f'"{c}"', unique=True, max_length=3)

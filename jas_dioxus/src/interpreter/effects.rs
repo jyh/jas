@@ -12809,10 +12809,17 @@ mod tests {
                                                   "value": v, "unique": true, "max_length": 3}});
         let mut store = StateStore::new();
         let mut model = Model::default();
-        for c in ["\"#000001\"", "\"#000002\"", "\"#000003\"", "\"#000001\"", "\"#000004\""] {
-            let r = run_effects(&[push(c)], &json!({}), &mut store, Some(&mut model), None, None, None);
+        let run = |model: &mut Model, store: &mut StateStore, cs: &[&str]| for c in cs {
+            let r = run_effects(&[push(c)], &json!({}), store, Some(model), None, None, None);
             assert!(r.unhandled.is_empty(), "{c}: {:?}", r.unhandled);
-        }
+        };
+        // The repeat first lands while the list is SHORT: in a full list a
+        // duplicate falls off the end under max_length, so a push that
+        // ignored `unique` would read the same there.
+        run(&mut model, &mut store, &["\"#000001\"", "\"#000002\"", "\"#000001\""]);
+        assert_eq!(model.recent_colors, vec!["#000001", "#000002"]);
+        model.recent_colors.clear();
+        run(&mut model, &mut store, &["\"#000001\"", "\"#000002\"", "\"#000003\"", "\"#000001\"", "\"#000004\""]);
         assert_eq!(model.recent_colors, vec!["#000004", "#000001", "#000003"]);
 
         let r = run_effects(&[json!({"list_push": {"target": "active_document.selection_count", "value": "1"}})],
