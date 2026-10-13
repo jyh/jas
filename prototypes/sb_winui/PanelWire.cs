@@ -503,6 +503,24 @@ internal static class PanelWire
     internal static string? ColorBarChange(string? point, string? lastSent) =>
         point is not null && point != lastSent ? point : null;
 
+    /// <summary>
+    /// §252 (#399): the bytes of a `display.picture`, a `data:image/bmp;base64,`
+    /// URI. Null for no picture, another media type, malformed base64, or bytes
+    /// that do not open with the BMP signature `BM`. Decoding is all the shell
+    /// does: every pixel is already the engine's colour.
+    /// </summary>
+    internal static byte[]? PictureBytes(string? uri)
+    {
+        const string prefix = "data:image/bmp;base64,";
+        if (uri is null || !uri.StartsWith(prefix, StringComparison.Ordinal)) { return null; }
+        try
+        {
+            var bytes = Convert.FromBase64String(uri.Substring(prefix.Length));
+            return bytes.Length >= 2 && bytes[0] == (byte)'B' && bytes[1] == (byte)'M' ? bytes : null;
+        }
+        catch (FormatException) { return null; }
+    }
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
