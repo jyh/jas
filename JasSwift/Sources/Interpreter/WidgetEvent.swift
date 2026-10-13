@@ -33,7 +33,7 @@ enum WidgetEvent {
     static let pressEvents = ["click", "change"]
     static let inputKinds: Set<String> = [
         "number_input", "length_input", "text_input",
-        "select", "icon_select", "combo_box",
+        "select", "icon_select", "combo_box", "slider",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
@@ -254,6 +254,13 @@ enum WidgetEvent {
             return (true, clampToDeclared(v, min: lo, max: hi))
         case "text_input":
             return (true, text)
+        case "slider":
+            // A number, clamped; snapped to `step` from `min`; clamped again,
+            // so a `max` off the step grid is unreachable (the reference's
+            // `_snap`, WIDGET_EVENTS.md Parsing).
+            guard let v = numberInputCommit(text: text, min: lo, max: hi) else { return refused }
+            return (true, clampToDeclared(snapToStep(v, min: lo, step: declaredBound(widget["step"])),
+                                          min: lo, max: hi))
         case "select", "icon_select":
             guard let rows = optionRows(widget["options"]) else {
                 // Computed options: the shell offered what the expression

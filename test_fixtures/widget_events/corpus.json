@@ -1800,6 +1800,364 @@
       "name": "gradient_dither_press_when_checked",
       "panel": "gradient_panel_content",
       "widget": "grad_dither_checkbox"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "210"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 210.0
+        },
+        "state_changed": {}
+      },
+      "name": "color_hue_slider_commit",
+      "panel": "color_panel_content",
+      "widget": "cp_h"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "400"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 359.0,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 359.0
+        },
+        "state_changed": {}
+      },
+      "name": "color_hue_slider_clamped",
+      "panel": "color_panel_content",
+      "widget": "cp_h"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "12.6"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 13.0,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 13.0
+        },
+        "state_changed": {}
+      },
+      "name": "color_hue_slider_decimal_snaps",
+      "panel": "color_panel_content",
+      "widget": "cp_h"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "130"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 153.0,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 153.0
+        },
+        "state_changed": {}
+      },
+      "name": "color_web_safe_slider_snaps_to_51",
+      "panel": "color_panel_content",
+      "widget": "cp_r_ws"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "-5"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 0.0,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": true,
+          "outcome": "committed",
+          "reason": null,
+          "value": 0.0
+        },
+        "state_changed": {}
+      },
+      "name": "color_web_safe_slider_clamped_below",
+      "panel": "color_panel_content",
+      "widget": "cp_r_ws"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699"
+        }
+      },
+      "event": {
+        "commit": "abc"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "color_hue_slider_bad_value",
+      "panel": "color_panel_content",
+      "widget": "cp_h"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 0,
+          "bl": 0,
+          "c": 0,
+          "g": 0,
+          "h": 0,
+          "hex": "000000",
+          "k": 100,
+          "m": 0,
+          "mode": "hsb",
+          "r": 0,
+          "s": 0,
+          "y": 0
+        },
+        "state": {
+          "fill_color": null,
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "210"
+      },
+      "expected": {
+        "panel": {
+          "b": 0,
+          "bl": 0,
+          "c": 0,
+          "g": 0,
+          "h": 0,
+          "hex": "000000",
+          "k": 100,
+          "m": 0,
+          "mode": "hsb",
+          "r": 0,
+          "s": 0,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "color_hue_slider_disabled_with_no_fill",
+      "panel": "color_panel_content",
+      "widget": "cp_h"
     }
   ]
 }

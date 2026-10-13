@@ -57,6 +57,7 @@ OUT = ROOT / "test_fixtures" / "widget_events" / "corpus.json"
 MW = "magic_wand_panel_content"
 STROKE = "stroke_panel_content"
 GRADIENT = "gradient_panel_content"
+COLOR = "color_panel_content"
 
 # (name, panel, widget, setup {"panel": {...}, "state": {...}}, event)
 # A setup writes the panel scope and global state before the event, as an
@@ -114,6 +115,23 @@ SEED = [
     ("gradient_dither_press_when_checked", GRADIENT, "grad_dither_checkbox",
      {"panel": {"dither": True}, "state": {"gradient_dither": True}},
      {"press": True}),
+    # slider (ruled 2026-10-12, flask's fork A): clamp to min/max, then snap to
+    # the step from min, half up, then clamp again. Color's hue (0..359 step 1)
+    # and a Web Safe channel (0..255 step 51).
+    ("color_hue_slider_commit", COLOR, "cp_h", {"state": {"fill_color": "#336699"}},
+     {"commit": "210"}),
+    ("color_hue_slider_clamped", COLOR, "cp_h", {"state": {"fill_color": "#336699"}},
+     {"commit": "400"}),
+    ("color_hue_slider_decimal_snaps", COLOR, "cp_h", {"state": {"fill_color": "#336699"}},
+     {"commit": "12.6"}),
+    ("color_web_safe_slider_snaps_to_51", COLOR, "cp_r_ws",
+     {"state": {"fill_color": "#336699"}}, {"commit": "130"}),
+    ("color_web_safe_slider_clamped_below", COLOR, "cp_r_ws",
+     {"state": {"fill_color": "#336699"}}, {"commit": "-5"}),
+    ("color_hue_slider_bad_value", COLOR, "cp_h", {"state": {"fill_color": "#336699"}},
+     {"commit": "abc"}),
+    ("color_hue_slider_disabled_with_no_fill", COLOR, "cp_h",
+     {"state": {"fill_on_top": True, "fill_color": None}}, {"commit": "210"}),
 ]
 
 

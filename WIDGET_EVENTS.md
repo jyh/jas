@@ -49,7 +49,7 @@ the field. They now write `event.value`, and Dither's behavior also writes
 
 ## The event table
 
-The table below is the whole vocabulary for the eight value kinds. A
+The table below is the whole vocabulary for the nine value kinds. A
 behavior on one of these kinds whose `event` is not listed for that kind
 is refused by the lint.
 
@@ -61,6 +61,7 @@ text_input: commit, change, input, blur, keydown
 select: commit, change
 icon_select: commit, change
 combo_box: commit, change
+slider: commit, change
 toggle: click, change
 checkbox: click, change
 dropdown: toggle, alt_toggle
@@ -68,7 +69,7 @@ dropdown: toggle, alt_toggle
 <!-- widget-event-table:end -->
 
 - **Input kinds** are `number_input`, `length_input`, `text_input`,
-  `select`, `icon_select` and `combo_box`. `commit` and `change` are
+  `select`, `icon_select`, `combo_box` and `slider`. `commit` and `change` are
   synonyms on these kinds: both name "a value was committed".
 - **`text_input` has three more events: `input`, `blur` and `keydown`.**
   They are not commits. A commit never runs them. They carry search-as-
@@ -82,7 +83,7 @@ dropdown: toggle, alt_toggle
 
 **Outside this contract, deliberately:** every other widget kind. That
 includes `icon_button_group`, `reference_point_widget`,
-`slider`, `radio_group` and the color widgets. Their events are not
+`radio_group` and the color widgets. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
@@ -211,6 +212,7 @@ expression that reads another root, or that does not parse.
 | `text_input` | the text, verbatim (including the empty string and surrounding spaces) | never |
 | `select`, `icon_select` | the declared value of the option whose `value`, written as a string, equals the text. With computed options (an expression, not a list) the text itself. | no declared option matches |
 | `combo_box` | a number (clamped as above) when the text is in the number grammar; otherwise the text | the text is blank |
+| `slider` | a number by the number grammar, clamped to `min:` / `max:` as `number_input` is, then SNAPPED to the declared `step:`: `min + floor((v − min) / step + 0.5) · step` (half up, offset from `min`, or from 0 with no `min`), then clamped again so a snap never leaves the range. No `step:`, or a step that is not a positive number, does not snap. A shell reports a drag as `change` (live) and the release as `commit`; both parse the same way. | the text is not in the grammar |
 | `toggle`, `checkbox` | no text parse; see §Pressing | — |
 
 - **The number grammar** is `-?[0-9]+(\.[0-9]+)?`, matched against the

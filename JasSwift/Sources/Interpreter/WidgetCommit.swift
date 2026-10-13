@@ -32,6 +32,15 @@ public func numberInputCommit(text: String, min minVal: Double?, max maxVal: Dou
     return clampToDeclared(parsed, min: minVal, max: maxVal)
 }
 
+/// A slider's step (WIDGET_EVENTS.md, Parsing): the nearest step from `min`
+/// (or 0), half up. No step, or one that is not positive, does not snap. The
+/// reference's `_snap`; Rust's `snap_to_step`.
+public func snapToStep(_ v: Double, min minVal: Double?, step: Double?) -> Double {
+    guard let s = step, s > 0 else { return v }
+    let base = minVal ?? 0
+    return base + ((v - base) / s + 0.5).rounded(.down) * s
+}
+
 /// Clamp a widget commit to the bounds its YAML DECLARES, leaving an
 /// undeclared bound alone — Character's Tracking field is signed and declares
 /// neither, and `renderNumberInput` used to substitute 0 for an absent `min:`,

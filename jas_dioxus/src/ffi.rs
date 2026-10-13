@@ -4860,6 +4860,17 @@ mod tests {
     // compared: `behaviors_run` and `bind_written`, which the door does not
     // report (a behavior's condition is evaluated inside the batch), and the
     // parsed `value`, which `widget_commit`'s own arms pin.
+    //
+    // ⛔ THE COLOUR PANEL IS SCOPED DIFFERENTLY, AND THIS SAYS WHY. Its
+    // `panel.*` is the colour SLICE, never a store scope (`panel_scope`), and a
+    // committed value is a colour edit that re-derives every channel and then
+    // runs `set_active_color` (which moves `fill_color` and the recent list).
+    // The corpus's panel snapshot is the reference's GENERIC store write
+    // (`h` moves, `hex` does not), which is not this panel's law. So for Color
+    // the case seeds the SLICE (as the engine adopts its spec colours at
+    // birth), and compares the refusal class and, on a commit, the PARSED
+    // value through `parse_commit`, the function the colour route calls. The
+    // channel arithmetic is pinned by the colour corpus, not here.
 
     /// Numbers as numbers, recursively; everything else by equality.
     fn same_json(a: &serde_json::Value, b: &serde_json::Value) -> bool {
@@ -4907,6 +4918,14 @@ mod tests {
                     .as_object().unwrap().iter().map(|(k, v)| (k.clone(), v.clone())).collect();
                 store.init_panel(panel, scope);
             }
+            let colour = panel == crate::panel_scope::COLOUR_PANEL;
+            if colour {
+                let en = engine_of(e);
+                en.panel.borrow_mut().adopt_store_state(&en.store.borrow(), None);
+                if let Some(m) = c["before"]["panel"]["mode"].as_str() {
+                    en.panel.borrow_mut().mode = m.to_string();
+                }
+            }
             let before = engine_of(e).store.borrow().get_all().clone();
             let ev = if c["event"].get("press").is_some() {
                 serde_json::json!({"widget": c["widget"], "event": "click"})
@@ -4930,6 +4949,20 @@ mod tests {
                 if !(class.is_empty() || class == "Unchanged") {
                     failures.push(format!("{name}: refused {err}"));
                 }
+            }
+            if colour {
+                if expected["result"]["outcome"] != "refused" {
+                    let ws = Workspace::load().unwrap();
+                    let node = crate::panel_behavior::widget_node(ws.panel(panel).unwrap(), c["widget"].as_str().unwrap())
+                        .expect("the case's widget");
+                    let text = c["event"]["commit"].as_str().unwrap();
+                    let got = crate::interpreter::widget_commit::parse_commit(node, text);
+                    if !got.as_ref().is_some_and(|g| same_json(g, &expected["result"]["value"])) {
+                        failures.push(format!("{name}: parsed {got:?} != {}", expected["result"]["value"]));
+                    }
+                }
+                unsafe { jas_engine_free(e) };
+                continue;
             }
             let store = engine_of(e).store.borrow();
             let panel_after: serde_json::Map<String, serde_json::Value> = store
