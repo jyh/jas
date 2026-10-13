@@ -463,15 +463,45 @@ internal static class PanelWire
                         System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
 
     /// <summary>
-    /// FORK A: the text a slider's RELEASE commits -- the dragged number exactly,
-    /// as invariant round-trip text -- or null when it is numerically the value
+    /// FORK A: the text a slider's RELEASE commits -- the dragged number as the
+    /// contract writes it (<see cref="ContractNumber"/>) -- or null when it is numerically the value
     /// the core already shows (a release that moved nothing sends nothing, as
     /// <see cref="ChoiceCommit"/> does). ⛔ NO SNAP, NO CLAMP: the engine's.
     /// </summary>
     internal static string? SliderCommit(double dragged, string? shown) =>
         SliderPosition(shown) is { } at && at == dragged
             ? null
-            : dragged.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+            : ContractNumber(dragged);
+
+    /// <summary>
+    /// A number as the contract's grammar writes it (`WIDGET_EVENTS.md`):
+    /// invariant, fixed-point, to 15 significant digits. ⛔ NEVER `"R"`: .NET's
+    /// round-trip text writes an EXPONENT below 1e-5 (`1.6666666666666667E-06`),
+    /// which the grammar refuses, so a value a hair from 0 was a `BadValue`.
+    /// </summary>
+    internal static string ContractNumber(double d) =>
+        d.ToString("0.#################", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// FORK B2 (#394): the colour bar's POINT under the pointer, `u,v`, with
+    /// u = x / width and v = y / height from the bar's own top-left, as invariant
+    /// fixed-point text (<see cref="ContractNumber"/>) and no space. ⛔ NOT CLAMPED: a captured pointer past the
+    /// edge is sent as given, and the engine clamps and maps it
+    /// (`color_util::color_bar_rgb`). An unsized bar or a non-finite pointer
+    /// names no point.
+    /// </summary>
+    internal static string? ColorBarPoint(double x, double y, double width, double height) =>
+        double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(width) && double.IsFinite(height)
+        && width > 0 && height > 0
+            ? ContractNumber(x / width) + "," + ContractNumber(y / height)
+            : null;
+
+    /// <summary>
+    /// A held move sends `change` only when it names a new point, so a pointer
+    /// that reports the same spot twice costs the engine nothing.
+    /// </summary>
+    internal static string? ColorBarChange(string? point, string? lastSent) =>
+        point is not null && point != lastSent ? point : null;
 
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
