@@ -22,7 +22,10 @@ $planOut = Join-Path (Split-Path $exe -Parent) 'rt-plan.json'
 $uiaOut = Join-Path (Split-Path $exe -Parent) 'rt-uia.json'
 Remove-Item $planOut, $uiaOut -ErrorAction SilentlyContinue
 $task = 'jas-rt-app'; $uTask = 'jas-rt-uia'
-New-SbLaunchTask -TaskName $task -Exe $exe -EnvPrefix ("`$env:SB_SCENE='app'; `$env:SB_PANEL='" + $Panel + "'; `$env:SB_PLAN_OUT='rt-plan.json'; ")
+# SB_TOOLBAR=0: the toolbar pane writes the same SB_PLAN_OUT file, and since it
+# went default-on (#343) its plan landed LAST, so this compared the toolbar's
+# plan against the dock's tree. The owner check below refuses that by name.
+New-SbLaunchTask -TaskName $task -Exe $exe -EnvPrefix ("`$env:SB_SCENE='app'; `$env:SB_TOOLBAR='0'; `$env:SB_PANEL='" + $Panel + "'; `$env:SB_PLAN_OUT='rt-plan.json'; ")
 $known = Get-SbAppPids $exe
 $st = Start-SbAppTask -TaskName $task -Exe $exe -Known $known
 "start: pid=$($st.Pid) waited=$($st.Waited) refusal=$($st.Refusal)"
@@ -43,6 +46,9 @@ $stop = Stop-SbAppByPid -TargetPid $st.Pid -ExpectName (Get-SbProcessName $exe)
 "stop: $($stop.Verdict)"
 Remove-SbTask $task; Remove-SbTask $uTask
 "tasks left: " + @(Get-ScheduledTask -TaskName 'jas-rt-*' -ErrorAction SilentlyContinue).Count
+$owner = Get-SbPlanOutOwner @(Read-SbRows $log $mark)
+"plan-out owner: $owner"
+if ((Test-Path $planOut) -and $owner -ne $Panel) { "VERDICT: REFUSED: the plan file is $owner's, not $Panel's (the last PLAN OUT row)"; exit 2 }
 if ((Test-Path $planOut) -and (Test-Path $uiaOut)) {
   $r = Compare-SbRenderedTree -Plan (Get-Content $planOut -Raw) -Uia (Get-Content $uiaOut -Raw)
   "VERDICT: $($r.Verdict)"; $r.Mismatches | ForEach-Object { "  $_" }

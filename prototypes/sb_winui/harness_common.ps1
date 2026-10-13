@@ -2911,6 +2911,18 @@ function Add-SbValueReplayVerdicts($Out, $Rows, [string]$Commit, [string]$Press,
 # ⛔ A FAILED READ OR AN EMPTY PLAN IS A REFUSAL, never `mismatches=0`: an
 # empty side agrees with everything, which is a vacuous green.
 # ---------------------------------------------------------------------------
+# Whose plan is in the SB_PLAN_OUT file? Every pane overwrites the one file,
+# newest wins, so it is the LAST `PLAN OUT` row's panel ('' when none wrote).
+# Anchored at the row's start so `RUSTFAIL PLAN OUT` (a failed write) never counts.
+function Get-SbPlanOutOwner($Rows) {
+    $owner = ''
+    foreach ($r in @($Rows)) {
+        $m = [regex]::Match("$r", '(?:^|\t)PLAN OUT panel=(\S+)')
+        if ($m.Success) { $owner = $m.Groups[1].Value }
+    }
+    return $owner
+}
+
 function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
     $refuse = { param($why) [pscustomobject]@{ Compared = 0; Mismatches = @(); Verdict = "REFUSED: $why" } }
     try { $p = $Plan | ConvertFrom-Json } catch { return (& $refuse 'the plan does not parse') }

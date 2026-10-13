@@ -1982,6 +1982,19 @@ Test-Case 'o6: CONTROL -- the HAND CLOSED fixture is matched by the pointer tabl
 # (WinUI drops a Collapsed control from UIA); enabled is `bind.disabled` !=
 # "true", the only true. An id on only one side is named, never skipped.
 # ---------------------------------------------------------------------------
+# SB_PLAN_OUT is ONE file every pane overwrites, newest wins. Since the toolbar
+# went default-on (#343) the toolbar's plan landed last, and rendered_tree.ps1
+# compared the TOOLBAR's plan against the dock's tree for all 16 panels
+# (measured 2026-10-12 on f189868d: compared=20 every panel, every mismatch a
+# btn_* toolbar id). The file's owner is the LAST `PLAN OUT` row's panel.
+$poRow = { param($panel) "19:21:51`tPLAN OUT panel=$panel seq=1 bytes=100" }
+Test-Case 'rt-owner: the plan file belongs to the LAST PLAN OUT row (the toolbar, written after the panel)' {
+    Get-SbPlanOutOwner @((& $poRow 'color_panel_content'), 'PANEL DRAWN panel=toolbar_pane seq=1', (& $poRow 'toolbar_pane')) } 'toolbar_pane'
+Test-Case 'rt-owner: CONTROL -- with no toolbar the panel owns it' {
+    Get-SbPlanOutOwner @('PANEL DRAWN panel=color_panel_content seq=1', (& $poRow 'color_panel_content')) } 'color_panel_content'
+Test-Case 'rt-owner: no PLAN OUT row owns nothing (a RUSTFAIL PLAN OUT is not a write)' {
+    "[$(Get-SbPlanOutOwner @('RUSTFAIL PLAN OUT panel=color_panel_content seq=1 -- IOException: x'))]" } '[]'
+
 function New-SbPlanLeaf([string]$Id, [hashtable]$Values) {
     [ordered]@{ path = @(0); type = 'button'; id = $Id; values = $Values }
 }
