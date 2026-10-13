@@ -789,6 +789,18 @@ if ($sceneOutcome.Verdict -eq 'DONE') {
             if (& $done $rows) { $verdicts += "ok  : the dock-collapse replay finished after $([math]::Round($cw.Elapsed.TotalSeconds, 1))s more" }
             else { $verdicts += "note: the dock-collapse replay did not finish within $([math]::Round($cw.Elapsed.TotalSeconds, 1))s; Q6.DC judges what arrived" }
         }
+        # SB_PANEL_MENU_SYNTH's replay (Q6.PM): a read, then the run; its last
+        # row is the run's answer, or the shell's refusal.
+        if (-not [string]::IsNullOrWhiteSpace($env:SB_PANEL_MENU_SYNTH)) {
+            $mw = [System.Diagnostics.Stopwatch]::StartNew()
+            $done = { param($r) $null -ne (Select-SbRow $r 'PANEL MENU (RAN|REFUSED) group=\S+ panel=\S+ index=\d+ via=synth|PANEL MENU REFUSED group=\S+ panel=\S+ read|RUSTFAIL PANEL MENU') }
+            while (-not (& $done $rows) -and $mw.Elapsed.TotalSeconds -lt 30) {
+                Start-Sleep -Milliseconds 250
+                $rows = Read-SbRows $log $logMark
+            }
+            if (& $done $rows) { $verdicts += "ok  : the panel-menu replay finished after $([math]::Round($mw.Elapsed.TotalSeconds, 1))s more" }
+            else { $verdicts += "note: the panel-menu replay did not finish within $([math]::Round($mw.Elapsed.TotalSeconds, 1))s; Q6.PM judges what arrived" }
+        }
     }
 }
 

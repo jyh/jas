@@ -573,3 +573,56 @@ internal static class ToolKnob
         return -1;
     }
 }
+
+/// <summary>
+/// One row of `jas_panel_menu`: a node of a panel's `menu:`, as the core
+/// evaluated it. `Checked` is null for a row that is not checkable.
+/// </summary>
+internal sealed record PanelMenuRow(int Index, string Kind, string Label, string Action, bool Enabled, bool? Checked);
+
+/// <summary>
+/// The panel menu (the owner's note 3, 2026-10-12), read off the core's rows
+/// and the synth knob. Pure, so `sb_winui_tests` drives it. The shell
+/// evaluates nothing here: label, enabled and checked are the core's.
+/// </summary>
+internal static class PanelMenuWire
+{
+    /// <summary>`jas_panel_menu`'s array. Empty or unreadable is an empty menu,
+    /// never a throw; the caller reports the count it drew.</summary>
+    internal static List<PanelMenuRow> Parse(string? json)
+    {
+        var rows = new List<PanelMenuRow>();
+        if (string.IsNullOrWhiteSpace(json)) return rows;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return rows;
+            foreach (var r in doc.RootElement.EnumerateArray())
+            {
+                static string Str(System.Text.Json.JsonElement e, string k) =>
+                    e.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String ? v.GetString() ?? "" : "";
+                bool? chk = r.TryGetProperty("checked", out var c) && (c.ValueKind == System.Text.Json.JsonValueKind.True || c.ValueKind == System.Text.Json.JsonValueKind.False)
+                    ? c.GetBoolean() : null;
+                var en = !r.TryGetProperty("enabled", out var en0) || en0.ValueKind != System.Text.Json.JsonValueKind.False;
+                rows.Add(new PanelMenuRow(
+                    r.TryGetProperty("index", out var i) && i.TryGetInt32(out var iv) ? iv : rows.Count,
+                    Str(r, "kind"), Str(r, "label"), Str(r, "action"), en, chk));
+            }
+        }
+        catch (System.Text.Json.JsonException) { rows.Clear(); }
+        return rows;
+    }
+
+    /// <summary>`SB_PANEL_MENU_SYNTH=&lt;group key&gt;:&lt;index&gt;`, or null for
+    /// anything else (the caller refuses a set knob it cannot read, by name).</summary>
+    internal static (string Group, int Index)? SynthKnob(string? knob)
+    {
+        if (string.IsNullOrWhiteSpace(knob)) return null;
+        var at = knob.IndexOf(':');
+        if (at <= 0) return null;
+        var group = knob[..at].Trim();
+        var idx = knob[(at + 1)..].Trim();
+        if (group.Length == 0 || idx.Length == 0 || !idx.All(char.IsAsciiDigit)) return null;
+        return int.TryParse(idx, out var n) ? (group, n) : null;
+    }
+}

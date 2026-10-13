@@ -2358,6 +2358,61 @@ function Get-SbDockCollapseVerdict($Rows, [string]$Scene, [string]$Dock, [string
     return New-SbVerdict $name 'PASS' "$($key): collapsed with its body hidden, then expanded with it visible, both read off the body after the toggle" $up
 }
 
+$SbPanelMenuName = 'Q6.PM a dock group''s panel menu was read and its item ran in the engine'
+
+# Q6.PM: `SB_PANEL_MENU_SYNTH=<group>:<index>` reads the group's menu and runs
+# that item through the same commands the button and the flyout send. PASS needs
+# the synth READ for the group with items in it, then the synth RAN for that
+# index with outcome=changed: an item the engine answered `Unchanged` moved
+# nothing, and a menu that changes nothing is the owner's complaint, not a pass.
+function Get-SbPanelMenuVerdict($Rows, [string]$Scene, [string]$Dock, [string]$Knob) {
+    $name = $SbPanelMenuName
+    if ([string]::IsNullOrWhiteSpace($Knob)) {
+        return New-SbVerdict $name 'NOT RUN' 'SB_PANEL_MENU_SYNTH is unset: no panel menu was asked for'
+    }
+    $k = $Knob.Trim()
+    if ($Scene -ne $SbPaneScene -or [string]::IsNullOrWhiteSpace($Dock)) {
+        return New-SbVerdict $name 'FAIL' "SB_PANEL_MENU_SYNTH='$k' needs a dock (SB_DOCK) under '$SbPaneScene'; this run is scene '$Scene' with SB_DOCK='$Dock', so there is no group"
+    }
+    $refused = Select-SbRow $Rows "`tRUSTFAIL PANEL MENU "
+    if ($null -ne $refused) {
+        return New-SbVerdict $name 'FAIL' "SB_PANEL_MENU_SYNTH='$k': the shell refused it or the run failed (the row)" $refused
+    }
+    $at = $k.IndexOf(':')
+    $group = if ($at -gt 0) { $k.Substring(0, $at).Trim() } else { $k }
+    $index = if ($at -gt 0) { $k.Substring($at + 1).Trim() } else { '' }
+    $g = [regex]::Escape($group)
+    $read = Select-SbRow $Rows (Get-SbRowPattern 'PANEL MENU READ' " group=$g panel=[a-z_]+ via=synth ")
+    if ($null -eq $read) {
+        return New-SbVerdict $name 'FAIL' "SB_PANEL_MENU_SYNTH='$k' and no replayed menu read for $($group): the menu was never read"
+    }
+    $items = Get-SbField $read 'items'
+    if ($items -notmatch '^[1-9][0-9]*$') {
+        return New-SbVerdict $name 'FAIL' "the menu read for $group drew items=$($items): an empty menu" $read
+    }
+    $panel = Get-SbField $read 'panel'
+    $tail = " group=$g panel=[a-z_]+ index=$([regex]::Escape($index)) via=synth "
+    $ran = Select-SbRow $Rows (Get-SbRowPattern 'PANEL MENU RAN' $tail)
+    $no = Select-SbRow $Rows (Get-SbRowPattern 'PANEL MENU REFUSED' $tail)
+    if ($null -ne $no) {
+        return New-SbVerdict $name 'FAIL' "the engine refused $panel's menu item $index (the row)" $no
+    }
+    if ($null -eq $ran) {
+        return New-SbVerdict $name 'FAIL' "$group's menu was read ($items item(s)) and item $index never ran" $read
+    }
+    if ((Get-SbField $ran 'outcome') -ne 'changed') {
+        # An item the core had ALREADY CHECKED (the current mode of a radio set)
+        # moves nothing by design, so the run cannot test what Q6.PM asserts.
+        # Measured live 2026-10-12: Color > HSB, the panel's default mode.
+        $was = [regex]::Match($read, '\bchecked=\[([0-9,]*)\]').Groups[1].Value -split ','
+        if ($was -contains $index) {
+            return New-SbVerdict $name 'NOT RUN' "$panel's menu item $index was already checked (the READ row's checked=[$($was -join ',')]); choosing it moves nothing by design, so this run cannot test a switch. Name an unchecked item" $ran
+        }
+        return New-SbVerdict $name 'FAIL' "$panel's menu item $index ran and the engine answered $(Get-SbField $ran 'channel'): it moved nothing" $ran
+    }
+    return New-SbVerdict $name 'PASS' "$($group): $panel's menu read with $items item(s), and item index $index ran in the engine and moved state ($(Get-SbField $ran 'changed-rows') panel row(s) changed)" $ran
+}
+
 # ===========================================================================
 # V1-V6 -- THE VALUE REPLAY, READ OFF ITS OWN ROWS (W2b-3)
 # ===========================================================================
@@ -2418,10 +2473,13 @@ function Get-SbValueKnobRefusal([string]$Commit, [string]$Press) {
 # Q6's knob, or BOTH value knobs (one alone is refused, and nothing runs). Every
 # replayed click that the core answers republishes the menu, so P4.4's rebuild
 # count has no derivation on such a run and reads NOT RUN.
-function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press, [string]$Toolbar = '') {
+function Test-SbPaneReplayAsked([string]$Synth, [string]$Commit, [string]$Press, [string]$Toolbar = '', [string]$PanelMenu = '') {
     if (Test-SbSynthAsked $Synth) { return $true }
     # The toolbar pane's one-click knob (SB_TOOLBAR_SYNTH): its click republishes the menu too.
     if (-not [string]::IsNullOrWhiteSpace($Toolbar)) { return $true }
+    # The panel-menu knob (SB_PANEL_MENU_SYNTH): its run republishes the menu too
+    # (measured 2026-10-12: seq reached 3 where a plain dock run predicts 2).
+    if (-not [string]::IsNullOrWhiteSpace($PanelMenu)) { return $true }
     return (-not [string]::IsNullOrWhiteSpace($Commit)) -and (-not [string]::IsNullOrWhiteSpace($Press))
 }
 
