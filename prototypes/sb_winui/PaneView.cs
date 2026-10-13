@@ -412,6 +412,17 @@ public sealed partial class MainWindow
                         el = BuildSlider(leaf, leaf.Track);
                         break;
 
+                    // FORK B2 (#394): the colour bar is an input kind. Held, it sends
+                    // `change` with the POINT under the pointer; the release sends
+                    // `commit` with the release point. The engine maps the point to a
+                    // colour (`color_util::color_bar_rgb`) and clamps it; the shell
+                    // does neither, so it draws no picture of its own.
+                    case "color_bar":
+                        inputs++;
+                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        el = BuildColorBar(leaf);
+                        break;
+
                     // A `spacer` is layout-only flex: the plan already gave it
                     // its room, and it draws nothing in any port. Counted, never
                     // drawn as a `[spacer]` placeholder.
@@ -841,6 +852,15 @@ public sealed partial class MainWindow
                     slider.IsEnabled = !off;
                     break;
 
+                // Fork B2: a disabled bar (the active colour is none) takes no
+                // pointer; a held one is the person's until the release.
+                case ColorBarSurface bar when bar.Tag is ColorBarState cb:
+                    typing = cb.Held;
+                    off = off || leaf.Id.Length == 0;
+                    bar.IsHitTestVisible = !off;
+                    bar.Opacity = off ? 0.4 : 1.0;
+                    break;
+
                 case CheckBox toggle:
                     off = off || leaf.Id.Length == 0;
                     toggle.Tag = on;
@@ -1030,6 +1050,85 @@ public sealed partial class MainWindow
         }
 
         /// <summary>
+        /// Fork B2: whether a person holds the colour bar, the last point a
+        /// `change` sent, and the last point the pointer named.
+        /// </summary>
+        private sealed class ColorBarState
+        {
+            internal bool Held;
+            internal string? LastSent;
+            internal string? LastPoint;
+        }
+
+        /// <summary>
+        /// FORK B2 (#394): a `color_bar`. A press captures the pointer; each held
+        /// move to a new point sends `change` with `u,v`
+        /// (<see cref="PanelWire.ColorBarPoint"/>), and the release sends `commit`
+        /// with the release point. A lost capture commits the last point named.
+        /// ⛔ NO COLOUR IS COMPUTED HERE: the engine maps and clamps the point.
+        /// The bar is drawn as an outlined surface, because the plan carries no
+        /// picture of it yet.
+        /// </summary>
+        private ColorBarSurface BuildColorBar(PaneLeaf leaf)
+        {
+            var grip = new ColorBarState();
+            var bar = new ColorBarSurface
+            {
+                BorderThickness = new Thickness(1),
+                BorderBrush = _paneMutedBrush,
+                // A transparent fill, not none, so the whole bar takes the pointer.
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00)),
+                Tag = grip,
+            };
+            if (leaf.Literal("summary") is { Length: > 0 } tip) { ToolTipService.SetToolTip(bar, tip); }
+            if (leaf.Id.Length == 0) { bar.IsHitTestVisible = false; return bar; }
+
+            var id = leaf.Id;
+            string? Point(PointerRoutedEventArgs e)
+            {
+                var at = e.GetCurrentPoint(bar).Position;
+                return PanelWire.ColorBarPoint(at.X, at.Y, bar.ActualWidth, bar.ActualHeight);
+            }
+            void Move(string? point)
+            {
+                grip.LastPoint = point ?? grip.LastPoint;
+                if (PanelWire.ColorBarChange(point, grip.LastSent) is { } text)
+                {
+                    grip.LastSent = text;
+                    SendPane(id, "change", text, leaf.Path);
+                }
+            }
+            void Release(string? point)
+            {
+                if (!grip.Held) { return; }
+                grip.Held = false;
+                if ((point ?? grip.LastPoint) is { } text) { SendPane(id, "commit", text, leaf.Path); }
+            }
+            bar.PointerPressed += (_, e) =>
+            {
+                grip.Held = true;
+                grip.LastSent = null;
+                grip.LastPoint = null;
+                bar.CapturePointer(e.Pointer);
+                Move(Point(e));
+                e.Handled = true;
+            };
+            bar.PointerMoved += (_, e) =>
+            {
+                if (grip.Held) { Move(Point(e)); }
+            };
+            bar.PointerReleased += (_, e) =>
+            {
+                var point = Point(e);
+                Release(point);
+                bar.ReleasePointerCapture(e.Pointer);
+                e.Handled = true;
+            };
+            bar.PointerCaptureLost += (_, _) => Release(null);
+            return bar;
+        }
+
+        /// <summary>
         /// What a list control last showed: the core's value, its item index (-1:
         /// none), and the text on the control's face for it.
         /// </summary>
@@ -1103,6 +1202,17 @@ public sealed partial class MainWindow
 /// edge and takes the same tap; the peer is the only addition.
 /// </summary>
 internal sealed partial class SwatchTile : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// Fork B2: the colour bar's surface. A panel has no automation peer, so this
+/// one is given the plain element peer, as <see cref="SwatchTile"/> is, and the
+/// bar's AutomationId reaches the rendered tree.
+/// </summary>
+internal sealed partial class ColorBarSurface : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);

@@ -842,6 +842,21 @@ static class Program
         Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
         Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
 
+        // FORK B2 (#394): the colour bar sends its POINT, u = x / width and
+        // v = y / height from its own top-left, as invariant text with no space.
+        // The engine maps and clamps; the shell does neither.
+        Eq("color_bar: a point is u,v over the bar's own size", "0.25,0.5", Show(PanelWire.ColorBarPoint(30, 12, 120, 24)));
+        Eq("color_bar: the corners are 0 and 1", "0,0|1,1", Show(PanelWire.ColorBarPoint(0, 0, 120, 24)) + "|" + Show(PanelWire.ColorBarPoint(120, 24, 120, 24)));
+        Eq("color_bar: the shell does NOT clamp -- a captured pointer past the edge is sent as given",
+            "-0.1,1.5", Show(PanelWire.ColorBarPoint(-12, 36, 120, 24)));
+        Eq("color_bar: fractions are sent round-trip, not rounded", "0.3333333333333333,0.125", Show(PanelWire.ColorBarPoint(40, 3, 120, 24)));
+        Eq("color_bar: an unsized bar names no point", "(null)|(null)", Show(PanelWire.ColorBarPoint(1, 1, 0, 24)) + "|" + Show(PanelWire.ColorBarPoint(1, 1, 120, double.NaN)));
+        Eq("color_bar: a non-finite pointer names no point", "(null)", Show(PanelWire.ColorBarPoint(double.PositiveInfinity, 1, 120, 24)));
+        Eq("color_bar: a held move to a new point sends a change", "0.5,0.5", Show(PanelWire.ColorBarChange("0.5,0.5", "0.25,0.5")));
+        Eq("color_bar: the first change after the press sends", "0.5,0.5", Show(PanelWire.ColorBarChange("0.5,0.5", null)));
+        Eq("color_bar: a move that names the same point sends nothing", "(null)", Show(PanelWire.ColorBarChange("0.5,0.5", "0.5,0.5")));
+        Eq("color_bar: no point, no change", "(null)", Show(PanelWire.ColorBarChange(null, "0.5,0.5")));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

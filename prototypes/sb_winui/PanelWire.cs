@@ -473,6 +473,28 @@ internal static class PanelWire
             ? null
             : dragged.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>
+    /// FORK B2 (#394): the colour bar's POINT under the pointer, `u,v`, with
+    /// u = x / width and v = y / height from the bar's own top-left, as invariant
+    /// round-trip text and no space. ⛔ NOT CLAMPED: a captured pointer past the
+    /// edge is sent as given, and the engine clamps and maps it
+    /// (`color_util::color_bar_rgb`). An unsized bar or a non-finite pointer
+    /// names no point.
+    /// </summary>
+    internal static string? ColorBarPoint(double x, double y, double width, double height) =>
+        double.IsFinite(x) && double.IsFinite(y) && double.IsFinite(width) && double.IsFinite(height)
+        && width > 0 && height > 0
+            ? (x / width).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+              + "," + (y / height).ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+            : null;
+
+    /// <summary>
+    /// A held move sends `change` only when it names a new point, so a pointer
+    /// that reports the same spot twice costs the engine nothing.
+    /// </summary>
+    internal static string? ColorBarChange(string? point, string? lastSent) =>
+        point is not null && point != lastSent ? point : null;
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
