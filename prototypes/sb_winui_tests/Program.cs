@@ -781,6 +781,32 @@ static class Program
         Eq("panel menu knob: a negative or non-number index is refused", "refused,refused", PK("dock1:-1") + "," + PK("dock1:x"));
         Eq("panel menu knob: unset is refused (the caller reads it as not asked)", "refused", PK(null));
 
+        // The reply's changed rows against the plan read after the click. #360's
+        // plan PRUNES a hidden node's rows and lists the node in `hidden`, so a
+        // changed row under a hidden path is not drawn and cannot disagree: it is
+        // counted as hidden, never as a mismatch. Measured live 2026-10-12: Color's
+        // hex commit read delta-mismatch=12, all 12 under the hidden mode groups.
+        static string DH(string reply, string plan) { var d = PanelWire.CheckDelta(reply, plan, "p"); return $"{d.Mismatch}|{d.Hidden}"; }
+        const string dhRow = "{\"panel\":\"p\",\"path\":[1,1,2,1,1],\"key\":\"bind.value\",\"value\":\"0\"}";
+        static string DhPlan(string hidden) => "{\"chrome\":[],\"containers\":[],\"withheld\":[],\"hidden\":" + hidden
+            + ",\"leaves\":[{\"path\":[2,1],\"values\":{\"bind.value\":\"ff0000\"}}]}";
+        Eq("delta: a changed row under a HIDDEN path is hidden, not a mismatch",
+            "0|1", DH("{\"changed\":[" + dhRow + "]}", DhPlan("[[1,1,2]]")));
+        Eq("delta: CONTROL -- the same row with nothing hidden is a mismatch",
+            "1|0", DH("{\"changed\":[" + dhRow + "]}", DhPlan("[]")));
+        Eq("delta: CONTROL -- the hidden test is by PATH PREFIX, not text: [1,1,20] does not hide [1,1,2,...]",
+            "1|0", DH("{\"changed\":[" + dhRow + "]}", DhPlan("[[1,1,20]]")));
+        Eq("delta: a drawn row that agrees is 0; one that disagrees is a mismatch",
+            "0|0,1|0",
+            DH("{\"changed\":[{\"panel\":\"p\",\"path\":[2,1],\"key\":\"bind.value\",\"value\":\"ff0000\"}]}", DhPlan("[]")) + ","
+            + DH("{\"changed\":[{\"panel\":\"p\",\"path\":[2,1],\"key\":\"bind.value\",\"value\":\"00ff00\"}]}", DhPlan("[]")));
+        Eq("delta: another panel's row is not this plan's to check",
+            "0|0", DH("{\"changed\":[{\"panel\":\"q\",\"path\":[9],\"key\":\"k\",\"value\":\"v\"}]}", DhPlan("[]")));
+        Eq("delta: a plan with no `hidden` key (older core) hides nothing",
+            "1|0", DH("{\"changed\":[" + dhRow + "]}", "{\"chrome\":[],\"containers\":[],\"withheld\":[],\"leaves\":[]}"));
+        Check("delta: unreadable is named, never 0",
+            PanelWire.CheckDelta("{x", "{}", "p").Mismatch.StartsWith("UNREADABLE("), PanelWire.CheckDelta("{x", "{}", "p").Mismatch);
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
