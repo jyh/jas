@@ -10373,7 +10373,7 @@
         {
           "label": "Use Preview Bounds",
           "action": "toggle_use_preview_bounds",
-          "checked": "panel.use_preview_bounds"
+          "checked_when": "panel.use_preview_bounds"
         },
         "separator",
         {
@@ -12478,28 +12478,28 @@
         {
           "label": "Show Snap to Glyph Options",
           "action": "toggle_snap_to_glyph_visible",
-          "checked": "panel.snap_to_glyph_visible"
+          "checked_when": "panel.snap_to_glyph_visible"
         },
         "separator",
         {
           "label": "All Caps",
           "action": "toggle_all_caps",
-          "checked": "panel.all_caps"
+          "checked_when": "panel.all_caps"
         },
         {
           "label": "Small Caps",
           "action": "toggle_small_caps",
-          "checked": "panel.small_caps"
+          "checked_when": "panel.small_caps"
         },
         {
           "label": "Superscript",
           "action": "toggle_superscript",
-          "checked": "panel.superscript"
+          "checked_when": "panel.superscript"
         },
         {
           "label": "Subscript",
           "action": "toggle_subscript",
-          "checked": "panel.subscript"
+          "checked_when": "panel.subscript"
         },
         "separator",
         {
@@ -13596,7 +13596,7 @@
         "separator",
         {
           "label": "Create New Swatch...",
-          "disabled": true,
+          "enabled_when": "false",
           "description": "Disabled. The stated reason USED to be \"when the Swatches panel is implemented\" \u2014 that landed, so the reason expired and was corrected 2026-07-29. The live blocker is one step further on: the `new_swatch` action itself is real (it opens the Swatch Options dialog in create mode, seeded from the active colour), but that dialog's OK button runs `swatch_options_confirm`, whose entire effect list is `- log:`. So enabling this item would open a dialog that cannot commit \u2014 a control that looks functional and does nothing, which this project holds to be worse than a visible placeholder. ENABLE WHEN `swatch_options_confirm` gains real effects, not before.\n"
         },
         "separator",
@@ -17586,7 +17586,7 @@
         {
           "label": "Hanging Punctuation",
           "action": "toggle_hanging_punctuation",
-          "checked": "panel.hanging_punctuation"
+          "checked_when": "panel.hanging_punctuation"
         },
         "separator",
         {

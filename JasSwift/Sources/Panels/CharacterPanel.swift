@@ -20,9 +20,9 @@
 public enum CharacterPanel {
     /// Source of truth is workspace/panels/character.yaml's `menu:`
     /// block (review #15); the generic reader builds the items from the
-    /// bundle. Each `checked:` toggle maps to a panel-state bool the
+    /// bundle. Each `checked_when:` toggle maps to a panel-state bool the
     /// dispatcher flips (and the generic `panelIsChecked` reads back through
-    /// character.yaml's own `checked:` predicates).
+    /// character.yaml's own `checked_when:` predicates).
     public static func menuItems() -> [PanelMenuItem] {
         menuItemsFromYaml("character_panel_content")
     }

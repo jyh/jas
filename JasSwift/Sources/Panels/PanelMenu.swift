@@ -65,9 +65,9 @@ public func menuItemsFromYaml(_ contentId: String) -> [PanelMenuItem] {
             ? commandWithParams(obj)
             : (action ?? "")
 
-        // A `checked:` / `checked_when:` expression marks a stateful
+        // A `checked_when:` expression marks a stateful
         // item: a radio member, or a standalone checkbox (toggle).
-        let hasChecked = obj["checked"] != nil || obj["checked_when"] != nil
+        let hasChecked = obj["checked_when"] != nil
         if hasChecked && isRadioMember {
             items.append(.radio(label: label, command: command, group: action ?? ""))
         } else if hasChecked {
@@ -188,7 +188,7 @@ public func panelDispatch(_ kind: PanelKind, cmd: String, addr: PanelAddr, layou
 /// Query whether a toggle/radio command is checked for a panel kind.
 ///
 /// ONE path for every panel: the panel's bundle menu entry is looked up by
-/// its runtime command, its `checked_when:` / `checked:` predicate is
+/// its runtime command, its `checked_when:` predicate is
 /// evaluated against the panel's context, and that is the answer. The
 /// fourteen per-panel native hooks this replaced are gone — with them went
 /// `BrushesPanel`'s hand-written `arr.contains { ($0 as? String) == v }`,
@@ -209,7 +209,7 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
     return panelMenuIsChecked(contentId, cmd, ctx: ctx)
 }
 
-/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry
+/// The `checked_when:` predicate of the panel-menu entry
 /// whose runtime command is `cmd`, or nil when there is no such entry or it
 /// declares no predicate.
 ///
@@ -217,13 +217,10 @@ public func panelIsChecked(_ kind: PanelKind, cmd: String,
 /// (`commandWithParams` for radio members, the bare action otherwise), so a
 /// caller holding a `PanelMenuItem`'s command can always find its own entry.
 ///
-/// Both spellings are read because the panel-menu vocabulary uses both:
-/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
-/// `checked_when:`, while `{align,character,paragraph}.yaml` write
-/// `checked:`. `menuItemsFromYaml` already reads both to decide toggle vs
-/// radio, so reading only one here would leave three panels' check marks
-/// dead. No expression feature is added: the two keys carry the same grammar
-/// and are evaluated the same way.
+/// One spelling: `checked_when:`, the only key the shared `MenuState` walk
+/// evaluates. `{align,character,paragraph}.yaml` once wrote `checked:` and
+/// this function read both; the YAML is canonical now and
+/// `test_panel_menu_state.py` refuses the alias.
 ///
 /// Mirrors the Rust `panel_menu::checked_expr`.
 public func panelMenuCheckedExpr(_ contentId: String, _ cmd: String) -> String? {
@@ -242,7 +239,7 @@ public func panelMenuCheckedExpr(_ contentId: String, _ cmd: String) -> String? 
         let isRadioMember = action.map { (actionCounts[$0] ?? 0) > 1 } ?? false
         let entryCmd = isRadioMember ? commandWithParams(obj) : (action ?? "")
         guard entryCmd == cmd else { continue }
-        let expr = (obj["checked_when"] as? String) ?? (obj["checked"] as? String)
+        let expr = obj["checked_when"] as? String
         guard let expr = expr, !expr.isEmpty else { return nil }
         return expr
     }
