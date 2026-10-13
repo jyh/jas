@@ -25,7 +25,7 @@ use serde_json::{json, Map, Value};
 
 use crate::document::document::Document;
 use crate::document::model::Model;
-use crate::interpreter::color_util::{color_from_panel_edit, panel_channels, parse_hex};
+use crate::interpreter::color_util::{color_from_panel_edit, panel_channels, parse_hex, web_safe_channel};
 use crate::interpreter::state_store::StateStore;
 
 /// The colour panel's id. Its `panel.*` state is [`PanelState`]'s, never the
@@ -294,6 +294,13 @@ impl PanelState {
                 // `parse_hex` takes the `#` form or the bare one; the panel's
                 // own field is bare (`panel.hex` carries no `#`).
                 let (r, g, b) = parse_hex(s);
+                // Web Safe RGB snaps a typed colour to the nearest web-safe one
+                // (`cp_hex`'s description), as both apps do on commit.
+                let (r, g, b) = if self.mode == "web_safe_rgb" {
+                    (web_safe_channel(r), web_safe_channel(g), web_safe_channel(b))
+                } else {
+                    (r, g, b)
+                };
                 self.set_active((r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0));
             }
             "panel.mode" => {

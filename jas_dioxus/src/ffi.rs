@@ -4585,6 +4585,36 @@ mod tests {
         }
     }
 
+    /// `cp_hex`: "In Web Safe RGB mode, the entered value is snapped to the
+    /// nearest web-safe color on commit." Both apps snap each channel to the
+    /// nearest multiple of 51 (the web's `renderer`, Swift's
+    /// `PanelWidgetEvents`); the engine committed the typed colour as is.
+    /// The expected colours are the apps' rule applied to the inputs, two of
+    /// them either side of a half step (`7f` -> `66`, `80` -> `99`). In any
+    /// other mode the typed colour stands.
+    #[test]
+    fn a_hex_commit_in_web_safe_mode_snaps_to_the_web_safe_colour() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        for (typed, want) in [("123456", "#003366"), ("1a1a1a", "#333333"), ("ff7f80", "#ff6699")] {
+            let e = jas_engine_new();
+            let _ = dispatch(e, r#"{"action":"set_color_panel_mode","params":{"mode":"web_safe_rgb"}}"#);
+            assert_eq!(engine_of(e).panel.borrow().mode, "web_safe_rgb", "fixture: the mode moved");
+            let ev = format!(r#"{{"widget":"cp_hex","event":"commit","value":"{typed}"}}"#);
+            let (_, err) = behave(e, id, &ev);
+            assert!(err.is_empty(), "{typed}: {err}");
+            assert_eq!(engine_of(e).store.borrow().get("fill_color"), want, "{typed}");
+            unsafe { jas_engine_free(e) };
+        }
+        // The control: in RGB mode the typed colour stands.
+        let e = jas_engine_new();
+        let _ = dispatch(e, r#"{"action":"set_color_panel_mode","params":{"mode":"rgb"}}"#);
+        let (_, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"123456"}"#);
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(engine_of(e).store.borrow().get("fill_color"), "#123456");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A Color value still never reaches the store through the generic path:
     /// a commit goes to the slice (above), and the generic value branches
     /// refuse Color by name. Driven on the generic function directly, because
