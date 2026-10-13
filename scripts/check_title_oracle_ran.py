@@ -205,10 +205,32 @@ def _loop_blocks(lines: list[str]) -> list[tuple[str, int, int]]:
     return blocks
 
 
+_ESCAPES = {'"': '"', "\\": "\\", "'": "'", "n": "\n", "t": "\t", "r": "\r", "0": "\0"}
+_ESCAPE = re.compile(r"\\(u[0-9A-Fa-f]{4}|.)")
+
+
+def _decode(literal: str, line: int) -> str:
+    """A case name as the run PRINTS it: the C# literal's escapes decoded.
+
+    ⛔ An escape this cannot decode is a Refusal, never the raw spelling --
+    a raw spelling matches no printed name and reads as a case that never ran.
+    """
+    def one(m: re.Match) -> str:
+        e = m.group(1)
+        if e.startswith("u") and len(e) == 5:
+            return chr(int(e[1:], 16))
+        if e in _ESCAPES:
+            return _ESCAPES[e]
+        raise Refusal("line %d: a case name carries the escape \\%s, which this "
+                      "gate cannot decode" % (line, e))
+    return _ESCAPE.sub(one, literal)
+
+
 def declaration(source_text: str) -> tuple[list[str], list[tuple[str, int, int]]]:
     """(exact case names, data-driven families) -- or a Refusal."""
     lines = source_text.splitlines()
-    exact = [m.group(1) for m in (EXACT_CASE.match(ln) for ln in lines) if m]
+    exact = [_decode(m.group(1), n + 1)
+             for n, m in enumerate(EXACT_CASE.match(ln) for ln in lines) if m]
     loops = _loop_blocks(lines)
 
     if not exact:
@@ -612,6 +634,40 @@ def self_test() -> int:
     f = findings(_GOOD_SOURCE, _log(_GOOD_NAMES, failed=["beta holds"]))
     arm("failed-case: a FAIL row is named",
         any("case FAILED: beta holds" in s for s in f), "got %r" % (f,))
+
+    # 13. A CASE NAME IS A C# STRING LITERAL, SO IT IS COMPARED DECODED. The run
+    #    prints `"50.0" is 50` where the source spells `\"50.0\" is 50`; the
+    #    first name to carry an escaped quote (#388) read as a case that never
+    #    ran, on a run where it had passed. The CONTROL is the source spelling in
+    #    the log: it must NOT satisfy the declaration, or the decode did nothing.
+    esc = _GOOD_SOURCE.replace(
+        '        Check("beta holds", true, "");',
+        '        Check("beta \\"quoted\\" \\\\ holds", true, "");',
+    )
+    esc_names = [("beta \"quoted\" \\ holds" if n == "beta holds" else n)
+                 for n in _GOOD_NAMES]
+    raw_names = [("beta \\\"quoted\\\" \\\\ holds" if n == "beta holds" else n)
+                 for n in _GOOD_NAMES]
+    try:
+        arm("escaped-name: the anchor is derived decoded",
+            'beta "quoted" \\ holds' in declaration(esc)[0],
+            "got %r" % (declaration(esc)[0],))
+        arm("escaped-name: the run's printed name satisfies it",
+            findings(esc, _log(esc_names)) == [],
+            "got %r" % (findings(esc, _log(esc_names)),))
+        arm("escaped-name: CONTROL -- the source spelling in a log does not",
+            findings(esc, _log(raw_names)) != [], "")
+    except Refusal as exc:
+        arm("escaped-name", False, str(exc))
+    for label, bad_src in [
+        ("unknown escape", '        Check("beta \\q holds", true, "");'),
+    ]:
+        try:
+            declaration(_GOOD_SOURCE.replace(
+                '        Check("beta holds", true, "");', bad_src))
+            arm("refusal/%s" % label, False, "returned instead of refusing")
+        except Refusal as exc:
+            arm("refusal/%s" % label, "escape" in str(exc), str(exc)[:80])
 
     # 12. THE REAL ARTIFACT. Run the derivation on the file this gate actually
     #    guards -- a parser tuned on a fixture and never pointed at production is
