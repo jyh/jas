@@ -22,7 +22,9 @@
           "c": 0,
           "m": 37.254902,
           "y": 37.254902,
-          "k": 60,
+          "k": 60
+        },
+        "active_document": {
           "recent_colors": [
             "#664040",
             "#112233",
@@ -1054,7 +1056,9 @@
           "c": 0,
           "m": 0,
           "y": 0,
-          "k": 0,
+          "k": 0
+        },
+        "active_document": {
           "recent_colors": []
         }
       }
@@ -2084,10 +2088,12 @@
           "selected_swatches": [
             "lib1:0"
           ],
+          "thumbnail_size": 16
+        },
+        "active_document": {
           "recent_colors": [
             "#ff0000"
-          ],
-          "thumbnail_size": 16
+          ]
         },
         "data": {
           "swatch_libraries": {
@@ -2821,8 +2827,10 @@
             "lib1:1",
             "lib2:0"
           ],
-          "recent_colors": [],
           "thumbnail_size": 16
+        },
+        "active_document": {
+          "recent_colors": []
         },
         "data": {
           "swatch_libraries": {
@@ -3151,8 +3159,10 @@
               ]
             ]
           ],
-          "recent_colors": [],
           "thumbnail_size": 16
+        },
+        "active_document": {
+          "recent_colors": []
         },
         "data": {
           "swatch_libraries": {

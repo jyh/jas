@@ -606,7 +606,7 @@
         },
         {
           "list_push": {
-            "target": "panel.recent_colors",
+            "target": "active_document.recent_colors",
             "value": "param.color",
             "unique": true,
             "max_length": 10
@@ -8879,9 +8879,16 @@
         "artboards_count": 0,
         "artboards_panel_selection_ids": [],
         "element_tree": null,
-        "element_selection": []
+        "element_selection": [],
+        "recent_colors": []
       },
       "properties": {
+        "recent_colors": {
+          "type": "list",
+          "item_type": "color",
+          "writable": true,
+          "description": "Per-document list of recently committed colors, newest first, capped at 10 entries. The ONE writable active_document property: `set_active_color` pushes onto it (`list_push` target `active_document.recent_colors`, unique, max 10), and the Color and Swatches panels both read it, so the two strips always agree. Added on commit (slider release, hex field Enter, swatch click including none/black/white). Empty slots render as hollow squares with a solid border. Until 2026-10-12 this was a PANEL key, so the push landed in whichever panel was active and a menu dispatch dropped it.\n"
+        },
         "is_modified": {
           "type": "bool",
           "description": "The active document has unsaved changes"
@@ -9006,8 +9013,7 @@
       "description": "Active panel state. Resolves to the state of whichever panel is currently focused or is the target of the effect being evaluated. Properties map to keys stored in the StateStore's panel-scoped buckets; each panel contributes its own subset.\n",
       "defaults": {
         "layers_panel_selection": [],
-        "isolation_stack": [],
-        "recent_colors": []
+        "isolation_stack": []
       },
       "properties": {
         "layers_panel_selection": {
@@ -9019,11 +9025,6 @@
           "type": "list",
           "item_type": "path",
           "description": "Stack of paths to isolated containers in the layers panel, innermost level last. Pushed by enter_isolation_mode, popped by exit_isolation_mode.\n"
-        },
-        "recent_colors": {
-          "type": "list",
-          "item_type": "color",
-          "description": "Per-document list of recently-committed colors, newest first, capped at 10 entries.\n"
         }
       }
     }
@@ -13517,14 +13518,6 @@
           "type": "string",
           "default": "ffffff",
           "description": "Working hex string (6 chars, no # prefix)"
-        },
-        "recent_colors": {
-          "type": "list",
-          "item_type": "color",
-          "max_length": 10,
-          "default": [],
-          "per_document": true,
-          "description": "Per-document list of recently committed colors, newest first. Max 10 entries. A duplicate color moves to front rather than duplicating. Added on commit: slider release, hex field Enter, swatch click (including none/black/white). Not added for Invert or Complement \u2014 those dispatch set_active_color which adds there. Empty slots render as hollow squares with a solid border.\n"
         }
       },
       "init": {
@@ -13538,8 +13531,7 @@
         "m": "cmyk_m(if state.fill_on_top then state.fill_color else state.stroke_color)",
         "y": "cmyk_y(if state.fill_on_top then state.fill_color else state.stroke_color)",
         "k": "cmyk_k(if state.fill_on_top then state.fill_color else state.stroke_color)",
-        "hex": "hex(if state.fill_on_top then state.fill_color else state.stroke_color)",
-        "recent_colors": "document.recent_colors"
+        "hex": "hex(if state.fill_on_top then state.fill_color else state.stroke_color)"
       },
       "menu": [
         {
@@ -13703,15 +13695,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.0"
+                  "color": "active_document.recent_colors.0"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.0 != null",
+                    "condition": "active_document.recent_colors.0 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.0"
+                      "color": "active_document.recent_colors.0"
                     }
                   }
                 ]
@@ -13724,15 +13716,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.1"
+                  "color": "active_document.recent_colors.1"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.1 != null",
+                    "condition": "active_document.recent_colors.1 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.1"
+                      "color": "active_document.recent_colors.1"
                     }
                   }
                 ]
@@ -13745,15 +13737,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.2"
+                  "color": "active_document.recent_colors.2"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.2 != null",
+                    "condition": "active_document.recent_colors.2 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.2"
+                      "color": "active_document.recent_colors.2"
                     }
                   }
                 ]
@@ -13766,15 +13758,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.3"
+                  "color": "active_document.recent_colors.3"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.3 != null",
+                    "condition": "active_document.recent_colors.3 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.3"
+                      "color": "active_document.recent_colors.3"
                     }
                   }
                 ]
@@ -13787,15 +13779,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.4"
+                  "color": "active_document.recent_colors.4"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.4 != null",
+                    "condition": "active_document.recent_colors.4 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.4"
+                      "color": "active_document.recent_colors.4"
                     }
                   }
                 ]
@@ -13808,15 +13800,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.5"
+                  "color": "active_document.recent_colors.5"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.5 != null",
+                    "condition": "active_document.recent_colors.5 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.5"
+                      "color": "active_document.recent_colors.5"
                     }
                   }
                 ]
@@ -13829,15 +13821,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.6"
+                  "color": "active_document.recent_colors.6"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.6 != null",
+                    "condition": "active_document.recent_colors.6 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.6"
+                      "color": "active_document.recent_colors.6"
                     }
                   }
                 ]
@@ -13850,15 +13842,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.7"
+                  "color": "active_document.recent_colors.7"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.7 != null",
+                    "condition": "active_document.recent_colors.7 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.7"
+                      "color": "active_document.recent_colors.7"
                     }
                   }
                 ]
@@ -13871,15 +13863,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.8"
+                  "color": "active_document.recent_colors.8"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.8 != null",
+                    "condition": "active_document.recent_colors.8 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.8"
+                      "color": "active_document.recent_colors.8"
                     }
                   }
                 ]
@@ -13893,15 +13885,15 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.9"
+                  "color": "active_document.recent_colors.9"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.9 != null",
+                    "condition": "active_document.recent_colors.9 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.9"
+                      "color": "active_document.recent_colors.9"
                     }
                   }
                 ]
@@ -20124,18 +20116,7 @@
             }
           ],
           "description": "List of open libraries with their collapsed state. Each entry has an \"id\" (library filename stem) and \"collapsed\" (bool).\n"
-        },
-        "recent_colors": {
-          "type": "list",
-          "item_type": "color",
-          "max_length": 10,
-          "default": [],
-          "per_document": true,
-          "description": "Per-document list of recently committed colors, newest first. Shared with the Color panel.\n"
         }
-      },
-      "init": {
-        "recent_colors": "document.recent_colors"
       },
       "menu": [
         {
@@ -20466,24 +20447,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.0"
+                  "color": "active_document.recent_colors.0"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.0 != null",
+                    "condition": "active_document.recent_colors.0 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.0"
+                      "color": "active_document.recent_colors.0"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.0 != null",
+                    "condition": "active_document.recent_colors.0 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.0"
+                      "color": "active_document.recent_colors.0"
                     }
                   }
                 ]
@@ -20496,24 +20477,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.1"
+                  "color": "active_document.recent_colors.1"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.1 != null",
+                    "condition": "active_document.recent_colors.1 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.1"
+                      "color": "active_document.recent_colors.1"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.1 != null",
+                    "condition": "active_document.recent_colors.1 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.1"
+                      "color": "active_document.recent_colors.1"
                     }
                   }
                 ]
@@ -20526,24 +20507,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.2"
+                  "color": "active_document.recent_colors.2"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.2 != null",
+                    "condition": "active_document.recent_colors.2 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.2"
+                      "color": "active_document.recent_colors.2"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.2 != null",
+                    "condition": "active_document.recent_colors.2 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.2"
+                      "color": "active_document.recent_colors.2"
                     }
                   }
                 ]
@@ -20556,24 +20537,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.3"
+                  "color": "active_document.recent_colors.3"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.3 != null",
+                    "condition": "active_document.recent_colors.3 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.3"
+                      "color": "active_document.recent_colors.3"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.3 != null",
+                    "condition": "active_document.recent_colors.3 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.3"
+                      "color": "active_document.recent_colors.3"
                     }
                   }
                 ]
@@ -20586,24 +20567,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.4"
+                  "color": "active_document.recent_colors.4"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.4 != null",
+                    "condition": "active_document.recent_colors.4 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.4"
+                      "color": "active_document.recent_colors.4"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.4 != null",
+                    "condition": "active_document.recent_colors.4 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.4"
+                      "color": "active_document.recent_colors.4"
                     }
                   }
                 ]
@@ -20616,24 +20597,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.5"
+                  "color": "active_document.recent_colors.5"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.5 != null",
+                    "condition": "active_document.recent_colors.5 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.5"
+                      "color": "active_document.recent_colors.5"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.5 != null",
+                    "condition": "active_document.recent_colors.5 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.5"
+                      "color": "active_document.recent_colors.5"
                     }
                   }
                 ]
@@ -20646,24 +20627,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.6"
+                  "color": "active_document.recent_colors.6"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.6 != null",
+                    "condition": "active_document.recent_colors.6 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.6"
+                      "color": "active_document.recent_colors.6"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.6 != null",
+                    "condition": "active_document.recent_colors.6 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.6"
+                      "color": "active_document.recent_colors.6"
                     }
                   }
                 ]
@@ -20676,24 +20657,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.7"
+                  "color": "active_document.recent_colors.7"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.7 != null",
+                    "condition": "active_document.recent_colors.7 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.7"
+                      "color": "active_document.recent_colors.7"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.7 != null",
+                    "condition": "active_document.recent_colors.7 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.7"
+                      "color": "active_document.recent_colors.7"
                     }
                   }
                 ]
@@ -20706,24 +20687,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.8"
+                  "color": "active_document.recent_colors.8"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.8 != null",
+                    "condition": "active_document.recent_colors.8 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.8"
+                      "color": "active_document.recent_colors.8"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.8 != null",
+                    "condition": "active_document.recent_colors.8 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.8"
+                      "color": "active_document.recent_colors.8"
                     }
                   }
                 ]
@@ -20736,24 +20717,24 @@
                   "size": 16
                 },
                 "bind": {
-                  "color": "panel.recent_colors.9"
+                  "color": "active_document.recent_colors.9"
                 },
                 "behavior": [
                   {
                     "event": "click",
-                    "condition": "panel.recent_colors.9 != null",
+                    "condition": "active_document.recent_colors.9 != null",
                     "action": "set_active_color",
                     "params": {
-                      "color": "panel.recent_colors.9"
+                      "color": "active_document.recent_colors.9"
                     }
                   },
                   {
                     "event": "double_click",
-                    "condition": "panel.recent_colors.9 != null",
+                    "condition": "active_document.recent_colors.9 != null",
                     "action": "open_swatch_options",
                     "params": {
                       "mode": "create",
-                      "color": "panel.recent_colors.9"
+                      "color": "active_document.recent_colors.9"
                     }
                   }
                 ]

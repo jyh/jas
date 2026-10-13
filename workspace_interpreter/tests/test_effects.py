@@ -427,6 +427,71 @@ class TestListPushEffect:
         assert store.get_panel("color", "recent") == ["c", "a", "b"]
 
 
+class TestRecentColoursArePerDocument:
+    """`set_active_color` pushes the colour onto ONE per-document list,
+    `active_document.recent_colors`, which both the Color and the Swatches
+    panels read. Until 2026-10-12 it pushed onto `panel.recent_colors`, the
+    ACTIVE panel's scope: a menu dispatch (no active panel) dropped it, a call
+    from Swatches landed it in the Swatches scope, and the two panels kept two
+    lists, while every description said "per-document".
+    """
+
+    @staticmethod
+    def _push(store, value, **kw):
+        run_effects([{"list_push": {"target": "active_document.recent_colors",
+                                    "value": value, **kw}}], {}, store)
+
+    @staticmethod
+    def _recent(store):
+        return store.eval_context({})["active_document"]["recent_colors"]
+
+    def test_an_empty_store_has_an_empty_list(self):
+        assert self._recent(StateStore()) == []
+
+    def test_a_push_lands_with_no_active_panel(self):
+        store = StateStore()
+        self._push(store, '"#112233"')
+        assert self._recent(store) == ["#112233"]
+
+    def test_unique_moves_to_front_and_max_length_caps(self):
+        store = StateStore()
+        for c in ["#000001", "#000002", "#000003"]:
+            self._push(store, f'"{c}"', unique=True, max_length=3)
+        assert self._recent(store) == ["#000003", "#000002", "#000001"]
+        self._push(store, '"#000001"', unique=True, max_length=3)
+        assert self._recent(store) == ["#000001", "#000003", "#000002"]
+        self._push(store, '"#000004"', unique=True, max_length=3)
+        assert self._recent(store) == ["#000004", "#000001", "#000003"]
+
+    def test_the_list_is_readable_by_index(self):
+        from workspace_interpreter.expr import evaluate
+        store = StateStore()
+        self._push(store, '"#abcdef"')
+        assert evaluate("active_document.recent_colors.0", store.eval_context({})).value == "#abcdef"
+        assert evaluate("active_document.recent_colors.1", store.eval_context({})).value is None
+
+    def test_another_document_property_is_not_a_target(self):
+        # Only `recent_colors` is a writable document list; any other
+        # `active_document.*` target writes nothing and is reported.
+        store = StateStore()
+        diagnostics: list = []
+        run_effects([{"list_push": {"target": "active_document.selection_count",
+                                    "value": "1"}}], {}, store, diagnostics=diagnostics)
+        assert self._recent(store) == []
+        assert any("active_document.selection_count" in str(d) for d in diagnostics), diagnostics
+
+    def test_set_active_color_from_the_menu_keeps_its_recent_colour(self, workspace_path):
+        from workspace_interpreter.loader import load_workspace
+        ws = load_workspace(workspace_path)
+        store = StateStore()
+        store.set("fill_on_top", True)
+        run_effects([{"dispatch": {"action": "set_active_color",
+                                   "params": {"color": '"#112233"'}}}],
+                    {}, store, actions=ws["actions"])
+        assert store.get("fill_color") == "#112233"
+        assert self._recent(store) == ["#112233"]
+
+
 class TestListToggleEffect:
     """`list_toggle: { target, value }` -- set membership, the checkbox primitive
     (council Q3.2). It had NO test in this reference until the engine door
