@@ -197,5 +197,113 @@
     "artboards_panel_selection": []
    }
   }
+ },
+ {
+  "_doc": "Select All in the Artboards panel menu selects every artboard in the panel (its row selection is panel-local state). The document does not change.",
+  "name": "artboards_select_all_selects_every_artboard",
+  "setup_svg": "two_artboards.svg",
+  "actions": [
+   {
+    "action": "artboards_select_all",
+    "params": {}
+   }
+  ],
+  "expected_json": "artboards_select_all_selects_every_artboard_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "artboards_panel_selection": [
+     "ab1",
+     "ab2",
+     "ab3"
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Rename (a double-click on an artboard's name) puts that row into rename mode: the panel's renaming_artboard names it. The document does not change until the rename is confirmed.",
+  "name": "rename_artboard_enters_rename_mode",
+  "setup_svg": "two_artboards.svg",
+  "actions": [
+   {
+    "action": "rename_artboard",
+    "params": {
+     "artboard_id": "ab2"
+    }
+   }
+  ],
+  "expected_json": "rename_artboard_enters_rename_mode_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "renaming_artboard": "ab2"
+   }
+  }
+ },
+ {
+  "_doc": "Escape cancels a rename: rename mode ends (renaming_artboard null) and the artboard keeps its name.",
+  "name": "cancel_artboard_rename_leaves_the_name",
+  "setup_svg": "two_artboards.svg",
+  "actions": [
+   {
+    "action": "rename_artboard",
+    "params": {
+     "artboard_id": "ab2"
+    }
+   },
+   {
+    "action": "cancel_artboard_rename",
+    "params": {}
+   }
+  ],
+  "expected_json": "cancel_artboard_rename_leaves_the_name_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "renaming_artboard": null
+   }
+  }
+ },
+ {
+  "_doc": "Enter confirms a rename: the artboard takes the new name in the document and rename mode ends.",
+  "name": "confirm_artboard_rename_renames_it",
+  "setup_svg": "two_artboards.svg",
+  "actions": [
+   {
+    "action": "rename_artboard",
+    "params": {
+     "artboard_id": "ab2"
+    }
+   },
+   {
+    "action": "confirm_artboard_rename",
+    "params": {
+     "artboard_id": "ab2",
+     "new_name": "Poster"
+    }
+   }
+  ],
+  "expected_json": "confirm_artboard_rename_renames_it_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "renaming_artboard": null
+   }
+  }
+ },
+ {
+  "_doc": "A click on a symbol's tile selects it in the Symbols panel (panel-local state). The verb records the id it is given; the document does not change.",
+  "name": "symbols_panel_select_records_the_symbol",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "symbols_panel_select",
+    "params": {
+     "symbol_id": "sym_star"
+    }
+   }
+  ],
+  "expected_json": "symbols_panel_select_records_the_symbol_expected.json",
+  "expected_panel_scope": {
+   "symbols_panel_content": {
+    "selected_symbol": "sym_star"
+   }
+  }
  }
 ]
