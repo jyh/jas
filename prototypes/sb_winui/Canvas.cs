@@ -1242,7 +1242,9 @@ internal sealed unsafe class Canvas : IDisposable
                     break;
 
                 case SaveCmd sv:
-                    ApplySave(sv.Path);
+                    // A save to a new path renames the document, so the canvas
+                    // tab is re-read.
+                    if (ApplySave(sv.Path)) { _panelStale = true; }
                     break;
 
                 case OpenCmd op:
@@ -3336,9 +3338,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// every save; two saves either side of an edit must differ, and only a
     /// digest on the row lets a reader see that.
     /// </summary>
-    private void ApplySave(string path)
+    private bool ApplySave(string path)
     {
-        if (_engine == IntPtr.Zero) { return; }
+        if (_engine == IntPtr.Zero) { return false; }
         try
         {
             var svg = JasCore.TakeString(JasCore.jas_document_svg(_engine));
@@ -3346,19 +3348,43 @@ internal sealed unsafe class Canvas : IDisposable
             {
                 _report($"RUSTFAIL SAVE REFUSED path={path} — the core returned the "
                       + $"EMPTY span; nothing was written {Tids()}");
-                return;
+                return false;
             }
             System.IO.File.WriteAllText(path, svg);
             var sha = Sha256Of(svg);
+            var renamed = PanelWire.IsNewDocumentPath(_documentPath, path);
             _documentPath = path;
             JasCore.jas_document_mark_saved(_engine);
             DirtyFromModel();
             _report($"RUSTOK SAVE path={path} bytes={svg.Length} sha={sha} {Tids()}");
+            if (renamed) { NameDocument(path, "save"); }
+            return renamed;
         }
         catch (Exception ex)
         {
             _report($"RUSTFAIL SAVE path={path} threw {ex.GetType().Name}: {ex.Message} {Tids()}");
+            return false;
         }
+    }
+
+    /// <summary>
+    /// Tell the engine the document's file name (#406), which the canvas tab
+    /// shows: <c>jas_load_svg</c> takes bytes only, so without this an opened
+    /// file's tab read <c>Untitled-N</c>. Called after an open and after a save
+    /// to a new path. Its row names the core's answer, not this method's hope.
+    /// </summary>
+    private void NameDocument(string path, string cause)
+    {
+        var name = PanelWire.DocumentNameBytes(path);
+        if (name is null)
+        {
+            _report($"RUSTFAIL FILENAME cause={cause} path={path} has no file name {Tids()}");
+            return;
+        }
+        var rc = JasCore.jas_document_set_filename(_engine, name, (nuint)name.Length);
+        _report(rc == 1
+            ? $"FILENAME SET cause={cause} name={System.IO.Path.GetFileName(path)} bytes={name.Length} {Tids()}"
+            : $"RUSTFAIL FILENAME REFUSED cause={cause} path={path} rc={rc} {Tids()}");
     }
 
     /// <summary>Load a document the UI thread chose. P1's receipt.</summary>
@@ -3387,6 +3413,7 @@ internal sealed unsafe class Canvas : IDisposable
 
         var elements = ElementCount();
         _documentPath = path;
+        NameDocument(path, "open");
         SetDirty(false);
         ApplyMenuRefresh("open");
         // ⭐ THE DUMP IS P1's SECOND READER, AND WITHOUT IT P1 IS `elements > 0`.

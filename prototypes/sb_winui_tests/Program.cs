@@ -894,6 +894,17 @@ static class Program
             Show(PanelWire.SurfaceTop(canvasPlan, "no_such")?.ToString()) + "|" + Show(PanelWire.SurfaceTop("{", "drawing_surface")?.ToString()));
         Eq("color_bar picture: bytes that are not a BMP are refused", "(null)|(null)", Hex(PanelWire.PictureBytes("data:image/bmp;base64,iVBORw==")) + "|" + Hex(PanelWire.PictureBytes("data:image/bmp;base64,")));
 
+        // §257 (#406): the tab names the document by its FILE NAME, sent as
+        // UTF-8 bytes (BL5); a path with no file name sends nothing.
+        static string Utf8(byte[]? b) => b is null ? "(null)" : System.Text.Encoding.UTF8.GetString(b);
+        Eq("document name: the file name of the path, not the path", "tab_rect.svg", Utf8(PanelWire.DocumentNameBytes(@"C:\work\docs\tab_rect.svg")));
+        Eq("document name: a non-ASCII name is UTF-8, never ANSI", "74616272C3A963742E737667", Hex(PanelWire.DocumentNameBytes(@"C:\d\tabr" + "\u00e9" + "ct.svg")));
+        Eq("document name: no path, an empty path, or a directory sends nothing", "(null)|(null)|(null)", Utf8(PanelWire.DocumentNameBytes(null)) + "|" + Utf8(PanelWire.DocumentNameBytes("")) + "|" + Utf8(PanelWire.DocumentNameBytes(@"C:\d\")));
+        Eq("document name: a save to the opened path is not a new path", "False", PanelWire.IsNewDocumentPath(@"C:\d\a.svg", @"C:\d\a.svg").ToString());
+        Eq("document name: Windows paths compare without case", "False", PanelWire.IsNewDocumentPath(@"C:\D\A.svg", @"c:\d\a.SVG").ToString());
+        Eq("document name: a save to another path is new", "True", PanelWire.IsNewDocumentPath(@"C:\d\a.svg", @"C:\d\b.svg").ToString());
+        Eq("document name: the first save of an untitled document is new", "True", PanelWire.IsNewDocumentPath(null, @"C:\d\b.svg").ToString());
+
         // #397: the dirty flag is the MODEL's answer (`jas_document_modified`),
         // never a reply's `doc_changed` (a selection repaints and is not an edit).
         static string Dirty(byte b) => TitleVerdict.DirtyFromModel(b) is { } d ? (d ? "dirty" : "clean") : "(no answer)";
