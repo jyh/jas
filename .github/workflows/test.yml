@@ -62,6 +62,9 @@ jobs:
       # coverage; it does not gate a coverage number.
       - run: python scripts/yaml_coverage_census.py --self-test
       - run: python scripts/yaml_coverage_census.py
+      # The level-2 certificate WRITER's arms (§203 (a)): it refuses what the
+      # census reader refuses plus a dirty build, another spec, a mis-row.
+      - run: python scripts/write_l2_cert.py --self-test
       - run: python scripts/check_action_refs.py
       # The sibling sub-check of the same VISION.md §11 layer, and it reads the
       # YAML SOURCES rather than the compiled bundle ON PURPOSE: `safe_load`
