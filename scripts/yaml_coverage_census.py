@@ -684,7 +684,7 @@ def self_test():
         check(len(refused) == 1 and "second" in refused[0][1],
               "two certificates for one row and platform: the second is refused")
         os.makedirs(os.path.join(d, L2_DIR), exist_ok=True)
-        with open(os.path.join(d, L2_DIR, "broken.json"), "w") as f:
+        with open(os.path.join(d, L2_DIR, "broken.json"), "w", encoding="utf-8", newline="") as f:
             f.write("{not json")
         got, refused = read_l2_certs(d, spec, rows)
         check(any("parse" in r for _p, r in refused), "a file that does not parse is refused")
