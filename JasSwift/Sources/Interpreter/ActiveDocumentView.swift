@@ -33,6 +33,8 @@ public func buildActiveDocumentView(
             "has_selection": false,
             "selection_count": 0,
             "element_selection": [] as [Any],
+            // No document: no recent colours (`active_document.recent_colors`).
+            "recent_colors": [String](),
             "artboards": [] as [Any],
             "artboard_options": [
                 "fade_region_outside_artboard": true,
@@ -190,6 +192,9 @@ public func buildActiveDocumentView(
         "has_selection": !m.document.selection.isEmpty,
         "selection_count": m.document.selection.count,
         "element_selection": elementSelection,
+        // The per-document recent colours, the one writable document list
+        // (`runtime_contexts.yaml`), which Color and Swatches both read.
+        "recent_colors": m.recentColors,
         // Drives the Boolean panel's Expand button: enabled only when at
         // least one selected element is a COMPOUND SHAPE. Not any `.live`:
         // a reference, a recorded and a generated element are live too, and

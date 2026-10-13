@@ -32,7 +32,7 @@ private func pickerEntries(_ options: Any?) -> [PickerEntry] {
 ///
 /// The value cannot tell them apart, and they must render differently:
 /// `state.fill_color` is null because the user set the attribute to None (draw
-/// the red-diagonal indicator), while `panel.recent_colors.3` is null because
+/// the red-diagonal indicator), while `active_document.recent_colors.3` is null because
 /// that slot has never been filled (draw a hollow placeholder). So decide from
 /// the bind's own DECLARATION instead: a global `state.<key>` read whose
 /// `workspace/state.yaml` schema entry is a NULLABLE COLOUR carries the "none"

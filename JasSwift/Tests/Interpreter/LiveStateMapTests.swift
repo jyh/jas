@@ -377,7 +377,7 @@ private func fileNewModel() -> Model {
 
 // A null colour has TWO meanings and the value alone cannot tell them apart:
 // `state.fill_color` null means "the user set this attribute to None" (draw the
-// red-diagonal indicator), while `panel.recent_colors.3` null means "that slot
+// red-diagonal indicator), while `active_document.recent_colors.3` null means "that slot
 // is empty" (draw a hollow placeholder). `renderColorSwatch` used to send both
 // to `.clear`, so the two rendered identically. The decision is read off the
 // bind's own declaration — mirrors Rust's
@@ -385,7 +385,7 @@ private func fileNewModel() -> Model {
 @Test func nullMeansNoneOnlyForNullableStateColours() {
     #expect(nullColorMeansNone("state.fill_color"))
     #expect(nullColorMeansNone("state.stroke_color"))
-    #expect(!nullColorMeansNone("panel.recent_colors.3"),
+    #expect(!nullColorMeansNone("active_document.recent_colors.3"),
             "an empty recent slot is a placeholder, not a None indicator")
     #expect(!nullColorMeansNone("swatch.color"))
     #expect(!nullColorMeansNone("stroke_dash_2"), "nullable but not a colour")

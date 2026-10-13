@@ -6805,7 +6805,7 @@ fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 ///
 /// The value cannot tell them apart, and they must render differently:
 /// `state.fill_color` is null because the user set the attribute to None
-/// (draw the red-diagonal indicator), while `panel.recent_colors.3` is null
+/// (draw the red-diagonal indicator), while `active_document.recent_colors.3` is null
 /// because that slot has never been filled (draw a hollow placeholder). So
 /// decide from the bind's own DECLARATION instead: a global `state.<key>`
 /// read whose `workspace/state.yaml` schema entry is a NULLABLE COLOUR
@@ -14803,7 +14803,7 @@ mod tests {
     // A null colour has TWO meanings and the value alone cannot tell them
     // apart: `state.fill_color` null means "the user set this attribute to
     // None" (draw the red-diagonal indicator), while
-    // `panel.recent_colors.3` null means "that slot is empty" (draw a
+    // `active_document.recent_colors.3` null means "that slot is empty" (draw a
     // hollow placeholder). The decision is read off the bind's declaration.
     // ── COLORTIERS: the RENDER half gets vectors of its own ───────────
     //
@@ -14828,7 +14828,7 @@ mod tests {
     fn swatch_ctx() -> serde_json::Value {
         serde_json::json!({
             "state": { "fill_color": serde_json::Value::Null, "stroke_color": "#000000" },
-            "panel": { "recent_colors": ["ff0000", serde_json::Value::Null] },
+            "active_document": { "recent_colors": ["ff0000", serde_json::Value::Null] },
             "dialog": { "hex": "" },
         })
     }
@@ -14852,7 +14852,7 @@ mod tests {
     fn colortiers_empty_recent_slot_stays_a_placeholder() {
         let ctx = swatch_ctx();
         let (color, explicit_none) =
-            super::swatch_color_bind(&swatch_el("panel.recent_colors.1"), &ctx);
+            super::swatch_color_bind(&swatch_el("active_document.recent_colors.1"), &ctx);
         assert!(color.is_empty());
         assert!(!explicit_none,
                 "an unfilled recent slot is a PLACEHOLDER — no diagonal");
@@ -14884,7 +14884,7 @@ mod tests {
         assert_eq!(super::swatch_border(&color, explicit_none, false),
                    super::SwatchBorder::Solid);
         // A bare hex (how recent_colors stores them) gets its '#'.
-        let (bare, _) = super::swatch_color_bind(&swatch_el("panel.recent_colors.0"), &ctx);
+        let (bare, _) = super::swatch_color_bind(&swatch_el("active_document.recent_colors.0"), &ctx);
         assert_eq!(bare, "#ff0000");
     }
 
@@ -14965,7 +14965,7 @@ mod tests {
     fn cptriage_null_means_none_only_for_nullable_state_colours() {
         assert!(null_color_means_none("state.fill_color"));
         assert!(null_color_means_none("state.stroke_color"));
-        assert!(!null_color_means_none("panel.recent_colors.3"),
+        assert!(!null_color_means_none("active_document.recent_colors.3"),
                 "an empty recent slot is a placeholder, not a None indicator");
         assert!(!null_color_means_none("swatch.color"));
         assert!(!null_color_means_none("stroke_dash_2"),

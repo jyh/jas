@@ -21,7 +21,8 @@
 //! it will not carry this"*, which is a different claim from *"nothing
 //! happened"*.
 //!
-//! ⛔ And the demonstrable half: after every attempt, `panel.recent_colors` is
+//! ⛔ And the demonstrable half: after every attempt, the first recent slot
+//! (`active_document.recent_colors`, the model's list since 2026-10-12) is
 //! **still empty**. A commit that had occurred would have pushed. The vacuity
 //! guard runs the other way here — the probe must show that the thing did NOT
 //! happen, so it asserts a state that a successful commit would have changed.
