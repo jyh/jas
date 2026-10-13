@@ -1,0 +1,25 @@
+{
+  "schema": "jas-l2-cert/1",
+  "platform": "windows",
+  "row": {
+    "class": "tools",
+    "id": "rect",
+    "observable": "state"
+  },
+  "spec_sha": "4eeff3c1768a89b0",
+  "evidence": "e2e",
+  "script": "test_fixtures/input_scripts/rect.draw.json",
+  "baseline": "prototypes/sb_winui/e2e_baselines/rect.draw",
+  "arms": {
+    "drive": "PASS",
+    "spec": "NOT APPLICABLE",
+    "readback": "PASS",
+    "core": "PASS",
+    "tree": "PASS",
+    "pixels": "PASS"
+  },
+  "verdict": "CERTIFIED",
+  "build": "e08c8d15",
+  "platform_detail": "windows-winui-10.0.26200",
+  "date": "2026-10-12T19:59:59-07:00"
+}
