@@ -1,0 +1,25 @@
+{
+  "schema": "jas-l2-cert/1",
+  "platform": "windows",
+  "row": {
+    "class": "tools",
+    "id": "ellipse",
+    "observable": "state"
+  },
+  "spec_sha": "8bfd4ab3f79b5960",
+  "evidence": "e2e",
+  "script": "test_fixtures/input_scripts/ellipse.draw.json",
+  "baseline": "prototypes/sb_winui/e2e_baselines/ellipse.draw",
+  "arms": {
+    "drive": "PASS",
+    "spec": "NOT APPLICABLE",
+    "readback": "PASS",
+    "core": "PASS",
+    "tree": "PASS",
+    "pixels": "PASS"
+  },
+  "verdict": "CERTIFIED",
+  "build": "e08c8d15",
+  "platform_detail": "windows-winui-10.0.26200",
+  "date": "2026-10-12T20:00:12-07:00"
+}
