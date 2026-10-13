@@ -4,6 +4,7 @@ mod algorithms;
 mod text_measure;
 mod surface;
 mod brush_preview;
+mod color_bar_picture;
 mod tool_consts;
 mod canvas;
 #[cfg(test)]
