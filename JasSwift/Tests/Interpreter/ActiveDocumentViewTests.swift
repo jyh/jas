@@ -208,3 +208,14 @@ import Foundation
     #expect(model.recentColors.first == "#ff0000",
             "the recent colour must land on the model: \(model.recentColors)")
 }
+
+// One form, `#rrggbb` lowercase (runtime_contexts.yaml): a native commit
+// pushed bare `rrggbb` and the YAML route `#rrggbb`, so `unique` kept both.
+@Test func recentColoursHoldOneFormWhateverTheSpelling() {
+    let model = Model()
+    model.recentColors = []
+    ColorPanel.pushRecentColor("AbCdEf", model: model)
+    #expect(model.recentColors == ["#abcdef"])
+    ColorPanel.pushRecentColor("#ABCDEF", model: model)
+    #expect(model.recentColors == ["#abcdef"], "one colour, one entry: \(model.recentColors)")
+}

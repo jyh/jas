@@ -8887,7 +8887,7 @@
           "type": "list",
           "item_type": "color",
           "writable": true,
-          "description": "Per-document list of recently committed colors, newest first, capped at 10 entries. The ONE writable active_document property: `set_active_color` pushes onto it (`list_push` target `active_document.recent_colors`, unique, max 10), and the Color and Swatches panels both read it, so the two strips always agree. Added on commit (slider release, hex field Enter, swatch click including none/black/white). Empty slots render as hollow squares with a solid border. Until 2026-10-12 this was a PANEL key, so the push landed in whichever panel was active and a menu dispatch dropped it.\n"
+          "description": "Per-document list of recently committed colors, newest first, capped at 10 entries. Every entry is \"#rrggbb\", lowercase, whatever form the push was given, so `unique` finds one colour however it was spelled. The ONE writable active_document property: `set_active_color` pushes onto it (`list_push` target `active_document.recent_colors`, unique, max 10), and the Color and Swatches panels both read it, so the two strips always agree. Added on commit (slider release, hex field Enter, swatch click including none/black/white). Empty slots render as hollow squares with a solid border. Until 2026-10-12 this was a PANEL key, so the push landed in whichever panel was active and a menu dispatch dropped it.\n"
         },
         "is_modified": {
           "type": "bool",

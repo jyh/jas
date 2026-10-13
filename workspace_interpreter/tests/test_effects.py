@@ -471,6 +471,16 @@ class TestRecentColoursArePerDocument:
         self._push(store, '"#000004"', unique=True, max_length=3)
         assert self._recent(store) == ["#000004", "#000001", "#000003"]
 
+    def test_every_entry_is_one_form_so_unique_dedupes_across_routes(self):
+        # The apps' native commits pushed bare `rrggbb` while the YAML route
+        # pushed `#rrggbb`, so `unique` kept both spellings of one colour.
+        # Every entry is `#rrggbb`, lowercase (runtime_contexts.yaml).
+        store = StateStore()
+        self._push(store, '"AbCdEf"', unique=True, max_length=10)
+        assert self._recent(store) == ["#abcdef"]
+        self._push(store, '"#ABCDEF"', unique=True, max_length=10)
+        assert self._recent(store) == ["#abcdef"]
+
     def test_the_list_is_readable_by_index(self):
         from workspace_interpreter.expr import evaluate
         store = StateStore()

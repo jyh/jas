@@ -12821,11 +12821,17 @@ mod tests {
         model.recent_colors.clear();
         run(&mut model, &mut store, &["\"#000001\"", "\"#000002\"", "\"#000003\"", "\"#000001\"", "\"#000004\""]);
         assert_eq!(model.recent_colors, vec!["#000004", "#000001", "#000003"]);
+        // One form, `#rrggbb` lowercase (runtime_contexts.yaml), so `unique`
+        // finds one colour however the push spelled it.
+        model.recent_colors.clear();
+        run(&mut model, &mut store, &["\"AbCdEf\"", "\"#ABCDEF\""]);
+        assert_eq!(model.recent_colors, vec!["#abcdef"]);
 
+        let before = model.recent_colors.clone();
         let r = run_effects(&[json!({"list_push": {"target": "active_document.selection_count", "value": "1"}})],
                             &json!({}), &mut store, Some(&mut model), None, None, None);
         assert_eq!(r.unhandled, vec![Unhandled::NotWritable("active_document.selection_count".into())]);
-        assert_eq!(model.recent_colors.len(), 3);
+        assert_eq!(model.recent_colors, before, "a refused target wrote the list");
 
         let r = run_effects(&[push("\"#000005\"")], &json!({}), &mut store, None, None, None, None);
         assert_eq!(r.unhandled, vec![Unhandled::NoModel("active_document.recent_colors".into())]);

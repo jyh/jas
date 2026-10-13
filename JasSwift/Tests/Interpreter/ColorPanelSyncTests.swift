@@ -368,7 +368,7 @@ private func panelNum(_ model: Model, _ key: String) -> Double? {
             the COMMIT writes the app tier — this is the whole of "a colour \
             dragged on a slider survives File > New", and it had no test
             """)
-    #expect(committed.recentColors.first == "660000",
+    #expect(committed.recentColors.first == "#660000",
             "and the commit is what lands in the recent strip")
 }
 

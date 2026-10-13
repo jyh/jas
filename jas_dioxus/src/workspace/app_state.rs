@@ -995,13 +995,9 @@ impl AppState {
                         m, |s| Some(recolor_stroke(s, color))));
                 }
             }
-            // Push to recent colors (move-to-front dedup, max 10)
-            let hex = color.to_hex();
-            if let Some(pos) = tab.model.recent_colors.iter().position(|c| c == &hex) {
-                tab.model.recent_colors.remove(pos);
-            }
-            tab.model.recent_colors.insert(0, hex);
-            tab.model.recent_colors.truncate(10);
+            // Push to recent colors (move-to-front dedup, max 10), through
+            // the one push, which stores the one form.
+            tab.model.push_recent_color(color.to_hex(), true, Some(10));
         }
     }
 
@@ -5384,6 +5380,20 @@ mod stroke_panel_field_scope_tests {
     // arrowheaded line left a plain 1pt stroke. Same class as the
     // Stroke-panel clobber, one panel over.
     const BLUE: Color = Color::rgb(0.0, 0.0, 1.0);
+
+    /// The recent list holds one form, `#rrggbb` lowercase: a native commit
+    /// (this) used to push bare `0000ff` while the YAML route pushed
+    /// `#0000ff`, so `unique` kept both. A second, YAML-spelled push of the
+    /// same colour moves it rather than adding a second entry.
+    #[test]
+    fn a_native_colour_commit_stores_the_one_recent_form() {
+        let mut st = state_with(rich_stroke());
+        st.set_active_color(BLUE);
+        let recent = &st.tabs[st.active_tab].model.recent_colors;
+        assert_eq!(recent.first().map(String::as_str), Some("#0000ff"));
+        st.tabs[st.active_tab].model.push_recent_color("#0000FF".into(), true, Some(10));
+        assert_eq!(st.tabs[st.active_tab].model.recent_colors, vec!["#0000ff".to_string()]);
+    }
 
     #[test]
     fn stroke_color_pick_keeps_every_other_attribute() {

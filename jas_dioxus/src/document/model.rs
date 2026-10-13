@@ -344,8 +344,9 @@ pub struct Model {
     pub default_fill: Option<Fill>,
     /// Default stroke for newly created elements.
     pub default_stroke: Option<Stroke>,
-    /// Per-document list of recently committed colors (hex strings, no #),
-    /// newest first. Max 10 entries.
+    /// Per-document list of recently committed colors, newest first, max 10.
+    /// Every entry is `#rrggbb`, lowercase (`runtime_contexts.yaml`): write it
+    /// through [`Model::push_recent_color`], which normalises the form.
     pub recent_colors: Vec<String>,
     /// Mask-editing mode state. ``Content`` is the default; flipped
     /// to ``Mask(path)`` when the user clicks the Opacity panel's
@@ -522,6 +523,15 @@ impl Model {
     /// with `unique`, an equal entry moves to the front instead of repeating;
     /// with `max_length`, the list is cut to it. Not undoable, as in both apps.
     pub fn push_recent_color(&mut self, colour: String, unique: bool, max_length: Option<usize>) {
+        // One form, `#rrggbb` lowercase, so `unique` finds one colour however
+        // it was spelled (the apps' native commits pushed bare `rrggbb`, the
+        // YAML route `#rrggbb`). Anything else is kept as given.
+        let bare = colour.strip_prefix('#').unwrap_or(&colour);
+        let colour = if bare.len() == 6 && bare.chars().all(|c| c.is_ascii_hexdigit()) {
+            format!("#{}", bare.to_ascii_lowercase())
+        } else {
+            colour
+        };
         if unique {
             self.recent_colors.retain(|c| *c != colour);
         }
