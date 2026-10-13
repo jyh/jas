@@ -1429,14 +1429,19 @@ function Get-SbNodeBounds($Node) {
 }
 
 # ⛔ THE APP'S HIT TEST IS A TOP-LEVEL LAYER-CHILD SCAN IN REVERSE DOCUMENT
-# ORDER, AND THAT IS WHAT THIS MIRRORS. Read out of the reference interpreter --
-# `workspace_interpreter/doc_primitives.py`, `hit_test(x, y)`: it walks
-# `layers` from last to first and each layer's `children` from last to first,
-# skipping locked and invisible ones, and returns the FIRST `[li, ci]` whose
-# BOUNDS contain the point. It returns the top-level child, NOT the deepest
-# leaf -- `hit_test_deep` is the other primitive and is not what a selection
-# press uses.
+# ORDER over PAINTED GEOMETRY (#355; `transcripts/SELECTION_TOOL.md` § Hit test:
+# painted geometry). The reference interpreter's `doc_primitives.hit_test(x, y)`
+# walks `layers` from last to first and each layer's `children` from last to
+# first, skipping what `hit_law.blocks_hit` blocks (locked, invisible), and
+# returns the FIRST `[li, ci]` whose painted geometry is under the point: a fill
+# inside its area, a stroke within width/2 + 3, a group when a child is, a text
+# by its box. It returns the top-level child, NOT the deepest leaf --
+# `hit_test_deep` is the other primitive and is not what a selection press uses.
 #
+# ⭐ THIS HARNESS DOES NOT PORT THAT LAW. `Get-SbHitTargetFromDoc` aims only
+# where every LATER top-level child provably cannot paint (`Test-SbMayPaint`, an
+# over-approximation), so the answer there is the aimed shape's own top-level
+# child under the box rule and the painted rule alike.
 # This is the F-B repair. The chooser aimed at the centre of the LARGEST FILLED
 # shape and then asserted against THAT element; the app selected the TOPMOST one
 # over the same point. Measured on kenai 2026-09-04: the aim landed on
@@ -1468,8 +1473,9 @@ function Get-SbLayerChildren($Doc) {
     return $out
 }
 
-# Locked or invisible children are skipped BY THE REFERENCE (`_child_is_locked`
-# / `_child_visibility_invisible`), so they are skipped here.
+# Locked or invisible children are skipped BY THE REFERENCE (`hit_law.blocks_hit`,
+# which replaced `_child_is_locked` / `_child_visibility_invisible` in #355), so
+# they are skipped here.
 #
 # ⚠️ TODAY'S DOCUMENTS CARRY BOTH FIELDS AND NEITHER TRIGGERS A SKIP --
 # `test_fixtures/expected/complex_document.json` reads `locked: false` and
@@ -1485,16 +1491,81 @@ function Test-SbNodeSkipped($Node) {
     return $false
 }
 
-function Get-SbTopmostAt($Doc, [double]$X, [double]$Y) {
-    $kids = @(Get-SbLayerChildren $Doc)
-    for ($i = $kids.Count - 1; $i -ge 0; $i--) {
-        $b = $kids[$i].Bounds
-        if ($null -eq $b) { continue }
-        if ($b.MinX -le $X -and $X -le $b.MaxX -and $b.MinY -le $Y -and $Y -le $b.MaxY) {
-            return $kids[$i]
-        }
+# Does `$Node` carry a transform? (This mirror reads no matrices.)
+function Test-SbTransformed($Node) {
+    if ($null -eq $Node) { return $false }
+    $p = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    return (($p -contains 'transform') -and ($null -ne $Node.transform))
+}
+
+# Is `$Node` `outline`? The law caps it and everything under it to the outline
+# (`hit_law.blocks_hit`), so a fill there is never hit.
+function Test-SbOutlineCapped($Node) {
+    if ($null -eq $Node) { return $false }
+    $p = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    return (($p -contains 'visibility') -and ("$($Node.visibility)" -match '(?i)^outline$'))
+}
+
+# The law's HIT_TOLERANCE (`workspace_interpreter/hit_law.py`).
+$SbHitTolerance = 3.0
+
+function Get-SbSegmentDistance([double]$Px, [double]$Py, [double]$Ax, [double]$Ay, [double]$Bx, [double]$By) {
+    $dx = $Bx - $Ax; $dy = $By - $Ay
+    $len2 = $dx * $dx + $dy * $dy
+    $t = if ($len2 -le 0) { 0.0 } else { [math]::Max(0.0, [math]::Min(1.0, (($Px - $Ax) * $dx + ($Py - $Ay) * $dy) / $len2)) }
+    $cx = $Ax + $t * $dx; $cy = $Ay + $t * $dy
+    return [math]::Sqrt(($Px - $cx) * ($Px - $cx) + ($Py - $cy) * ($Py - $cy))
+}
+
+# MAY `$Node` paint at (X, Y)? An OVER-APPROXIMATION of the painted-geometry law:
+# True wherever the law could hit, and False only where it provably cannot.
+# ⛔ It is never used to say what IS hit -- only to clear an aim point of later
+# paint -- so every doubt answers True: a transform anywhere (this mirror reads
+# no matrices), geometry it cannot read (a path's `d`, a polyline), a text with
+# no font size. The stroke reach is the FULL width (an inside or outside stroke
+# reaches that far; a centred one only half), plus the law's 3-unit tolerance.
+# A text's dump box is 0x0 (the real one comes from font metrics), so a text
+# may paint within two em per character of its x and two em of its y.
+# `harness_selftest.ps1` replays the law's shared corpus through this and fails
+# on any expected hit it would call False.
+function Test-SbMayPaint($Node, [double]$X, [double]$Y) {
+    if ($null -eq $Node) { return $false }
+    if (Test-SbNodeSkipped $Node) { return $false }
+    $p = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    if (($p -contains 'transform') -and ($null -ne $Node.transform)) { return $true }
+    $reach = 0.0
+    if (($p -contains 'stroke') -and ($null -ne $Node.stroke)) {
+        $sp = @($Node.stroke.PSObject.Properties | ForEach-Object { $_.Name })
+        $reach = if ($sp -contains 'width') { [double]$Node.stroke.width } else { 1.0 }
     }
-    return $null
+    $m = $reach + $SbHitTolerance
+    $t = [string]$Node.type
+    if (($p -contains 'children') -and @($Node.children).Count -gt 0) {
+        foreach ($c in @($Node.children)) { if (Test-SbMayPaint $c $X $Y) { return $true } }
+        return $false
+    }
+    if ($t -eq 'line' -and ($p -contains 'x1') -and ($p -contains 'y2')) {
+        return ((Get-SbSegmentDistance $X $Y ([double]$Node.x1) ([double]$Node.y1) ([double]$Node.x2) ([double]$Node.y2)) -le $m)
+    }
+    if ($t -eq 'text' -or $t -eq 'text_path') {
+        if (($p -notcontains 'font_size') -or ($null -eq $Node.font_size) -or ($p -notcontains 'x')) { return $true }
+        $fs = [double]$Node.font_size
+        $chars = 0; $lines = 1
+        foreach ($ts in @($(if ($p -contains 'tspans') { $Node.tspans } else { @() }))) {
+            $txt = [string]$ts.content
+            $chars += $txt.Length
+            $lines += ([regex]::Matches($txt, "`n")).Count
+        }
+        if (($p -contains 'content') -and $Node.content) { $chars += ([string]$Node.content).Length }
+        $w = [math]::Max([double]$(if ($p -contains 'width') { $Node.width } else { 0 }), 2.0 * $fs * [math]::Max($chars, 1))
+        $h = [math]::Max([double]$(if ($p -contains 'height') { $Node.height } else { 0 }), 2.0 * $fs * $lines)
+        $x0 = [double]$Node.x; $y0 = [double]$Node.y
+        return ($X -ge $x0 - $m -and $X -le $x0 + $w + $m -and $Y -ge $y0 - $h - $m -and $Y -le $y0 + $h + $m)
+    }
+    if ($t -eq 'path' -or $t -eq 'polyline' -or $t -eq 'polygon' -or $t -eq 'live') { return $true }
+    $b = Get-SbNodeBounds $Node
+    if ($null -eq $b) { return $true }
+    return ($X -ge $b.MinX - $m -and $X -le $b.MaxX + $m -and $Y -ge $b.MinY - $m -and $Y -le $b.MaxY + $m)
 }
 
 function Get-SbHitTargetFromDoc($Doc) {
@@ -1530,31 +1601,68 @@ function Get-SbHitTargetFromDoc($Doc) {
         }
     }
     if ($cands.Count -eq 0) { return $null }
-    # THE AIM POINT is unchanged: the centre of the largest filled shape.
-    $aim = @($cands | Sort-Object -Property @{Expression = 'Filled'; Descending = $true},
-                                            @{Expression = 'Area'; Descending = $true},
-                                            @{Expression = 'Path'; Descending = $false})[0]
-    # THE TARGET is the app's own rule applied to that point.
-    $top = Get-SbTopmostAt $Doc $aim.X $aim.Y
-    if ($null -eq $top) {
+    # THE AIM POINT: the centre of the largest FILLED shape (an unfilled
+    # interior is not painted, so it is never aimed at) that nothing LATER in the
+    # app's reverse scan may paint over. At such a point the painted law and the
+    # box rule both answer with the shape's own top-level child. No shape
+    # qualifies: $null, which every caller refuses by name.
+    $tops = @(Get-SbLayerChildren $Doc)
+    $ordered = @($cands | Where-Object { $_.Filled -eq 1 } |
+                 Sort-Object -Property @{Expression = 'Area'; Descending = $true},
+                                       @{Expression = 'Path'; Descending = $false})
+    foreach ($aim in $ordered) {
+        if (Test-SbNodeSkipped $aim.Node) { continue }
+        if (Test-SbOutlineCapped $aim.Node) { continue }
+        $k = -1
+        for ($i = 0; $i -lt $tops.Count; $i++) {
+            $tp = $tops[$i].Path
+            if ($aim.Path -eq $tp -or $aim.Path.StartsWith($tp + '.')) { $k = $i; break }
+        }
+        if ($k -lt 0) { continue }
+        # The law maps the press through the LAYER's transform before it scans
+        # the layer's children, and caps every child by the layer's visibility
+        # (`hit_law.blocks_hit`): a transformed or `outline` layer is never aimed
+        # into (jas's #359 review, gap 1 and gap 2).
+        $layer = @($Doc.layers)[$tops[$k].Li]
+        if ((Test-SbTransformed $layer) -or (Test-SbOutlineCapped $layer)) { continue }
+        # The centre is the shape's painted interior only in its OWN frame, so
+        # a transform on it or on any container between it and its top-level
+        # child disqualifies it (this mirror reads no matrices). An `outline`
+        # container caps everything under it to the outline, where the fill at
+        # the centre does not count, so it disqualifies too.
+        $moved = $false
+        $node = $tops[$k].Node
+        $rest = $aim.Path.Substring($tops[$k].Path.Length)
+        foreach ($seg in [regex]::Matches($rest, '\.children\[(\d+)\]')) {
+            $np = @($node.PSObject.Properties | ForEach-Object { $_.Name })
+            if (($np -contains 'transform') -and ($null -ne $node.transform)) { $moved = $true; break }
+            if (Test-SbNodeSkipped $node) { $moved = $true; break }
+            if (Test-SbOutlineCapped $node) { $moved = $true; break }
+            $node = @($node.children)[[int]$seg.Groups[1].Value]
+        }
+        $ap = @($aim.Node.PSObject.Properties | ForEach-Object { $_.Name })
+        if ($moved -or (($ap -contains 'transform') -and ($null -ne $aim.Node.transform))) { continue }
+        $covered = $false
+        for ($i = $k + 1; $i -lt $tops.Count; $i++) {
+            # A later child's geometry is in ITS layer's frame: under a layer
+            # transform this mirror cannot place it, so it may paint anywhere.
+            if (Test-SbTransformed (@($Doc.layers)[$tops[$i].Li])) { $covered = $true; break }
+            if (Test-SbMayPaint $tops[$i].Node $aim.X $aim.Y) { $covered = $true; break }
+        }
+        if ($covered) { continue }
+        $tn = $tops[$k].Node
+        $tnp = @($tn.PSObject.Properties | ForEach-Object { $_.Name })
         return [pscustomobject]@{
-            Path = $aim.Path; Id = $aim.Id; Type = $aim.Type; Filled = $aim.Filled
-            Area = $aim.Area; X = $aim.X; Y = $aim.Y; Node = $aim.Node
+            Path = $tops[$k].Path
+            Id = $(if ($tnp -contains 'id') { [string]$tn.id } else { '' })
+            Type = [string]$tn.type
+            Filled = $aim.Filled; Area = $aim.Area
+            X = $aim.X; Y = $aim.Y; Node = $tn
             AimPath = $aim.Path
-            Rule = 'NO top-level layer child''s bounds contain the aim point, so the chooser fell back to the aimed shape itself. O1.2c is what reports a disagreement with the app'
+            Rule = 'the centre of the largest filled shape that nothing later may paint over; there the painted-geometry law (#355) and the box rule both hit that shape''s own top-level layer child'
         }
     }
-    $tn = $top.Node
-    $tp = @($tn.PSObject.Properties | ForEach-Object { $_.Name })
-    return [pscustomobject]@{
-        Path = $top.Path
-        Id = $(if ($tp -contains 'id') { [string]$tn.id } else { '' })
-        Type = [string]$tn.type
-        Filled = $aim.Filled; Area = $aim.Area
-        X = $aim.X; Y = $aim.Y; Node = $tn
-        AimPath = $aim.Path
-        Rule = 'the TOPMOST top-level layer child whose bounds contain the aim point (the reference interpreter''s own rule: workspace_interpreter/doc_primitives.py hit_test scans layers and their children in REVERSE document order and returns the first [li,ci] whose bounds contain the point)'
-    }
+    return $null
 }
 
 function Get-SbHitTarget([string]$JsonPath) {

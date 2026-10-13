@@ -643,7 +643,7 @@ if ($Hand) {
         $verdicts += "ok  : scale $Scale for the hand's aim, from $scaleSource (there is no -Scale: it reached nothing, PR #110)"
         $handTarget = Get-SbHitTarget $beforeDump
         if ($null -eq $handTarget) {
-            Add-NotRun 'O4 hand' "sb-doc-before.json holds no element with readable coordinates -- the harness will not aim at a point it did not derive"
+            Add-NotRun 'O4 hand' "sb-doc-before.json holds no filled shape the chooser can aim at (none with readable coordinates, or every one may be painted over by a later element) -- the harness will not aim at a point it did not derive"
         } else {
             $aimX = $handTarget.X
             $aimY = $handTarget.Y
