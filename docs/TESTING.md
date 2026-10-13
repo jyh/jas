@@ -22,6 +22,9 @@ A naming note, as everywhere: this is a **vector illustration application**.
 * **A level-3 test "must be level 3, there are no other options."** A thing goes to a human only when no level-2
   observable can decide it.
 
+**The level-3 tests are listed, sorted by priority, in `docs/LEVEL3_TESTS.md`**, each with the reason no machine can
+decide it and the level-2 asset its verdict becomes.
+
 **Every human finding becomes a level-2 item.** A defect a person finds at level 3 is a missing level-2 check. A
 missing selection highlight, for example, is a level-1 or level-2 catch.
 

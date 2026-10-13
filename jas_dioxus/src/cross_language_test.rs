@@ -2821,6 +2821,9 @@ mod tests {
         // YAML coverage census (2026-10-11): the fill/stroke colour verbs, each after a
         // select_all, pinning the panel-render state as well as the document.
         "color_actions.json",
+        // YAML coverage census (2026-10-12): verbs that write a panel's own state,
+        // witnessed by `expected_panel_scope` (or `expected_panel_state`).
+        "panel_scope_actions.json",
         // LOCKINHERIT (transcripts/LAYER_STRUCTURE.md §13): Select All and
         // inherited lock. `actions.yaml` §select_all always said "locked
         // objects are excluded" without saying WHOSE flag, and the two ports
@@ -2987,7 +2990,41 @@ mod tests {
             panic!("Action test '{}' failed: canonical JSON mismatch", name);
         }
         assert_action_panel_state(tc, &st);
+        assert_action_panel_scope(tc, &st);
         assert_action_view(tc, &st);
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL assertion: `expected_panel_scope`, `{<panel content id>:
+    /// {<key>: <value>}}`, a SUBSET of the `panel.*` scope that panel renders
+    /// against. A verb that writes only a panel's own state (a view mode, a
+    /// thumbnail size, a search query, a type filter) moves neither the
+    /// document nor `state.*`, so before this block no case could see it (the
+    /// YAML coverage census, 2026-10-12). The scope is read where the panel
+    /// reads it: `panel_menu_ctx`, which layers the declared defaults, the
+    /// generic per-panel table and the typed `AppState` slots. Mirrors Swift
+    /// `assertActionPanelScope`.
+    fn assert_action_panel_scope(
+        tc: &serde_json::Value, st: &crate::workspace::app_state::AppState,
+    ) {
+        let Some(expected) = tc.get("expected_panel_scope").and_then(|v| v.as_object())
+        else { return };
+        let name = tc["name"].as_str().unwrap();
+        for (panel, keys) in expected {
+            let ctx = crate::panels::panel_menu::panel_menu_ctx(panel, st);
+            let scope = &ctx["panel"];
+            for (key, want) in keys.as_object().expect("expected_panel_scope.<panel> is an object") {
+                assert!(
+                    scope.get(key).is_some(),
+                    "Action test '{name}': panel {panel} has no key {key:?} in its scope at all"
+                );
+                assert_eq!(
+                    &scope[key], want,
+                    "Action test '{name}': panel {panel}.{key} is {} but the corpus pins {want}",
+                    scope[key]
+                );
+            }
+        }
     }
 
     #[cfg(feature = "web")]

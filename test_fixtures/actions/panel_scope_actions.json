@@ -1,0 +1,201 @@
+[
+ {
+  "_doc": "The Color panel's mode is panel-local state (default hsb). Choosing RGB from the panel menu writes it; the panel's slider groups bind their visibility to it.",
+  "name": "set_color_panel_mode_rgb",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_color_panel_mode",
+    "params": {
+     "mode": "rgb"
+    }
+   }
+  ],
+  "expected_json": "set_color_panel_mode_rgb_expected.json",
+  "expected_panel_scope": {
+   "color_panel_content": {
+    "mode": "rgb"
+   }
+  }
+ },
+ {
+  "name": "set_brush_view_mode_list",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_brush_view_mode",
+    "params": {
+     "view_mode": "list"
+    }
+   }
+  ],
+  "expected_json": "set_brush_view_mode_list_expected.json",
+  "expected_panel_scope": {
+   "brushes_panel_content": {
+    "view_mode": "list"
+   }
+  }
+ },
+ {
+  "name": "set_brush_thumbnail_size_large",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_brush_thumbnail_size",
+    "params": {
+     "size": "large"
+    }
+   }
+  ],
+  "expected_json": "set_brush_thumbnail_size_large_expected.json",
+  "expected_panel_scope": {
+   "brushes_panel_content": {
+    "thumbnail_size": "large"
+   }
+  }
+ },
+ {
+  "name": "set_swatch_thumbnail_size_medium",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_swatch_thumbnail_size",
+    "params": {
+     "size": "medium"
+    }
+   }
+  ],
+  "expected_json": "set_swatch_thumbnail_size_medium_expected.json",
+  "expected_panel_scope": {
+   "swatches_panel_content": {
+    "thumbnail_size": "medium"
+   }
+  }
+ },
+ {
+  "name": "set_layers_search_query",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_layers_search",
+    "params": {
+     "query": "Rect"
+    }
+   }
+  ],
+  "expected_json": "set_layers_search_query_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "search_query": "Rect"
+   }
+  }
+ },
+ {
+  "name": "solo_layers_type_filter_path",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "solo_layers_type_filter",
+    "params": {
+     "element_type": "path"
+    }
+   }
+  ],
+  "expected_json": "solo_layers_type_filter_path_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "type_filter": [
+     "path"
+    ]
+   }
+  }
+ },
+ {
+  "_doc": "Soloing the type that is already the only one in the filter turns the solo off: the filter returns to empty (all types shown).",
+  "name": "solo_layers_type_filter_twice_clears",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "solo_layers_type_filter",
+    "params": {
+     "element_type": "path"
+    }
+   },
+   {
+    "action": "solo_layers_type_filter",
+    "params": {
+     "element_type": "path"
+    }
+   }
+  ],
+  "expected_json": "solo_layers_type_filter_twice_clears_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "type_filter": []
+   }
+  }
+ },
+ {
+  "name": "clear_layers_type_filter_after_solo",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "solo_layers_type_filter",
+    "params": {
+     "element_type": "rect"
+    }
+   },
+   {
+    "action": "clear_layers_type_filter",
+    "params": {}
+   }
+  ],
+  "expected_json": "clear_layers_type_filter_after_solo_expected.json",
+  "expected_panel_scope": {
+   "layers_panel_content": {
+    "type_filter": []
+   }
+  }
+ },
+ {
+  "name": "set_artboard_reference_point_top_left",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_artboard_reference_point",
+    "params": {
+     "anchor": "top_left"
+    }
+   }
+  ],
+  "expected_json": "set_artboard_reference_point_top_left_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "reference_point": "top_left"
+   }
+  }
+ },
+ {
+  "name": "reset_artboards_panel_restores_centre",
+  "setup_svg": "rect_basic.svg",
+  "actions": [
+   {
+    "action": "set_artboard_reference_point",
+    "params": {
+     "anchor": "top_left"
+    }
+   },
+   {
+    "action": "reset_artboards_panel",
+    "params": {}
+   }
+  ],
+  "expected_json": "reset_artboards_panel_restores_centre_expected.json",
+  "expected_panel_scope": {
+   "artboards_panel_content": {
+    "reference_point": "center",
+    "artboards_panel_selection": []
+   }
+  }
+ }
+]
