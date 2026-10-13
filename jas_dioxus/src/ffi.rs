@@ -2218,6 +2218,29 @@ mod tests {
     /// them. (Through the engine the eleven channels are DERIVED from the colour,
     /// so more than one row moves; the exactly-one claim is made on the pin's own
     /// scope in `panel_plan::tests`.)
+    /// THE COLOUR BAR'S PICTURE THROUGH THE ABI (STATUS-flask §249): the
+    /// engine's Color panel plan places exactly one `color_bar` leaf, with a
+    /// real rect, carrying `display.picture` — the picture whose every pixel is
+    /// the pick's `color_bar_rgb` — so the shell draws the bar the engine picks
+    /// from.
+    #[test]
+    fn the_color_panels_bar_carries_the_engines_picture_through_the_abi() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "color_panel_content", 228, 600)).expect("plan JSON");
+        let bars: Vec<&serde_json::Value> = plan["leaves"].as_array().expect("leaves").iter()
+            .filter(|l| l["type"] == "color_bar").collect();
+        assert_eq!(bars.len(), 1, "one colour bar placed: {plan}");
+        assert!(bars[0]["rect"]["w"].as_i64().unwrap_or(0) > 0, "{}", bars[0]["rect"]);
+        assert!(bars[0]["rect"]["h"].as_i64().unwrap_or(0) > 0, "{}", bars[0]["rect"]);
+        assert_eq!(
+            bars[0]["display"]["picture"].as_str(),
+            Some(crate::color_bar_picture::data_uri().as_str()),
+        );
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn panel_plan_values_equal_bind_values_through_the_abi() {
         use crate::panel_plan::checks::{plan_values, row_values};

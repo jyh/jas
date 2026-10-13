@@ -203,6 +203,12 @@ fn numbers_of(node: &Value) -> Map<String, Value> {
 /// icon from. A brush type with no preview sends neither, and the tile stays an
 /// empty box, as it does in the web port.
 ///
+/// A `color_bar` is the same case again: every port paints the bar at its view
+/// layer, and the shell has no colour mapping. So the core sends the picture,
+/// `picture` ([`crate::color_bar_picture::data_uri`], a BMP data URI whose
+/// every pixel is the pick's own `color_bar_rgb`), and the shell scales it to
+/// the leaf's rect (STATUS-flask §249).
+///
 /// Empty for every other kind: a shell reads `display` first and must never
 /// find a stale or invented string shadowing a resolved value.
 fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<String, Value> {
@@ -214,6 +220,10 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
             out.insert("preview.viewbox".to_string(),
                        Value::String(crate::brush_preview::VIEWBOX.to_string()));
         }
+        return out;
+    }
+    if node.get("type").and_then(Value::as_str) == Some("color_bar") {
+        out.insert("picture".to_string(), Value::String(crate::color_bar_picture::data_uri()));
         return out;
     }
     if node.get("type").and_then(Value::as_str) != Some("length_input") {
@@ -1961,6 +1971,48 @@ mod tests {
         // The control: the same node DOES carry the resolved value, so the
         // empty display above is a scoping decision and not a dead walk.
         assert_eq!(plan["leaves"][0]["values"]["bind.value"], json!("12"), "{plan}");
+    }
+
+    /// THE COLOUR BAR'S PICTURE RIDES ON THE PLAN (STATUS-flask §249). A
+    /// `color_bar` leaf carries `display.picture`, the engine's own picture of
+    /// the bar ([`crate::color_bar_picture::data_uri`]), so a shell draws the
+    /// colour the engine's pick maps that point to and computes nothing. It is
+    /// the ONLY display key the leaf carries.
+    #[test]
+    fn a_color_bar_leaf_carries_the_engines_picture_and_nothing_else() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "color_bar", "id": "bar"},
+        ]}});
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({}), &Value::Null, &Value::Null);
+        let want = crate::color_bar_picture::data_uri();
+        assert!(want.starts_with("data:image/bmp;base64,"), "{want:.40}");
+        assert_eq!(plan["leaves"][0]["type"], json!("color_bar"), "{plan}");
+        assert_eq!(plan["leaves"][0]["display"], json!({"picture": want}));
+    }
+
+    /// The picture is the colour bar's alone: a sibling kind with no core
+    /// formatting does not acquire one (the scope half of the arm above).
+    #[test]
+    fn no_other_kind_carries_a_picture() {
+        let ws = Workspace::load().expect("workspace");
+        let mut pictures = 0usize;
+        let mut entries = 0usize;
+        for panel in panel_ids(&ws) {
+            let spec = ws.panel(&panel).expect("a listed panel");
+            let (plan, _) = panel_plan(spec, 228, 0, &engine_scope(), ws.icons(), ws.actions());
+            for key in ["leaves", "chrome", "containers"] {
+                for e in plan[key].as_array().into_iter().flatten() {
+                    entries += 1;
+                    if e["display"].get("picture").is_some() {
+                        assert_eq!(e["type"], json!("color_bar"), "{panel}: {}", e["path"]);
+                        pictures += 1;
+                    }
+                }
+            }
+        }
+        assert!(entries > 100, "vacuous: only {entries} entries");
+        // The control: the shipped Color panel's bar is reached and carries it.
+        assert_eq!(pictures, 1, "exactly one shipped color_bar, carrying its picture");
     }
 
     // ── The options channel (W-b) ─────────────────────────────────────

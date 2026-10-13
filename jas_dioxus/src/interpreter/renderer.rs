@@ -7274,7 +7274,7 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
 fn render_color_bar(_el: &serde_json::Value, _ctx: &serde_json::Value, rctx: &RenderCtx) -> Element {
     use crate::geometry::element::Color;
 
-    let data_uri = crate::workspace::color_panel_view::build_color_bar_data_uri();
+    let data_uri = crate::color_bar_picture::data_uri();
     let app = rctx.app.clone();
     let mut revision = rctx.revision;
 

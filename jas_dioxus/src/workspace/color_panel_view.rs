@@ -199,84 +199,6 @@ fn color_bar_element_size(id: &str) -> (f64, f64) {
 }
 
 // ---------------------------------------------------------------------------
-// Color bar image generation
-// ---------------------------------------------------------------------------
-
-/// Build a data URI for the color bar as a BMP image.
-/// Each pixel is `color_util::color_bar_rgb` at that pixel, normalized.
-/// Uses a 120x32 image (browser scales smoothly).
-/// Result is cached — the gradient never changes.
-pub(crate) fn build_color_bar_data_uri() -> String {
-    use std::sync::OnceLock;
-    static CACHE: OnceLock<String> = OnceLock::new();
-    CACHE.get_or_init(build_color_bar_data_uri_inner).clone()
-}
-
-fn build_color_bar_data_uri_inner() -> String {
-    const W: usize = 120;
-    const H: usize = 32;
-
-    // BMP: 54-byte header + W*H*3 pixel data (120*3=360, divisible by 4, no padding)
-    let pixel_data_size = W * 3 * H;
-    let file_size = 54 + pixel_data_size;
-
-    let mut bmp = Vec::with_capacity(file_size);
-    // BMP file header (14 bytes)
-    bmp.extend_from_slice(b"BM");
-    bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
-    bmp.extend_from_slice(&[0u8; 4]); // reserved
-    bmp.extend_from_slice(&54u32.to_le_bytes()); // pixel data offset
-    // DIB header (40 bytes - BITMAPINFOHEADER)
-    bmp.extend_from_slice(&40u32.to_le_bytes());
-    bmp.extend_from_slice(&(W as i32).to_le_bytes());
-    bmp.extend_from_slice(&(H as i32).to_le_bytes());
-    bmp.extend_from_slice(&1u16.to_le_bytes()); // color planes
-    bmp.extend_from_slice(&24u16.to_le_bytes()); // bits per pixel
-    bmp.extend_from_slice(&[0u8; 24]); // compression, sizes, resolution, colors
-
-    // BMP rows are bottom-to-top, so row 0 in the file is the bottom of the image.
-    for bmp_row in 0..H {
-        let y = (H - 1 - bmp_row) as f64;
-        for x in 0..W {
-            // The picture is the pick's own function, so a click lands on the
-            // colour drawn under it.
-            let (r, g, b) = crate::interpreter::color_util::color_bar_rgb(
-                x as f64 / W as f64, y / H as f64);
-            // BMP pixel order is BGR
-            bmp.extend_from_slice(&[b, g, r]);
-        }
-    }
-
-    let encoded = simple_base64(&bmp);
-    format!("data:image/bmp;base64,{encoded}")
-}
-
-/// Minimal base64 encoder (no external dependency).
-fn simple_base64(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = if chunk.len() > 1 { chunk[1] as u32 } else { 0 };
-        let b2 = if chunk.len() > 2 { chunk[2] as u32 } else { 0 };
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[((triple >> 18) & 0x3F) as usize] as char);
-        out.push(TABLE[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            out.push(TABLE[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if chunk.len() > 2 {
-            out.push(TABLE[(triple & 0x3F) as usize] as char);
-        } else {
-            out.push('=');
-        }
-    }
-    out
-}
-
-// ---------------------------------------------------------------------------
 // ColorPanelView component
 // ---------------------------------------------------------------------------
 
@@ -346,7 +268,7 @@ pub(crate) fn ColorPanelView() -> Element {
 
     // Color bar: pixel-accurate base64 BMP data URI.
     // Split y-axis: top half S 0→100%, B 100→80%; bottom half S 100%, B 80→0%.
-    let color_bar_data_uri = build_color_bar_data_uri();
+    let color_bar_data_uri = crate::color_bar_picture::data_uri();
 
     let bar_opacity = if disabled { "0.4" } else { "1.0" };
 
