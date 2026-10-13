@@ -5935,8 +5935,7 @@ fn render_text_input(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Ren
                                             if st.color_panel_mode == crate::workspace::color_panel_view::ColorMode::WebSafeRgb {
                                                 let (r, g, b, _) = color.to_rgba();
                                                 let snap = |c: f64| -> f64 {
-                                                    let q = ((c * 255.0).round() / 51.0).round() * 51.0;
-                                                    q / 255.0
+                                                    super::color_util::web_safe_channel((c * 255.0).round() as u8) as f64 / 255.0
                                                 };
                                                 color = crate::geometry::element::Color::rgb(
                                                     snap(r), snap(g), snap(b));
