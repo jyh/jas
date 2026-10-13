@@ -1,5 +1,14 @@
 //! Color conversion utilities matching the Python/JS implementations.
 
+/// One 8-bit channel snapped to the nearest web-safe value, a multiple of 51
+/// (0, 51, 102, 153, 204, 255), half away from zero. The Color panel's Web
+/// Safe RGB mode applies it to a typed hex on commit (`cp_hex`); the web app
+/// and the engine both call this, and Swift's `PanelWidgetEvents` applies the
+/// same rule.
+pub fn web_safe_channel(c: u8) -> u8 {
+    ((c as f64 / 51.0).round() * 51.0) as u8
+}
+
 /// Parse a hex color string to (r, g, b). Returns (0,0,0) for invalid input.
 pub fn parse_hex(c: &str) -> (u8, u8, u8) {
     let h = c.trim_start_matches('#');
@@ -364,6 +373,17 @@ mod tests {
         let map = panel_map("rgb", 0.4, 0.25, 0.25);
         let got = as_8bit(color_from_panel_edit("r", 200.0, &map).unwrap());
         assert_eq!(got, (200, 64, 64), "only r moved");
+    }
+
+    /// The web-safe snap at its half-step edges: 25.5 is the boundary
+    /// between 0 and 51, so 25 snaps down and 26 up; 127/128 straddle the
+    /// 102/153 boundary at 127.5; the ends are fixed points.
+    #[test]
+    fn web_safe_channel_snaps_to_the_nearest_multiple_of_51() {
+        for (c, want) in [(0u8, 0u8), (25, 0), (26, 51), (127, 102), (128, 153), (229, 204), (230, 255), (255, 255)] {
+            assert_eq!(web_safe_channel(c), want, "{c}");
+        }
+        assert!((0..=255u8).all(|c| web_safe_channel(c) % 51 == 0), "every result is web-safe");
     }
 
     #[test]
