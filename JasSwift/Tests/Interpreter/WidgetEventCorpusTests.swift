@@ -273,3 +273,23 @@ private func isTrue(_ v: Any?) -> Bool { Value.fromJson(v) == .bool(true) }
     #expect(!WidgetEvent.parseCommit(widget: w, text: "Letter").accepted)
     #expect(!WidgetEvent.parseCommit(widget: w, text: "legal").accepted)
 }
+
+// A slider (WIDGET_EVENTS.md, Parsing; the reference's `_snap`): a number,
+// clamped, snapped to `step` from `min` half up, clamped again. The values are
+// the reference's own (`widget_event.parse_commit`), as Rust's arm uses.
+@Test func widgetEventASliderClampsSnapsFromMinAndClampsAgain() {
+    func parse(_ w: [String: Any], _ t: String) -> Double? {
+        let r = WidgetEvent.parseCommit(widget: w, text: t)
+        return r.accepted ? r.value as? Double : nil
+    }
+    let w: [String: Any] = ["type": "slider", "min": 0, "max": 255, "step": 51]
+    #expect(parse(w, "100") == 102, "nearest step")
+    #expect(parse(w, "25.5") == 51, "half up")
+    #expect(parse(w, "-9") == 0, "clamped below")
+    #expect(WidgetEvent.parseCommit(widget: w, text: "abc").accepted == false, "not a number")
+    let g: [String: Any] = ["type": "slider", "min": 10, "max": 30, "step": 3]
+    #expect(parse(g, "14") == 13, "from min, not from 0")
+    #expect(parse(g, "29.9") == 30, "an off-grid max: 31 clamped to 30")
+    #expect(parse(["type": "slider", "min": 0, "max": 10], "3.7") == 3.7, "no step")
+    #expect(parse(["type": "slider", "step": 0], "3.7") == 3.7, "a zero step")
+}
