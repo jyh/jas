@@ -1065,9 +1065,10 @@ public sealed partial class MainWindow
         /// move to a new point sends `change` with `u,v`
         /// (<see cref="PanelWire.ColorBarPoint"/>), and the release sends `commit`
         /// with the release point. A lost capture commits the last point named.
-        /// ⛔ NO COLOUR IS COMPUTED HERE: the engine maps and clamps the point.
-        /// The bar is drawn as an outlined surface, because the plan carries no
-        /// picture of it yet.
+        /// ⛔ NO COLOUR IS COMPUTED HERE: the engine maps and clamps the point,
+        /// and the engine's picture of the bar (`display.picture`, §252) is
+        /// decoded and stretched to the bar's rect, so the colour under a point
+        /// is the colour that point picks. With no picture, an outline.
         /// </summary>
         private ColorBarSurface BuildColorBar(PaneLeaf leaf)
         {
@@ -1081,6 +1082,8 @@ public sealed partial class MainWindow
                 Tag = grip,
             };
             if (leaf.Literal("summary") is { Length: > 0 } tip) { ToolTipService.SetToolTip(bar, tip); }
+            if (PanelWire.PictureBytes(leaf.Shown("picture")) is { } picture) { LoadColorBarPicture(bar, picture, leaf, _paneBuild); }
+            else { _w.Report($"PANEL PICTURE NONE {leaf.Id} -- the bar stays an outline"); }
             if (leaf.Id.Length == 0) { bar.IsHitTestVisible = false; return bar; }
 
             var id = leaf.Id;
@@ -1126,6 +1129,46 @@ public sealed partial class MainWindow
             };
             bar.PointerCaptureLost += (_, _) => Release(null);
             return bar;
+        }
+
+        /// <summary>
+        /// §252: draw the engine's BMP of the colour bar under the bar's pointer
+        /// surface, stretched over the whole bar (the core's 120×32 to the leaf's
+        /// rect), with no outline.
+        /// The image takes no pointer, so every press still reaches the bar. A
+        /// load for a replaced build is dropped; a failed load leaves the outline.
+        /// </summary>
+        private async void LoadColorBarPicture(ColorBarSurface bar, byte[] picture, PaneLeaf leaf, int build)
+        {
+            try
+            {
+                using var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream();
+                using (var writer = new Windows.Storage.Streams.DataWriter(stream))
+                {
+                    writer.WriteBytes(picture);
+                    await writer.StoreAsync();
+                    writer.DetachStream();
+                }
+                stream.Seek(0);
+                var source = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+                await source.SetSourceAsync(stream);
+                if (build != _paneBuild) { return; }
+                // The outline goes: a Grid's border insets its children, and the
+                // pointer's u,v are measured over the whole bar, so an inset
+                // picture would put a different colour under the point it picks.
+                bar.BorderThickness = new Thickness(0);
+                bar.Children.Insert(0, new Image
+                {
+                    Source = source,
+                    Stretch = Microsoft.UI.Xaml.Media.Stretch.Fill,
+                    IsHitTestVisible = false,
+                });
+                _w.Report($"PANEL PICTURE drawn {leaf.Id} {source.PixelWidth}x{source.PixelHeight} into {leaf.W}x{leaf.H}");
+            }
+            catch (Exception ex)
+            {
+                _w.Report($"PANEL PICTURE FAILED {ex.GetType().Name}: {ex.Message} -- the bar stays an outline");
+            }
         }
 
         /// <summary>
