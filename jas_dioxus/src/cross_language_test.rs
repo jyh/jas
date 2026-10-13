@@ -906,6 +906,25 @@ mod tests {
         }
     }
 
+    /// The colour bar corpus: a point normalized to [0,1]^2 -> the colour the
+    /// bar shows there. Goldens derived from the spec's formula
+    /// (`scripts/derive_color_bar_goldens.py`). Mirrored by Swift's
+    /// `algorithmColorBarVectors` and the reference's `test_color_bar.py`, and
+    /// run port-against-port by `scripts/cross_language_algorithms.py --algo color_bar`.
+    #[test]
+    fn algorithm_color_bar_vectors() {
+        use crate::interpreter::color_util::color_bar_hex;
+        let doc: serde_json::Value = serde_json::from_str(&read_fixture("algorithms/color_bar.json"))
+            .expect("Failed to parse color_bar.json");
+        let vectors = doc["vectors"].as_array().expect("color_bar.json has no vectors");
+        assert!(vectors.len() >= 12, "color_bar.json has {} vectors", vectors.len());
+        for tc in vectors {
+            let (u, v) = (tc["u"].as_f64().unwrap(), tc["v"].as_f64().unwrap());
+            assert_eq!(color_bar_hex(u, v), tc["expected"].as_str().unwrap(),
+                       "color_bar '{}': ({u}, {v})", tc["name"]);
+        }
+    }
+
     /// The `options` corpus (SCHEMA.md, `options`): how a literal list reads
     /// and what a commit of each text accepts. A bare `separator` is a divider
     /// and NEVER a value. Authored from the schema text, because every reader

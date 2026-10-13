@@ -111,6 +111,33 @@ def hsb_to_rgb(h: float, s: float, b: float) -> tuple[int, int, int]:
     return (round((r1 + m) * 255), round((g1 + m) * 255), round((b1_ + m) * 255))
 
 
+def color_bar_rgb(u: float, v: float) -> tuple[int, int, int]:
+    """The Color panel's colour bar (``cp_color_bar``): the colour it shows at
+    a point normalized to [0, 1]^2 -- ``u`` left to right, ``v`` top to bottom,
+    each clamped. Hue is 360 u. The top half ramps saturation 0 -> 100 % while
+    brightness goes 100 -> 80 %; the bottom half holds saturation at 100 % while
+    brightness goes 80 -> 0 % (workspace/panels/color.yaml).
+
+    ONE mapping: every view of the bar calls this with its own pixel point
+    divided by its own size, and the engine maps a shell's normalized point
+    with it. Held to test_fixtures/algorithms/color_bar.json.
+    """
+    u = min(max(u, 0.0), 1.0)
+    v = min(max(v, 0.0), 1.0)
+    if v <= 0.5:
+        t = v / 0.5
+        sat, br = t * 100.0, 100.0 - t * 20.0
+    else:
+        t = (v - 0.5) / 0.5
+        sat, br = 100.0, 80.0 * (1.0 - t)
+    return hsb_to_rgb(360.0 * u, sat, br)
+
+
+def color_bar_hex(u: float, v: float) -> str:
+    """:func:`color_bar_rgb` as ``#rrggbb`` lowercase."""
+    return rgb_to_hex(*color_bar_rgb(u, v))
+
+
 def rgb_to_cmyk(r: int, g: int, b: int) -> tuple[int, int, int, int]:
     """Convert RGB (0-255) to CMYK (0-100 each)."""
     if r == 0 and g == 0 and b == 0:

@@ -87,6 +87,37 @@ public func saturatingUInt8(_ v: Double) -> UInt8 {
     return UInt8(v)
 }
 
+/// The Color panel's colour bar (`cp_color_bar`): the colour it shows at a
+/// point normalized to [0, 1]² — `u` left to right, `v` top to bottom, each
+/// clamped. Hue is 360 u. The top half ramps saturation 0 → 100 % while
+/// brightness goes 100 → 80 %; the bottom half holds saturation at 100 % while
+/// brightness goes 80 → 0 % (workspace/panels/color.yaml). ONE mapping: every
+/// view of the bar calls it with its own pixel point divided by its own size.
+/// Mirrors Rust `color_util::color_bar_rgb`; held to
+/// `test_fixtures/algorithms/color_bar.json`.
+public func colorBarRgb(_ u: Double, _ v: Double) -> (UInt8, UInt8, UInt8) {
+    let u = min(max(u, 0.0), 1.0)
+    let v = min(max(v, 0.0), 1.0)
+    let sat: Double
+    let br: Double
+    if v <= 0.5 {
+        let t = v / 0.5
+        sat = t * 100.0
+        br = 100.0 - t * 20.0
+    } else {
+        let t = (v - 0.5) / 0.5
+        sat = 100.0
+        br = 80.0 * (1.0 - t)
+    }
+    return hsbToRgb(360.0 * u, sat, br)
+}
+
+/// ``colorBarRgb(_:_:)`` as `#rrggbb` lowercase.
+public func colorBarHex(_ u: Double, _ v: Double) -> String {
+    let (r, g, b) = colorBarRgb(u, v)
+    return rgbToHex(r, g, b)
+}
+
 /// Convert HSB (h: 0-360, s: 0-100, b: 0-100) to RGB (0-255).
 ///
 /// Channels outside those ranges are clamped (see ``clampChannel``). Hue's

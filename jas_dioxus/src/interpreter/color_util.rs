@@ -78,6 +78,36 @@ pub fn clamp_channel(v: f64, lo: f64, hi: f64) -> f64 {
     v.clamp(lo, hi)
 }
 
+/// The Color panel's colour bar (`cp_color_bar`): the colour it shows at a
+/// point normalized to [0, 1]² — `u` left to right, `v` top to bottom, each
+/// clamped. Hue is 360 u. The top half ramps saturation 0 → 100 % while
+/// brightness goes 100 → 80 %; the bottom half holds saturation at 100 % while
+/// brightness goes 80 → 0 % (workspace/panels/color.yaml).
+///
+/// ONE mapping: every view of the bar calls this with its own pixel point
+/// divided by its own size, and the engine maps a shell's normalized point
+/// with it. Held to `test_fixtures/algorithms/color_bar.json`.
+pub fn color_bar_rgb(u: f64, v: f64) -> (u8, u8, u8) {
+    let u = u.clamp(0.0, 1.0);
+    let v = v.clamp(0.0, 1.0);
+    let (sat, br) = if v <= 0.5 {
+        let t = v / 0.5;
+        (t * 100.0, 100.0 - t * 20.0)
+    } else {
+        let t = (v - 0.5) / 0.5;
+        (100.0, 80.0 * (1.0 - t))
+    };
+    hsb_to_rgb(360.0 * u, sat, br)
+}
+
+/// [`color_bar_rgb`] as `#rrggbb` lowercase.
+// Read by the corpus tests and the algorithm CLI; the engine route is fork B2.
+#[allow(dead_code)]
+pub fn color_bar_hex(u: f64, v: f64) -> String {
+    let (r, g, b) = color_bar_rgb(u, v);
+    rgb_to_hex(r, g, b)
+}
+
 /// Convert HSB (h:0-360, s:0-100, b:0-100) to RGB (0-255).
 ///
 /// Channels outside those ranges are clamped (see [`clamp_channel`]). Hue's

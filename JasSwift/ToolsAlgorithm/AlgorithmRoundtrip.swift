@@ -56,6 +56,7 @@ case "gradient_remap":    results = runGradientRemap(activeVectors)
 case "length":            results = runLength(activeVectors)
 case "color_convert":     results = runColorConvert(activeVectors)
 case "number_commit":     results = runNumberCommit(activeVectors)
+case "color_bar":         results = runColorBar(activeVectors)
 case "hit_test":          results = runHitTest(activeVectors)
 case "path_project":      results = runPathProject(activeVectors)
 case "boolean":           results = runBoolean(activeVectors)
@@ -406,6 +407,17 @@ func runNumberCommit(_ vectors: [[String: Any]]) -> [[String: Any]] {
         let maxVal = (tc["max"] as? NSNumber)?.doubleValue
         let committed = numberInputCommit(text: text, min: minVal, max: maxVal)
         return ["name": name, "result": committed ?? NSNull()]
+    }
+}
+
+// MARK: - color_bar (the Color panel's colour bar: a normalized point -> its colour)
+
+func runColorBar(_ vectors: [[String: Any]]) -> [[String: Any]] {
+    vectors.map { tc in
+        let name = tc["name"] as? String ?? ""
+        let u = (tc["u"] as? NSNumber)?.doubleValue ?? .nan
+        let v = (tc["v"] as? NSNumber)?.doubleValue ?? .nan
+        return ["name": name, "result": colorBarHex(u, v)]
     }
 }
 
