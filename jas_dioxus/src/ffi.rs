@@ -4558,6 +4558,9 @@ mod tests {
         let e = engine_with(model_with(vec![filled(Some("0000ff"))], &[0]));
         let own = engine_of(e).panel.borrow().state_keys()["fill_color"].clone();
         assert_ne!(own, "#0000ff", "fixture: the panel's own colour is not blue");
+        // Draw the panel first, as the app does before any click: that is what
+        // puts the selection's blue in the store copy the adopt step reads.
+        assert_eq!(hex(e)["bind.value"], "0000ff", "fixture: the panel shows blue");
         // The reply class is not the point (a no-panel dispatch with no
         // registered panel replies Unchanged even when the mode moves); the
         // behaviour RAN, so its adopt step ran, and the mode is the receipt.
