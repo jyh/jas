@@ -13177,6 +13177,21 @@ mod tests {
         assert_eq!(view["element_selection"], serde_json::json!([]));
     }
 
+    /// The per-document recent colours are `active_document.recent_colors`
+    /// (`runtime_contexts.yaml`): the active tab's model list, and an empty
+    /// list with no tab. Until 2026-10-12 they were a panel override instead.
+    #[test]
+    fn active_document_view_publishes_the_tabs_recent_colours() {
+        let mut st = AppState::new();
+        st.tabs.clear();
+        st.active_tab = 0;
+        assert_eq!(build_active_document_view(&st)["recent_colors"], serde_json::json!([]));
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        st.tabs[st.active_tab].model.recent_colors = vec!["#112233".into(), "#445566".into()];
+        assert_eq!(build_active_document_view(&st)["recent_colors"],
+                   serde_json::json!(["#112233", "#445566"]));
+    }
+
     #[test]
     fn active_document_view_empty_selection_yields_no_selection() {
         let st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
