@@ -564,6 +564,35 @@ Test-Case 'painted: a later LOCKED line over the aim does not block (the law ski
     Get-SbAimOf (New-SbChooserDoc '{"type":"line","locked":true,"x1":0,"y1":72,"x2":72,"y2":0}') } $big
 Test-Case 'painted: an UNFILLED shape is never aimed at (its interior is not painted)' {
     Get-SbAimOf ('{"layers":[{"type":"layer","children":[{"type":"ellipse","cx":50,"cy":50,"rx":20,"ry":20,"fill":null}]}]}' | ConvertFrom-Json) } 'REFUSED'
+# jas's two latent gaps (#359 review, 2026-10-12). Neither fires on a shipped
+# fixture (every layer reads transform null and visibility preview).
+# (1) The law maps the press through the LAYER's transform before it scans the
+#     children, and this mirror reads no matrices: an aim in a transformed layer
+#     is disqualified, and a later child in a transformed layer may paint anywhere.
+# (2) `outline` visibility on the aim's chain (the layer, a container, the shape)
+#     caps the law to the outline, so the fill at the centre MISSES: disqualified.
+function New-SbLayersDoc([string]$Layer0, [string]$Kids0, [string]$Layer1 = '', [string]$Kids1 = '') {
+    $l0 = '{"type":"layer"' + $(if ($Layer0) { ',' + $Layer0 } else { '' }) + ',"children":[' + $Kids0 + ']}'
+    $l1 = if ($Kids1) { ',{"type":"layer"' + $(if ($Layer1) { ',' + $Layer1 } else { '' }) + ',"children":[' + $Kids1 + ']}' } else { '' }
+    ('{"layers":[' + $l0 + $l1 + ']}') | ConvertFrom-Json
+}
+$bigRect = '{"type":"rect","id":"big","x":0,"y":0,"width":72,"height":72,"fill":"#ff0000"}'
+$smallRect = '{"type":"rect","id":"small","x":300,"y":300,"width":10,"height":10,"fill":"#00ff00"}'
+$transform = '"transform":{"a":1,"b":0,"c":0,"d":1,"e":5,"f":5}'
+Test-Case 'painted: CONTROL -- the two-layer builder, nothing special, aims at the big rect' {
+    Get-SbAimOf (New-SbLayersDoc '' ($bigRect + ',' + $smallRect)) } $big
+Test-Case 'painted: an OUTLINE layer is never aimed into (the law tests only the outline there)' {
+    Get-SbAimOf (New-SbLayersDoc '"visibility":"outline"' ($bigRect + ',' + $smallRect)) } 'REFUSED'
+Test-Case 'painted: an OUTLINE shape is not aimed at; the next filled one is' {
+    Get-SbAimOf (New-SbLayersDoc '' (($bigRect -replace '"fill"', '"visibility":"outline","fill"') + ',' + $smallRect)) } $small
+Test-Case 'painted: a shape under an OUTLINE container is not aimed at' {
+    Get-SbAimOf (New-SbLayersDoc '' ('{"type":"group","visibility":"outline","children":[' + $bigRect + ']},' + $smallRect)) } $small
+Test-Case 'painted: a TRANSFORMED layer is never aimed into (the press is mapped through it)' {
+    Get-SbAimOf (New-SbLayersDoc $transform ($bigRect + ',' + $smallRect)) } 'REFUSED'
+Test-Case 'painted: a later child in a TRANSFORMED layer may paint anywhere, so it blocks' {
+    Get-SbAimOf (New-SbLayersDoc '' $bigRect $transform '{"type":"rect","x":900,"y":900,"width":1,"height":1,"fill":"#000"}') } 'REFUSED'
+Test-Case 'painted: CONTROL -- the same later child in a plain layer is far away and clear' {
+    Get-SbAimOf (New-SbLayersDoc '' $bigRect '' '{"type":"rect","x":900,"y":900,"width":1,"height":1,"fill":"#000"}') } $big
 $cdPath = Join-Path $PSScriptRoot '..\..\test_fixtures\expected\complex_document.json'
 $cdTarget = Get-SbFixture { if (Test-Path $cdPath) { Get-SbHitTargetFromDoc (Get-Content -Raw -LiteralPath $cdPath | ConvertFrom-Json) } else { $null } }
 Test-Case 'painted: the REAL document -- aim at the rect''s centre, as the E2E drag presses' { "$($cdTarget.AimPath) at $($cdTarget.X),$($cdTarget.Y)" } '$.layers[0].children[0] at 36,36'
