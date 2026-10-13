@@ -391,6 +391,15 @@ internal static unsafe class JasCore
     internal static extern byte jas_document_mark_saved(IntPtr engine);
 
     /// <summary>
+    /// The shell names the document it opened or saved (#406): the model's
+    /// <c>filename</c>, which the canvas tab shows. ⛔ UTF-8 BYTES, NOT A
+    /// STRING (BL5), as <see cref="jas_load_svg"/>. 1 named; 0 refused (null,
+    /// not UTF-8, empty) and unchanged; 255 no engine. Naming is not an edit.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_document_set_filename(IntPtr engine, byte[] name, nuint len);
+
+    /// <summary>
     /// The session's document as SVG -- the artefact a person SAVES.
     ///
     /// ⛔ NOT <see cref="jas_document_json"/>, AND THE DIFFERENCE IS THE WHOLE

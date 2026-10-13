@@ -574,6 +574,30 @@ internal static class PanelWire
         }
     }
 
+    /// <summary>
+    /// §257 (#406): the name the canvas tab shows for a document opened from or
+    /// saved to <paramref name="path"/> -- its FILE NAME, never the path, as the
+    /// UTF-8 bytes <c>jas_document_set_filename</c> takes (BL5: a string would
+    /// cross as ANSI and mangle a non-ASCII name). Null when there is no file
+    /// name to send, which the engine would refuse anyway.
+    /// </summary>
+    internal static byte[]? DocumentNameBytes(string? path)
+    {
+        var name = System.IO.Path.GetFileName(path);
+        return string.IsNullOrEmpty(name) ? null : System.Text.Encoding.UTF8.GetBytes(name);
+    }
+
+    /// <summary>
+    /// §257 (#406): does a save to <paramref name="path"/> give the document a
+    /// new name? True for the first save of an untitled document and for a
+    /// save to another file; false for a save back to the file it came from.
+    /// Windows paths compare without case.
+    /// </summary>
+    internal static bool IsNewDocumentPath(string? current, string path) =>
+        current is null
+        || !string.Equals(System.IO.Path.GetFullPath(current), System.IO.Path.GetFullPath(path),
+                          StringComparison.OrdinalIgnoreCase);
+
     internal static byte[]? PictureBytes(string? uri)
     {
         const string prefix = "data:image/bmp;base64,";
