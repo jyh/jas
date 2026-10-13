@@ -126,10 +126,10 @@ fn build_menu_items(content_id: &str) -> Vec<PanelMenuItem> {
                 leak(action.unwrap_or(""))
             };
 
-            // A `checked:` / `checked_when:` expression marks a stateful item:
+            // A `checked_when:` expression marks a stateful item:
             // a radio-group member, or a standalone checkbox (Toggle). The
             // radio group key is the action name.
-            let has_checked = obj.contains_key("checked") || obj.contains_key("checked_when");
+            let has_checked = obj.contains_key("checked_when");
             Some(if has_checked && is_radio_member {
                 PanelMenuItem::Radio { label, command, group: leak(action.unwrap_or("")) }
             } else if has_checked {
@@ -281,7 +281,7 @@ fn menu_entry(
 // Generic panel-menu CHECKED state
 // ---------------------------------------------------------------------------
 
-/// The `checked_when:` (or `checked:`) predicate of the panel-menu entry whose
+/// The `checked_when:` predicate of the panel-menu entry whose
 /// runtime command is `cmd`, or `None` when there is no such entry or it
 /// declares no predicate.
 ///
@@ -289,18 +289,15 @@ fn menu_entry(
 /// (`command_with_params` for radio members, the bare action otherwise), so a
 /// caller holding a `PanelMenuItem`'s command can always find its own entry.
 ///
-/// Both spellings are read because the panel-menu vocabulary uses both:
-/// `workspace/panels/{brushes,color,opacity,stroke,swatches}.yaml` write
-/// `checked_when:`, while `{align,character,paragraph}.yaml` write `checked:`.
-/// `build_menu_items` above already reads both to decide Toggle vs Radio, so
-/// reading only one here would leave three panels' check marks dead — the
-/// exact defect this path exists to close. No expression feature is added:
-/// the two keys carry the same grammar and are evaluated the same way.
+/// One spelling: `checked_when:`, the only key the shared `menu_state` walk
+/// evaluates. `{align,character,paragraph}.yaml` once wrote `checked:` and
+/// this function read both, so the web drew check marks the walk (and the
+/// Windows dock's export, which reads the walk) did not; the YAML is
+/// canonical now and `test_panel_menu_state.py` refuses the alias.
 pub fn checked_expr(content_id: &str, cmd: &str) -> Option<String> {
     let entry = menu_entry(content_id, cmd)?;
     entry
         .get("checked_when")
-        .or_else(|| entry.get("checked"))
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
