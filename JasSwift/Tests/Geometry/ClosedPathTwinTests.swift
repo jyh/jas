@@ -96,3 +96,114 @@ struct ClosedPathTwinTests {
         ])
     }
 }
+
+/// THE TWINS SHARE THEIR HANDLES. Twin of Rust's
+/// `closed_path_twin_handle_tests`, arm for arm. A pen-closed path's start (a
+/// `moveTo`) has no in-segment: its in-handle is the closing curve's x2. The
+/// closing endpoint has no out-segment: its out-handle is the first
+/// segment's x1. A Convert on a straight-`closePath` close inserts the pen's
+/// closing curve to hold the start's in-handle.
+@Suite("A closed path's start and its closing endpoint share their handles")
+struct ClosedPathTwinHandleTests {
+
+    private let penClosed: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 10, y1: -10, x2: 90, y2: -10, x: 100, y: 0),
+        .curveTo(x1: 110, y1: 50, x2: -10, y2: 50, x: 0, y: 0),
+        .closePath,
+    ]
+
+    private let penClosedStartCornered: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 0, y1: 0, x2: 90, y2: -10, x: 100, y: 0),
+        .curveTo(x1: 110, y1: 50, x2: 0, y2: 0, x: 0, y: 0),
+        .closePath,
+    ]
+
+    private func eq(_ a: (Double, Double)?, _ b: (Double, Double)?) -> Bool {
+        switch (a, b) {
+        case (nil, nil): return true
+        case let (p?, q?): return p.0 == q.0 && p.1 == q.1
+        default: return false
+        }
+    }
+
+    @Test func theStartAndItsTwinReportTheSameTwoHandles() {
+        for i in [0, 2] {
+            let (hIn, hOut) = pathHandlePositions(penClosed, anchorIdx: i)
+            #expect(eq(hIn, (-10, 50)), "anchor \(i) in")
+            #expect(eq(hOut, (10, -10)), "anchor \(i) out")
+        }
+        // CONTROL: a middle anchor reads its own two handles, unchanged.
+        let (mIn, mOut) = pathHandlePositions(penClosed, anchorIdx: 1)
+        #expect(eq(mIn, (90, -10)) && eq(mOut, (110, 50)))
+    }
+
+    @Test func aStartWithOnlyAnInHandleIsSmooth() {
+        var d = penClosed
+        d[1] = .curveTo(x1: 0, y1: 0, x2: 90, y2: -10, x: 100, y: 0)
+        #expect(isSmoothPoint(d, anchorIdx: 0))
+    }
+
+    @Test func convertingTheStartToACornerCollapsesBothOfItsHandles() {
+        for i in [0, 2] {
+            #expect(convertSmoothToCorner(penClosed, anchorIdx: i) == penClosedStartCornered, "anchor \(i)")
+        }
+    }
+
+    @Test func convertingTheStartToSmoothWritesBothOfItsHandles() {
+        let want: [PathCommand] = [
+            .moveTo(0, 0),
+            .curveTo(x1: 20, y1: -20, x2: 90, y2: -10, x: 100, y: 0),
+            .curveTo(x1: 110, y1: 50, x2: -20, y2: 20, x: 0, y: 0),
+            .closePath,
+        ]
+        for i in [0, 2] {
+            #expect(convertCornerToSmooth(penClosedStartCornered, anchorIdx: i, hx: 20, hy: -20) == want,
+                    "anchor \(i)")
+        }
+    }
+
+    @Test func convertingTheStartOfAStraightCloseInsertsTheClosingCurve() {
+        let tri: [PathCommand] = [.moveTo(0, 0), .lineTo(100, 0), .lineTo(50, 80), .closePath]
+        let got = convertCornerToSmooth(tri, anchorIdx: 0, hx: 0, hy: -20)
+        #expect(got == [
+            .moveTo(0, 0),
+            .curveTo(x1: 0, y1: -20, x2: 100, y2: 0, x: 100, y: 0),
+            .lineTo(50, 80),
+            .curveTo(x1: 50, y1: 80, x2: 0, y2: 20, x: 0, y: 0),
+            .closePath,
+        ])
+        let twins = closedPathTwins(got)
+        #expect(twins.count == 1 && twins[0] == (0, 3))
+    }
+
+    /// CONTROL: an OPEN path's start has no in-handle, and nothing is inserted.
+    @Test func convertingTheStartOfAnOpenPathInsertsNothing() {
+        #expect(convertCornerToSmooth([.moveTo(0, 0), .lineTo(100, 0)], anchorIdx: 0, hx: 0, hy: -20)
+                == [.moveTo(0, 0), .curveTo(x1: 0, y1: -20, x2: 100, y2: 0, x: 100, y: 0)])
+    }
+
+    @Test func draggingTheStartsInHandleMovesTheClosingX2() {
+        var want = penClosed
+        want[2] = .curveTo(x1: 110, y1: 50, x2: -5, y2: 50, x: 0, y: 0)
+        #expect(movePathHandleIndependent(penClosed, anchorIdx: 0, handleType: "in", dx: 5, dy: 0) == want)
+    }
+
+    @Test func draggingTheTwinsOutHandleMovesTheFirstX1() {
+        var want = penClosed
+        want[1] = .curveTo(x1: 10, y1: -5, x2: 90, y2: -10, x: 100, y: 0)
+        #expect(movePathHandleIndependent(penClosed, anchorIdx: 2, handleType: "out", dx: 0, dy: 5) == want)
+    }
+
+    @Test func aSmoothDragOfTheStartsInHandleRotatesItsOutHandle() {
+        let got = movePathHandle(penClosed, anchorIdx: 0, handleType: "in", dx: -40, dy: -50)
+        guard case .curveTo(_, _, let x2, let y2, _, _) = got[2],
+              case .curveTo(let x1, let y1, _, _, _, _) = got[1] else {
+            Issue.record("shape changed: \(got)")
+            return
+        }
+        #expect(x2 == -50 && y2 == 0)
+        #expect(abs(x1 - 200.0.squareRoot()) < 1e-9 && abs(y1) < 1e-9, "(\(x1), \(y1))")
+    }
+}

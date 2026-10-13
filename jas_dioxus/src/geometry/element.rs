@@ -2699,6 +2699,30 @@ fn cmd_indices_for_path(d: &[PathCommand]) -> Vec<usize> {
         .collect()
 }
 
+/// The command indices holding a path anchor's two handles: `(in, out)`, where
+/// `in` is a CurveTo whose `(x2, y2)` is the anchor's in-handle and `out` a
+/// CurveTo whose `(x1, y1)` is its out-handle. Normally the anchor's own
+/// command and the next one. A closed path's start and its closing endpoint
+/// are TWINS ([`closed_path_twins`]) and share their handles: the start (a
+/// `MoveTo`) has no in-segment, so its in-handle is on the closing CurveTo,
+/// and the closing endpoint (before `Z`) has no out-segment, so its
+/// out-handle is on the first segment.
+fn handle_sites(d: &[PathCommand], anchor_idx: usize) -> (Option<usize>, Option<usize>) {
+    let indices = cmd_indices_for_path(d);
+    let Some(&ci) = indices.get(anchor_idx) else { return (None, None) };
+    let curve = |c: usize| matches!(d.get(c), Some(PathCommand::CurveTo { .. })).then_some(c);
+    let twins = closed_path_twins(d);
+    let in_site = if matches!(d[ci], PathCommand::CurveTo { .. }) {
+        Some(ci)
+    } else {
+        twins.iter().find(|&&(a, _)| a == anchor_idx).and_then(|&(_, b)| curve(indices[b]))
+    };
+    let out_site = curve(ci + 1).or_else(|| {
+        twins.iter().find(|&&(_, b)| b == anchor_idx).and_then(|&(a, _)| curve(indices[a] + 1))
+    });
+    (in_site, out_site)
+}
+
 /// Return (incoming_handle, outgoing_handle) for a path anchor.
 /// Returns None for a handle that doesn't exist or coincides with its anchor.
 pub fn path_handle_positions(
@@ -2719,31 +2743,20 @@ pub fn path_handle_positions(
         _ => return (None, None),
     };
 
-    // Incoming handle: (x2, y2) of this CurveTo
-    let h_in = if let PathCommand::CurveTo { x2, y2, .. } = cmd {
-        if (*x2 - ax).abs() > 0.01 || (*y2 - ay).abs() > 0.01 {
-            Some((*x2, *y2))
-        } else {
-            None
-        }
-    } else {
-        None
+    let off = |(hx, hy): (f64, f64)| {
+        ((hx - ax).abs() > 0.01 || (hy - ay).abs() > 0.01).then_some((hx, hy))
     };
-
-    // Outgoing handle: (x1, y1) of next CurveTo
-    let h_out = if ci + 1 < d.len() {
-        if let PathCommand::CurveTo { x1, y1, .. } = &d[ci + 1] {
-            if (*x1 - ax).abs() > 0.01 || (*y1 - ay).abs() > 0.01 {
-                Some((*x1, *y1))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    } else {
-        None
-    };
+    let (in_site, out_site) = handle_sites(d, anchor_idx);
+    // Incoming handle: (x2, y2) of the in-site CurveTo
+    let h_in = in_site.and_then(|c| match d[c] {
+        PathCommand::CurveTo { x2, y2, .. } => off((x2, y2)),
+        _ => None,
+    });
+    // Outgoing handle: (x1, y1) of the out-site CurveTo
+    let h_out = out_site.and_then(|c| match d[c] {
+        PathCommand::CurveTo { x1, y1, .. } => off((x1, y1)),
+        _ => None,
+    });
 
     (h_in, h_out)
 }
@@ -2776,40 +2789,39 @@ pub fn move_path_handle(
     if anchor_idx >= indices.len() {
         return elem.clone();
     }
-    let ci = indices[anchor_idx];
-    let cmd = &d[ci];
-
-    let (ax, ay) = match cmd {
-        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
-        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+    let (ax, ay) = match d[indices[anchor_idx]] {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (x, y),
+        PathCommand::CurveTo { x, y, .. } => (x, y),
         _ => return elem.clone(),
     };
-
+    let (in_site, out_site) = handle_sites(d, anchor_idx);
     let mut new_cmds = d.clone();
 
     if handle_type == "in" {
-        if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
-            let new_hx = x2 + dx;
-            let new_hy = y2 + dy;
-            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: new_hx, y2: new_hy, x, y };
-            // Rotate opposite (out) handle
-            if ci + 1 < d.len()
-                && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
-                    let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, nx1, ny1);
-                    new_cmds[ci + 1] = PathCommand::CurveTo { x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny };
-                }
-        }
+        if let Some(c) = in_site
+            && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[c] {
+                let new_hx = x2 + dx;
+                let new_hy = y2 + dy;
+                new_cmds[c] = PathCommand::CurveTo { x1, y1, x2: new_hx, y2: new_hy, x, y };
+                // Rotate opposite (out) handle
+                if let Some(o) = out_site
+                    && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[o] {
+                        let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, nx1, ny1);
+                        new_cmds[o] = PathCommand::CurveTo { x1: rx, y1: ry, x2: nx2, y2: ny2, x: nx, y: ny };
+                    }
+            }
     } else if handle_type == "out"
-        && ci + 1 < d.len()
-            && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[ci + 1] {
+        && let Some(o) = out_site
+            && let PathCommand::CurveTo { x1: nx1, y1: ny1, x2: nx2, y2: ny2, x: nx, y: ny } = d[o] {
                 let new_hx = nx1 + dx;
                 let new_hy = ny1 + dy;
-                new_cmds[ci + 1] = PathCommand::CurveTo { x1: new_hx, y1: new_hy, x2: nx2, y2: ny2, x: nx, y: ny };
+                new_cmds[o] = PathCommand::CurveTo { x1: new_hx, y1: new_hy, x2: nx2, y2: ny2, x: nx, y: ny };
                 // Rotate opposite (in) handle
-                if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
-                    let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, x2, y2);
-                    new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: rx, y2: ry, x, y };
-                }
+                if let Some(c) = in_site
+                    && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[c] {
+                        let (rx, ry) = reflect_handle_keep_distance(ax, ay, new_hx, new_hy, x2, y2);
+                        new_cmds[c] = PathCommand::CurveTo { x1, y1, x2: rx, y2: ry, x, y };
+                    }
             }
 
     PathElem { d: new_cmds, ..elem.clone() }
@@ -2824,22 +2836,18 @@ pub fn move_path_handle_independent(
     dy: f64,
 ) -> PathElem {
     let d = &elem.d;
-    let indices = cmd_indices_for_path(d);
-    if anchor_idx >= indices.len() {
-        return elem.clone();
-    }
-    let ci = indices[anchor_idx];
-
+    let (in_site, out_site) = handle_sites(d, anchor_idx);
     let mut new_cmds = d.clone();
 
     if handle_type == "in" {
-        if let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci] {
-            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: x2 + dx, y2: y2 + dy, x, y };
-        }
+        if let Some(c) = in_site
+            && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[c] {
+                new_cmds[c] = PathCommand::CurveTo { x1, y1, x2: x2 + dx, y2: y2 + dy, x, y };
+            }
     } else if handle_type == "out"
-        && ci + 1 < d.len()
-            && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[ci + 1] {
-                new_cmds[ci + 1] = PathCommand::CurveTo { x1: x1 + dx, y1: y1 + dy, x2, y2, x, y };
+        && let Some(c) = out_site
+            && let PathCommand::CurveTo { x1, y1, x2, y2, x, y } = d[c] {
+                new_cmds[c] = PathCommand::CurveTo { x1: x1 + dx, y1: y1 + dy, x2, y2, x, y };
             }
 
     PathElem { d: new_cmds, ..elem.clone() }
@@ -2890,11 +2898,9 @@ pub fn convert_corner_to_smooth(
         return elem.clone();
     }
     let ci = indices[anchor_idx];
-    let cmd = &d[ci];
-
-    let (ax, ay) = match cmd {
-        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
-        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+    let (ax, ay) = match d[ci] {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (x, y),
+        PathCommand::CurveTo { x, y, .. } => (x, y),
         _ => return elem.clone(),
     };
 
@@ -2902,47 +2908,70 @@ pub fn convert_corner_to_smooth(
     let rhx = 2.0 * ax - hx;
     let rhy = 2.0 * ay - hy;
 
+    let end_of = |c: usize| match d[c] {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } | PathCommand::CurveTo { x, y, .. } => (x, y),
+        _ => (ax, ay),
+    };
+    // The segments this anchor's two handles live on (see [`handle_sites`]):
+    // its own command and the next one, except that a closed path's start
+    // takes its in-segment from its twin and the closing endpoint takes its
+    // out-segment from the start. A LineTo segment is converted to a CurveTo.
+    let twins = closed_path_twins(d);
+    let segment = |c: usize| {
+        matches!(d.get(c), Some(PathCommand::LineTo { .. } | PathCommand::CurveTo { .. })).then_some(c)
+    };
+    let in_seg = if matches!(d[ci], PathCommand::MoveTo { .. }) {
+        twins.iter().find(|&&(a, _)| a == anchor_idx).map(|&(_, b)| indices[b])
+    } else {
+        Some(ci)
+    };
+    let out_seg = segment(ci + 1).or_else(|| {
+        twins.iter().find(|&&(_, b)| b == anchor_idx).and_then(|&(a, _)| segment(indices[a] + 1))
+    });
+
     let mut new_cmds = d.clone();
 
-    // Set incoming handle (x2,y2 on this command) to the reflected position
-    match new_cmds[ci] {
-        PathCommand::LineTo { x, y } => {
-            new_cmds[ci] = PathCommand::CurveTo { x1: x, y1: y, x2: rhx, y2: rhy, x, y };
-            // Also need to fix x1,y1: use the previous anchor's position
-            if ci > 0 {
-                let (px, py) = match d[ci - 1] {
-                    PathCommand::MoveTo { x, y }
-                    | PathCommand::LineTo { x, y }
-                    | PathCommand::CurveTo { x, y, .. } => (x, y),
-                    _ => (ax, ay),
-                };
-                if let PathCommand::CurveTo { ref mut x1, ref mut y1, .. } = new_cmds[ci] {
-                    *x1 = px;
-                    *y1 = py;
-                }
-            }
-        }
-        PathCommand::CurveTo { x1, y1, x, y, .. } => {
-            new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: rhx, y2: rhy, x, y };
-        }
-        PathCommand::MoveTo { .. } => {
-            // Can't set incoming handle on MoveTo, only outgoing
-        }
-        _ => {}
-    }
-
-    // Set outgoing handle (x1,y1 on the next command) to (hx,hy)
-    if ci + 1 < new_cmds.len() {
-        match new_cmds[ci + 1] {
+    // Set outgoing handle (x1,y1 on the out-segment) to (hx,hy)
+    if let Some(o) = out_seg {
+        match new_cmds[o] {
             PathCommand::LineTo { x, y } => {
-                // Need incoming handle for the next anchor too
-                let (nx2, ny2) = (x, y);
-                new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2: nx2, y2: ny2, x, y };
+                new_cmds[o] = PathCommand::CurveTo { x1: hx, y1: hy, x2: x, y2: y, x, y };
             }
             PathCommand::CurveTo { x2, y2, x, y, .. } => {
-                new_cmds[ci + 1] = PathCommand::CurveTo { x1: hx, y1: hy, x2, y2, x, y };
+                new_cmds[o] = PathCommand::CurveTo { x1: hx, y1: hy, x2, y2, x, y };
             }
             _ => {}
+        }
+    }
+
+    // Set incoming handle (x2,y2 on the in-segment) to the reflected position
+    match in_seg {
+        Some(c) => match new_cmds[c] {
+            PathCommand::LineTo { x, y } => {
+                // A line's start is the previous anchor, which becomes x1.
+                let (px, py) = if c > 0 { end_of(c - 1) } else { (ax, ay) };
+                new_cmds[c] = PathCommand::CurveTo { x1: px, y1: py, x2: rhx, y2: rhy, x, y };
+            }
+            PathCommand::CurveTo { x1, y1, x, y, .. } => {
+                new_cmds[c] = PathCommand::CurveTo { x1, y1, x2: rhx, y2: rhy, x, y };
+            }
+            _ => {}
+        },
+        // A start with no twin: a straight `Z` close has no segment to hold
+        // the in-handle, so insert the pen's closing CurveTo (from the last
+        // anchor, whose out-handle sits on it) before the `Z`. An open path
+        // has no `Z` and its start has no in-handle at all.
+        None => {
+            let close = (ci + 1..d.len())
+                .take_while(|&c| !matches!(d[c], PathCommand::MoveTo { .. }))
+                .find(|&c| matches!(d[c], PathCommand::ClosePath));
+            if let Some(close) = close
+                && close > ci + 1 {
+                    let (px, py) = end_of(close - 1);
+                    new_cmds.insert(close, PathCommand::CurveTo {
+                        x1: px, y1: py, x2: rhx, y2: rhy, x: ax, y: ay,
+                    });
+                }
         }
     }
 
@@ -2959,26 +2988,24 @@ pub fn convert_smooth_to_corner(
     if anchor_idx >= indices.len() {
         return elem.clone();
     }
-    let ci = indices[anchor_idx];
-    let cmd = &d[ci];
-
-    let (ax, ay) = match cmd {
-        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (*x, *y),
-        PathCommand::CurveTo { x, y, .. } => (*x, *y),
+    let (ax, ay) = match d[indices[anchor_idx]] {
+        PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => (x, y),
+        PathCommand::CurveTo { x, y, .. } => (x, y),
         _ => return elem.clone(),
     };
-
+    let (in_site, out_site) = handle_sites(d, anchor_idx);
     let mut new_cmds = d.clone();
 
     // Collapse incoming handle (x2,y2) to anchor
-    if let PathCommand::CurveTo { x1, y1, x, y, .. } = new_cmds[ci] {
-        new_cmds[ci] = PathCommand::CurveTo { x1, y1, x2: ax, y2: ay, x, y };
-    }
+    if let Some(c) = in_site
+        && let PathCommand::CurveTo { x1, y1, x, y, .. } = new_cmds[c] {
+            new_cmds[c] = PathCommand::CurveTo { x1, y1, x2: ax, y2: ay, x, y };
+        }
 
-    // Collapse outgoing handle (x1,y1 of next command) to anchor
-    if ci + 1 < new_cmds.len()
-        && let PathCommand::CurveTo { x2, y2, x, y, .. } = new_cmds[ci + 1] {
-            new_cmds[ci + 1] = PathCommand::CurveTo { x1: ax, y1: ay, x2, y2, x, y };
+    // Collapse outgoing handle (x1,y1) to anchor
+    if let Some(o) = out_site
+        && let PathCommand::CurveTo { x2, y2, x, y, .. } = new_cmds[o] {
+            new_cmds[o] = PathCommand::CurveTo { x1: ax, y1: ay, x2, y2, x, y };
         }
 
     PathElem { d: new_cmds, ..elem.clone() }
@@ -5873,5 +5900,157 @@ mod closed_path_twin_tests {
             PathCommand::LineTo { x: 100.0, y: 5.0 },
             PathCommand::CurveTo { x1: 110.0, y1: 15.0, x2: 190.0, y2: 10.0, x: 200.0, y: 0.0 },
         ]);
+    }
+}
+
+/// THE TWINS SHARE THEIR HANDLES. A pen-closed path's start (anchor 0, a
+/// `MoveTo`) has no in-segment of its own: its in-handle is the closing
+/// CurveTo's `x2`. And the closing endpoint has no out-segment: its out-handle
+/// is the first segment's `x1`. Every reader and writer of a handle goes
+/// through the same two sites, so the Anchor Point tool sees, converts and
+/// drags the start's in-handle, and a Convert on a straight-`Z` close inserts
+/// the pen's closing CurveTo to hold it.
+#[cfg(test)]
+mod closed_path_twin_handle_tests {
+    use super::*;
+    use super::closed_path_twin_tests_support::*;
+
+    fn elem(d: Vec<PathCommand>) -> PathElem {
+        PathElem {
+            d, fill: None, stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            width_points: Vec::new(), common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+            stroke_brush: None, stroke_brush_overrides: None,
+            fill_rule: FillRule::NonZero,
+        }
+    }
+
+    #[test]
+    fn the_start_and_its_twin_report_the_same_two_handles() {
+        let d = pen_closed();
+        let want = (Some((-10.0, 50.0)), Some((10.0, -10.0)));
+        assert_eq!(path_handle_positions(&d, 0), want);
+        assert_eq!(path_handle_positions(&d, 2), want);
+        // CONTROL: a middle anchor reads its own two handles, unchanged.
+        assert_eq!(path_handle_positions(&d, 1), (Some((90.0, -10.0)), Some((110.0, 50.0))));
+    }
+
+    /// A start whose ONLY handle is its in-handle is smooth, so the Anchor
+    /// Point tool converts it to a corner rather than treating it as one.
+    #[test]
+    fn a_start_with_only_an_in_handle_is_smooth() {
+        let mut d = pen_closed();
+        d[1] = PathCommand::CurveTo { x1: 0.0, y1: 0.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 };
+        assert!(is_smooth_point(&d, 0));
+    }
+
+    fn pen_closed_start_cornered() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 0.0, y1: 0.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: 0.0, y2: 0.0, x: 0.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]
+    }
+
+    #[test]
+    fn converting_the_start_to_a_corner_collapses_both_of_its_handles() {
+        for i in [0, 2] {
+            assert_eq!(convert_smooth_to_corner(&elem(pen_closed()), i).d,
+                       pen_closed_start_cornered(), "anchor {i}");
+        }
+    }
+
+    #[test]
+    fn converting_the_start_to_smooth_writes_both_of_its_handles() {
+        let want = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 20.0, y1: -20.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: -20.0, y2: 20.0, x: 0.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ];
+        for i in [0, 2] {
+            assert_eq!(convert_corner_to_smooth(&elem(pen_closed_start_cornered()), i, 20.0, -20.0).d,
+                       want, "anchor {i}");
+        }
+    }
+
+    /// A straight `Z` close has nowhere to hold the start's in-handle, so the
+    /// Convert inserts the pen's closing CurveTo: from the last anchor (a
+    /// corner, so its out-handle sits on it) to the start, carrying the
+    /// reflected handle. The start gains a twin, which is the pen's own form.
+    #[test]
+    fn converting_the_start_of_a_straight_close_inserts_the_closing_curve() {
+        let tri = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 80.0 },
+            PathCommand::ClosePath,
+        ];
+        let got = convert_corner_to_smooth(&elem(tri), 0, 0.0, -20.0).d;
+        assert_eq!(got, vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 0.0, y1: -20.0, x2: 100.0, y2: 0.0, x: 100.0, y: 0.0 },
+            PathCommand::LineTo { x: 50.0, y: 80.0 },
+            PathCommand::CurveTo { x1: 50.0, y1: 80.0, x2: 0.0, y2: 20.0, x: 0.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]);
+        assert_eq!(closed_path_twins(&got), vec![(0, 3)]);
+    }
+
+    /// CONTROL: an OPEN path's start has no in-handle to write, and nothing is
+    /// inserted.
+    #[test]
+    fn converting_the_start_of_an_open_path_inserts_nothing() {
+        let open = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 100.0, y: 0.0 },
+        ];
+        assert_eq!(convert_corner_to_smooth(&elem(open), 0, 0.0, -20.0).d, vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 0.0, y1: -20.0, x2: 100.0, y2: 0.0, x: 100.0, y: 0.0 },
+        ]);
+    }
+
+    #[test]
+    fn dragging_the_starts_in_handle_moves_the_closing_x2() {
+        let got = move_path_handle_independent(&elem(pen_closed()), 0, "in", 5.0, 0.0).d;
+        let mut want = pen_closed();
+        want[2] = PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: -5.0, y2: 50.0, x: 0.0, y: 0.0 };
+        assert_eq!(got, want);
+    }
+
+    #[test]
+    fn dragging_the_twins_out_handle_moves_the_first_x1() {
+        let got = move_path_handle_independent(&elem(pen_closed()), 2, "out", 0.0, 5.0).d;
+        let mut want = pen_closed();
+        want[1] = PathCommand::CurveTo { x1: 10.0, y1: -5.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 };
+        assert_eq!(got, want);
+    }
+
+    /// The smooth drag rotates the OTHER handle, across the twin: the start's
+    /// new in-handle (-50, 0) puts its out-handle on the opposite ray at its
+    /// old length, sqrt(200).
+    #[test]
+    fn a_smooth_drag_of_the_starts_in_handle_rotates_its_out_handle() {
+        let got = move_path_handle(&elem(pen_closed()), 0, "in", -40.0, -50.0).d;
+        let PathCommand::CurveTo { x2, y2, .. } = got[2] else { panic!("{got:?}") };
+        assert_eq!((x2, y2), (-50.0, 0.0));
+        let PathCommand::CurveTo { x1, y1, .. } = got[1] else { panic!("{got:?}") };
+        assert!((x1 - 200f64.sqrt()).abs() < 1e-9 && y1.abs() < 1e-9, "({x1}, {y1})");
+    }
+}
+
+/// The pen-closed fixture, shared by the two twin modules.
+#[cfg(test)]
+mod closed_path_twin_tests_support {
+    use super::PathCommand;
+    pub fn pen_closed() -> Vec<PathCommand> {
+        vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 10.0, y1: -10.0, x2: 90.0, y2: -10.0, x: 100.0, y: 0.0 },
+            PathCommand::CurveTo { x1: 110.0, y1: 50.0, x2: -10.0, y2: 50.0, x: 0.0, y: 0.0 },
+            PathCommand::ClosePath,
+        ]
     }
 }
