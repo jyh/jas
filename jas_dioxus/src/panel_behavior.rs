@@ -75,6 +75,7 @@ use serde_json::{json, Map, Value};
 
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
+use crate::interpreter::colour_host;
 use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
@@ -283,6 +284,15 @@ impl EffectHost for EngineHost {
     /// ONE undo step, and the runner's owner commits it.
     fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
         let Some(model) = model else { return };
+        // The active colour (`colour_host`, the reference's
+        // `subscribe_active_color`): the model's default and the selection.
+        if colour_host::ACTIVE_COLOUR_KEYS.contains(&key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            colour_host::apply_active_colour(model, key, store.get(key));
+            return;
+        }
         if !stroke_host::is_render_key(key) {
             return;
         }

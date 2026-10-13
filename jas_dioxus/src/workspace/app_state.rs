@@ -357,22 +357,9 @@ pub(crate) struct LayerSoloState {
     pub(crate) saved: std::collections::HashMap<Vec<usize>, crate::geometry::element::Visibility>,
 }
 
-/// A stroke with `color` replaced and every other attribute preserved.
-/// `None` (nothing to recolour) becomes a plain 1pt stroke in that colour.
-pub(crate) fn recolor_stroke(base: Option<Stroke>, color: Color) -> Stroke {
-    match base {
-        Some(mut s) => { s.color = color; s }
-        None => Stroke::new(color, 1.0),
-    }
-}
-
-/// A fill with `color` replaced and its opacity preserved.
-pub(crate) fn recolor_fill(base: Option<Fill>, color: Color) -> Fill {
-    match base {
-        Some(mut f) => { f.color = color; f }
-        None => Fill::new(color),
-    }
-}
+// The two recolour rules live web-free in `interpreter::colour_host`, where the
+// engine's active-colour write also reads them; re-exported for the web paths.
+pub(crate) use crate::interpreter::colour_host::{recolor_fill, recolor_stroke};
 
 /// Gradient panel state fields — mirror the panel-local state declared
 /// in `workspace/panels/gradient.yaml`. Populated by

@@ -1008,6 +1008,19 @@ fn colour_value_commit(
         return refuse("BadParamType", &target);
     }
     crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+    // The edit moved the active colour, so the model follows as it does after
+    // any write of that key (`colour_host`): one undo step, opened here
+    // because no effect runner owns this route.
+    let generation = engine.model.borrow().generation();
+    if outcome == EditOutcome::Changed {
+        let key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
+        let value = engine.store.borrow().get(key).clone();
+        let mut model = engine.model.borrow_mut();
+        model.begin_txn();
+        crate::interpreter::colour_host::apply_active_colour(&mut model, key, &value);
+        model.commit_txn();
+    }
+    let doc_changed = engine.model.borrow().generation() != generation;
     let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
     if outcome == EditOutcome::Unchanged {
@@ -1015,7 +1028,7 @@ fn colour_value_commit(
     } else {
         *engine.last_error.borrow_mut() = None;
     }
-    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": false});
+    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": doc_changed});
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -4364,10 +4377,15 @@ mod tests {
     #[test]
     fn a_colour_act_paints_the_selection_as_the_reference_does() {
         use crate::document::test_fixture::{model_with, rect};
-        use crate::geometry::element::Color;
+        use crate::geometry::element::{Color, Element, Stroke};
         let _counters = crate::ffi_instr::test_lock::lock();
         let id = crate::panel_scope::COLOUR_PANEL;
-        // (side, the colour the act leaves, how)
+        // A black fill AND a black 2pt stroke, so None on either side has
+        // something to clear and a recolour has a width to keep.
+        let stroked = || match rect(10.0, 20.0, 30.0, 40.0) {
+            Element::Rect(mut r) => { r.stroke = Some(Stroke::new(Color::BLACK, 2.0)); Element::Rect(r) }
+            _ => unreachable!(),
+        };
         let white = Some(Color::WHITE);
         let teal = Color::from_hex("12ab34");
         for fill_side in [true, false] {
@@ -4378,16 +4396,15 @@ mod tests {
                 ("menu", Err(r##"{"action":"set_active_color","params":{"color":"#ffffff"}}"##), white),
             ] {
                 let tag = format!("{} {what}", if fill_side { "fill" } else { "stroke" });
-                let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+                let e = engine_with(model_with(vec![stroked()], &[0]));
                 if !fill_side {
                     let (_, err) = dispatch(e, r#"{"action":"toggle_fill_on_top"}"#);
                     assert!(err.is_empty(), "{tag}: toggle_fill_on_top: {err}");
                 }
                 let el = |e| engine_of(e).model.borrow().document().layers[0].children().unwrap()[0].clone();
                 let (fill0, stroke0) = (el(e).fill().cloned(), el(e).stroke().cloned());
-                // The fixture: a black fill and no stroke, so every act moves one side.
                 assert_eq!(fill0.map(|f| f.color), Some(Color::BLACK), "{tag}: fixture");
-                assert!(stroke0.is_none(), "{tag}: fixture");
+                assert_eq!(stroke0.map(|s| (s.color, s.width)), Some((Color::BLACK, 2.0)), "{tag}: fixture");
                 let before = doc_json(e);
 
                 let (_, err) = match ev {
@@ -4402,8 +4419,10 @@ mod tests {
                     (got.stroke().map(|s| s.color), got.fill().map(|f| f.color))
                 };
                 assert_eq!(side, want, "{tag}: the selection was not painted");
-                assert_eq!(other, if fill_side { None } else { Some(Color::BLACK) },
-                           "{tag}: the other side moved");
+                assert_eq!(other, Some(Color::BLACK), "{tag}: the other side moved");
+                if !fill_side && want.is_some() {
+                    assert_eq!(got.stroke().map(|s| s.width), Some(2.0), "{tag}: the width was not kept");
+                }
                 let model = engine_of(e).model.borrow();
                 let default = if fill_side { model.default_fill.map(|f| f.color) }
                               else { model.default_stroke.map(|s| s.color) };
