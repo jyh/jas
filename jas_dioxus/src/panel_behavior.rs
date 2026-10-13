@@ -75,6 +75,7 @@ use serde_json::{json, Map, Value};
 
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
+use crate::interpreter::colour_host;
 use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
@@ -283,6 +284,15 @@ impl EffectHost for EngineHost {
     /// ONE undo step, and the runner's owner commits it.
     fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
         let Some(model) = model else { return };
+        // The active colour (`colour_host`, the reference's
+        // `subscribe_active_color`): the model's default and the selection.
+        if colour_host::ACTIVE_COLOUR_KEYS.contains(&key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            colour_host::apply_active_colour(model, key, store.get(key));
+            return;
+        }
         if !stroke_host::is_render_key(key) {
             return;
         }
@@ -1315,7 +1325,10 @@ mod tests {
         let mut model = stroked(&[0, 1]);
         let mut store = StateStore::new();
         store.set("stroke_cap", json!("square"));
-        for other in ["stroke_link_arrowhead_scale", "fill_color", "cap"] {
+        // `fill_color` was in this list until 2026-10-12, which pinned the
+        // engine's missing active-colour law (`colour_host`); it has its own
+        // arm below.
+        for other in ["stroke_link_arrowhead_scale", "cap"] {
             host.global_written(other, &mut store, Some(&mut model));
             assert!(!model.in_txn(), "{other} opened a transaction");
         }
@@ -1326,6 +1339,26 @@ mod tests {
         model.commit_txn();
         assert!(model.can_undo());
         assert_eq!(caps_and_joins(&model), vec!["Square/Miter", "Square/Miter"]);
+    }
+
+    /// The engine host's active-colour arm, called directly: a write of
+    /// `fill_color` sets the default and recolours the selection, inside the
+    /// batch's transaction, as `stroke_cap` does above.
+    #[test]
+    fn the_engine_host_applies_the_active_colour() {
+        use crate::geometry::element::Color;
+        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut model = misaligned(&[0]);
+        let mut store = StateStore::new();
+        store.set("fill_color", json!("#ff0000"));
+        host.global_written("fill_color", &mut store, Some(&mut model));
+        assert!(model.in_txn(), "the apply opened the batch's transaction");
+        model.commit_txn();
+        let fills: Vec<_> = model.document().layers[0].children().unwrap().iter()
+            .map(|e| e.fill().map(|f| f.color)).collect();
+        let red = Color::from_hex("#ff0000");
+        assert_eq!(fills, vec![red, Some(Color::BLACK)], "only the selected rect is recoloured");
+        assert_eq!(model.default_fill.map(|f| f.color), red);
     }
 
     /// The runner reads `panel.*` from the store LIVE, so a `set_panel_state`
