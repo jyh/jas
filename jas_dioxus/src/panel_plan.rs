@@ -38,6 +38,7 @@
 //!          "values": {"<bind_values key>": "<resolved value>", ...},
 //!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
 //!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...},
+//!          "numbers": {"<NUMBER_KEYS key>": <the node's literal number>, ...},
 //!          "display": {"<bind key>": "<the core-formatted display string>", ...},
 //!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
 //!                             | {"kind": "separator"}, ...]}
@@ -116,6 +117,18 @@ pub const STATIC_KEYS: [&str; 8] =
 /// would cross schema into the shell.
 pub const FLAG_KEYS: [&str; 2] = ["hollow", "nullable"];
 
+/// The node keys whose LITERAL number a shell may act on (fork A, 2026-10-13):
+/// a slider's track. The ENGINE parses, clamps and snaps every commit
+/// (`widget_commit::parse_commit`), so the shell never enforces these; it only
+/// draws a range a person can drag.
+///
+/// Measured on the compiled workspace's panel CONTENT trees, the population
+/// this module walks: **112** occurrences, every one a literal number, on five
+/// kinds (`slider` min/max/step 14 each, `number_input` min/max 30 and step 4,
+/// `length_input` min 8 and max 2, `combo_box` min 6 and max 4). Carried for
+/// any kind that declares them, as [`FLAG_KEYS`] are.
+pub const NUMBER_KEYS: [&str; 3] = ["max", "min", "step"];
+
 /// A node's allow-listed LITERAL display strings, plus the allow-listed keys it
 /// carries as a TEMPLATE that the plan does not resolve.
 ///
@@ -144,6 +157,18 @@ fn flags_of(node: &Value) -> Map<String, Value> {
     for key in FLAG_KEYS {
         if let Some(b) = node.get(key).and_then(Value::as_bool) {
             out.insert(key.to_string(), Value::Bool(b));
+        }
+    }
+    out
+}
+
+/// A node's allow-listed LITERAL numbers. The mirror of [`flags_of`]: a number
+/// cannot be a `{{`-template, so nothing is withheld.
+fn numbers_of(node: &Value) -> Map<String, Value> {
+    let mut out = Map::new();
+    for key in NUMBER_KEYS {
+        if let Some(n) = node.get(key).filter(|v| v.is_number()) {
+            out.insert(key.to_string(), n.clone());
         }
     }
     out
@@ -389,6 +414,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
         "values": values,
         "static": st,
         "flags": flags_of(&item.node),
+        "numbers": numbers_of(&item.node),
         "display": display,
         "options": options,
         "items": items,
@@ -1561,6 +1587,7 @@ mod tests {
         // assertions no anti-vacuity floor at all — they could carry ZERO and
         // the arm would still read green.
         let mut flags_carried = 0usize;
+        let mut numbers_carried = 0usize;
         for pid in panel_ids(&ws) {
             let spec = ws.panel(&pid).unwrap();
             for (sname, ctx) in scopes() {
@@ -1608,6 +1635,22 @@ mod tests {
                                             "{at}: literal flag {k} dropped from {e}");
                                 }
                             }
+                            // And the same three for `numbers` (fork A).
+                            let nu = e["numbers"].as_object()
+                                .unwrap_or_else(|| panic!("{at}: no numbers map on {e}"));
+                            for (k, v) in nu {
+                                assert!(super::NUMBER_KEYS.contains(&k.as_str()),
+                                        "{at}: number {k} crossed");
+                                assert_eq!(Some(v), node.get(k),
+                                           "{at}: number {k} is not the node's own");
+                                numbers_carried += 1;
+                            }
+                            for k in super::NUMBER_KEYS {
+                                if node.get(k).is_some_and(Value::is_number) {
+                                    assert!(nu.contains_key(k),
+                                            "{at}: literal number {k} dropped from {e}");
+                                }
+                            }
                             if let Some(n) = st.get("icon").and_then(Value::as_str) {
                                 named.insert(n.to_string());
                             }
@@ -1644,6 +1687,9 @@ mod tests {
         }
         assert!(carried > 0 && icons_seen > 0 && missing_seen > 0,
             "vacuous: carried={carried} icons={icons_seen} missing={missing_seen}");
+        assert!(numbers_carried > 0,
+            "vacuous: not one NUMBER_KEYS number was carried, so the number \
+             assertions above never ran");
         assert!(flags_carried > 0,
             "vacuous: not one FLAG_KEYS bool was carried, so the flag assertions \
              above never ran — the panels walked here have no `nullable`/`hollow` \
