@@ -4496,6 +4496,55 @@ mod tests {
         unsafe { jas_engine_free(b) };
     }
 
+    /// flask §238 (2026-10-12, live on `82bfd729`): selecting a blue rect left
+    /// the Color panel at its own colour, and after Undo the panel still showed
+    /// the undone colour, so retyping it was `Unchanged`. The web derives the
+    /// panel's active colour from the SELECTION (`live_fill_stroke_values`:
+    /// a uniform colour, or none; a mixed or empty selection falls back to the
+    /// document's default, then the panel's own). Driven on flask's sequence.
+    #[test]
+    fn the_colour_panel_follows_the_selection_and_undo() {
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::geometry::element::{Color, Element, Fill};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let filled = |hex: Option<&str>| match rect(10.0, 20.0, 30.0, 40.0) {
+            Element::Rect(mut r) => { r.fill = hex.map(|h| Fill::new(Color::from_hex(h).unwrap())); Element::Rect(r) }
+            _ => unreachable!(),
+        };
+        let hex = |e| leaf(e, id, "cp_hex")["values"].clone();
+
+        // A blue rect selected: the panel reads blue.
+        let e = engine_with(model_with(vec![filled(Some("0000ff"))], &[0]));
+        assert_eq!(hex(e)["bind.value"], "0000ff", "selecting a blue rect must load blue");
+        assert_eq!(engine_of(e).store.borrow().get("fill_color"), "#0000ff",
+                   "the store copy (what an action's guard reads) must follow too");
+        // Commit, Undo: the panel follows the document back to blue, and the
+        // same colour can be committed again.
+        let (_, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.is_empty(), "{err}");
+        undo(e);
+        assert_eq!(hex(e)["bind.value"], "0000ff", "after Undo the panel must read the document again");
+        let (reply, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.is_empty(), "retyping the undone colour must apply: {err}");
+        assert!(reply.contains(r#""doc_changed":true"#), "{reply}");
+        unsafe { jas_engine_free(e) };
+
+        // A rect with NO fill selected: the panel is none (hex disabled).
+        let e = engine_with(model_with(vec![filled(None)], &[0]));
+        assert_eq!(hex(e)["bind.disabled"], "true", "a selected unfilled shape reads none");
+        unsafe { jas_engine_free(e) };
+
+        // A MIXED selection, and NO selection, fall back to the panel's own
+        // colour (no document default has been set on a fresh model).
+        for (what, sel) in [("mixed", &[0usize, 1][..]), ("empty", &[][..])] {
+            let e = engine_with(model_with(vec![filled(Some("0000ff")), filled(Some("ff0000"))], sel));
+            let own = engine_of(e).panel.borrow().state_keys()["fill_color"].clone();
+            assert_eq!(format!("#{}", hex(e)["bind.value"].as_str().unwrap()), own.as_str().unwrap(), "{what}");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
     /// A Color value still never reaches the store through the generic path:
     /// a commit goes to the slice (above), and the generic value branches
     /// refuse Color by name. Driven on the generic function directly, because
