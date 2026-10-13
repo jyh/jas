@@ -991,18 +991,39 @@ pub unsafe extern "C" fn jas_dispatch_action(
     let Some(ws) = Workspace::load() else {
         return JasBytes::empty();
     };
+    // `{"panel": <content id>, "menu_index": <i>}`: that PANEL menu's item i,
+    // run with its panel active and in its panel's scope.
+    let panel = req.get("panel").and_then(serde_json::Value::as_str);
+    if let Some(pid) = panel {
+        if ws.panel(pid).is_none() {
+            set_panel_event_error(engine, "UnknownPanel", pid);
+            return JasBytes::empty();
+        }
+    }
+    let panel_menu = panel.map(|pid| ws.panel_menu(pid));
     // `{"menu_item": <id>}`: the item's own action and params, from the menubar.
-    let item = match req.get("menu_item").and_then(serde_json::Value::as_str) {
-        None => None,
-        Some(id) => match find_menu_item(&ws.data()["menubar"], id) {
-            Some(item) => Some(item),
+    let item = match (req.get("menu_item").and_then(serde_json::Value::as_str), &panel_menu) {
+        (Some(id), _) => match find_menu_item(&ws.data()["menubar"], id) {
+            Some(item) => Some(item.clone()),
             None => {
                 set_panel_event_error(engine, "UnknownMenuItem", id);
                 return JasBytes::empty();
             }
         },
+        (None, Some(menu)) => {
+            let at = req.get("menu_index").and_then(serde_json::Value::as_u64);
+            match at.and_then(|i| menu.get(i as usize)) {
+                Some(node) => Some(node.clone()),
+                None => {
+                    let named = req.get("menu_index").map_or("(none)".to_string(), |v| v.to_string());
+                    set_panel_event_error(engine, "UnknownMenuItem", &format!("{}[{named}]", panel.unwrap_or("")));
+                    return JasBytes::empty();
+                }
+            }
+        }
+        (None, None) => None,
     };
-    let source = item.unwrap_or(&req);
+    let source = item.as_ref().unwrap_or(&req);
     let Some(action) = source.get("action").and_then(serde_json::Value::as_str) else {
         set_panel_event_error(engine, "MissingAction", "");
         return JasBytes::empty();
@@ -1017,16 +1038,20 @@ pub unsafe extern "C" fn jas_dispatch_action(
             seed_panel(engine, &ws, pid);
         }
     }
-    // The app's scope, no panel's: `engine_scope` with no panel id reads the
-    // state and the active document and seeds nothing.
-    let scope = crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    // A menubar item runs in the app's scope, no panel's: `engine_scope` with no
+    // panel id reads the state and the active document and seeds nothing. A
+    // panel-menu item runs in its panel's scope, seeded as a click's is.
+    let scope = match panel {
+        Some(pid) => panel_ctx(engine, &ws, pid),
+        None => crate::panel_scope::engine_scope(
+            &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), ""),
+    };
     let ran = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
         crate::panel_behavior::run_action(
-            action, params, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(),
+            panel, action, params, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(),
             &mut host)
     };
     let ran = match ran {
@@ -1054,6 +1079,83 @@ pub unsafe extern "C" fn jas_dispatch_action(
     let reply = serde_json::json!({"changed": sync.changed, "doc_changed": ran.doc_changed});
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::DispatchAction, out.len);
+    out
+}
+
+/// **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
+/// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
+/// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
+/// or `separator` (any other node is `unknown`, never guessed at). An item
+/// also carries `label`, `action`, `enabled` and `checked` (a bool for a
+/// checkable item, null otherwise).
+///
+/// ⭐ THE STATE IS THE SHARED WALK'S, NOT THIS FUNCTION'S. `enabled` and
+/// `checked` are [`menu_state`]'s rows for the menu, evaluated in the panel's
+/// engine scope, so the shell evaluates nothing and a panel menu reads what
+/// the cross-language corpus (`algorithms/panel_menu_state.json`) pins. That
+/// walk reads `enabled_when` and `checked_when` only, so a node spelled
+/// `checked:` or `disabled: true` reads unchecked and enabled here exactly as
+/// it does there.
+///
+/// A click goes back by index: `jas_dispatch_action({"panel", "menu_index"})`.
+/// An unknown panel is the empty span with `UnknownPanel` on
+/// [`jas_last_error_json`].
+///
+/// [`menu_state`]: crate::interpreter::menu_state::menu_state
+///
+/// # Safety
+/// `e` is null or from [`jas_engine_new`], and `panel_id` is `len` readable
+/// bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_panel_menu(
+    e: *mut JasEngine,
+    panel_id: *const u8,
+    len: usize,
+) -> JasBytes {
+    ffi_instr::record(Crossing::PanelMenu, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(id) = (unsafe { utf8(panel_id, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Some(ws) = Workspace::load() else {
+        return JasBytes::empty();
+    };
+    if ws.panel(id).is_none() {
+        set_panel_event_error(engine, "UnknownPanel", id);
+        return JasBytes::empty();
+    }
+    let menu = ws.panel_menu(id);
+    let ctx = panel_ctx(engine, &ws, id);
+    let state = crate::interpreter::menu_state::menu_state(&serde_json::json!([{ "items": menu }]), &ctx);
+    let by_index: std::collections::HashMap<i64, &serde_json::Value> = state
+        .as_array()
+        .map(|rows| rows.iter().filter_map(|r| Some((r["path"].get(1)?.as_i64()?, r))).collect())
+        .unwrap_or_default();
+    let rows: Vec<serde_json::Value> = menu
+        .iter()
+        .enumerate()
+        .map(|(i, node)| match node {
+            serde_json::Value::String(s) if s == "separator" => serde_json::json!({"index": i, "kind": "separator"}),
+            serde_json::Value::Object(o) if !o.contains_key("items") => {
+                let st = by_index.get(&(i as i64));
+                serde_json::json!({
+                    "index": i,
+                    "kind": "item",
+                    "label": o.get("label").cloned().unwrap_or(serde_json::Value::Null),
+                    "action": o.get("action").cloned().unwrap_or(serde_json::Value::Null),
+                    "enabled": st.map_or(serde_json::Value::Bool(true), |r| r["enabled"].clone()),
+                    "checked": st.map_or(serde_json::Value::Null, |r| r["checked"].clone()),
+                })
+            }
+            _ => serde_json::json!({"index": i, "kind": "unknown"}),
+        })
+        .collect();
+    *engine.last_error.borrow_mut() = None;
+    let out = JasBytes::from_string(serde_json::Value::Array(rows).to_string());
+    ffi_instr::record_out(Crossing::PanelMenu, out.len);
     out
 }
 
@@ -2571,6 +2673,95 @@ mod tests {
     fn undo(e: *mut JasEngine) {
         let op = r#"{"op":"undo"}"#;
         assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+    }
+
+    fn panel_menu(e: *mut JasEngine, panel: &str) -> (Vec<serde_json::Value>, String) {
+        let raw = take(unsafe { jas_panel_menu(e, panel.as_ptr(), panel.len()) });
+        let rows = if raw.is_empty() { vec![] } else {
+            serde_json::from_str::<serde_json::Value>(&raw).unwrap().as_array().unwrap().clone()
+        };
+        (rows, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    #[test]
+    fn panel_menu_lists_every_node_of_the_colour_panels_menu_with_the_mode_checked() {
+        // The owner's note 3 (2026-10-11): the Windows dock has no panel menu.
+        // The shell reads the menu from the core, labels AND state, and
+        // evaluates nothing (the boundary law).
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (rows, err) = panel_menu(e, "color_panel_content");
+        let ws = Workspace::load().unwrap();
+        let spec = ws.panel_menu("color_panel_content");
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(rows.len(), spec.len(), "one row per menu node, separators included");
+        for (i, r) in rows.iter().enumerate() {
+            assert_eq!(r["index"], i as i64, "rows are in menu order");
+        }
+        let labels: Vec<&str> = rows.iter().take(5).map(|r| r["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, ["Grayscale", "RGB", "HSB", "CMYK", "Web Safe RGB"]);
+        assert_eq!(rows[5]["kind"], "separator");
+        assert_eq!(rows[0]["kind"], "item");
+        assert_eq!(rows[0]["action"], "set_color_panel_mode");
+        // The panel's declared default mode is hsb: exactly that row is checked.
+        let checked: Vec<usize> = (0..5).filter(|&i| rows[i]["checked"] == true).collect();
+        assert_eq!(checked, vec![2], "only HSB is checked: {rows:?}");
+        assert!((0..5).all(|i| rows[i]["checked"].is_boolean()), "the five mode rows are checkable");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn panel_menu_refuses_an_unknown_panel_by_name() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (rows, err) = panel_menu(e, "zz_no_such_panel");
+        assert!(rows.is_empty());
+        assert!(err.contains("UnknownPanel") && err.contains("zz_no_such_panel"), "{err}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn dispatch_runs_a_panel_menu_item_with_its_panel_active() {
+        // Align > Use Preview Bounds: `toggle_use_preview_bounds` writes the
+        // ACTIVE panel's `use_preview_bounds` (a `set_panel_state` with no
+        // `panel:`), so it only moves when the item runs with its panel active.
+        // The shell names the panel and the item's index; the core reads the
+        // item's action and params from that panel's menu.
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let pid = "align_panel_content";
+        let _ = panel_menu(e, pid); // the shell reads the menu before a click
+        let before = engine_of(e).store.borrow().get_panel(pid, "use_preview_bounds").clone();
+        let (reply, err) = dispatch(e, r#"{"panel":"align_panel_content","menu_index":0}"#);
+        assert!(!reply.is_empty() && err.is_empty(), "Use Preview Bounds ran: {err}");
+        let after = engine_of(e).store.borrow().get_panel(pid, "use_preview_bounds").clone();
+        assert_ne!(before, after, "the panel's own flag moved: {before} -> {after}");
+        unsafe { jas_engine_free(e) };
+        // CONTROL, on a fresh engine where no panel was ever made active: the
+        // same action by id leaves the panel's flag. (The active panel then
+        // persists, as after a widget click, so the control cannot follow the
+        // panel run on the same engine.)
+        let f = jas_engine_new();
+        let _ = panel_menu(f, pid);
+        let was = engine_of(f).store.borrow().get_panel(pid, "use_preview_bounds").clone();
+        let _ = dispatch(f, r#"{"action":"toggle_use_preview_bounds"}"#);
+        assert_eq!(engine_of(f).store.borrow().get_panel(pid, "use_preview_bounds"), &was,
+            "without its panel the action cannot reach the panel's state");
+        unsafe { jas_engine_free(f) };
+    }
+
+    #[test]
+    fn dispatch_refuses_a_panel_menu_index_or_panel_it_does_not_have_and_runs_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let (r1, e1) = dispatch(e, r#"{"panel":"zz_no_such_panel","menu_index":0}"#);
+        assert!(r1.is_empty() && e1.contains("UnknownPanel") && e1.contains("zz_no_such_panel"), "{e1}");
+        let (r2, e2) = dispatch(e, r#"{"panel":"align_panel_content","menu_index":99}"#);
+        assert!(r2.is_empty() && e2.contains("UnknownMenuItem") && e2.contains("99"), "{e2}");
+        // A separator is a node with no action: refused as MissingAction.
+        let (r3, e3) = dispatch(e, r#"{"panel":"align_panel_content","menu_index":1}"#);
+        assert!(r3.is_empty() && e3.contains("MissingAction"), "{e3}");
+        unsafe { jas_engine_free(e) };
     }
 
     fn engine_of<'a>(e: *mut JasEngine) -> &'a JasEngine {

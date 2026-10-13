@@ -655,11 +655,13 @@ fn bind_write(node: &Value, spec: &Value, panel_id: &str) -> Vec<Value> {
 
 /// Run one workspace ACTION by id, as a menu item runs it: the one-step batch
 /// `[{"dispatch": {action, params}}]`, through the same pre-flight and run as
-/// a widget's behavior ([`run_batch`]), with no panel made active. An id the
-/// workspace does not define is refused as `UnknownAction` before anything
-/// runs, naming it.
+/// a widget's behavior ([`run_batch`]). `panel_id` is the panel a PANEL-menu
+/// item belongs to, made active for the run as a widget's click makes its
+/// panel active; a menubar item passes `None`. An id the workspace does not
+/// define is refused as `UnknownAction` before anything runs, naming it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_action(
+    panel_id: Option<&str>,
     action: &str,
     params: Option<&Value>,
     scope: &Value,
@@ -678,7 +680,7 @@ pub(crate) fn run_action(
         d.insert("params".into(), p.clone());
     }
     let batch = vec![json!({"dispatch": Value::Object(d)})];
-    run_batch(None, &batch, json!({}), scope, store, model, actions, dialogs, host)
+    run_batch(panel_id, &batch, json!({}), scope, store, model, actions, dialogs, host)
 }
 
 /// `event.*` for a value event: the modifiers, plus `value`.

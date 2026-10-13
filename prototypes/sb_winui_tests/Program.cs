@@ -757,6 +757,30 @@ static class Program
         Eq("tool: names compare ordinally, so Rect is not rect", "-1", ToolKnob.Resolve("Rect", tools).ToString());
         Eq("tool: a negative number is refused", "-1", ToolKnob.Resolve("-1", tools).ToString());
 
+        // -- THE PANEL MENU (the owner's note 3, 2026-10-12) ----------------------
+        // `jas_panel_menu` rows, read as the shell draws them. The shell evaluates
+        // nothing: label, enabled and checked are the core's.
+        var pmJson = "[{\"index\":0,\"kind\":\"item\",\"label\":\"Grayscale\",\"action\":\"set_color_panel_mode\",\"enabled\":true,\"checked\":false},"
+                   + "{\"index\":1,\"kind\":\"item\",\"label\":\"HSB\",\"action\":\"set_color_panel_mode\",\"enabled\":true,\"checked\":true},"
+                   + "{\"index\":2,\"kind\":\"separator\"},"
+                   + "{\"index\":3,\"kind\":\"item\",\"label\":\"Create New Swatch...\",\"action\":null,\"enabled\":false,\"checked\":null},"
+                   + "{\"index\":4,\"kind\":\"unknown\"}]";
+        var pm = PanelMenuWire.Parse(pmJson);
+        Eq("panel menu: one row per node, in order", "0,1,2,3,4", string.Join(",", pm.Select(r => r.Index)));
+        Eq("panel menu: kinds are read, an unknown one kept as unknown", "item,item,separator,item,unknown", string.Join(",", pm.Select(r => r.Kind)));
+        Eq("panel menu: a checkable row carries its state", "False,True", $"{pm[0].Checked},{pm[1].Checked}");
+        Check("panel menu: a non-checkable row has no check state (null, not false)", pm[3].Checked is null, $"{pm[3].Checked}");
+        Check("panel menu: enabled is the core's", pm[1].Enabled && !pm[3].Enabled, $"{pm[1].Enabled},{pm[3].Enabled}");
+        Eq("panel menu: a null action reads empty", "", pm[3].Action);
+        Check("panel menu: empty or unreadable is an empty menu, never a throw", PanelMenuWire.Parse("").Count == 0 && PanelMenuWire.Parse("{x").Count == 0, "threw or read rows");
+        // SB_PANEL_MENU_SYNTH=<group key>:<index>.
+        static string PK(string? k) { var r = PanelMenuWire.SynthKnob(k); return r is null ? "refused" : $"{r.Value.Group}|{r.Value.Index}"; }
+        Eq("panel menu knob: group and index", "dock1|0", PK("dock1:0"));
+        Eq("panel menu knob: whitespace trimmed", "dock3|12", PK(" dock3 : 12 "));
+        Eq("panel menu knob: no index is refused", "refused", PK("dock1"));
+        Eq("panel menu knob: a negative or non-number index is refused", "refused,refused", PK("dock1:-1") + "," + PK("dock1:x"));
+        Eq("panel menu knob: unset is refused (the caller reads it as not asked)", "refused", PK(null));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;

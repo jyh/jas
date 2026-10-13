@@ -1575,6 +1575,8 @@ Test-Case 'P4.4 REPLAY: one value knob alone runs none -- the shell refuses it' 
 Test-Case 'P4.4 REPLAY: no knob runs none, and whitespace is unset' { "$(Test-SbPaneReplayAsked ' ' ' ' ' ')" } 'False'
 Test-Case 'P4.4 REPLAY: the toolbar''s knob runs a replay (a toolbar click republishes the menu too)' { "$(Test-SbPaneReplayAsked '' '' '' 'btn_shape_slot')" } 'True'
 Test-Case 'P4.4 REPLAY: a whitespace toolbar knob is unset' { "$(Test-SbPaneReplayAsked '' '' '' ' ')" } 'False'
+Test-Case 'P4.4 REPLAY: the panel-menu knob runs a replay (its run republishes the menu, measured: seq 3 against 2)' { "$(Test-SbPaneReplayAsked '' '' '' '' 'dock1:0')" } 'True'
+Test-Case 'P4.4 REPLAY: a whitespace panel-menu knob is unset' { "$(Test-SbPaneReplayAsked '' '' '' '' ' ')" } 'False'
 Test-Case 'Q6 DOCK: under SB_DOCK the one pane is replaced, so its clauses are NOT RUN, never FAIL' { $v = @(Get-SbPaneVerdicts @() 'app' '' 'Default'); "$(@($v | Where-Object Verdict -eq 'FAIL').Count) $(@($v | Where-Object Verdict -eq 'NOT RUN').Count -eq $v.Count)" } '0 True'
 Test-Case 'Q6 DOCK: a replay asked for under SB_DOCK is a FAIL (no one pane to replay on)' { $v = @(Get-SbPaneVerdicts @() 'app' 'align_left_button' 'Default'); "$(@($v | Where-Object Verdict -eq 'FAIL').Count -ge 1)" } 'True'
 
@@ -2181,6 +2183,58 @@ Test-Case 'Q6.D: CONTROL -- a refused DOCK itself still FAILS beside it' {
 } 'FAIL'
 Test-Case 'Q6.DC: CONTROL -- a HAND chevron row is not the replay' { (Get-SbDc @(($dcDown -replace 'synth', 'hand'), ($dcUp -replace 'synth', 'hand'))).Verdict } 'FAIL'
 Test-Case 'Q6.D: SB_DOCK set on a scene that opens no pane FAILS -- the shell ignores the knob there' { (Get-SbDk @() 'retained').Verdict } 'FAIL'
+# ---------------------------------------------------------------------------
+# Q6.PM -- A DOCK GROUP'S PANEL MENU, READ AND RUN IN THE ENGINE (2026-10-12)
+# ---------------------------------------------------------------------------
+# `SB_PANEL_MENU_SYNTH=<group>:<index>` reads the group's menu (`jas_panel_menu`)
+# and runs that item (`jas_dispatch_action {panel, menu_index}`), through the
+# same commands the button and the flyout send. The rows are the live ones.
+$pmRead = 'PANEL MENU READ group=dock1 panel=align_panel_content via=synth items=3 separators=2 checked=[] ' + $q6Tids
+$pmRan  = 'PANEL MENU RAN group=dock1 panel=align_panel_content index=0 via=synth outcome=changed changed-rows=1 doc-changed=false channel=(clear) ' + $q6Tids
+function Get-SbPm([string[]]$Extra, [string]$Knob = 'dock1:0', [string]$Dock = 'Default', [string]$Scene = 'app') {
+    return (Get-SbPanelMenuVerdict (New-SbDockRows ($dkHealthy + $Extra)) $Scene $Dock $Knob)
+}
+Test-Case 'Q6.PM: the menu read and its item run, the state moved, PASSES' { (Get-SbPm @($pmRead, $pmRan)).Verdict } 'PASS'
+Test-Case 'Q6.PM: ...and the detail names the panel, the item and the count read' {
+    $d = (Get-SbPm @($pmRead, $pmRan)).Detail
+    if ($d -match 'align_panel_content' -and $d -match 'index 0' -and $d -match '3 item') { 'named' } else { $d }
+} 'named'
+Test-Case 'Q6.PM: SB_PANEL_MENU_SYNTH unset is NOT RUN, by name' { (Get-SbPm @() '').Verdict } 'NOT RUN'
+Test-Case 'Q6.PM: the knob with no dock FAILS -- there is no group' { (Get-SbPm @() 'dock1:0' '').Verdict } 'FAIL'
+Test-Case 'Q6.PM: the knob off app FAILS' { (Get-SbPm @() 'dock1:0' 'Default' 'document').Verdict } 'FAIL'
+Test-Case 'Q6.PM: no READ row FAILS -- the menu was never read' { (Get-SbPm @($pmRan)).Verdict } 'FAIL'
+Test-Case 'Q6.PM: a READ with no items FAILS -- an empty menu drew nothing' { (Get-SbPm @(($pmRead -replace 'items=3', 'items=0'), $pmRan)).Verdict } 'FAIL'
+Test-Case 'Q6.PM: a read and no run FAILS' { (Get-SbPm @($pmRead)).Verdict } 'FAIL'
+Test-Case 'Q6.PM: an engine refusal of the item FAILS and is quoted' {
+    $v = Get-SbPm @($pmRead, 'PANEL MENU REFUSED group=dock1 panel=align_panel_content index=0 via=synth channel={"panel_event":"MissingAction","detail":""} ' + $q6Tids)
+    "$($v.Verdict) $($v.Row -match 'MissingAction')"
+} 'FAIL True'
+Test-Case 'Q6.PM: a run that moved NOTHING FAILS -- the colour mode switch, measured live 2026-10-12' {
+    $v = Get-SbPm @(($pmRead -replace 'dock1', 'dock0'), 'PANEL MENU RAN group=dock0 panel=color_panel_content index=0 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids) 'dock0:0'
+    "$($v.Verdict) $($v.Detail -match 'set_color_panel_mode')"
+} 'FAIL True'
+Test-Case 'Q6.PM: choosing the item ALREADY CHECKED is NOT RUN -- a no-op by design, measured live (HSB, the default mode)' {
+    $read = ($pmRead -replace 'dock1', 'dock0' -replace 'align_panel_content', 'color_panel_content' -replace 'checked=\[\]', 'checked=[2]')
+    $ran = 'PANEL MENU RAN group=dock0 panel=color_panel_content index=2 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids
+    $v = Get-SbPm @($read, $ran) 'dock0:2'
+    "$($v.Verdict) $($v.Detail -match 'already checked')"
+} 'NOT RUN True'
+Test-Case 'Q6.PM: CONTROL -- an UNCHECKED item that moves nothing still FAILS' {
+    $read = ($pmRead -replace 'dock1', 'dock0' -replace 'align_panel_content', 'color_panel_content' -replace 'checked=\[\]', 'checked=[2]')
+    $ran = 'PANEL MENU RAN group=dock0 panel=color_panel_content index=0 via=synth outcome=unchanged changed-rows=0 doc-changed=false channel={"panel_event":"Unchanged","detail":"set_color_panel_mode"} ' + $q6Tids
+    (Get-SbPm @($read, $ran) 'dock0:0').Verdict
+} 'FAIL'
+Test-Case 'Q6.PM: a run of ANOTHER index FAILS -- the knob named index 0' { (Get-SbPm @($pmRead, ($pmRan -replace 'index=0', 'index=2'))).Verdict } 'FAIL'
+Test-Case 'Q6.PM: rows for ANOTHER group FAIL -- the knob named dock1' { (Get-SbPm @(($pmRead -replace 'dock1', 'dock2'), ($pmRan -replace 'dock1', 'dock2'))).Verdict } 'FAIL'
+Test-Case 'Q6.PM: CONTROL -- a HAND run is not the replay' { (Get-SbPm @(($pmRead -replace 'synth', 'hand'), ($pmRan -replace 'synth', 'hand'))).Verdict } 'FAIL'
+Test-Case 'Q6.PM: the shell''s refusal of the knob FAILS and is quoted' {
+    $v = Get-SbPm @('RUSTFAIL PANEL MENU SYNTH REFUSED group=dock9 -- the dock has 5 group(s)') 'dock9:0'
+    "$($v.Verdict) $($v.Row -match 'dock9')"
+} 'FAIL True'
+Test-Case 'Q6.D: a refused PANEL MENU knob is Q6.PM''s, not a broken dock -- Q6.D still PASSES' {
+    (Get-SbDk ($dkHealthy + 'RUSTFAIL PANEL MENU SYNTH REFUSED group=dock9 -- the dock has 5 group(s)')).Verdict
+} 'PASS'
+
 # ...and the WAIT: a docked run writes no PANEL DRAWN, so waiting on it timed out
 # (60 s) and the clause above read whatever had arrived by then.
 Test-Case 'Q6.D WAIT: a docked run waits on DOCK DRAWN, not PANEL DRAWN' { (@(Get-SbPaneWaits 'app' '' 'Default') | ForEach-Object { $_.Label }) -join ' | ' } 'the DOCK DRAWN row'

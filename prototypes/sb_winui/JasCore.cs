@@ -492,6 +492,16 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_dispatch_action(IntPtr engine, byte[] actionJson, nuint actionLen);
 
     /// <summary>
+    /// One panel's menu (`jas_panel_menu`): one row per node, `{index, kind}`
+    /// plus, for an item, `label`, `action`, `enabled` and `checked`, all the
+    /// core's. A click goes back through <see cref="jas_dispatch_action"/> as
+    /// `{"panel":"<id>","menu_index":i}`. An unknown panel is the empty span,
+    /// its class in <see cref="jas_last_error_json"/>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_panel_menu(IntPtr engine, byte[] panelId, nuint panelLen);
+
+    /// <summary>
     /// The panels the pane can offer (`jas_panel_list`, W2b-2):
     /// `[{"id","summary"}]`, sorted by content id, `summary` null where the
     /// core will not send one. Takes no engine, like
