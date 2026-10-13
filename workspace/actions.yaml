@@ -13,48 +13,15 @@ actions:
   # ── File ──────────────────────────────────────────────────
   new_document:
     description: >
-      Create a new untitled document. Adds a tab labeled "Untitled-N" to the
-      canvas tab bar and a blank white canvas to the drawing surface. The new
-      tab becomes active immediately. The tab's close button dispatches
-      close_tab (which checks for unsaved changes). Tab index is captured at
-      creation time via prop so click handlers remain correct as more tabs
-      are added.
+      Create a new untitled document and a blank white canvas for it in the
+      drawing surface. The host adds the document to the open documents
+      (workspace.open_documents), so the canvas tab bar shows its tab,
+      labeled "Untitled-N"; no effect here adds the tab. The new tab becomes
+      active immediately. The tab's close button dispatches close_tab (which
+      checks for unsaved changes).
     category: file
     effects:
       - set: { active_tab: "state.tab_count" }
-      # Create the tab button (with close x) in the tab bar.
-      # prop.index is resolved once at creation time; state.*
-      # references remain reactive.
-      - create_child:
-          parent: canvas_tab_bar
-          props:
-            index: "state.tab_count"
-          element:
-            id: "canvas_tab_{{prop.index}}"
-            type: container
-            layout: row
-            style: { padding: "2 4 2 8", font_size: 11, gap: 4, alignment: center, background: "#4a4a4a", border: "1px solid #666" }
-            behavior:
-              - event: click
-                effects:
-                  - set: { active_tab: "prop.index" }
-            bind:
-              # {{prop.index}} is resolved once at creation time so the
-              # bind expression bakes the tab's index in; only state.*
-              # remains reactive.
-              active: "state.active_tab == {{prop.index}}"
-            children:
-              - type: text
-                content: "Untitled-{{prop.index}}"
-              - type: icon_button
-                icon: "close"
-                summary: "Close tab"
-                style: { size: 12 }
-                behavior:
-                  - event: click
-                    stop_propagation: true
-                    action: close_tab
-                    params: { index: "prop.index" }
       # Create the canvas in the drawing surface. The canvas-stack
       # background is the pasteboard color and inherits the active
       # appearance's window_bg (dark gray in Dark Gray); the
@@ -73,7 +40,9 @@ actions:
               flex: 1
               background: "{{theme.colors.window_bg}}"
             bind:
-              # See the tab-button bind:active above for the {{}} rule.
+              # {{prop.index}} is resolved once at creation time, so the
+              # bind bakes this canvas's index in; only state.* stays
+              # reactive.
               visible: "state.active_tab == {{prop.index}}"
       - increment: { key: tab_count, by: 1 }
   open_file:
@@ -1075,15 +1044,16 @@ actions:
             - dispatch: { action: remove_tab, params: { index: "param.index" } }
   remove_tab:
     description: >
-      Remove a tab and its canvas without prompting. Removes both the tab
-      button and canvas surface elements, then selects an adjacent tab
-      (prefer the tab to the left; if none, the tab to the right; if the
-      last tab was closed, set active_tab to -1).
+      Close a document without prompting: the host removes it from the open
+      documents (workspace.open_documents), so its tab leaves the canvas tab
+      bar and the tabs after it renumber; this removes its canvas surface
+      element, then selects an adjacent tab (prefer the tab to the left; if
+      none, the tab to the right; if the last tab was closed, set
+      active_tab to -1).
     category: tab
     params:
       index: { type: number }
     effects:
-      - remove_child: "canvas_tab_{{param.index}}"
       - remove_child: "canvas_surface_{{param.index}}"
       - decrement: { key: tab_count, by: 1 }
       - if:

@@ -402,6 +402,23 @@ pub fn seed_colour_mode(slice: &PanelState, store: &mut StateStore) {
     }
 }
 
+/// The `workspace` namespace (runtime_contexts.yaml) as the engine holds it.
+/// `open_documents` is the engine's ONE document: index 0, named by the
+/// model (its filename, or its untitled name), with its modified flag. The
+/// canvas tab bar draws one tab per entry (owner note 4b). The engine has no
+/// layout save/load, so the other two properties are their declared defaults.
+pub fn workspace_facts(model: &Model) -> Value {
+    serde_json::json!({
+        "active_layout_name": "",
+        "has_saved_layout": false,
+        "open_documents": [{
+            "index": 0,
+            "is_modified": model.is_modified(),
+            "name": model.filename,
+        }],
+    })
+}
+
 /// The scope panel `panel_id`'s bindings resolve against, in the engine
 /// (FB wave 2, A6). One function, so the plan the shell draws and the
 /// behavior the engine runs read the same values.
@@ -426,7 +443,12 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
     let mut scope = slice.scope(model.document());
     let mut state: Map<String, Value> = sorted(store.get_all());
     state.extend(slice.state_keys());
+    // Owner note 4b: the engine holds exactly ONE document, so it is the one
+    // open tab and the front one, whatever the store's defaults say.
+    state.insert("tab_count".into(), 1.into());
+    state.insert("active_tab".into(), 0.into());
     scope["state"] = Value::Object(state);
+    scope["workspace"] = workspace_facts(model);
     if let (Some(own), Some(panel)) = (store.panel_scope(panel_id), scope["panel"].as_object_mut()) {
         panel.extend(sorted(own));
         if panel_id == crate::interpreter::properties_host::PROPERTIES_PANEL {

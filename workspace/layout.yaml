@@ -665,17 +665,20 @@ layout:
         style: { flex: 1 }
         children:
 
-          # Tab bar (populated dynamically by new_document)
+          # Tab bar: one tab per open document
           - id: canvas_tab_bar
             type: container
             summary: "Document tabs"
             description: >
-              Horizontal row of tab buttons at the top of the canvas pane.
-              Starts empty; tabs are added dynamically by new_document and
-              open_file actions via create_child. Each tab shows the document
-              name and a close (X) button. Clicking a tab sets active_tab to
-              that tab's index; the active tab gets highlighted styling. The
-              tab bar is hidden when no documents are open (tab_count == 0).
+              Horizontal row of tab buttons at the top of the canvas pane,
+              one per open document (workspace.open_documents, in tab order).
+              Each tab shows the document name and a close (X) button.
+              Clicking a tab sets active_tab to that tab's index; the active
+              tab gets highlighted styling. The tab bar is hidden when no
+              documents are open (tab_count == 0). The tabs are DRAWN FROM
+              THE LIST, never added or removed one at a time: opening,
+              creating or closing a document changes the list, and closing a
+              tab renumbers the tabs after it.
             layout: row
             style:
               background: "{{theme.colors.pane_bg_dark}}"
@@ -684,7 +687,33 @@ layout:
               alignment: center
             bind:
               visible: "state.tab_count != 0"
-            children: []
+            foreach:
+              source: "workspace.open_documents"
+              as: doc
+            do:
+              id: "canvas_tab_{{doc.index}}"
+              type: container
+              summary: "{{doc.name}}"
+              layout: row
+              style: { padding: "2 4 2 8", font_size: 11, gap: 4, alignment: center, background: "#4a4a4a", border: "1px solid #666" }
+              behavior:
+                - event: click
+                  effects:
+                    - set: { active_tab: "doc.index" }
+              bind:
+                active: "state.active_tab == doc.index"
+              children:
+                - type: text
+                  content: "{{doc.name}}"
+                - type: icon_button
+                  icon: "close"
+                  summary: "Close tab"
+                  style: { size: 12 }
+                  behavior:
+                    - event: click
+                      stop_propagation: true
+                      action: close_tab
+                      params: { index: "doc.index" }
 
           # Drawing surface area (canvases added dynamically)
           - id: drawing_surface
