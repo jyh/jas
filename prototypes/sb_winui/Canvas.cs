@@ -1195,6 +1195,7 @@ internal sealed unsafe class Canvas : IDisposable
                     // IN ORDER with the pointer events around it: Escape between a
                     // press and its release is what cancels a marquee.
                     if (_engine != IntPtr.Zero) { JasCore.jas_key_event(_engine, k.Code, k.Mods); }
+                    DirtyFromModel();
                     dirty = true;
                     cause = "key";
                     // A shortcut may have switched the tool, so an open panel is re-read.
@@ -1755,6 +1756,7 @@ internal sealed unsafe class Canvas : IDisposable
         // reached the window from a gesture left open.
         if (_handDeadlineMs >= 0 && p.Kind == JasCore.PointerPress) { _handPressSeen = true; }
         JasCore.jas_pointer_event(_engine, p.Kind, p.X, p.Y, p.Mods);
+        if (p.Kind == JasCore.PointerRelease) { DirtyFromModel(); }
     }
 
     /// <summary>
@@ -3349,7 +3351,8 @@ internal sealed unsafe class Canvas : IDisposable
             System.IO.File.WriteAllText(path, svg);
             var sha = Sha256Of(svg);
             _documentPath = path;
-            SetDirty(false);
+            JasCore.jas_document_mark_saved(_engine);
+            DirtyFromModel();
             _report($"RUSTOK SAVE path={path} bytes={svg.Length} sha={sha} {Tids()}");
         }
         catch (Exception ex)
@@ -3425,7 +3428,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
 
         var applied = before != after ? 1 : 0;
-        if (applied == 1) { SetDirty(true); }
+        DirtyFromModel();
         _report($"RUSTOK {cmd.Label.ToUpperInvariant()} applied={applied} "
               + $"can-undo={after.CanUndo} can-redo={after.CanRedo} {Tids()}");
         return true;
@@ -3533,6 +3536,16 @@ internal sealed unsafe class Canvas : IDisposable
         if (node.TryGetProperty("layers", out var layers)) { n += CountTypedNodes(layers); }
         if (node.TryGetProperty("children", out var children)) { n += CountTypedNodes(children); }
         return n;
+    }
+
+    /// <summary>
+    /// #397: the dirty flag is the MODEL's answer, read after each act. Never a
+    /// reply's `doc_changed`: that means repaint, and Select All sets it.
+    /// </summary>
+    private void DirtyFromModel()
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        if (TitleVerdict.DirtyFromModel(JasCore.jas_document_modified(_engine)) is { } dirty) { SetDirty(dirty); }
     }
 
     private void SetDirty(bool dirty)
@@ -4361,7 +4374,7 @@ internal sealed unsafe class Canvas : IDisposable
             _report($"RUSTFAIL PANEL MENU REPLY UNREADABLE {runHead} {ex.GetType().Name} {Tids()}");
             return false;
         }
-        if (docChanged) { SetDirty(true); }
+        DirtyFromModel();
         ApplyMenuRefresh("panel-menu");
         ApplyPanelRefresh("panel-menu");
         ApplyPanesRefresh("panel-menu");
@@ -4406,7 +4419,7 @@ internal sealed unsafe class Canvas : IDisposable
             _report($"RUSTFAIL MENU ACTION REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
             return false;
         }
-        if (docChanged) { SetDirty(true); }
+        DirtyFromModel();
         ApplyMenuRefresh("menu");
         ApplyPanelRefresh("menu");
         ApplyPanesRefresh("menu");
@@ -4622,7 +4635,7 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
 
-        if (docChanged) { SetDirty(true); }
+        DirtyFromModel();
         ApplyMenuRefresh("panel");
         // The plan is re-read NOW, not at the end of the drain, because the
         // reply's rows are checked against it and a later command in the same

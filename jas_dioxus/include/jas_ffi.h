@@ -776,6 +776,20 @@ struct JasBytes jas_dispatch_action(struct JasEngine *e,
 uint8_t jas_document_modified(struct JasEngine *e);
 
 /**
+ * **The shell wrote the document to disk: record that as the saved state**
+ * (`Model::mark_saved`). The shell writes the file itself (from
+ * [`jas_document_svg`]), so the model cannot know a save happened unless it is
+ * told. Without this, [`jas_document_modified`] measures from the OPENED
+ * state: open, edit, save, Undo would read "not modified" while the file on
+ * disk holds the edit. Call it only after the write succeeded. 1 when marked,
+ * 255 for a null engine.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_document_mark_saved(struct JasEngine *e);
+
+/**
  * **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
  * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
  * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`

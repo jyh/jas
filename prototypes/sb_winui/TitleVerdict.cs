@@ -99,6 +99,18 @@ public readonly struct TitleVerdict
         Dirty = false,
     };
 
+    /// <summary>
+    /// #397: the dirty flag read from the MODEL (`jas_document_modified`): 1 is
+    /// modified, 0 is saved, and anything else (255, a null engine) is NO
+    /// answer, so the flag is left as it is rather than read as "saved".
+    /// </summary>
+    public static bool? DirtyFromModel(byte answer) => answer switch
+    {
+        1 => true,
+        0 => false,
+        _ => null,
+    };
+
     /// <summary>Set or clear the dirty mark, leaving the run's verdict alone.</summary>
     public static TitleVerdict WithDirty(TitleVerdict prev, bool dirty) =>
         new()
