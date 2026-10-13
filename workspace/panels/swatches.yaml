@@ -63,18 +63,6 @@ state:
     description: >
       List of open libraries with their collapsed state. Each entry
       has an "id" (library filename stem) and "collapsed" (bool).
-  recent_colors:
-    type: list
-    item_type: color
-    max_length: 10
-    default: []
-    per_document: true
-    description: >
-      Per-document list of recently committed colors, newest first.
-      Shared with the Color panel.
-
-init:
-  recent_colors: "document.recent_colors"
 
 menu:
   - label: "New Swatch"
@@ -232,180 +220,180 @@ content:
           summary: "Recent color 1"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.0"
+            color: "active_document.recent_colors.0"
           behavior:
             - event: click
-              condition: "panel.recent_colors.0 != null"
+              condition: "active_document.recent_colors.0 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.0" }
+              params: { color: "active_document.recent_colors.0" }
             - event: double_click
-              condition: "panel.recent_colors.0 != null"
+              condition: "active_document.recent_colors.0 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.0"
+                color: "active_document.recent_colors.0"
 
         - id: sp_recent_1
           type: color_swatch
           summary: "Recent color 2"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.1"
+            color: "active_document.recent_colors.1"
           behavior:
             - event: click
-              condition: "panel.recent_colors.1 != null"
+              condition: "active_document.recent_colors.1 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.1" }
+              params: { color: "active_document.recent_colors.1" }
             - event: double_click
-              condition: "panel.recent_colors.1 != null"
+              condition: "active_document.recent_colors.1 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.1"
+                color: "active_document.recent_colors.1"
 
         - id: sp_recent_2
           type: color_swatch
           summary: "Recent color 3"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.2"
+            color: "active_document.recent_colors.2"
           behavior:
             - event: click
-              condition: "panel.recent_colors.2 != null"
+              condition: "active_document.recent_colors.2 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.2" }
+              params: { color: "active_document.recent_colors.2" }
             - event: double_click
-              condition: "panel.recent_colors.2 != null"
+              condition: "active_document.recent_colors.2 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.2"
+                color: "active_document.recent_colors.2"
 
         - id: sp_recent_3
           type: color_swatch
           summary: "Recent color 4"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.3"
+            color: "active_document.recent_colors.3"
           behavior:
             - event: click
-              condition: "panel.recent_colors.3 != null"
+              condition: "active_document.recent_colors.3 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.3" }
+              params: { color: "active_document.recent_colors.3" }
             - event: double_click
-              condition: "panel.recent_colors.3 != null"
+              condition: "active_document.recent_colors.3 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.3"
+                color: "active_document.recent_colors.3"
 
         - id: sp_recent_4
           type: color_swatch
           summary: "Recent color 5"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.4"
+            color: "active_document.recent_colors.4"
           behavior:
             - event: click
-              condition: "panel.recent_colors.4 != null"
+              condition: "active_document.recent_colors.4 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.4" }
+              params: { color: "active_document.recent_colors.4" }
             - event: double_click
-              condition: "panel.recent_colors.4 != null"
+              condition: "active_document.recent_colors.4 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.4"
+                color: "active_document.recent_colors.4"
 
         - id: sp_recent_5
           type: color_swatch
           summary: "Recent color 6"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.5"
+            color: "active_document.recent_colors.5"
           behavior:
             - event: click
-              condition: "panel.recent_colors.5 != null"
+              condition: "active_document.recent_colors.5 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.5" }
+              params: { color: "active_document.recent_colors.5" }
             - event: double_click
-              condition: "panel.recent_colors.5 != null"
+              condition: "active_document.recent_colors.5 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.5"
+                color: "active_document.recent_colors.5"
 
         - id: sp_recent_6
           type: color_swatch
           summary: "Recent color 7"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.6"
+            color: "active_document.recent_colors.6"
           behavior:
             - event: click
-              condition: "panel.recent_colors.6 != null"
+              condition: "active_document.recent_colors.6 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.6" }
+              params: { color: "active_document.recent_colors.6" }
             - event: double_click
-              condition: "panel.recent_colors.6 != null"
+              condition: "active_document.recent_colors.6 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.6"
+                color: "active_document.recent_colors.6"
 
         - id: sp_recent_7
           type: color_swatch
           summary: "Recent color 8"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.7"
+            color: "active_document.recent_colors.7"
           behavior:
             - event: click
-              condition: "panel.recent_colors.7 != null"
+              condition: "active_document.recent_colors.7 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.7" }
+              params: { color: "active_document.recent_colors.7" }
             - event: double_click
-              condition: "panel.recent_colors.7 != null"
+              condition: "active_document.recent_colors.7 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.7"
+                color: "active_document.recent_colors.7"
 
         - id: sp_recent_8
           type: color_swatch
           summary: "Recent color 9"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.8"
+            color: "active_document.recent_colors.8"
           behavior:
             - event: click
-              condition: "panel.recent_colors.8 != null"
+              condition: "active_document.recent_colors.8 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.8" }
+              params: { color: "active_document.recent_colors.8" }
             - event: double_click
-              condition: "panel.recent_colors.8 != null"
+              condition: "active_document.recent_colors.8 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.8"
+                color: "active_document.recent_colors.8"
 
         - id: sp_recent_9
           type: color_swatch
           summary: "Recent color 10"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.9"
+            color: "active_document.recent_colors.9"
           behavior:
             - event: click
-              condition: "panel.recent_colors.9 != null"
+              condition: "active_document.recent_colors.9 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.9" }
+              params: { color: "active_document.recent_colors.9" }
             - event: double_click
-              condition: "panel.recent_colors.9 != null"
+              condition: "active_document.recent_colors.9 != null"
               action: open_swatch_options
               params:
                 mode: create
-                color: "panel.recent_colors.9"
+                color: "active_document.recent_colors.9"
 
     # -- Row 4: Swatch tiles area --
     - id: sp_swatch_tiles

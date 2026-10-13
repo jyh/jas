@@ -94,19 +94,6 @@ state:
     type: string
     default: "ffffff"
     description: "Working hex string (6 chars, no # prefix)"
-  recent_colors:
-    type: list
-    item_type: color
-    max_length: 10
-    default: []
-    per_document: true
-    description: >
-      Per-document list of recently committed colors, newest first.
-      Max 10 entries. A duplicate color moves to front rather than
-      duplicating. Added on commit: slider release, hex field Enter,
-      swatch click (including none/black/white). Not added for Invert
-      or Complement — those dispatch set_active_color which adds there.
-      Empty slots render as hollow squares with a solid border.
 
 init:
   h:   "hsb_h(if state.fill_on_top then state.fill_color else state.stroke_color)"
@@ -120,7 +107,6 @@ init:
   y:   "cmyk_y(if state.fill_on_top then state.fill_color else state.stroke_color)"
   k:   "cmyk_k(if state.fill_on_top then state.fill_color else state.stroke_color)"
   hex: "hex(if state.fill_on_top then state.fill_color else state.stroke_color)"
-  recent_colors: "document.recent_colors"
 
 menu:
   - label: "Grayscale"
@@ -237,108 +223,108 @@ content:
           description: "Most recent committed color. Empty slot shows a hollow square with a solid border."
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.0"
+            color: "active_document.recent_colors.0"
           behavior:
             - event: click
-              condition: "panel.recent_colors.0 != null"
+              condition: "active_document.recent_colors.0 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.0" }
+              params: { color: "active_document.recent_colors.0" }
 
         - id: cp_recent_1
           type: color_swatch
           summary: "Recent color 2"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.1"
+            color: "active_document.recent_colors.1"
           behavior:
             - event: click
-              condition: "panel.recent_colors.1 != null"
+              condition: "active_document.recent_colors.1 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.1" }
+              params: { color: "active_document.recent_colors.1" }
 
         - id: cp_recent_2
           type: color_swatch
           summary: "Recent color 3"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.2"
+            color: "active_document.recent_colors.2"
           behavior:
             - event: click
-              condition: "panel.recent_colors.2 != null"
+              condition: "active_document.recent_colors.2 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.2" }
+              params: { color: "active_document.recent_colors.2" }
 
         - id: cp_recent_3
           type: color_swatch
           summary: "Recent color 4"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.3"
+            color: "active_document.recent_colors.3"
           behavior:
             - event: click
-              condition: "panel.recent_colors.3 != null"
+              condition: "active_document.recent_colors.3 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.3" }
+              params: { color: "active_document.recent_colors.3" }
 
         - id: cp_recent_4
           type: color_swatch
           summary: "Recent color 5"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.4"
+            color: "active_document.recent_colors.4"
           behavior:
             - event: click
-              condition: "panel.recent_colors.4 != null"
+              condition: "active_document.recent_colors.4 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.4" }
+              params: { color: "active_document.recent_colors.4" }
 
         - id: cp_recent_5
           type: color_swatch
           summary: "Recent color 6"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.5"
+            color: "active_document.recent_colors.5"
           behavior:
             - event: click
-              condition: "panel.recent_colors.5 != null"
+              condition: "active_document.recent_colors.5 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.5" }
+              params: { color: "active_document.recent_colors.5" }
 
         - id: cp_recent_6
           type: color_swatch
           summary: "Recent color 7"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.6"
+            color: "active_document.recent_colors.6"
           behavior:
             - event: click
-              condition: "panel.recent_colors.6 != null"
+              condition: "active_document.recent_colors.6 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.6" }
+              params: { color: "active_document.recent_colors.6" }
 
         - id: cp_recent_7
           type: color_swatch
           summary: "Recent color 8"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.7"
+            color: "active_document.recent_colors.7"
           behavior:
             - event: click
-              condition: "panel.recent_colors.7 != null"
+              condition: "active_document.recent_colors.7 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.7" }
+              params: { color: "active_document.recent_colors.7" }
 
         - id: cp_recent_8
           type: color_swatch
           summary: "Recent color 9"
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.8"
+            color: "active_document.recent_colors.8"
           behavior:
             - event: click
-              condition: "panel.recent_colors.8 != null"
+              condition: "active_document.recent_colors.8 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.8" }
+              params: { color: "active_document.recent_colors.8" }
 
         - id: cp_recent_9
           type: color_swatch
@@ -346,12 +332,12 @@ content:
           description: "Oldest of the ten recent colors."
           style: { size: 16 }
           bind:
-            color: "panel.recent_colors.9"
+            color: "active_document.recent_colors.9"
           behavior:
             - event: click
-              condition: "panel.recent_colors.9 != null"
+              condition: "active_document.recent_colors.9 != null"
               action: set_active_color
-              params: { color: "panel.recent_colors.9" }
+              params: { color: "active_document.recent_colors.9" }
 
     # ── Row 2: Fill/stroke widget | Sliders ────────────────────
     - type: row

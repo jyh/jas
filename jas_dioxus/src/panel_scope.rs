@@ -50,7 +50,6 @@ pub struct PanelState {
     pub stroke: Option<(f64, f64, f64)>,
     pub fill_on_top: bool,
     pub mode: String,
-    pub recent: Vec<String>,
 }
 
 impl Default for PanelState {
@@ -60,7 +59,6 @@ impl Default for PanelState {
             stroke: Some((0.0, 0.0, 0.0)),
             fill_on_top: true,
             mode: "hsb".to_string(),
-            recent: vec![],
         }
     }
 }
@@ -148,7 +146,6 @@ impl PanelState {
                 "r": ch.r, "g": ch.g, "bl": ch.bl,
                 "h": ch.h, "s": ch.s, "b": ch.b,
                 "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
-                "recent_colors": self.recent,
                 // The artboards panel reads these two; an absent key and a
                 // false key are not the same thing to `eval`.
                 "renaming_artboard": Value::Null,
@@ -322,6 +319,9 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
         crate::interpreter::document_views::brushed_stroke_facts(model.document());
     m.insert("selection_has_brushed_stroke".into(), has_brushed.into());
     m.insert("selection_is_single_brushed_stroke".into(), single_brushed.into());
+    // The per-document recent colours (`active_document.recent_colors`), which
+    // `set_active_color` pushes onto the model and Color and Swatches read.
+    m.insert("recent_colors".into(), serde_json::json!(model.recent_colors));
     m
 }
 
@@ -934,7 +934,10 @@ mod tests {
     /// adjacent.
     ///
     /// **It does not.** The colour panel declares TEN fixed swatch nodes
-    /// (`cp_recent_0` … `cp_recent_9`), each binding `panel.recent_colors.<n>`;
+    /// (`cp_recent_0` … `cp_recent_9`), each binding
+    /// `active_document.recent_colors.<n>` (the model's list since 2026-10-12;
+    /// it was the slice's `panel.recent_colors` before, so this drives the
+    /// ENGINE scope, which is where the list now arrives);
     /// an empty slot renders as a hollow square rather than not rendering. So
     /// the count is **constant at every list length** and only the VALUES move.
     /// C2 and C3 share a denominator.
@@ -942,11 +945,14 @@ mod tests {
     fn a_recent_colours_push_moves_values_and_not_the_record_count() {
         let w = ws();
         let spec = w.panel("color_panel_content").unwrap();
-        let doc = doc_with(0);
 
+        let scope = |recent: Vec<String>| {
+            let mut m = Model::default();
+            m.recent_colors = recent;
+            engine_scope(&PanelState::default(), &StateStore::new(), &m, COLOUR_PANEL)
+        };
         let rows = |recent: Vec<String>| -> (usize, usize) {
-            let st = PanelState { recent, ..PanelState::default() };
-            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            let v = crate::interpreter::bind_values::bind_values(spec, &scope(recent));
             let arr = v.as_array().unwrap().clone();
             let slots = arr.iter().filter(|r| {
                 r["id"].as_str().is_some_and(|s| s.starts_with("cp_recent_"))
@@ -969,8 +975,7 @@ mod tests {
         // The CONTROL: the values DO move, or this test would pass on a scope
         // that ignored `recent` entirely and prove nothing about pushes.
         let value_of = |recent: Vec<String>| -> String {
-            let st = PanelState { recent, ..PanelState::default() };
-            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            let v = crate::interpreter::bind_values::bind_values(spec, &scope(recent));
             v.as_array().unwrap().iter()
                 .find(|r| r["id"] == "cp_recent_0")
                 .expect("the first recent slot")["value"].as_str().unwrap().to_string()

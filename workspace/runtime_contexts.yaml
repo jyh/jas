@@ -25,7 +25,23 @@ runtime_contexts:
       artboards_panel_selection_ids: []
       element_tree: null
       element_selection: []
+      recent_colors: []
     properties:
+      recent_colors:
+        type: list
+        item_type: color
+        writable: true
+        description: >
+          Per-document list of recently committed colors, newest first,
+          capped at 10 entries. The ONE writable active_document property:
+          `set_active_color` pushes onto it (`list_push` target
+          `active_document.recent_colors`, unique, max 10), and the Color and
+          Swatches panels both read it, so the two strips always agree.
+          Added on commit (slider release, hex field Enter, swatch click
+          including none/black/white). Empty slots render as hollow squares
+          with a solid border. Until 2026-10-12 this was a PANEL key, so the
+          push landed in whichever panel was active and a menu dispatch
+          dropped it.
       is_modified:
         type: bool
         description: "The active document has unsaved changes"
@@ -175,7 +191,6 @@ runtime_contexts:
     defaults:
       layers_panel_selection: []
       isolation_stack: []
-      recent_colors: []
     properties:
       layers_panel_selection:
         type: list
@@ -191,12 +206,6 @@ runtime_contexts:
           Stack of paths to isolated containers in the layers panel,
           innermost level last. Pushed by enter_isolation_mode, popped
           by exit_isolation_mode.
-      recent_colors:
-        type: list
-        item_type: color
-        description: >
-          Per-document list of recently-committed colors, newest first,
-          capped at 10 entries.
 
 # ──────────────────────────────────────────────────────────────────
 # Lexically-bound contexts

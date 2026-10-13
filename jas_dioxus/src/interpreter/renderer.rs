@@ -1959,6 +1959,8 @@ pub(crate) fn build_active_document_view(
             // The Brushes panel's two gates (W2b-18): nothing is selected.
             m.insert("selection_has_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
+            // No document: no recent colours (`active_document.recent_colors`).
+            m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
         }
         return empty;
     };
@@ -2191,6 +2193,11 @@ pub(crate) fn build_active_document_view(
                     .collect(),
             ),
         );
+    }
+    // The per-document recent colours, the one writable document list
+    // (`runtime_contexts.yaml`), which Color and Swatches both read.
+    if let Some(m) = view.as_object_mut() {
+        m.insert("recent_colors".to_string(), serde_json::json!(tab.model.recent_colors));
     }
     view
 }
@@ -3187,7 +3194,7 @@ fn run_yaml_effect(
     // list_push: { target, value, unique, max_length }
     if let Some(lp) = eff.get("list_push").and_then(|v| v.as_object()) {
         let target = lp.get("target").and_then(|v| v.as_str()).unwrap_or("");
-        if target == "panel.recent_colors" {
+        if target == "active_document.recent_colors" {
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
             // Accept both Value::Color (e.g. from a `Color`-typed
@@ -3202,15 +3209,7 @@ fn run_yaml_effect(
                 let unique = lp.get("unique").and_then(|v| v.as_bool()).unwrap_or(false);
                 let max_len = lp.get("max_length").and_then(|v| v.as_u64()).map(|n| n as usize);
                 if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-                    if unique {
-                        if let Some(pos) = tab.model.recent_colors.iter().position(|c| *c == hex) {
-                            tab.model.recent_colors.remove(pos);
-                        }
-                    }
-                    tab.model.recent_colors.insert(0, hex);
-                    if let Some(max) = max_len {
-                        tab.model.recent_colors.truncate(max);
-                    }
+                    tab.model.push_recent_color(hex, unique, max_len);
                 }
             }
         } else if target == "panel.isolation_stack" {
@@ -6806,7 +6805,7 @@ fn render_radio_group(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
 ///
 /// The value cannot tell them apart, and they must render differently:
 /// `state.fill_color` is null because the user set the attribute to None
-/// (draw the red-diagonal indicator), while `panel.recent_colors.3` is null
+/// (draw the red-diagonal indicator), while `active_document.recent_colors.3` is null
 /// because that slot has never been filled (draw a hollow placeholder). So
 /// decide from the bind's own DECLARATION instead: a global `state.<key>`
 /// read whose `workspace/state.yaml` schema entry is a NULLABLE COLOUR
@@ -13178,6 +13177,21 @@ mod tests {
         assert_eq!(view["element_selection"], serde_json::json!([]));
     }
 
+    /// The per-document recent colours are `active_document.recent_colors`
+    /// (`runtime_contexts.yaml`): the active tab's model list, and an empty
+    /// list with no tab. Until 2026-10-12 they were a panel override instead.
+    #[test]
+    fn active_document_view_publishes_the_tabs_recent_colours() {
+        let mut st = AppState::new();
+        st.tabs.clear();
+        st.active_tab = 0;
+        assert_eq!(build_active_document_view(&st)["recent_colors"], serde_json::json!([]));
+        let mut st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
+        st.tabs[st.active_tab].model.recent_colors = vec!["#112233".into(), "#445566".into()];
+        assert_eq!(build_active_document_view(&st)["recent_colors"],
+                   serde_json::json!(["#112233", "#445566"]));
+    }
+
     #[test]
     fn active_document_view_empty_selection_yields_no_selection() {
         let st = make_state_with_layers(vec![("A".into(), Visibility::Preview, false)]);
@@ -14804,7 +14818,7 @@ mod tests {
     // A null colour has TWO meanings and the value alone cannot tell them
     // apart: `state.fill_color` null means "the user set this attribute to
     // None" (draw the red-diagonal indicator), while
-    // `panel.recent_colors.3` null means "that slot is empty" (draw a
+    // `active_document.recent_colors.3` null means "that slot is empty" (draw a
     // hollow placeholder). The decision is read off the bind's declaration.
     // ── COLORTIERS: the RENDER half gets vectors of its own ───────────
     //
@@ -14829,7 +14843,7 @@ mod tests {
     fn swatch_ctx() -> serde_json::Value {
         serde_json::json!({
             "state": { "fill_color": serde_json::Value::Null, "stroke_color": "#000000" },
-            "panel": { "recent_colors": ["ff0000", serde_json::Value::Null] },
+            "active_document": { "recent_colors": ["ff0000", serde_json::Value::Null] },
             "dialog": { "hex": "" },
         })
     }
@@ -14853,7 +14867,7 @@ mod tests {
     fn colortiers_empty_recent_slot_stays_a_placeholder() {
         let ctx = swatch_ctx();
         let (color, explicit_none) =
-            super::swatch_color_bind(&swatch_el("panel.recent_colors.1"), &ctx);
+            super::swatch_color_bind(&swatch_el("active_document.recent_colors.1"), &ctx);
         assert!(color.is_empty());
         assert!(!explicit_none,
                 "an unfilled recent slot is a PLACEHOLDER — no diagonal");
@@ -14885,7 +14899,7 @@ mod tests {
         assert_eq!(super::swatch_border(&color, explicit_none, false),
                    super::SwatchBorder::Solid);
         // A bare hex (how recent_colors stores them) gets its '#'.
-        let (bare, _) = super::swatch_color_bind(&swatch_el("panel.recent_colors.0"), &ctx);
+        let (bare, _) = super::swatch_color_bind(&swatch_el("active_document.recent_colors.0"), &ctx);
         assert_eq!(bare, "#ff0000");
     }
 
@@ -14966,7 +14980,7 @@ mod tests {
     fn cptriage_null_means_none_only_for_nullable_state_colours() {
         assert!(null_color_means_none("state.fill_color"));
         assert!(null_color_means_none("state.stroke_color"));
-        assert!(!null_color_means_none("panel.recent_colors.3"),
+        assert!(!null_color_means_none("active_document.recent_colors.3"),
                 "an empty recent slot is a placeholder, not a None indicator");
         assert!(!null_color_means_none("swatch.color"));
         assert!(!null_color_means_none("stroke_dash_2"),

@@ -1987,7 +1987,7 @@ effects like `push_recent_color`:
 
 ```yaml
 list_push:
-  target: <state_path>          # list to modify (panel.* or state.*)
+  target: <state_path>          # list to modify (panel.* or active_document.recent_colors)
   value: <expr>                 # value to prepend
   unique: <bool>                # if true, remove existing equal value first (default false)
   max_length: <integer>         # cap list length after push (optional)
@@ -1998,6 +1998,18 @@ If `unique` is true and the value already exists in the list (by
 strict `==`), remove the existing occurrence before prepending.
 If `max_length` is set, truncate the list to that length after
 the push.
+
+Two target forms, and only these:
+
+* `panel.<key>` writes the ACTIVE panel's scope. With no active panel
+  (a menu dispatch), nothing is written.
+* `active_document.recent_colors` writes the per-document recent-colour
+  list, the one writable `active_document` property
+  (`runtime_contexts.yaml`). Any other `active_document.*` target writes
+  nothing and is reported as not writable.
+
+There is no `state.*` form. This section said there was until
+2026-10-12, and no runner implemented it.
 
 ### Expression Conformance Tests
 

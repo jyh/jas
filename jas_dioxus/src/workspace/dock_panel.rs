@@ -227,13 +227,8 @@ pub(crate) fn build_live_panel_overrides(st: &AppState) -> serde_json::Map<Strin
     m.insert("selected_library".into(), J::String(swp.selected_library.clone()));
     m.insert("open_libraries".into(), swp.open_libraries.clone());
     m.insert("thumbnail_size".into(), J::String(swp.thumbnail_size.clone()));
-    // panel.recent_colors mirrors the active tab's model.recent_colors,
-    // so the YAML's recent-color slot binds (panel.recent_colors.0..9)
-    // see live edits without needing to re-init the panel each click.
-    let recent: Vec<serde_json::Value> = st.recent_colors().iter()
-        .map(|c| J::String(c.clone()))
-        .collect();
-    m.insert("recent_colors".into(), serde_json::Value::Array(recent));
+    // The recent colours are `active_document.recent_colors` now
+    // (`build_active_document_view`), not a panel key.
 
     // ── Character panel overrides ───────────────────────────
     // Read font_family / font_size from the first selected

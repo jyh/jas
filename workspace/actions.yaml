@@ -757,7 +757,7 @@ actions:
             - set: { fill_color: "param.color" }
           else:
             - set: { stroke_color: "param.color" }
-      - list_push: { target: "panel.recent_colors", value: "param.color", unique: true, max_length: 10 }
+      - list_push: { target: "active_document.recent_colors", value: "param.color", unique: true, max_length: 10 }
 
   set_active_color_none:
     description: >
