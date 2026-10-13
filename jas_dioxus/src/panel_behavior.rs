@@ -462,9 +462,6 @@ pub fn run_widget_behavior(
     dialogs: &Value,
     host: &mut dyn EffectHost,
 ) -> Result<Ran, Refusal> {
-    if panel_id == COLOUR_PANEL {
-        return Err(Refusal::new("PanelNotHosted", panel_id));
-    }
     let content = spec.get("content").unwrap_or(&Value::Null);
     // W2b-16: an event addressed by `path` resolves the node AND the row scope
     // it runs in; one addressed by id finds the first node with that id, which
@@ -500,6 +497,16 @@ pub fn run_widget_behavior(
     // press on a boolean kind follow the contract; every other event on every
     // other kind keeps the click path below.
     let kind = node.get("type").and_then(Value::as_str).unwrap_or("");
+    // The colour panel's `panel.*` is the `PanelState` slice, never the store,
+    // so the three branches that WRITE a widget's value (a commit, a boolean
+    // press, an item pick) refuse it by name. Its value commits go through the
+    // slice (`ffi::colour_value_commit`); its clicks run below like any panel's.
+    let writes_value = (INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()))
+        || (BOOLEAN_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()))
+        || ITEM_KINDS.contains(&kind);
+    if panel_id == COLOUR_PANEL && writes_value {
+        return Err(Refusal::new("PanelNotHosted", panel_id));
+    }
     if INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()) {
         return commit_value(panel_id, spec, node, ev, scope, store, model, actions, dialogs,
                             host);
