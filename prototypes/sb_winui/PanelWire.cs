@@ -509,6 +509,71 @@ internal static class PanelWire
     /// that do not open with the BMP signature `BM`. Decoding is all the shell
     /// does: every pixel is already the engine's colour.
     /// </summary>
+    /// <summary>§255: a chrome row carrying `bind.active` (a document tab), by path; drawn behind its leaves.</summary>
+    internal sealed record ActiveBox(string Path, double X, double Y, double W, double H, bool Active);
+
+    /// <summary>
+    /// §255 (#403): the plan's chrome rows that carry `bind.active`, in plan
+    /// order, with any row under one of the plan's `hidden` paths skipped. A
+    /// `foreach` row's id is withheld, so a row is named by its PATH (the same
+    /// raw text a leaf's path is). Null when the plan does not parse. The shell
+    /// only reads `"true"`: which tab is active is the engine's answer.
+    /// </summary>
+    internal static List<ActiveBox>? ActiveBoxes(string planJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(planJson);
+            var root = doc.RootElement;
+            var hidden = new List<long[]>();
+            if (root.TryGetProperty("hidden", out var hs))
+            {
+                foreach (var h in hs.EnumerateArray()) { hidden.Add(h.EnumerateArray().Select(x => x.GetInt64()).ToArray()); }
+            }
+            var boxes = new List<ActiveBox>();
+            foreach (var e in root.GetProperty("chrome").EnumerateArray())
+            {
+                if (!e.GetProperty("values").TryGetProperty("bind.active", out var active)) { continue; }
+                var p = e.GetProperty("path").EnumerateArray().Select(x => x.GetInt64()).ToArray();
+                if (hidden.Any(h => h.Length <= p.Length && h.SequenceEqual(p.Take(h.Length)))) { continue; }
+                var r = e.GetProperty("rect");
+                boxes.Add(new ActiveBox(
+                    e.GetProperty("path").GetRawText(),
+                    r.GetProperty("x").GetDouble(), r.GetProperty("y").GetDouble(),
+                    r.GetProperty("w").GetDouble(), r.GetProperty("h").GetDouble(),
+                    active.GetString() == "true"));
+            }
+            return boxes;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// §255: the y at which the chrome container <paramref name="surfaceId"/>
+    /// starts, so the shell's own drawing surface sits where the plan puts it and
+    /// the strip above it is the plan's. Null when the plan does not parse or
+    /// does not place it.
+    /// </summary>
+    internal static long? SurfaceTop(string planJson, string surfaceId)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(planJson);
+            foreach (var e in doc.RootElement.GetProperty("chrome").EnumerateArray())
+            {
+                if (e.GetProperty("id").GetString() == surfaceId) { return e.GetProperty("rect").GetProperty("y").GetInt64(); }
+            }
+            return null;
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
     internal static byte[]? PictureBytes(string? uri)
     {
         const string prefix = "data:image/bmp;base64,";

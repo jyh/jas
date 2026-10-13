@@ -870,6 +870,28 @@ static class Program
         Eq("color_bar picture: another media type is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/png;base64,Qk0BAg==")));
         Eq("color_bar picture: a URI that is not base64 is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/bmp,Qk0BAg==")));
         Eq("color_bar picture: malformed base64 is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/bmp;base64,Qk0*Ag==")));
+        // §255 (#403): the canvas pane's document tabs. A tab row is a CHROME
+        // container carrying `bind.active`; its id is withheld, so it is read by
+        // path. The D2D surface starts where the plan puts `drawing_surface`.
+        const string canvasPlan = """
+            {"chrome":[
+              {"path":[0],"type":"container","id":"canvas_tab_bar","rect":{"x":0,"y":0,"w":1600,"h":24},"values":{"bind.visible":"true"},"static":{},"display":{}},
+              {"path":[0,0],"type":"container","id":"","rect":{"x":0,"y":0,"w":128,"h":24},"values":{"bind.active":"true"},"static":{},"display":{}},
+              {"path":[0,1],"type":"container","id":"","rect":{"x":128,"y":0,"w":128,"h":24},"values":{"bind.active":"false"},"static":{},"display":{}},
+              {"path":[1],"type":"container","id":"drawing_surface","rect":{"x":0,"y":24,"w":1600,"h":876},"values":{},"static":{},"display":{}},
+              {"path":[1,0],"type":"container","id":"","rect":{"x":0,"y":30,"w":50,"h":20},"values":{"bind.active":"true"},"static":{},"display":{}}],
+             "leaves":[],"containers":[],"hidden":[[1,0]]}
+            """;
+        static string Boxes(List<PanelWire.ActiveBox>? bs) => bs is null ? "(null)"
+            : string.Join(" ", bs.Select(b => $"{b.Path}@{b.X},{b.Y},{b.W}x{b.H}:{(b.Active ? "on" : "off")}"));
+        Eq("canvas tabs: each chrome row carrying bind.active is a box, in plan order, a hidden one skipped",
+            "[0,0]@0,0,128x24:on [0,1]@128,0,128x24:off", Boxes(PanelWire.ActiveBoxes(canvasPlan)));
+        Eq("canvas tabs: a plan with no active rows has no boxes", "",
+            Boxes(PanelWire.ActiveBoxes("""{"chrome":[{"path":[0],"type":"container","id":"x","rect":{"x":0,"y":0,"w":9,"h":9},"values":{},"static":{},"display":{}}],"hidden":[]}""")));
+        Eq("canvas tabs: an unparseable plan has no boxes", "(null)", Boxes(PanelWire.ActiveBoxes("{")));
+        Eq("canvas tabs: the surface starts where the plan places it", "24", Show(PanelWire.SurfaceTop(canvasPlan, "drawing_surface")?.ToString()));
+        Eq("canvas tabs: a plan without the surface names no top", "(null)|(null)",
+            Show(PanelWire.SurfaceTop(canvasPlan, "no_such")?.ToString()) + "|" + Show(PanelWire.SurfaceTop("{", "drawing_surface")?.ToString()));
         Eq("color_bar picture: bytes that are not a BMP are refused", "(null)|(null)", Hex(PanelWire.PictureBytes("data:image/bmp;base64,iVBORw==")) + "|" + Hex(PanelWire.PictureBytes("data:image/bmp;base64,")));
 
         // #397: the dirty flag is the MODEL's answer (`jas_document_modified`),

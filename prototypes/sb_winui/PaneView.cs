@@ -28,9 +28,10 @@ public sealed partial class MainWindow
         private readonly bool _topAligned;
 
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
-                          bool topAligned = false)
+                          bool topAligned = false, double pad = PanePad)
         {
             _topAligned = topAligned;
+            _pad = pad;
             _w = w;
             _host = host;
             _scroll = scroll;
@@ -44,6 +45,9 @@ public sealed partial class MainWindow
         /// control it is, even while a switch is still queued.
         /// </summary>
         internal string _paneDrawnPanel;
+
+        /// <summary>The margin round the plan's own coordinates: the panes' 4, the canvas strip's 0.</summary>
+        private readonly double _pad;
 
         /// <summary>The `Seq` of the plan currently drawn (see `_menuDrawnSeq`).</summary>
         private long _paneDrawnSeq;
@@ -149,6 +153,10 @@ public sealed partial class MainWindow
                                   ic.Value.GetProperty("svg").GetString() ?? "");
             }
             var height = root.GetProperty("height").GetInt64();
+            // §255: chrome rows carrying `bind.active` (the canvas pane's document
+            // tabs) are drawn as boxes behind the leaves. Which one is active is a
+            // build input, so a moved active tab rebuilds the pane.
+            var boxes = PanelWire.ActiveBoxes(snap.PlanJson) ?? new List<PanelWire.ActiveBox>();
 
             // The panel id is part of the signature: two panels with the same
             // leaves would otherwise keep controls that address the wrong panel.
@@ -160,10 +168,11 @@ public sealed partial class MainWindow
                 // must rebuild. The selection is not in it: it moves every tick
                 // and is applied in place.
                 + "|" + (l.Options?.Signature ?? "")
-                + "|" + (l.Track?.ToString() ?? "")));
+                + "|" + (l.Track?.ToString() ?? "")))
+                + "\n" + string.Join("\n", boxes);
             var rebuilt = signature != _paneSignature;
             _paneDrawnPanel = snap.PanelId;
-            if (rebuilt) { BuildPane(leaves, icons, height); }
+            if (rebuilt) { BuildPane(leaves, icons, height, boxes); }
             _paneSignature = signature;
 
             // §1.2: a dropdown's flyout is built at every OPEN from the newest
@@ -238,7 +247,8 @@ public sealed partial class MainWindow
         /// built. A leaf type this shell has no control for is drawn as a muted
         /// `[type]` placeholder and COUNTED, never dropped.
         /// </summary>
-        private void BuildPane(List<PaneLeaf> leaves, Dictionary<string, (string Viewbox, string Svg)> icons, long height)
+        private void BuildPane(List<PaneLeaf> leaves, Dictionary<string, (string Viewbox, string Svg)> icons, long height,
+                               List<PanelWire.ActiveBox> boxes)
         {
             _paneBuild++;
             _paneControls.Clear();
@@ -253,8 +263,25 @@ public sealed partial class MainWindow
             {
                 Width = _availW,
                 Height = height,
-                Margin = new Thickness(PanePad),
+                Margin = new Thickness(_pad),
             };
+            // §255: a row's box goes in first, so its leaves draw over it. The
+            // active one takes the checked look a toggle has; another is outlined.
+            foreach (var box in boxes)
+            {
+                var face = new Border
+                {
+                    Width = box.W,
+                    Height = box.H,
+                    Background = box.Active ? _paneCheckedFill : null,
+                    BorderBrush = box.Active ? _paneCheckedEdge : _paneMutedBrush,
+                    BorderThickness = box.Active ? new Thickness(1, 1, 1, 0) : new Thickness(0, 0, 1, 0),
+                    IsHitTestVisible = false,
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(face, box.X);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(face, box.Y);
+                host.Children.Add(face);
+            }
             // The toolbar's buttons sit at the TOP of its column, as every port
             // draws a toolbar. The dock keeps its placement (unchanged here).
             if (_topAligned) { host.VerticalAlignment = VerticalAlignment.Top; }
@@ -458,7 +485,7 @@ public sealed partial class MainWindow
             // counters, and the self-test's row is an INPUT to that parser.
             _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
                  + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} previews={previews} preview-empty={previewEmpty} "
-                 + $"unmaterialized={unmaterialized} "
+                 + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
