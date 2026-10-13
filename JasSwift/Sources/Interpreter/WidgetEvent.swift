@@ -33,7 +33,7 @@ enum WidgetEvent {
     static let pressEvents = ["click", "change"]
     static let inputKinds: Set<String> = [
         "number_input", "length_input", "text_input",
-        "select", "icon_select", "combo_box", "slider",
+        "select", "icon_select", "combo_box", "slider", "color_bar",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
@@ -261,6 +261,15 @@ enum WidgetEvent {
             guard let v = numberInputCommit(text: text, min: lo, max: hi) else { return refused }
             return (true, clampToDeclared(snapToStep(v, min: lo, step: declaredBound(widget["step"])),
                                           min: lo, max: hi))
+        case "color_bar":
+            // A point normalized to [0,1]² (fork B2): "u,v", each coordinate in
+            // the number grammar, each clamped. The colour is
+            // `colorBarRgb(u, v)`; the parse stops at the point.
+            let parts = text.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 2,
+                  let u = numberInputCommit(text: parts[0], min: 0, max: 1),
+                  let v = numberInputCommit(text: parts[1], min: 0, max: 1) else { return refused }
+            return (true, [u, v])
         case "select", "icon_select":
             guard let rows = optionRows(widget["options"]) else {
                 // Computed options: the shell offered what the expression

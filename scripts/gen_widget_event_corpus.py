@@ -132,6 +132,17 @@ SEED = [
      {"commit": "abc"}),
     ("color_hue_slider_disabled_with_no_fill", COLOR, "cp_h",
      {"state": {"fill_on_top": True, "fill_color": None}}, {"commit": "210"}),
+    # color_bar (fork B2, 2026-10-13): the point "u,v", each clamped to [0,1].
+    ("color_bar_commit_is_a_point", COLOR, "cp_color_bar",
+     {"state": {"fill_on_top": True, "fill_color": "#336699"}}, {"commit": "0.25,0.5"}),
+    ("color_bar_point_is_clamped", COLOR, "cp_color_bar",
+     {"state": {"fill_on_top": True, "fill_color": "#336699"}}, {"commit": "1.4,-0.2"}),
+    ("color_bar_one_coordinate_is_bad", COLOR, "cp_color_bar",
+     {"state": {"fill_on_top": True, "fill_color": "#336699"}}, {"commit": "0.5"}),
+    ("color_bar_spaced_point_is_bad", COLOR, "cp_color_bar",
+     {"state": {"fill_on_top": True, "fill_color": "#336699"}}, {"commit": "0.5, 0.5"}),
+    ("color_bar_disabled_with_no_fill", COLOR, "cp_color_bar",
+     {"state": {"fill_on_top": True, "fill_color": None}}, {"commit": "0.25,0.5"}),
 ]
 
 

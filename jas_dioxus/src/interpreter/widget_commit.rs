@@ -103,9 +103,9 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 
 /// The input kinds: a committed value is parsed, written, then its
 /// `commit`/`change` behaviors run.
-pub const INPUT_KINDS: [&str; 7] = [
+pub const INPUT_KINDS: [&str; 8] = [
     "number_input", "length_input", "text_input", "select", "icon_select", "combo_box",
-    "slider",
+    "slider", "color_bar",
 ];
 /// The boolean kinds: a declared `click`/`change` behavior IS the press.
 pub const BOOLEAN_KINDS: [&str; 2] = ["toggle", "checkbox"];
@@ -232,6 +232,20 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
         "slider" => number_input_commit(text, lo, hi).map(|v| {
             json!(clamp_to_declared(snap_to_step(v, lo, declared_bound(widget, "step")), lo, hi))
         }),
+        // A point normalized to [0,1]² (fork B2): "u,v", each coordinate in the
+        // number grammar, each clamped. The colour is
+        // `color_util::color_bar_rgb(u, v)`; the parse stops at the point.
+        "color_bar" => {
+            let parts: Vec<&str> = text.split(',').collect();
+            match parts.as_slice() {
+                [u, v] => match (number_input_commit(u, Some(0.0), Some(1.0)),
+                                 number_input_commit(v, Some(0.0), Some(1.0))) {
+                    (Some(u), Some(v)) => Some(json!([u, v])),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
         // A divider is not a row a commit can match (SCHEMA.md, `options`).
         "select" | "icon_select" => match widget.get("options").and_then(option_rows) {
             Some(rows) => rows.into_iter().find_map(|r| {
@@ -389,10 +403,11 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len());
-        // A kind outside the table has no events. `slider` was this control
-        // until it became an input kind (2026-10-13, fork A); `color_bar` is
-        // still outside the table until fork B.
-        assert!(allowed_events("color_bar").is_empty());
+        // A kind outside the table has no events. `slider` and then
+        // `color_bar` were this control until each became an input kind
+        // (2026-10-13, forks A and B2); `radio_group` is outside by the
+        // contract's own list.
+        assert!(allowed_events("radio_group").is_empty());
     }
 
     #[test]
@@ -454,11 +469,26 @@ mod tests {
         assert_eq!(parse(w, "  "), None);
     }
 
+    /// The colour bar (fork B2): a point "u,v", each coordinate clamped to
+    /// [0, 1]. Mirrors the reference's `test_a_color_bar_*` lists.
+    #[test]
+    fn a_colour_bar_commit_is_a_clamped_point_or_refused() {
+        let w = json!({"type": "color_bar"});
+        for (text, want) in [("0.25,0.5", [0.25, 0.5]), ("0,0", [0.0, 0.0]), ("1,1", [1.0, 1.0]),
+                             ("1.4,-0.2", [1.0, 0.0]), ("-3,7", [0.0, 1.0])] {
+            assert_eq!(parse(w.clone(), text), Some(json!(want)), "{text}");
+        }
+        for text in ["0.5", "0.5,0.5,0.5", "0.5, 0.5", "a,b", ",0.5", "0.5,", "", ".5,.5"] {
+            assert_eq!(parse(w.clone(), text), None, "{text:?}");
+        }
+    }
+
     #[test]
     fn a_boolean_or_unknown_kind_has_no_text_parse() {
         assert_eq!(parse(json!({"type": "toggle"}), "true"), None);
-        // `slider` was this example until it became an input kind (fork A).
-        assert_eq!(parse(json!({"type": "color_bar"}), "3"), None);
+        // `slider`, then `color_bar`, were this example until each became an
+        // input kind (forks A and B2).
+        assert_eq!(parse(json!({"type": "radio_group"}), "3"), None);
     }
 
     /// A slider (WIDGET_EVENTS.md, Parsing; the reference's `_snap`): a

@@ -2158,6 +2158,272 @@
       "name": "color_hue_slider_disabled_with_no_fill",
       "panel": "color_panel_content",
       "widget": "cp_h"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699",
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "0.25,0.5"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "inert",
+          "reason": null,
+          "value": [
+            0.25,
+            0.5
+          ]
+        },
+        "state_changed": {}
+      },
+      "name": "color_bar_commit_is_a_point",
+      "panel": "color_panel_content",
+      "widget": "cp_color_bar"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699",
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "1.4,-0.2"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "inert",
+          "reason": null,
+          "value": [
+            1.0,
+            0.0
+          ]
+        },
+        "state_changed": {}
+      },
+      "name": "color_bar_point_is_clamped",
+      "panel": "color_panel_content",
+      "widget": "cp_color_bar"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699",
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "0.5"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "color_bar_one_coordinate_is_bad",
+      "panel": "color_panel_content",
+      "widget": "cp_color_bar"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "state": {
+          "fill_color": "#336699",
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "0.5, 0.5"
+      },
+      "expected": {
+        "panel": {
+          "b": 60,
+          "bl": 153,
+          "c": 67,
+          "g": 102,
+          "h": 210,
+          "hex": "336699",
+          "k": 40,
+          "m": 33,
+          "mode": "hsb",
+          "r": 51,
+          "s": 67,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "BadValue",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "color_bar_spaced_point_is_bad",
+      "panel": "color_panel_content",
+      "widget": "cp_color_bar"
+    },
+    {
+      "before": {
+        "panel": {
+          "b": 0,
+          "bl": 0,
+          "c": 0,
+          "g": 0,
+          "h": 0,
+          "hex": "000000",
+          "k": 100,
+          "m": 0,
+          "mode": "hsb",
+          "r": 0,
+          "s": 0,
+          "y": 0
+        },
+        "state": {
+          "fill_color": null,
+          "fill_on_top": true
+        }
+      },
+      "event": {
+        "commit": "0.25,0.5"
+      },
+      "expected": {
+        "panel": {
+          "b": 0,
+          "bl": 0,
+          "c": 0,
+          "g": 0,
+          "h": 0,
+          "hex": "000000",
+          "k": 100,
+          "m": 0,
+          "mode": "hsb",
+          "r": 0,
+          "s": 0,
+          "y": 0
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "color_bar_disabled_with_no_fill",
+      "panel": "color_panel_content",
+      "widget": "cp_color_bar"
     }
   ]
 }

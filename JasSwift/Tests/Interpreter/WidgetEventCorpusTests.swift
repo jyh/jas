@@ -293,3 +293,19 @@ private func isTrue(_ v: Any?) -> Bool { Value.fromJson(v) == .bool(true) }
     #expect(parse(["type": "slider", "min": 0, "max": 10], "3.7") == 3.7, "no step")
     #expect(parse(["type": "slider", "step": 0], "3.7") == 3.7, "a zero step")
 }
+
+/// The colour bar (fork B2): a point "u,v", each coordinate clamped to [0, 1].
+/// Mirrors the reference's `test_a_color_bar_*` lists and Rust's
+/// `a_colour_bar_commit_is_a_clamped_point_or_refused`.
+@Test func aColourBarCommitIsAClampedPointOrRefused() {
+    let w: [String: Any] = ["type": "color_bar"]
+    for (text, want) in [("0.25,0.5", [0.25, 0.5]), ("0,0", [0.0, 0.0]), ("1,1", [1.0, 1.0]),
+                         ("1.4,-0.2", [1.0, 0.0]), ("-3,7", [0.0, 1.0])] {
+        let (ok, v) = WidgetEvent.parseCommit(widget: w, text: text)
+        #expect(ok && (v as? [Double]) == want, "\(text)")
+    }
+    for text in ["0.5", "0.5,0.5,0.5", "0.5, 0.5", "a,b", ",0.5", "0.5,", "", ".5,.5"] {
+        let (ok, v) = WidgetEvent.parseCommit(widget: w, text: text)
+        #expect(!ok && v == nil, "\(text)")
+    }
+}
