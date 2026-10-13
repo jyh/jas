@@ -621,6 +621,7 @@ fn run_batch(
 
     if panel_id.is_some() { store.set_active_panel(panel_id); }
     let state_before = store.eval_context();
+    let model_state_before = model_state(model);
     let generation = model.generation();
     let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
                                     Some(dialogs), None, host);
@@ -628,8 +629,20 @@ fn run_batch(
                   "the pre-flight passed and the real run did not: {report:?}");
     Ok(Ran {
         doc_changed: model.generation() != generation,
-        state_changed: store.eval_context() != state_before,
+        state_changed: store.eval_context() != state_before
+            || model_state(model) != model_state_before,
     })
+}
+
+/// The state a behavior can change that the MODEL holds beside the document:
+/// the per-document recent colours (`active_document.recent_colors`) and the
+/// new-element defaults (`colour_host`). Neither is the document, so the
+/// generation does not see them, and neither is the store. Without this a
+/// swatch that only moved the recent strip reported `Unchanged` (2026-10-12,
+/// the white swatch on an engine already at white).
+fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::Fill>,
+                                   Option<crate::geometry::element::Stroke>) {
+    (model.recent_colors.clone(), model.default_fill, model.default_stroke)
 }
 
 /// A value event's behaviors, in declaration order: each one's effects and
