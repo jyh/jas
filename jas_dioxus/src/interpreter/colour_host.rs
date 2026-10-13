@@ -95,3 +95,26 @@ pub fn apply_active_colour(model: &mut Model, key: &str, value: &Value) -> bool 
     }
     true
 }
+
+/// The LIVE half of the law, for a drag (a colour bar or slider held down):
+/// the side's default and the selection's matching side take `colour`
+/// through the live, non-undoable write (`map_selection_*_live`), so no
+/// recent colour is pushed and no undo step is taken. The release commits
+/// through [`apply_active_colour`] (by way of `set_active_color`), and the
+/// model's live-drag baseline makes the whole drag one undo step back to
+/// before it. `fill_side` is the panel's `fill_on_top`. The web app's
+/// `set_active_color_live` and the engine's colour-bar `change` both call it.
+pub fn apply_active_colour_live(model: &mut Model, fill_side: bool, colour: Color) {
+    let selected = !model.document().selection.is_empty();
+    if fill_side {
+        model.default_fill = Some(recolor_fill(model.default_fill, colour));
+        if selected {
+            Controller::map_selection_fill_live(model, |f| Some(recolor_fill(f, colour)));
+        }
+    } else {
+        model.default_stroke = Some(recolor_stroke(model.default_stroke, colour));
+        if selected {
+            Controller::map_selection_stroke_live(model, |s| Some(recolor_stroke(s, colour)));
+        }
+    }
+}

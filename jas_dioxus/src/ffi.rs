@@ -1003,14 +1003,32 @@ fn colour_value_commit(
         Some(serde_json::Value::String(t)) => t.clone(),
         Some(_) => return refuse("BadValue", &ev.widget),
     };
-    // The colour bar (fork B2): `change` is its LIVE drag, which the engine
-    // does not host yet. Refused by name, so a commit never happens by accident.
-    if kind == "color_bar" && ev.event != "commit" {
-        return refuse("LiveNotHosted", &ev.widget);
-    }
     let Some(value) = node.and_then(|n| parse_commit(n, &text)) else {
         return refuse("BadValue", &ev.widget);
     };
+    // The colour bar's `change` is its LIVE drag (fork B2b): the point's colour
+    // paints the default and the selection with no recent colour and no undo
+    // step (`colour_host::apply_active_colour_live`); the release's `commit`
+    // below takes the one step, back to before the drag.
+    if kind == "color_bar" && ev.event != "commit" {
+        let (u, v) = (value[0].as_f64().unwrap_or(0.0), value[1].as_f64().unwrap_or(0.0));
+        let (r, g, b) = crate::interpreter::color_util::color_bar_rgb(u, v);
+        let colour = crate::geometry::element::Color::rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
+        let fill_side = engine.panel.borrow().fill_on_top;
+        let doc_changed = {
+            let mut model = engine.model.borrow_mut();
+            let generation = model.generation();
+            crate::interpreter::colour_host::apply_active_colour_live(&mut model, fill_side, colour);
+            model.generation() != generation
+        };
+        let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
+        ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
+        *engine.last_error.borrow_mut() = None;
+        let reply = serde_json::json!({"changed": sync.changed, "doc_changed": doc_changed});
+        let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
+        ffi_instr::record_out(Crossing::PanelBehavior, out.len);
+        return out;
+    }
     let active_key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
     // The colour bar's point names a colour by the ONE colour-bar function,
     // committed as is: the slice is not edited first. The panel then reads the
@@ -1022,7 +1040,9 @@ fn colour_value_commit(
         serde_json::json!(crate::interpreter::color_util::color_bar_hex(u, v))
     });
     let outcome = if let Some(colour) = &bar_colour {
-        if engine.store.borrow().get(active_key) == colour {
+        // A pending live drag is committed whatever its colour: its undo step
+        // and its recent colour are owed by THIS release.
+        if !engine.model.borrow().has_live_gesture() && engine.store.borrow().get(active_key) == colour {
             EditOutcome::Unchanged
         } else {
             EditOutcome::Changed
@@ -4723,16 +4743,102 @@ mod tests {
         assert_eq!(engine_of(c).model.borrow().recent_colors, vec![hex.clone()]);
         let b = c;
 
-        // Live is not hosted yet: refused by name, nothing moves.
+        // `change` is live (B2b): it moves the document, not the recent list.
         let held = doc_json(b);
         let (reply, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"change","value":"0.9,0.1"}"#);
-        assert!(reply.is_empty(), "{reply}");
-        assert_eq!(err, refusal("LiveNotHosted", "cp_color_bar"));
-        assert_eq!(doc_json(b), held);
+        assert!(err.is_empty(), "{err}");
+        assert!(reply.contains(r#""doc_changed":true"#) || doc_json(b) == held, "{reply}");
         // A text outside the point grammar.
         let (_, err) = behave(b, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.5"}"#);
         assert_eq!(err, refusal("BadValue", "cp_color_bar"));
         unsafe { jas_engine_free(b) };
+    }
+
+    /// FORK B2b: the colour bar's `change` is its LIVE drag. Each one paints
+    /// the selection and the default with the point's colour, pushes NO recent
+    /// colour and takes NO undo step; the release's `commit` pushes the colour
+    /// once and makes the whole drag ONE undo step back to before it (the
+    /// model's live-drag baseline, #392). Releasing on a colour already at the
+    /// front of the recent list still commits: a pending drag is never
+    /// `Unchanged`.
+    #[test]
+    fn a_colour_bar_drag_is_live_and_its_release_is_one_undo_step() {
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::interpreter::color_util::color_bar_hex;
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+        let fill_hex = |e| -> String {
+            let d: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+            let c = &d["layers"][0]["children"][0]["fill"]["color"];
+            crate::interpreter::color_util::rgb_to_hex(
+                (c["r"].as_f64().unwrap() * 255.0).round() as u8,
+                (c["g"].as_f64().unwrap() * 255.0).round() as u8,
+                (c["b"].as_f64().unwrap() * 255.0).round() as u8)
+        };
+        let before = doc_json(e);
+        let ev = |kind: &str, at: &str| format!(r#"{{"widget":"cp_color_bar","event":"{kind}","value":"{at}"}}"#);
+        for at in ["0.1,0.2", "0.6,0.7"] {
+            let (reply, err) = behave(e, id, &ev("change", at));
+            assert!(err.is_empty(), "{at}: {err}");
+            assert!(reply.contains(r#""doc_changed":true"#), "{at}: {reply}");
+            let (u, v) = at.split_once(',').unwrap();
+            assert_eq!(fill_hex(e), color_bar_hex(u.parse().unwrap(), v.parse().unwrap()), "{at}: painted live");
+        }
+        assert!(engine_of(e).model.borrow().recent_colors.is_empty(), "a live tick pushed a recent colour");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "a live tick took an undo step");
+        let (_, err) = behave(e, id, &ev("commit", "0.6,0.7"));
+        assert!(err.is_empty(), "the release committed: {err}");
+        assert_eq!(engine_of(e).model.borrow().recent_colors, vec![color_bar_hex(0.6, 0.7)]);
+        undo(e);
+        assert_eq!(doc_json(e), before, "one Undo returns to before the drag");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "the drag was ONE step");
+
+        // A release on the colour already at the front of the recent list
+        // still commits the drag (it is never `Unchanged` while one is live).
+        let (_, err) = behave(e, id, &ev("change", "0.6,0.7"));
+        assert!(err.is_empty(), "{err}");
+        let (_, err) = behave(e, id, &ev("commit", "0.6,0.7"));
+        assert!(err.is_empty(), "a pending drag's release is not Unchanged: {err}");
+        undo(e);
+        assert_eq!(doc_json(e), before, "and it is one Undo step too");
+        unsafe { jas_engine_free(e) };
+
+        // The STROKE on top: a drag paints the stroke and leaves the fill.
+        // (The rect needs a stroke: with none, the active attribute is none
+        // and the bar is Disabled, as the spec says.)
+        let stroked = match rect(10.0, 20.0, 30.0, 40.0) {
+            crate::geometry::element::Element::Rect(mut r) => {
+                r.stroke = Some(crate::geometry::element::Stroke::new(crate::geometry::element::Color::BLACK, 1.0));
+                crate::geometry::element::Element::Rect(r)
+            }
+            _ => unreachable!(),
+        };
+        let k = engine_with(model_with(vec![stroked], &[0]));
+        engine_of(k).panel.borrow_mut().fill_on_top = false;
+        let side = |e, which: &str| -> serde_json::Value {
+            let d: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+            d["layers"][0]["children"][0][which].clone()
+        };
+        let (fill0, before_k) = (side(k, "fill"), doc_json(k));
+        let (_, err) = behave(k, id, &ev("change", "0.1,0.2"));
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(side(k, "fill"), fill0, "a stroke-side drag moved the fill");
+        assert_ne!(side(k, "stroke"), serde_json::Value::Null, "the stroke was painted");
+        let (_, err) = behave(k, id, &ev("commit", "0.1,0.2"));
+        assert!(err.is_empty(), "{err}");
+        undo(k);
+        assert_eq!(doc_json(k), before_k, "the stroke drag is one Undo step too");
+        unsafe { jas_engine_free(k) };
+
+        // Nothing selected: the default follows live, and nothing is pushed.
+        let c = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let (_, err) = behave(c, id, &ev("change", "0.25,0.5"));
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(engine_of(c).model.borrow().default_fill.map(|f| f.color.to_hex()),
+                   Some(color_bar_hex(0.25, 0.5).trim_start_matches('#').to_string()));
+        assert!(engine_of(c).model.borrow().recent_colors.is_empty());
+        unsafe { jas_engine_free(c) };
     }
 
     /// flask §238 (2026-10-12, live on `82bfd729`): selecting a blue rect left

@@ -1013,20 +1013,10 @@ impl AppState {
     /// on pointer-up) snapshots once for the whole drag. Colour-only,
     /// exactly like `set_active_color`.
     pub(crate) fn set_active_color_live(&mut self, color: Color) {
+        // The live law is `colour_host`'s, shared with the engine's colour bar.
         if let Some(tab) = self.tabs.get_mut(self.active_tab) {
-            if self.fill_on_top {
-                tab.model.default_fill = Some(recolor_fill(tab.model.default_fill, color));
-                if !tab.model.document().selection.is_empty() {
-                    Controller::map_selection_fill_live(
-                        &mut tab.model, |f| Some(recolor_fill(f, color)));
-                }
-            } else {
-                tab.model.default_stroke = Some(recolor_stroke(tab.model.default_stroke, color));
-                if !tab.model.document().selection.is_empty() {
-                    Controller::map_selection_stroke_live(
-                        &mut tab.model, |s| Some(recolor_stroke(s, color)));
-                }
-            }
+            crate::interpreter::colour_host::apply_active_colour_live(
+                &mut tab.model, self.fill_on_top, color);
         }
     }
 

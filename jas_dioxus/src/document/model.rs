@@ -766,6 +766,12 @@ impl Model {
         }
     }
 
+    /// Whether a live drag's baseline is pending: a drag has moved the
+    /// document and its commit has not yet taken the undo step.
+    pub fn has_live_gesture(&self) -> bool {
+        self.live_baseline.is_some()
+    }
+
     /// The checkpoint an EDIT pushes: the live drag's baseline when one is
     /// pending (consumed here), otherwise the current document.
     fn edit_checkpoint(&mut self) -> Checkpoint {
