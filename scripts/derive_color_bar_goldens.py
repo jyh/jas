@@ -101,7 +101,7 @@ def main(out):
             for n, u, v in VECTORS
         ],
     }
-    with open(out, "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8", newline="") as f:
         json.dump(doc, f, indent=2)
         f.write("\n")
     for vec in doc["vectors"]:
