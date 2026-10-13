@@ -4543,6 +4543,35 @@ mod tests {
         assert_eq!(hex(e)["bind.disabled"], "true", "a selected unfilled shape reads none");
         unsafe { jas_engine_free(e) };
 
+        // A document that carries its OWN new-element default shows it when
+        // nothing is selected, ahead of the panel's own colour (the web's
+        // tab-then-app order).
+        let mut m = model_with(vec![filled(Some("0000ff"))], &[]);
+        m.default_fill = Some(Fill::new(Color::from_hex("ff0000").unwrap()));
+        let e = engine_with(m);
+        assert_eq!(hex(e)["bind.value"], "ff0000", "the document's default comes before the panel's own");
+        unsafe { jas_engine_free(e) };
+
+        // The selection's colour must never LEAK into the panel's own colour:
+        // run a behaviour (which adopts store writes) while blue is selected,
+        // then deselect. The panel shows its own colour again, not blue.
+        let e = engine_with(model_with(vec![filled(Some("0000ff"))], &[0]));
+        let own = engine_of(e).panel.borrow().state_keys()["fill_color"].clone();
+        assert_ne!(own, "#0000ff", "fixture: the panel's own colour is not blue");
+        // The reply class is not the point (a no-panel dispatch with no
+        // registered panel replies Unchanged even when the mode moves); the
+        // behaviour RAN, so its adopt step ran, and the mode is the receipt.
+        let _ = dispatch(e, r#"{"action":"set_color_panel_mode","params":{"mode":"cmyk"}}"#);
+        assert_eq!(engine_of(e).panel.borrow().mode, "cmyk", "fixture: the behaviour ran");
+        engine_of(e).with_model_mut(|m| {
+            let mut d = m.document().clone();
+            d.selection.clear();
+            m.set_document_for_test(d);
+        });
+        assert_eq!(format!("#{}", hex(e)["bind.value"].as_str().unwrap()), own.as_str().unwrap(),
+                   "the selection's blue leaked into the panel's own colour");
+        unsafe { jas_engine_free(e) };
+
         // A MIXED selection, and NO selection, fall back to the panel's own
         // colour (no document default has been set on a fresh model).
         for (what, sel) in [("mixed", &[0usize, 1][..]), ("empty", &[][..])] {
