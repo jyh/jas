@@ -900,9 +900,12 @@ pub unsafe extern "C" fn jas_panel_behavior(
         Err(r) => return refuse(r),
     };
 
-    if id == crate::panel_scope::COLOUR_PANEL {
+    if id == crate::panel_scope::COLOUR_PANEL && is_value_commit(spec, &ev) {
         return colour_value_commit(engine, &ws, spec, &ev);
     }
+    // Every other Color event (a swatch, a chip, swap) runs its declared
+    // behaviour in the colour scope like any panel's; the value branches of
+    // `run_widget_behavior` still refuse Color by name.
     let scope = panel_ctx(engine, &ws, id);
     let ran = {
         let mut store = engine.store.borrow_mut();
@@ -950,11 +953,22 @@ pub unsafe extern "C" fn jas_panel_behavior(
 /// (`widget_commit::parse_commit`, the generic path's rule), then
 /// `apply_edit` on the widget's `bind.value` binding, then the slice's state
 /// is re-synced into the store. Every OTHER Color event (a click on a chip, a
-/// swatch, the swap button) is still refused by name, `PanelNotHosted`: its
-/// behaviours write the slice through effects, which is the second half.
+/// swatch, the swap button) runs its declared behaviour in the colour scope,
+/// and the slice adopts what it wrote to `state.*` (`adopt_store_state`, below
+/// the run).
 ///
 /// The reply is the behaviour door's, `{"changed", "doc_changed": false}`:
 /// an S-C.2 edit moves the slice and the store, never the document.
+/// A commit or change on an INPUT kind: the event that writes a widget's value.
+fn is_value_commit(spec: &serde_json::Value, ev: &crate::panel_behavior::UserEvent) -> bool {
+    use crate::interpreter::widget_commit::{COMMIT_EVENTS, INPUT_KINDS};
+    let kind = crate::panel_behavior::widget_node(spec, &ev.widget)
+        .and_then(|n| n.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    COMMIT_EVENTS.contains(&ev.event.as_str()) && INPUT_KINDS.contains(&kind)
+}
+
 fn colour_value_commit(
     engine: &JasEngine,
     ws: &Workspace,
@@ -4119,9 +4133,14 @@ mod tests {
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = engine_with(misaligned(&[0, 1]));
         let cases: [(&str, &str, String); 6] = [
-            // The colour panel's state is PanelState's, not the store's.
+            // A click on a Color slider declares nothing to run. Until flask
+            // §228 every Color event read `PanelNotHosted`; Color clicks now run
+            // their behaviours, so a click with none is `EmptyBehavior`, refused
+            // by name like any panel's. A Color VALUE through the generic
+            // branches is still `PanelNotHosted`
+            // (`the_generic_value_branches_refuse_color_by_name`).
             ("color_panel_content", r#"{"widget":"cp_h","event":"click"}"#,
-             refusal("PanelNotHosted", "color_panel_content")),
+             refusal("EmptyBehavior", "cp_h")),
             ("zz_no_such_panel", LEFT, refusal("MissingTarget", "zz_no_such_panel")),
             (ALIGN, r#"{"widget":"zz_no_such_widget","event":"click"}"#,
              refusal("MissingTarget", "zz_no_such_widget")),
@@ -4205,11 +4224,90 @@ mod tests {
         // A commit with no value is refused by name and runs nothing.
         let (r3, err3) = behave(b, id, r#"{"widget":"cp_hex","event":"commit"}"#);
         assert!(r3.is_empty() && err3.contains("MissingValue"), "{err3}");
-        // A CLICK on Color is still refused by name: its behaviours write the
-        // colour slice, which the generic path must not reach (the second half).
-        let (r4, err4) = behave(b, id, r#"{"widget":"cp_swap_btn","event":"click"}"#);
-        assert!(r4.is_empty() && err4.contains("PanelNotHosted"), "{err4}");
         unsafe { jas_engine_free(b) };
+    }
+
+    /// The second half of flask §228: a CLICK on a Color widget runs its
+    /// declared action, in the colour scope, exactly as dispatching that action
+    /// with the same params does. The oracle is `jas_dispatch_action` on a fresh
+    /// engine. Two shapes: an action with no params (swap; reset is left out
+    /// because on the default colours it moves nothing) and one with a
+    /// literal param (the black swatch's `set_active_color`).
+    ///
+    /// ⚠️ The dispatch oracle is NOT the whole truth for `set_active_color`: its
+    /// `list_push {target: "panel.recent_colors"}` writes the ACTIVE panel's
+    /// scope, and a menu dispatch has none, so the dispatch route drops the
+    /// recent colour that the action's description promises. The click (Color
+    /// active) keeps it. So that case allows exactly ONE extra row,
+    /// `cp_recent_0` = the action's own param, and nothing else.
+    #[test]
+    fn a_colour_click_runs_its_action_as_dispatching_it_does() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        for (widget, action, recent) in [
+            ("cp_swap_btn", r#"{"action":"swap_fill_stroke"}"#, None),
+            ("cp_black_swatch", r##"{"action":"set_active_color","params":{"color":"#000000"}}"##,
+             Some("#000000")),
+        ] {
+            let a = jas_engine_new();
+            let before = bind_rows(a, id);
+            let (_, aerr) = dispatch(a, action);
+            assert!(aerr.is_empty() || aerr.contains("Unchanged"), "oracle ran: {aerr}");
+            let want = bind_rows(a, id);
+            assert_ne!(want, before, "fixture: {action} must move the colour rows");
+            unsafe { jas_engine_free(a) };
+
+            let b = jas_engine_new();
+            let _ = bind_rows(b, id);
+            let ev = format!(r#"{{"widget":"{widget}","event":"click"}}"#);
+            let (reply, err) = behave(b, id, &ev);
+            assert!(err.is_empty(), "{widget} ran: {err}");
+            assert!(!reply.is_empty(), "{widget}: {reply}");
+            let got = bind_rows(b, id);
+            let got = match recent {
+                None => got,
+                Some(c) => {
+                    // The one row the dispatch route drops (see above), checked
+                    // and then taken out so the rest must match exactly.
+                    let mut g: Vec<serde_json::Value> = serde_json::from_str(&got).unwrap();
+                    let w: Vec<serde_json::Value> = serde_json::from_str(&want).unwrap();
+                    let i = g.iter().position(|r| r["id"] == "cp_recent_0").expect("a cp_recent_0 row");
+                    assert_eq!(g[i]["value"], c, "{widget}: the recent colour is the action's param");
+                    g[i] = w[i].clone();
+                    serde_json::Value::Array(g).to_string()
+                }
+            };
+            if got != want {
+                let (g, w): (Vec<serde_json::Value>, Vec<serde_json::Value>) =
+                    (serde_json::from_str(&got).unwrap(), serde_json::from_str(&want).unwrap());
+                let diff: Vec<String> = g.iter().zip(w.iter()).filter(|(a, b)| a != b)
+                    .map(|(a, b)| format!("{}.{}: click {} vs dispatch {}", a["id"], a["key"], a["value"], b["value"]))
+                    .collect();
+                panic!("{widget} != {action}: {} row(s) differ (of {} / {}): {diff:?}", diff.len(), g.len(), w.len());
+            }
+            unsafe { jas_engine_free(b) };
+        }
+    }
+
+    /// A Color value still never reaches the store through the generic path:
+    /// a commit goes to the slice (above), and the generic value branches
+    /// refuse Color by name. Driven on the generic function directly, because
+    /// the FFI door routes the commit before it gets there.
+    #[test]
+    fn the_generic_value_branches_refuse_color_by_name() {
+        let ws = Workspace::load().unwrap();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let spec = ws.panel(id).unwrap();
+        let ev = crate::panel_behavior::parse_event(
+            &serde_json::json!({"widget":"cp_hex","event":"commit","value":"12ab34"})).unwrap();
+        let mut store = crate::interpreter::state_store::StateStore::new();
+        let mut model = crate::document::model::Model::default();
+        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+        let r = crate::panel_behavior::run_widget_behavior(
+            id, spec, &ev, &serde_json::json!({"state": {"fill_on_top": true, "fill_color": "#112233"}}),
+            &mut store, &mut model, ws.actions(), ws.dialogs(),
+            &mut host);
+        assert!(matches!(r, Err(ref e) if e.class == "PanelNotHosted"), "{:?}", r.err().map(|e| e.class));
     }
 
     /// The colour panel's rows through the engine scope are, byte for byte,
