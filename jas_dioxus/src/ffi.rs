@@ -986,6 +986,12 @@ fn colour_value_commit(
     if !COMMIT_EVENTS.contains(&ev.event.as_str()) || !INPUT_KINDS.contains(&kind) {
         return refuse("PanelNotHosted", id);
     }
+    // A disabled widget is refused before its value is read, as the generic
+    // route does: Color's hex and sliders are disabled while the active colour
+    // is none.
+    if node.is_some_and(|n| crate::panel_behavior::widget_disabled(n, &panel_ctx(engine, ws, id))) {
+        return refuse("Disabled", &ev.widget);
+    }
     let text = match &ev.value {
         None | Some(serde_json::Value::Null) => return refuse("MissingValue", &ev.widget),
         Some(serde_json::Value::String(t)) => t.clone(),
@@ -4286,6 +4292,64 @@ mod tests {
                 panic!("{widget} != {action}: {} row(s) differ (of {} / {}): {diff:?}", diff.len(), g.len(), w.len());
             }
             unsafe { jas_engine_free(b) };
+        }
+    }
+
+    /// flask §235 (2026-10-12, live on `b7c58b0d`): after None, the store held
+    /// `fill_color: null` while the panel kept the OLD colour and the hex stayed
+    /// enabled (0 rows changed), because the slice held an RGB tuple and could
+    /// not say none. `color.yaml` says what none looks like: every channel is
+    /// `hsb_h(<active>)` etc., and all three evaluators read a null colour as
+    /// `#000000`, so the hex reads `000000`; the sliders and the hex are
+    /// disabled. Driven for fill AND stroke, then out again by a swatch.
+    #[test]
+    fn none_makes_the_active_colour_none_in_the_panel_and_disables_the_hex() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        for fill_on_top in [true, false] {
+            let key = if fill_on_top { "fill_color" } else { "stroke_color" };
+            let other = if fill_on_top { "stroke_color" } else { "fill_color" };
+            let e = jas_engine_new();
+            let engine = engine_of(e);
+            if !fill_on_top {
+                let (_, err) = dispatch(e, r#"{"action":"toggle_fill_on_top"}"#);
+                assert!(err.is_empty(), "toggle_fill_on_top ran: {err}");
+            }
+            assert_eq!(engine.panel.borrow().state_keys()["fill_on_top"], fill_on_top);
+            let hex = || leaf(e, id, "cp_hex")["values"].clone();
+            // A colour that is not black (the default stroke IS black, and none
+            // shows as black, so a black start would make the arm vacuous).
+            let (_, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+            assert!(err.is_empty(), "{key}: the seed commit ran: {err}");
+            // The control: a colour, so the hex is enabled and shows it.
+            assert_eq!(hex()["bind.disabled"], "false", "{key}: the control");
+            assert_ne!(hex()["bind.value"], "000000", "{key}: the fixture must not start at black");
+            let kept = engine.panel.borrow().state_keys()[other].clone();
+
+            let (reply, err) = dispatch(e, r#"{"action":"set_active_color_none"}"#);
+            assert!(err.is_empty(), "{key}: None ran: {err}");
+            assert!(!reply.contains(r#""changed":[]"#), "{key}: None changed no row: {reply}");
+            let keys = engine.panel.borrow().state_keys();
+            assert_eq!(keys[key], serde_json::Value::Null, "{key}: the slice is not none");
+            assert_eq!(keys[other], kept, "{key}: None moved the other colour");
+            assert_eq!(engine.store.borrow().get(key), &serde_json::Value::Null, "{key}: store");
+            assert_eq!(hex()["bind.disabled"], "true", "{key}: the hex is still enabled");
+            assert_eq!(hex()["bind.value"], "000000", "{key}: color.yaml's hex(null)");
+
+            // A commit on the disabled hex is refused by name and moves nothing
+            // (#375's colour route skipped the check the generic route makes).
+            let (r, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+            assert_eq!((r.as_str(), err), ("", refusal("Disabled", "cp_hex")), "{key}");
+            assert_eq!(engine.panel.borrow().state_keys()[key], serde_json::Value::Null, "{key}");
+
+            // A swatch un-nones it (`color.yaml`: "Clicking any swatch …
+            // implicitly un-nones the attribute").
+            let (_, err) = behave(e, id, r#"{"widget":"cp_white_swatch","event":"click"}"#);
+            assert!(err.is_empty(), "{key}: the white swatch ran: {err}");
+            assert_eq!(engine.panel.borrow().state_keys()[key], "#ffffff", "{key}");
+            assert_eq!(hex()["bind.disabled"], "false", "{key}");
+            assert_eq!(hex()["bind.value"], "ffffff", "{key}");
+            unsafe { jas_engine_free(e) };
         }
     }
 
