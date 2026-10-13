@@ -79,7 +79,8 @@ public sealed partial class MainWindow
         private sealed record PaneLeaf(
             string Path, string Type, string Id, double X, double Y, double W, double H,
             Dictionary<string, string> Values, Dictionary<string, string> Static,
-            Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items)
+            Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items,
+            SliderTrack? Track = null)
         {
             internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
             internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -136,7 +137,10 @@ public sealed partial class MainWindow
                     // either way there is no list to offer.
                     PanelWire.ReadOptions(e.TryGetProperty("options", out var opts) ? opts.GetRawText() : null),
                     // §1.2: a dropdown's items, read the same way: null is no list.
-                    PanelWire.ReadItems(e.TryGetProperty("items", out var its) ? its.GetRawText() : null)));
+                    PanelWire.ReadItems(e.TryGetProperty("items", out var its) ? its.GetRawText() : null),
+                    // Fork A: a slider's track from the `numbers` channel; null
+                    // (no channel, an older core) leaves it a counted placeholder.
+                    PanelWire.ReadSliderTrack(e.TryGetProperty("numbers", out var nums) ? nums.GetRawText() : null)));
             }
             var icons = new Dictionary<string, (string Viewbox, string Svg)>();
             foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -155,7 +159,8 @@ public sealed partial class MainWindow
                 // W-b: a list control's ITEMS are built once, so a changed list
                 // must rebuild. The selection is not in it: it moves every tick
                 // and is applied in place.
-                + "|" + (l.Options?.Signature ?? "")));
+                + "|" + (l.Options?.Signature ?? "")
+                + "|" + (l.Track?.ToString() ?? "")));
             var rebuilt = signature != _paneSignature;
             _paneDrawnPanel = snap.PanelId;
             if (rebuilt) { BuildPane(leaves, icons, height); }
@@ -389,6 +394,22 @@ public sealed partial class MainWindow
                         if (leaf.Id.Length == 0) { unaddressable++; }
                         optionsRefused += leaf.Options?.Refused ?? 0;
                         el = BuildChoice(leaf);
+                        break;
+
+                    // FORK A (#384): a `slider` is an input kind. The track is the
+                    // plan's `numbers`; with none it stays a counted placeholder,
+                    // never a guessed 0..100. A RELEASE commits the dragged number
+                    // as text; the engine parses, clamps and snaps it.
+                    case "slider":
+                        if (leaf.Track is null)
+                        {
+                            unmaterialized++;
+                            el = Placeholder(leaf.Type);
+                            break;
+                        }
+                        inputs++;
+                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        el = BuildSlider(leaf, leaf.Track);
                         break;
 
                     // A `spacer` is layout-only flex: the plan already gave it
@@ -809,6 +830,17 @@ public sealed partial class MainWindow
                     break;
                 }
 
+                // Fork A: the thumb sits where the CORE's value is, except while a
+                // person holds it -- a held thumb is theirs until the release
+                // commits, and the re-read after that commit places it.
+                case Slider slider when slider.Tag is SliderState st:
+                    st.Shown = leaf.Value("bind.value");
+                    typing = st.Held;
+                    if (!st.Held && PanelWire.SliderPosition(st.Shown) is { } at) { slider.Value = at; }
+                    off = off || leaf.Id.Length == 0;
+                    slider.IsEnabled = !off;
+                    break;
+
                 case CheckBox toggle:
                     off = off || leaf.Id.Length == 0;
                     toggle.Tag = on;
@@ -928,6 +960,73 @@ public sealed partial class MainWindow
                 SendPane(id, "click", null, leaf.Path);
             };
             return box;
+        }
+
+        /// <summary>
+        /// Fork A: what a slider last showed (the core's value text) and whether a
+        /// person is holding it.
+        /// </summary>
+        private sealed class SliderState
+        {
+            internal string? Shown;
+            internal bool Held;
+        }
+
+        /// <summary>
+        /// FORK A (#384): a `slider`, drawn over the plan's track. A pointer
+        /// RELEASE (or a key that moved it) commits the dragged number as text
+        /// through the behaviour door, as the hex box does; nothing is sent while
+        /// it is held. ⛔ THE SHELL DOES NOT SNAP: `StepFrequency` is a
+        /// ten-thousandth of the range, so the number sent is the one dragged and
+        /// the engine's `parse_commit` alone clamps and snaps it. The declared step
+        /// is the KEYBOARD increment only.
+        /// </summary>
+        private Slider BuildSlider(PaneLeaf leaf, SliderTrack track)
+        {
+            var range = track.Max - track.Min;
+            var grip = new SliderState();
+            var slider = new Slider
+            {
+                Minimum = track.Min,
+                Maximum = track.Max,
+                StepFrequency = range / 10000.0,
+                SmallChange = track.Step ?? range / 100.0,
+                LargeChange = (track.Step ?? range / 100.0) * 10,
+                MinHeight = 0,
+                Padding = new Thickness(0),
+                IsThumbToolTipEnabled = false,
+                Tag = grip,
+            };
+            if (leaf.Id.Length == 0) { slider.IsEnabled = false; return slider; }
+
+            var id = leaf.Id;
+            void Release()
+            {
+                if (!grip.Held) { return; }
+                grip.Held = false;
+                if (PanelWire.SliderCommit(slider.Value, grip.Shown) is { } text)
+                {
+                    SendPane(id, "commit", text, leaf.Path);
+                }
+            }
+            // handledEventsToo: the Thumb handles its own pointer events.
+            slider.AddHandler(UIElement.PointerPressedEvent,
+                new PointerEventHandler((_, _) => grip.Held = true), true);
+            slider.AddHandler(UIElement.PointerReleasedEvent,
+                new PointerEventHandler((_, _) => Release()), true);
+            slider.AddHandler(UIElement.PointerCaptureLostEvent,
+                new PointerEventHandler((_, _) => Release()), true);
+            // A key that MOVES the thumb commits on its release; Tab and the rest
+            // never do.
+            slider.KeyUp += (_, e) =>
+            {
+                if (e.Key is not (Windows.System.VirtualKey.Left or Windows.System.VirtualKey.Right
+                    or Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down
+                    or Windows.System.VirtualKey.Home or Windows.System.VirtualKey.End
+                    or Windows.System.VirtualKey.PageUp or Windows.System.VirtualKey.PageDown)) { return; }
+                if (PanelWire.SliderCommit(slider.Value, grip.Shown) is { } text) { SendPane(id, "commit", text, leaf.Path); }
+            };
+            return slider;
         }
 
         /// <summary>

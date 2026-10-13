@@ -428,6 +428,51 @@ internal static class PanelWire
     internal static string ChoiceText(PaneOption row) =>
         row.Glyph is { Length: > 0 } g ? $"{g}  {row.Label}" : row.Label;
 
+    /// <summary>
+    /// FORK A (#384): a `slider`'s track, from the plan's `numbers` channel (the
+    /// node's LITERAL min/max/step). Null -- a counted placeholder, never a guessed
+    /// range -- when the core sent no `numbers` (an older core), a bound is missing
+    /// or not a number, or min is not below max. A non-positive step is dropped.
+    /// ⛔ THE TRACK ONLY DRAWS: the engine parses, clamps and snaps every commit
+    /// (`widget_commit::parse_commit`), so nothing here enforces these numbers.
+    /// </summary>
+    internal static SliderTrack? ReadSliderTrack(string? numbersJson)
+    {
+        if (string.IsNullOrEmpty(numbersJson)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(numbersJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+            double? Num(string key) =>
+                root.TryGetProperty(key, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number
+                    ? v.GetDouble() : null;
+            if (Num("min") is not { } min || Num("max") is not { } max || min >= max) { return null; }
+            var step = Num("step") is { } st && st > 0 ? st : (double?)null;
+            return new SliderTrack(min, max, step);
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// FORK A: where the core's value puts the thumb, read invariantly. Null when
+    /// the core sent no number; the thumb is then left where it is.
+    /// </summary>
+    internal static double? SliderPosition(string? coreValue) =>
+        double.TryParse(coreValue, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+
+    /// <summary>
+    /// FORK A: the text a slider's RELEASE commits -- the dragged number exactly,
+    /// as invariant round-trip text -- or null when it is numerically the value
+    /// the core already shows (a release that moved nothing sends nothing, as
+    /// <see cref="ChoiceCommit"/> does). ⛔ NO SNAP, NO CLAMP: the engine's.
+    /// </summary>
+    internal static string? SliderCommit(double dragged, string? shown) =>
+        SliderPosition(shown) is { } at && at == dragged
+            ? null
+            : dragged.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+
     /// <summary>A reading of a leaf the plan does not hold, or of a key the leaf does not carry.</summary>
     internal const string Absent = "ABSENT";
 
@@ -519,6 +564,9 @@ internal sealed record PaneItem(bool Separator, string Kind, string Value, strin
 /// <summary>§1.2: a dropdown's items as the core sent them, and how many rows
 /// this shell could not read (COUNTED, never guessed at).</summary>
 internal sealed record PaneItems(List<PaneItem> Rows, int Refused);
+
+/// <summary>FORK A: a slider's drawn range, from the plan's `numbers`.</summary>
+internal sealed record SliderTrack(double Min, double Max, double? Step);
 
 /// <summary>
 /// W-b: one row of a plan entry's `options` channel. A separator carries no
