@@ -50,9 +50,9 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_ten_kinds_and_nothing_else(self):
+    def test_the_eleven_kinds_and_nothing_else(self):
         assert set(we.ALLOWED_EVENTS) == we.INPUT_KINDS | we.BOOLEAN_KINDS | we.ITEM_KINDS
-        assert len(we.INPUT_KINDS) == 7 and len(we.BOOLEAN_KINDS) == 2
+        assert len(we.INPUT_KINDS) == 8 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert not (we.INPUT_KINDS & we.BOOLEAN_KINDS)
         assert not ((we.INPUT_KINDS | we.BOOLEAN_KINDS) & we.ITEM_KINDS)
@@ -911,3 +911,38 @@ def test_without_a_positive_step_a_slider_is_a_clamped_number():
 def test_a_slider_refuses_text_outside_the_number_grammar():
     for text in ("abc", "", " 5", "1e3"):
         assert we.parse_commit(_slider(), text) == (False, None), text
+
+
+# ── color_bar (WIDGET_EVENTS.md, fork B2, 2026-10-13) ────────────────────────
+# A point normalized to [0,1]²: "u,v", two numbers in the number grammar
+# joined by one comma. The colour is color_util.color_bar_rgb(u, v).
+
+@pytest.mark.parametrize("text, want", [
+    ("0.25,0.5", [0.25, 0.5]),
+    ("0,0", [0.0, 0.0]),
+    ("1,1", [1.0, 1.0]),
+    ("1.4,-0.2", [1.0, 0.0]),     # each clamped to [0, 1]
+    ("-3,7", [0.0, 1.0]),
+])
+def test_a_color_bar_commit_is_a_clamped_point(text, want):
+    ok, v = we.parse_commit({"type": "color_bar"}, text)
+    assert ok and v == want, (text, v)
+
+
+@pytest.mark.parametrize("text", [
+    "0.5",            # one coordinate
+    "0.5,0.5,0.5",    # three
+    "0.5, 0.5",       # a space is outside the grammar
+    "a,b",
+    ",0.5",
+    "0.5,",
+    "",
+    ".5,.5",          # a leading `.` is outside the number grammar
+])
+def test_a_color_bar_refuses_anything_but_two_numbers(text):
+    assert we.parse_commit({"type": "color_bar"}, text) == (False, None), text
+
+
+def test_a_color_bar_is_an_input_kind_with_the_sliders_events():
+    assert "color_bar" in we.INPUT_KINDS
+    assert we.ALLOWED_EVENTS["color_bar"] == we.ALLOWED_EVENTS["slider"] == ("commit", "change")
