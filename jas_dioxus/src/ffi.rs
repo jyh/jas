@@ -1158,7 +1158,21 @@ pub unsafe extern "C" fn jas_dispatch_action(
         None => crate::panel_scope::engine_scope(
             &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), ""),
     };
-    let ran = {
+    // The menu's model-pure verbs (flask STATUS §242: Select All was refused
+    // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
+    // menu runs them in every app, through one table (`menu_native`), and so
+    // does this route. A panel menu never names one, so only the menubar's.
+    let native = panel.is_none().then(|| {
+        let mut model = engine.model.borrow_mut();
+        let generation = model.generation();
+        crate::workspace::menu_native::run(action, &mut model).then(|| crate::panel_behavior::Ran {
+            doc_changed: model.generation() != generation,
+            state_changed: false,
+        })
+    }).flatten();
+    let ran = if let Some(ran) = native {
+        Ok(ran)
+    } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
@@ -2623,6 +2637,139 @@ mod tests {
         let (reply2, err2) = dispatch(e, r#"{"menu_item":"zz_no_such_item"}"#);
         assert!(reply2.is_empty() && err2.contains("UnknownMenuItem") && err2.contains("zz_no_such_item"), "{err2}");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// Every menubar item with an `action`, in menu order: (item id, action).
+    fn menubar_items() -> Vec<(String, String)> {
+        fn walk(node: &serde_json::Value, out: &mut Vec<(String, String)>) {
+            match node {
+                serde_json::Value::Array(xs) => xs.iter().for_each(|x| walk(x, out)),
+                serde_json::Value::Object(m) => {
+                    if let (Some(id), Some(a)) = (m.get("id").and_then(|v| v.as_str()),
+                                                  m.get("action").and_then(|v| v.as_str())) {
+                        out.push((id.to_string(), a.to_string()));
+                    }
+                    m.values().for_each(|v| walk(v, out));
+                }
+                _ => {}
+            }
+        }
+        let ws = Workspace::load().expect("workspace");
+        let mut out = Vec::new();
+        walk(&ws.data()["menubar"], &mut out);
+        out
+    }
+
+    fn engine_on(fixture: &str) -> *mut JasEngine {
+        let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/jas_dioxus");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
+        let e = jas_engine_new();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        e
+    }
+
+    /// SELECT ALL FROM THE MENU (flask STATUS §242, 2026-10-13: Edit > Select
+    /// All on Windows read `PlatformEffect`, `Logged:select_all`). Its
+    /// `actions.yaml` entry is a `log` stub: the behaviour is the menu's own,
+    /// in every app (the reference's `_MENU_NATIVE_HANDLERS`, Swift's
+    /// `MenuActions`). The engine runs the same model verb.
+    #[test]
+    fn dispatch_menu_select_all_selects_and_records_no_undo_step() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        let selected = || unsafe { crate::ffi_pointer::jas_selection_len(e) };
+        assert_eq!(selected(), 0, "the fixture opens with nothing selected");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        assert!(err.is_empty(), "Select All ran and moved the selection: {err}");
+        assert!(!reply.is_empty(), "a run replies");
+        assert!(selected() >= 2, "Select All selected {}", selected());
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "selecting is not an edit");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Group from the menu is an EDIT: one undo step, and Undo restores.
+    #[test]
+    fn dispatch_menu_group_is_one_undo_step() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        let before = doc_json(e);
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let (_, err) = dispatch(e, r#"{"action":"group"}"#);
+        assert!(err.is_empty(), "Group ran: {err}");
+        assert_ne!(doc_json(e), before, "Group moved the document");
+        undo(e);
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "Group was ONE step");
+        let restored: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+        let orig: serde_json::Value = serde_json::from_str(&before).unwrap();
+        assert_eq!(restored["layers"], orig["layers"], "Undo restored the tree");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE CLASS, NOT THE INSTANCE: every menubar item, run on a document with
+    /// content and a selection, and every `PlatformEffect` refusal recorded as
+    /// `action -> detail`. The model-pure verbs (`menu_native::VERBS`) run;
+    /// what remains is PINNED here by class, so a newly refused item, or one
+    /// that starts running, moves this list in a diff someone reads.
+    #[test]
+    fn dispatch_every_menubar_item_and_name_what_the_engine_refuses() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let mut refused: Vec<String> = Vec::new();
+        let mut ran = 0;
+        let items = menubar_items();
+        assert!(items.len() >= 40, "the menubar walk read {} items", items.len());
+        for (id, action) in &items {
+            let e = engine_on("complex_document.svg");
+            let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+            let (_, err) = dispatch(e, &format!(r#"{{"menu_item":"{id}"}}"#));
+            let detail = serde_json::from_str::<serde_json::Value>(&err).ok()
+                .filter(|v| v["panel_event"] == "PlatformEffect")
+                .and_then(|v| v["detail"].as_str().map(str::to_string));
+            match detail {
+                Some(d) => refused.push(format!("{action} -> {d}")),
+                None => ran += 1,
+            }
+            unsafe { jas_engine_free(e) };
+        }
+        refused.sort();
+        refused.dedup();
+        let expected = [
+            // The clipboard: a platform's (the shell's own copy/paste).
+            "copy -> Logged:copy: selection to clipboard",
+            "cut -> Logged:copy: selection to clipboard",
+            "paste -> Logged:paste: offset 24pt",
+            "paste_in_place -> Logged:paste_in_place: offset 0",
+            "paste_preserving_layers -> Logged:paste_preserving_layers: offset 24pt",
+            // Files and the window: the Windows shell runs open_file, save,
+            // save_as and quit itself (`MainWindow.Invoke`); revert reads a file.
+            "open_file -> Logged:open_file: show native file dialog",
+            "quit -> Logged:quit: close window",
+            "revert -> Logged:revert: reload {{active_document.filename}}",
+            "save -> Logged:save_as: show native save dialog",
+            "save_as -> Logged:save_as: show native save dialog",
+            // Undo and redo: the shell sends them as ops (`{"op":"undo"}`).
+            "redo -> Logged:redo",
+            "undo -> Logged:undo",
+            // Dialogs: no engine dialog route yet (census lever 2).
+            "open_document_setup -> Dialog:document_setup",
+            "open_print_dialog -> Dialog:print",
+            "save_appearance_as -> Dialog:appearance_save_as",
+            "save_workspace_as -> Dialog:workspace_save_as",
+            // Effects no engine runs yet: a new tab, the pane layout.
+            "new_document -> UnknownEffect:create_child",
+            "reset_workspace -> UnknownEffect:reset_layout",
+            "revert_workspace -> UnknownEffect:revert_layout",
+            "tile_panes -> UnknownEffect:tile",
+            // The dock: the shell shows and hides its own panels.
+            "toggle_panel -> Logged:toggle_panel (native): {{param.panel}}",
+        ];
+        let mut expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        expected.sort();
+        assert_eq!(refused, expected, "the menubar's PlatformEffect refusals moved");
+        for verb in crate::workspace::menu_native::VERBS {
+            assert!(!refused.iter().any(|r| r.starts_with(&format!("{verb} -> "))),
+                    "{verb} is the menu's own and the engine runs it");
+        }
+        assert!(ran >= 9, "at least the nine menu verbs ran; {ran} items ran");
     }
 
     #[test]

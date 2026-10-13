@@ -173,9 +173,16 @@ pub(crate) fn MenuBarView(
                         app_for_menu.clone(), revision_for_menu, PASTE_OFFSET, true,
                     );
                 }
-                "select_all" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() { Controller::select_all(&mut tab.model); }
+                // The menu's model-pure verbs: one table, shared with the
+                // action corpus and the engine's menu dispatch
+                // (`menu_native`). `hide` is `hide_selection`'s cmd name.
+                "select_all" | "group" | "ungroup" | "ungroup_all" | "lock" | "unlock_all"
+                | "hide" | "show_all" | "make_instance" => {
+                    let action = if cmd == "hide" { "hide_selection" } else { cmd }.to_string();
+                    (act.0.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        if let Some(tab) = st.tab_mut() {
+                            super::menu_native::run(&action, &mut tab.model);
+                        }
                     }));
                 }
                 "delete" => {
@@ -230,62 +237,6 @@ pub(crate) fn MenuBarView(
                             &live_state,
                         );
                     }
-                }
-                "group" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::group_selection(m));
-                        }
-                    }));
-                }
-                "ungroup" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::ungroup_selection(m));
-                        }
-                    }));
-                }
-                "ungroup_all" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::ungroup_all(m));
-                        }
-                    }));
-                }
-                "lock" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::lock_selection(m));
-                        }
-                    }));
-                }
-                "unlock_all" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::unlock_all(m));
-                        }
-                    }));
-                }
-                "hide" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::hide_selection(m));
-                        }
-                    }));
-                }
-                "show_all" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            tab.model.with_txn(|m| Controller::show_all(m));
-                        }
-                    }));
-                }
-                "make_instance" => {
-                    (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
-                        if let Some(tab) = st.tab_mut() {
-                            make_instance_on_model(&mut tab.model);
-                        }
-                    }));
                 }
                 "simplify" => {
                     (act.0.borrow_mut())(Box::new(|st: &mut AppState| {
@@ -1017,48 +968,6 @@ fn cmd_for(action: &str, params: &serde_json::Map<String, serde_json::Value>) ->
         ),
         other => other.to_string(),
     }
-}
-
-/// Object > Make Instance, as a headless mutation on a [`Model`].
-///
-/// Replaces the single whole-element selection with a by-id reference to it,
-/// offset by [`PASTE_OFFSET`], under ONE undo transaction. Shared by the live
-/// menu handler (the `"make_instance"` arm above) and the cross-language
-/// action corpus, so both drive the identical mutation. No-op unless exactly
-/// ONE `All`-kind element is selected (the same guard the menu item's
-/// enablement uses).
-///
-/// The two element ids are minted HERE in the UI layer (NOT inside a
-/// `Controller` method — see `generate_element_id`'s contract) through the
-/// shared `mint_unique_ids` loop, then passed in to `create_reference`. Under
-/// the action corpus's deterministic id source that yields the golden-pinned
-/// `"01234567"` / `"89abcdef"`.
-pub(crate) fn make_instance_on_model(model: &mut crate::document::model::Model) {
-    use crate::document::artboard::{generate_element_id, mint_unique_ids};
-    use crate::document::document::SelectionKind;
-    // Enabled only when exactly ONE whole element is selected (kind = All; not
-    // a control-point sub-selection). Otherwise no-op, like group's guard.
-    let target_path = {
-        let sel = &model.document().selection;
-        let [es] = sel.as_slice() else { return; };
-        if es.kind != SelectionKind::All { return; }
-        es.path.clone()
-    };
-    // Mint two distinct, collision-free ids against every id already in the
-    // document (see `Document::element_ids`), through the shared mint loop.
-    let mut existing = model.document().element_ids();
-    let Some(ids) =
-        mint_unique_ids(2, &mut existing, &mut || generate_element_id(None))
-    else {
-        return;
-    };
-    let (target_id, ref_id) = (&ids[0], &ids[1]);
-    // create_reference + offset-move under ONE snapshot = a single undo step
-    // (offset rides on the new reference's common.transform via move_selection).
-    model.with_txn(|m| {
-        Controller::create_reference(m, &target_path, &target_id, &ref_id);
-        Controller::move_selection(m, PASTE_OFFSET, PASTE_OFFSET);
-    });
 }
 
 /// Strip a known extension from a filename so we can append a new one
