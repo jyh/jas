@@ -2869,6 +2869,16 @@ mod tests {
     }
 
     #[cfg(feature = "web")]
+    /// [`run_action_model`], also returning the effects the run deferred to
+    /// the UI (`open_dialog` / `close_dialog`), for `expected_dialog`.
+    fn run_action_model_deferred(
+        tc: &serde_json::Value,
+    ) -> (crate::workspace::app_state::AppState, Vec<serde_json::Value>) {
+        let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
+        crate::recorder::replay::run_action_case_deferred(tc, &setup_svg)
+    }
+
+    #[cfg(feature = "web")]
     /// Serialize the document the action sequence produced (mirrors
     /// `run_gesture_test`).
     fn run_action_test(tc: &serde_json::Value) -> String {
@@ -2998,7 +3008,7 @@ mod tests {
         let expected_file = tc["expected_json"].as_str().unwrap();
         let expected = read_fixture(&format!("actions/{}", expected_file));
         let expected = expected.trim();
-        let st = run_action_model(tc);
+        let (st, deferred) = run_action_model_deferred(tc);
         let actual = document_to_test_json(st.tabs[st.active_tab].model.document());
 
         if actual != expected {
@@ -3011,6 +3021,50 @@ mod tests {
         assert_action_panel_state(tc, &st);
         assert_action_panel_scope(tc, &st);
         assert_action_view(tc, &st);
+        assert_action_dialog(tc, &st, &deferred);
+    }
+
+    #[cfg(feature = "web")]
+    /// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..},
+    /// "state": {..}}`, the dialog the action OPENS. `params` and `state` are
+    /// SUBSETS: name only the keys under test. Rust's `dispatch_action`
+    /// DEFERS `open_dialog` to the UI, so the dialog is opened here exactly as
+    /// the web opens a deferred one (`renderer.rs`, the deferred-dialog loop):
+    /// the LAST `open_dialog` the run deferred, through
+    /// `dialog_state::build_dialog_state` with `build_live_state_map` and
+    /// `build_dialog_outer_scope`. Swift opens into its store, and its
+    /// `assertActionDialog` reads it there. Census lever 2: before this block
+    /// no case could see a dialog at all.
+    fn assert_action_dialog(
+        tc: &serde_json::Value,
+        st: &crate::workspace::app_state::AppState,
+        deferred: &[serde_json::Value],
+    ) {
+        let Some(expected) = tc.get("expected_dialog").and_then(|v| v.as_object()) else { return };
+        let name = tc["name"].as_str().unwrap();
+        let od = deferred.iter().rev().find_map(|e| e.get("open_dialog")).unwrap_or_else(|| {
+            panic!("Action test '{name}': expected_dialog, but the run deferred no open_dialog: {deferred:?}")
+        });
+        let id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
+        let raw = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+        let ds = crate::interpreter::dialog_state::build_dialog_state(
+            id,
+            &raw,
+            &crate::workspace::dock_panel::build_live_state_map(st),
+            &crate::interpreter::renderer::build_dialog_outer_scope(st),
+        )
+        .unwrap_or_else(|| panic!("Action test '{name}': the workspace defines no dialog {id:?}"));
+        assert_eq!(serde_json::json!(ds.id), expected["id"], "Action test '{name}': the dialog opened");
+        for (section, got) in [("params", &ds.params), ("state", &ds.state)] {
+            let Some(want) = expected.get(section).and_then(|v| v.as_object()) else { continue };
+            for (key, value) in want {
+                // ABSENT is not NULL: the key must be there for a null to pass.
+                let Some(have) = got.get(key) else {
+                    panic!("Action test '{name}': the opened dialog's {section} has no key {key:?}: {got:?}")
+                };
+                assert_eq!(have, value, "Action test '{name}': dialog {section}.{key}");
+            }
+        }
     }
 
     #[cfg(feature = "web")]
