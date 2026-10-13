@@ -525,6 +525,14 @@ fn live_panel_state(
             ),
             ("reference_point", s(&st.artboards_reference_point)),
             ("rearrange_dirty", b(st.artboards_rearrange_dirty)),
+            // The row being renamed inline. `apply_artboards_panel_field` writes
+            // it and the dock's render map published it, but this scope did not,
+            // so the panel scope read null after `rename_artboard` (the action
+            // corpus, 2026-10-12).
+            (
+                "renaming_artboard",
+                st.artboards_renaming.clone().map(J::String).unwrap_or(J::Null),
+            ),
         ],
         "layers_panel_content" => {
             // A HashSet has no order and the bundle's only expression that
