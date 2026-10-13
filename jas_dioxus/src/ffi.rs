@@ -4437,6 +4437,42 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// `set_active_color` is "the commit point for all color changes from the
+    /// Color Panel: … hex field Enter/Tab" (`actions.yaml`), so a hex commit
+    /// lands EXACTLY as dispatching that action with the committed colour:
+    /// the panel's rows (the recent strip included), the document and the
+    /// model's recent list. Until 2026-10-12 the commit edited the slice and
+    /// never pushed the recent colour. A repeat commit is Unchanged and pushes
+    /// nothing twice.
+    #[test]
+    fn a_hex_commit_lands_as_set_active_color_does() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let fresh = || engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+        let a = fresh();
+        let _ = bind_rows(a, id);
+        let (_, err) = dispatch(a, r##"{"action":"set_active_color","params":{"color":"#12ab34"}}"##);
+        assert!(err.is_empty(), "the oracle ran: {err}");
+        let (want_rows, want_doc) = (bind_rows(a, id), doc_json(a));
+        let want_recent = engine_of(a).model.borrow().recent_colors.clone();
+        assert_eq!(want_recent, vec!["#12ab34".to_string()], "fixture: the oracle pushes");
+        unsafe { jas_engine_free(a) };
+
+        let b = fresh();
+        let _ = bind_rows(b, id);
+        let (reply, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.is_empty(), "the commit ran: {err}");
+        assert!(reply.contains(r#""doc_changed":true"#), "{reply}");
+        assert_eq!(bind_rows(b, id), want_rows, "the rows differ from set_active_color's");
+        assert_eq!(doc_json(b), want_doc, "the document differs from set_active_color's");
+        assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent);
+        let (_, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.contains("Unchanged"), "{err}");
+        assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent, "a repeat pushed");
+        unsafe { jas_engine_free(b) };
+    }
+
     /// A Color value still never reaches the store through the generic path:
     /// a commit goes to the slice (above), and the generic value branches
     /// refuse Color by name. Driven on the generic function directly, because
