@@ -10,7 +10,7 @@ guessed, and the guesses differ. The contract is now written down once, in
 `workspace_interpreter/widget_event.py` (ALLOWED_EVENTS), and this gate holds
 two other copies of it to that one:
 
-  1. THE YAML. Every behavior on one of the eight value kinds names an event
+  1. THE YAML. Every behavior on one of the nine value kinds names an event
      the contract lists for that kind. A `number_input` with `event: click`,
      or a `toggle` with `event: commit`, is a behavior no executor will run
      the same way twice.
