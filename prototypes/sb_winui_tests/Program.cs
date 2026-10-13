@@ -807,6 +807,41 @@ static class Program
         Check("delta: unreadable is named, never 0",
             PanelWire.CheckDelta("{x", "{}", "p").Mismatch.StartsWith("UNREADABLE("), PanelWire.CheckDelta("{x", "{}", "p").Mismatch);
 
+        // FORK A (#384): a `slider` is an input kind. The plan's `numbers` channel
+        // carries the node's literal min/max/step; the shell draws a track from
+        // them and commits the dragged number as TEXT at release. ⛔ THE ENGINE
+        // PARSES, CLAMPS AND SNAPS (`widget_commit::parse_commit`); the shell
+        // must not, so nothing here rounds, clamps or snaps a dragged value.
+        static string Track(string? json) => PanelWire.ReadSliderTrack(json) is { } t
+            ? $"{t.Min.ToString(System.Globalization.CultureInfo.InvariantCulture)}..{t.Max.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+              + $"/{(t.Step is { } st ? st.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-")}"
+            : "(null)";
+        Eq("slider: a track is the plan's min..max/step", "0..359/1", Track("{\"min\":0,\"max\":359,\"step\":1}"));
+        Eq("slider: a step is optional (the engine snaps, the track only draws)", "0..100/-", Track("{\"min\":0,\"max\":100}"));
+        Eq("slider: fractional numbers survive", "-1.5..2.25/0.25", Track("{\"min\":-1.5,\"max\":2.25,\"step\":0.25}"));
+        Eq("slider: no `numbers` (an older core) is no track -- a counted placeholder, never a guessed 0..100",
+            "(null)", Track(null));
+        Eq("slider: a missing max is no track", "(null)", Track("{\"min\":0}"));
+        Eq("slider: min >= max is no track", "(null)", Track("{\"min\":5,\"max\":5}"));
+        Eq("slider: a non-number bound is no track", "(null)", Track("{\"min\":\"0\",\"max\":100}"));
+        Eq("slider: a non-positive step is dropped, not used", "0..100/-", Track("{\"min\":0,\"max\":100,\"step\":0}"));
+        Eq("slider: unreadable numbers are no track, never a throw", "(null)", Track("{x"));
+
+        static string Pos(string? v) => PanelWire.SliderPosition(v) is { } d
+            ? d.ToString(System.Globalization.CultureInfo.InvariantCulture) : "(null)";
+        Eq("slider: the core's value places the thumb", "212", Pos("212"));
+        Eq("slider: the value is read invariantly (a '.' decimal on any culture)", "33.5", Pos("33.5"));
+        Eq("slider: an empty or absent value places nothing", "(null)|(null)", Pos("") + "|" + Pos(null));
+        Eq("slider: a non-number value places nothing", "(null)", Pos("abc"));
+
+        Eq("slider: a release commits the dragged number as invariant text", "212.4", Show(PanelWire.SliderCommit(212.4, "100")));
+        Eq("slider: a whole number commits without a decimal", "50", Show(PanelWire.SliderCommit(50.0, "40")));
+        Eq("slider: the shell does NOT snap or clamp -- 359.7 on a 0..359 step-1 track is sent as dragged",
+            "359.7", Show(PanelWire.SliderCommit(359.7, "359")));
+        Eq("slider: a release where the core's value already is sends nothing", "(null)", Show(PanelWire.SliderCommit(50.0, "50")));
+        Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
+        Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
