@@ -1,9 +1,9 @@
 {
     "item":  "selection.drag",
-    "surface":  "2379x1369",
-    "frame_hash":  "175551f14bb681701094cee67b3e26bc106bcb8ba3094cdbc157dda546d840c3",
+    "surface":  "2379x1333",
+    "frame_hash":  "bb026282c76bfb1e3aa92869549c3441847a084afddf928ae21f9dd8211419a8",
     "doc_sha":  "09c450d7fc0a0b26",
     "plan_panel":  "align_panel_content",
-    "plan_sha":  "f71106ee3bd9ba11",
+    "plan_sha":  "8b1762b806b1b4da",
     "selection_count":  1
 }

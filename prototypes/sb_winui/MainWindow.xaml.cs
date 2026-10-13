@@ -216,6 +216,34 @@ public sealed partial class MainWindow : Window
     /// <summary>`layout.yaml`'s toolbar, by its pane id; the core plans it like a panel.</summary>
     private const string ToolbarPanelId = "toolbar_pane";
 
+    /// <summary>§255: the canvas pane's strip (its document tabs). See PaneView.cs.</summary>
+    private PaneView _canvasStrip = null!;
+
+    /// <summary>`layout.yaml`'s canvas pane, by its pane id; the core plans it like a panel.</summary>
+    private const string CanvasPanelId = "canvas_pane";
+
+    /// <summary>The canvas pane's container the D2D surface stands in for: the strip is what lies above it.</summary>
+    private const string CanvasSurfaceId = "drawing_surface";
+
+    /// <summary>
+    /// The width the canvas pane is planned at, in canonical units. Tabs are laid
+    /// from x = 0 at their own widths, so the strip shows the part of the plan
+    /// its column holds, and a wider plan only moves the bar's own right edge.
+    /// </summary>
+    private const long CanvasStripAvailW = 1600;
+
+    private bool _canvasStripWanted;
+    private bool _canvasStripRefused;
+
+    /// <summary>
+    /// The first canvas plan has been answered (placed or refused), so the
+    /// surface is where it will stay and `HITTARGET` may report its offset.
+    /// </summary>
+    private bool _canvasStripSettled;
+
+    /// <summary>The strip height last applied, or -1 before the first canvas plan.</summary>
+    private long _canvasStripTop = -1;
+
     /// <summary>The toolbar's width in canonical panel units: `toolbar_pane`'s own 72.</summary>
     private const long ToolbarAvailW = 72;
 
@@ -463,7 +491,10 @@ public sealed partial class MainWindow : Window
     private void OnPaneChanged(string key)
     {
         if (!_canvas.Panes.TryGetValue(key, out var snap)) { return; }
-        var view = key == SbWinUi.Canvas.ToolbarPaneKey ? _toolbar : DockGroupView(key);
+        if (key == SbWinUi.Canvas.CanvasPaneKey && !PlaceCanvasStrip(snap.PlanJson)) { return; }
+        var view = key == SbWinUi.Canvas.ToolbarPaneKey ? _toolbar
+                 : key == SbWinUi.Canvas.CanvasPaneKey ? _canvasStrip
+                 : DockGroupView(key);
         if (view is null) { return; }
         try { view.DrawPane(snap); }
         catch (Exception ex)
@@ -471,7 +502,37 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL {(key == SbWinUi.Canvas.ToolbarPaneKey ? "TOOLBAR" : $"PANE key={key}")} DRAW threw "
                  + $"{ex.GetType().Name}: {ex.Message}");
         }
-        if (key != SbWinUi.Canvas.ToolbarPaneKey) { MarkDockTab(key, snap.PanelId); }
+        if (key.StartsWith("dock", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
+    }
+
+    /// <summary>
+    /// §255: size the canvas strip to the y at which the plan places the
+    /// drawing surface, and move the surface (and its hit shield) down by the
+    /// same. False, with a refusal row, when the plan does not place it.
+    /// ⚠️ THE ONE RESIZE: the plan arrives after the surface's first layout, so
+    /// the surface is resized once, here, when the strip first appears.
+    /// </summary>
+    private bool PlaceCanvasStrip(string plan)
+    {
+        if (PanelWire.SurfaceTop(plan, CanvasSurfaceId) is not { } top || top < 0)
+        {
+            Report($"RUSTFAIL CANVAS STRIP REFUSED -- the {CanvasPanelId} plan places no {CanvasSurfaceId}");
+            if (!_canvasStripSettled) { _canvasStripSettled = true; Canvas.InvalidateArrange(); }
+            return false;
+        }
+        _canvasStripSettled = true;
+        if (top == _canvasStripTop) { return true; }
+        Report($"CANVAS STRIP height={top} was={(_canvasStripTop < 0 ? "none" : _canvasStripTop.ToString())} "
+             + $"canvas-dips={Canvas.ActualWidth:0}x{Canvas.ActualHeight:0}");
+        _canvasStripTop = top;
+        CanvasStripHost.Height = top;
+        CanvasStripHost.Visibility = top > 0 ? Visibility.Visible : Visibility.Collapsed;
+        Canvas.Margin = new Thickness(0, top, 0, 0);
+        HitShield.Margin = new Thickness(0, top, 0, 0);
+        // A layout pass even when nothing moved (a zero strip), so the deferred
+        // HITTARGET row is always written.
+        Canvas.InvalidateArrange();
+        return true;
     }
 
     public MainWindow()
@@ -479,6 +540,7 @@ public sealed partial class MainWindow : Window
         InitializeComponent();
         _dock = new PaneView(this, PaneHost, PaneScroll, PaneAvailW, PaneFirstPanelId);
         _toolbar = new PaneView(this, ToolbarHost, ToolbarScroll, ToolbarAvailW, ToolbarPanelId, topAligned: true);
+        _canvasStrip = new PaneView(this, CanvasStripHost, CanvasStripScroll, CanvasStripAvailW, CanvasPanelId, topAligned: true, pad: 0);
         // `RUSTPENDING`, not a bare name: a window that has reported nothing yet
         // must SAY so. The bare title used to be indistinguishable from a run
         // whose verdict had been blanked by a verdict-less last row.
@@ -534,11 +596,18 @@ public sealed partial class MainWindow : Window
                 ToolbarHost.Width = ToolbarAvailW + 2 * PanePad + ToolbarHost.BorderThickness.Right;
                 ToolbarHost.Visibility = Visibility.Visible;
             }
+            // §255: THE CANVAS STRIP (document tabs), on by default under `app`;
+            // `SB_CANVAS_TABS=0` turns it off. The same knob rule as the toolbar.
+            _canvasStripWanted = PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_CANVAS_TABS"), true) == "on";
         }
         else if (PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_TOOLBAR"), false) == "refused")
         {
             // Refused, never ignored: only `app` opens panes.
             _toolbarRefused = true;
+        }
+        if (!_paneWanted && PaneKnobs.Toolbar(Environment.GetEnvironmentVariable("SB_CANVAS_TABS"), false) == "refused")
+        {
+            _canvasStripRefused = true;
         }
 
         // SB_FULLSCREEN: THE COPY COST IS FIXED BY SURFACE AREA, so pricing it
@@ -670,6 +739,10 @@ public sealed partial class MainWindow : Window
             if (reported) { return; }
             var el = (FrameworkElement)target;
             if (el.ActualHeight <= 0) { return; }   // layout has not run yet
+            // §255: the canvas strip moves the surface down when its plan
+            // arrives, so an offset read before then aims every press high by
+            // the strip's height. Wait until the strip is placed (or refused).
+            if (_canvasStripWanted && !_canvasStripSettled) { return; }
             reported = true;
             el.LayoutUpdated -= OnceLaidOut;
             try
@@ -1359,11 +1432,20 @@ public sealed partial class MainWindow : Window
                     });
                 }
             }
+            if (_canvasStripWanted)
+            {
+                _canvas.OpenPane(SbWinUi.Canvas.CanvasPaneKey, CanvasPanelId, CanvasStripAvailW);
+            }
             if (!_toolbarWanted
                 && !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SB_TOOLBAR_SYNTH")))
             {
                 // Refused, never ignored: a toolbar click with no toolbar open.
                 Report("RUSTFAIL TOOLBAR SYNTH REFUSED -- SB_TOOLBAR_SYNTH needs the toolbar open: SB_SCENE=app and SB_TOOLBAR not 0");
+            }
+            if (_canvasStripRefused)
+            {
+                Report($"RUSTFAIL CANVAS TABS REFUSED -- SB_CANVAS_TABS needs SB_SCENE=app, the one scene "
+                     + $"that opens panes; this run is '{scene}'");
             }
             if (_toolbarRefused)
             {
