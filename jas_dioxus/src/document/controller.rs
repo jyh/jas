@@ -1363,6 +1363,9 @@ impl Controller {
     pub fn map_selection_stroke_live(
         model: &mut Model, f: impl Fn(Option<Stroke>) -> Option<Stroke>,
     ) {
+        if !model.document().selection.is_empty() {
+            model.begin_live_gesture();
+        }
         let new_doc = Self::stroke_mapped(model.document(), f);
         model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
     }
@@ -1407,6 +1410,9 @@ impl Controller {
 
     /// Live, NON-undoable [`Self::map_selection_fill`] for per-tick drag.
     pub fn map_selection_fill_live(model: &mut Model, f: impl Fn(Option<Fill>) -> Option<Fill>) {
+        if !model.document().selection.is_empty() {
+            model.begin_live_gesture();
+        }
         let new_doc = Self::fill_mapped(model.document(), f);
         model.set_document_unbracketed(new_doc, NonUndoableIntent::LiveDrag);
     }
@@ -3795,6 +3801,149 @@ mod tests {
                     fill_gradient: None,
             stroke_gradient: None,
         })
+    }
+
+    // -----------------------------------------------------------------------
+    // A LIVE DRAG IS ONE UNDO STEP BACK TO BEFORE THE DRAG. A colour drag
+    // writes each tick live (`map_selection_fill_live`, off the undo stack)
+    // and commits at release. The commit's checkpoint must be the document
+    // BEFORE the drag: taken at the release it was the last live tick, so
+    // Undo after a drag restored the dragged colour, not the original
+    // (found 2026-10-13 designing the engine's colour bar; the web, Swift and
+    // the model's own `LiveDrag` doc all assumed the release captured it).
+    // -----------------------------------------------------------------------
+
+    fn rect_doc_model() -> Model {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(
+            format!("{root}/test_fixtures/svg/rect_with_stroke.svg")).unwrap();
+        let mut m = Model::new(crate::geometry::svg::try_svg_to_document(&svg).unwrap(), None);
+        Controller::select_all(&mut m);
+        assert_eq!(m.document().selection.len(), 1, "the fixture's rect is selected");
+        m
+    }
+
+    fn doc_of(m: &Model) -> String {
+        crate::geometry::test_json::document_to_test_json(m.document())
+    }
+
+    fn fill_to(c: Color) -> impl Fn(Option<Fill>) -> Option<Fill> {
+        move |_| Some(Fill::new(c))
+    }
+
+    const LIVE_RED: Color = Color::Rgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 };
+    const YELLOW: Color = Color::Rgb { r: 1.0, g: 1.0, b: 0.0, a: 1.0 };
+    const LIVE_GREEN: Color = Color::Rgb { r: 0.0, g: 1.0, b: 0.0, a: 1.0 };
+
+    #[test]
+    fn a_live_drag_and_its_commit_are_one_undo_step_back_to_before_the_drag() {
+        let mut m = rect_doc_model();
+        let before = doc_of(&m);
+        Controller::map_selection_fill_live(&mut m, fill_to(LIVE_RED));
+        let live = doc_of(&m);
+        assert_ne!(live, before, "CONTROL: the live tick changed the document");
+        Controller::map_selection_fill_live(&mut m, fill_to(YELLOW));
+        assert!(!m.can_undo(), "live ticks are off the undo stack");
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        let committed = doc_of(&m);
+        m.undo();
+        assert_eq!(doc_of(&m), before, "Undo returns to before the drag, not to a live tick");
+        assert!(!m.can_undo(), "the drag was ONE step");
+        m.redo();
+        assert_eq!(doc_of(&m), committed, "Redo returns the committed colour");
+    }
+
+    #[test]
+    fn undo_during_a_live_drag_drops_its_baseline() {
+        let mut m = rect_doc_model();
+        let start = doc_of(&m);
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        Controller::map_selection_fill_live(&mut m, fill_to(LIVE_RED));
+        m.undo(); // back to `start`; the abandoned drag's baseline must go with it
+        assert_eq!(doc_of(&m), start);
+        Controller::map_selection_fill_live(&mut m, fill_to(YELLOW));
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_RED));
+        m.undo();
+        assert_eq!(doc_of(&m), start, "the second drag's Undo returns to where IT began");
+    }
+
+    #[test]
+    fn a_snapshot_after_a_live_drag_also_undoes_to_before_it() {
+        // `snapshot()` is the other checkpoint path (no production caller
+        // today; kept consistent so a future one cannot strand a baseline).
+        let mut m = rect_doc_model();
+        let before = doc_of(&m);
+        Controller::map_selection_fill_live(&mut m, fill_to(LIVE_RED));
+        m.snapshot();
+        m.undo();
+        assert_eq!(doc_of(&m), before);
+    }
+
+    #[test]
+    fn redo_during_a_live_drag_drops_its_baseline() {
+        let mut m = rect_doc_model();
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        let green = doc_of(&m);
+        m.undo();
+        Controller::map_selection_fill_live(&mut m, fill_to(LIVE_RED));
+        m.redo(); // back to `green`; the abandoned drag's baseline goes with it
+        assert_eq!(doc_of(&m), green);
+        Controller::map_selection_fill(&mut m, fill_to(YELLOW));
+        m.undo();
+        assert_eq!(doc_of(&m), green, "the edit after the redo undoes to the redone state");
+    }
+
+    #[test]
+    fn the_baseline_is_spent_by_the_commit_it_serves() {
+        // A drag's baseline belongs to ONE commit. The edit after it undoes
+        // to the committed state, never back past the drag.
+        let mut m = rect_doc_model();
+        Controller::map_selection_fill_live(&mut m, fill_to(LIVE_RED));
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        let committed = doc_of(&m);
+        Controller::map_selection_fill(&mut m, fill_to(YELLOW));
+        m.undo();
+        assert_eq!(doc_of(&m), committed);
+    }
+
+    #[test]
+    fn a_drag_that_snapshots_at_its_start_keeps_its_own_undo_step() {
+        // The artboard tool's shape (artboard.yaml): `doc.snapshot` at the
+        // drag threshold, THEN live ticks through the same `LiveDrag` channel,
+        // and a commit that pushes no checkpoint. That drag already owns its
+        // undo step, so it must leave no baseline behind: the next edit
+        // undoes to the MOVED document, not back past the move.
+        let mut m = rect_doc_model();
+        m.snapshot();
+        let mut other = rect_doc_model();
+        Controller::map_selection_fill(&mut other, fill_to(LIVE_RED));
+        m.set_document_unbracketed(other.document().clone(), NonUndoableIntent::LiveDrag);
+        let after_drag = doc_of(&m);
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        m.undo();
+        assert_eq!(doc_of(&m), after_drag, "the edit after the drag undoes to the dragged state");
+    }
+
+    #[test]
+    fn a_live_stroke_drag_is_one_undo_step_too() {
+        let mut m = rect_doc_model();
+        let before = doc_of(&m);
+        let stroke_to = |c: Color| move |_: Option<Stroke>| Some(Stroke::new(c, 2.0));
+        Controller::map_selection_stroke_live(&mut m, stroke_to(LIVE_RED));
+        assert_ne!(doc_of(&m), before, "CONTROL: the live tick changed the stroke");
+        Controller::map_selection_stroke(&mut m, stroke_to(LIVE_GREEN));
+        m.undo();
+        assert_eq!(doc_of(&m), before);
+    }
+
+    #[test]
+    fn an_edit_with_no_live_drag_checkpoints_the_document_it_edits() {
+        let mut m = rect_doc_model();
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_RED));
+        let red = doc_of(&m);
+        Controller::map_selection_fill(&mut m, fill_to(LIVE_GREEN));
+        m.undo();
+        assert_eq!(doc_of(&m), red, "CONTROL: a plain edit's Undo is the edit before it");
     }
 
     fn make_line(x1: f64, y1: f64, x2: f64, y2: f64) -> Element {

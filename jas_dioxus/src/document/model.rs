@@ -71,8 +71,11 @@ pub(crate) fn advance_next_untitled_past(existing: &[String]) {
 ///   artboard move/resize live-drag (`artboard_translate_from_preview` /
 ///   `artboard_resize_apply`, idempotent restore+re-apply per mousemove) and
 ///   the per-tick color apply during a picker drag
-///   (`map_selection_fill_live` / `map_selection_stroke_live`); undo is
-///   captured once at the gesture boundary.
+///   (`map_selection_fill_live` / `map_selection_stroke_live`). The colour
+///   ticks take no checkpoint at their start, so their first tick keeps the
+///   pre-drag document (`begin_live_gesture`) and the release's commit
+///   checkpoints THAT; the artboard drags `snapshot` at their threshold
+///   instead. Either way the whole drag is one undo step back to before it.
 /// - `TestOnly` — test-fixture seeding (46 Rust / 64 Swift test-file sites at
 ///   freeze, routed via the `#[cfg(test)]` [`Model::set_document_for_test`]
 ///   helper); production code can never pass it (debug-asserted).
@@ -365,6 +368,12 @@ pub struct Model {
     /// `undo_stack` so preview-driven applies don't pollute undo
     /// history. See SCALE_TOOL.md §Preview.
     preview_doc_snapshot: Option<Document>,
+    /// The document as it stood when a live drag began: taken by
+    /// [`Model::begin_live_gesture`] at the gesture's first tick, pushed by the next checkpoint (a
+    /// transaction or a `snapshot`) in place of the current document, so the
+    /// release's commit undoes to before the drag, not to its last tick; and
+    /// dropped by undo and redo.
+    live_baseline: Option<Checkpoint>,
     /// The one pending agent proposal, if any (docs/AGENT_API.md). While it is
     /// set, `document` shows the proposal applied (a preview) and the proposal
     /// holds the document as it was before; it is in no transaction.
@@ -409,6 +418,7 @@ impl Default for Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            live_baseline: None,
             pending_proposal: None,
             zoom_level: 1.0,
             view_offset_x: 0.0,
@@ -447,6 +457,7 @@ impl Model {
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
             preview_doc_snapshot: None,
+            live_baseline: None,
             pending_proposal: None,
             zoom_level: 1.0,
             view_offset_x: 0.0,
@@ -742,6 +753,25 @@ impl Model {
     /// THE ONLY place a checkpoint is built, so a future field that must ride
     /// undo is added in exactly one spot — and, being a named struct, cannot be
     /// dropped by a destructuring caller.
+    /// Begin (or continue) a live drag that takes no checkpoint of its own at
+    /// its start: keep the document as it is now, unless a baseline is
+    /// already pending, so the drag's commit undoes to here. The colour
+    /// picker's per-tick writes call it (`map_selection_fill_live`). A drag
+    /// that snapshots at its start, as the artboard tool does, must NOT: its
+    /// undo step is already taken, and a baseline left pending would be spent
+    /// by the NEXT edit, undoing that edit back past the drag.
+    pub fn begin_live_gesture(&mut self) {
+        if self.live_baseline.is_none() {
+            self.live_baseline = Some(self.checkpoint());
+        }
+    }
+
+    /// The checkpoint an EDIT pushes: the live drag's baseline when one is
+    /// pending (consumed here), otherwise the current document.
+    fn edit_checkpoint(&mut self) -> Checkpoint {
+        self.live_baseline.take().unwrap_or_else(|| self.checkpoint())
+    }
+
     fn checkpoint(&self) -> Checkpoint {
         Checkpoint {
             doc: self.document.clone(),
@@ -800,7 +830,8 @@ impl Model {
     pub fn snapshot(&mut self) {
         // Pair the index with the document on the stack so undo/redo restore
         // it in O(1) without a rebuild (rpds clone is O(1) structure sharing).
-        self.undo_stack.push(self.checkpoint());
+        let checkpoint = self.edit_checkpoint();
+        self.undo_stack.push(checkpoint);
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
         }
@@ -819,6 +850,9 @@ impl Model {
         // undo, so a post-undo edit clears redo via its own commit).
         self.in_txn = false;
         self.pending_txn = None;
+        // History navigation abandons a live drag: its baseline describes a
+        // document that is no longer the one being edited.
+        self.live_baseline = None;
         if let Some(prev) = self.undo_stack.pop() {
             self.redo_stack.push(self.checkpoint());
             self.document = prev.doc;
@@ -849,6 +883,7 @@ impl Model {
         self.withdraw_proposal();
         self.in_txn = false;
         self.pending_txn = None;
+        self.live_baseline = None;
         if let Some(next) = self.redo_stack.pop() {
             self.undo_stack.push(self.checkpoint());
             self.document = next.doc;
@@ -1010,7 +1045,8 @@ impl Model {
         // rebase). `propose`/`accept` take the proposal out of its slot before
         // they open a bracket, so this never withdraws the proposal in flight.
         self.withdraw_proposal();
-        self.undo_stack.push(self.checkpoint());
+        let checkpoint = self.edit_checkpoint();
+        self.undo_stack.push(checkpoint);
         if self.undo_stack.len() > MAX_UNDO {
             self.undo_stack.remove(0);
         }

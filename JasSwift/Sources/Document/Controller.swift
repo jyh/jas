@@ -2345,6 +2345,7 @@ public class Controller {
     /// `setActiveColor`, so the drag must not push checkpoints.
     public func mapSelectionStrokeLive(_ f: (Stroke?) -> Stroke?) {
         guard let doc = strokeMapped(f) else { return }
+        model.beginLiveGesture()
         model.setDocumentUnbracketed(doc, intent: .liveDrag)
     }
 
@@ -2382,6 +2383,7 @@ public class Controller {
     /// Live, NON-undoable ``mapSelectionFill(_:)`` for per-tick drag.
     public func mapSelectionFillLive(_ f: (Fill?) -> Fill?) {
         guard let doc = fillMapped(f) else { return }
+        model.beginLiveGesture()
         model.setDocumentUnbracketed(doc, intent: .liveDrag)
     }
 
