@@ -176,6 +176,7 @@ runtime_contexts:
     defaults:
       has_saved_layout: false
       active_layout_name: ""
+      open_documents: []
     properties:
       has_saved_layout:
         type: bool
@@ -183,6 +184,22 @@ runtime_contexts:
       active_layout_name:
         type: string
         description: "Name of the currently active layout (empty if none)"
+      open_documents:
+        type: list
+        item_type: object
+        description: >
+          The open documents, in tab order, one entry per document tab:
+          {index, name, is_modified}. `index` is the entry's position (0
+          first), the value active_tab names when that tab is the front one.
+          `name` is the document's filename, or its untitled name
+          ("Untitled-N", N from the application's own counter, which is not
+          the tab index) when it has never been saved. `is_modified` is
+          whether it has unsaved changes. READ-ONLY: each host builds it from the documents it holds,
+          so opening, creating and closing a document changes it and no
+          effect writes it. The canvas tab bar (layout.yaml, canvas_tab_bar)
+          draws one tab per entry with a foreach. Because the list is rebuilt
+          from the documents, closing a tab renumbers the tabs after it; a
+          tab never carries an index baked in when it was created.
 
   panel:
     description: >

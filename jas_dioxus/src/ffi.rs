@@ -2941,8 +2941,54 @@ mod tests {
         let (reply, err) = dispatch(e, r#"{"action":"new_document"}"#);
         assert!(reply.is_empty(), "a refused action replies nothing: {reply}");
         assert!(err.contains("PlatformEffect") && err.contains("create_child"), "{err}");
-        let plan = plan_of(e, "canvas_pane", 1600, 900);
-        assert!(!plan.contains("canvas_tab_0"), "nothing ran: {plan}");
+        // Nothing ran: the tab bar still shows the engine's one document,
+        // and only it (owner note 4b: tabs are drawn from the open documents).
+        assert_eq!(canvas_tabs(e).len(), 1, "nothing ran");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The canvas pane's document tabs: the entries one level under
+    /// `canvas_tab_bar`, each with the leaves under it. A `foreach` row's
+    /// templated id is WITHHELD by the plan (`static_of`), so a tab is found
+    /// by its PATH, as a shell finds it.
+    fn canvas_tabs(e: *mut JasEngine) -> Vec<(serde_json::Value, Vec<serde_json::Value>)> {
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "canvas_pane", 1600, 900)).expect("plan JSON");
+        let all: Vec<&serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .flat_map(|k| plan[*k].as_array().into_iter().flatten()).collect();
+        let bar = all.iter().find(|x| x["id"] == "canvas_tab_bar").expect("the tab bar is placed");
+        let bar_path = bar["path"].as_array().expect("path").clone();
+        let under = |x: &serde_json::Value, depth: usize, root: &[serde_json::Value]| {
+            x["path"].as_array().is_some_and(|p| p.len() == root.len() + depth && p[..root.len()] == *root)
+        };
+        all.iter().filter(|x| under(x, 1, &bar_path)).map(|tab| {
+            let tp = tab["path"].as_array().unwrap().clone();
+            let kids = all.iter().filter(|x| under(x, 1, &tp)).map(|x| (*x).clone()).collect();
+            ((*tab).clone(), kids)
+        }).collect()
+    }
+
+    /// OWNER NOTE 4b: THE CANVAS TAB BAR IS DRAWN FROM THE OPEN DOCUMENTS.
+    /// `canvas_tab_bar` is a `foreach` over `workspace.open_documents`, and
+    /// the engine holds exactly one document, so the plan a shell draws has
+    /// ONE tab: shown, the front one, labelled with the model's own name (its
+    /// filename, or its untitled name), with its close button. Before #4b the
+    /// tab came from a `create_child` no port ran, so Windows drew no tab.
+    #[test]
+    fn the_canvas_tab_bar_draws_the_engines_one_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let name = unsafe { &*e }.model.borrow().filename.clone();
+        assert!(name.starts_with("Untitled-"), "a fresh engine's document is untitled: {name:?}");
+        let tabs = canvas_tabs(e);
+        assert_eq!(tabs.len(), 1, "one tab for the one document: {tabs:?}");
+        let (tab, kids) = &tabs[0];
+        assert!(tab["rect"]["w"].as_i64().unwrap_or(0) > 0, "the tab is laid out: {}", tab["rect"]);
+        assert_eq!(tab["values"]["bind.active"], "true", "the one tab is the front one");
+        assert!(kids.iter().any(|k| k["type"] == "text" && k["values"]["content"] == serde_json::json!(name)),
+                "the tab shows the document's name {name:?}: {kids:?}");
+        assert!(kids.iter().any(|k| k["type"] == "icon_button" && k["static"]["icon"] == "close"),
+                "the tab has its close button: {kids:?}");
         unsafe { jas_engine_free(e) };
     }
 
