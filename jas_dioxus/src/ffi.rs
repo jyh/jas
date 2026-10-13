@@ -2661,7 +2661,7 @@ mod tests {
     }
 
     fn engine_on(fixture: &str) -> *mut JasEngine {
-        let root = env!("CARGO_MANIFEST_DIR").trim_end_matches("/jas_dioxus");
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
         let e = jas_engine_new();
         engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
