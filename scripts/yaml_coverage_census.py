@@ -44,6 +44,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -66,6 +67,16 @@ NOT_CENSUSED = ("native_intercepts", "layout", "default_layouts", "elements",
                 "lexical_contexts", "theme", "concepts", "templates",
                 "swatch_libraries", "gradient_libraries", "brush_libraries")
 METADATA = ("version", "schema_version", "app")
+
+# Level-2 certificates: a LIVE app drove an item and read it back (§203 (a);
+# the shape is flask's, STATUS-flask §225). One committed file per census row
+# and platform; the reader keys each by the `row` INSIDE it, never by its
+# filename, because a shortcut's id carries spaces and an arrow.
+L2_DIR = os.path.join("prototypes", "sb_winui", "l2_certs")
+L2_SCHEMA = "jas-l2-cert/1"
+L2_EVIDENCE = ("e2e", "tree", "pixels")
+L2_ARM_OK = ("PASS", "NOT APPLICABLE")
+L2_CERTIFIED, L2_STALE = "CERTIFIED", "STALE"
 
 # OS-native chrome: the irreducible residue of TESTING_STRATEGY.md section 1.
 _NATIVE_CHROME = re.compile(r"native (file|save|open|print)\b.*dialog|native file dialog")
@@ -296,6 +307,104 @@ def census(spec, ev):
     return rows
 
 
+def _canonical_sha16(node):
+    """sha256 of `node` as canonical JSON (sorted keys, `,`/`:` separators,
+    UTF-8 NOT ascii-escaped), first 16 hex."""
+    blob = json.dumps(node, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+# A row's class -> the spec key its node lives under, for the six classes whose
+# id IS that key's member name. `shortcuts` and `menu_items` are found the way
+# census() names them.
+_SPEC_KEY_OF = {"actions": "actions", "tools": "tools", "state": "state",
+                "panels": "panels", "panel_pixels": "panels",
+                "dialogs": "dialogs", "dialog_pixels": "dialogs", "icons": "icons"}
+
+
+def spec_node(spec, cls, item_id):
+    """The compiled node a census row is ABOUT, or None when the census has no
+    such row. The same mapping census() uses to name its rows."""
+    if cls in _SPEC_KEY_OF:
+        return spec.get(_SPEC_KEY_OF[cls], {}).get(item_id)
+    if cls == "shortcuts":
+        return next((s for s in spec.get("shortcuts", [])
+                     if f'{s.get("key")} -> {s.get("action")}' == item_id), None)
+    if cls == "menu_items":
+        return next((it for _p, it in _menu_items(spec.get("menubar", []))
+                     if it.get("id") == item_id), None)
+    return None
+
+
+def item_spec_sha(spec, cls, item_id):
+    """The PER-ITEM spec hash a level-2 certificate pins (§203 (a)): only the
+    item that moved goes stale, where a whole-spec hash would stale every
+    certificate at every spec edit. None for a row the census does not have.
+    Importable: flask's certificate writer uses this same function."""
+    node = spec_node(spec, cls, item_id)
+    return None if node is None else _canonical_sha16(node)
+
+
+def _l2_refusal(root, spec, known, c):
+    """Why certificate `c` is refused, or None. STALE is not a refusal."""
+    if not isinstance(c, dict):
+        return "not a JSON object"
+    if c.get("schema") != L2_SCHEMA:
+        return f"schema {c.get('schema')!r} is not {L2_SCHEMA}"
+    if not isinstance(c.get("platform"), str) or not c["platform"]:
+        return "no platform"
+    row = c.get("row")
+    key = (row.get("class"), row.get("id"), row.get("observable")) if isinstance(row, dict) else None
+    if key not in known:
+        return f"row {row!r} is not a census row"
+    if not (isinstance(c.get("spec_sha"), str) and re.fullmatch(r"[0-9a-f]{16}", c["spec_sha"])):
+        return "spec_sha is not 16 hex"
+    if c.get("verdict") != L2_CERTIFIED:
+        return f"verdict {c.get('verdict')!r} is not {L2_CERTIFIED}"
+    arms = c.get("arms")
+    if not isinstance(arms, dict) or not arms:
+        return "no arms: a certificate must say what was checked"
+    bad = {k: v for k, v in arms.items() if v not in L2_ARM_OK}
+    if bad:
+        return f"arm(s) neither PASS nor NOT APPLICABLE: {bad}"
+    if c.get("evidence") not in L2_EVIDENCE:
+        return f"evidence {c.get('evidence')!r} is not one of {L2_EVIDENCE}"
+    base = c.get("baseline")
+    if base is not None and not os.path.exists(os.path.join(root, base)):
+        return f"baseline {base!r} does not exist"
+    return None
+
+
+def read_l2_certs(root, spec, rows):
+    """Every committed level-2 certificate under L2_DIR, read and checked.
+    Returns ({(platform, (class, id, observable)): (CERTIFIED|STALE, path)},
+    [(path, why refused)]). A stale certificate is reported, never counted."""
+    known = {(r["class"], r["id"], r["observable"]) for r in rows}
+    out, refused = {}, []
+    base = os.path.join(root, L2_DIR)
+    for dirpath, _dirs, files in sorted(os.walk(base)):
+        for fn in sorted(f for f in files if f.endswith(".json")):
+            path = os.path.join(dirpath, fn)
+            rel = os.path.relpath(path, root).replace(os.sep, "/")
+            try:
+                c = _load(path)
+            except (OSError, ValueError) as e:
+                refused.append((rel, f"does not parse: {e}"))
+                continue
+            why = _l2_refusal(root, spec, known, c)
+            if why:
+                refused.append((rel, why))
+                continue
+            row = c["row"]
+            key = (row["class"], row["id"], row["observable"])
+            if (c["platform"], key) in out:
+                refused.append((rel, f"a second certificate for {c['platform']} {key}"))
+                continue
+            now = item_spec_sha(spec, key[0], key[1])
+            out[(c["platform"], key)] = (L2_CERTIFIED if c["spec_sha"] == now else L2_STALE, rel)
+    return out, refused
+
+
 def undeclared_classes(spec):
     known = set(CENSUSED) | set(NOT_CENSUSED) | set(METADATA)
     return sorted(k for k in spec if k not in known)
@@ -315,7 +424,7 @@ def _count(v):
     return len(v) if isinstance(v, (list, dict)) else 1
 
 
-def render(spec, rows, provenance, ev=None):
+def render(spec, rows, provenance, ev=None, l2=None):
     by = summarize(rows)
     total = len(rows)
     cov = sum(1 for r in rows if r["status"] == COVERED)
@@ -337,6 +446,21 @@ def render(spec, rows, provenance, ev=None):
         lines.append(f"NOTE: {len(shadow)} uncovered action(s) share a name with an op "
                      f"tested at the op layer beneath them (not counted as covered): "
                      + ", ".join(shadow))
+    if l2 is not None:
+        certs, refused = l2
+        plats = sorted({p for p, _k in certs}) or ["windows"]
+        for plat in plats:
+            mine = [v for (p, _k), v in certs.items() if p == plat]
+            n_ok = sum(1 for s, _r in mine if s == L2_CERTIFIED)
+            n_st = sum(1 for s, _r in mine if s == L2_STALE)
+            lines.append(f"LEVEL-2 ({plat}, a live app driven; {L2_DIR.replace(os.sep, '/')}): "
+                         f"CERTIFIED {n_ok} · STALE {n_st} · REFUSED {len(refused)} "
+                         f"of {len(rows)} rows")
+        for (plat, key), (st, rel) in sorted(certs.items()):
+            if st == L2_STALE:
+                lines.append(f"  STALE {plat} {key[0]}/{key[1]}.{key[2]}: the item's spec moved since {rel}")
+        for rel, why in refused:
+            lines.append(f"  REFUSED {rel}: {why}")
     lines.append("NOT CENSUSED (declared, counted): " + ", ".join(
         f"{k}={_count(spec[k])}" for k in NOT_CENSUSED if k in spec))
     lines.append("LIMITS: covered = a committed corpus/golden names the item and an "
@@ -481,6 +605,93 @@ def self_test():
         text = render(spec, rows, {"spec_sha256_16": "0", "build": "0", "platform": "t"})
         if "LIMITS:" not in text or "NOT CENSUSED" not in text or "elements=1" not in text:
             failures.append("the report must carry its limits and the uncensused classes")
+        # ── Level-2 certificates (§203 (a), flask's shape in STATUS-flask §225) ──
+        def check(cond, why):
+            nonlocal arms
+            arms += 1
+            if not cond:
+                failures.append(why)
+        # item_spec_sha: canonical JSON, sorted keys, compact, UTF-8 (NOT
+        # ascii-escaped), first 16 hex. A non-ASCII node is what tells the
+        # last two apart; an ASCII one hashes the same either way.
+        uni = {"b": "\u2026", "a": 1}
+        want = hashlib.sha256('{"a":1,"b":"\u2026"}'.encode("utf-8")).hexdigest()[:16]
+        check(_canonical_sha16(uni) == want, "canonical sha: sorted, compact, UTF-8 un-escaped")
+        check(_canonical_sha16(uni) != hashlib.sha256(
+            json.dumps(uni, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:16],
+            "CONTROL: the ascii-escaped form hashes differently, so the arm above can fail")
+        # The census's own mapping, one class at a time.
+        for cls, iid, node in [
+                ("actions", "decoy", spec["actions"]["decoy"]),
+                ("tools", "pen", spec["tools"]["pen"]),
+                ("state", "fill", spec["state"]["fill"]),
+                ("panels", "p2", spec["panels"]["p2"]),
+                ("panel_pixels", "p2", spec["panels"]["p2"]),
+                ("dialogs", "d1", spec["dialogs"]["d1"]),
+                ("dialog_pixels", "d1", spec["dialogs"]["d1"]),
+                ("icons", "i1", spec["icons"]["i1"]),
+                ("shortcuts", "Ctrl+W -> not_close", spec["shortcuts"][2]),
+                ("menu_items", "m_in_sub", spec["menubar"][0]["items"][4]["items"][0])]:
+            check(item_spec_sha(spec, cls, iid) == _canonical_sha16(node),
+                  f"item_spec_sha({cls}, {iid}) hashes the node the row is about")
+        check(item_spec_sha(spec, "tools", "no_such_tool") is None, "an unknown id has no sha")
+        check(item_spec_sha(spec, "elements", "e") is None, "an uncensused class has no sha")
+        moved = json.loads(json.dumps(spec))
+        moved["tools"]["pen"]["handlers"]["a"] = 2
+        check(item_spec_sha(moved, "tools", "pen") != item_spec_sha(spec, "tools", "pen"),
+              "an edit to the item moves its sha")
+        check(item_spec_sha(moved, "tools", "rect") == item_spec_sha(spec, "tools", "rect"),
+              "an edit to ANOTHER item leaves this one's sha (per-item, not whole-spec)")
+
+        good = {"schema": L2_SCHEMA, "platform": "windows",
+                "row": {"class": "tools", "id": "pen", "observable": "state"},
+                "spec_sha": item_spec_sha(spec, "tools", "pen"), "evidence": "tree",
+                "arms": {"tree": "PASS", "pixels": "NOT APPLICABLE"},
+                "verdict": "CERTIFIED", "build": "0", "date": "2026-10-12"}
+
+        def certs(*named):
+            base = os.path.join(d, L2_DIR)
+            if os.path.isdir(base):
+                shutil.rmtree(base)
+            for rel, obj in named:
+                put(os.path.join(L2_DIR, rel), obj)
+            return read_l2_certs(d, spec, rows)
+        got, refused = certs()
+        check(got == {} and refused == [], "no certificates: nothing certified, nothing refused")
+        got, refused = certs(("tools/pen.state.json", good))
+        check(got.get(("windows", ("tools", "pen", "state")), ("",))[0] == L2_CERTIFIED and not refused,
+              f"a good certificate reads CERTIFIED: {got} {refused}")
+        stale = dict(good, spec_sha="0" * 16)
+        got, refused = certs(("tools/pen.state.json", stale))
+        check(got.get(("windows", ("tools", "pen", "state")), ("",))[0] == L2_STALE and not refused,
+              "a certificate whose spec_sha is not the item's NOW reads STALE")
+        for label, bad, why in [
+                ("schema", dict(good, schema="jas-l2-cert/0"), "schema"),
+                ("row", dict(good, row={"class": "tools", "id": "nope", "observable": "state"}), "row"),
+                ("observable", dict(good, row={"class": "tools", "id": "pen", "observable": "tree"}), "row"),
+                ("verdict", dict(good, verdict="FAILED"), "verdict"),
+                ("arm", dict(good, arms={"tree": "PASS", "pixels": "NOT RUN"}), "arm"),
+                ("no arms", dict(good, arms={}), "arm"),
+                ("evidence", dict(good, evidence="vibes"), "evidence"),
+                ("baseline", dict(good, baseline="prototypes/no/such/dir"), "baseline")]:
+            got, refused = certs(("tools/pen.state.json", bad))
+            check(got == {} and len(refused) == 1 and why in refused[0][1],
+                  f"a certificate with a bad {label} is REFUSED naming it: {refused}")
+        put("prototypes/real_baseline/x.png", {"x": 1})
+        got, refused = certs(("tools/pen.state.json", dict(good, baseline="prototypes/real_baseline")))
+        check(not refused, f"CONTROL: a baseline that exists is accepted: {refused}")
+        got, refused = certs(("a.json", good), ("b.json", good))
+        check(len(refused) == 1 and "second" in refused[0][1],
+              "two certificates for one row and platform: the second is refused")
+        os.makedirs(os.path.join(d, L2_DIR), exist_ok=True)
+        with open(os.path.join(d, L2_DIR, "broken.json"), "w") as f:
+            f.write("{not json")
+        got, refused = read_l2_certs(d, spec, rows)
+        check(any("parse" in r for _p, r in refused), "a file that does not parse is refused")
+        text = render(spec, rows, {"spec_sha256_16": "0", "build": "0", "platform": "t"},
+                      l2=({("windows", ("tools", "pen", "state")): (L2_STALE, "x")}, [("y", "why")]))
+        check("LEVEL-2" in text and "STALE 1" in text and "REFUSED 1" in text,
+              "the report prints the level-2 block with its counts")
     for f in failures:
         print("FAIL:", f)
     print(f"yaml_coverage_census --self-test: {arms} arm(s), {len(failures)} failure(s)")
@@ -505,7 +716,12 @@ def main(argv=None):
     ev = gather_evidence(args.root)
     rows = census(spec, ev)
     prov = provenance_of(args.root, spec_path)
-    print(render(spec, rows, prov, ev))
+    l2 = read_l2_certs(args.root, spec, rows)
+    print(render(spec, rows, prov, ev, l2))
+    for (plat, key), (st, _rel) in l2[0].items():
+        for r in rows:
+            if (r["class"], r["id"], r["observable"]) == key:
+                r.setdefault("l2", {})[plat] = st
     if args.json:
         with open(args.json, "w", encoding="utf-8", newline="") as f:
             json.dump({"provenance": prov, "summary": summarize(rows), "rows": rows},
@@ -513,6 +729,9 @@ def main(argv=None):
             f.write("\n")
     if any(r["status"] == UNCLASSIFIED for r in rows):
         print("yaml_coverage_census: UNCLASSIFIED rows present")
+        return 1
+    if l2[1]:
+        print(f"yaml_coverage_census: {len(l2[1])} level-2 certificate(s) REFUSED")
         return 1
     return 0
 
