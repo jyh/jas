@@ -1008,17 +1008,31 @@ fn colour_value_commit(
         return refuse("BadParamType", &target);
     }
     crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
-    // The edit moved the active colour, so the model follows as it does after
-    // any write of that key (`colour_host`). Its one document edit is an
-    // `edit_document`, which brackets itself, so this is one undo step with no
-    // effect runner to own a transaction.
-    let generation = engine.model.borrow().generation();
+    // The slice computed the new colour (by channel and mode); COMMITTING it is
+    // `set_active_color`'s, "the commit point for all color changes from the
+    // Color Panel: … hex field Enter/Tab" (`actions.yaml`). So it runs here as
+    // a click runs it, in the colour scope: the model's default and selection
+    // follow (`colour_host`, through `global_written`), the recent colour is
+    // pushed, and the runner owns the one undo step.
+    let mut doc_changed = false;
     if outcome == EditOutcome::Changed {
         let key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
-        let value = engine.store.borrow().get(key).clone();
-        crate::interpreter::colour_host::apply_active_colour(&mut engine.model.borrow_mut(), key, &value);
+        let colour = engine.store.borrow().get(key).clone();
+        let params = serde_json::json!({"color": colour});
+        let scope = panel_ctx(engine, ws, id);
+        let ran = {
+            let mut store = engine.store.borrow_mut();
+            let mut model = engine.model.borrow_mut();
+            let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+            crate::panel_behavior::run_action(
+                Some(id), "set_active_color", Some(&params), &scope, &mut store, &mut model,
+                ws.actions(), ws.dialogs(), &mut host)
+        };
+        match ran {
+            Ok(ran) => doc_changed = ran.doc_changed,
+            Err(r) => return refuse(r.class, &r.detail),
+        }
     }
-    let doc_changed = engine.model.borrow().generation() != generation;
     let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
     if outcome == EditOutcome::Unchanged {
@@ -4218,8 +4232,10 @@ mod tests {
     /// through the BEHAVIOUR door (`jas_panel_behavior`, `{"widget","event":
     /// "commit","value":<text>}`), and the core refused every Color widget there
     /// (`PanelNotHosted`), so Color's hex did nothing on Windows. A value commit
-    /// on a Color input now lands exactly as the same edit through the S-C.2
-    /// door does: the oracle is that door, on a fresh engine.
+    /// on a Color input now moves the panel to the edited colour, as the S-C.2
+    /// door's tick does: the oracle is that door's COLOUR, on a fresh engine.
+    /// It is not the whole row set: a commit also runs `set_active_color`,
+    /// which a tick does not (`a_hex_commit_lands_as_set_active_color_does`).
     #[test]
     fn a_colour_commit_through_the_behaviour_door_lands_as_the_s_c2_tick_does() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -4236,7 +4252,12 @@ mod tests {
         let (reply, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
         assert!(err.is_empty(), "the commit ran: {err}");
         assert!(reply.contains(r#""changed":["#) && !reply.contains(r#""changed":[]"#), "{reply}");
-        assert_eq!(bind_rows(b, id), want, "the same rows as the S-C.2 door's");
+        let colour_rows = |rows: &str| -> Vec<serde_json::Value> {
+            serde_json::from_str::<Vec<serde_json::Value>>(rows).unwrap().into_iter()
+                .filter(|r| !r["id"].as_str().unwrap_or("").starts_with("cp_recent_")).collect()
+        };
+        assert_eq!(colour_rows(&bind_rows(b, id)), colour_rows(&want),
+                   "the colour rows differ from the S-C.2 door's");
         // Committing the same value again moves nothing, and says so.
         let (_, err2) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
         assert!(err2.contains("Unchanged"), "{err2}");
@@ -4435,6 +4456,44 @@ mod tests {
         assert_eq!(doc_json(e), before, "an empty selection painted something");
         assert_eq!(engine_of(e).model.borrow().default_fill.map(|f| f.color), white);
         unsafe { jas_engine_free(e) };
+    }
+
+    /// `set_active_color` is "the commit point for all color changes from the
+    /// Color Panel: … hex field Enter/Tab" (`actions.yaml`), so a hex commit
+    /// lands EXACTLY as dispatching that action with the committed colour:
+    /// the panel's rows (the recent strip included), the document and the
+    /// model's recent list. Until 2026-10-12 the commit edited the slice and
+    /// never pushed the recent colour. A repeat commit is Unchanged and pushes
+    /// nothing twice.
+    #[test]
+    fn a_hex_commit_lands_as_set_active_color_does() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let id = crate::panel_scope::COLOUR_PANEL;
+        let fresh = || engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[0]));
+        let a = fresh();
+        let _ = bind_rows(a, id);
+        let (_, err) = dispatch(a, r##"{"action":"set_active_color","params":{"color":"#12ab34"}}"##);
+        assert!(err.is_empty(), "the oracle ran: {err}");
+        // The LAYERS: each fresh document draws its own artboard id.
+        let layers = |e| serde_json::from_str::<serde_json::Value>(&doc_json(e)).unwrap()["layers"].clone();
+        let (want_rows, want_doc) = (bind_rows(a, id), layers(a));
+        let want_recent = engine_of(a).model.borrow().recent_colors.clone();
+        assert_eq!(want_recent, vec!["#12ab34".to_string()], "fixture: the oracle pushes");
+        unsafe { jas_engine_free(a) };
+
+        let b = fresh();
+        let _ = bind_rows(b, id);
+        let (reply, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.is_empty(), "the commit ran: {err}");
+        assert!(reply.contains(r#""doc_changed":true"#), "{reply}");
+        assert_eq!(bind_rows(b, id), want_rows, "the rows differ from set_active_color's");
+        assert_eq!(layers(b), want_doc, "the document differs from set_active_color's");
+        assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent);
+        let (_, err) = behave(b, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+        assert!(err.contains("Unchanged"), "{err}");
+        assert_eq!(engine_of(b).model.borrow().recent_colors, want_recent, "a repeat pushed");
+        unsafe { jas_engine_free(b) };
     }
 
     /// A Color value still never reaches the store through the generic path:
