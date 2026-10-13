@@ -862,6 +862,15 @@ static class Program
         Eq("color_bar: the first change after the press sends", "0.5,0.5", Show(PanelWire.ColorBarChange("0.5,0.5", null)));
         Eq("color_bar: a move that names the same point sends nothing", "(null)", Show(PanelWire.ColorBarChange("0.5,0.5", "0.5,0.5")));
         Eq("color_bar: no point, no change", "(null)", Show(PanelWire.ColorBarChange(null, "0.5,0.5")));
+        // §252 (#399): the bar's picture is `display.picture`, a BMP data URI. The
+        // shell decodes it and draws it; anything else draws no picture.
+        static string Hex(byte[]? b) => b is null ? "(null)" : Convert.ToHexString(b);
+        Eq("color_bar picture: a BMP data URI decodes to its bytes", "424D0102", Hex(PanelWire.PictureBytes("data:image/bmp;base64,Qk0BAg==")));
+        Eq("color_bar picture: no picture, no bytes", "(null)|(null)", Hex(PanelWire.PictureBytes(null)) + "|" + Hex(PanelWire.PictureBytes("")));
+        Eq("color_bar picture: another media type is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/png;base64,Qk0BAg==")));
+        Eq("color_bar picture: a URI that is not base64 is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/bmp,Qk0BAg==")));
+        Eq("color_bar picture: malformed base64 is refused", "(null)", Hex(PanelWire.PictureBytes("data:image/bmp;base64,Qk0*Ag==")));
+        Eq("color_bar picture: bytes that are not a BMP are refused", "(null)|(null)", Hex(PanelWire.PictureBytes("data:image/bmp;base64,iVBORw==")) + "|" + Hex(PanelWire.PictureBytes("data:image/bmp;base64,")));
 
         // #397: the dirty flag is the MODEL's answer (`jas_document_modified`),
         // never a reply's `doc_changed` (a selection repaints and is not an edit).
