@@ -95,6 +95,41 @@ impl PanelState {
         self.active().unwrap_or((0.0, 0.0, 0.0))
     }
 
+    /// The slice as the panel SHOWS it: the web's `live_fill_stroke_values`
+    /// law (`dock_panel.rs`). Per side, the SELECTION decides first: a uniform
+    /// colour shows that colour, a uniform none shows none. A mixed or empty
+    /// selection falls back to the document's new-element default, and then
+    /// to the slice's own colour (the app's tier). Until 2026-10-12 the panel
+    /// showed only its own colour, so selecting a blue shape left it white and
+    /// an Undo left it on the undone colour (flask §238).
+    pub fn effective(&self, model: &Model) -> PanelState {
+        use crate::document::controller::{
+            selection_fill_summary, selection_stroke_summary, FillSummary, StrokeSummary,
+        };
+        let rgb = |c: crate::geometry::element::Color| { let (r, g, b, _) = c.to_rgba(); (r, g, b) };
+        let doc = model.document();
+        let fill = match selection_fill_summary(doc) {
+            FillSummary::Uniform(Some(f)) => Some(rgb(f.color)),
+            FillSummary::Uniform(None) => None,
+            _ => model.default_fill.map(|f| rgb(f.color)).or(self.fill),
+        };
+        let stroke = match selection_stroke_summary(doc) {
+            StrokeSummary::Uniform(Some(s)) => Some(rgb(s.color)),
+            StrokeSummary::Uniform(None) => None,
+            _ => model.default_stroke.map(|s| rgb(s.color)).or(self.stroke),
+        };
+        PanelState { fill, stroke, ..self.clone() }
+    }
+
+    /// Make the slice's own colours the ones it shows, before an edit: an edit
+    /// starts from what the person sees (the selected shape's colour), never
+    /// from a colour the panel is not showing.
+    pub fn materialize(&mut self, model: &Model) {
+        let shown = self.effective(model);
+        self.fill = shown.fill;
+        self.stroke = shown.stroke;
+    }
+
     fn set_active(&mut self, rgb: (f64, f64, f64)) {
         if self.fill_on_top { self.fill = Some(rgb) } else { self.stroke = Some(rgb) }
     }
@@ -188,8 +223,15 @@ impl PanelState {
     /// written `null` is adopted as none (`set_active_color_none`); any other
     /// non-string is NOT adopted, because `parse_hex` would read it as black.
     /// Returns whether anything moved.
-    pub fn adopt_store_state(&mut self, store: &StateStore) -> bool {
-        let mine = self.state_keys();
+    ///
+    /// With a `model`, the comparison is against what the store copy holds,
+    /// the EFFECTIVE keys ([`PanelState::effective`]), so a colour the
+    /// selection supplied is never mistaken for a behaviour's write.
+    pub fn adopt_store_state(&mut self, store: &StateStore, model: Option<&Model>) -> bool {
+        let mine = match model {
+            Some(m) => self.effective(m).state_keys(),
+            None => self.state_keys(),
+        };
         let written = |k: &str| Some(store.get(k)).filter(|v| Some(*v) != mine.get(k));
         let rgb = |v: &Value| match v {
             Value::Null => Some(None),
@@ -372,6 +414,8 @@ pub fn seed_colour_mode(slice: &PanelState, store: &mut StateStore) {
 /// Keys are inserted in sorted order, so the scope does not depend on a hash
 /// map's iteration order.
 pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel_id: &str) -> Value {
+    // Every panel reads the colour state as it is SHOWN (`effective`).
+    let slice = &slice.effective(model);
     let mut scope = slice.scope(model.document());
     let mut state: Map<String, Value> = sorted(store.get_all());
     state.extend(slice.state_keys());
@@ -873,14 +917,14 @@ mod tests {
 
         // The control: an untouched copy adopts nothing.
         let mut st = slice.clone();
-        assert!(!st.adopt_store_state(&store));
+        assert!(!st.adopt_store_state(&store, None));
         assert_eq!(st.state_keys(), slice.state_keys());
 
         // fill_color written: the fill moves, the stroke and the flag do not.
         let mut s = store.clone();
         s.set("fill_color", json!("#000099"));
         let mut st = slice.clone();
-        assert!(st.adopt_store_state(&s));
+        assert!(st.adopt_store_state(&s, None));
         assert_eq!(st.state_keys()["fill_color"], "#000099");
         assert_eq!(st.state_keys()["stroke_color"], slice.state_keys()["stroke_color"]);
         assert_eq!(st.fill_on_top, slice.fill_on_top);
@@ -890,7 +934,7 @@ mod tests {
         s.set("stroke_color", json!("#12ab34"));
         s.set("fill_on_top", json!(false));
         let mut st = slice.clone();
-        assert!(st.adopt_store_state(&s));
+        assert!(st.adopt_store_state(&s, None));
         assert_eq!(st.state_keys()["stroke_color"], "#12ab34");
         assert_eq!(st.state_keys()["fill_color"], slice.state_keys()["fill_color"]);
         assert!(!st.fill_on_top);
@@ -901,7 +945,7 @@ mod tests {
         let mut s = store.clone();
         s.set("fill_color", serde_json::Value::Null);
         let mut st = slice.clone();
-        assert!(st.adopt_store_state(&s));
+        assert!(st.adopt_store_state(&s, None));
         assert_eq!(st.state_keys()["fill_color"], serde_json::Value::Null);
         assert_eq!(st.state_keys()["stroke_color"], slice.state_keys()["stroke_color"]);
 
@@ -910,7 +954,7 @@ mod tests {
         let mut s = store.clone();
         s.set("fill_color", json!(7));
         let mut st = slice.clone();
-        assert!(!st.adopt_store_state(&s));
+        assert!(!st.adopt_store_state(&s, None));
         assert_eq!(st.state_keys(), slice.state_keys());
     }
 

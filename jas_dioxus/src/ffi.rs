@@ -263,7 +263,7 @@ impl JasEngine {
         // the sync below writes the slice over the store, so a slice default
         // would replace the spec's white with the slice's (#664040 until
         // 2026-10-10, measured by the initial-state-map corpus).
-        panel.adopt_store_state(&store);
+        panel.adopt_store_state(&store, None);
         crate::panel_scope::sync_colour_state(&mut store, &panel);
         crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
@@ -539,6 +539,11 @@ pub unsafe extern "C" fn jas_menu_state(
 /// (wave 2, A6): each panel reads its own `panel.*`.
 fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::Value {
     seed_panel(engine, ws, panel_id);
+    // The store's copy of the colour state is what an action's guard reads
+    // (`state.fill_color == null`), so it carries the colour as SHOWN: the
+    // selection's, as the web's action context does (`action_fill_stroke_values`).
+    crate::panel_scope::sync_colour_state(
+        &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
     crate::panel_scope::engine_scope(
         &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id)
 }
@@ -684,6 +689,7 @@ pub unsafe extern "C" fn jas_panel_event(
         return JasBytes::empty();
     };
 
+    engine.panel.borrow_mut().materialize(&engine.model.borrow());
     let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
     if outcome == EditOutcome::NoSuchTarget {
         set_panel_event_error(engine, "BadParamType", &target);
@@ -923,7 +929,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
     // A behavior writes the store's copy of the colour slice's three
     // `state.*` keys (Swatches' `set_active_color`); every scope reads the
     // slice, so the slice adopts the write and the copy is re-synced from it.
-    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow()) {
+    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow(), Some(&engine.model.borrow())) {
         crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
     }
 
@@ -1003,6 +1009,7 @@ fn colour_value_commit(
     let Some(target) = crate::panel_scope::binding_of(spec, &ev.widget, "bind.value") else {
         return refuse("MissingTarget", &ev.widget);
     };
+    engine.panel.borrow_mut().materialize(&engine.model.borrow());
     let outcome = engine.panel.borrow_mut().apply_edit(&target, &value);
     if outcome == EditOutcome::NoSuchTarget {
         return refuse("BadParamType", &target);
@@ -1169,7 +1176,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // The same aftermath as a click: the tool, the colour slice, every open
     // panel's rows.
     let tool = crate::ffi_pointer::sync_tool_to_state(engine);
-    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow()) {
+    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow(), Some(&engine.model.borrow())) {
         crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
     }
     let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
@@ -2379,7 +2386,7 @@ mod tests {
         assert_eq!(tile["path"].as_array().and_then(|p| p.last()), Some(&serde_json::json!(k)),
                    "fixture: the tile's last path index is its row: {tile}");
         let colour = tile["values"]["bind.color"].as_str().expect("the tile's colour").to_string();
-        let slice_before = engine_of(e).panel.borrow().state_keys();
+        let slice_before = engine_of(e).panel.borrow().effective(&engine_of(e).model.borrow()).state_keys();
         assert_ne!(slice_before["fill_color"], colour.as_str(), "fixture: the tap must be able to move the fill");
         let lib = engine_of(e).store.borrow().get_panel(P, "open_libraries")[0]["id"].clone();
         assert!(lib.is_string(), "fixture: an open library: {lib}");
@@ -2395,8 +2402,9 @@ mod tests {
         // The recent colour is the DOCUMENT's (`active_document.recent_colors`),
         // held on the model; until 2026-10-12 it landed in this panel's scope.
         assert_eq!(engine_of(e).model.borrow().recent_colors.first().map(String::as_str), Some(colour.as_str()));
-        // The SLICE, which every scope reads, and the store's copy agree on it.
-        let slice_after = engine_of(e).panel.borrow().state_keys();
+        // The colour as SHOWN (`effective`), which every scope reads, and the
+        // store's copy agree on it.
+        let slice_after = engine_of(e).panel.borrow().effective(&engine_of(e).model.borrow()).state_keys();
         assert_eq!(slice_after["fill_color"], colour.as_str(), "the active colour did not move");
         assert_eq!(slice_after["stroke_color"], slice_before["stroke_color"]);
         assert_eq!(engine_of(e).store.borrow().get("fill_color"), &slice_after["fill_color"]);
@@ -4342,7 +4350,7 @@ mod tests {
                 let (_, err) = dispatch(e, r#"{"action":"toggle_fill_on_top"}"#);
                 assert!(err.is_empty(), "toggle_fill_on_top ran: {err}");
             }
-            assert_eq!(engine.panel.borrow().state_keys()["fill_on_top"], fill_on_top);
+            assert_eq!(engine.panel.borrow().effective(&engine.model.borrow()).state_keys()["fill_on_top"], fill_on_top);
             let hex = || leaf(e, id, "cp_hex")["values"].clone();
             // A colour that is not black (the default stroke IS black, and none
             // shows as black, so a black start would make the arm vacuous).
@@ -4351,12 +4359,12 @@ mod tests {
             // The control: a colour, so the hex is enabled and shows it.
             assert_eq!(hex()["bind.disabled"], "false", "{key}: the control");
             assert_ne!(hex()["bind.value"], "000000", "{key}: the fixture must not start at black");
-            let kept = engine.panel.borrow().state_keys()[other].clone();
+            let kept = engine.panel.borrow().effective(&engine.model.borrow()).state_keys()[other].clone();
 
             let (reply, err) = dispatch(e, r#"{"action":"set_active_color_none"}"#);
             assert!(err.is_empty(), "{key}: None ran: {err}");
             assert!(!reply.contains(r#""changed":[]"#), "{key}: None changed no row: {reply}");
-            let keys = engine.panel.borrow().state_keys();
+            let keys = engine.panel.borrow().effective(&engine.model.borrow()).state_keys();
             assert_eq!(keys[key], serde_json::Value::Null, "{key}: the slice is not none");
             assert_eq!(keys[other], kept, "{key}: None moved the other colour");
             assert_eq!(engine.store.borrow().get(key), &serde_json::Value::Null, "{key}: store");
@@ -4367,13 +4375,13 @@ mod tests {
             // (#375's colour route skipped the check the generic route makes).
             let (r, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
             assert_eq!((r.as_str(), err), ("", refusal("Disabled", "cp_hex")), "{key}");
-            assert_eq!(engine.panel.borrow().state_keys()[key], serde_json::Value::Null, "{key}");
+            assert_eq!(engine.panel.borrow().effective(&engine.model.borrow()).state_keys()[key], serde_json::Value::Null, "{key}");
 
             // A swatch un-nones it (`color.yaml`: "Clicking any swatch …
             // implicitly un-nones the attribute").
             let (_, err) = behave(e, id, r#"{"widget":"cp_white_swatch","event":"click"}"#);
             assert!(err.is_empty(), "{key}: the white swatch ran: {err}");
-            assert_eq!(engine.panel.borrow().state_keys()[key], "#ffffff", "{key}");
+            assert_eq!(engine.panel.borrow().effective(&engine.model.borrow()).state_keys()[key], "#ffffff", "{key}");
             assert_eq!(hex()["bind.disabled"], "false", "{key}");
             assert_eq!(hex()["bind.value"], "ffffff", "{key}");
             unsafe { jas_engine_free(e) };
@@ -4603,7 +4611,7 @@ mod tests {
         let e = jas_engine_new();
         let engine = engine_of(e);
         let agree = || {
-            let keys = engine.panel.borrow().state_keys();
+            let keys = engine.panel.borrow().effective(&engine.model.borrow()).state_keys();
             let store = engine.store.borrow();
             for (k, v) in &keys {
                 assert_eq!(store.get(k), v, "the store's {k} is not the slice's");
