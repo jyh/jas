@@ -1009,16 +1009,14 @@ fn colour_value_commit(
     }
     crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
     // The edit moved the active colour, so the model follows as it does after
-    // any write of that key (`colour_host`): one undo step, opened here
-    // because no effect runner owns this route.
+    // any write of that key (`colour_host`). Its one document edit is an
+    // `edit_document`, which brackets itself, so this is one undo step with no
+    // effect runner to own a transaction.
     let generation = engine.model.borrow().generation();
     if outcome == EditOutcome::Changed {
         let key = if engine.panel.borrow().fill_on_top { "fill_color" } else { "stroke_color" };
         let value = engine.store.borrow().get(key).clone();
-        let mut model = engine.model.borrow_mut();
-        model.begin_txn();
-        crate::interpreter::colour_host::apply_active_colour(&mut model, key, &value);
-        model.commit_txn();
+        crate::interpreter::colour_host::apply_active_colour(&mut engine.model.borrow_mut(), key, &value);
     }
     let doc_changed = engine.model.borrow().generation() != generation;
     let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));

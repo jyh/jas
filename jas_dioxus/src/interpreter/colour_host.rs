@@ -50,8 +50,8 @@ pub fn recolor_fill(base: Option<Fill>, color: Color) -> Fill {
 /// not a colour, or any other non-null value, changes nothing, as in the
 /// reference. Returns whether `key` was one this law owns.
 ///
-/// The caller owns the transaction: the edit is an ordinary `edit_document`,
-/// so it rides whatever bracket is open.
+/// At most ONE document edit, an `edit_document` (through `Controller`), so it
+/// joins a bracket that is open and is its own undo step when none is.
 pub fn apply_active_colour(model: &mut Model, key: &str, value: &Value) -> bool {
     let fill_side = match key {
         "fill_color" => true,
