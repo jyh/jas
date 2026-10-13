@@ -1491,6 +1491,21 @@ function Test-SbNodeSkipped($Node) {
     return $false
 }
 
+# Does `$Node` carry a transform? (This mirror reads no matrices.)
+function Test-SbTransformed($Node) {
+    if ($null -eq $Node) { return $false }
+    $p = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    return (($p -contains 'transform') -and ($null -ne $Node.transform))
+}
+
+# Is `$Node` `outline`? The law caps it and everything under it to the outline
+# (`hit_law.blocks_hit`), so a fill there is never hit.
+function Test-SbOutlineCapped($Node) {
+    if ($null -eq $Node) { return $false }
+    $p = @($Node.PSObject.Properties | ForEach-Object { $_.Name })
+    return (($p -contains 'visibility') -and ("$($Node.visibility)" -match '(?i)^outline$'))
+}
+
 # The law's HIT_TOLERANCE (`workspace_interpreter/hit_law.py`).
 $SbHitTolerance = 3.0
 
@@ -1597,15 +1612,24 @@ function Get-SbHitTargetFromDoc($Doc) {
                                        @{Expression = 'Path'; Descending = $false})
     foreach ($aim in $ordered) {
         if (Test-SbNodeSkipped $aim.Node) { continue }
+        if (Test-SbOutlineCapped $aim.Node) { continue }
         $k = -1
         for ($i = 0; $i -lt $tops.Count; $i++) {
             $tp = $tops[$i].Path
             if ($aim.Path -eq $tp -or $aim.Path.StartsWith($tp + '.')) { $k = $i; break }
         }
         if ($k -lt 0) { continue }
+        # The law maps the press through the LAYER's transform before it scans
+        # the layer's children, and caps every child by the layer's visibility
+        # (`hit_law.blocks_hit`): a transformed or `outline` layer is never aimed
+        # into (jas's #359 review, gap 1 and gap 2).
+        $layer = @($Doc.layers)[$tops[$k].Li]
+        if ((Test-SbTransformed $layer) -or (Test-SbOutlineCapped $layer)) { continue }
         # The centre is the shape's painted interior only in its OWN frame, so
         # a transform on it or on any container between it and its top-level
-        # child disqualifies it (this mirror reads no matrices).
+        # child disqualifies it (this mirror reads no matrices). An `outline`
+        # container caps everything under it to the outline, where the fill at
+        # the centre does not count, so it disqualifies too.
         $moved = $false
         $node = $tops[$k].Node
         $rest = $aim.Path.Substring($tops[$k].Path.Length)
@@ -1613,12 +1637,16 @@ function Get-SbHitTargetFromDoc($Doc) {
             $np = @($node.PSObject.Properties | ForEach-Object { $_.Name })
             if (($np -contains 'transform') -and ($null -ne $node.transform)) { $moved = $true; break }
             if (Test-SbNodeSkipped $node) { $moved = $true; break }
+            if (Test-SbOutlineCapped $node) { $moved = $true; break }
             $node = @($node.children)[[int]$seg.Groups[1].Value]
         }
         $ap = @($aim.Node.PSObject.Properties | ForEach-Object { $_.Name })
         if ($moved -or (($ap -contains 'transform') -and ($null -ne $aim.Node.transform))) { continue }
         $covered = $false
         for ($i = $k + 1; $i -lt $tops.Count; $i++) {
+            # A later child's geometry is in ITS layer's frame: under a layer
+            # transform this mirror cannot place it, so it may paint anywhere.
+            if (Test-SbTransformed (@($Doc.layers)[$tops[$i].Li])) { $covered = $true; break }
             if (Test-SbMayPaint $tops[$i].Node $aim.X $aim.Y) { $covered = $true; break }
         }
         if ($covered) { continue }
