@@ -326,8 +326,13 @@ public sealed partial class MainWindow
                     // A `length_input` is this control too: the person types TEXT
                     // and the core parses it by the widget's kind. What differs is
                     // the DISPLAY, and the core now sends that ready-made.
+                    // A `text_input` is the same box: the core's `parse_commit`
+                    // keeps its text verbatim (Color's hex, Layers' search, the
+                    // artboard rename), and it was a `[text_input]` placeholder
+                    // until 2026-10-12 (measured live: `cp_hex` a TextBlock).
                     case "number_input":
                     case "length_input":
+                    case "text_input":
                         inputs++;
                         if (leaf.Id.Length == 0) { unaddressable++; }
                         el = BuildNumberInput(leaf);
@@ -875,6 +880,9 @@ public sealed partial class MainWindow
             };
             var unit = leaf.Literal("unit") ?? leaf.Literal("suffix");
             if (!string.IsNullOrEmpty(unit)) { ToolTipService.SetToolTip(box, unit); }
+            // The spec's literal hint for an empty box (`cp_hex`'s "000000",
+            // Layers' "Search All"); the plan sends it in `static`.
+            if (leaf.Literal("placeholder") is { Length: > 0 } hint) { box.PlaceholderText = hint; }
             if (leaf.Id.Length == 0) { return box; }
 
             var id = leaf.Id;
