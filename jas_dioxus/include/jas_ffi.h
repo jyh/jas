@@ -790,6 +790,25 @@ uint8_t jas_document_modified(struct JasEngine *e);
 uint8_t jas_document_mark_saved(struct JasEngine *e);
 
 /**
+ * **The shell names the document it opened or saved** (flask §256): the
+ * model's `filename`, which the canvas tab shows (`workspace.open_documents`,
+ * owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
+ * engine names a replaced document with its next untitled name, so without
+ * this an opened file's tab read `Untitled-N`. Pass the name to show (a file
+ * name, not a path). Naming is not an edit.
+ *
+ * ⛔ BYTES, NOT A STRING (BL5), as `jas_load_svg`: the default P/Invoke
+ * `CharSet` is `Ansi`, which would mangle a non-ASCII name. 1 when named; 0
+ * when refused (a null pointer, bytes that are not UTF-8, or an empty name),
+ * changing nothing; 255 for a null engine.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ * `name` must be NULL or point to `len` readable bytes.
+ */
+uint8_t jas_document_set_filename(struct JasEngine *e, const uint8_t *name, uintptr_t len);
+
+/**
  * **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
  * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
  * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
