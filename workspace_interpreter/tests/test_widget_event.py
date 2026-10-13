@@ -50,9 +50,9 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_nine_kinds_and_nothing_else(self):
+    def test_the_ten_kinds_and_nothing_else(self):
         assert set(we.ALLOWED_EVENTS) == we.INPUT_KINDS | we.BOOLEAN_KINDS | we.ITEM_KINDS
-        assert len(we.INPUT_KINDS) == 6 and len(we.BOOLEAN_KINDS) == 2
+        assert len(we.INPUT_KINDS) == 7 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert not (we.INPUT_KINDS & we.BOOLEAN_KINDS)
         assert not ((we.INPUT_KINDS | we.BOOLEAN_KINDS) & we.ITEM_KINDS)
@@ -405,7 +405,7 @@ class TestCommitSynthetic:
 
     def test_an_unknown_kind_is_refused_by_commit(self):
         store = self._store()
-        r = we.commit({"type": "slider", "bind": {"value": "panel.n"}}, "3", store, panel=None)
+        r = we.commit({"type": "radio_group", "bind": {"value": "panel.n"}}, "3", store, panel=None)
         assert r == we.EventResult("refused", reason=we.WRONG_KIND)
         assert store.get_panel(self.PID, "n") == 1
 
@@ -862,3 +862,52 @@ class TestShippedLayersFilter(_Shipped):
         r, tf = self._run(workspace_path, "__all__", initial=["path", "text"])
         assert r.outcome == "committed"
         assert tf == []
+
+
+# ── slider (WIDGET_EVENTS.md, ruled 2026-10-12: flask's fork A) ──────────────
+
+def _slider(lo=0, hi=255, step=51):
+    w = {"type": "slider"}
+    for k, v in (("min", lo), ("max", hi), ("step", step)):
+        if v is not None:
+            w[k] = v
+    return w
+
+
+@pytest.mark.parametrize("text, want", [
+    ("130", 153),      # 130/51 = 2.55 -> 3 steps
+    ("127", 102),      # 2.49 -> 2 steps
+    ("127.5", 153),    # exactly half -> up
+    ("255", 255),
+    ("300", 255),      # clamped, then on a step
+    ("-5", 0),         # clamped below
+])
+def test_a_slider_commit_clamps_then_snaps_to_its_step(text, want):
+    ok, v = we.parse_commit(_slider(), text)
+    assert ok and v == want, (text, v)
+
+
+def test_a_slider_snaps_from_its_min_not_from_zero():
+    ok, v = we.parse_commit(_slider(lo=10, hi=100, step=20), "39")
+    assert ok and v == 30, v   # 10 + round((39-10)/20 = 1.45 -> 1) * 20
+
+
+def test_a_snap_never_leaves_the_range():
+    # max 100 is not on the 0,30,60,90,120 grid: 99 snaps to 90, never 120.
+    ok, v = we.parse_commit(_slider(lo=0, hi=100, step=30), "99")
+    assert ok and v == 90, v
+    # And the max itself, off the grid, is unreachable, as on an HTML range
+    # input: 100 -> 3.33 steps -> 3 -> 90.
+    ok, v = we.parse_commit(_slider(lo=0, hi=100, step=30), "100")
+    assert ok and v == 90, v
+
+
+def test_without_a_positive_step_a_slider_is_a_clamped_number():
+    for step in (None, 0, -1, True):
+        ok, v = we.parse_commit(_slider(lo=0, hi=10, step=step), "7.3")
+        assert ok and v == 7.3, (step, v)
+
+
+def test_a_slider_refuses_text_outside_the_number_grammar():
+    for text in ("abc", "", " 5", "1e3"):
+        assert we.parse_commit(_slider(), text) == (False, None), text

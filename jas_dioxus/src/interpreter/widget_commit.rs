@@ -55,6 +55,19 @@ pub fn parse_numeric_string(s: &str) -> Option<f64> {
     s.parse::<f64>().ok()
 }
 
+/// A slider's step (WIDGET_EVENTS.md, Parsing): the nearest step from `min`
+/// (or 0), half up. No step, or one that is not positive, does not snap.
+/// The reference's `_snap`.
+pub fn snap_to_step(v: f64, min: Option<f64>, step: Option<f64>) -> f64 {
+    match step {
+        Some(s) if s > 0.0 => {
+            let base = min.unwrap_or(0.0);
+            base + ((v - base) / s + 0.5).floor() * s
+        }
+        _ => v,
+    }
+}
+
 /// Clamp a widget commit to the bounds its YAML DECLARES, leaving an
 /// undeclared bound alone (Tracking is signed and declares neither).
 ///
@@ -90,8 +103,9 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 
 /// The input kinds: a committed value is parsed, written, then its
 /// `commit`/`change` behaviors run.
-pub const INPUT_KINDS: [&str; 6] = [
+pub const INPUT_KINDS: [&str; 7] = [
     "number_input", "length_input", "text_input", "select", "icon_select", "combo_box",
+    "slider",
 ];
 /// The boolean kinds: a declared `click`/`change` behavior IS the press.
 pub const BOOLEAN_KINDS: [&str; 2] = ["toggle", "checkbox"];
@@ -213,6 +227,11 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
                 .map(|v| json!(clamp_to_declared(v, lo, hi)))
         }
         "text_input" => Some(json!(text)),
+        // A number, clamped; snapped to `step` from `min`; clamped again, so a
+        // `max` off the step grid is unreachable, as on an HTML range input.
+        "slider" => number_input_commit(text, lo, hi).map(|v| {
+            json!(clamp_to_declared(snap_to_step(v, lo, declared_bound(widget, "step")), lo, hi))
+        }),
         // A divider is not a row a commit can match (SCHEMA.md, `options`).
         "select" | "icon_select" => match widget.get("options").and_then(option_rows) {
             Some(rows) => rows.into_iter().find_map(|r| {
@@ -370,7 +389,10 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len());
-        assert!(allowed_events("slider").is_empty());
+        // A kind outside the table has no events. `slider` was this control
+        // until it became an input kind (2026-10-13, fork A); `color_bar` is
+        // still outside the table until fork B.
+        assert!(allowed_events("color_bar").is_empty());
     }
 
     #[test]
@@ -435,7 +457,29 @@ mod tests {
     #[test]
     fn a_boolean_or_unknown_kind_has_no_text_parse() {
         assert_eq!(parse(json!({"type": "toggle"}), "true"), None);
-        assert_eq!(parse(json!({"type": "slider"}), "3"), None);
+        // `slider` was this example until it became an input kind (fork A).
+        assert_eq!(parse(json!({"type": "color_bar"}), "3"), None);
+    }
+
+    /// A slider (WIDGET_EVENTS.md, Parsing; the reference's `_snap`): a
+    /// number, clamped, snapped to `step` from `min` half up, clamped again,
+    /// so a `max` off the step grid is unreachable. The corpus drives it
+    /// through the door; these pin the arithmetic's edges directly.
+    #[test]
+    fn a_slider_clamps_snaps_from_min_and_clamps_again() {
+        let w = json!({"type": "slider", "min": 0, "max": 255, "step": 51});
+        assert_eq!(parse(w.clone(), "100"), Some(json!(102.0)), "nearest step");
+        assert_eq!(parse(w.clone(), "25.5"), Some(json!(51.0)), "half up");
+        assert_eq!(parse(w.clone(), "-9"), Some(json!(0.0)), "clamped below");
+        assert_eq!(parse(w.clone(), "abc"), None, "not a number");
+        // From `min`, not from 0: 10 + 3k.
+        let w = json!({"type": "slider", "min": 10, "max": 30, "step": 3});
+        assert_eq!(parse(w.clone(), "14"), Some(json!(13.0)));
+        // An off-grid max: 28 is the last step; 29.9 snaps to 31, clamped to 30.
+        assert_eq!(parse(w.clone(), "29.9"), Some(json!(30.0)));
+        // No step, or a non-positive one, does not snap.
+        assert_eq!(parse(json!({"type": "slider", "min": 0, "max": 10}), "3.7"), Some(json!(3.7)));
+        assert_eq!(parse(json!({"type": "slider", "step": 0}), "3.7"), Some(json!(3.7)));
     }
 
     #[test]

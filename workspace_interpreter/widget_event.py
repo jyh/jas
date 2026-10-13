@@ -49,6 +49,7 @@ subscriber's counterpart, not a second step of this procedure.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -70,7 +71,7 @@ TEXT_ENTRY_EVENTS = ("input", "blur", "keydown")
 
 INPUT_KINDS = frozenset({
     "number_input", "length_input", "text_input",
-    "select", "icon_select", "combo_box",
+    "select", "icon_select", "combo_box", "slider",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # A plain pick and an Alt pick of one declared item. They carry the ITEM,
@@ -139,6 +140,15 @@ def _clamp(v: float, lo: float | None, hi: float | None) -> float:
     if hi is not None and v > hi:
         v = hi
     return v
+
+
+def _snap(v: float, lo: float | None, step: float | None) -> float:
+    """A slider's step (WIDGET_EVENTS.md, Parsing): the nearest step from
+    `min` (or 0), half up. No step, or one that is not positive, does not snap."""
+    if step is None or step <= 0:
+        return v
+    base = lo if lo is not None else 0.0
+    return base + math.floor((v - base) / step + 0.5) * step
 
 
 def number_commit(text: str, lo, hi) -> float | None:
@@ -216,6 +226,12 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
 
     if kind == "text_input":
         return (True, text)
+
+    if kind == "slider":
+        v = number_commit(text, lo, hi)
+        if v is None:
+            return refused
+        return (True, _clamp(_snap(v, lo, _as_bound(widget.get("step"))), lo, hi))
 
     if kind in ("select", "icon_select"):
         options = widget.get("options")
