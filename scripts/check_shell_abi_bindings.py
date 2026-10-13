@@ -161,6 +161,7 @@ C_CANON = {
     "uint8_t *": "bytes-in",
     "uintptr_t": "usize",
     "uintptr_t *": "usize-out",
+    "uint8_t": "u8",
     "uint32_t": "u32",
     "int32_t": "i32",
     "int64_t": "i64",
@@ -182,6 +183,7 @@ CS_CANON = {
     "UIntPtr": "usize",
     "out nuint": "usize-out",
     "out UIntPtr": "usize-out",
+    "byte": "u8",
     "uint": "u32",
     "int": "i32",
     "long": "i64",
@@ -321,7 +323,7 @@ def canon_cs(spelling: str, aliases: dict[str, str]) -> str | None:
     resolved = aliases.get(spelling, spelling)
     if resolved != spelling:
         resolved = C_CANON.get(resolved, resolved)
-        if resolved in ("ptr", "usize", "i32", "u32", "f32", "f64", "void",
+        if resolved in ("ptr", "usize", "i32", "u8", "u32", "f32", "f64", "void",
                         "JasBytes", "bytes-in", "usize-out"):
             return resolved
     return CS_CANON.get(spelling)
@@ -469,6 +471,7 @@ struct JasBytes jas_last_error_json(struct JasEngine *e);
 uintptr_t jas_selection_len(struct JasEngine *e);
 const uint8_t *jas_tool_name(uintptr_t index, uintptr_t *out_len);
 struct JasBytes jas_panel_plan(struct JasEngine *e, const uint8_t *panel_id, uintptr_t len, int64_t avail_w, int64_t avail_h);
+uint8_t jas_document_modified(struct JasEngine *e);
 """
 
 _GOOD = """
@@ -482,6 +485,7 @@ internal static unsafe class JasCore {
     [DllImport(Lib)] internal static extern nuint jas_selection_len(IntPtr e);
     [DllImport(Lib)] internal static extern IntPtr jas_tool_name(nuint index, out nuint len);
     [DllImport(Lib)] internal static extern JasBytes jas_panel_plan(IntPtr e, byte[] id, nuint len, long w, long h);
+    [DllImport(Lib)] internal static extern byte jas_document_modified(IntPtr e);
 }
 """
 
@@ -508,8 +512,8 @@ def self_test() -> int:
     # (1) THE INSTRUMENT BEFORE THE SUBJECT. The header fixture must parse into
     #     the shapes every later arm is compared against; an arm driven by an
     #     empty header would be green for the wrong reason in BOTH directions.
-    if len(header) != 9:
-        failures.append(f"1 header fixture parsed {len(header)} decls, expected 9")
+    if len(header) != 10:
+        failures.append(f"1 header fixture parsed {len(header)} decls, expected 10")
     if header.get("jas_panel_plan", ("", []))[1][3:] != ["int64_t", "int64_t"]:
         failures.append(f"1 int64_t params mis-parsed: {header.get('jas_panel_plan')}")
     if header.get("jas_menu_state") != ("JasBytes", ["JasEngine *", "const uint8_t *", "uintptr_t"]):
@@ -631,6 +635,17 @@ def self_test() -> int:
         "nuint len, long w, long h)", "nuint len, ulong w, long h)"),
         "parameter 3 type 'ulong' is not in")
 
+    # (17) `uint8_t`, added with #397's `jas_document_modified` (1 / 0 / 255).
+    #      The row is `byte` and nothing else: an `int` reads three bytes the
+    #      callee never wrote, and an unlisted `sbyte` must refuse, not pass.
+    #      The green control above already carries `byte` and proves the row
+    #      resolves.
+    red("17a uint8 bound as int", _GOOD.replace(
+        "extern byte jas_document_modified", "extern int jas_document_modified"), "RETURN TYPE")
+    red("17b sbyte is not in the table", _GOOD.replace(
+        "extern byte jas_document_modified", "extern sbyte jas_document_modified"),
+        "'sbyte' is not in")
+
     # (15) THE VACUITY ARMS, driven rather than asserted. Each floor must be the
     #      thing that reds -- a floor nobody drives is arithmetic, not a gate.
     class _Tmp:
@@ -665,6 +680,7 @@ def self_test() -> int:
         "side and on the header side, in BOTH the return and the parameter position; "
         "`const uint8_t *` accepts all three spellings "
         "and `int64_t` accepts `long` alone (`int` and `nuint` red, `ulong` refuses); "
+        "`uint8_t` accepts `byte` alone (`int` reds, `sbyte` refuses); "
         "while an engine handle accepts only a pointer; a wrong signature in a "
         "comment and in a string stay green; an alias resolves only for its own "
         "file and goes STALE when its type leaves; both vacuity floors are DRIVEN)")

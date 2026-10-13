@@ -1270,6 +1270,23 @@ pub unsafe extern "C" fn jas_document_modified(e: *mut JasEngine) -> u8 {
     u8::from(engine.with_model(|m| m.is_modified()))
 }
 
+/// **The shell wrote the document to disk: record that as the saved state**
+/// (`Model::mark_saved`). The shell writes the file itself (from
+/// [`jas_document_svg`]), so the model cannot know a save happened unless it is
+/// told. Without this, [`jas_document_modified`] measures from the OPENED
+/// state: open, edit, save, Undo would read "not modified" while the file on
+/// disk holds the edit. Call it only after the write succeeded. 1 when marked,
+/// 255 for a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_mark_saved(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    engine.with_model_mut(Model::mark_saved);
+    1
+}
+
 /// **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
 /// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
 /// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
@@ -2864,6 +2881,30 @@ mod tests {
         let (_, err) = behave(e, id, r#"{"widget":"cp_color_bar","event":"commit","value":"0.3,0.3"}"#);
         assert!(err.is_empty(), "{err}");
         assert_eq!(modified(), 1, "its release is");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A SAVE MOVES THE BASELINE (flask, after #397). The shell writes the file
+    /// itself, so it tells the model; `modified` then measures from the save,
+    /// not from the open. The case that matters: open, edit, save, Undo is
+    /// MODIFIED, because the file on disk holds the edit that Undo removed.
+    #[test]
+    fn a_save_the_shell_reports_is_the_baseline_the_modified_flag_measures_from() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        assert_eq!(unsafe { jas_document_mark_saved(std::ptr::null_mut()) }, 255);
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0), rect(50.0, 20.0, 30.0, 40.0)], &[]));
+        let modified = || unsafe { jas_document_modified(e) };
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let _ = dispatch(e, r#"{"action":"group"}"#);
+        assert_eq!(modified(), 1, "CONTROL: Group is an edit");
+        assert_eq!(unsafe { jas_document_mark_saved(e) }, 1);
+        assert_eq!(modified(), 0, "saved");
+        undo(e);
+        assert_eq!(modified(), 1, "Undo past the save is modified: the file holds the group");
+        let op = r#"{"op":"redo"}"#;
+        assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
+        assert_eq!(modified(), 0, "Redo back to the saved state is not");
         unsafe { jas_engine_free(e) };
     }
 

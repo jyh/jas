@@ -842,6 +842,14 @@ static class Program
         Eq("slider: CONTROL -- equality is numeric, not textual (\"50.0\" is 50)", "(null)", Show(PanelWire.SliderCommit(50.0, "50.0")));
         Eq("slider: a release over no readable core value commits", "7", Show(PanelWire.SliderCommit(7.0, null)));
 
+        // #397: the dirty flag is the MODEL's answer (`jas_document_modified`),
+        // never a reply's `doc_changed` (a selection repaints and is not an edit).
+        static string Dirty(byte b) => TitleVerdict.DirtyFromModel(b) is { } d ? (d ? "dirty" : "clean") : "(no answer)";
+        Eq("dirty: the model's 1 is modified", "dirty", Dirty(1));
+        Eq("dirty: the model's 0 is saved", "clean", Dirty(0));
+        Eq("dirty: 255 (no engine) is no answer -- never read as saved", "(no answer)", Dirty(255));
+        Eq("dirty: any other byte is no answer, never a guess", "(no answer)", Dirty(2));
+
         Console.WriteLine();
         Console.WriteLine($"--- {_passed} passed, {_failed} failed, of {_passed + _failed} case(s) ---");
         return _failed == 0 ? 0 : 1;
