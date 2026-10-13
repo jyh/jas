@@ -447,6 +447,15 @@ fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&
     None
 }
 
+/// Whether a widget's `bind.disabled` reads true in `scope`. ONE definition,
+/// because two routes refuse a disabled widget: [`run_widget_behavior`] and the
+/// colour panel's value commit (`ffi.rs`), which skipped the check until
+/// 2026-10-12 and so would have applied a hex typed into a disabled field.
+pub fn widget_disabled(node: &Value, scope: &Value) -> bool {
+    node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str)
+        .is_some_and(|expr| eval(expr, scope).to_bool())
+}
+
 /// Run the behavior `ev` names, on panel `panel_id` whose spec is `spec`,
 /// with `scope` the engine's scope for that panel. See the module doc for the
 /// order of the steps.
@@ -487,10 +496,8 @@ pub fn run_widget_behavior(
         }
     };
     let ev: &UserEvent = &ev;
-    if let Some(expr) = node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str) {
-        if eval(expr, scope).to_bool() {
-            return Err(Refusal::new("Disabled", ev.widget.clone()));
-        }
+    if widget_disabled(node, scope) {
+        return Err(Refusal::new("Disabled", ev.widget.clone()));
     }
 
     // The value events (WIDGET_EVENTS.md). A commit on an input kind and a

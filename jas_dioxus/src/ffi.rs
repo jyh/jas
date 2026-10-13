@@ -986,6 +986,12 @@ fn colour_value_commit(
     if !COMMIT_EVENTS.contains(&ev.event.as_str()) || !INPUT_KINDS.contains(&kind) {
         return refuse("PanelNotHosted", id);
     }
+    // A disabled widget is refused before its value is read, as the generic
+    // route does: Color's hex and sliders are disabled while the active colour
+    // is none.
+    if node.is_some_and(|n| crate::panel_behavior::widget_disabled(n, &panel_ctx(engine, ws, id))) {
+        return refuse("Disabled", &ev.widget);
+    }
     let text = match &ev.value {
         None | Some(serde_json::Value::Null) => return refuse("MissingValue", &ev.widget),
         Some(serde_json::Value::String(t)) => t.clone(),
@@ -4311,6 +4317,10 @@ mod tests {
             }
             assert_eq!(engine.panel.borrow().state_keys()["fill_on_top"], fill_on_top);
             let hex = || leaf(e, id, "cp_hex")["values"].clone();
+            // A colour that is not black (the default stroke IS black, and none
+            // shows as black, so a black start would make the arm vacuous).
+            let (_, err) = behave(e, id, r#"{"widget":"cp_hex","event":"commit","value":"12ab34"}"#);
+            assert!(err.is_empty(), "{key}: the seed commit ran: {err}");
             // The control: a colour, so the hex is enabled and shows it.
             assert_eq!(hex()["bind.disabled"], "false", "{key}: the control");
             assert_ne!(hex()["bind.value"], "000000", "{key}: the fixture must not start at black");
