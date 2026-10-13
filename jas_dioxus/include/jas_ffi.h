@@ -759,6 +759,23 @@ struct JasBytes jas_dispatch_action(struct JasEngine *e,
                                     uintptr_t action_len);
 
 /**
+ * Whether the active document is MODIFIED: 1 when it holds an edit since it
+ * was opened or last saved, 0 when it does not, 255 for a null engine.
+ *
+ * ⭐ IT EXISTS FOR A SHELL'S DIRTY FLAG (flask STATUS §246, ruled §247). A
+ * reply's `doc_changed` means "repaint the document", and a selection change
+ * sets it, so a shell that marked the document dirty on `doc_changed` made
+ * Select All an edit. This is the model's own answer (`Model::is_modified`):
+ * a selection and a live drag tick are not edits, and Undo back to the saved
+ * state is unmodified again. 255, not 0, for a null engine: 0 would read as
+ * "saved" about a session that does not exist.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_document_modified(struct JasEngine *e);
+
+/**
  * **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
  * the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
  * the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
