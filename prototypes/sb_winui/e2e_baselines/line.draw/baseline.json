@@ -1,9 +1,9 @@
 {
     "item":  "line.draw",
-    "surface":  "2379x1369",
-    "frame_hash":  "80a6a8741b6bf6113ae1de724af814c16948cd4573bb97f7e40d4a0783e612a4",
+    "surface":  "2379x1333",
+    "frame_hash":  "494f8025bc4b69248a7a7491cc9e8ef4f76955828e565aead2a5d70171645e3d",
     "doc_sha":  "1b20ff1f2402622d",
     "plan_panel":  "align_panel_content",
-    "plan_sha":  "f71106ee3bd9ba11",
+    "plan_sha":  "8b1762b806b1b4da",
     "selection_count":  1
 }

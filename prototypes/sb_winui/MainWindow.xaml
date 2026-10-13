@@ -79,6 +79,27 @@
         <SwapChainPanel x:Name="Canvas" Grid.Row="1" Grid.Column="1" />
 
         <!--
+          THE CANVAS STRIP (STATUS-flask 255): `layout.yaml`'s `canvas_pane`,
+          planned by the core and drawn by a third PaneView, holds the document
+          tabs. It is the plan's strip ABOVE `drawing_surface`: its height, and
+          the surface's top margin, are the y the plan places the surface at, so
+          nothing here names a tab or a size. Collapsed until that plan arrives.
+        -->
+        <Border
+            x:Name="CanvasStripHost"
+            Grid.Row="1"
+            Grid.Column="1"
+            VerticalAlignment="Top"
+            Background="#FFF3F3F3"
+            RequestedTheme="Light"
+            Visibility="Collapsed">
+            <ScrollViewer
+                x:Name="CanvasStripScroll"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Disabled" />
+        </Border>
+
+        <!--
           ⚠️ THE HIT-TESTABILITY FALLBACK, AND IT IS COLLAPSED BY DEFAULT.
 
           A SwapChainPanel with no Background may not be hit-testable, and

@@ -4139,6 +4139,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// <summary>The key the toolbar pane is registered under.</summary>
     internal const string ToolbarPaneKey = "toolbar";
 
+    /// <summary>§255: the key the canvas pane's strip (its document tabs) is registered under.</summary>
+    internal const string CanvasPaneKey = "canvas";
+
     private sealed class PaneChannel
     {
         internal string PanelId = "";
