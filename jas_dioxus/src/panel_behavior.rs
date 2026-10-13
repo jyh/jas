@@ -621,6 +621,10 @@ fn run_batch(
 
     if panel_id.is_some() { store.set_active_panel(panel_id); }
     let state_before = store.eval_context();
+    // Every panel's scope, not only the active one's: a menu dispatch has no
+    // active panel, and a write to a panel's own scope (the Color mode) is
+    // still a change.
+    let panels_before = store.panel_scopes().clone();
     let model_state_before = model_state(model);
     let generation = model.generation();
     let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
@@ -630,6 +634,7 @@ fn run_batch(
     Ok(Ran {
         doc_changed: model.generation() != generation,
         state_changed: store.eval_context() != state_before
+            || *store.panel_scopes() != panels_before
             || model_state(model) != model_state_before,
     })
 }
