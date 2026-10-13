@@ -1097,8 +1097,12 @@
         lpList = panelState[lpParts[1]] || [];
         lpList = lpList.slice(); // copy
       } else if (lpTarget === "active_document.recent_colors") {
-        // The one writable document list (runtime_contexts.yaml).
+        // The one writable document list (runtime_contexts.yaml); every entry
+        // is "#rrggbb", lowercase, whatever the push spelled.
         lpList = (activeDocumentCtx.recent_colors || []).slice();
+        if (typeof lpValue === "string" && /^#?[0-9a-fA-F]{6}$/.test(lpValue)) {
+          lpValue = "#" + lpValue.replace(/^#/, "").toLowerCase();
+        }
       } else {
         return;
       }

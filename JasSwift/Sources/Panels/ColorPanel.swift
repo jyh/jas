@@ -240,7 +240,12 @@ public enum ColorPanel {
     }
 
     /// Push a hex color to the recent colors list (move-to-front dedup, max 10).
+    /// Every entry is `#rrggbb`, lowercase (`runtime_contexts.yaml`), whatever
+    /// the caller spelled: a native commit passes bare `toHex()`, the YAML
+    /// route `#rrggbb`, and `unique` must find one colour either way.
     public static func pushRecentColor(_ hex: String, model: Model) {
+        let bare = hex.hasPrefix("#") ? String(hex.dropFirst()) : hex
+        let hex = bare.count == 6 && bare.allSatisfy(\.isHexDigit) ? "#" + bare.lowercased() : hex
         model.recentColors.removeAll { $0 == hex }
         model.recentColors.insert(hex, at: 0)
         if model.recentColors.count > 10 {

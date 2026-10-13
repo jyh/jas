@@ -116,6 +116,17 @@ def panel_content_id(raw: str) -> str:
 #: colours the Color and Swatches panels read (`runtime_contexts.yaml`).
 DOCUMENT_LISTS: tuple[str, ...] = ("recent_colors",)
 
+
+def canonical_hex(value):
+    """A colour as the recent list stores it: ``#rrggbb``, lowercase
+    (``runtime_contexts.yaml``, ``recent_colors``). Anything that is not six
+    hex digits, with or without the ``#``, is returned unchanged."""
+    if isinstance(value, str):
+        h = value[1:] if value.startswith("#") else value
+        if len(h) == 6 and all(c in "0123456789abcdefABCDEF" for c in h):
+            return "#" + h.lower()
+    return value
+
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
@@ -532,6 +543,8 @@ class StateStore:
         nothing, for any other key."""
         if key not in self._document_lists:
             return False
+        if key == "recent_colors":
+            value = canonical_hex(value)
         lst = [v for v in self._document_lists[key] if not (unique and v == value)]
         lst.insert(0, value)
         if max_length is not None:

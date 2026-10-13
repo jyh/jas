@@ -33,7 +33,9 @@ runtime_contexts:
         writable: true
         description: >
           Per-document list of recently committed colors, newest first,
-          capped at 10 entries. The ONE writable active_document property:
+          capped at 10 entries. Every entry is "#rrggbb", lowercase,
+          whatever form the push was given, so `unique` finds one colour
+          however it was spelled. The ONE writable active_document property:
           `set_active_color` pushes onto it (`list_push` target
           `active_document.recent_colors`, unique, max 10), and the Color and
           Swatches panels both read it, so the two strips always agree.
