@@ -131,20 +131,20 @@ init: {}
 menu:
   - label: "Show Snap to Glyph Options"
     action: toggle_snap_to_glyph_visible
-    checked: "panel.snap_to_glyph_visible"
+    checked_when: "panel.snap_to_glyph_visible"
   - separator
   - label: "All Caps"
     action: toggle_all_caps
-    checked: "panel.all_caps"
+    checked_when: "panel.all_caps"
   - label: "Small Caps"
     action: toggle_small_caps
-    checked: "panel.small_caps"
+    checked_when: "panel.small_caps"
   - label: "Superscript"
     action: toggle_superscript
-    checked: "panel.superscript"
+    checked_when: "panel.superscript"
   - label: "Subscript"
     action: toggle_subscript
-    checked: "panel.subscript"
+    checked_when: "panel.subscript"
   - separator
   - label: "Close Character"
     action: close_panel

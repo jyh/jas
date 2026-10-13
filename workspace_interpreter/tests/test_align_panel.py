@@ -394,7 +394,7 @@ class TestAlignPanelMenu:
                      None)
         assert entry is not None
         assert entry["action"] == "toggle_use_preview_bounds"
-        assert entry["checked"] == "panel.use_preview_bounds"
+        assert entry["checked_when"] == "panel.use_preview_bounds"
 
     def test_menu_reset_panel_entry(self, workspace_path):
         ws = load_workspace(workspace_path)

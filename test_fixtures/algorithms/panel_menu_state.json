@@ -511,7 +511,7 @@
           9
         ],
         "action": "",
-        "enabled": true,
+        "enabled": false,
         "checked": null
       },
       {
@@ -1738,7 +1738,7 @@
           9
         ],
         "action": "",
-        "enabled": true,
+        "enabled": false,
         "checked": null
       },
       {
@@ -1838,7 +1838,7 @@
           9
         ],
         "action": "",
-        "enabled": true,
+        "enabled": false,
         "checked": null
       },
       {
@@ -1982,6 +1982,350 @@
         "path": [
           0,
           18
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "align_use_preview_bounds_on",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "align_panel_content",
+      "ctx": {
+        "panel": {
+          "use_preview_bounds": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_use_preview_bounds",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "reset_align_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "align_use_preview_bounds_off",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "align_panel_content",
+      "ctx": {
+        "panel": {
+          "use_preview_bounds": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_use_preview_bounds",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "reset_align_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "character_all_caps_and_subscript",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "character_panel_content",
+      "ctx": {
+        "panel": {
+          "snap_to_glyph_visible": false,
+          "all_caps": true,
+          "small_caps": false,
+          "superscript": false,
+          "subscript": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_snap_to_glyph_visible",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "toggle_all_caps",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "toggle_small_caps",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "toggle_superscript",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "toggle_subscript",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "character_snap_and_small_caps_and_superscript",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "character_panel_content",
+      "ctx": {
+        "panel": {
+          "snap_to_glyph_visible": true,
+          "all_caps": false,
+          "small_caps": true,
+          "superscript": true,
+          "subscript": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_snap_to_glyph_visible",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "toggle_all_caps",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "toggle_small_caps",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          4
+        ],
+        "action": "toggle_superscript",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "toggle_subscript",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "paragraph_hanging_punctuation_on",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "paragraph_panel_content",
+      "ctx": {
+        "panel": {
+          "hanging_punctuation": true
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_hanging_punctuation",
+        "enabled": true,
+        "checked": true
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "open_paragraph_justification",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "open_paragraph_hyphenation",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "reset_paragraph_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
+        ],
+        "action": "close_panel",
+        "enabled": true,
+        "checked": null
+      }
+    ]
+  },
+  {
+    "name": "paragraph_hanging_punctuation_off",
+    "function": "panel_menu_state",
+    "args": {
+      "panel": "paragraph_panel_content",
+      "ctx": {
+        "panel": {
+          "hanging_punctuation": false
+        }
+      }
+    },
+    "expected": [
+      {
+        "path": [
+          0,
+          0
+        ],
+        "action": "toggle_hanging_punctuation",
+        "enabled": true,
+        "checked": false
+      },
+      {
+        "path": [
+          0,
+          2
+        ],
+        "action": "open_paragraph_justification",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          3
+        ],
+        "action": "open_paragraph_hyphenation",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          5
+        ],
+        "action": "reset_paragraph_panel",
+        "enabled": true,
+        "checked": null
+      },
+      {
+        "path": [
+          0,
+          7
         ],
         "action": "close_panel",
         "enabled": true,

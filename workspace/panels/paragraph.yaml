@@ -145,7 +145,7 @@ init: {}
 menu:
   - label: "Hanging Punctuation"
     action: toggle_hanging_punctuation
-    checked: "panel.hanging_punctuation"
+    checked_when: "panel.hanging_punctuation"
   - separator
   - label: "Justification…"
     action: open_paragraph_justification
