@@ -27,7 +27,9 @@ WHAT IT REFUSES, and each condition was bought by a real merge, not imagined:
                       run that REPORTED was green; it says nothing about a
                       required context that never reported at all. Those are
                       different claims and only this one blocks the merge.
-  (6) origin/main NOT AN ANCESTOR of the head.
+  (6) main NOT AN ANCESTOR of the head -- read from the FORGE's compare,
+                      never a local `origin/main`, which is only as new as the
+                      last fetch (it passed #401 while the forge read BEHIND).
                       The green tree must BE the merged tree. This refused #198
                       AFTER #198 was green, because merging `main` in moved the
                       head -- the checks described a tree that no longer
@@ -287,6 +289,14 @@ def _gh(*args: str) -> str:
     return proc.stdout
 
 
+def base_is_ancestor_by_compare(status: str) -> bool:
+    """The forge's compare of `<base>...<head>` reads `ahead` or `identical`
+    exactly when the base is an ancestor of the head; `behind`, `diverged` and
+    anything unexpected are not. Condition (6) asks the FORGE, because a local
+    `origin/<base>` is only as new as the last fetch (#401, 2026-10-13)."""
+    return status in ("ahead", "identical")
+
+
 def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
     meta = json.loads(_gh("api", f"repos/{repo}/pulls/{pr}"))
     head = require_key(meta, "head", f"pulls/{pr}")["sha"]
@@ -320,12 +330,8 @@ def fetch(pr: int, repo: str = REPO, base: str = BASE) -> State:
         )
         required = ()
 
-    ancestor = (
-        subprocess.run(
-            ("git", "merge-base", "--is-ancestor", f"origin/{base}", head)
-        ).returncode
-        == 0
-    )
+    compare = json.loads(_gh("api", f"repos/{repo}/compare/{base}...{head}"))
+    ancestor = base_is_ancestor_by_compare(str(compare.get("status") or ""))
     return State(head, draft, runs, required, ancestor, forge_state)
 
 
@@ -594,6 +600,18 @@ def self_test(fixture: Path | None = None) -> int:
                 f"printed text is not cp1252-safe ({e.reason} at {e.start}): {text[:70]!r}"
             )
             break
+
+    # (d7) ⛔ THE ANCESTOR CONDITION ASKS THE FORGE, NEVER THE LOCAL REF. It read
+    #      `git merge-base --is-ancestor origin/main <head>`, and origin/main is
+    #      only as new as the last fetch: on 2026-10-13 it passed #401 while the
+    #      forge read BEHIND (#399 had merged after the clone last fetched), and
+    #      the merge was refused. The forge's compare of main...head says
+    #      `ahead` or `identical` exactly when main is an ancestor of the head.
+    for status, want in (("ahead", True), ("identical", True),
+                         ("behind", False), ("diverged", False), ("", False)):
+        declared += 1
+        if base_is_ancestor_by_compare(status) is not want:
+            failures.append(f"compare status {status!r} must read ancestor={want}")
 
     # (e) THE RECEIPT CARRIES ITS OWN DENOMINATOR. A bare refusal count is 0
     #     for a run that examined nothing, so the verdict states how many
