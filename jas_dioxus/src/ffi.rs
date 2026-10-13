@@ -4891,7 +4891,7 @@ mod tests {
             let colour = panel == crate::panel_scope::COLOUR_PANEL;
             if colour {
                 let en = engine_of(e);
-                en.panel.borrow_mut().adopt_store_state(&en.store.borrow());
+                en.panel.borrow_mut().adopt_store_state(&en.store.borrow(), None);
                 if let Some(m) = c["before"]["panel"]["mode"].as_str() {
                     en.panel.borrow_mut().mode = m.to_string();
                 }
