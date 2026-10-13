@@ -1039,6 +1039,14 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             if panel_id:
                 store.list_push(panel_id, parts[1], value,
                                unique=unique, max_length=max_length)
+        elif len(parts) == 2 and parts[0] == "active_document":
+            # A per-document list (`state_store.DOCUMENT_LISTS`); any other
+            # document property is read-only and the write is reported.
+            if not store.document_list_push(parts[1], value, unique=unique,
+                                            max_length=max_length):
+                if diagnostics is not None:
+                    diagnostics.append({"level": "warning", "key": target,
+                                        "reason": "field_not_writable"})
         return
 
     # list_toggle: { target, value } -- set membership, the checkbox primitive

@@ -4634,11 +4634,11 @@ internal sealed unsafe class Canvas : IDisposable
         var panePlans = ApplyPanesRefresh(click.Event);
         _panelStale = false;
         var plan = paneKey is null ? dockPlan : panePlans.GetValueOrDefault(paneKey);
-        var mismatch = plan is null ? "UNCHECKED" : DeltaMismatches(reply, plan, click.PanelId);
+        var (mismatch, hiddenRows) = plan is null ? ("UNCHECKED", 0) : PanelWire.CheckDelta(reply, plan, click.PanelId);
         var outcome = channel.Length == 0 ? "changed" : "unchanged";
         var row = $"PANEL CLICK {head} outcome={outcome} "
                 + $"changed-rows={changedRows} doc-changed={(docChanged ? "true" : "false")} "
-                + $"delta-mismatch={mismatch} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
+                + $"delta-mismatch={mismatch} delta-hidden={hiddenRows} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}";
         _report(mismatch == "0" ? row : $"RUSTFAIL {row}");
         return docChanged;
     }
@@ -4892,49 +4892,4 @@ internal sealed unsafe class Canvas : IDisposable
         $"panel={click.PanelId} widget={click.Widget} via={click.Via} "
         + $"event={click.Event} value={PanelWire.RowValue(click.Value)}";
 
-    /// <summary>
-    /// How many of the reply's rows for THIS panel disagree with the plan read
-    /// after the click, as text ("0" when all agree). A row whose value the plan
-    /// withheld (a template) must be named in `withheld` instead.
-    /// </summary>
-    private static string DeltaMismatches(string reply, string plan, string panelId)
-    {
-        try
-        {
-            using var answer = System.Text.Json.JsonDocument.Parse(reply);
-            using var doc = System.Text.Json.JsonDocument.Parse(plan);
-            var values = new Dictionary<string, string>();
-            foreach (var list in new[] { "chrome", "leaves", "containers" })
-            {
-                foreach (var e in doc.RootElement.GetProperty(list).EnumerateArray())
-                {
-                    var path = e.GetProperty("path").GetRawText();
-                    foreach (var kv in e.GetProperty("values").EnumerateObject())
-                    {
-                        values[path + "|" + kv.Name] = kv.Value.GetString() ?? "";
-                    }
-                }
-            }
-            var withheld = new HashSet<string>();
-            foreach (var w in doc.RootElement.GetProperty("withheld").EnumerateArray())
-            {
-                withheld.Add(w.GetProperty("path").GetRawText() + "|" + w.GetProperty("key").GetString());
-            }
-
-            var bad = 0;
-            foreach (var row in answer.RootElement.GetProperty("changed").EnumerateArray())
-            {
-                if (row.GetProperty("panel").GetString() != panelId) { continue; }
-                var k = row.GetProperty("path").GetRawText() + "|" + row.GetProperty("key").GetString();
-                var v = row.GetProperty("value").GetString() ?? "";
-                var agrees = values.TryGetValue(k, out var inPlan) ? inPlan == v : withheld.Contains(k);
-                if (!agrees) { bad++; }
-            }
-            return bad.ToString();
-        }
-        catch (Exception ex)
-        {
-            return $"UNREADABLE({ex.GetType().Name})";
-        }
-    }
 }

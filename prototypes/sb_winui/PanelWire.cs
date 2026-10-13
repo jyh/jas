@@ -16,6 +16,65 @@ namespace SbWinUi;
 /// </summary>
 internal static class PanelWire
 {
+    /// <summary>
+    /// The reply's changed rows for <paramref name="panelId"/> checked against the
+    /// plan read AFTER the click. `Mismatch` is how many disagree, as text ("0"
+    /// when all agree; `UNREADABLE(..)` when either side does not parse). A row
+    /// whose value the plan withheld (a template) agrees when `withheld` names it.
+    /// A row under one of the plan's `hidden` paths (#360: the plan prunes a
+    /// hidden node's rows) is not drawn and cannot disagree: it is counted in
+    /// `Hidden`, never as a mismatch. The test is by PATH PREFIX, element-wise.
+    /// Measured live 2026-10-12: Color's hex commit read 12 "mismatches", every
+    /// one a slider of a mode group the plan had hidden.
+    /// </summary>
+    internal static (string Mismatch, int Hidden) CheckDelta(string reply, string plan, string panelId)
+    {
+        try
+        {
+            using var answer = System.Text.Json.JsonDocument.Parse(reply);
+            using var doc = System.Text.Json.JsonDocument.Parse(plan);
+            var values = new Dictionary<string, string>();
+            foreach (var list in new[] { "chrome", "leaves", "containers" })
+            {
+                foreach (var e in doc.RootElement.GetProperty(list).EnumerateArray())
+                {
+                    var path = e.GetProperty("path").GetRawText();
+                    foreach (var kv in e.GetProperty("values").EnumerateObject())
+                    {
+                        values[path + "|" + kv.Name] = kv.Value.GetString() ?? "";
+                    }
+                }
+            }
+            var withheld = new HashSet<string>();
+            foreach (var w in doc.RootElement.GetProperty("withheld").EnumerateArray())
+            {
+                withheld.Add(w.GetProperty("path").GetRawText() + "|" + w.GetProperty("key").GetString());
+            }
+            var hidden = new List<long[]>();
+            if (doc.RootElement.TryGetProperty("hidden", out var hs))
+            {
+                foreach (var h in hs.EnumerateArray()) { hidden.Add(h.EnumerateArray().Select(x => x.GetInt64()).ToArray()); }
+            }
+
+            int bad = 0, under = 0;
+            foreach (var row in answer.RootElement.GetProperty("changed").EnumerateArray())
+            {
+                if (row.GetProperty("panel").GetString() != panelId) { continue; }
+                var p = row.GetProperty("path").EnumerateArray().Select(x => x.GetInt64()).ToArray();
+                if (hidden.Any(h => h.Length <= p.Length && h.SequenceEqual(p.Take(h.Length)))) { under++; continue; }
+                var k = row.GetProperty("path").GetRawText() + "|" + row.GetProperty("key").GetString();
+                var v = row.GetProperty("value").GetString() ?? "";
+                var agrees = values.TryGetValue(k, out var inPlan) ? inPlan == v : withheld.Contains(k);
+                if (!agrees) { bad++; }
+            }
+            return (bad.ToString(), under);
+        }
+        catch (Exception ex)
+        {
+            return ($"UNREADABLE({ex.GetType().Name})", 0);
+        }
+    }
+
     /// <summary>The row form of "this event carried no value" (a press).</summary>
     internal const string NoValue = "-";
 

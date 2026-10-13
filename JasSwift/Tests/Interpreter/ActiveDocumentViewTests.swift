@@ -185,3 +185,26 @@ import Foundation
     // A stale selection path is false, never a crash.
     #expect(predicate(compound, selecting: [0, 7]) == false)
 }
+
+// The per-document recent colours are `active_document.recent_colors`
+// (runtime_contexts.yaml), read by the Color and Swatches panels. Until
+// 2026-10-12 they were a panel key, mirrored into each panel by a bridge.
+@Test func activeDocumentPublishesTheModelsRecentColours() {
+    #expect((buildActiveDocumentView(model: nil)["recent_colors"] as? [String]) == [],
+            "no document: an empty list, never absent")
+    let model = Model()
+    model.recentColors = ["#112233", "#445566"]
+    #expect((buildActiveDocumentView(model: model)["recent_colors"] as? [String])
+            == ["#112233", "#445566"])
+}
+
+// `set_active_color` pushes onto `active_document.recent_colors`, which the
+// app holds on the model. Dispatched with nothing selected, as a menu does.
+@Test func setActiveColorPushesTheRecentColourOntoTheModel() {
+    let model = Model()
+    model.recentColors = []
+    LayersPanel.dispatchYamlAction(
+        "set_active_color", model: model, params: ["color": "#ff0000"])
+    #expect(model.recentColors.first == "#ff0000",
+            "the recent colour must land on the model: \(model.recentColors)")
+}

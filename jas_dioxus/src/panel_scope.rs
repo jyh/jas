@@ -42,21 +42,23 @@ pub struct PanelState {
     /// Float RGB, 0..1. Seeded to a NON-DEGENERATE colour on purpose: at white
     /// every derivation agrees, so a white seed would let a wrong one pass. This
     /// is the corpus's own `panel_exact_eighth_bit_values` vector.
-    pub fill: (f64, f64, f64),
-    pub stroke: (f64, f64, f64),
+    ///
+    /// `None` is the colour NONE (`set_active_color_none`), which the store
+    /// carries as `null`. Until 2026-10-12 the slice could not hold it: None
+    /// moved the store and the panel kept showing the old colour (flask §235).
+    pub fill: Option<(f64, f64, f64)>,
+    pub stroke: Option<(f64, f64, f64)>,
     pub fill_on_top: bool,
     pub mode: String,
-    pub recent: Vec<String>,
 }
 
 impl Default for PanelState {
     fn default() -> Self {
         PanelState {
-            fill: (0.4, 0.25, 0.25),
-            stroke: (0.0, 0.0, 0.0),
+            fill: Some((0.4, 0.25, 0.25)),
+            stroke: Some((0.0, 0.0, 0.0)),
             fill_on_top: true,
             mode: "hsb".to_string(),
-            recent: vec![],
         }
     }
 }
@@ -80,17 +82,26 @@ pub enum EditOutcome {
 impl PanelState {
     /// The active colour — fill or stroke, per `fill_on_top`. The panel's
     /// channels are always derived from THIS, never from the inactive one.
-    fn active(&self) -> (f64, f64, f64) {
+    fn active(&self) -> Option<(f64, f64, f64)> {
         if self.fill_on_top { self.fill } else { self.stroke }
     }
 
+    /// The colour the channels are derived from. Under none it is BLACK,
+    /// because that is what `color.yaml` declares: every channel is
+    /// `hsb_h(<active colour>)` and the like, and all three evaluators read a
+    /// null colour as `#000000` (`color_arg`). The sliders and the hex are
+    /// disabled then (`bind.disabled`), so black is what they show, greyed.
+    fn shown(&self) -> (f64, f64, f64) {
+        self.active().unwrap_or((0.0, 0.0, 0.0))
+    }
+
     fn set_active(&mut self, rgb: (f64, f64, f64)) {
-        if self.fill_on_top { self.fill = rgb } else { self.stroke = rgb }
+        if self.fill_on_top { self.fill = Some(rgb) } else { self.stroke = Some(rgb) }
     }
 
     /// The panel channel map, in the shape `color_from_panel_edit` reads.
     fn channel_map(&self) -> Value {
-        let (r, g, b) = self.active();
+        let (r, g, b) = self.shown();
         let ch = panel_channels(r, g, b);
         json!({
             "mode": self.mode,
@@ -125,7 +136,7 @@ impl PanelState {
     /// `fill_on_top` was true for the whole of C1: with the stroke active, the
     /// sliders would have shown the FILL's channels. Corrected at S-C.2.
     pub fn scope(&self, doc: &Document) -> Value {
-        let (ar, ag, ab) = self.active();
+        let (ar, ag, ab) = self.shown();
         let ch = panel_channels(ar, ag, ab);
         json!({
             "state": self.state_keys(),
@@ -135,7 +146,6 @@ impl PanelState {
                 "r": ch.r, "g": ch.g, "bl": ch.bl,
                 "h": ch.h, "s": ch.s, "b": ch.b,
                 "c": ch.c, "m": ch.m, "y": ch.y, "k": ch.k,
-                "recent_colors": self.recent,
                 // The artboards panel reads these two; an absent key and a
                 // false key are not the same thing to `eval`.
                 "renaming_artboard": Value::Null,
@@ -156,11 +166,13 @@ impl PanelState {
     /// engine's store holds a copy of exactly these, written from here
     /// (see [`sync_colour_state`]).
     pub fn state_keys(&self) -> Map<String, Value> {
-        let st = panel_channels(self.stroke.0, self.stroke.1, self.stroke.2);
-        let fl = panel_channels(self.fill.0, self.fill.1, self.fill.2);
+        let colour = |c: Option<(f64, f64, f64)>| match c {
+            Some((r, g, b)) => Value::String(format!("#{}", panel_channels(r, g, b).hex)),
+            None => Value::Null,
+        };
         let mut m = Map::new();
-        m.insert("fill_color".into(), Value::String(format!("#{}", fl.hex)));
-        m.insert("stroke_color".into(), Value::String(format!("#{}", st.hex)));
+        m.insert("fill_color".into(), colour(self.fill));
+        m.insert("stroke_color".into(), colour(self.stroke));
         m.insert("fill_on_top".into(), Value::Bool(self.fill_on_top));
         m
     }
@@ -173,15 +185,19 @@ impl PanelState {
     ///
     /// A key is adopted only where the store's copy DIFFERS from the slice's
     /// own rendering of it, so an untouched copy adopts nothing. A colour key
-    /// that is not a string is NOT adopted: the slice has no "none", and
-    /// `parse_hex` would read it as black. Returns whether anything moved.
+    /// written `null` is adopted as none (`set_active_color_none`); any other
+    /// non-string is NOT adopted, because `parse_hex` would read it as black.
+    /// Returns whether anything moved.
     pub fn adopt_store_state(&mut self, store: &StateStore) -> bool {
         let mine = self.state_keys();
         let written = |k: &str| Some(store.get(k)).filter(|v| Some(*v) != mine.get(k));
-        let rgb = |v: &Value| v.as_str().map(|s| {
-            let (r, g, b) = parse_hex(s);
-            (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0)
-        });
+        let rgb = |v: &Value| match v {
+            Value::Null => Some(None),
+            _ => v.as_str().map(|s| {
+                let (r, g, b) = parse_hex(s);
+                Some((r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0))
+            }),
+        };
         let mut moved = false;
         if let Some(c) = written("fill_color").and_then(rgb) {
             self.fill = c;
@@ -252,9 +268,11 @@ impl PanelState {
         // Compared on the DERIVED channels, not the floats: two float colours a
         // hair apart quantise to the same eight bits and therefore display
         // identically, and a tick that moved nothing a user can see is not a
-        // change. `active()` is read after the write, `before` before it.
-        if panel_channels(self.active().0, self.active().1, self.active().2)
-            == panel_channels(before.active().0, before.active().1, before.active().2)
+        // change. `state_keys` also tells none from black, which the channels
+        // cannot (none SHOWS as black). Read after the write, `before` before.
+        let (a, b) = (self.shown(), before.shown());
+        if panel_channels(a.0, a.1, a.2) == panel_channels(b.0, b.1, b.2)
+            && self.state_keys() == before.state_keys()
             && self.mode == before.mode
             && self.fill_on_top == before.fill_on_top
         {
@@ -301,6 +319,9 @@ pub fn document_facts(model: &Model) -> Map<String, Value> {
         crate::interpreter::document_views::brushed_stroke_facts(model.document());
     m.insert("selection_has_brushed_stroke".into(), has_brushed.into());
     m.insert("selection_is_single_brushed_stroke".into(), single_brushed.into());
+    // The per-document recent colours (`active_document.recent_colors`), which
+    // `set_active_color` pushes onto the model and Color and Swatches read.
+    m.insert("recent_colors".into(), serde_json::json!(model.recent_colors));
     m
 }
 
@@ -759,6 +780,19 @@ mod tests {
         PanelState { mode: "rgb".to_string(), ..PanelState::default() }
     }
 
+    /// None SHOWS as black (`color.yaml`'s `hex(null)`), so the channels alone
+    /// cannot tell none from black: an edit from none to black moved the
+    /// colour, and must say Changed. The second identical edit is Unchanged.
+    #[test]
+    fn an_edit_from_none_to_black_is_a_change() {
+        let mut st = PanelState { fill: None, ..PanelState::default() };
+        assert_eq!(st.state_keys()["fill_color"], Value::Null);
+        assert_eq!(st.scope(&doc_with(0))["panel"]["hex"], "000000", "none shows as black");
+        assert_eq!(st.apply_edit("panel.hex", &json!("000000")), EditOutcome::Changed);
+        assert_eq!(st.state_keys()["fill_color"], "#000000");
+        assert_eq!(st.apply_edit("panel.hex", &json!("000000")), EditOutcome::Unchanged);
+    }
+
     #[test]
     fn a_channel_edit_moves_the_colour_and_says_so() {
         let mut st = rgb_mode();
@@ -861,12 +895,20 @@ mod tests {
         assert_eq!(st.state_keys()["fill_color"], slice.state_keys()["fill_color"]);
         assert!(!st.fill_on_top);
 
-        // A value the slice cannot hold (no colour) is NOT adopted: the slice
-        // has no "none", and a parse of null is black, which would be a wrong
-        // colour shown as a success. Only `color.yaml` writes one, and the
-        // door does not host that panel.
+        // A null is NONE (`set_active_color_none`), and the slice holds it.
+        // Until 2026-10-12 this arm asserted the opposite ("the slice has no
+        // none"), which pinned the defect flask saw live (§235).
         let mut s = store.clone();
         s.set("fill_color", serde_json::Value::Null);
+        let mut st = slice.clone();
+        assert!(st.adopt_store_state(&s));
+        assert_eq!(st.state_keys()["fill_color"], serde_json::Value::Null);
+        assert_eq!(st.state_keys()["stroke_color"], slice.state_keys()["stroke_color"]);
+
+        // A value that is neither a colour nor none is NOT adopted: a parse of
+        // it would be black, a wrong colour shown as a success.
+        let mut s = store.clone();
+        s.set("fill_color", json!(7));
         let mut st = slice.clone();
         assert!(!st.adopt_store_state(&s));
         assert_eq!(st.state_keys(), slice.state_keys());
@@ -892,7 +934,10 @@ mod tests {
     /// adjacent.
     ///
     /// **It does not.** The colour panel declares TEN fixed swatch nodes
-    /// (`cp_recent_0` … `cp_recent_9`), each binding `panel.recent_colors.<n>`;
+    /// (`cp_recent_0` … `cp_recent_9`), each binding
+    /// `active_document.recent_colors.<n>` (the model's list since 2026-10-12;
+    /// it was the slice's `panel.recent_colors` before, so this drives the
+    /// ENGINE scope, which is where the list now arrives);
     /// an empty slot renders as a hollow square rather than not rendering. So
     /// the count is **constant at every list length** and only the VALUES move.
     /// C2 and C3 share a denominator.
@@ -900,11 +945,14 @@ mod tests {
     fn a_recent_colours_push_moves_values_and_not_the_record_count() {
         let w = ws();
         let spec = w.panel("color_panel_content").unwrap();
-        let doc = doc_with(0);
 
+        let scope = |recent: Vec<String>| {
+            let mut m = Model::default();
+            m.recent_colors = recent;
+            engine_scope(&PanelState::default(), &StateStore::new(), &m, COLOUR_PANEL)
+        };
         let rows = |recent: Vec<String>| -> (usize, usize) {
-            let st = PanelState { recent, ..PanelState::default() };
-            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            let v = crate::interpreter::bind_values::bind_values(spec, &scope(recent));
             let arr = v.as_array().unwrap().clone();
             let slots = arr.iter().filter(|r| {
                 r["id"].as_str().is_some_and(|s| s.starts_with("cp_recent_"))
@@ -927,8 +975,7 @@ mod tests {
         // The CONTROL: the values DO move, or this test would pass on a scope
         // that ignored `recent` entirely and prove nothing about pushes.
         let value_of = |recent: Vec<String>| -> String {
-            let st = PanelState { recent, ..PanelState::default() };
-            let v = crate::interpreter::bind_values::bind_values(spec, &st.scope(&doc));
+            let v = crate::interpreter::bind_values::bind_values(spec, &scope(recent));
             v.as_array().unwrap().iter()
                 .find(|r| r["id"] == "cp_recent_0")
                 .expect("the first recent slot")["value"].as_str().unwrap().to_string()

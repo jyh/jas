@@ -162,10 +162,12 @@ public enum ColorPanel {
         Fill(color: color, opacity: base?.opacity ?? 1.0)
     }
 
-    /// Listeners fired after [pushRecentColor] commits. The Color and
-    /// Swatches panels register here so a native push (slider/hex/
-    /// recent click) flows into their YAML panel.recent_colors state
-    /// stores. Each listener receives (model, hex).
+    /// Listeners fired after [pushRecentColor] commits. Each listener
+    /// receives (model, hex). The Color and Swatches panels do NOT need
+    /// one: they read `active_document.recent_colors`, which
+    /// `buildActiveDocumentView` publishes from `model.recentColors`
+    /// (until 2026-10-12 a bridge listener copied the list into each
+    /// panel's own `recent_colors` key).
     ///
     /// Guarded by `_recentColorsLock`: registration (append) and
     /// firing (iterate) can run concurrently — e.g. parallel tests

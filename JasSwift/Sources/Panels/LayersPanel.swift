@@ -502,11 +502,10 @@ public enum LayersPanel {
         // list_push: { target, value } — special-case routing.
         // - panel.isolation_stack — Phase 3 Group D enter_isolation_mode;
         //   writes the evaluated Path value to model.layersIsolationStack.
-        // - panel.recent_colors — Swatches Panel set_active_color
-        //   effect; routes the hex through ColorPanel.pushRecentColor
-        //   so model.recentColors stays the single source of truth, and
-        //   mirrors the post-push list back into the calling panel's
-        //   store so the recent strip updates immediately.
+        // - active_document.recent_colors — set_active_color's push
+        //   (`runtime_contexts.yaml`); routes the hex through
+        //   ColorPanel.pushRecentColor, so model.recentColors is the one
+        //   list, which buildActiveDocumentView publishes to both panels.
         let listPushHandler: PlatformEffect = { value, callCtx, store in
             guard let spec = value as? [String: Any] else { return nil }
             let target = (spec["target"] as? String) ?? ""
@@ -517,7 +516,7 @@ public enum LayersPanel {
                 let val = evaluate(valueExpr, context: callCtx)
                 guard case .path(let indices) = val else { return nil }
                 model.layersIsolationStack.append(indices)
-            } else if target == "panel.recent_colors" {
+            } else if target == "active_document.recent_colors" {
                 let val = evaluate(valueExpr, context: callCtx)
                 let hex: String?
                 switch val {
@@ -526,11 +525,6 @@ public enum LayersPanel {
                 default: hex = nil
                 }
                 if let h = hex, !h.isEmpty {
-                    // Push to model — registered listeners
-                    // (WorkspaceState.installRecentColorsBridge) mirror
-                    // the new list into every panel.recent_colors that
-                    // is initialized, so the calling panel and any
-                    // sibling panel both update reactively.
                     ColorPanel.pushRecentColor(h, model: model)
                 }
             }

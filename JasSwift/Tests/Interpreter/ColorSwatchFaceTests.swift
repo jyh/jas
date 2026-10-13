@@ -19,7 +19,7 @@ import AppKit
 /// is NONE, the stroke is black, and recent slot 1 has never been filled.
 private let swatchCtx: [String: Any] = [
     "state": ["fill_color": NSNull(), "stroke_color": "#000000"] as [String: Any],
-    "panel": ["recent_colors": ["ff0000", NSNull()] as [Any]] as [String: Any],
+    "active_document": ["recent_colors": ["ff0000", NSNull()] as [Any]] as [String: Any],
     "dialog": ["hex": ""] as [String: Any],
 ]
 
@@ -38,7 +38,7 @@ private let swatchCtx: [String: Any] = [
 }
 
 @Test func emptyRecentSlotStaysAPlaceholder() {
-    let (color, explicitNone) = swatchColorBind("panel.recent_colors.1", context: swatchCtx)
+    let (color, explicitNone) = swatchColorBind("active_document.recent_colors.1", context: swatchCtx)
     #expect(color.isEmpty)
     #expect(!explicitNone, "an unfilled recent slot is a PLACEHOLDER — no diagonal")
     #expect(swatchFaceColor(color, explicitNone: explicitNone) == nil,
@@ -63,7 +63,7 @@ private let swatchCtx: [String: Any] = [
         red: 0, green: 0, blue: 0, alpha: 1))
     #expect(swatchBorder(color, explicitNone: explicitNone, selected: false) == .solid)
     // A bare hex (how recent_colors stores them) gets its '#'.
-    let (bare, _) = swatchColorBind("panel.recent_colors.0", context: swatchCtx)
+    let (bare, _) = swatchColorBind("active_document.recent_colors.0", context: swatchCtx)
     #expect(bare == "#ff0000")
 }
 
@@ -105,9 +105,9 @@ private let swatchCtx: [String: Any] = [
         ("state.fill_color", "", true, .white, .solid),
         ("state.stroke_color", "#000000", false,
          NSColor(red: 0, green: 0, blue: 0, alpha: 1), .solid),
-        ("panel.recent_colors.0", "#ff0000", false,
+        ("active_document.recent_colors.0", "#ff0000", false,
          NSColor(red: 1, green: 0, blue: 0, alpha: 1), .solid),
-        ("panel.recent_colors.1", "", false, nil, .placeholder),
+        ("active_document.recent_colors.1", "", false, nil, .placeholder),
         ("#dialog.hex", "", true, .white, .solid),
         (nil, "", false, nil, .placeholder),
     ]

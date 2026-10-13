@@ -191,10 +191,10 @@ _BV_COLOR_SELECTED = {
         "h": 0, "s": 37.254902, "b": 40,
         "r": 102, "g": 64, "bl": 64,
         "c": 0, "m": 37.254902, "y": 37.254902, "k": 60,
-        # Three filled recent slots; slots 3..9 resolve to null, so the same
-        # widget kind is pinned in both its present and its empty state.
-        "recent_colors": ["#664040", "#112233", "#ffffff"],
     },
+    # Three filled recent slots; slots 3..9 resolve to null, so the same
+    # widget kind is pinned in both its present and its empty state.
+    "active_document": {"recent_colors": ["#664040", "#112233", "#ffffff"]},
 }
 
 # No active colour: every `bind.disabled` flips true, every `bind.color` that
@@ -213,8 +213,8 @@ _BV_COLOR_NONE = {
         "h": 0, "s": 0, "b": 0,
         "r": 0, "g": 0, "bl": 0,
         "c": 0, "m": 0, "y": 0, "k": 0,
-        "recent_colors": [],
     },
+    "active_document": {"recent_colors": []},
 }
 
 # Two libraries, one expanded and one collapsed: the outer foreach expands per
@@ -232,9 +232,9 @@ _BV_SWATCHES = {
             {"id": "lib2", "collapsed": True},
         ],
         "selected_swatches": ["lib1:0"],
-        "recent_colors": ["#ff0000"],
         "thumbnail_size": 16,
     },
+    "active_document": {"recent_colors": ["#ff0000"]},
     "data": {
         "swatch_libraries": {
             "lib1": {"name": "Default", "swatches": [
@@ -301,9 +301,9 @@ _BV_SWATCHES_MULTI = {
             {"id": "lib2", "collapsed": True},
         ],
         "selected_swatches": ["lib1:0", "lib1:1", "lib2:0"],
-        "recent_colors": [],
         "thumbnail_size": 16,
     },
+    "active_document": {"recent_colors": []},
     "data": {
         "swatch_libraries": {
             "lib1": {"name": "Default", "swatches": [
@@ -331,9 +331,9 @@ _BV_SWATCHES_NESTED = {
     "panel": {
         "open_libraries": [{"id": "lib1", "collapsed": False}],
         "selected_swatches": [["lib1:0", "lib1:1"], [], ["lib2:0", ["deep"]]],
-        "recent_colors": [],
         "thumbnail_size": 16,
     },
+    "active_document": {"recent_colors": []},
     "data": {
         "swatch_libraries": {
             "lib1": {"name": "Default", "swatches": [{"color": "#ff0000"}]},

@@ -530,16 +530,16 @@
       return false;
     }
     var parts = expr.split(".");
+    // `<ns>.<list>.<n>`: index a list by a numeric third segment, in any
+    // namespace (the recent-colour slots read `active_document.recent_colors.N`).
+    if (parts.length === 3 && /^[0-9]+$/.test(parts[2])) {
+      var base = evalExpr(parts[0] + "." + parts[1], ctx);
+      return Array.isArray(base) ? (base[parseInt(parts[2])] || null) : null;
+    }
     if (parts[0] === "state") return state[parts[1]];
     if (parts[0] === "param" && ctx.params) return ctx.params[parts[1]];
     if (parts[0] === "prop" && ctx.props) return ctx.props[parts[1]];
-    if (parts[0] === "panel") {
-      if (parts.length === 3 && parts[1] === "recent_colors") {
-        var rcArr = panelState.recent_colors || [];
-        return rcArr[parseInt(parts[2])] || null;
-      }
-      return panelState[parts[1]];
-    }
+    if (parts[0] === "panel") return panelState[parts[1]];
     if (parts[0] === "dialog" && dialogState) return dialogGetValue(parts[1]);
     if (parts[0] === "event" && ctx.event) return ctx.event[parts[1]];
     if (parts[0] === "self" && ctx.self) return ctx.self[parts[1]];
@@ -1096,6 +1096,9 @@
       if (lpParts[0] === "panel" && lpParts.length === 2) {
         lpList = panelState[lpParts[1]] || [];
         lpList = lpList.slice(); // copy
+      } else if (lpTarget === "active_document.recent_colors") {
+        // The one writable document list (runtime_contexts.yaml).
+        lpList = (activeDocumentCtx.recent_colors || []).slice();
       } else {
         return;
       }
@@ -1108,6 +1111,7 @@
         lpList.length = lp.max_length;
       }
       if (lpParts[0] === "panel") panelState[lpParts[1]] = lpList;
+      else activeDocumentCtx.recent_colors = lpList;
       updateBindings(null, null);
       return;
     }

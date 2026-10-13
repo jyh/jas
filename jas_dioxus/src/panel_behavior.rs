@@ -75,6 +75,7 @@ use serde_json::{json, Map, Value};
 
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
+use crate::interpreter::colour_host;
 use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
@@ -283,6 +284,15 @@ impl EffectHost for EngineHost {
     /// ONE undo step, and the runner's owner commits it.
     fn global_written(&mut self, key: &str, store: &mut StateStore, model: Option<&mut Model>) {
         let Some(model) = model else { return };
+        // The active colour (`colour_host`, the reference's
+        // `subscribe_active_color`): the model's default and the selection.
+        if colour_host::ACTIVE_COLOUR_KEYS.contains(&key) {
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            colour_host::apply_active_colour(model, key, store.get(key));
+            return;
+        }
         if !stroke_host::is_render_key(key) {
             return;
         }
@@ -372,6 +382,7 @@ fn unhandled_detail(u: &Unhandled) -> String {
         Unhandled::EmptyAction(s) => ("EmptyAction", s),
         Unhandled::UnknownDialog(s) => ("UnknownDialog", s),
         Unhandled::Dialog(s) => ("Dialog", s),
+        Unhandled::NotWritable(s) => ("NotWritable", s),
     };
     format!("{kind}:{payload}")
 }
@@ -447,6 +458,15 @@ fn find_widget<'a>(node: &'a Value, widget: &str, in_foreach: bool) -> Option<(&
     None
 }
 
+/// Whether a widget's `bind.disabled` reads true in `scope`. ONE definition,
+/// because two routes refuse a disabled widget: [`run_widget_behavior`] and the
+/// colour panel's value commit (`ffi.rs`), which skipped the check until
+/// 2026-10-12 and so would have applied a hex typed into a disabled field.
+pub fn widget_disabled(node: &Value, scope: &Value) -> bool {
+    node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str)
+        .is_some_and(|expr| eval(expr, scope).to_bool())
+}
+
 /// Run the behavior `ev` names, on panel `panel_id` whose spec is `spec`,
 /// with `scope` the engine's scope for that panel. See the module doc for the
 /// order of the steps.
@@ -487,10 +507,8 @@ pub fn run_widget_behavior(
         }
     };
     let ev: &UserEvent = &ev;
-    if let Some(expr) = node.get("bind").and_then(|b| b.get("disabled")).and_then(Value::as_str) {
-        if eval(expr, scope).to_bool() {
-            return Err(Refusal::new("Disabled", ev.widget.clone()));
-        }
+    if widget_disabled(node, scope) {
+        return Err(Refusal::new("Disabled", ev.widget.clone()));
     }
 
     // The value events (WIDGET_EVENTS.md). A commit on an input kind and a
@@ -603,6 +621,7 @@ fn run_batch(
 
     if panel_id.is_some() { store.set_active_panel(panel_id); }
     let state_before = store.eval_context();
+    let model_state_before = model_state(model);
     let generation = model.generation();
     let report = run_effects_hosted(batch, &ctx, store, Some(&mut *model), Some(actions),
                                     Some(dialogs), None, host);
@@ -610,8 +629,20 @@ fn run_batch(
                   "the pre-flight passed and the real run did not: {report:?}");
     Ok(Ran {
         doc_changed: model.generation() != generation,
-        state_changed: store.eval_context() != state_before,
+        state_changed: store.eval_context() != state_before
+            || model_state(model) != model_state_before,
     })
+}
+
+/// The state a behavior can change that the MODEL holds beside the document:
+/// the per-document recent colours (`active_document.recent_colors`) and the
+/// new-element defaults (`colour_host`). Neither is the document, so the
+/// generation does not see them, and neither is the store. Without this a
+/// swatch that only moved the recent strip reported `Unchanged` (2026-10-12,
+/// the white swatch on an engine already at white).
+fn model_state(model: &Model) -> (Vec<String>, Option<crate::geometry::element::Fill>,
+                                   Option<crate::geometry::element::Stroke>) {
+    (model.recent_colors.clone(), model.default_fill, model.default_stroke)
 }
 
 /// A value event's behaviors, in declaration order: each one's effects and
@@ -1307,7 +1338,10 @@ mod tests {
         let mut model = stroked(&[0, 1]);
         let mut store = StateStore::new();
         store.set("stroke_cap", json!("square"));
-        for other in ["stroke_link_arrowhead_scale", "fill_color", "cap"] {
+        // `fill_color` was in this list until 2026-10-12, which pinned the
+        // engine's missing active-colour law (`colour_host`); it has its own
+        // arm below.
+        for other in ["stroke_link_arrowhead_scale", "cap"] {
             host.global_written(other, &mut store, Some(&mut model));
             assert!(!model.in_txn(), "{other} opened a transaction");
         }
@@ -1318,6 +1352,26 @@ mod tests {
         model.commit_txn();
         assert!(model.can_undo());
         assert_eq!(caps_and_joins(&model), vec!["Square/Miter", "Square/Miter"]);
+    }
+
+    /// The engine host's active-colour arm, called directly: a write of
+    /// `fill_color` sets the default and recolours the selection, inside the
+    /// batch's transaction, as `stroke_cap` does above.
+    #[test]
+    fn the_engine_host_applies_the_active_colour() {
+        use crate::geometry::element::Color;
+        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut model = misaligned(&[0]);
+        let mut store = StateStore::new();
+        store.set("fill_color", json!("#ff0000"));
+        host.global_written("fill_color", &mut store, Some(&mut model));
+        assert!(model.in_txn(), "the apply opened the batch's transaction");
+        model.commit_txn();
+        let fills: Vec<_> = model.document().layers[0].children().unwrap().iter()
+            .map(|e| e.fill().map(|f| f.color)).collect();
+        let red = Color::from_hex("#ff0000");
+        assert_eq!(fills, vec![red, Some(Color::BLACK)], "only the selected rect is recoloured");
+        assert_eq!(model.default_fill.map(|f| f.color), red);
     }
 
     /// The runner reads `panel.*` from the store LIVE, so a `set_panel_state`

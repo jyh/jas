@@ -110,6 +110,12 @@ def panel_content_id(raw: str) -> str:
     return raw if raw.endswith(PANEL_CONTENT_SUFFIX) else raw + PANEL_CONTENT_SUFFIX
 
 
+
+#: The `active_document.*` properties an effect may write, each a list that
+#: `list_push` targets (`active_document.<key>`). One today: the recent
+#: colours the Color and Swatches panels read (`runtime_contexts.yaml`).
+DOCUMENT_LISTS: tuple[str, ...] = ("recent_colors",)
+
 class StateStore:
     """Manages global state, panel-scoped state, and reactive subscriptions."""
 
@@ -118,6 +124,10 @@ class StateStore:
         self._state: dict = dict(defaults) if defaults else {}
         self._panels: dict[str, dict] = {}
         self._active_panel: str | None = None
+        # The writable per-document lists (`active_document.<key>`), keyed by
+        # the names in DOCUMENT_LISTS. Not part of the document tree: the
+        # apps keep them on their Model beside the document, as this does.
+        self._document_lists: dict[str, list] = {k: [] for k in DOCUMENT_LISTS}
         # Tool-scoped state parallels _panels but is keyed by tool id.
         # YAML tool handlers read/write via $tool.<id>.<key>; the `set`
         # effect routes those targets here via the scope-routed set in
@@ -514,6 +524,20 @@ class StateStore:
         return self._dialog_snapshot is not None
 
     # ── List operations ──────────────────────────────────────
+
+    def document_list_push(self, key: str, value, unique: bool = False,
+                           max_length: int | None = None) -> bool:
+        """Push a value to the front of the per-document list ``key`` (one of
+        DOCUMENT_LISTS), with ``list_push``'s semantics. Returns False, writing
+        nothing, for any other key."""
+        if key not in self._document_lists:
+            return False
+        lst = [v for v in self._document_lists[key] if not (unique and v == value)]
+        lst.insert(0, value)
+        if max_length is not None:
+            lst = lst[:max_length]
+        self._document_lists[key] = lst
+        return True
 
     def list_push(self, panel_id: str, key: str, value,
                   unique: bool = False, max_length: int | None = None):
@@ -1063,6 +1087,9 @@ class StateStore:
             "current_artboard": current_artboard,
             "artboards_panel_selection_ids": artboards_panel_selection_ids,
         }
+        # The writable per-document lists ride with the artboard facts, on
+        # both branches below (with and without a document).
+        artboards_common.update({k: list(v) for k, v in self._document_lists.items()})
         if self._document is None:
             sel_count = 0
             if self._active_panel == panel_content_id("layers"):
