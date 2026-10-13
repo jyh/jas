@@ -1287,6 +1287,36 @@ pub unsafe extern "C" fn jas_document_mark_saved(e: *mut JasEngine) -> u8 {
     1
 }
 
+/// **The shell names the document it opened or saved** (flask §256): the
+/// model's `filename`, which the canvas tab shows (`workspace.open_documents`,
+/// owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
+/// engine names a replaced document with its next untitled name, so without
+/// this an opened file's tab read `Untitled-N`. Pass the name to show (a file
+/// name, not a path). Naming is not an edit.
+///
+/// ⛔ BYTES, NOT A STRING (BL5), as `jas_load_svg`: the default P/Invoke
+/// `CharSet` is `Ansi`, which would mangle a non-ASCII name. 1 when named; 0
+/// when refused (a null pointer, bytes that are not UTF-8, or an empty name),
+/// changing nothing; 255 for a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+/// `name` must be NULL or point to `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_set_filename(e: *mut JasEngine, name: *const u8, len: usize) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    if name.is_null() {
+        return 0;
+    }
+    let bytes = unsafe { core::slice::from_raw_parts(name, len) };
+    let Ok(text) = core::str::from_utf8(bytes) else { return 0 };
+    if text.is_empty() {
+        return 0;
+    }
+    engine.with_model_mut(|m| m.filename = text.to_string());
+    1
+}
+
 /// **One panel's menu, for a shell to draw** (the owner's note 3, 2026-10-12:
 /// the Windows dock had no panel menu). A JSON array with ONE ROW PER NODE of
 /// the panel's `menu:`, in order, each `{"index", "kind"}`: `kind` is `item`
@@ -2966,6 +2996,35 @@ mod tests {
             let kids = all.iter().filter(|x| under(x, 1, &tp)).map(|x| (*x).clone()).collect();
             ((*tab).clone(), kids)
         }).collect()
+    }
+
+    /// A SHELL NAMES THE DOCUMENT IT OPENED (flask §256): `jas_load_svg` takes
+    /// bytes only, so on Windows an opened file's tab read `Untitled-N`. The
+    /// name arrives as UTF-8 BYTES (BL5), is the model's `filename`, and is
+    /// what the canvas tab shows. Naming is not an edit. A null pointer,
+    /// non-UTF-8 bytes or an empty name are refused (0) and change nothing.
+    #[test]
+    fn a_shell_names_the_document_and_the_tab_shows_the_name() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let set = |e, b: &[u8]| unsafe { jas_document_set_filename(e, b.as_ptr(), b.len()) };
+        assert_eq!(unsafe { jas_document_set_filename(std::ptr::null_mut(), b"x".as_ptr(), 1) }, 255);
+        let e = jas_engine_new();
+        let before = unsafe { &*e }.model.borrow().filename.clone();
+        // Refusals, each leaving the name as it was.
+        assert_eq!(unsafe { jas_document_set_filename(e, std::ptr::null(), 3) }, 0, "null pointer");
+        assert_eq!(set(e, &[0x66, 0xff, 0x2e]), 0, "not UTF-8");
+        assert_eq!(set(e, b""), 0, "empty");
+        assert_eq!(unsafe { &*e }.model.borrow().filename, before, "a refusal changes nothing");
+        // The name, with a non-ASCII character to prove it is not read as ANSI.
+        let name = "tab_r\u{e9}ct.svg";
+        assert_eq!(set(e, name.as_bytes()), 1);
+        assert_eq!(unsafe { &*e }.model.borrow().filename, name);
+        assert_eq!(unsafe { jas_document_modified(e) }, 0, "naming is not an edit");
+        let tabs = canvas_tabs(e);
+        assert_eq!(tabs.len(), 1);
+        assert!(tabs[0].1.iter().any(|k| k["type"] == "text" && k["values"]["content"] == serde_json::json!(name)),
+                "the tab shows the name: {:?}", tabs[0].1);
+        unsafe { jas_engine_free(e) };
     }
 
     /// OWNER NOTE 4b: THE CANVAS TAB BAR IS DRAWN FROM THE OPEN DOCUMENTS.
