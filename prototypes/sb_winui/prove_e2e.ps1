@@ -8,7 +8,11 @@
 #
 #   drive   : a real SendInput drag (send_hand.ps1, session 1, by pid)
 #   core    : the document the core now holds (SB_PROBE's `doc`, `selection`)
-#   tree    : the open panel's plan as the core resolved it (`plan_sha`)
+#   tree    : the open panel's plan as the core resolved it (`plan_sha`), and
+#             the canvas strip's document tabs, each one's name and active state
+#             (`tab_sha`; its reading is `tab`). The panel plan is the Align
+#             panel's, which no tab is part of, so without `tab_sha` a regression
+#             in the tab would certify green (STATUS-flask section 260).
 #   pixels  : the hash of the frame on screen (`frame_hash`, the back buffer)
 #   cert    : one line, against FROZEN baselines, naming the commit
 #
@@ -269,7 +273,7 @@ $platform = "windows-winui-$($os.Major).$($os.Minor).$($os.Build)"
 $dirty = if ((& git -C $repo status --porcelain -- jas_dioxus/src prototypes/sb_winui | Measure-Object -Line).Lines -gt 0) { '+dirty' } else { '' }
 $reading = [ordered]@{
     item = $item; surface = $r.surface; frame_hash = $r.frame_hash; doc_sha = $r.doc_sha
-    plan_panel = $r.plan_panel; plan_sha = $r.plan_sha; selection_count = $selCount
+    plan_panel = $r.plan_panel; plan_sha = $r.plan_sha; tab = $r.tab; tab_sha = $r.tab_sha; selection_count = $selCount
 }
 
 if ($Freeze) {
@@ -284,7 +288,7 @@ if ($Freeze) {
     # of the person's screen (other windows, URLs) and the baseline is
     # committed to a public repo. It stays in bin/ (git-ignored); the
     # certificate carries its hash only.
-    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) doc-sha=$($r.doc_sha) plan-sha=$($r.plan_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
+    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) doc-sha=$($r.doc_sha) plan-sha=$($r.plan_sha) tab-sha=$($r.tab_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
     exit 0
 }
 
@@ -298,7 +302,14 @@ $core = if ($isSelection) {
 } else {
     if ($readback -like 'PASS*') { 'PASS' } else { "FAIL(readback=$readback)" }
 }
-$tree = if ($r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha) { 'PASS' } else { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
+# A baseline frozen before the tab was read has no `tab_sha`: that is a FAIL
+# naming the re-freeze, never a pass on the half of `tree` it does hold.
+$planOk = $r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha
+$tabOk  = $null -ne $b.tab_sha -and $r.tab_sha -eq $b.tab_sha
+$tree = if ($planOk -and $tabOk) { 'PASS' }
+        elseif (-not $planOk) { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
+        elseif ($null -eq $b.tab_sha) { "FAIL(tab=$($r.tab_sha) want=NONE-FROZEN: the baseline predates the tab reading; re-freeze)" }
+        else { "FAIL(tab=$($r.tab_sha) want=$($b.tab_sha))" }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
