@@ -1805,79 +1805,7 @@ fn build_appstate_ctx(
 /// Exposes top_level_layers (list of dicts with path, name, common, ...)
 /// and top_level_layer_paths (list of paths). Also computed properties
 /// used by new_layer: next_layer_name, new_layer_insert_index.
-/// Build the ``marks_and_bleed`` nested object exposed under
-/// ``active_document.print_preferences``. Split out so the parent
-/// json! macro stays under serde's recursion limit.
-fn marks_and_bleed_view(
-    m: &crate::document::print_preferences::MarksAndBleed,
-) -> serde_json::Value {
-    serde_json::json!({
-        "all_printer_marks": m.all_printer_marks,
-        "trim_marks": m.trim_marks,
-        "registration_marks": m.registration_marks,
-        "color_bars": m.color_bars,
-        "page_information": m.page_information,
-        "printer_mark_type": crate::document::print_preferences::printer_mark_type_str(&m.printer_mark_type),
-        "trim_mark_weight": m.trim_mark_weight,
-        "mark_offset": m.mark_offset,
-        "use_document_bleed": m.use_document_bleed,
-        "bleed_top": m.bleed_top,
-        "bleed_right": m.bleed_right,
-        "bleed_bottom": m.bleed_bottom,
-        "bleed_left": m.bleed_left,
-    })
-}
 
-fn ink_override_view(ink: &crate::document::print_preferences::InkOverride) -> serde_json::Value {
-    serde_json::json!({
-        "name": ink.name,
-        "print": ink.print,
-        "frequency": ink.frequency,
-        "angle": ink.angle,
-        "dot_shape": crate::document::print_preferences::dot_shape_str(&ink.dot_shape),
-    })
-}
-
-fn output_view(o: &crate::document::print_preferences::Output) -> serde_json::Value {
-    let inks: Vec<serde_json::Value> = o.inks.iter().map(ink_override_view).collect();
-    serde_json::json!({
-        "mode": crate::document::print_preferences::output_mode_str(&o.mode),
-        "emulsion": crate::document::print_preferences::emulsion_str(&o.emulsion),
-        "image_polarity": crate::document::print_preferences::image_polarity_str(&o.image_polarity),
-        "printer_resolution": o.printer_resolution,
-        "convert_spot_to_process": o.convert_spot_to_process,
-        "overprint_black": o.overprint_black,
-        "inks": inks,
-    })
-}
-
-fn advanced_view(a: &crate::document::print_preferences::Advanced) -> serde_json::Value {
-    serde_json::json!({
-        "print_as_bitmap": a.print_as_bitmap,
-        "overprint_flattener_preset": crate::document::print_preferences::flattener_preset_str(&a.overprint_flattener_preset),
-    })
-}
-
-fn color_management_view(c: &crate::document::print_preferences::ColorManagement) -> serde_json::Value {
-    serde_json::json!({
-        "document_profile": c.document_profile,
-        "color_handling": crate::document::print_preferences::color_handling_str(&c.color_handling),
-        "printer_profile": c.printer_profile,
-        "rendering_intent": crate::document::print_preferences::rendering_intent_str(&c.rendering_intent),
-        "preserve_rgb_numbers": c.preserve_rgb_numbers,
-    })
-}
-
-fn graphics_view(g: &crate::document::print_preferences::Graphics) -> serde_json::Value {
-    serde_json::json!({
-        "flatness": g.flatness,
-        "font_download": crate::document::print_preferences::font_download_str(&g.font_download),
-        "postscript_level": crate::document::print_preferences::postscript_level_str(&g.postscript_level),
-        "data_format": crate::document::print_preferences::data_format_str(&g.data_format),
-        "compatible_gradient_printing": g.compatible_gradient_printing,
-        "raster_effects_resolution": g.raster_effects_resolution,
-    })
-}
 
 
 pub(crate) fn build_active_document_view(
@@ -1940,19 +1868,19 @@ pub(crate) fn build_active_document_view(
                 "tile_overlap_h": 0.0,
                 "tile_overlap_v": 0.0,
                 "tile_range": "",
-                "marks_and_bleed": marks_and_bleed_view(
+                "marks_and_bleed": crate::interpreter::document_views::marks_and_bleed_view(
                     &crate::document::print_preferences::MarksAndBleed::default(),
                 ),
-                "output": output_view(
+                "output": crate::interpreter::document_views::output_view(
                     &crate::document::print_preferences::Output::default(),
                 ),
-                "graphics": graphics_view(
+                "graphics": crate::interpreter::document_views::graphics_view(
                     &crate::document::print_preferences::Graphics::default(),
                 ),
-                "color_management": color_management_view(
+                "color_management": crate::interpreter::document_views::color_management_view(
                     &crate::document::print_preferences::ColorManagement::default(),
                 ),
-                "advanced": advanced_view(
+                "advanced": crate::interpreter::document_views::advanced_view(
                     &crate::document::print_preferences::Advanced::default(),
                 ),
             },
@@ -1991,251 +1919,12 @@ pub(crate) fn build_active_document_view(
         }
         return empty;
     };
-    let mut top_level_layers = Vec::new();
-    let mut top_level_layer_paths = Vec::new();
-    let mut layer_names: HashSet<String> = HashSet::new();
-    for (i, elem) in tab.model.document().layers.iter().enumerate() {
-        if let Element::Layer(le) = elem {
-            let vis = match le.common.visibility {
-                Visibility::Invisible => "invisible",
-                Visibility::Outline => "outline",
-                Visibility::Preview => "preview",
-            };
-            let path_json = serde_json::json!({"__path__": [i as u64]});
-            top_level_layers.push(serde_json::json!({
-                "kind": "Layer",
-                "name": le.name(),
-                "common": {
-                    "visibility": vis,
-                    "locked": le.common.locked,
-                    "opacity": le.common.opacity,
-                },
-                "path": path_json.clone(),
-            }));
-            top_level_layer_paths.push(path_json);
-            layer_names.insert(le.name().to_string());
-        }
-    }
-    // next_layer_name: smallest "Layer N" not already taken
-    let mut n = 1usize;
-    loop {
-        let candidate = format!("Layer {n}");
-        if !layer_names.contains(&candidate) { break; }
-        n += 1;
-    }
-    let next_layer_name = format!("Layer {n}");
-    // new_layer_insert_index: min(selected top-level indices) + 1, else end
-    let top_level_selected: Vec<usize> = st.layers_panel_selection.iter()
-        .filter_map(|p| if p.len() == 1 { Some(p[0]) } else { None })
-        .collect();
-    let new_layer_insert_index = match top_level_selected.iter().min() {
-        Some(&i) => i + 1,
-        None => tab.model.document().layers.len(),
-    };
-    // runtime_contexts.yaml's two layers-panel rollups — "the sole selected
-    // layer item is a container (group or layer)" and "at least one selected
-    // layer item is a group". Declared there, read by layers.yaml's Enter
-    // Isolation Mode / Flatten Artwork rows (and those actions' own
-    // `enabled_when`), and built by NO port until the panel-menu
-    // `enabled_when` went live and the read census found both unpublished:
-    // they had evaluated null wherever anything evaluated them at all.
-    let layers_panel_selection_is_container = st.layers_panel_selection.len() == 1
-        && matches!(
-            tab.model.document().get_element(&st.layers_panel_selection[0]),
-            Some(Element::Group(_)) | Some(Element::Layer(_))
-        );
-    let layers_panel_selection_has_group = st.layers_panel_selection.iter().any(|p| {
-        matches!(tab.model.document().get_element(p), Some(Element::Group(_)))
-    });
-    // Canvas selection rollup (Phase 0a, Align panel): scalar/boolean
-    // plus path markers for downstream predicates and list operations.
-    let canvas_selection = &tab.model.document().selection;
-    let element_selection: Vec<serde_json::Value> = canvas_selection
-        .iter()
-        .map(|es| {
-            let path_ints: Vec<u64> = es.path.iter().map(|&i| i as u64).collect();
-            serde_json::json!({"__path__": path_ints})
-        })
-        .collect();
-    // Consumed by the Boolean panel's Expand button. The one definition
-    // lives in `boolean_host`, which the engine's scope also calls.
-    let selection_has_compound_shape =
-        crate::interpreter::boolean_host::selection_has_compound_shape(tab.model.document());
-    // The Brushes panel's two gates (W2b-18), from the one definition the
-    // engine's scope also calls.
-    let (has_brushed_stroke, single_brushed_stroke) =
-        crate::interpreter::document_views::brushed_stroke_facts(tab.model.document());
-    // Concepts panel (Slice 2): when exactly one generated concept instance is
-    // selected, expose its concept id + param schema merged with current values
-    // so the panel switches to PARAMS mode; null otherwise.
-    let selected_concept =
-        crate::interpreter::document_views::selected_concept_view(tab.model.document());
-    // Artboard view (ARTBOARDS.md §Artboard data model).
-    let doc = tab.model.document();
-    let artboards_json: Vec<serde_json::Value> = doc
-        .artboards
-        .iter()
-        .enumerate()
-        .map(|(i, a)| {
-            serde_json::json!({
-                "id": a.id,
-                "name": a.name,
-                "number": i + 1,
-                "x": a.x,
-                "y": a.y,
-                "width": a.width,
-                "height": a.height,
-                "fill": a.fill.as_canonical(),
-                "show_center_mark": a.show_center_mark,
-                "show_cross_hairs": a.show_cross_hairs,
-                "show_video_safe_areas": a.show_video_safe_areas,
-                "video_ruler_pixel_aspect_ratio": a.video_ruler_pixel_aspect_ratio,
-            })
-        })
-        .collect();
-    // current_artboard: topmost panel-selected, else first. THE shared rule
-    // (document::artboard::current_artboard), not a second copy of it — this
-    // used to be the only place the rule was written, so every other site that
-    // wanted "the current artboard" reached for `artboards.first()`.
-    let current: Option<&crate::document::artboard::Artboard> =
-        crate::document::artboard::current_artboard(
-            &doc.artboards, &st.artboards_panel_selection,
-        );
-    let current_artboard_json = match current {
-        Some(a) => serde_json::json!({
-            "id": a.id,
-            "name": a.name,
-            "x": a.x,
-            "y": a.y,
-            "width": a.width,
-            "height": a.height,
-        }),
-        None => serde_json::json!({}),
-    };
-    let current_id = current.map(|a| serde_json::Value::String(a.id.clone())).unwrap_or(serde_json::Value::Null);
-    // next_artboard_name: smallest N not used by any "Artboard N" pattern name.
-    let next_artboard_name = crate::document::artboard::next_artboard_name(&doc.artboards);
-    let symbols_json = crate::interpreter::document_views::symbols_view(&doc);
-    let mut view = serde_json::json!({
-        "top_level_layers": top_level_layers,
-        "top_level_layer_paths": top_level_layer_paths,
-        "next_layer_name": next_layer_name,
-        "new_layer_insert_index": new_layer_insert_index,
-        "layers_panel_selection_count": st.layers_panel_selection.len(),
-        "has_selection": !canvas_selection.is_empty(),
-        "selection_count": canvas_selection.len(),
-        "selection_has_compound_shape": selection_has_compound_shape,
-        "element_selection": element_selection,
-        "artboards": artboards_json,
-        "artboard_options": {
-            "fade_region_outside_artboard": doc.artboard_options.fade_region_outside_artboard,
-            "update_while_dragging": doc.artboard_options.update_while_dragging,
-        },
-        "document_setup": {
-            "bleed_top": doc.document_setup.bleed_top,
-            "bleed_right": doc.document_setup.bleed_right,
-            "bleed_bottom": doc.document_setup.bleed_bottom,
-            "bleed_left": doc.document_setup.bleed_left,
-            "bleed_uniform": doc.document_setup.bleed_uniform,
-            "show_images_outline": doc.document_setup.show_images_outline,
-            "highlight_substituted_glyphs": doc.document_setup.highlight_substituted_glyphs,
-            "grid_size": doc.document_setup.grid_size,
-            "grid_color": doc.document_setup.grid_color.clone(),
-            "paper_color": doc.document_setup.paper_color.clone(),
-            "simulate_colored_paper": doc.document_setup.simulate_colored_paper,
-            "transparency_flattener_preset": crate::document::print_preferences::flattener_preset_str(
-                &doc.document_setup.transparency_flattener_preset),
-            "discard_white_overprint": doc.document_setup.discard_white_overprint,
-        },
-        "print_preferences": {
-            "preset_name": doc.print_preferences.preset_name.clone(),
-            "printer_name": doc.print_preferences.printer_name.clone()
-                .map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
-            "copies": doc.print_preferences.copies,
-            "collate": doc.print_preferences.collate,
-            "reverse_order": doc.print_preferences.reverse_order,
-            "artboard_range_mode": crate::document::print_preferences::artboard_range_mode_str(&doc.print_preferences.artboard_range_mode),
-            "artboard_range": doc.print_preferences.artboard_range.clone(),
-            "ignore_artboards": doc.print_preferences.ignore_artboards,
-            "skip_blank_artboards": doc.print_preferences.skip_blank_artboards,
-            "media_size": crate::document::print_preferences::media_size_str(&doc.print_preferences.media_size),
-            "media_width": doc.print_preferences.media_width,
-            "media_height": doc.print_preferences.media_height,
-            "orientation": crate::document::print_preferences::orientation_str(&doc.print_preferences.orientation),
-            "auto_rotate": doc.print_preferences.auto_rotate,
-            "transverse": doc.print_preferences.transverse,
-            "print_layers": crate::document::print_preferences::print_layers_str(&doc.print_preferences.print_layers),
-            "placement_x": doc.print_preferences.placement_x,
-            "placement_y": doc.print_preferences.placement_y,
-            "scaling_mode": crate::document::print_preferences::scaling_mode_str(&doc.print_preferences.scaling_mode),
-            "custom_scale": doc.print_preferences.custom_scale,
-            "tile_overlap_h": doc.print_preferences.tile_overlap_h,
-            "tile_overlap_v": doc.print_preferences.tile_overlap_v,
-            "tile_range": doc.print_preferences.tile_range.clone(),
-            "marks_and_bleed": marks_and_bleed_view(&doc.print_preferences.marks_and_bleed),
-            "output": output_view(&doc.print_preferences.output),
-            "graphics": graphics_view(&doc.print_preferences.graphics),
-            "color_management": color_management_view(&doc.print_preferences.color_management),
-            "advanced": advanced_view(&doc.print_preferences.advanced),
-        },
-        "artboards_count": doc.artboards.len(),
-        "next_artboard_name": next_artboard_name,
-        "current_artboard_id": current_id,
-        "current_artboard": current_artboard_json,
-        "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
-        "artboards_panel_anchor": st.artboards_panel_anchor.clone()
-            .map(serde_json::Value::String)
-            .unwrap_or(serde_json::Value::Null),
-        "zoom_level": tab.model.zoom_level,
-        "view_offset_x": tab.model.view_offset_x,
-        "view_offset_y": tab.model.view_offset_y,
-    });
-    // Inserted outside the json! literal to keep the macro under the
-    // recursion limit (the tab-branch object is at the ceiling too).
-    if let serde_json::Value::Object(m) = &mut view {
-        m.insert("layers_panel_selection_is_container".to_string(),
-                 serde_json::Value::Bool(layers_panel_selection_is_container));
-        m.insert("layers_panel_selection_has_group".to_string(),
-                 serde_json::Value::Bool(layers_panel_selection_has_group));
-    }
-    // Inserted after the json! literal: the populated active-document
-    // object is already at the macro recursion ceiling, so the symbols
-    // list is attached here (SYMBOLS.md §8).
-    if let serde_json::Value::Object(m) = &mut view {
-        m.insert("selection_has_brushed_stroke".to_string(), has_brushed_stroke.into());
-        m.insert("selection_is_single_brushed_stroke".to_string(), single_brushed_stroke.into());
-        m.insert("symbols".to_string(), symbols_json);
-        // Concepts panel Slice 2: attached here too (macro recursion ceiling).
-        m.insert("selected_concept".to_string(), selected_concept);
-        // The ids `delete_empty_artboards` may remove — already filtered by the
-        // preserve-position-1 rule, so the action's `foreach` stays a plain
-        // mirror of `delete_artboards`. See
-        // `document::evaluated_bounds::deletable_empty_artboard_ids`.
-        m.insert(
-            "deletable_empty_artboard_ids".to_string(),
-            serde_json::Value::Array(
-                crate::document::evaluated_bounds::deletable_empty_artboard_ids(doc)
-                    .into_iter()
-                    .map(serde_json::Value::String)
-                    .collect(),
-            ),
-        );
-    }
-    // The per-document recent colours, the one writable document list
-    // (`runtime_contexts.yaml`), which Color and Swatches both read.
-    if let Some(m) = view.as_object_mut() {
-        m.insert("recent_colors".to_string(), serde_json::json!(tab.model.recent_colors));
-        // The document's save state (`runtime_contexts.yaml`), as the menu
-        // context has it (`menu_bar.rs`). Until 2026-10-14 only menus saw it,
-        // so `close_tab`'s `if active_document.is_modified` was always false
-        // and an edited tab closed without the Save Changes prompt.
-        // `filename` is the name the tab shows (`Untitled-N` until a save);
-        // `has_filename` says whether it has been saved.
-        m.insert("is_modified".to_string(), serde_json::json!(tab.model.is_modified()));
-        m.insert("has_filename".to_string(), serde_json::json!(!tab.model.filename.starts_with("Untitled-")));
-        m.insert("filename".to_string(), serde_json::json!(tab.model.filename));
-    }
-    view
+    crate::interpreter::document_views::active_document_view(
+        &tab.model,
+        &st.layers_panel_selection,
+        &st.artboards_panel_selection,
+        st.artboards_panel_anchor.as_deref(),
+    )
 }
 
 /// Execute one YAML effect against AppState, returning any deferred dialog effects.
@@ -3295,6 +2984,18 @@ fn run_yaml_effect(
                 new_od.insert("params".to_string(), serde_json::Value::Object(rp));
                 resolved = serde_json::json!({"open_dialog": new_od});
             }
+            // `result_to` names a field of the dialog open NOW, so it is
+            // resolved here, in the opener's scope (a nested dialog).
+            if let Some(rt) = od.get("result_to").and_then(|r| r.as_str()) {
+                resolved["open_dialog"]["result_to"] =
+                    super::effects::value_to_json(&super::expr::eval(rt, eval_ctx));
+            }
+        }
+        // `close_dialog: {result: <expr>}`: the result is evaluated here, in
+        // the closing dialog's scope, and written into its parent on close.
+        if let Some(r) = eff.get("close_dialog").and_then(|c| c.get("result")).and_then(|r| r.as_str()) {
+            resolved = serde_json::json!({"close_dialog": {
+                "result": super::effects::value_to_json(&super::expr::eval(r, eval_ctx))}});
         }
         deferred.push(resolved);
     }
@@ -3850,8 +3551,9 @@ fn build_mouse_event_handler(
 
             // Apply deferred dialog effects (outside AppState borrow)
             for eff in &deferred_dialog_effects {
-                if eff.get("close_dialog").is_some() {
-                    dialog_signal.set(None);
+                if let Some(cd) = eff.get("close_dialog") {
+                    super::dialog_view::close_dialog_with_result(
+                        &mut dialog_signal, cd.get("result").cloned());
                 }
                 if let Some(od) = eff.get("open_dialog") {
                     let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -3863,9 +3565,8 @@ fn build_mouse_event_handler(
                             build_dialog_outer_scope(&st),
                         )
                     };
-                    super::dialog_view::open_dialog_with_outer(
-                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope,
-                    );
+                    super::dialog_view::open_dialog_over(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                 }
             }
             revision += 1;
@@ -4460,7 +4161,7 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             let params = params.clone();
             spawn(async move {
                 if action == "dismiss_dialog" {
-                    dialog_signal.set(None);
+                    super::dialog_view::close_dialog_with_result(&mut dialog_signal, None);
                 } else {
                     // Snapshot dialog state before dispatching (for confirm actions)
                     let dialog_snapshot = dialog_signal().map(|ds| {
@@ -4523,8 +4224,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         deferred = dispatch_action(&action, &evaluated_params, &mut st);
                     }
                     for eff in &deferred {
-                        if eff.get("close_dialog").is_some() {
-                            dialog_signal.set(None);
+                        if let Some(cd) = eff.get("close_dialog") {
+                            super::dialog_view::close_dialog_with_result(
+                                &mut dialog_signal, cd.get("result").cloned());
                         }
                     }
                 }
@@ -4895,9 +4597,8 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                 )
                             };
                             let empty = serde_json::Map::new();
-                            super::dialog_view::open_dialog_with_outer(
-                                &mut dialog_signal, &dlg_id, &empty, &live_state, &outer_scope,
-                            );
+                            super::dialog_view::open_dialog_over(
+                                &mut dialog_signal, &dlg_id, &empty, &live_state, &outer_scope, None);
                             revision += 1;
                         }
                     }
@@ -8427,13 +8128,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     build_dialog_outer_scope(&st),
                                 )
                             };
-                            super::dialog_view::open_dialog_with_outer(
+                            super::dialog_view::open_dialog_over(
                                 &mut kb_dialog_signal,
                                 &dlg_id,
                                 &raw_params,
                                 &live_state,
-                                &outer_scope,
-                            );
+                                &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                         }
                     }
                     kb_rev += 1;
@@ -9576,9 +9276,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                 build_dialog_outer_scope(&st),
                                             )
                                         };
-                                        super::dialog_view::open_dialog_with_outer(
-                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope,
-                                        );
+                                        super::dialog_view::open_dialog_over(
+                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                                     }
                                 }
                                 r += 1;
@@ -13787,6 +13486,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -13825,6 +13526,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -13859,6 +13562,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -15049,5 +14754,78 @@ mod tests {
         assert!(st.align_panel.use_preview_bounds, "the first press turns it on");
         dispatch_action("toggle_use_preview_bounds", &none, &mut st);
         assert!(!st.align_panel.use_preview_bounds, "the second press turns it off");
+    }
+
+    // ── The web's nested dialog (the reference's `test_nested_dialogs.py`):
+    // the deferral resolves `result_to` and the close `result`, and the
+    // dialog signal's helpers nest over and return to the parent. ──
+
+    fn nested_picker_ok() -> Vec<serde_json::Value> {
+        fn find(n: &serde_json::Value) -> Option<&serde_json::Value> {
+            if n["type"] == "button" && n["label"] == "OK" { return Some(n); }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(find),
+                serde_json::Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let ok = find(&ws.dialog("color_picker").unwrap()["content"]).expect("the picker's OK").clone();
+        let click = ok["behavior"].as_array().unwrap().iter().find(|b| b["event"] == "click").unwrap().clone();
+        click["effects"].as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn web_nested_picker_ok_defers_its_result_and_leaves_the_app_colours() {
+        let mut st = AppState::new();
+        let before = (format!("{:?}", st.app_default_fill), format!("{:?}", st.app_default_stroke));
+        let ctx = serde_json::json!({
+            "dialog": {"color": "#ff0000"},
+            "param": {"target": "dialog.color"},
+        });
+        let deferred = run_yaml_effects(&nested_picker_ok(), &ctx, &mut st);
+        let close = deferred.iter().find_map(|e| e.get("close_dialog")).expect("OK closes");
+        assert_eq!(close["result"], "#ff0000", "{deferred:?}");
+        assert_eq!((format!("{:?}", st.app_default_fill), format!("{:?}", st.app_default_stroke)), before,
+                   "a dialog-field target writes no app colour");
+    }
+
+    #[test]
+    fn web_nested_open_resolves_result_to_in_the_openers_scope() {
+        let mut st = AppState::new();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let effects = ws.data()["actions"]["open_color_picker"]["effects"].as_array().unwrap().clone();
+        let ctx = serde_json::json!({"param": {"target": "dialog.color", "color": "#4a90d9"}});
+        let deferred = run_yaml_effects(&effects, &ctx, &mut st);
+        let od = deferred.iter().find_map(|e| e.get("open_dialog")).expect("opens the picker");
+        assert_eq!(od["result_to"], "dialog.color", "{od}");
+        assert_eq!(od["params"]["color"], "#4a90d9");
+    }
+
+    #[test]
+    fn web_nested_dialog_returns_to_its_parent_with_the_result() {
+        use super::super::dialog_view::DialogState;
+        let mk = |id: &str| DialogState {
+            id: id.into(), state: Default::default(), params: Default::default(), anchor: None,
+            props: Default::default(), parent: None, result_to: None,
+        };
+        let mut parent = mk("layer_options");
+        parent.state.insert("name".into(), serde_json::json!("Edited"));
+        let mut child = mk("color_picker");
+        crate::interpreter::dialog_view::nest_over(&mut child, parent.clone(), Some("dialog.color"));
+        assert_eq!(child.result_to.as_deref(), Some("color"));
+        let back = crate::interpreter::dialog_view::return_to_parent(child.clone(), Some(serde_json::json!("#ff0000")))
+            .expect("returns to the parent");
+        assert_eq!(back.id, "layer_options");
+        assert_eq!(back.state["name"], "Edited");
+        assert_eq!(back.state["color"], "#ff0000");
+        // Cancel: no result, the parent unchanged.
+        let back = crate::interpreter::dialog_view::return_to_parent(child, None).unwrap();
+        assert!(!back.state.contains_key("color"));
+        // A target that is not a dialog field does not nest.
+        let mut lone = mk("color_picker");
+        crate::interpreter::dialog_view::nest_over(&mut lone, parent, Some("fill"));
+        assert!(lone.parent.is_none());
+        assert!(crate::interpreter::dialog_view::return_to_parent(lone, None).is_none());
     }
 }

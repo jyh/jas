@@ -1076,7 +1076,7 @@ fn colour_value_commit(
             let mut model = engine.model.borrow_mut();
             let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
             crate::panel_behavior::run_action(
-                Some(id), "set_active_color", Some(&params), &scope, &mut store, &mut model,
+                Some(id), "set_active_color", Some(&params), false, &scope, &mut store, &mut model,
                 ws.actions(), ws.dialogs(), &mut host)
         };
         match ran {
@@ -1231,7 +1231,8 @@ pub unsafe extern "C" fn jas_dispatch_action(
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
         crate::panel_behavior::run_action(
-            panel, action, params, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(),
+            panel, action, params, item.is_none(), &scope, &mut store, &mut model, ws.actions(),
+            ws.dialogs(),
             &mut host)
     };
     let ran = match ran {
@@ -2922,23 +2923,26 @@ mod tests {
         let new_gaps: Vec<&String> = failures.iter()
             .filter(|f| !ENGINE_DIALOG_VALUE_GAPS.contains(&f.split(':').next().unwrap())).collect();
         assert!(new_gaps.is_empty(), "values the engine's dialog does not match, outside the declared gaps:\n{new_gaps:#?}");
+        // The declared gaps' values, printed (`--nocapture`), so the next repair
+        // starts from a reading rather than a re-derivation.
+        eprintln!("declared value gaps, {} value(s):\n{}", failures.len(), failures.join("\n"));
         let closed: Vec<&&str> = ENGINE_DIALOG_VALUE_GAPS.iter().filter(|c| !unequal.contains(c)).collect();
         assert!(closed.is_empty(), "these declared gaps now pass: remove them from ENGINE_DIALOG_VALUE_GAPS: {closed:?}");
     }
 
     /// The `expected_dialog` cases whose dialog the engine OPENS with values the
-    /// corpus does not pin (2026-10-14, the day the door was cut: 111 values in
-    /// these 8 cases; the other 4 cases are equal). Each is a context the
-    /// engine's action route does not yet build; see the test above.
-    const ENGINE_DIALOG_VALUE_GAPS: [&str; 8] = [
+    /// corpus does not pin. 2026-10-14, the day the door was cut: 111 values
+    /// in 8 cases. The same day: the init context's outer-`param` fix closed
+    /// Boolean Options and Layer Options (create); the shared
+    /// `active_document` view closed Print; the flat `let` closed Layer Options
+    /// (edit); the shared artboard row closed Artboard Options. What remains:
+    /// Document Setup's confirm does not write the document on the engine's
+    /// route, and New Swatch and the Color Picker read `state.fill_color`,
+    /// which on the engine is not the selection's fill.
+    const ENGINE_DIALOG_VALUE_GAPS: [&str; 3] = [
         "new_swatch_opens_swatch_options_with_the_active_fill",
-        "open_artboard_options_reads_the_named_artboard",
-        "open_boolean_options_opens_with_the_state_defaults",
         "open_color_picker_fill_starts_on_the_fill_colour",
         "open_document_setup_reads_back_what_confirm_wrote",
-        "open_layer_options_create_opens_on_the_defaults",
-        "open_layer_options_edit_reads_the_layer_and_keeps_the_defaults",
-        "open_print_dialog_opens_on_the_declared_defaults",
     ];
 
     /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's

@@ -637,6 +637,10 @@ internal sealed unsafe class Canvas : IDisposable
             }
             var docSha = doc.Length == 0 ? "EMPTY" : Sha256Of(doc);
             var planSha = plan.Length == 0 ? "NONE" : Sha256Of(plan);
+            // §260: the canvas strip's tabs (name and active state), so `tree`
+            // also watches the document tab; NONE when the strip is not open.
+            var tabs = Panes.TryGetValue(CanvasPaneKey, out var strip) ? PanelWire.TabReading(strip.PlanJson) : null;
+            var tabSha = tabs is null ? "NONE" : Sha256Of(tabs);
             var frame = _lastHash ?? "NONE";
             var body = "{"
                 + $"\"seq\":{_probeSeq},"
@@ -646,6 +650,8 @@ internal sealed unsafe class Canvas : IDisposable
                 + $"\"selection\":{selection},"
                 + $"\"plan_panel\":\"{Panel?.PanelId ?? ""}\","
                 + $"\"plan_sha\":\"{planSha}\","
+                + $"\"tab\":{System.Text.Json.JsonSerializer.Serialize(tabs)},"
+                + $"\"tab_sha\":\"{tabSha}\","
                 + $"\"doc\":{(doc.Length == 0 ? "null" : doc)},"
                 + $"\"plan\":{(plan.Length == 0 ? "null" : plan)}"
                 + "}";
@@ -657,7 +663,7 @@ internal sealed unsafe class Canvas : IDisposable
             // re-serialize it (1.0 becomes 1) and compare a different document.
             System.IO.File.WriteAllText(System.IO.Path.ChangeExtension(full, ".doc.json"), doc);
             _report($"PROBE seq={_probeSeq} surface={_lastHashSurface} frame={frame} doc-sha={docSha} "
-                  + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} "
+                  + $"selection={selection.Replace(" ", "")} plan={Panel?.PanelId ?? "NONE"} plan-sha={planSha} tab-sha={tabSha} "
                   + $"-> {ProbePath} {Tids()}");
         }
         catch (Exception ex)
