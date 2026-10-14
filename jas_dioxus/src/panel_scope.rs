@@ -419,6 +419,27 @@ pub fn workspace_facts(model: &Model) -> Value {
     })
 }
 
+/// The web's `active_document` view for the engine's one document
+/// (`document_views::active_document_view`), with the Layers and Artboards
+/// panels' selections read from where the engine keeps them: their panel
+/// scopes in the store. A selection row that is not a path is skipped.
+fn engine_document_view(store: &StateStore, model: &Model) -> Value {
+    let read = |panel: &str, key: &str| store.panel_scope(panel).and_then(|p| p.get(key)).cloned();
+    let as_path = |v: &Value| -> Option<Vec<usize>> {
+        let arr = v.get("__path__").unwrap_or(v).as_array()?;
+        arr.iter().map(|i| i.as_u64().map(|n| n as usize)).collect()
+    };
+    let layers: Vec<Vec<usize>> = read("layers", "layers_panel_selection")
+        .and_then(|v| v.as_array().map(|a| a.iter().filter_map(as_path).collect()))
+        .unwrap_or_default();
+    let artboards: Vec<String> = read("artboards", "artboards_panel_selection")
+        .and_then(|v| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()))
+        .unwrap_or_default();
+    let anchor = read("artboards", "artboards_panel_anchor");
+    crate::interpreter::document_views::active_document_view(
+        model, &layers, &artboards, anchor.as_ref().and_then(Value::as_str))
+}
+
 /// The scope panel `panel_id`'s bindings resolve against, in the engine
 /// (FB wave 2, A6). One function, so the plan the shell draws and the
 /// behavior the engine runs read the same values.
@@ -463,6 +484,14 @@ pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel
         }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
+        // The web's whole `active_document` view first (`document_views`), so
+        // a dialog's init and an action read the same namespace on both routes;
+        // the engine's own facts below then stand for every key they name.
+        if let Value::Object(view) = engine_document_view(store, model) {
+            for (k, v) in view {
+                doc.entry(k).or_insert(v);
+            }
+        }
         doc.extend(document_facts(model));
         doc.extend(artboard_facts(store, model.document()));
         // W2b-15: the symbols list and the Concepts panel's PARAMS mode.
@@ -619,7 +648,7 @@ fn artboards_json(doc: &Document) -> Value {
         doc.artboards
             .iter()
             .enumerate()
-            .map(|(i, a)| json!({ "id": a.id, "name": a.name, "number": i + 1 }))
+            .map(|(i, a)| crate::interpreter::document_views::artboard_row(i, a))
             .collect(),
     )
 }

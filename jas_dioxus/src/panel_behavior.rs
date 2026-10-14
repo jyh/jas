@@ -724,6 +724,7 @@ pub(crate) fn run_action(
     panel_id: Option<&str>,
     action: &str,
     params: Option<&Value>,
+    params_are_values: bool,
     scope: &Value,
     store: &mut StateStore,
     model: &mut Model,
@@ -736,9 +737,25 @@ pub(crate) fn run_action(
     }
     let mut d = Map::new();
     d.insert("action".into(), Value::String(action.to_string()));
-    if let Some(p) = params {
-        d.insert("params".into(), p.clone());
-    }
+    // Params a menu's YAML declares are EXPRESSIONS, which the dispatch arm
+    // evaluates. Params a CALLER passes are VALUES, as the web's
+    // `dispatch_action` takes them: they are bound as `param` directly, so
+    // `"1"` stays the string "1" (a layer id) instead of evaluating to 1.
+    let mut bound_scope;
+    let scope = match params {
+        Some(p) if params_are_values => {
+            bound_scope = scope.clone();
+            let mut bindings = bound_scope.get(ROW_BINDINGS).cloned().unwrap_or_else(|| json!({}));
+            bindings["param"] = p.clone();
+            bound_scope[ROW_BINDINGS] = bindings;
+            &bound_scope
+        }
+        Some(p) => {
+            d.insert("params".into(), p.clone());
+            scope
+        }
+        None => scope,
+    };
     let batch = vec![json!({"dispatch": Value::Object(d)})];
     run_batch(panel_id, &batch, json!({}), scope, store, model, actions, dialogs, host)
 }
