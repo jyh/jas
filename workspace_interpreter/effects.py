@@ -1143,6 +1143,14 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
         raw_params = od.get("params", {}) if isinstance(od, dict) else {}
         for k, v in raw_params.items():
             resolved_params[k] = _eval(v, store, ctx)
+        # `result_to`: a field of the dialog that is OPEN now, as
+        # `dialog.<key>`. The new dialog is then pushed over it (a nested
+        # dialog), and its `close_dialog: {result: ...}` writes that field
+        # after returning. Anything else opens it in place of an open one.
+        result_to = _eval(od["result_to"], store, ctx) if isinstance(od, dict) and "result_to" in od else None
+        if (store.get_dialog_id() is not None and isinstance(result_to, str)
+                and result_to.startswith("dialog.") and len(result_to) > len("dialog.")):
+            store.push_dialog(result_to[len("dialog."):])
         # Init dialog state with defaults, params, and property definitions
         store.init_dialog(dlg_id, defaults,
                          params=resolved_params or None,
@@ -1186,6 +1194,13 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
 
     # close_dialog: null or dialog_id
     if "close_dialog" in effect:
+        # `close_dialog: {result: <expr>}` returns a value to the field the
+        # opener named (`open_dialog`'s `result_to`), written into the
+        # PARENT after the pop. It is evaluated now, in the closing dialog.
+        cd = effect["close_dialog"]
+        has_result = isinstance(cd, dict) and "result" in cd
+        result = _eval(cd["result"], store, ctx) if has_result else None
+        result_to = store.get_dialog_result_to()
         # Preview restore: if a snapshot survived (i.e., no OK action
         # cleared it), revert each target to its captured original
         # value. Phase 0 handles only top-level state keys.
@@ -1202,6 +1217,8 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
                 if handler:
                     handler(None, ctx, store)
         store.close_dialog()
+        if has_result and result_to is not None and store.get_dialog_id() is not None:
+            store.set_dialog(result_to, result)
         return
 
     # clear_dialog_snapshot: drop the preview snapshot so close_dialog

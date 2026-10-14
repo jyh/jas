@@ -442,8 +442,17 @@ behavior:
 # Open a dialog by id, passing parameters
 - open_dialog: { id: <dialog_id>, params: { ... } }
 
+# Open it OVER the open dialog (nested), returning a value to its field:
+# result_to is an expression evaluated in the opener's scope; when it is
+# "dialog.<field>" and a dialog is open, the new dialog is pushed over it
+- open_dialog: { id: <dialog_id>, params: { ... }, result_to: <expr> }
+
 # Close the current dialog (or a specific one)
 - close_dialog: <dialog_id>       # optional; omit to close topmost
+
+# Close it, returning a value (evaluated in the closing dialog) to the
+# parent field its opener named
+- close_dialog: { result: <expr> }
 ```
 
 ### Action Chaining
@@ -1350,8 +1359,16 @@ The interpreter manages dialog lifecycle as follows:
    confirm actions, set global state before closing:
    `set: { fill_color: "dialog.color" }` then `close_dialog: null`.
 
-Only one dialog can be open at a time. Opening a new dialog replaces
-any currently open dialog.
+Opening a dialog replaces any currently open dialog, except a NESTED
+open: `open_dialog` with a `result_to` that evaluates to `dialog.<field>`
+while a dialog is open pushes the new dialog over it. The open dialog is
+kept whole (its state, params and preview snapshot), and the new dialog
+starts with no snapshot. Closing the nested dialog returns to it: with
+`close_dialog: { result: <expr> }` the result, evaluated in the closing
+dialog, is written to `<field>` of the parent; Cancel (`dismiss_dialog`,
+`close_dialog: null`) returns to it unchanged. The Color Picker opened from
+Layer Options' or Artboard Options' swatch is the shipped case
+(`open_color_picker`'s `target`).
 
 ### Validation
 
