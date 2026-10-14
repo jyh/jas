@@ -46,6 +46,23 @@ public class StateStore {
     /// the on_change action. Prevents the action's own set effects
     /// from re-triggering the hook.
     private var dialogFiringOnChange: Bool = false
+    /// A nested dialog (the Color Picker from Layer Options) is PUSHED over
+    /// its parent: each entry is a parent's whole dialog frame, restored by
+    /// `closeDialog`. `dialogResultTo` is the open dialog's own: the parent
+    /// field its result lands in when it closes with one
+    /// (`close_dialog: {result: ...}`). The reference's `push_dialog`.
+    private struct DialogFrame {
+        var id: String?
+        var state: [String: Any]
+        var params: [String: Any]?
+        var props: [String: [String: Any]]
+        var onChange: String?
+        var dirty: Bool
+        var snapshot: [String: Any]?
+        var resultTo: String?
+    }
+    private var dialogStack: [DialogFrame] = []
+    private var dialogResultTo: String?
 
     // MARK: - Data namespace
     //
@@ -324,7 +341,37 @@ public class StateStore {
         dialogParams
     }
 
+    /// Keep the open dialog under the next one: the next `initDialog` opens
+    /// the child over it, and `closeDialog` returns to it intact. The child
+    /// starts with no preview snapshot, and `resultTo` names the parent's
+    /// field that the child's result is written to.
+    public func pushDialog(resultTo: String?) {
+        dialogStack.append(DialogFrame(
+            id: dialogId, state: dialog, params: dialogParams, props: dialogProps,
+            onChange: dialogOnChange, dirty: dialogDirty, snapshot: dialogSnapshot,
+            resultTo: dialogResultTo))
+        dialogSnapshot = nil
+        dialogResultTo = resultTo
+    }
+
+    public func getDialogResultTo() -> String? { dialogResultTo }
+
+    /// How many dialogs are open: 0, 1, or more when nested.
+    public func dialogDepth() -> Int { (dialogId == nil ? 0 : 1) + dialogStack.count }
+
     public func closeDialog() {
+        if let parent = dialogStack.popLast() {
+            dialogId = parent.id
+            dialog = parent.state
+            dialogParams = parent.params
+            dialogProps = parent.props
+            dialogOnChange = parent.onChange
+            dialogDirty = parent.dirty
+            dialogSnapshot = parent.snapshot
+            dialogResultTo = parent.resultTo
+            return
+        }
+        dialogResultTo = nil
         dialogId = nil
         dialog = [:]
         dialogParams = nil

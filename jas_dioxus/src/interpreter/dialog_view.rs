@@ -51,9 +51,29 @@ pub fn open_dialog_with_outer(
     live_state: &serde_json::Map<String, serde_json::Value>,
     outer_scope: &serde_json::Value,
 ) {
-    if let Some(ds) = super::dialog_state::build_dialog_state(
+    open_dialog_over(dialog_signal, dialog_id, raw_params, live_state, outer_scope, None)
+}
+
+/// As `open_dialog_with_outer`, with the opener's resolved `result_to`. When
+/// it names a field of the dialog that is OPEN now (`dialog.<key>`), the new
+/// dialog is opened OVER it (nested): the open one is kept as its parent, and
+/// closing the new one with a result writes that field and returns to it.
+/// Anything else replaces the open dialog, as before. The reference's
+/// `open_dialog` with `result_to`.
+pub fn open_dialog_over(
+    dialog_signal: &mut Signal<Option<DialogState>>,
+    dialog_id: &str,
+    raw_params: &serde_json::Map<String, serde_json::Value>,
+    live_state: &serde_json::Map<String, serde_json::Value>,
+    outer_scope: &serde_json::Value,
+    result_to: Option<&str>,
+) {
+    if let Some(mut ds) = super::dialog_state::build_dialog_state(
         dialog_id, raw_params, live_state, outer_scope)
     {
+        if let Some(open) = dialog_signal() {
+            nest_over(&mut ds, open, result_to);
+        }
         dialog_signal.set(Some(ds));
     }
 }
@@ -76,7 +96,42 @@ pub fn open_dialog_at(
 
 /// Close the currently open dialog.
 pub fn close_dialog(dialog_signal: &mut Signal<Option<DialogState>>) {
-    dialog_signal.set(None);
+    close_dialog_with_result(dialog_signal, None);
+}
+
+/// Close the open dialog. A nested one returns to its parent, with
+/// `result` (the closing dialog's `close_dialog: {result: ...}`, already
+/// evaluated) written into the parent field its opener named; otherwise no
+/// dialog is left open.
+pub fn close_dialog_with_result(
+    dialog_signal: &mut Signal<Option<DialogState>>,
+    result: Option<serde_json::Value>,
+) {
+    let next = dialog_signal().and_then(|ds| return_to_parent(ds, result));
+    dialog_signal.set(next);
+}
+
+/// Open `child` over `open` when `result_to` names one of `open`'s fields
+/// (`dialog.<key>`): `open` becomes the child's parent and `<key>` its result
+/// field. Anything else leaves the child standalone, replacing `open`.
+pub(crate) fn nest_over(child: &mut DialogState, open: DialogState, result_to: Option<&str>) {
+    if let Some(key) = result_to.and_then(|r| r.strip_prefix("dialog.")).filter(|k| !k.is_empty()) {
+        child.parent = Some(Box::new(open));
+        child.result_to = Some(key.to_string());
+    }
+}
+
+/// The dialog left open when `closing` closes: its parent, with `result`
+/// written into the field the opener named, or none.
+pub(crate) fn return_to_parent(closing: DialogState, result: Option<serde_json::Value>) -> Option<DialogState> {
+    let key = closing.result_to;
+    closing.parent.map(|parent| {
+        let mut parent = *parent;
+        if let (Some(key), Some(result)) = (key, result) {
+            parent.state.insert(key, result);
+        }
+        parent
+    })
 }
 
 

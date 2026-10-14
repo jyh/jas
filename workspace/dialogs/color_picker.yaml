@@ -11,7 +11,11 @@ color_picker:
     maps red to the colorbar and G/B to the gradient axes.
   modal: true
   params:
-    target: { type: enum, values: [fill, stroke] }
+    # "fill", "stroke", or a field of the dialog the picker was opened over
+    # ("dialog.color"); see the open_color_picker action.
+    target: { type: string }
+    # The color to start from, when the opener passes one (a dialog field's).
+    color: { type: color, optional: True }
   state:
     # Canonical color — the single source of truth
     color:
@@ -77,7 +81,7 @@ color_picker:
       get: "hex(color)"
       set: "fun v -> color <- \"#\" + v"
   init:
-    color: 'if param.target == "fill" then state.fill_color else state.stroke_color'
+    color: 'if param.color != null then param.color else if param.target == "fill" then state.fill_color else state.stroke_color'
   content:
     type: container
     layout: column
@@ -202,9 +206,15 @@ color_picker:
                                   condition: 'param.target == "fill"'
                                   then:
                                     - set: { fill_color: "dialog.color" }
-                                  else:
+                              - if:
+                                  condition: 'param.target == "stroke"'
+                                  then:
                                     - set: { stroke_color: "dialog.color" }
-                              - close_dialog: null
+                              # A dialog-field target ("dialog.color") gets the
+                              # color as the picker's RESULT, written into the
+                              # dialog it was opened over (open_color_picker's
+                              # result_to).
+                              - close_dialog: { result: "dialog.color" }
                       - { type: button, label: "Cancel", action: dismiss_dialog,
                           style: { padding: "6 20" } }
                       - { type: button, label: "Color Swatches",

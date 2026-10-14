@@ -494,15 +494,15 @@
       ]
     },
     "open_color_picker": {
-      "description": "Open the modal color picker dialog for either the fill or stroke color (determined by the target param). The dialog initializes from the current color and commits back to the corresponding state variable when OK is pressed.\n",
+      "description": "Open the modal color picker dialog for the color the target param names. The target is \"fill\" or \"stroke\", the active fill or stroke color, or a field of the dialog that is open now, written \"dialog.<field>\" (Layer Options' swatch passes \"dialog.color\", Artboard Options' passes \"dialog.fill\"), and then the opener also passes that field's current color as the color param. The picker initializes from the color param when one is given, else from the fill or stroke color. On OK it commits a fill or stroke to its state variable, and returns the picked color to a dialog field: the picker opens OVER the open dialog (nested), and closing it returns to that dialog with the field set and every other edit intact. Cancel returns to it unchanged.\n",
       "category": "fill_stroke",
       "params": {
         "target": {
-          "type": "enum",
-          "values": [
-            "fill",
-            "stroke"
-          ]
+          "type": "string"
+        },
+        "color": {
+          "type": "color",
+          "optional": true
         }
       },
       "effects": [
@@ -510,8 +510,10 @@
           "open_dialog": {
             "id": "color_picker",
             "params": {
-              "target": "param.target"
-            }
+              "target": "param.target",
+              "color": "param.color"
+            },
+            "result_to": "param.target"
           }
         }
       ]
@@ -27112,7 +27114,8 @@
                         "event": "click",
                         "action": "open_color_picker",
                         "params": {
-                          "target": "dialog.fill"
+                          "target": "\"dialog.fill\"",
+                          "color": "dialog.fill"
                         }
                       }
                     ]
@@ -28828,11 +28831,11 @@
       "modal": true,
       "params": {
         "target": {
-          "type": "enum",
-          "values": [
-            "fill",
-            "stroke"
-          ]
+          "type": "string"
+        },
+        "color": {
+          "type": "color",
+          "optional": true
         }
       },
       "state": {
@@ -28916,7 +28919,7 @@
         }
       },
       "init": {
-        "color": "if param.target == \"fill\" then state.fill_color else state.stroke_color"
+        "color": "if param.color != null then param.color else if param.target == \"fill\" then state.fill_color else state.stroke_color"
       },
       "content": {
         "type": "container",
@@ -29210,8 +29213,13 @@
                                             "fill_color": "dialog.color"
                                           }
                                         }
-                                      ],
-                                      "else": [
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "if": {
+                                      "condition": "param.target == \"stroke\"",
+                                      "then": [
                                         {
                                           "set": {
                                             "stroke_color": "dialog.color"
@@ -29221,7 +29229,9 @@
                                     }
                                   },
                                   {
-                                    "close_dialog": null
+                                    "close_dialog": {
+                                      "result": "dialog.color"
+                                    }
                                   }
                                 ]
                               }
@@ -30981,7 +30991,8 @@
                         "event": "click",
                         "action": "open_color_picker",
                         "params": {
-                          "target": "dialog.color"
+                          "target": "\"dialog.color\"",
+                          "color": "dialog.color"
                         }
                       }
                     ]
