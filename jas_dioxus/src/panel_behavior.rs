@@ -271,7 +271,7 @@ impl EffectHost for EngineHost {
                 };
                 let params = params.as_object()
                     .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-                open_dialog_in(&id, def, params, &Value::Null, store, Some(model));
+                open_dialog_in(&id, def, params, None, &Value::Null, store, Some(model));
                 Some(None)
             }
             Some(Outcome::SelectSymbol(id)) => {

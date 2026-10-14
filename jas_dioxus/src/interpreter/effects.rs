@@ -433,10 +433,16 @@ pub fn open_dialog_in(
     dlg_id: &str,
     dlg_def: &serde_json::Value,
     resolved_params: Option<std::collections::HashMap<String, serde_json::Value>>,
+    push_over: Option<String>,
     ctx: &serde_json::Value,
     store: &mut StateStore,
     mut model: Option<&mut Model>,
 ) {
+    // A nested dialog: the open one is kept under this one, and this one's
+    // result lands in its field `push_over` (`open_dialog`'s `result_to`).
+    if let Some(key) = push_over {
+        store.push_dialog(Some(key));
+    }
     // Extract state defaults
     let mut defaults = std::collections::HashMap::new();
     if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
@@ -980,13 +986,34 @@ fn run_one<'h>(
         } else {
             None
         };
-        open_dialog_in(dlg_id, dlg_def, resolved_params, ctx, store, model.as_deref_mut());
+        // `result_to`: a field of the dialog that is OPEN now, as
+        // `dialog.<key>`. The new dialog is then pushed over it (nested), and
+        // its `close_dialog: {result: ...}` writes that field after
+        // returning. Anything else opens it in place of an open one (the
+        // reference's `open_dialog`).
+        let push_over = od.get("result_to").and_then(|e| e.as_str())
+            .filter(|_| store.dialog_id().is_some())
+            .and_then(|e| match eval_expr(e, store, ctx) {
+                Value::Str(s) => s.strip_prefix("dialog.").filter(|k| !k.is_empty()).map(str::to_string),
+                _ => None,
+            });
+        open_dialog_in(dlg_id, dlg_def, resolved_params, push_over, ctx, store, model.as_deref_mut());
         return;
     }
 
     // close_dialog: null or dialog_id
-    if effect.contains_key("close_dialog") {
+    if let Some(cd) = effect.get("close_dialog") {
+        // `close_dialog: {result: <expr>}` returns a value to the field the
+        // opener named (`open_dialog`'s `result_to`), written into the PARENT
+        // after the pop. It is evaluated now, in the closing dialog.
+        let result = cd.get("result").map(|e| value_to_json(&eval_expr(e.as_str().unwrap_or(""), store, ctx)));
+        let result_to = store.dialog_result_to().map(str::to_string);
         close_dialog_in(store, model.as_deref_mut());
+        if let (Some(result), Some(key)) = (result, result_to) {
+            if store.dialog_id().is_some() {
+                store.set_dialog(&key, result);
+            }
+        }
         return;
     }
 
@@ -7122,6 +7149,102 @@ mod tests {
         assert_eq!(store.get_dialog("color"), &serde_json::json!("#00ff00"));
         // hsb_h("#00ff00") = 120
         assert_eq!(store.get_dialog("h"), &serde_json::json!(120));
+    }
+
+    // ── A dialog opened from inside another returns to its parent (the
+    // reference's `test_nested_dialogs.py`, against the SHIPPED workspace:
+    // the openers' params and the picker's OK effects are read from it). ──
+
+    fn nested_ws() -> (serde_json::Value, serde_json::Value) {
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        (ws.data()["actions"].clone(), ws.data()["dialogs"].clone())
+    }
+
+    fn nested_find<'a>(n: &'a serde_json::Value, pred: &dyn Fn(&serde_json::Value) -> bool)
+        -> Option<&'a serde_json::Value> {
+        if pred(n) { return Some(n); }
+        match n {
+            serde_json::Value::Object(m) => m.values().find_map(|v| nested_find(v, pred)),
+            serde_json::Value::Array(a) => a.iter().find_map(|v| nested_find(v, pred)),
+            _ => None,
+        }
+    }
+
+    /// The params the parent's swatch passes to `open_color_picker`.
+    fn nested_opener(dialogs: &serde_json::Value, parent: &str) -> serde_json::Value {
+        let opens = |b: &serde_json::Value| b["action"] == "open_color_picker";
+        let node = nested_find(&dialogs[parent]["content"], &|n| {
+            n.get("behavior").and_then(|b| b.as_array()).is_some_and(|a| a.iter().any(opens))
+        }).unwrap_or_else(|| panic!("{parent} opens no colour picker"));
+        node["behavior"].as_array().unwrap().iter().find(|b| opens(b)).unwrap()["params"].clone()
+    }
+
+    /// The picker's OK button's click effects, as the spec writes them.
+    fn nested_ok(dialogs: &serde_json::Value) -> Vec<serde_json::Value> {
+        let ok = nested_find(&dialogs["color_picker"]["content"], &|n| {
+            n["type"] == "button" && n["label"] == "OK"
+        }).expect("the colour picker has an OK button");
+        let click = ok["behavior"].as_array().unwrap().iter().find(|b| b["event"] == "click").unwrap();
+        click["effects"].as_array().unwrap().clone()
+    }
+
+    fn nested_dispatch(store: &mut StateStore, a: &serde_json::Value, d: &serde_json::Value,
+                       action: &str, params: serde_json::Value) {
+        let eff = vec![serde_json::json!({"dispatch": {"action": action, "params": params}})];
+        run_effects(&eff, &serde_json::json!({}), store, None, Some(a), Some(d), None);
+    }
+
+    #[test]
+    fn nested_ok_writes_the_parent_field_and_returns_to_it() {
+        let (a, d) = nested_ws();
+        let mut store = StateStore::new();
+        store.set("stroke_color", serde_json::json!("#000000"));
+        store.set("fill_color", serde_json::json!("#ffffff"));
+        nested_dispatch(&mut store, &a, &d, "open_layer_options", serde_json::json!({"mode": "\"create\""}));
+        assert_eq!(store.dialog_id(), Some("layer_options"));
+        store.set_dialog("name", serde_json::json!("Edited"));
+
+        nested_dispatch(&mut store, &a, &d, "open_color_picker", nested_opener(&d, "layer_options"));
+        assert_eq!(store.dialog_id(), Some("color_picker"));
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#4a90d9"), "starts from the parent's colour");
+        store.set_dialog("color", serde_json::json!("#ff0000"));
+
+        let ok = nested_ok(&d);
+        run_effects(&ok, &serde_json::json!({}), &mut store, None, Some(&a), Some(&d), None);
+
+        assert_eq!(store.dialog_id(), Some("layer_options"), "OK returns to the parent");
+        assert_eq!(store.get_dialog("name"), &serde_json::json!("Edited"), "the parent keeps its edits");
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#ff0000"), "the colour lands in the parent");
+        assert_eq!(store.get("stroke_color"), &serde_json::json!("#000000"), "the app's stroke is not the target");
+        assert_eq!(store.get("fill_color"), &serde_json::json!("#ffffff"));
+    }
+
+    #[test]
+    fn nested_cancel_returns_to_the_parent_unchanged() {
+        let (a, d) = nested_ws();
+        let mut store = StateStore::new();
+        store.set("stroke_color", serde_json::json!("#000000"));
+        nested_dispatch(&mut store, &a, &d, "open_layer_options", serde_json::json!({"mode": "\"create\""}));
+        let before = store.get_dialog("color").clone();
+        nested_dispatch(&mut store, &a, &d, "open_color_picker", nested_opener(&d, "layer_options"));
+        store.set_dialog("color", serde_json::json!("#ff0000"));
+        nested_dispatch(&mut store, &a, &d, "dismiss_dialog", serde_json::json!({}));
+        assert_eq!(store.dialog_id(), Some("layer_options"));
+        assert_eq!(store.get_dialog("color"), &before);
+        assert_eq!(store.get("stroke_color"), &serde_json::json!("#000000"));
+    }
+
+    #[test]
+    fn nested_close_twice_leaves_no_dialog() {
+        let (a, d) = nested_ws();
+        let mut store = StateStore::new();
+        nested_dispatch(&mut store, &a, &d, "open_layer_options", serde_json::json!({"mode": "\"create\""}));
+        nested_dispatch(&mut store, &a, &d, "open_color_picker", nested_opener(&d, "layer_options"));
+        assert_eq!(store.dialog_depth(), 2);
+        nested_dispatch(&mut store, &a, &d, "dismiss_dialog", serde_json::json!({}));
+        nested_dispatch(&mut store, &a, &d, "dismiss_dialog", serde_json::json!({}));
+        assert_eq!(store.dialog_id(), None);
+        assert_eq!(store.dialog_depth(), 0);
     }
 
     #[test]

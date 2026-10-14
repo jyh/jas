@@ -14,6 +14,18 @@ use super::expr_types::Value;
 ///
 /// `Clone` so a caller can run a batch on a copy first (the Windows engine's
 /// pre-flight, FB wave 2 A6). Every field is a plain value.
+/// One parent dialog's frame, kept under a nested dialog (`push_dialog`).
+#[derive(Debug, Clone, PartialEq)]
+struct DialogFrame {
+    id: Option<String>,
+    state: Option<HashMap<String, serde_json::Value>>,
+    params: Option<HashMap<String, serde_json::Value>>,
+    on_change: Option<String>,
+    dirty: bool,
+    snapshot: Option<HashMap<String, serde_json::Value>>,
+    result_to: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct StateStore {
     state: HashMap<String, serde_json::Value>,
@@ -41,6 +53,13 @@ pub struct StateStore {
     /// the on_change action. Prevents the action's own `set` effects
     /// (or any nested run_effects calls) from re-triggering the hook.
     dialog_firing_on_change: bool,
+    /// A nested dialog (the Color Picker from Layer Options) is PUSHED over
+    /// its parent: each entry is a parent's whole dialog frame, restored by
+    /// `close_dialog`. `dialog_result_to` is the open dialog's own: the parent
+    /// field its result lands in when it closes with one
+    /// (`close_dialog: {result: ...}`). The reference's `push_dialog`.
+    dialog_stack: Vec<DialogFrame>,
+    dialog_result_to: Option<String>,
     /// Workspace-loaded reference data (swatch_libraries,
     /// brush_libraries, etc.). Mirrors the JS-side `data` namespace
     /// from jas_flask/static/js/engine/store.mjs. Mutated by the
@@ -102,6 +121,8 @@ impl StateStore {
             dialog_on_change: None,
             dialog_dirty: false,
             dialog_firing_on_change: false,
+            dialog_stack: Vec::new(),
+            dialog_result_to: None,
             data: serde_json::Value::Object(serde_json::Map::new()),
             pending_panel_state_writes: Vec::new(),
             writes: None,
@@ -280,7 +301,45 @@ impl StateStore {
         self.dialog_params.as_ref()
     }
 
+    /// Keep the open dialog under the next one: the next `init_dialog` opens
+    /// the child over it, and `close_dialog` returns to it intact. The child
+    /// starts with no preview snapshot, and `result_to` names the parent's
+    /// field that the child's result is written to.
+    pub fn push_dialog(&mut self, result_to: Option<String>) {
+        self.dialog_stack.push(DialogFrame {
+            id: self.dialog_id.take(),
+            state: self.dialog.take(),
+            params: self.dialog_params.take(),
+            on_change: self.dialog_on_change.take(),
+            dirty: self.dialog_dirty,
+            snapshot: self.dialog_snapshot.take(),
+            result_to: self.dialog_result_to.take(),
+        });
+        self.dialog_dirty = false;
+        self.dialog_result_to = result_to;
+    }
+
+    pub fn dialog_result_to(&self) -> Option<&str> {
+        self.dialog_result_to.as_deref()
+    }
+
+    /// How many dialogs are open: 0, 1, or more when nested.
+    pub fn dialog_depth(&self) -> usize {
+        usize::from(self.dialog_id.is_some()) + self.dialog_stack.len()
+    }
+
     pub fn close_dialog(&mut self) {
+        if let Some(parent) = self.dialog_stack.pop() {
+            self.dialog_id = parent.id;
+            self.dialog = parent.state;
+            self.dialog_params = parent.params;
+            self.dialog_on_change = parent.on_change;
+            self.dialog_dirty = parent.dirty;
+            self.dialog_snapshot = parent.snapshot;
+            self.dialog_result_to = parent.result_to;
+            return;
+        }
+        self.dialog_result_to = None;
         self.dialog_id = None;
         self.dialog = None;
         self.dialog_params = None;

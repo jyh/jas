@@ -2972,6 +2972,18 @@ fn run_yaml_effect(
                 new_od.insert("params".to_string(), serde_json::Value::Object(rp));
                 resolved = serde_json::json!({"open_dialog": new_od});
             }
+            // `result_to` names a field of the dialog open NOW, so it is
+            // resolved here, in the opener's scope (a nested dialog).
+            if let Some(rt) = od.get("result_to").and_then(|r| r.as_str()) {
+                resolved["open_dialog"]["result_to"] =
+                    super::effects::value_to_json(&super::expr::eval(rt, eval_ctx));
+            }
+        }
+        // `close_dialog: {result: <expr>}`: the result is evaluated here, in
+        // the closing dialog's scope, and written into its parent on close.
+        if let Some(r) = eff.get("close_dialog").and_then(|c| c.get("result")).and_then(|r| r.as_str()) {
+            resolved = serde_json::json!({"close_dialog": {
+                "result": super::effects::value_to_json(&super::expr::eval(r, eval_ctx))}});
         }
         deferred.push(resolved);
     }
@@ -3527,8 +3539,9 @@ fn build_mouse_event_handler(
 
             // Apply deferred dialog effects (outside AppState borrow)
             for eff in &deferred_dialog_effects {
-                if eff.get("close_dialog").is_some() {
-                    dialog_signal.set(None);
+                if let Some(cd) = eff.get("close_dialog") {
+                    super::dialog_view::close_dialog_with_result(
+                        &mut dialog_signal, cd.get("result").cloned());
                 }
                 if let Some(od) = eff.get("open_dialog") {
                     let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
@@ -3540,9 +3553,8 @@ fn build_mouse_event_handler(
                             build_dialog_outer_scope(&st),
                         )
                     };
-                    super::dialog_view::open_dialog_with_outer(
-                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope,
-                    );
+                    super::dialog_view::open_dialog_over(
+                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                 }
             }
             revision += 1;
@@ -4137,7 +4149,7 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             let params = params.clone();
             spawn(async move {
                 if action == "dismiss_dialog" {
-                    dialog_signal.set(None);
+                    super::dialog_view::close_dialog_with_result(&mut dialog_signal, None);
                 } else {
                     // Snapshot dialog state before dispatching (for confirm actions)
                     let dialog_snapshot = dialog_signal().map(|ds| {
@@ -4200,8 +4212,9 @@ fn render_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
                         deferred = dispatch_action(&action, &evaluated_params, &mut st);
                     }
                     for eff in &deferred {
-                        if eff.get("close_dialog").is_some() {
-                            dialog_signal.set(None);
+                        if let Some(cd) = eff.get("close_dialog") {
+                            super::dialog_view::close_dialog_with_result(
+                                &mut dialog_signal, cd.get("result").cloned());
                         }
                     }
                 }
@@ -4572,9 +4585,8 @@ fn render_icon_button(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Re
                                 )
                             };
                             let empty = serde_json::Map::new();
-                            super::dialog_view::open_dialog_with_outer(
-                                &mut dialog_signal, &dlg_id, &empty, &live_state, &outer_scope,
-                            );
+                            super::dialog_view::open_dialog_over(
+                                &mut dialog_signal, &dlg_id, &empty, &live_state, &outer_scope, None);
                             revision += 1;
                         }
                     }
@@ -8104,13 +8116,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                     build_dialog_outer_scope(&st),
                                 )
                             };
-                            super::dialog_view::open_dialog_with_outer(
+                            super::dialog_view::open_dialog_over(
                                 &mut kb_dialog_signal,
                                 &dlg_id,
                                 &raw_params,
                                 &live_state,
-                                &outer_scope,
-                            );
+                                &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                         }
                     }
                     kb_rev += 1;
@@ -9253,9 +9264,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                 build_dialog_outer_scope(&st),
                                             )
                                         };
-                                        super::dialog_view::open_dialog_with_outer(
-                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope,
-                                        );
+                                        super::dialog_view::open_dialog_over(
+                                            &mut ctx_dialog_signal, &dlg_id, &raw_params, &live_state, &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
                                     }
                                 }
                                 r += 1;
@@ -13464,6 +13474,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -13502,6 +13514,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -13536,6 +13550,8 @@ mod tests {
             params: HashMap::new(),
             anchor: None,
             props,
+            parent: None,
+            result_to: None,
         };
 
         let outer = serde_json::json!({
@@ -14713,6 +14729,77 @@ mod tests {
         assert!(!null_color_means_none("stroke_width"),
                 "a colour bind on a non-nullable field means nothing here");
     }
+
+    // ── The web's nested dialog (the reference's `test_nested_dialogs.py`):
+    // the deferral resolves `result_to` and the close `result`, and the
+    // dialog signal's helpers nest over and return to the parent. ──
+
+    fn nested_picker_ok() -> Vec<serde_json::Value> {
+        fn find(n: &serde_json::Value) -> Option<&serde_json::Value> {
+            if n["type"] == "button" && n["label"] == "OK" { return Some(n); }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(find),
+                serde_json::Value::Array(a) => a.iter().find_map(find),
+                _ => None,
+            }
+        }
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let ok = find(&ws.dialog("color_picker").unwrap()["content"]).expect("the picker's OK").clone();
+        let click = ok["behavior"].as_array().unwrap().iter().find(|b| b["event"] == "click").unwrap().clone();
+        click["effects"].as_array().unwrap().clone()
+    }
+
+    #[test]
+    fn web_nested_picker_ok_defers_its_result_and_leaves_the_app_colours() {
+        let mut st = AppState::new();
+        let before = (format!("{:?}", st.app_default_fill), format!("{:?}", st.app_default_stroke));
+        let ctx = serde_json::json!({
+            "dialog": {"color": "#ff0000"},
+            "param": {"target": "dialog.color"},
+        });
+        let deferred = run_yaml_effects(&nested_picker_ok(), &ctx, &mut st);
+        let close = deferred.iter().find_map(|e| e.get("close_dialog")).expect("OK closes");
+        assert_eq!(close["result"], "#ff0000", "{deferred:?}");
+        assert_eq!((format!("{:?}", st.app_default_fill), format!("{:?}", st.app_default_stroke)), before,
+                   "a dialog-field target writes no app colour");
+    }
+
+    #[test]
+    fn web_nested_open_resolves_result_to_in_the_openers_scope() {
+        let mut st = AppState::new();
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let effects = ws.data()["actions"]["open_color_picker"]["effects"].as_array().unwrap().clone();
+        let ctx = serde_json::json!({"param": {"target": "dialog.color", "color": "#4a90d9"}});
+        let deferred = run_yaml_effects(&effects, &ctx, &mut st);
+        let od = deferred.iter().find_map(|e| e.get("open_dialog")).expect("opens the picker");
+        assert_eq!(od["result_to"], "dialog.color", "{od}");
+        assert_eq!(od["params"]["color"], "#4a90d9");
+    }
+
+    #[test]
+    fn web_nested_dialog_returns_to_its_parent_with_the_result() {
+        use super::super::dialog_view::DialogState;
+        let mk = |id: &str| DialogState {
+            id: id.into(), state: Default::default(), params: Default::default(), anchor: None,
+            props: Default::default(), parent: None, result_to: None,
+        };
+        let mut parent = mk("layer_options");
+        parent.state.insert("name".into(), serde_json::json!("Edited"));
+        let mut child = mk("color_picker");
+        crate::interpreter::dialog_view::nest_over(&mut child, parent.clone(), Some("dialog.color"));
+        assert_eq!(child.result_to.as_deref(), Some("color"));
+        let back = crate::interpreter::dialog_view::return_to_parent(child.clone(), Some(serde_json::json!("#ff0000")))
+            .expect("returns to the parent");
+        assert_eq!(back.id, "layer_options");
+        assert_eq!(back.state["name"], "Edited");
+        assert_eq!(back.state["color"], "#ff0000");
+        // Cancel: no result, the parent unchanged.
+        let back = crate::interpreter::dialog_view::return_to_parent(child, None).unwrap();
+        assert!(!back.state.contains_key("color"));
+        // A target that is not a dialog field does not nest.
+        let mut lone = mk("color_picker");
+        crate::interpreter::dialog_view::nest_over(&mut lone, parent, Some("fill"));
+        assert!(lone.parent.is_none());
+        assert!(crate::interpreter::dialog_view::return_to_parent(lone, None).is_none());
+    }
 }
-
-
