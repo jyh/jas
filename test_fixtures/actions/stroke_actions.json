@@ -53,5 +53,41 @@
       }
     ],
     "expected_json": "toggle_dashed_line_on_expected.json"
+  },
+  {
+    "name": "open_brush_options_create_opens_on_the_declared_defaults",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_brush_options",
+        "params": {
+          "mode": "create"
+        }
+      }
+    ],
+    "expected_json": "open_brush_options_create_expected.json",
+    "expected_dialog": {
+      "id": "brush_options",
+      "params": {
+        "mode": "create",
+        "brush_slug": null
+      },
+      "state": {
+        "brush_name": "",
+        "brush_type": "calligraphic",
+        "angle": 0,
+        "angle_variation": {
+          "mode": "fixed"
+        },
+        "roundness": 100,
+        "roundness_variation": {
+          "mode": "fixed"
+        },
+        "size": 5,
+        "size_variation": {
+          "mode": "fixed"
+        }
+      }
+    }
   }
 ]

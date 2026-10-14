@@ -73,17 +73,21 @@ brush_options:
 
   init:
     # Defaults are loaded from the master brush when in library_edit
-    # or instance_edit. The interpreter resolves these expressions
-    # against the dialog scope; missing param paths fall through to
-    # the state defaults declared above.
-    brush_name: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name : ""'
-    brush_type: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type : "calligraphic"'
-    angle: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle : 0'
-    angle_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle_variation : { mode: "fixed" }'
-    roundness: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness : 100'
-    roundness_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness_variation : { mode: "fixed" }'
-    size: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size : 5'
-    size_variation: 'param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size_variation : { mode: "fixed" }'
+    # or instance_edit; with no brush_slug (create) each key keeps its
+    # declared default by reading it back (`else dialog.<key>`). Until
+    # 2026-10-14 these were `a ? b : c`, which no port's parser accepts:
+    # every init evaluated to null and erased its default
+    # (check_state_reads now refuses an unparseable expression of any head).
+    # angle_variation, roundness_variation and size_variation have NO init:
+    # each is an object ({mode: ...}), and the expression language has no
+    # object value in any port, so an init reading one returns its JSON TEXT.
+    # Create mode keeps the declared default; loading a brush's variations in
+    # library_edit / instance_edit is not expressible here (declared gap).
+    brush_name: 'if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name else dialog.brush_name'
+    brush_type: 'if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type else dialog.brush_type'
+    angle: 'if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle else dialog.angle'
+    roundness: 'if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness else dialog.roundness'
+    size: 'if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size else dialog.size'
 
   content:
     type: container

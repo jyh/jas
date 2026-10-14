@@ -179,5 +179,57 @@
         "color_mode": null
       }
     }
+  },
+  {
+    "name": "open_color_picker_fill_starts_on_the_fill_colour",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "open_color_picker",
+        "params": {
+          "target": "fill"
+        }
+      }
+    ],
+    "expected_json": "open_color_picker_fill_expected.json",
+    "expected_dialog": {
+      "id": "color_picker",
+      "params": {
+        "target": "fill"
+      },
+      "state": {
+        "color": "#0000ff"
+      }
+    }
+  },
+  {
+    "name": "open_color_picker_stroke_starts_on_the_stroke_colour",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "open_color_picker",
+        "params": {
+          "target": "stroke"
+        }
+      }
+    ],
+    "expected_json": "open_color_picker_stroke_expected.json",
+    "expected_dialog": {
+      "id": "color_picker",
+      "params": {
+        "target": "stroke"
+      },
+      "state": {
+        "color": "#000000"
+      }
+    }
   }
 ]
