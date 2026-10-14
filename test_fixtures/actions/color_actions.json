@@ -149,5 +149,35 @@
         "swatch_name": ""
       }
     }
+  },
+  {
+    "name": "open_swatch_options_create_keeps_the_unpassed_fields_null",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_swatch_options",
+        "params": {
+          "mode": "create",
+          "color": "#ff0000"
+        }
+      }
+    ],
+    "expected_json": "open_swatch_options_create_expected.json",
+    "expected_dialog": {
+      "id": "swatch_options",
+      "params": {
+        "mode": "create",
+        "color": "#ff0000",
+        "swatch_name": null,
+        "color_mode": null,
+        "library": null,
+        "index": null
+      },
+      "state": {
+        "color": "#ff0000",
+        "swatch_name": null,
+        "color_mode": null
+      }
+    }
   }
 ]

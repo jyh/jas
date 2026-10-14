@@ -295,7 +295,7 @@ private func stateDefaults(_ stateDefs: [String: Any]) -> [String: Any] {
     var defaults: [String: Any] = [:]
     for (key, defn) in stateDefs {
         if let d = defn as? [String: Any] {
-            defaults[key] = d["default"]
+            defaults[key] = d["default"] ?? NSNull()
         } else {
             defaults[key] = defn
         }
@@ -743,7 +743,9 @@ private func runOne(
         var resolvedParams: [String: Any] = [:]
         for (k, v) in rawParams {
             let val = evalExpr(v, store: store, ctx: ctx)
-            resolvedParams[k] = valueToAny(val)
+            // A null param is KEPT as NSNull: assigning nil would remove the
+            // key, and the reference's `open_dialog` keeps it as None.
+            resolvedParams[k] = valueToAny(val) ?? NSNull()
         }
 
         // Extract per-state get / set props so dialog widget edits

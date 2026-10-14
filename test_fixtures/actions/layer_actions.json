@@ -47,5 +47,75 @@
       }
     ],
     "expected_json": "new_group_from_layer_row_circle_expected.json"
+  },
+  {
+    "name": "open_layer_options_edit_reads_the_layer_and_keeps_the_defaults",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "edit",
+          "layer_id": "1"
+        }
+      }
+    ],
+    "expected_json": "open_layer_options_edit_expected.json",
+    "expected_dialog": {
+      "id": "layer_options",
+      "params": {
+        "mode": "edit",
+        "layer_id": "1",
+        "name": "Foreground",
+        "lock": false,
+        "show": true,
+        "preview": true
+      },
+      "state": {
+        "name": "Foreground",
+        "lock": false,
+        "show": true,
+        "preview": true,
+        "color": "#4a90d9",
+        "color_preset": "light_blue",
+        "dim_images": false,
+        "dim_percentage": 50
+      }
+    }
+  },
+  {
+    "name": "open_layer_options_create_opens_on_the_defaults",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {
+        "action": "open_layer_options",
+        "params": {
+          "mode": "create",
+          "layer_id": null
+        }
+      }
+    ],
+    "expected_json": "open_layer_options_create_expected.json",
+    "expected_dialog": {
+      "id": "layer_options",
+      "params": {
+        "mode": "create",
+        "layer_id": null,
+        "name": "",
+        "lock": false,
+        "show": true,
+        "preview": true
+      },
+      "state": {
+        "name": "",
+        "lock": false,
+        "show": true,
+        "preview": true,
+        "color": "#4a90d9",
+        "color_preset": "light_blue",
+        "dim_images": false,
+        "dim_percentage": 50
+      }
+    }
   }
 ]
