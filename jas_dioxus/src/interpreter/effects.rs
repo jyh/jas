@@ -249,10 +249,25 @@ fn run_effects_into<'h>(
     // A11: a hosted batch journals its store writes and reports them to the
     // host after each effect. The outermost batch owns the journal.
     let owns_journal = host.is_some() && store.open_writes();
+    // A flat `let` (no `in`) extends the context for the REST of the batch, as
+    // the reference's loop does with the context its `let` returns. Until
+    // 2026-10-14 this runner dropped the bindings, so `open_layer_options`'s
+    // `layer_elem` read null in the effect after it.
+    let mut ctx = std::borrow::Cow::Borrowed(ctx);
     for effect in effects {
         match effect {
+            serde_json::Value::Object(map) if map.contains_key("let") && !map.contains_key("in") => {
+                if let Some(serde_json::Value::Object(bindings)) = map.get("let") {
+                    for (name, expr) in bindings {
+                        let value = eval_expr(expr.as_str().unwrap_or(""), store, &ctx);
+                        if let Some(m) = ctx.to_mut().as_object_mut() {
+                            m.insert(name.clone(), value_to_json(&value));
+                        }
+                    }
+                }
+            }
             serde_json::Value::Object(map) => {
-                run_one(map, ctx, store, model.as_deref_mut(), actions, dialogs,
+                run_one(map, &ctx, store, model.as_deref_mut(), actions, dialogs,
                         host.as_deref_mut(), report);
             }
             // `- snapshot` (every align and boolean action's first effect) is
@@ -286,7 +301,7 @@ fn run_effects_into<'h>(
                 "dispatch": action_name,
             });
             if let serde_json::Value::Object(map) = &dispatch_effect {
-                run_one(map, ctx, store, model.as_deref_mut(),
+                run_one(map, &ctx, store, model.as_deref_mut(),
                         actions, dialogs, host.as_deref_mut(), report);
             }
             store.set_firing_on_change(false);
@@ -442,11 +457,22 @@ pub fn open_dialog_in(
     }
     // Init dialog
     store.init_dialog(dlg_id, defaults, resolved_params);
-    // Evaluate init expressions
+    // Evaluate init expressions (in order: a later init may read an earlier
+    // one). The DIALOG's params must win over the opening action's: an init
+    // reads `param.*` meaning its own dialog's. The reference drops the outer
+    // `param` from the extras so the store's dialog-scoped binding shows
+    // through (`effects.py`, `open_dialog`); until 2026-10-14 this runner kept
+    // it, so on the engine's route every `param.*` init read the ACTION's
+    // params and Boolean Options, Layer Options and Swatch Options opened on
+    // nulls.
+    let mut init_ctx = ctx.clone();
+    if let Some(m) = init_ctx.as_object_mut() {
+        m.remove("param");
+    }
     if let Some(serde_json::Value::Object(init_map)) = dlg_def.get("init") {
         for (key, expr) in init_map {
             let expr_str = expr.as_str().unwrap_or("");
-            let val = eval_expr(expr_str, store, ctx);
+            let val = eval_expr(expr_str, store, &init_ctx);
             store.set_dialog(key, value_to_json(&val));
         }
     }
@@ -7876,6 +7902,24 @@ mod tests {
             &effects, &serde_json::json!({}), &mut store,
             None, None, None, None);
         assert_eq!(store.get("result"), &serde_json::json!(20));
+    }
+
+    #[test]
+    fn a_flat_let_binds_for_the_effects_after_it() {
+        // `- let: {...}` with no `in`: the reference returns the extended
+        // context and its loop runs the REST of the batch in it (`effects.py`,
+        // `let`). `open_layer_options` binds `layer_elem` this way and reads it
+        // in the next effect. A binding reads an earlier one in the same `let`.
+        let mut store = StateStore::new();
+        let effects = vec![
+            serde_json::json!({ "set": { "before": "x" } }),
+            serde_json::json!({ "let": { "x": "5", "y": "x + 1" } }),
+            serde_json::json!({ "set": { "after": "x", "chained": "y" } }),
+        ];
+        run_effects(&effects, &serde_json::json!({}), &mut store, None, None, None, None);
+        assert_eq!(store.get("before"), &serde_json::Value::Null, "not before the let");
+        assert_eq!(store.get("after"), &serde_json::json!(5));
+        assert_eq!(store.get("chained"), &serde_json::json!(6));
     }
 
     #[test]
