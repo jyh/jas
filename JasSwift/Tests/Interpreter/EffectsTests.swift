@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -89,6 +90,33 @@ import Testing
     ]
     runEffects([["dispatch": "set_x_to_42"]], ctx: [:], store: store, actions: actions)
     #expect(store.get("x") as? Int == 42)
+}
+
+/// `params: {target: artboard}` means the STRING "artboard": a bare identifier
+/// that evaluates to null is its own name. A null from a PATH stays null, a
+/// path that resolves keeps its value, and a YAML literal is that value.
+/// Mirrors Rust `a_dispatch_param_that_is_a_bare_identifier_is_its_own_name`
+/// and the reference's `_dispatch_param`. Swift fell back to the raw string for
+/// ANY null, so `state.zz_absent` dispatched as the text "state.zz_absent".
+@Test func aDispatchParamThatIsABareIdentifierIsItsOwnName() {
+    let store = StateStore(defaults: ["five": 5])
+    let actions: [String: Any] = [
+        "zz_take": ["effects": [["set": [
+            "got": "param.target", "dotted": "param.dotted",
+            "known": "param.known", "flag": "param.flag",
+        ]]]]
+    ]
+    runEffects([["dispatch": ["action": "zz_take", "params": [
+        "target": "artboard",
+        "dotted": "state.zz_absent",
+        "known": "state.five",
+        "flag": true,
+    ] as [String: Any]] as [String: Any]]], ctx: [:], store: store, actions: actions)
+    #expect(store.get("got") as? String == "artboard")
+    let dotted = store.get("dotted")
+    #expect(dotted == nil || dotted is NSNull, "a null from a path stays null, got \(String(describing: dotted))")
+    #expect(store.get("known") as? Int == 5)
+    #expect(store.get("flag") as? Bool == true)
 }
 
 // MARK: - Sequential effects
