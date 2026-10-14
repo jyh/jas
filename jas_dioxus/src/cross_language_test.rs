@@ -3028,7 +3028,9 @@ mod tests {
     /// `72` equals `72.0`, while `true` stays apart from `1`. serde_json's own
     /// `==` keeps an integer apart from a float, so a dialog value that the
     /// evaluator made integral (`72`) failed against the corpus's `72.0`.
-    #[cfg(feature = "web")]
+    // Its only caller, `assert_action_dialog`, is `web`-gated; the function
+    // and its test are not, so the native lane verifies it too.
+    #[cfg_attr(not(feature = "web"), allow(dead_code))]
     fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         use serde_json::Value as V;
         match (a, b) {
@@ -3044,7 +3046,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "web")]
     #[test]
     fn json_value_eq_has_one_number_type_and_keeps_booleans_apart() {
         use serde_json::json;
