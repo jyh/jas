@@ -696,7 +696,8 @@ struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
  *
  * # The reply
  *
- * `{"changed": [<row>...], "doc_changed": <bool>}`. Each row is a
+ * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null}`
+ * ([`act_reply`]). Each row is a
  * [`jas_panel_event`] delta row, tagged with its `panel`, across every open
  * panel. `doc_changed` says the document moved, so the shell repaints.
  *
@@ -736,8 +737,8 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  *
  * # The reply
  *
- * [`jas_panel_behavior`]'s: `{"changed": [<row>...], "doc_changed": <bool>}`,
- * so the shell repaints and re-reads exactly as after a click.
+ * [`jas_panel_behavior`]'s ([`act_reply`]), so the shell repaints and
+ * re-reads exactly as after a click, and opens the dialog it names.
  *
  * # ⛔ A refusal runs NOTHING
  *
@@ -788,6 +789,20 @@ uint8_t jas_document_modified(struct JasEngine *e);
  * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
  */
 uint8_t jas_document_mark_saved(struct JasEngine *e);
+
+/**
+ * **Escape, or the dialog window's close box: dismiss the open dialog** (the
+ * dialog door, design 2026-10-14). Every other dialog act is a click on one of
+ * its YAML buttons; this is the one a shell makes on its own. It closes the
+ * dialog exactly as the `close_dialog` effect does (`dismiss_dialog`'s whole
+ * body): a preview snapshot no OK action cleared is restored, for state and
+ * for the document. 1 when a dialog was closed, 0 when none was open, 255 for
+ * a null engine.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_dialog_dismiss(struct JasEngine *e);
 
 /**
  * **The shell names the document it opened or saved** (flask §256): the

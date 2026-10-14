@@ -847,7 +847,8 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 ///
 /// # The reply
 ///
-/// `{"changed": [<row>...], "doc_changed": <bool>}`. Each row is a
+/// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null}`
+/// ([`act_reply`]). Each row is a
 /// [`jas_panel_event`] delta row, tagged with its `panel`, across every open
 /// panel. `doc_changed` says the document moved, so the shell repaints.
 ///
@@ -943,7 +944,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": ran.doc_changed});
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -963,7 +964,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
 /// and the slice adopts what it wrote to `state.*` (`adopt_store_state`, below
 /// the run).
 ///
-/// The reply is the behaviour door's, `{"changed", "doc_changed": false}`:
+/// The reply is the behaviour door's ([`act_reply`]), with `doc_changed: false`:
 /// an S-C.2 edit moves the slice and the store, never the document.
 /// A commit or change on an INPUT kind: the event that writes a widget's value.
 fn is_value_commit(spec: &serde_json::Value, ev: &crate::panel_behavior::UserEvent) -> bool {
@@ -1024,7 +1025,7 @@ fn colour_value_commit(
         let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
         ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
         *engine.last_error.borrow_mut() = None;
-        let reply = serde_json::json!({"changed": sync.changed, "doc_changed": doc_changed});
+        let reply = act_reply(engine, &sync.changed, doc_changed);
         let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
         ffi_instr::record_out(Crossing::PanelBehavior, out.len);
         return out;
@@ -1090,10 +1091,20 @@ fn colour_value_commit(
     } else {
         *engine.last_error.borrow_mut() = None;
     }
-    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": doc_changed});
+    let reply = act_reply(engine, &sync.changed, doc_changed);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
+}
+
+/// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
+/// "doc_changed": <bool>, "dialog": <id> | null}`. `dialog` is the dialog open
+/// in the engine's store after the act (the dialog door, design 2026-10-14):
+/// a shell that reads an id there asks for that dialog's plan, and `null`
+/// means none is open, so a shell showing one closes it.
+fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool) -> serde_json::Value {
+    let dialog = engine.store.borrow().dialog_id().map(str::to_string);
+    serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog})
 }
 
 /// Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
@@ -1108,8 +1119,8 @@ fn colour_value_commit(
 ///
 /// # The reply
 ///
-/// [`jas_panel_behavior`]'s: `{"changed": [<row>...], "doc_changed": <bool>}`,
-/// so the shell repaints and re-reads exactly as after a click.
+/// [`jas_panel_behavior`]'s ([`act_reply`]), so the shell repaints and
+/// re-reads exactly as after a click, and opens the dialog it names.
 ///
 /// # ⛔ A refusal runs NOTHING
 ///
@@ -1245,7 +1256,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     } else {
         set_panel_event_error(engine, "Unchanged", action);
     }
-    let reply = serde_json::json!({"changed": sync.changed, "doc_changed": ran.doc_changed});
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::DispatchAction, out.len);
     out
@@ -1284,6 +1295,27 @@ pub unsafe extern "C" fn jas_document_modified(e: *mut JasEngine) -> u8 {
 pub unsafe extern "C" fn jas_document_mark_saved(e: *mut JasEngine) -> u8 {
     let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
     engine.with_model_mut(Model::mark_saved);
+    1
+}
+
+/// **Escape, or the dialog window's close box: dismiss the open dialog** (the
+/// dialog door, design 2026-10-14). Every other dialog act is a click on one of
+/// its YAML buttons; this is the one a shell makes on its own. It closes the
+/// dialog exactly as the `close_dialog` effect does (`dismiss_dialog`'s whole
+/// body): a preview snapshot no OK action cleared is restored, for state and
+/// for the document. 1 when a dialog was closed, 0 when none was open, 255 for
+/// a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dialog_dismiss(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    let mut store = engine.store.borrow_mut();
+    if store.dialog_id().is_none() {
+        return 0;
+    }
+    engine.with_model_mut(|m| crate::interpreter::effects::close_dialog_in(&mut store, Some(m)));
     1
 }
 
@@ -2582,10 +2614,13 @@ mod tests {
     /// `symbols_host`, the web's own implementation, instead of reporting their
     /// `log` stubs. New Symbol promotes the selection and panel-selects the new
     /// master in the STORE; Place Instance places the store-selected master;
-    /// Delete on a master that still has instances would open the orphan
-    /// confirm, which the engine refuses by the dialog's name, changing nothing.
+    /// Delete on a master that still has instances OPENS the orphan confirm in
+    /// the engine's store (the dialog door; until 2026-10-14 it was refused by
+    /// the dialog's name), with the instance count as its param, and changes
+    /// nothing; the confirm's OK action then deletes the master, closes the
+    /// dialog and clears the panel selection.
     #[test]
-    fn the_symbol_verbs_run_in_the_engine_and_the_orphan_confirm_is_refused() {
+    fn the_symbol_verbs_run_in_the_engine_and_the_orphan_confirm_opens() {
         let _counters = crate::ffi_instr::test_lock::lock();
         const SYMBOLS: &str = "symbols_panel_content";
         use crate::document::test_fixture::{model_with, rect};
@@ -2612,9 +2647,19 @@ mod tests {
 
         let before = doc_json(e);
         let (reply, err) = behave(e, SYMBOLS, r#"{"widget":"sym_delete","event":"click"}"#);
-        assert_eq!(reply, "", "delete with instances is refused");
-        assert_eq!(err, refusal("PlatformEffect", "Dialog:delete_symbol_orphan_confirm"));
-        assert_eq!(doc_json(e), before, "a refusal changes nothing");
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "delete_symbol_orphan_confirm", "delete with instances asks first");
+        assert_eq!(doc_json(e), before, "asking changes nothing");
+        {
+            let ctx = engine_of(e).store.borrow().eval_context();
+            assert_eq!(ctx["param"]["count"], 2, "the confirm names the two instances: {ctx}");
+        }
+        let (reply, err) = dispatch(e, r#"{"action":"delete_symbol_orphan_confirm_ok"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closes the confirm");
+        let (doc, sel) = state(e);
+        assert!(doc.symbols.is_empty(), "OK deletes the master");
+        assert_eq!(sel, Some(serde_json::Value::Null), "and clears the panel selection");
         unsafe { jas_engine_free(e) };
     }
 
@@ -2792,6 +2837,140 @@ mod tests {
         out
     }
 
+    /// THE DIALOG DOOR, E1 (design `2026-10-14-jas-DESIGN-dialog-door`): the
+    /// engine OPENS a dialog in its own store, as the reference does
+    /// (`effects.py`, `open_dialog`), and its reply NAMES it, so the shell
+    /// knows to ask for the dialog's plan. Before the door, A12 refused
+    /// `open_dialog` by name and the engine opened nothing.
+    ///
+    /// The oracle is the action corpus's `expected_dialog` cases, which the web
+    /// runner (`assert_action_dialog`) and Swift already hold to; the
+    /// population is DERIVED from the fixtures, never listed, and its floor is
+    /// the count on the day the door was cut. `params` and `state` are subsets,
+    /// and an ABSENT key is not a null.
+    ///
+    /// ⛔ **OPENING IS STRICT; THE VALUES ARE NOT YET.** Every case must open its
+    /// dialog and name it. The VALUES differ in [`ENGINE_DIALOG_VALUE_GAPS`]:
+    /// the engine evaluates a dialog's `init` against its own action context,
+    /// which lacks fields the web's `build_dialog_outer_scope` and
+    /// `build_appstate_ctx` carry (`active_document.print_preferences`, the
+    /// Boolean options, a layer's fields, …), so an init writes null over a
+    /// declared default. The list is TWO-SIDED: a case on it that starts
+    /// passing reds this test until it is removed, so it can only shrink.
+    #[test]
+    fn dispatch_opens_every_expected_dialog_in_the_engine_store() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../test_fixtures/actions");
+        let mut cases = Vec::new();
+        for entry in std::fs::read_dir(root).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().and_then(|x| x.to_str()) != Some("json") { continue; }
+            let doc: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let list = doc.as_array().cloned()
+                .or_else(|| doc.get("cases").and_then(|c| c.as_array()).cloned())
+                .or_else(|| doc.get("tests").and_then(|c| c.as_array()).cloned())
+                .unwrap_or_default();
+            cases.extend(list.into_iter().filter(|c| c.get("expected_dialog").is_some()));
+        }
+        assert!(cases.len() >= 12, "the corpus holds {} expected_dialog cases", cases.len());
+        let mut failures = Vec::new();
+        for tc in &cases {
+            let name = tc["name"].as_str().unwrap();
+            let want = &tc["expected_dialog"];
+            let e = engine_on(tc["setup_svg"].as_str().unwrap());
+            let mut last = (String::new(), String::new());
+            for act in tc["actions"].as_array().unwrap() {
+                last = dispatch(e, &act.to_string());
+            }
+            let (reply, err) = &last;
+            let reply_dialog = serde_json::from_str::<serde_json::Value>(reply).ok()
+                .and_then(|v| v.get("dialog").cloned());
+            if reply_dialog.as_ref() != Some(&want["id"]) {
+                failures.push(format!("{name}: the reply names dialog {reply_dialog:?}, want {} (reply {reply:?}, err {err})", want["id"]));
+                unsafe { jas_engine_free(e) };
+                continue;
+            }
+            let store = engine_of(e).store.borrow();
+            if store.dialog_id() != want["id"].as_str() {
+                failures.push(format!("{name}: the store holds dialog {:?}", store.dialog_id()));
+            }
+            let ctx = store.eval_context();
+            for (section, scope) in [("params", "param"), ("state", "dialog")] {
+                let Some(keys) = want.get(section).and_then(|v| v.as_object()) else { continue };
+                for (key, value) in keys {
+                    match ctx.get(scope).and_then(|s| s.get(key)) {
+                        None => failures.push(format!("{name}: {section} has no key {key:?}")),
+                        Some(have) if !crate::cross_language_test::tests::json_value_eq(have, value) =>
+                            failures.push(format!("{name}: {section}.{key} is {have}, the corpus pins {value}")),
+                        Some(_) => {}
+                    }
+                }
+            }
+            drop(store);
+            unsafe { jas_engine_free(e) };
+        }
+        let mut unequal: Vec<&str> = failures.iter()
+            .filter(|f| !f.contains(": the reply names dialog") && !f.contains(": the store holds dialog"))
+            .map(|f| f.split(':').next().unwrap()).collect();
+        unequal.sort();
+        unequal.dedup();
+        let opening: Vec<&String> = failures.iter()
+            .filter(|f| f.contains(": the reply names dialog") || f.contains(": the store holds dialog"))
+            .collect();
+        assert!(opening.is_empty(), "{} of {} cases did not open their dialog:\n{opening:#?}", opening.len(), cases.len());
+        let new_gaps: Vec<&String> = failures.iter()
+            .filter(|f| !ENGINE_DIALOG_VALUE_GAPS.contains(&f.split(':').next().unwrap())).collect();
+        assert!(new_gaps.is_empty(), "values the engine's dialog does not match, outside the declared gaps:\n{new_gaps:#?}");
+        let closed: Vec<&&str> = ENGINE_DIALOG_VALUE_GAPS.iter().filter(|c| !unequal.contains(c)).collect();
+        assert!(closed.is_empty(), "these declared gaps now pass: remove them from ENGINE_DIALOG_VALUE_GAPS: {closed:?}");
+    }
+
+    /// The `expected_dialog` cases whose dialog the engine OPENS with values the
+    /// corpus does not pin (2026-10-14, the day the door was cut: 111 values in
+    /// these 8 cases; the other 4 cases are equal). Each is a context the
+    /// engine's action route does not yet build; see the test above.
+    const ENGINE_DIALOG_VALUE_GAPS: [&str; 8] = [
+        "new_swatch_opens_swatch_options_with_the_active_fill",
+        "open_artboard_options_reads_the_named_artboard",
+        "open_boolean_options_opens_with_the_state_defaults",
+        "open_color_picker_fill_starts_on_the_fill_colour",
+        "open_document_setup_reads_back_what_confirm_wrote",
+        "open_layer_options_create_opens_on_the_defaults",
+        "open_layer_options_edit_reads_the_layer_and_keeps_the_defaults",
+        "open_print_dialog_opens_on_the_declared_defaults",
+    ];
+
+    /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's
+    /// close box. `jas_dialog_dismiss` closes the open dialog as `close_dialog`
+    /// does (a preview snapshot no OK action cleared is restored), and says
+    /// whether one was open: 1 closed · 0 none was open · 255 a null engine.
+    #[test]
+    fn dialog_dismiss_closes_the_open_dialog_and_restores_its_preview() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("complex_document.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_boolean_options"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "boolean_options", "{reply}");
+        // A preview target, written while the dialog is open, is put back.
+        {
+            let mut store = engine_of(e).store.borrow_mut();
+            store.set("zz_preview", serde_json::json!("before"));
+            let mut targets = std::collections::HashMap::new();
+            targets.insert("zz_preview".to_string(), "zz_preview".to_string());
+            store.capture_dialog_snapshot(&targets);
+            store.set("zz_preview", serde_json::json!("during"));
+        }
+        assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
+        let store = engine_of(e).store.borrow();
+        assert_eq!(store.dialog_id(), None, "dismissed");
+        assert_eq!(store.get("zz_preview"), &serde_json::json!("before"), "the preview is restored");
+        drop(store);
+        assert_eq!(unsafe { jas_dialog_dismiss(e) }, 0, "none is open now");
+        assert_eq!(unsafe { jas_dialog_dismiss(std::ptr::null_mut()) }, 255);
+        unsafe { jas_engine_free(e) };
+    }
+
     fn engine_on(fixture: &str) -> *mut JasEngine {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
@@ -2881,11 +3060,9 @@ mod tests {
             // Undo and redo: the shell sends them as ops (`{"op":"undo"}`).
             "redo -> Logged:redo",
             "undo -> Logged:undo",
-            // Dialogs: no engine dialog route yet (census lever 2).
-            "open_document_setup -> Dialog:document_setup",
-            "open_print_dialog -> Dialog:print",
-            "save_appearance_as -> Dialog:appearance_save_as",
-            "save_workspace_as -> Dialog:workspace_save_as",
+            // Dialogs open in the engine now (the dialog door, 2026-10-14), so
+            // `open_document_setup`, `open_print_dialog`, `save_appearance_as`
+            // and `save_workspace_as` left this list.
             // Effects no engine runs yet: a new tab, the pane layout.
             "new_document -> UnknownEffect:create_child",
             "reset_workspace -> UnknownEffect:reset_layout",
@@ -3361,7 +3538,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "doc_changed"], "{reply}");
+        assert_eq!(keys, vec!["changed", "dialog", "doc_changed"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -3385,7 +3562,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"doc_changed":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"dialog":null,"doc_changed":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -3441,13 +3618,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"doc_changed":true}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"dialog":null,"doc_changed":true}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"doc_changed":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"dialog":null,"doc_changed":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
@@ -4555,26 +4732,24 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// **A12 (W2b-12).** The engine has no dialog door, so a behavior that
-    /// opens a dialog is refused by the dialog's name, and nothing of its
-    /// batch runs. Until A12, New Brush with a selection RAN: it opened the
-    /// dialog in the engine's store, which no shell can show, and replied as a
-    /// success with the error channel empty.
+    /// **The dialog door (it replaces A12, W2b-12).** A behavior that opens a
+    /// dialog opens it in the engine's store, and the reply NAMES it. Before
+    /// A12, New Brush with a selection did open it there, and replied as a
+    /// plain success, so no shell could know a dialog was waiting; A12 then
+    /// refused it by name. The reply's `dialog` is what makes the open
+    /// observable, so it is pinned here beside the store.
     #[test]
-    fn panel_behavior_refuses_a_dialog_by_name() {
+    fn panel_behavior_opens_a_dialog_and_names_it() {
         let _counters = crate::ffi_instr::test_lock::lock();
         let e = stroked_engine();
         let _ = plan_of(e, "brushes_panel_content", 228, 0);
         let before = doc_json(e);
-        let store_before = engine_of(e).store.borrow().eval_context();
         let (reply, err) = behave(e, "brushes_panel_content",
                                   r#"{"widget":"bp_new_brush_btn","event":"click"}"#);
-        assert_eq!(err, refusal("PlatformEffect", "Dialog:brush_options"));
-        assert_eq!(reply, "");
-        assert_eq!(doc_json(e), before);
-        assert_eq!(engine_of(e).store.borrow().dialog_id(), None,
-                   "the refused batch opened a dialog on the live store");
-        assert_eq!(engine_of(e).store.borrow().eval_context(), store_before);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "brush_options", "{reply}");
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("brush_options"));
+        assert_eq!(doc_json(e), before, "opening a dialog does not edit the document");
         unsafe { jas_engine_free(e) };
     }
 
