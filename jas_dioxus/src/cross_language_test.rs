@@ -3024,6 +3024,39 @@ mod tests {
         assert_action_dialog(tc, &st, &deferred);
     }
 
+    /// JSON equality with ONE number type, as JSON and the reference have it:
+    /// `72` equals `72.0`, while `true` stays apart from `1`. serde_json's own
+    /// `==` keeps an integer apart from a float, so a dialog value that the
+    /// evaluator made integral (`72`) failed against the corpus's `72.0`.
+    // Its only caller, `assert_action_dialog`, is `web`-gated; the function
+    // and its test are not, so the native lane verifies it too.
+    #[cfg_attr(not(feature = "web"), allow(dead_code))]
+    fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+        use serde_json::Value as V;
+        match (a, b) {
+            (V::Number(x), V::Number(y)) => x.as_f64() == y.as_f64(),
+            (V::Array(x), V::Array(y)) => {
+                x.len() == y.len() && x.iter().zip(y).all(|(p, q)| json_value_eq(p, q))
+            }
+            (V::Object(x), V::Object(y)) => {
+                x.len() == y.len()
+                    && x.iter().all(|(k, p)| y.get(k).is_some_and(|q| json_value_eq(p, q)))
+            }
+            _ => a == b,
+        }
+    }
+
+    #[test]
+    fn json_value_eq_has_one_number_type_and_keeps_booleans_apart() {
+        use serde_json::json;
+        assert!(json_value_eq(&json!(72), &json!(72.0)));
+        assert!(json_value_eq(&json!({"a": [1, 2.5]}), &json!({"a": [1.0, 2.5]})));
+        assert!(!json_value_eq(&json!(1), &json!(true)));
+        assert!(!json_value_eq(&json!(0.0), &json!(false)));
+        assert!(!json_value_eq(&json!(72), &json!(72.5)));
+        assert!(!json_value_eq(&json!({"a": 1}), &json!({"a": 1, "b": 2})));
+    }
+
     #[cfg(feature = "web")]
     /// OPTIONAL assertion: `expected_dialog`, `{"id", "params": {..},
     /// "state": {..}}`, the dialog the action OPENS. `params` and `state` are
@@ -3062,7 +3095,10 @@ mod tests {
                 let Some(have) = got.get(key) else {
                     panic!("Action test '{name}': the opened dialog's {section} has no key {key:?}: {got:?}")
                 };
-                assert_eq!(have, value, "Action test '{name}': dialog {section}.{key}");
+                assert!(
+                    json_value_eq(have, value),
+                    "Action test '{name}': dialog {section}.{key} is {have} but the corpus pins {value}"
+                );
             }
         }
     }

@@ -1972,6 +1972,10 @@ pub(crate) fn build_active_document_view(
             m.insert("selection_is_single_brushed_stroke".to_string(), serde_json::Value::Bool(false));
             // No document: no recent colours (`active_document.recent_colors`).
             m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
+            // No document: nothing to save (`runtime_contexts.yaml` defaults).
+            m.insert("is_modified".to_string(), serde_json::Value::Bool(false));
+            m.insert("has_filename".to_string(), serde_json::Value::Bool(false));
+            m.insert("filename".to_string(), serde_json::Value::String(String::new()));
         }
         return empty;
     };
@@ -2209,6 +2213,15 @@ pub(crate) fn build_active_document_view(
     // (`runtime_contexts.yaml`), which Color and Swatches both read.
     if let Some(m) = view.as_object_mut() {
         m.insert("recent_colors".to_string(), serde_json::json!(tab.model.recent_colors));
+        // The document's save state (`runtime_contexts.yaml`), as the menu
+        // context has it (`menu_bar.rs`). Until 2026-10-14 only menus saw it,
+        // so `close_tab`'s `if active_document.is_modified` was always false
+        // and an edited tab closed without the Save Changes prompt.
+        // `filename` is the name the tab shows (`Untitled-N` until a save);
+        // `has_filename` says whether it has been saved.
+        m.insert("is_modified".to_string(), serde_json::json!(tab.model.is_modified()));
+        m.insert("has_filename".to_string(), serde_json::json!(!tab.model.filename.starts_with("Untitled-")));
+        m.insert("filename".to_string(), serde_json::json!(tab.model.filename));
     }
     view
 }
@@ -13850,6 +13863,29 @@ mod tests {
             ds.state.get("x_stored"),
             Some(&serde_json::json!(100))
         );
+    }
+
+    /// `close_tab` asks `active_document.is_modified` and passes
+    /// `active_document.filename` to Save Changes, so the view publishes the
+    /// document's save state as the menu context does: the name the tab shows,
+    /// and whether it has been saved. Mirrors Swift
+    /// `activeDocumentViewPublishesTheSaveState`.
+    #[test]
+    fn the_active_document_view_publishes_the_save_state() {
+        let mut st = make_state_with_artboards(&["aaa00001"]);
+        let untitled = super::build_active_document_view(&st);
+        assert!(untitled["filename"].as_str().is_some_and(|f| f.starts_with("Untitled-")), "{}", untitled["filename"]);
+        assert_eq!(untitled["has_filename"], serde_json::json!(false));
+        assert_eq!(untitled["is_modified"], serde_json::json!(false));
+        st.tabs[st.active_tab].model.filename = "drawing.svg".to_string();
+        let named = super::build_active_document_view(&st);
+        assert_eq!(named["filename"], serde_json::json!("drawing.svg"));
+        assert_eq!(named["has_filename"], serde_json::json!(true));
+        st.tabs.clear();
+        let none = super::build_active_document_view(&st);
+        assert_eq!(none["filename"], serde_json::json!(""));
+        assert_eq!(none["has_filename"], serde_json::json!(false));
+        assert_eq!(none["is_modified"], serde_json::json!(false));
     }
 
     #[test]

@@ -273,6 +273,12 @@ private func evalExpr(_ expr: Any?, store: StateStore, ctx: [String: Any]) -> Va
     return evaluate(exprStr, context: evalCtx)
 }
 
+/// A bare identifier: non-empty, letters, digits and `_` only (Rust's
+/// `dispatch_param_value` test, `char::is_alphanumeric`).
+private func isBareIdentifier(_ s: String) -> Bool {
+    !s.isEmpty && s.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
+}
+
 private func valueToAny(_ v: Value) -> Any? {
     switch v {
     case .null: return nil
@@ -295,7 +301,7 @@ private func stateDefaults(_ stateDefs: [String: Any]) -> [String: Any] {
     var defaults: [String: Any] = [:]
     for (key, defn) in stateDefs {
         if let d = defn as? [String: Any] {
-            defaults[key] = d["default"]
+            defaults[key] = d["default"] ?? NSNull()
         } else {
             defaults[key] = defn
         }
@@ -695,15 +701,18 @@ private func runOne(
                     let val = evalExpr(v, store: store, ctx: ctx)
                     if let any = valueToAny(val) {
                         resolved[k] = any
-                    } else if let exprStr = v as? String {
-                        // Bare-identifier convention used in YAML params
-                        // like `{ target: artboard }`: when the
-                        // expression evaluates to null, treat the raw
-                        // string as a literal so the value flows through.
-                        // Without this, dispatch param resolution dropped
-                        // bare-identifier values and downstream
-                        // `param.<key>` reads silently became nil.
+                    } else if let exprStr = v as? String, isBareIdentifier(exprStr) {
+                        // A BARE identifier that evaluates to null is its own
+                        // name: `{ target: artboard }` is the string
+                        // "artboard" (Rust `dispatch_param_value`, the
+                        // reference's `_dispatch_param`). Until 2026-10-13
+                        // ANY null fell back to its text, so a null path
+                        // (`state.absent`) dispatched as "state.absent".
                         resolved[k] = exprStr
+                    } else {
+                        // A null is kept as NSNull: assigning nil would
+                        // remove the key, and the other ports keep it.
+                        resolved[k] = NSNull()
                     }
                 }
                 dispatchCtx["param"] = resolved
@@ -743,7 +752,9 @@ private func runOne(
         var resolvedParams: [String: Any] = [:]
         for (k, v) in rawParams {
             let val = evalExpr(v, store: store, ctx: ctx)
-            resolvedParams[k] = valueToAny(val)
+            // A null param is KEPT as NSNull: assigning nil would remove the
+            // key, and the reference's `open_dialog` keeps it as None.
+            resolvedParams[k] = valueToAny(val) ?? NSNull()
         }
 
         // Extract per-state get / set props so dialog widget edits

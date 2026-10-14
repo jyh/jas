@@ -219,3 +219,24 @@ import Foundation
     ColorPanel.pushRecentColor("#ABCDEF", model: model)
     #expect(model.recentColors == ["#abcdef"], "one colour, one entry: \(model.recentColors)")
 }
+
+/// `close_tab` asks `active_document.is_modified` and passes
+/// `active_document.filename` to Save Changes, so the view publishes the
+/// document's save state as the menu context does: the name the tab shows, and
+/// whether it has been saved. Mirrors Rust
+/// `the_active_document_view_publishes_the_save_state`.
+@Test func activeDocumentViewPublishesTheSaveState() {
+    let model = Model(document: Document(layers: [Layer(children: [])]))
+    let untitled = buildActiveDocumentView(model: model)
+    #expect((untitled["filename"] as? String)?.hasPrefix("Untitled-") == true)
+    #expect(untitled["has_filename"] as? Bool == false)
+    #expect(untitled["is_modified"] as? Bool == false)
+    model.filename = "drawing.svg"
+    let named = buildActiveDocumentView(model: model)
+    #expect(named["filename"] as? String == "drawing.svg")
+    #expect(named["has_filename"] as? Bool == true)
+    let none = buildActiveDocumentView(model: nil)
+    #expect(none["filename"] as? String == "")
+    #expect(none["has_filename"] as? Bool == false)
+    #expect(none["is_modified"] as? Bool == false)
+}

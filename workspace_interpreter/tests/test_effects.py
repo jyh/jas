@@ -659,6 +659,30 @@ class TestDispatchEffect:
         run_effects([{"dispatch": "set_x_to_42"}], {}, store, actions=actions)
         assert store.get("x") == 42
 
+    def test_a_dispatch_param_that_is_a_bare_identifier_is_its_own_name(self):
+        """`params: {target: artboard}` means the STRING "artboard": a bare
+        identifier that evaluates to null is its own name. A null from a PATH
+        stays null, a path that resolves keeps its value, and a YAML literal
+        (`copy: true`) is that value. This is Rust's `dispatch_param_value`
+        and Swift's dispatch; the reference evaluated `str(v)`, so 125 bare
+        words in the bundle (`cap: butt`, `tool: selection`) dispatched null
+        and `copy: true` (`str(True)` is "True") did too."""
+        store = StateStore({"five": 5})
+        actions = {"zz_take": {"effects": [{"set": {
+            "got": "param.target", "dotted": "param.dotted",
+            "known": "param.known", "flag": "param.flag",
+        }}]}}
+        run_effects([{"dispatch": {"action": "zz_take", "params": {
+            "target": "artboard",
+            "dotted": "state.zz_absent",
+            "known": "state.five",
+            "flag": True,
+        }}}], {}, store, actions=actions)
+        assert store.get("got") == "artboard"
+        assert store.get("dotted") is None
+        assert store.get("known") == 5
+        assert store.get("flag") is True
+
 
 class TestMultipleEffects:
     def test_sequential_effects(self):

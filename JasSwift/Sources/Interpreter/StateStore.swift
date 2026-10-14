@@ -301,7 +301,11 @@ public class StateStore {
                 return  // read-only prop — ignore writes
             }
         }
-        dialog[key] = value
+        // A nil value is stored as NSNull, as `setPanel` does: assigning nil
+        // removes the key, and the reference's `set_dialog` keeps it as None.
+        // Until 2026-10-13 an init that evaluated to null (Swatch Options in
+        // create mode, with no swatch name passed) deleted the dialog's key.
+        dialog[key] = value ?? NSNull()
     }
 
     public func setDialog(_ key: String, _ value: Any?) {

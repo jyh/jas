@@ -8892,7 +8892,7 @@
         },
         "filename": {
           "type": "string",
-          "description": "The active document's filename (empty string if untitled)"
+          "description": "The name the active document's tab shows: its file name once saved, `Untitled-N` until then (has_filename says which). The empty string only when no document is open. Save Changes shows it."
         },
         "any_modified": {
           "type": "bool",
@@ -28238,14 +28238,11 @@
         }
       },
       "init": {
-        "brush_name": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name : \"\"",
-        "brush_type": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type : \"calligraphic\"",
-        "angle": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle : 0",
-        "angle_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle_variation : { mode: \"fixed\" }",
-        "roundness": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness : 100",
-        "roundness_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness_variation : { mode: \"fixed\" }",
-        "size": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size : 5",
-        "size_variation": "param.brush_slug != null ? data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size_variation : { mode: \"fixed\" }"
+        "brush_name": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name else dialog.brush_name",
+        "brush_type": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type else dialog.brush_type",
+        "angle": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle else dialog.angle",
+        "roundness": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness else dialog.roundness",
+        "size": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size else dialog.size"
       },
       "content": {
         "type": "container",
@@ -29566,7 +29563,7 @@
         "children": [
           {
             "type": "text",
-            "content": "Cutting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+            "content": "Cutting will leave {{param.count}} live {{ if param.count == 1 then \"instance\" else \"instances\" }} empty."
           },
           {
             "type": "row",
@@ -29611,7 +29608,7 @@
         "children": [
           {
             "type": "text",
-            "content": "Deleting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+            "content": "Deleting will leave {{param.count}} live {{ if param.count == 1 then \"instance\" else \"instances\" }} empty."
           },
           {
             "type": "row",
@@ -29656,7 +29653,7 @@
         "children": [
           {
             "type": "text",
-            "content": "Deleting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+            "content": "Deleting will leave {{param.count}} live {{ if param.count == 1 then \"instance\" else \"instances\" }} empty."
           },
           {
             "type": "row",
@@ -29701,7 +29698,7 @@
         "children": [
           {
             "type": "text",
-            "content": "Deleting will leave {{param.count}} live {{ param.count == 1 ? \"instance\" : \"instances\" }} empty."
+            "content": "Deleting will leave {{param.count}} live {{ if param.count == 1 then \"instance\" else \"instances\" }} empty."
           },
           {
             "type": "row",
@@ -30838,13 +30835,9 @@
       },
       "init": {
         "name": "param.name",
-        "color": "param.color",
-        "color_preset": "param.color_preset",
         "lock": "param.lock",
         "show": "param.show",
-        "preview": "param.preview",
-        "dim_images": "param.dim_images",
-        "dim_percentage": "param.dim_percentage"
+        "preview": "param.preview"
       },
       "content": {
         "type": "container",

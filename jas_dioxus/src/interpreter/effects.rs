@@ -13696,6 +13696,7 @@ mod tests {
         let actions = serde_json::json!({
             "zz_take": {"effects": [{"set": {
                 "got": "param.target", "dotted": "param.dotted", "known": "param.known",
+                "flag": "param.flag",
             }}]},
         });
         let mut store = StateStore::new();
@@ -13707,12 +13708,16 @@ mod tests {
                 "dotted": "state.zz_absent",
                 // A path that resolves keeps its value.
                 "known": "state.five",
+                // A YAML literal is that value (`copy: true` in the transform
+                // dialogs; the reference read `str(True)` as null).
+                "flag": true,
             }}})],
             &serde_json::json!({}), &mut store, None, Some(&actions), None, None);
         assert!(report.all_handled(), "{report:?}");
         assert_eq!(store.get("got"), &serde_json::json!("artboard"));
         assert_eq!(store.get("dotted"), &serde_json::Value::Null);
         assert_eq!(store.get("known"), &serde_json::json!(5));
+        assert_eq!(store.get("flag"), &serde_json::json!(true));
     }
 }
 

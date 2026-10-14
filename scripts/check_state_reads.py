@@ -198,7 +198,13 @@ STATE_HEADS = ("state", "panel", "tool", "dialog")
 # A string is worth parsing only if it mentions one of those heads followed by
 # a dot. `(?<![\w.])` keeps `active_document.panel` and `foo.state.bar` out: a
 # head is only a head at the START of a path.
-HEAD_RE = re.compile(r"(?<![\w.])(" + "|".join(STATE_HEADS) + r")\.")
+# EVERY namespace an expression can read, not only the state tables: a string
+# that names any of them is an expression, so it must PARSE, even when it has
+# no state read to check (`param.count == 1 ? ...` reads only `param`). Reads
+# are still counted against STATE_HEADS alone (`extract_reads`).
+PARSE_HEADS = STATE_HEADS + ("param", "data", "active_document", "workspace",
+                             "node", "item", "event", "theme", "prefs")
+HEAD_RE = re.compile(r"(?<![\w.])(" + "|".join(PARSE_HEADS) + r")\.")
 
 # `{{ }}` interpolation regions, the same pattern `expr.evaluate_text` uses.
 INTERP_RE = re.compile(r"\{\{(.+?)\}\}")
@@ -1063,6 +1069,23 @@ def _self_test():
                         "site and the string")
     if unreadable_refusal(reg) is not None:
         failures.append("the clean fixture reported an unparseable expression")
+
+    # 4b. AN UNPARSEABLE EXPRESSION THAT NAMES NO *STATE* HEAD IS REFUSED TOO.
+    #     A `param.`/`data.`-only string has no state read to check, but the
+    #     runtime still evaluates it, and a parse failure is null. Until
+    #     2026-10-14 such strings were never parsed, so ten `a ? b : c`
+    #     ternaries (Brush Options' whole init, the four orphan-confirm
+    #     messages) evaluated to null in every port while this gate read clean.
+    param_expr = dict(clean)
+    param_expr["workspace/layout.yaml"] = param_expr["workspace/layout.yaml"].replace(
+        'visible: "state.g_flag"', 'visible: "param.g_on ? true : false"')
+    if param_expr["workspace/layout.yaml"] == clean["workspace/layout.yaml"]:
+        failures.append("arm 4b's mutation did not apply (its anchor is gone)")
+    msg = unreadable_refusal(evaluate(param_expr))
+    if msg is None:
+        failures.append("an unparseable param-only expression was not refused")
+    elif "param.g_on" not in msg:
+        failures.append("the param-only refusal did not name the string")
 
     # 5. THE CLEAN FIXTURE IS GREEN, and EVERY collector found something.
     if reg.findings:
