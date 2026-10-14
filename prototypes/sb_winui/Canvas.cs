@@ -638,9 +638,11 @@ internal sealed unsafe class Canvas : IDisposable
             var docSha = doc.Length == 0 ? "EMPTY" : Sha256Of(doc);
             var planSha = plan.Length == 0 ? "NONE" : Sha256Of(plan);
             // §260: the canvas strip's tabs (name and active state), so `tree`
-            // also watches the document tab; NONE when the strip is not open.
-            var tabs = Panes.TryGetValue(CanvasPaneKey, out var strip) ? PanelWire.TabReading(strip.PlanJson) : null;
-            var tabSha = tabs is null ? "NONE" : Sha256Of(tabs);
+            // also watches the document tab. §265: NONE when the strip is not
+            // open, UNREADABLE when its plan does not parse; both are written as
+            // the sha too, never hashed, so neither can pass for a reading.
+            var tabs = PanelWire.TabProbeReading(Panes.TryGetValue(CanvasPaneKey, out var strip), strip?.PlanJson);
+            var tabSha = tabs is "NONE" or "UNREADABLE" ? tabs : Sha256Of(tabs);
             var frame = _lastHash ?? "NONE";
             var body = "{"
                 + $"\"seq\":{_probeSeq},"
