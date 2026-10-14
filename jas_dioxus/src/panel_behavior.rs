@@ -76,7 +76,9 @@ use serde_json::{json, Map, Value};
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::colour_host;
-use crate::interpreter::effects::{dialog_id, run_effects_hosted, EffectHost, Unhandled};
+use crate::interpreter::effects::{
+    close_dialog_in, open_dialog_in, run_effects_hosted, EffectHost, Unhandled,
+};
 use crate::interpreter::expr::eval;
 use crate::interpreter::state_store::StateStore;
 use crate::interpreter::character_host::{self, CHARACTER_PANEL};
@@ -201,9 +203,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * A write to one of the Properties panel's eight fields applies it to the
 ///   selection through `properties_host` (W2b-5), as the reference's
 ///   `subscribe_properties_panel` does.
-/// * `open_dialog` is REFUSED by the dialog's name (A12). The engine has no
-///   dialog door, and the runner's own arm would open the dialog in a store no
-///   shell can show, then report success.
+/// * `open_dialog` is NOT claimed: the runner's own arm opens the dialog in
+///   the engine's store (the dialog door, design 2026-10-14, which replaced
+///   A12's refusal), and the FFI reply names it so a shell can show it.
 ///
 /// Everything else is declined, so the runner reports it.
 pub struct EngineHost {
@@ -240,7 +242,7 @@ impl EffectHost for EngineHost {
     /// W2b-17: the Symbols and Concepts panels' native verbs, through
     /// `symbols_host`, the one implementation the web calls too. The panel
     /// selection is read from the STORE, where the YAML's `set_panel_state`
-    /// writes it. The orphan-confirm dialog is refused by name (A12).
+    /// writes it. The orphan confirm opens in the engine's store (the dialog door).
     fn run_action(
         &mut self,
         action: &str,
@@ -259,12 +261,25 @@ impl EffectHost for EngineHost {
         };
         let (sym, con) = (read("symbols", "selected_symbol"), read("concepts", "selected_concept"));
         match run(model, action, params, sym.as_deref(), con.as_deref()) {
-            Some(Outcome::Dialog { id, .. }) => Some(Some(Unhandled::Dialog(id))),
+            // The dialog door (design 2026-10-14): the confirm opens in the
+            // engine's store with the params the verb computed, exactly as
+            // an `open_dialog` effect opens one.
+            Some(Outcome::Dialog { id, params }) => {
+                let ws = crate::interpreter::workspace::Workspace::load();
+                let Some(def) = ws.as_ref().and_then(|w| w.dialog(&id)) else {
+                    return Some(Some(Unhandled::UnknownDialog(id)));
+                };
+                let params = params.as_object()
+                    .map(|o| o.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                open_dialog_in(&id, def, params, &Value::Null, store, Some(model));
+                Some(None)
+            }
             Some(Outcome::SelectSymbol(id)) => {
                 store.set_panel("symbols", "selected_symbol", id.map(Value::String).unwrap_or(Value::Null));
                 Some(None)
             }
             Some(Outcome::CloseDialog { cleared_selection }) => {
+                close_dialog_in(store, Some(model));
                 if cleared_selection {
                     store.set_panel("symbols", "selected_symbol", Value::Null);
                 }
@@ -272,10 +287,6 @@ impl EffectHost for EngineHost {
             }
             Some(Outcome::Done) | None => Some(None),
         }
-    }
-
-    fn refuse(&mut self, key: &str, arg: &Value) -> Option<Unhandled> {
-        (key == "open_dialog").then(|| Unhandled::Dialog(dialog_id(arg).to_string()))
     }
 
     /// A11: a write to a Stroke render key applies that field of the Stroke
@@ -1101,18 +1112,24 @@ mod tests {
         }
     }
 
-    /// A12: `open_dialog` is refused by the dialog's id, in both of the
-    /// argument's spellings, and never run.
+    /// THE DIALOG DOOR (it replaces A12, which refused `open_dialog` by name):
+    /// the engine host neither refuses nor claims `open_dialog`, in either of
+    /// the argument's spellings, so the runner's own arm opens the dialog in
+    /// the engine's store, as the reference's does.
     #[test]
-    fn the_engine_host_refuses_a_dialog_by_its_id() {
-        let mut host = EngineHost { artboard_selection: vec![] };
-        let mut store = StateStore::new();
-        let mut model = misaligned(&[0]);
-        for (arg, id) in [(json!({"id": "brush_options", "params": {}}), "brush_options"),
-                          (json!("artboard_options"), "artboard_options"),
-                          (json!(7), "")] {
-            assert_eq!(host.refuse("open_dialog", &arg), Some(Unhandled::Dialog(id.into())));
-            assert!(!host.run("open_dialog", &arg, &mut store, Some(&mut model)));
+    fn the_engine_host_lets_the_runner_open_a_dialog() {
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let dialogs = ws.data()["dialogs"].clone();
+        for arg in [json!({"id": "boolean_options", "params": {}}), json!("boolean_options")] {
+            let mut host = EngineHost { artboard_selection: vec![] };
+            let mut store = StateStore::new();
+            let mut model = misaligned(&[0]);
+            assert_eq!(host.refuse("open_dialog", &arg), None, "{arg}");
+            assert!(!host.run("open_dialog", &arg, &mut store, Some(&mut model)), "{arg}");
+            let report = run_effects_hosted(&[json!({"open_dialog": arg})], &json!({}), &mut store,
+                                            Some(&mut model), None, Some(&dialogs), None, &mut host);
+            assert!(report.all_handled(), "{report:?}");
+            assert_eq!(store.dialog_id(), Some("boolean_options"));
         }
     }
 
