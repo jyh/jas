@@ -128,5 +128,38 @@
         "discard_white_overprint": true
       }
     }
+  },
+  {
+    "name": "open_artboard_options_reads_the_named_artboard",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "ab2"
+        }
+      }
+    ],
+    "expected_json": "open_artboard_options_reads_the_named_artboard_expected.json",
+    "expected_dialog": {
+      "id": "artboard_options",
+      "params": {
+        "artboard_id": "ab2"
+      },
+      "state": {
+        "name": "Board Two",
+        "width": 72.0,
+        "height": 72.0,
+        "x_stored": 90.0,
+        "y_stored": 0.0,
+        "fill": "transparent",
+        "show_center_mark": false,
+        "show_cross_hairs": false,
+        "show_video_safe_areas": false,
+        "video_ruler_pixel_aspect_ratio": 1.0,
+        "fade_region_outside_artboard": true,
+        "update_while_dragging": true
+      }
+    }
   }
 ]

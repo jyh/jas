@@ -5716,6 +5716,30 @@ private func assertActionTest(_ tc: [String: Any]) {
 /// Swift opens a dialog INTO the model's store (`open_dialog` in
 /// `Effects.swift`), so it is read there. Rust defers it and opens it as the
 /// web does (`assert_action_dialog`). Census lever 2.
+/// A value as canonical JSON, for comparing a port's value with the corpus's.
+/// `JSONSerialization` keeps a CFBoolean apart from a number, so `true` is not
+/// `1`, while `72` and `72.0` agree (JSON has one number type). The dialog
+/// block first used `keyCanonValue`, written for the key corpus, which has no
+/// non-string scalars: it reads a parsed `1.0` as `true` and `0.0` as
+/// `false`, so a Bool where the corpus pins 1 would have passed.
+func jsonCanonValue(_ v: Any?) -> String {
+    let wrapped: [Any] = [v ?? NSNull()]
+    guard JSONSerialization.isValidJSONObject(wrapped),
+          let data = try? JSONSerialization.data(withJSONObject: wrapped, options: [.sortedKeys, .fragmentsAllowed])
+    else { return "<not JSON: \(String(describing: v))>" }
+    return String(data: data, encoding: .utf8)!
+}
+
+@Test func jsonCanonKeepsABooleanApartFromItsNumber() throws {
+    let parsed = try JSONSerialization.jsonObject(with: Data("[1.0, 0.0, true, false, 72.0]".utf8)) as! [Any]
+    #expect(jsonCanonValue(parsed[0]) != jsonCanonValue(true))
+    #expect(jsonCanonValue(parsed[1]) != jsonCanonValue(false))
+    #expect(jsonCanonValue(parsed[2]) == jsonCanonValue(true))
+    #expect(jsonCanonValue(parsed[3]) == jsonCanonValue(false))
+    #expect(jsonCanonValue(parsed[0]) == jsonCanonValue(1))
+    #expect(jsonCanonValue(parsed[4]) == jsonCanonValue(72))
+}
+
 private func assertActionDialog(_ tc: [String: Any], _ model: Model) {
     guard let expected = tc["expected_dialog"] as? [String: Any] else { return }
     let name = tc["name"] as! String
@@ -5738,8 +5762,8 @@ private func assertActionDialog(_ tc: [String: Any], _ model: Model) {
                 #expect(Bool(false), "Action test '\(name)': the opened dialog's \(section) has no key '\(key)'")
                 continue
             }
-            #expect(keyCanonValue(have) == keyCanonValue(value),
-                    "Action test '\(name)': dialog \(section).\(key) is \(keyCanonValue(have)), the corpus pins \(keyCanonValue(value))")
+            #expect(jsonCanonValue(have) == jsonCanonValue(value),
+                    "Action test '\(name)': dialog \(section).\(key) is \(jsonCanonValue(have)), the corpus pins \(jsonCanonValue(value))")
         }
     }
 }
@@ -5753,11 +5777,7 @@ private func assertActionDialog(_ tc: [String: Any], _ model: Model) {
 private func assertActionPanelScope(_ tc: [String: Any], _ model: Model) {
     guard let expected = tc["expected_panel_scope"] as? [String: Any] else { return }
     let name = tc["name"] as! String
-    func canon(_ v: Any?) -> String {
-        let wrapped: [Any] = [v ?? NSNull()]
-        let data = try! JSONSerialization.data(withJSONObject: wrapped, options: [.sortedKeys, .fragmentsAllowed])
-        return String(data: data, encoding: .utf8)!
-    }
+    let canon = jsonCanonValue
     for (panel, keysAny) in expected {
         let keys = keysAny as! [String: Any]
         let scope = model.stateStore.getPanelState(panel)
