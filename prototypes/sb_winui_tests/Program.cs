@@ -889,6 +889,32 @@ static class Program
         Eq("canvas tabs: a plan with no active rows has no boxes", "",
             Boxes(PanelWire.ActiveBoxes("""{"chrome":[{"path":[0],"type":"container","id":"x","rect":{"x":0,"y":0,"w":9,"h":9},"values":{},"static":{},"display":{}}],"hidden":[]}""")));
         Eq("canvas tabs: an unparseable plan has no boxes", "(null)", Boxes(PanelWire.ActiveBoxes("{")));
+        // §260: the certificate's reading of the tab strip -- each tab's path,
+        // whether it is active, and its label (the text leaf under it) -- so a
+        // regression in the tab's name or its active state fails `tree`.
+        const string tabPlan = """
+            {"chrome":[
+              {"path":[0],"type":"container","id":"canvas_tab_bar","rect":{"x":0,"y":0,"w":1600,"h":24},"values":{"bind.visible":"true"},"static":{},"display":{}},
+              {"path":[0,0],"type":"container","id":"","rect":{"x":0,"y":0,"w":128,"h":24},"values":{"bind.active":"true"},"static":{},"display":{}},
+              {"path":[0,1],"type":"container","id":"","rect":{"x":128,"y":0,"w":128,"h":24},"values":{"bind.active":"false"},"static":{},"display":{}},
+              {"path":[1,0],"type":"container","id":"","rect":{"x":0,"y":30,"w":50,"h":20},"values":{"bind.active":"true"},"static":{},"display":{}}],
+             "leaves":[
+              {"path":[0,0,0],"type":"text","id":"","rect":{"x":8,"y":2,"w":80,"h":20},"values":{"content":"tabréct.svg"},"static":{},"display":{}},
+              {"path":[0,0,1],"type":"icon_button","id":"","rect":{"x":100,"y":4,"w":12,"h":12},"values":{},"static":{"icon":"close"},"display":{}},
+              {"path":[0,1,0],"type":"text","id":"","rect":{"x":136,"y":2,"w":80,"h":20},"values":{},"static":{"content":"Untitled-2"},"display":{}},
+              {"path":[1,0,0],"type":"text","id":"","rect":{"x":0,"y":30,"w":50,"h":20},"values":{"content":"hidden"},"static":{},"display":{}}],
+             "containers":[],"hidden":[[1,0]]}
+            """;
+        Eq("canvas tab reading: each tab's path, active state and label, in plan order, a hidden one skipped",
+            "[0,0]=on:\"tabréct.svg\" [0,1]=off:\"Untitled-2\"", Show(PanelWire.TabReading(tabPlan)));
+        Eq("canvas tab reading: a mutant label reads differently",
+            "False", (PanelWire.TabReading(tabPlan) == PanelWire.TabReading(tabPlan.Replace("tabréct.svg", "tabrect.svg"))).ToString());
+        Eq("canvas tab reading: a mutant active state reads differently",
+            "False", (PanelWire.TabReading(tabPlan) == PanelWire.TabReading(tabPlan.Replace("\"bind.active\":\"false\"", "\"bind.active\":\"true\""))).ToString());
+        Eq("canvas tab reading: a tab without a text leaf reads an empty label", "[0,0]=on:\"\" [0,1]=off:\"\"",
+            Show(PanelWire.TabReading(canvasPlan)));
+        Eq("canvas tab reading: a plan with no tabs reads empty, an unparseable one null", "|(null)",
+            Show(PanelWire.TabReading("""{"chrome":[],"leaves":[],"hidden":[]}""")) + "|" + Show(PanelWire.TabReading("{")));
         Eq("canvas tabs: the surface starts where the plan places it", "24", Show(PanelWire.SurfaceTop(canvasPlan, "drawing_surface")?.ToString()));
         Eq("canvas tabs: a plan without the surface names no top", "(null)|(null)",
             Show(PanelWire.SurfaceTop(canvasPlan, "no_such")?.ToString()) + "|" + Show(PanelWire.SurfaceTop("{", "drawing_surface")?.ToString()));

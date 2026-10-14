@@ -552,6 +552,51 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// §260: the canvas strip as a certificate reads it -- each tab (a row
+    /// <see cref="ActiveBoxes"/> finds) as `path=on|off:"label"`, space-joined in
+    /// plan order, where the label is the first text leaf under the tab's path
+    /// (its resolved `content`, else the literal). Only the engine's answers are
+    /// read, never a rect, so the reading moves when a tab's NAME or ACTIVE STATE
+    /// does and not when the strip is laid out differently. Empty for a plan with
+    /// no tabs; null when the plan does not parse.
+    /// </summary>
+    internal static string? TabReading(string planJson)
+    {
+        var boxes = ActiveBoxes(planJson);
+        if (boxes is null) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(planJson);
+            var leaves = doc.RootElement.TryGetProperty("leaves", out var ls)
+                ? ls.EnumerateArray().ToList() : new List<System.Text.Json.JsonElement>();
+            var parts = new List<string>();
+            foreach (var b in boxes)
+            {
+                var p = System.Text.Json.JsonDocument.Parse(b.Path).RootElement.EnumerateArray().Select(x => x.GetInt64()).ToArray();
+                var label = "";
+                foreach (var l in leaves)
+                {
+                    if (l.GetProperty("type").GetString() != "text") { continue; }
+                    var lp = l.GetProperty("path").EnumerateArray().Select(x => x.GetInt64()).ToArray();
+                    if (lp.Length <= p.Length || !lp.Take(p.Length).SequenceEqual(p)) { continue; }
+                    label = (l.GetProperty("values").TryGetProperty("content", out var v) ? v.GetString() : null)
+                        ?? (l.GetProperty("static").TryGetProperty("content", out var s) ? s.GetString() : null)
+                        ?? "";
+                    break;
+                }
+                var quoted = label.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                parts.Add($"{b.Path}={(b.Active ? "on" : "off")}:\"{quoted}\"");
+            }
+            return string.Join(" ", parts);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+
+    /// <summary>
     /// §255: the y at which the chrome container <paramref name="surfaceId"/>
     /// starts, so the shell's own drawing surface sits where the plan puts it and
     /// the strip above it is the plan's. Null when the plan does not parse or
