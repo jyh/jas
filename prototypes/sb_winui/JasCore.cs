@@ -400,6 +400,16 @@ internal static unsafe class JasCore
     internal static extern byte jas_dialog_dismiss(IntPtr engine);
 
     /// <summary>
+    /// The open dialog's plan: <c>{"open": false}</c>, or <c>{"open": true,
+    /// "id", "summary", "modal", "depth", "plan"}</c> where <c>plan</c> is
+    /// <see cref="jas_panel_plan"/>'s shape for the TOP dialog (<c>depth</c> is 2
+    /// when the Color Picker sits over Layer Options). An empty span only for a
+    /// null engine. Copy the span, then release it with <c>jas_free</c>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_dialog_plan(IntPtr engine, long availW, long availH);
+
+    /// <summary>
     /// The shell names the document it opened or saved (#406): the model's
     /// <c>filename</c>, which the canvas tab shows. ⛔ UTF-8 BYTES, NOT A
     /// STRING (BL5), as <see cref="jas_load_svg"/>. 1 named; 0 refused (null,

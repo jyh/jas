@@ -805,6 +805,27 @@ uint8_t jas_document_mark_saved(struct JasEngine *e);
 uint8_t jas_dialog_dismiss(struct JasEngine *e);
 
 /**
+ * **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
+ * planner over the dialog's `content`, so the shell materializes a dialog
+ * body with the code that materializes a panel. The context is the engine's
+ * scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
+ *
+ * # The reply
+ *
+ * `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
+ * "summary", "modal", "depth", "plan"}`: `depth` is how many dialogs are open
+ * (2 when the Color Picker sits over Layer Options), and `plan` is
+ * [`jas_panel_plan`]'s shape for the TOP dialog.
+ *
+ * A null engine is the empty span. **BL4**: copy the span, then release with
+ * [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+struct JasBytes jas_dialog_plan(struct JasEngine *e, int64_t avail_w, int64_t avail_h);
+
+/**
  * **The shell names the document it opened or saved** (flask §256): the
  * model's `filename`, which the canvas tab shows (`workspace.open_documents`,
  * owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
