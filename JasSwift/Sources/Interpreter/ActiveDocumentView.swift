@@ -40,6 +40,10 @@ public func buildActiveDocumentView(
                 "fade_region_outside_artboard": true,
                 "update_while_dragging": true,
             ] as [String: Any],
+            // No document: nothing to save (`runtime_contexts.yaml` defaults).
+            "is_modified": false,
+            "has_filename": false,
+            "filename": "",
             "document_setup": documentSetupView(.default),
             "print_preferences": printPreferencesView(.default),
             "artboards_count": 0,
@@ -218,6 +222,15 @@ public func buildActiveDocumentView(
             "fade_region_outside_artboard": m.document.artboardOptions.fadeRegionOutsideArtboard,
             "update_while_dragging": m.document.artboardOptions.updateWhileDragging,
         ] as [String: Any],
+        // The document's save state (`runtime_contexts.yaml`), as the menu
+        // context has it (`buildMenuContext`). Until 2026-10-14 only menus saw
+        // it, so `close_tab`'s `if active_document.is_modified` was always
+        // false and an edited tab closed without the Save Changes prompt.
+        // `filename` is the name the tab shows (`Untitled-N` until a save).
+        // Mirrors Rust `build_active_document_view`.
+        "is_modified": m.isModified,
+        "has_filename": !m.filename.hasPrefix("Untitled-"),
+        "filename": m.filename,
         "document_setup": documentSetupView(m.document.documentSetup),
         "print_preferences": printPreferencesView(m.document.printPreferences),
         "artboards_count": m.document.artboards.count,
