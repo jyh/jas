@@ -65,7 +65,8 @@ pub enum Unhandled {
     /// with no catalog.
     UnknownDialog(String),
     /// An `open_dialog` that a host refuses because it has no way to show a
-    /// dialog (the engine, FB wave 2b A12). Carries the dialog's id.
+    /// dialog (the engine did, FB wave 2b A12, until its dialog door). Carries
+    /// the dialog's id.
     Dialog(String),
     /// A write to a target that is not writable: an `active_document.*`
     /// property other than the per-document lists (`list_push`). Carries the
@@ -405,6 +406,106 @@ pub fn value_to_json(v: &Value) -> serde_json::Value {
         }),
         Value::Closure { .. } => serde_json::Value::Null,
     }
+}
+
+/// Open the dialog `dlg_id` (definition `dlg_def`) in `store`, as the
+/// reference's `open_dialog` does: the state defaults and the resolved params,
+/// then the `init` expressions in order, then the preview snapshots and the
+/// `on_change` wiring. The `open_dialog` effect calls it, and so does a hosted
+/// verb that opens a dialog with params it computed itself (the engine's
+/// dialog door; `panel_behavior`'s symbols route).
+pub fn open_dialog_in(
+    dlg_id: &str,
+    dlg_def: &serde_json::Value,
+    resolved_params: Option<std::collections::HashMap<String, serde_json::Value>>,
+    ctx: &serde_json::Value,
+    store: &mut StateStore,
+    mut model: Option<&mut Model>,
+) {
+    // Extract state defaults
+    let mut defaults = std::collections::HashMap::new();
+    if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
+        for (key, defn) in state_defs {
+            let default_val = if let serde_json::Value::Object(d) = defn {
+                d.get("default").cloned().unwrap_or(serde_json::Value::Null)
+            } else {
+                defn.clone()
+            };
+            defaults.insert(key.clone(), default_val);
+        }
+    }
+    // Init dialog
+    store.init_dialog(dlg_id, defaults, resolved_params);
+    // Evaluate init expressions
+    if let Some(serde_json::Value::Object(init_map)) = dlg_def.get("init") {
+        for (key, expr) in init_map {
+            let expr_str = expr.as_str().unwrap_or("");
+            let val = eval_expr(expr_str, store, ctx);
+            store.set_dialog(key, value_to_json(&val));
+        }
+    }
+    // Capture preview snapshot if the dialog declares preview_targets.
+    // Restored on close_dialog unless first cleared by an OK action via
+    // clear_dialog_snapshot.
+    if let Some(serde_json::Value::Object(targets_obj)) = dlg_def.get("preview_targets") {
+        let mut targets = std::collections::HashMap::new();
+        for (k, v) in targets_obj {
+            if let Some(s) = v.as_str() {
+                targets.insert(k.clone(), s.to_string());
+            }
+        }
+        store.capture_dialog_snapshot(&targets);
+    }
+    // Document-level preview snapshot for transform-tool dialogs
+    // (Scale Options / Rotate Options / Shear Options). When the
+    // dialog yaml sets `doc_preview: true`, capture the document
+    // so the on_change-fired apply effects can restore-and-reapply
+    // without polluting undo history. See SCALE_TOOL.md §Preview.
+    if let Some(serde_json::Value::Bool(true)) = dlg_def.get("doc_preview") {
+        if let Some(m) = model.as_deref_mut() {
+            m.capture_preview_snapshot();
+        }
+    }
+    // Wire the dialog's on_change action — fired by run_effects
+    // after any batch that mutated dialog state.
+    if let Some(serde_json::Value::String(s)) = dlg_def.get("on_change") {
+        store.set_dialog_on_change(Some(s.clone()));
+    } else {
+        store.set_dialog_on_change(None);
+    }
+    // Clear any leftover dirty flag from prior dialog sessions so
+    // the very-first init of dialog state does not immediately fire
+    // on_change.
+    store.take_dialog_dirty();
+}
+
+/// Close the open dialog, as the `close_dialog` effect does: a preview
+/// snapshot no OK action cleared is restored first (the Cancel path), for
+/// state and for the document, then the store's dialog slot is emptied.
+pub fn close_dialog_in(store: &mut StateStore, model: Option<&mut Model>) {
+    // Preview restore: if a snapshot survived (i.e., no OK action
+    // cleared it), revert each target to its captured original value.
+    // Phase 0 handles only top-level state keys; deep paths defer to
+    // Phase 8/9 alongside their first real consumer.
+    if let Some(snapshot) = store.dialog_snapshot().cloned() {
+        for (key, value) in snapshot {
+            if !key.contains('.') {
+                store.set(&key, value);
+            }
+        }
+        store.clear_dialog_snapshot();
+    }
+    // Document-level preview restore: if the dialog captured a doc
+    // snapshot at open and the OK path did not call doc.preview.clear,
+    // this is the Cancel path — revert the document and drop the
+    // snapshot. See SCALE_TOOL.md §Preview.
+    if let Some(m) = model {
+        if m.has_preview_snapshot() {
+            m.restore_preview_snapshot();
+            m.clear_preview_snapshot();
+        }
+    }
+    store.close_dialog();
 }
 
 fn run_one<'h>(
@@ -839,18 +940,6 @@ fn run_one<'h>(
                 return;
             }
         };
-        // Extract state defaults
-        let mut defaults = std::collections::HashMap::new();
-        if let Some(serde_json::Value::Object(state_defs)) = dlg_def.get("state") {
-            for (key, defn) in state_defs {
-                let default_val = if let serde_json::Value::Object(d) = defn {
-                    d.get("default").cloned().unwrap_or(serde_json::Value::Null)
-                } else {
-                    defn.clone()
-                };
-                defaults.insert(key.clone(), default_val);
-            }
-        }
         // Resolve params
         let resolved_params = if let Some(serde_json::Value::Object(raw_params)) =
             od.as_object().and_then(|o| o.get("params"))
@@ -865,77 +954,13 @@ fn run_one<'h>(
         } else {
             None
         };
-        // Init dialog
-        store.init_dialog(dlg_id, defaults, resolved_params);
-        // Evaluate init expressions
-        if let Some(serde_json::Value::Object(init_map)) = dlg_def.get("init") {
-            for (key, expr) in init_map {
-                let expr_str = expr.as_str().unwrap_or("");
-                let val = eval_expr(expr_str, store, ctx);
-                store.set_dialog(key, value_to_json(&val));
-            }
-        }
-        // Capture preview snapshot if the dialog declares preview_targets.
-        // Restored on close_dialog unless first cleared by an OK action via
-        // clear_dialog_snapshot.
-        if let Some(serde_json::Value::Object(targets_obj)) = dlg_def.get("preview_targets") {
-            let mut targets = std::collections::HashMap::new();
-            for (k, v) in targets_obj {
-                if let Some(s) = v.as_str() {
-                    targets.insert(k.clone(), s.to_string());
-                }
-            }
-            store.capture_dialog_snapshot(&targets);
-        }
-        // Document-level preview snapshot for transform-tool dialogs
-        // (Scale Options / Rotate Options / Shear Options). When the
-        // dialog yaml sets `doc_preview: true`, capture the document
-        // so the on_change-fired apply effects can restore-and-reapply
-        // without polluting undo history. See SCALE_TOOL.md §Preview.
-        if let Some(serde_json::Value::Bool(true)) = dlg_def.get("doc_preview") {
-            if let Some(m) = model.as_deref_mut() {
-                m.capture_preview_snapshot();
-            }
-        }
-        // Wire the dialog's on_change action — fired by run_effects
-        // after any batch that mutated dialog state.
-        if let Some(serde_json::Value::String(s)) = dlg_def.get("on_change") {
-            store.set_dialog_on_change(Some(s.clone()));
-        } else {
-            store.set_dialog_on_change(None);
-        }
-        // Clear any leftover dirty flag from prior dialog sessions so
-        // the very-first init of dialog state does not immediately fire
-        // on_change.
-        store.take_dialog_dirty();
+        open_dialog_in(dlg_id, dlg_def, resolved_params, ctx, store, model.as_deref_mut());
         return;
     }
 
     // close_dialog: null or dialog_id
     if effect.contains_key("close_dialog") {
-        // Preview restore: if a snapshot survived (i.e., no OK action
-        // cleared it), revert each target to its captured original value.
-        // Phase 0 handles only top-level state keys; deep paths defer to
-        // Phase 8/9 alongside their first real consumer.
-        if let Some(snapshot) = store.dialog_snapshot().cloned() {
-            for (key, value) in snapshot {
-                if !key.contains('.') {
-                    store.set(&key, value);
-                }
-            }
-            store.clear_dialog_snapshot();
-        }
-        // Document-level preview restore: if the dialog captured a doc
-        // snapshot at open and the OK path did not call doc.preview.clear,
-        // this is the Cancel path — revert the document and drop the
-        // snapshot. See SCALE_TOOL.md §Preview.
-        if let Some(m) = model.as_deref_mut() {
-            if m.has_preview_snapshot() {
-                m.restore_preview_snapshot();
-                m.clear_preview_snapshot();
-            }
-        }
-        store.close_dialog();
+        close_dialog_in(store, model.as_deref_mut());
         return;
     }
 

@@ -996,6 +996,24 @@ internal sealed unsafe class Canvas : IDisposable
     /// different readings and the harness reads them differently -- O3.1 counts
     /// painting rows, O3.1/O3.2 count rows the render thread wrote.
     /// </summary>
+    /// The dialog door's engine half (design 2026-10-14): an act's reply names
+    /// the dialog the engine opened in its store (`"dialog": <id> | null`).
+    /// This shell has no dialog host yet, so it reports the dialog BY NAME and
+    /// dismisses it, leaving no dialog open in the engine. Before the door the
+    /// engine refused the act as `PlatformEffect Dialog:<id>`; the name still
+    /// reaches the report, now with the act having run.
+    private void DismissUnshownDialog(System.Text.Json.JsonElement reply, string head)
+    {
+        if (!reply.TryGetProperty("dialog", out var dialog)
+            || dialog.ValueKind != System.Text.Json.JsonValueKind.String)
+        {
+            return;
+        }
+        var closed = JasCore.jas_dialog_dismiss(_engine);
+        _report($"DIALOG UNSHOWN {head} dialog={dialog.GetString()} dismissed={closed} "
+              + $"-- this shell has no dialog host yet {Tids()}");
+    }
+
     internal string Tids()
     {
         if (_renderTid == 0)
@@ -4404,6 +4422,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+            DismissUnshownDialog(doc.RootElement, runHead);
         }
         catch (Exception ex)
         {
@@ -4449,6 +4468,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+            DismissUnshownDialog(doc.RootElement, head);
         }
         catch (Exception ex)
         {
@@ -4664,6 +4684,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
+            DismissUnshownDialog(doc.RootElement, head);
         }
         catch (Exception ex)
         {

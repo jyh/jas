@@ -391,6 +391,15 @@ internal static unsafe class JasCore
     internal static extern byte jas_document_mark_saved(IntPtr engine);
 
     /// <summary>
+    /// Escape, or a dialog's close box: the engine closes the dialog open in
+    /// its store, as `dismiss_dialog` does (a preview snapshot no OK cleared is
+    /// restored). 1 when one was closed, 0 when none was open, 255 for a null
+    /// engine.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_dialog_dismiss(IntPtr engine);
+
+    /// <summary>
     /// The shell names the document it opened or saved (#406): the model's
     /// <c>filename</c>, which the canvas tab shows. ⛔ UTF-8 BYTES, NOT A
     /// STRING (BL5), as <see cref="jas_load_svg"/>. 1 named; 0 refused (null,
