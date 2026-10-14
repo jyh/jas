@@ -128,5 +128,121 @@
         "discard_white_overprint": true
       }
     }
+  },
+  {
+    "name": "open_artboard_options_reads_the_named_artboard",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "open_artboard_options",
+        "params": {
+          "artboard_id": "ab2"
+        }
+      }
+    ],
+    "expected_json": "open_artboard_options_reads_the_named_artboard_expected.json",
+    "expected_dialog": {
+      "id": "artboard_options",
+      "params": {
+        "artboard_id": "ab2"
+      },
+      "state": {
+        "name": "Board Two",
+        "width": 72.0,
+        "height": 72.0,
+        "x_stored": 90.0,
+        "y_stored": 0.0,
+        "fill": "transparent",
+        "show_center_mark": false,
+        "show_cross_hairs": false,
+        "show_video_safe_areas": false,
+        "video_ruler_pixel_aspect_ratio": 1.0,
+        "fade_region_outside_artboard": true,
+        "update_while_dragging": true
+      }
+    }
+  },
+  {
+    "name": "open_print_dialog_opens_on_the_declared_defaults",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "open_print_dialog",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_print_dialog_expected.json",
+    "expected_dialog": {
+      "id": "print",
+      "state": {
+        "preset_name": "[Default]",
+        "copies": 1,
+        "collate": false,
+        "reverse_order": false,
+        "artboard_range_mode": "all",
+        "artboard_range": "",
+        "ignore_artboards": false,
+        "skip_blank_artboards": false,
+        "media_size": "defined_by_driver",
+        "media_width": 612,
+        "media_height": 792,
+        "orientation": "portrait",
+        "auto_rotate": true,
+        "transverse": false,
+        "print_layers": "visible_printable",
+        "placement_x": 0,
+        "placement_y": 0,
+        "scaling_mode": "do_not_scale",
+        "custom_scale": 100.0,
+        "mab_all_printer_marks": false,
+        "mab_trim_marks": false,
+        "mab_registration_marks": false,
+        "mab_color_bars": false,
+        "mab_page_information": false,
+        "mab_printer_mark_type": "roman",
+        "mab_trim_mark_weight": 0.25,
+        "mab_mark_offset": 6.0,
+        "mab_use_document_bleed": true,
+        "mab_bleed_top": 0.0,
+        "mab_bleed_right": 0.0,
+        "mab_bleed_bottom": 0.0,
+        "mab_bleed_left": 0.0,
+        "out_mode": "composite",
+        "out_emulsion": "up_right",
+        "out_image_polarity": "positive",
+        "out_printer_resolution": "75 lpi / 600 dpi",
+        "out_convert_spot_to_process": false,
+        "out_overprint_black": false,
+        "out_ink0_print": true,
+        "out_ink0_frequency": 75.0,
+        "out_ink0_angle": 105.0,
+        "out_ink0_dot_shape": "round",
+        "out_ink1_print": true,
+        "out_ink1_frequency": 75.0,
+        "out_ink1_angle": 75.0,
+        "out_ink1_dot_shape": "round",
+        "out_ink2_print": true,
+        "out_ink2_frequency": 75.0,
+        "out_ink2_angle": 90.0,
+        "out_ink2_dot_shape": "round",
+        "out_ink3_print": true,
+        "out_ink3_frequency": 75.0,
+        "out_ink3_angle": 45.0,
+        "out_ink3_dot_shape": "round",
+        "gfx_flatness": 1.0,
+        "gfx_font_download": "subset",
+        "gfx_postscript_level": "level_3",
+        "gfx_data_format": "binary",
+        "gfx_compatible_gradient_printing": false,
+        "gfx_raster_effects_resolution": 300.0,
+        "cm_document_profile": "sRGB IEC61966-2.1",
+        "cm_color_handling": "let_app_determine",
+        "cm_printer_profile": "",
+        "cm_rendering_intent": "relative_colorimetric",
+        "cm_preserve_rgb_numbers": false,
+        "adv_print_as_bitmap": false,
+        "adv_overprint_flattener_preset": "medium_resolution"
+      }
+    }
   }
 ]
