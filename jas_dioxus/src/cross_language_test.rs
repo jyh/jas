@@ -6,7 +6,7 @@
 //! the canonical expected values.
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::algorithms::hit_test;
     use crate::document::model::Model;
     use crate::geometry::binary::{document_to_binary, binary_to_document};
@@ -3028,10 +3028,9 @@ mod tests {
     /// `72` equals `72.0`, while `true` stays apart from `1`. serde_json's own
     /// `==` keeps an integer apart from a float, so a dialog value that the
     /// evaluator made integral (`72`) failed against the corpus's `72.0`.
-    // Its only caller, `assert_action_dialog`, is `web`-gated; the function
-    // and its test are not, so the native lane verifies it too.
-    #[cfg_attr(not(feature = "web"), allow(dead_code))]
-    fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    // Its callers are `assert_action_dialog` (`web`-gated) and the engine's
+    // dialog door (`ffi.rs`, every build), so the native lane uses it too.
+    pub(crate) fn json_value_eq(a: &serde_json::Value, b: &serde_json::Value) -> bool {
         use serde_json::Value as V;
         match (a, b) {
             (V::Number(x), V::Number(y)) => x.as_f64() == y.as_f64(),

@@ -37,7 +37,7 @@ pub enum Outcome {
     /// The Symbols panel's selection becomes this (`None` clears it).
     SelectSymbol(Option<String>),
     /// Open the named confirm dialog with these params; the document is
-    /// unchanged. The engine has no dialog door and refuses this by name.
+    /// unchanged. The engine opens it in its store (the dialog door).
     Dialog { id: String, params: Value },
     /// Close the open dialog (the confirm's OK already ran). When it deleted
     /// the master, the Symbols panel's selection is cleared as well.
