@@ -30,6 +30,13 @@ pub struct DialogState {
     /// Each entry maps a variable name to its JSON definition
     /// (which may contain "get" and/or "set" expression strings).
     pub props: HashMap<String, serde_json::Value>,
+    /// The dialog this one was opened over (a nested dialog: the Color
+    /// Picker from Layer Options), restored when this one closes. The
+    /// reference's `push_dialog`.
+    pub parent: Option<Box<DialogState>>,
+    /// The parent's field this dialog's result lands in when it closes with
+    /// one (`close_dialog: {result: ...}`; `open_dialog`'s `result_to`).
+    pub result_to: Option<String>,
 }
 
 impl DialogState {
@@ -320,6 +327,8 @@ pub fn build_dialog_state(
         params: resolved_params,
         anchor: None,
         props,
+        parent: None,
+        result_to: None,
     })
 }
 

@@ -165,7 +165,7 @@ layer_options:
                 behavior:
                   - event: click
                     action: open_color_picker
-                    params: { target: "dialog.color" }
+                    params: { target: '"dialog.color"', color: "dialog.color" }
 
       # Template + Lock
       - type: row
