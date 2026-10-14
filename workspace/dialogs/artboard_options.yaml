@@ -328,7 +328,7 @@ artboard_options:
                 behavior:
                   - event: click
                     action: open_color_picker
-                    params: { target: "dialog.fill" }
+                    params: { target: '"dialog.fill"', color: "dialog.fill" }
 
       # Display section header + separator
       - type: separator

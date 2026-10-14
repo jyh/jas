@@ -697,15 +697,24 @@ actions:
       - set: { stroke_color: null }
   open_color_picker:
     description: >
-      Open the modal color picker dialog for either the fill or stroke
-      color (determined by the target param). The dialog initializes from
-      the current color and commits back to the corresponding state
-      variable when OK is pressed.
+      Open the modal color picker dialog for the color the target param
+      names. The target is "fill" or "stroke", the active fill or stroke
+      color, or a field of the dialog that is open now, written
+      "dialog.<field>" (Layer Options' swatch passes "dialog.color",
+      Artboard Options' passes "dialog.fill"), and then the opener also
+      passes that field's current color as the color param. The picker
+      initializes from the color param when one is given, else from the
+      fill or stroke color. On OK it commits a fill or stroke to its state variable,
+      and returns the picked color to a dialog field: the picker opens OVER
+      the open dialog (nested), and closing it returns to that dialog with
+      the field set and every other edit intact. Cancel returns to it
+      unchanged.
     category: fill_stroke
     params:
-      target: { type: enum, values: [fill, stroke] }
+      target: { type: string }
+      color: { type: color, optional: True }
     effects:
-      - open_dialog: { id: color_picker, params: { target: "param.target" } }
+      - open_dialog: { id: color_picker, params: { target: "param.target", color: "param.color" }, result_to: "param.target" }
 
   set_active_color:
     description: >

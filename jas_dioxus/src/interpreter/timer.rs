@@ -66,8 +66,9 @@ pub fn start_timer(
 
         // Apply deferred dialog effects
         for eff in &deferred_dialog_effects {
-            if eff.get("close_dialog").is_some() {
-                dialog_signal.set(None);
+            if let Some(cd) = eff.get("close_dialog") {
+                super::dialog_view::close_dialog_with_result(
+                    &mut dialog_signal, cd.get("result").cloned());
             }
             if let Some(od) = eff.get("open_dialog") {
                 let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");

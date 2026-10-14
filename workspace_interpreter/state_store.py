@@ -162,6 +162,13 @@ class StateStore:
         # Set by every set_dialog write; consumed by the post-run hook
         # to decide whether to fire the dialog's on_change action.
         self._dialog_dirty: bool = False
+        # A nested dialog (the Color Picker from Layer Options) is PUSHED
+        # over its parent: each entry is a parent's whole dialog frame
+        # (`_DIALOG_FRAME`), restored by close_dialog. `_dialog_result_to`
+        # is the open dialog's own: the parent field its result lands in
+        # when it closes with one (`close_dialog: {result: ...}`).
+        self._dialog_stack: list[dict] = []
+        self._dialog_result_to: str | None = None
         # Re-entrancy guard: True while the post-run hook is dispatching
         # the on_change action. Prevents the action's own set effects
         # from re-triggering the hook.
@@ -473,7 +480,32 @@ class StateStore:
     def get_dialog_params(self) -> dict | None:
         return self._dialog_params
 
+    _DIALOG_FRAME = ("_dialog_id", "_dialog", "_dialog_params", "_dialog_props",
+                     "_dialog_on_change", "_dialog_dirty", "_dialog_snapshot",
+                     "_dialog_result_to")
+
+    def push_dialog(self, result_to: str | None = None):
+        """Keep the open dialog under the next one. The next init_dialog
+        opens the child over it, and close_dialog returns to it intact. The
+        child starts with no preview snapshot, and `result_to` names the
+        parent's field that the child's result is written to."""
+        self._dialog_stack.append({k: getattr(self, k) for k in self._DIALOG_FRAME})
+        self._dialog_snapshot = None
+        self._dialog_result_to = result_to
+
+    def get_dialog_result_to(self) -> str | None:
+        return self._dialog_result_to
+
+    def dialog_depth(self) -> int:
+        """How many dialogs are open: 0, 1, or more when nested."""
+        return (self._dialog_id is not None) + len(self._dialog_stack)
+
     def close_dialog(self):
+        if self._dialog_stack:
+            for k, v in self._dialog_stack.pop().items():
+                setattr(self, k, v)
+            return
+        self._dialog_result_to = None
         self._dialog_id = None
         self._dialog = {}
         self._dialog_params = None

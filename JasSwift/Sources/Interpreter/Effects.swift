@@ -772,6 +772,17 @@ private func runOne(
             if let s = d["set"] { p["set"] = s }
             if !p.isEmpty { props[key] = p }
         }
+        // `result_to`: a field of the dialog that is OPEN now, as
+        // `dialog.<key>`. The new dialog is then pushed over it (nested), and
+        // its `close_dialog: {result: ...}` writes that field after returning.
+        // Anything else opens it in place of an open one (the reference's
+        // `open_dialog`).
+        if let odDict = od as? [String: Any], let rtExpr = odDict["result_to"],
+           store.getDialogId() != nil,
+           let rt = valueToAny(evalExpr(rtExpr, store: store, ctx: ctx)) as? String,
+           rt.hasPrefix("dialog."), rt.count > "dialog.".count {
+            store.pushDialog(resultTo: String(rt.dropFirst("dialog.".count)))
+        }
         // Init dialog
         store.initDialog(dlgId, defaults: defaults,
                          params: resolvedParams.isEmpty ? nil : resolvedParams,
@@ -839,6 +850,13 @@ private func runOne(
 
     // close_dialog: null or dialog_id
     if effect.keys.contains("close_dialog") {
+        // `close_dialog: {result: <expr>}` returns a value to the field the
+        // opener named (`open_dialog`'s `result_to`), written into the PARENT
+        // after the pop. It is evaluated now, in the closing dialog.
+        let cd = effect["close_dialog"] as? [String: Any]
+        let resultExpr = cd?["result"]
+        let result: Any? = resultExpr.map { valueToAny(evalExpr($0, store: store, ctx: ctx)) ?? NSNull() }
+        let resultTo = store.getDialogResultTo()
         // Preview restore: if a snapshot survived (i.e., no OK action
         // cleared it), revert each target to its captured original value.
         // Phase 0 handles only top-level state keys.
@@ -860,6 +878,9 @@ private func runOne(
             _ = clear([:], ctx, store)
         }
         store.closeDialog()
+        if let result, let resultTo, store.getDialogId() != nil {
+            store.setDialog(resultTo, result)
+        }
         return
     }
 
