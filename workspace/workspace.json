@@ -30838,13 +30838,9 @@
       },
       "init": {
         "name": "param.name",
-        "color": "param.color",
-        "color_preset": "param.color_preset",
         "lock": "param.lock",
         "show": "param.show",
-        "preview": "param.preview",
-        "dim_images": "param.dim_images",
-        "dim_percentage": "param.dim_percentage"
+        "preview": "param.preview"
       },
       "content": {
         "type": "container",

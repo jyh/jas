@@ -162,6 +162,22 @@ def _eval(expr, store: StateStore, ctx: dict):
     return result.value
 
 
+def _dispatch_param(v, store: StateStore, ctx: dict):
+    """A dispatch parameter's value, by the rule both apps apply (Rust's
+    `dispatch_param_value`, Swift's dispatch). A YAML literal that is not a
+    string (`copy: true`, `index: 2`) is that value; `str(True)` would
+    evaluate the unknown identifier "True" to null. A string is an
+    expression, except that a BARE identifier evaluating to null is its own
+    name: `params: {target: artboard}` means the string "artboard". A null
+    from a path (`state.absent`) stays null."""
+    if not isinstance(v, str):
+        return v
+    value = _eval(v, store, ctx)
+    if value is None and v and all(c.isalnum() or c == "_" for c in v):
+        return v
+    return value
+
+
 def _used_stroke_brushes(document: dict | None) -> set[str]:
     """Every non-empty ``stroke_brush`` id on any element of the document, at
     any depth (layers and groups nest through ``children``), selected or not.
@@ -1087,7 +1103,7 @@ def _run_one(effect: dict, ctx: dict, store: StateStore,
             if params:
                 resolved_params = {}
                 for k, v in params.items():
-                    resolved_params[k] = _eval(v, store, ctx)
+                    resolved_params[k] = _dispatch_param(v, store, ctx)
                 dispatch_ctx["param"] = resolved_params
             run_effects(action_effects, dispatch_ctx, store, actions, platform_effects, dialogs,
                         schema, diagnostics)

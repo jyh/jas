@@ -86,15 +86,15 @@ layer_options:
       min: 0
       max: 100
       description: "Opacity percentage for dimmed raster images"
+  # color, color_preset, dim_images and dim_percentage have no init: a
+  # layer stores none of them, so open_layer_options passes no such
+  # params, and an init reading `param.color` evaluated to null and
+  # erased the declared default (found by expected_dialog, 2026-10-13).
   init:
     name: "param.name"
-    color: "param.color"
-    color_preset: "param.color_preset"
     lock: "param.lock"
     show: "param.show"
     preview: "param.preview"
-    dim_images: "param.dim_images"
-    dim_percentage: "param.dim_percentage"
   content:
     type: container
     layout: column

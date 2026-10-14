@@ -81,5 +81,52 @@
       }
     ],
     "expected_json": "delete_empty_artboards_all_expected.json"
+  },
+  {
+    "name": "open_document_setup_reads_back_what_confirm_wrote",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "document_setup_confirm",
+        "params": {
+          "bleed_top": 4.5,
+          "bleed_right": 6.25,
+          "bleed_bottom": 7.5,
+          "bleed_left": 9.75,
+          "bleed_uniform": false,
+          "show_images_outline": true,
+          "highlight_substituted_glyphs": true,
+          "grid_size": 36.5,
+          "grid_color": "#336699",
+          "paper_color": "#ffeecc",
+          "simulate_colored_paper": true,
+          "transparency_flattener_preset": "high_resolution",
+          "discard_white_overprint": true
+        }
+      },
+      {
+        "action": "open_document_setup",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_document_setup_reads_back_expected.json",
+    "expected_dialog": {
+      "id": "document_setup",
+      "state": {
+        "bleed_top": 4.5,
+        "bleed_right": 6.25,
+        "bleed_bottom": 7.5,
+        "bleed_left": 9.75,
+        "bleed_uniform": false,
+        "show_images_outline": true,
+        "highlight_substituted_glyphs": true,
+        "grid_size": 36.5,
+        "grid_color": "#336699",
+        "paper_color": "#ffeecc",
+        "simulate_colored_paper": true,
+        "transparency_flattener_preset": "high_resolution",
+        "discard_white_overprint": true
+      }
+    }
   }
 ]
