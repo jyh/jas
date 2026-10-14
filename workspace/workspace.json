@@ -8892,7 +8892,7 @@
         },
         "filename": {
           "type": "string",
-          "description": "The active document's filename (empty string if untitled)"
+          "description": "The name the active document's tab shows: its file name once saved, `Untitled-N` until then (has_filename says which). The empty string only when no document is open. Save Changes shows it."
         },
         "any_modified": {
           "type": "bool",
