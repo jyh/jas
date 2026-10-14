@@ -34,7 +34,7 @@ cut_orphan_confirm:
     style: { gap: 12, padding: 16 }
     children:
       - type: text
-        content: 'Cutting will leave {{param.count}} live {{ param.count == 1 ? "instance" : "instances" }} empty.'
+        content: 'Cutting will leave {{param.count}} live {{ if param.count == 1 then "instance" else "instances" }} empty.'
       - type: row
         style: { justify: end, gap: 8 }
         children:
