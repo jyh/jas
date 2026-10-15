@@ -279,6 +279,13 @@ pub unsafe extern "C" fn jas_pointer_event(
         KIND_MOVE => tool.on_move(m, dx, dy, shift, alt, dragging),
         _ => tool.on_release(m, dx, dy, shift, alt),
     });
+    // A dialog the tool opened (Scale's Alt-click) moves to the engine's store,
+    // where `jas_dialog_plan` reads it (flask STATUS §285).
+    let opened = tool.take_opened_dialog();
+    drop(slot);
+    if let Some((id, params)) = opened {
+        crate::ffi::open_tool_dialog(engine, &id, &params);
+    }
     JasStatus::Ok
 }
 
@@ -1170,6 +1177,36 @@ mod tests {
             assert!(!doc(e).contains("\"rect\""));
             jas_engine_free(e);
         }
+    }
+
+    /// A dialog a TOOL opens reaches the engine's store (flask STATUS §283,
+    /// §285): Scale's Alt-held click without a drag opens `scale_options`
+    /// (`scale.yaml`). The tool's handlers run on its own private store, so
+    /// before this its `open_dialog` resolved against no dialog table and was
+    /// dropped. The control: the same click without Alt opens nothing.
+    #[test]
+    fn a_tool_opened_dialog_reaches_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let open = |mods: u32| -> String {
+            let e = jas_engine_new();
+            seed(e);
+            unsafe {
+                jas_set_tool(e, 0);
+                jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+                jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+                assert_eq!(jas_set_tool(e, selectable_index("scale").expect("scale")), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_PRESS, 80.0, 80.0, mods), JasStatus::Ok);
+                assert_eq!(jas_pointer_event(e, KIND_RELEASE, 80.0, 80.0, mods), JasStatus::Ok);
+                let b = crate::ffi::jas_dialog_plan(e, 380, 640);
+                let plan = String::from_utf8_lossy(std::slice::from_raw_parts(b.ptr, b.len)).into_owned();
+                crate::ffi::jas_free(b);
+                jas_engine_free(e);
+                plan
+            }
+        };
+        assert!(open(0).starts_with(r#"{"open":false"#), "the control: no Alt, no dialog: {}", open(0));
+        let alt = open(MOD_ALT);
+        assert!(alt.contains(r#""id":"scale_options""#) && alt.contains(r#""open":true"#), "{alt}");
     }
 
     /// W5-3a: Escape reaches the active tool. The selection tool cancels its

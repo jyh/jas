@@ -549,6 +549,48 @@ pub unsafe extern "C" fn jas_menu_state(
 /// (wave 2, A6): each panel reads its own `panel.*`.
 /// The engine's scope for `panel_id` ("" for none), read with whether its
 /// one document is open ([`jas_document_close`]).
+/// Open in the ENGINE's store a dialog a tool opened (flask STATUS §285): the
+/// same `open_dialog` effect an action runs, so the dialog's `init` evaluates
+/// in the engine's scope. `params` arrive RESOLVED in the tool's own scope, and
+/// the effect evaluates each param as an expression, so each is passed as a
+/// literal (`tool_param_literal`); a param no literal can carry is recorded in
+/// `jas_last_error_json` by name and the dialog is not opened.
+pub(crate) fn open_tool_dialog(engine: &JasEngine, id: &str,
+                               params: &serde_json::Map<String, serde_json::Value>) {
+    let Some(ws) = Workspace::load() else { return };
+    let mut literal = serde_json::Map::new();
+    for (k, v) in params {
+        match tool_param_literal(v) {
+            Some(expr) => { literal.insert(k.clone(), serde_json::Value::String(expr)); }
+            None => {
+                set_panel_event_error(engine, "UnliteralParam", &format!("{id}.{k}"));
+                return;
+            }
+        }
+    }
+    let scope = engine_scope_of(engine, "");
+    let effect = serde_json::json!({"open_dialog": {"id": id, "params": literal}});
+    let mut store = engine.store.borrow_mut();
+    let mut model = engine.model.borrow_mut();
+    let report = crate::interpreter::effects::run_effects(
+        &[effect], &scope, &mut store, Some(&mut model), Some(ws.actions()), Some(ws.dialogs()), None);
+    if let Some(u) = report.unhandled.first() {
+        drop((store, model));
+        set_panel_event_error(engine, "ToolDialogUnhandled", &format!("{u:?}"));
+    }
+}
+
+/// A resolved value as an expression that evaluates back to it: a string in
+/// single quotes (`None` when it holds one, which the grammar cannot escape),
+/// a number or bool as its JSON text, `null`. A list or object has no literal.
+fn tool_param_literal(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) if !s.contains('\'') => Some(format!("'{s}'")),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) | serde_json::Value::Null => Some(v.to_string()),
+        _ => None,
+    }
+}
+
 fn engine_scope_of(engine: &JasEngine, panel_id: &str) -> serde_json::Value {
     crate::panel_scope::engine_scope_open(
         &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id,
@@ -3341,6 +3383,21 @@ mod tests {
             "dialog.radio_channel", &engine_of(e).store.borrow().eval_context())).as_deref(), Some("2"),
             "a whole number reads as its integer text");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// A tool's resolved dialog params travel as literals that evaluate back
+    /// to themselves, through the same evaluator the `open_dialog` effect uses.
+    #[test]
+    fn a_tool_param_literal_evaluates_back_to_its_value() {
+        for v in [serde_json::json!("ab12"), serde_json::json!(3.5), serde_json::json!(2),
+                  serde_json::json!(true), serde_json::Value::Null] {
+            let expr = super::tool_param_literal(&v).unwrap_or_else(|| panic!("{v} has a literal"));
+            let back = crate::interpreter::effects::value_to_json(&crate::interpreter::expr::eval(&expr, &serde_json::json!({})));
+            assert_eq!(back.as_f64().map(|f| serde_json::json!(f)).unwrap_or(back.clone()),
+                       v.as_f64().map(|f| serde_json::json!(f)).unwrap_or(v.clone()), "{expr}");
+        }
+        assert_eq!(super::tool_param_literal(&serde_json::json!("it's")), None, "a quote cannot be escaped");
+        assert_eq!(super::tool_param_literal(&serde_json::json!([1])), None);
     }
 
     /// A dialog's buttons have no ids: the shell clicks one by its PLAN path,
