@@ -981,7 +981,8 @@
                 "open_dialog": {
                   "id": "save_changes_tab",
                   "params": {
-                    "filename": "active_document.filename"
+                    "filename": "active_document.filename",
+                    "index": "param.index"
                   }
                 }
               }
@@ -1143,6 +1144,28 @@
         },
         {
           "log": "close_without_saving"
+        }
+      ]
+    },
+    "discard_and_close_tab": {
+      "description": "Close a document tab without saving its changes. Called from the save_changes_tab dialog when the user clicks Discard, with the index of the tab the dialog asked about. Closes the dialog, then removes the tab with remove_tab, discarding its unsaved modifications. The button passes the index as this action's own param, because the dialog's params are gone once it closes.\n",
+      "category": "dialog",
+      "params": {
+        "index": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        {
+          "close_dialog": null
+        },
+        {
+          "dispatch": {
+            "action": "remove_tab",
+            "params": {
+              "index": "param.index"
+            }
+          }
         }
       ]
     },
@@ -35482,11 +35505,14 @@
     },
     "save_changes_tab": {
       "summary": "Save Changes",
-      "description": "Confirmation dialog shown when closing a tab with unsaved changes. Three options: Save the document, Discard changes, or Cancel.\n",
+      "description": "Confirmation dialog shown when closing a tab with unsaved changes. Three options: Save the document, Discard changes, or Cancel. `index` is the tab being closed: Discard passes it on, so the tab that is removed is the one the dialog asked about.\n",
       "modal": true,
       "params": {
         "filename": {
           "type": "string"
+        },
+        "index": {
+          "type": "number"
         }
       },
       "content": {
@@ -35516,7 +35542,10 @@
               {
                 "type": "button",
                 "label": "Discard",
-                "action": "close_without_saving"
+                "action": "discard_and_close_tab",
+                "params": {
+                  "index": "param.index"
+                }
               },
               {
                 "type": "button",

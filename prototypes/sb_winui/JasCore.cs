@@ -414,7 +414,8 @@ internal static unsafe class JasCore
     /// <see cref="jas_panel_behavior"/> event, addressed to the top dialog.
     /// A dialog's buttons carry no id, so a click names the leaf's plan path:
     /// <c>{"path":[1,0],"event":"click"}</c>. The reply is
-    /// <c>{"changed","doc_changed","dialog"}</c>, where <c>dialog</c> is the
+    /// <c>{"changed","doc_changed","dialog","remove_tab"}</c>, where <c>remove_tab</c>
+    /// names a tab index the shell must remove (null otherwise), and <c>dialog</c> is the
     /// dialog open AFTER the act (null when it closed). Empty span on a
     /// refusal (<c>NoDialog</c> when none is open), read the class from
     /// <c>jas_last_error_json</c>. Copy the span, then release it with
