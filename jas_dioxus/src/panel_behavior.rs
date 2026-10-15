@@ -65,8 +65,9 @@
 //!   aligns to the FIRST artboard (`EngineHost::artboard_selection` is `[]`).
 //! * A behavior that WRITES one of the colour slice's three `state.*` keys
 //!   writes the store's copy only. No align behavior does.
-//! * A value widget bound to `dialog.<ident>` is not written: the engine hosts
-//!   no dialog, and no panel carries such a bind.
+//! * A PANEL widget bound to `dialog.<ident>` is not written (no panel carries
+//!   such a bind). A widget of the open dialog writes it, through
+//!   [`run_dialog_widget_behavior`] (`ffi::jas_dialog_event`).
 //! * The door does not report how many behaviors ran, or whether the bind was
 //!   written. The corpus's `behaviors_run` and `bind_written` are the
 //!   reference's.
@@ -493,6 +494,43 @@ pub fn run_widget_behavior(
     dialogs: &Value,
     host: &mut dyn EffectHost,
 ) -> Result<Ran, Refusal> {
+    run_widget_behavior_in(Some(panel_id), spec, ev, scope, store, model, actions, dialogs, host)
+}
+
+/// Run the behavior `ev` names on a widget of the OPEN dialog, whose spec is
+/// `spec`, with `scope` the engine's scope plus the dialog's own (`dialog.*`,
+/// `param.*`). The steps are [`run_widget_behavior`]'s, with the dialog as
+/// the widget's owner, as the reference's `widget_event` takes a dialog
+/// widget (`panel=None`): a value bind writes `dialog.<ident>` and mirrors no
+/// global, and no panel is made active.
+#[allow(clippy::too_many_arguments)]
+pub fn run_dialog_widget_behavior(
+    spec: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    run_widget_behavior_in(None, spec, ev, scope, store, model, actions, dialogs, host)
+}
+
+/// The steps both doors share. `panel_id` is the widget's panel, or `None`
+/// for a widget of the open dialog.
+#[allow(clippy::too_many_arguments)]
+fn run_widget_behavior_in(
+    panel_id: Option<&str>,
+    spec: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
     let content = spec.get("content").unwrap_or(&Value::Null);
     // W2b-16: an event addressed by `path` resolves the node AND the row scope
     // it runs in; one addressed by id finds the first node with that id, which
@@ -533,8 +571,8 @@ pub fn run_widget_behavior(
     let writes_value = (INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()))
         || (BOOLEAN_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()))
         || ITEM_KINDS.contains(&kind);
-    if panel_id == COLOUR_PANEL && writes_value {
-        return Err(Refusal::new("PanelNotHosted", panel_id));
+    if panel_id == Some(COLOUR_PANEL) && writes_value {
+        return Err(Refusal::new("PanelNotHosted", COLOUR_PANEL));
     }
     if INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()) {
         return commit_value(panel_id, spec, node, ev, scope, store, model, actions, dialogs,
@@ -580,10 +618,25 @@ pub fn run_widget_behavior(
             batch.push(json!({"dispatch": Value::Object(d)}));
         }
     }
+    // SCHEMA.md's `button`/`icon_button` take `action` and `params` on the node
+    // itself. A click no declared behavior took runs that action, as the web's
+    // element renderer does (behaviors first, then the shorthand). Every
+    // shipped node-level action is on a dialog button (67, 2026-10-14).
+    if chosen == 0 && ev.event == "click" {
+        if let Some(action) = node.get("action").and_then(Value::as_str) {
+            let mut d = Map::new();
+            d.insert("action".into(), Value::String(action.to_string()));
+            if let Some(params) = node.get("params") {
+                d.insert("params".into(), params.clone());
+            }
+            batch.push(json!({"dispatch": Value::Object(d)}));
+            chosen = 1;
+        }
+    }
     if chosen == 0 {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(Some(panel_id), &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
+    run_batch(panel_id, &batch, ev.modifiers.clone(), scope, store, model, actions, dialogs,
               host)
 }
 
@@ -699,12 +752,19 @@ fn value_behaviors(node: &Value, events: &[&str], widget: &str)
 
 /// The bind write as effects: the evaluated `event.value` into the widget's
 /// own panel, then into the global the panel's `init:` two-way binds that
-/// field to. Empty when the widget binds nothing this layer writes. A
-/// `dialog.<ident>` bind is writable by the contract, and no panel the engine
-/// hosts carries one, so the engine writes panel binds only.
-fn bind_write(node: &Value, spec: &Value, panel_id: &str) -> Vec<Value> {
+/// field to; or, for a widget of the open dialog (`panel_id` `None`), into
+/// `dialog.<ident>` alone (the reference mirrors a panel field only). Empty
+/// when the widget binds nothing its owner writes: a panel widget's
+/// `dialog.` bind, or a dialog widget's `panel.` bind.
+fn bind_write(node: &Value, spec: &Value, panel_id: Option<&str>) -> Vec<Value> {
     let Some(target) = widget_commit::bound_target(node) else { return vec![] };
-    let Some(("panel", key)) = widget_commit::writable_target(target) else { return vec![] };
+    let (panel_id, key) = match (widget_commit::writable_target(target), panel_id) {
+        (Some(("panel", key)), Some(panel_id)) => (panel_id, key),
+        (Some(("dialog", key)), None) => {
+            return vec![json!({"set": {format!("dialog.{key}"): "event.value"}})];
+        }
+        _ => return vec![],
+    };
     let mut out = vec![json!({"set_panel_state": {
         "key": key, "value": "event.value", "panel": panel_id}})];
     if let Some(global) = widget_commit::mirrored_global(spec, key) {
@@ -777,7 +837,7 @@ fn value_event(ev: &UserEvent, value: Value) -> Value {
 /// `inert`).
 #[allow(clippy::too_many_arguments)]
 fn commit_value(
-    panel_id: &str,
+    panel_id: Option<&str>,
     spec: &Value,
     node: &Value,
     ev: &UserEvent,
@@ -802,7 +862,7 @@ fn commit_value(
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(Some(panel_id), &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
 }
 
@@ -812,7 +872,7 @@ fn commit_value(
 /// written; otherwise the new value is written. Neither is `EmptyBehavior`.
 #[allow(clippy::too_many_arguments)]
 fn press(
-    panel_id: &str,
+    panel_id: Option<&str>,
     spec: &Value,
     node: &Value,
     ev: &UserEvent,
@@ -834,7 +894,7 @@ fn press(
     if batch.is_empty() {
         return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
     }
-    run_batch(Some(panel_id), &batch, value_event(ev, value), scope, store, model, actions, dialogs,
+    run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
 }
 
@@ -847,7 +907,7 @@ fn press(
 /// item and `event.value` to its value. Nothing runs is `EmptyBehavior`.
 #[allow(clippy::too_many_arguments)]
 fn pick(
-    panel_id: &str,
+    panel_id: Option<&str>,
     node: &Value,
     ev: &UserEvent,
     scope: &Value,
@@ -895,7 +955,7 @@ fn pick(
             r.insert("item".into(), item.clone());
         }
     }
-    run_batch(Some(panel_id), &batch, value_event(ev, Value::String(named.clone())), &item_scope,
+    run_batch(panel_id, &batch, value_event(ev, Value::String(named.clone())), &item_scope,
               store, model, actions, dialogs, host)
 }
 
