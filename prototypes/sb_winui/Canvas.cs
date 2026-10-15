@@ -1969,7 +1969,23 @@ internal sealed unsafe class Canvas : IDisposable
         // reached the window from a gesture left open.
         if (_handDeadlineMs >= 0 && p.Kind == JasCore.PointerPress) { _handPressSeen = true; }
         JasCore.jas_pointer_event(_engine, p.Kind, p.X, p.Y, p.Mods);
-        if (p.Kind == JasCore.PointerRelease) { DirtyFromModel(); }
+        if (p.Kind == JasCore.PointerRelease)
+        {
+            DirtyFromModel();
+            ApplyDialogAfterRelease();
+        }
+    }
+
+    /// <summary>
+    /// jas §284 (a): a tool may open a dialog (Alt+click with Scale), and
+    /// `jas_pointer_event` has no reply to say so. Read the plan after the
+    /// release and publish it only when it differs from the dialog shown.
+    /// </summary>
+    private void ApplyDialogAfterRelease()
+    {
+        var raw = JasCore.TakeString(JasCore.jas_dialog_plan(_engine, DialogAvailW, 0));
+        var shown = Dialog?.Reading is { Open: true } r ? r.Id : null;
+        if (DialogWire.AfterRelease(shown, DialogWire.Read(raw))) { ApplyDialogRefresh("release"); }
     }
 
     /// <summary>
