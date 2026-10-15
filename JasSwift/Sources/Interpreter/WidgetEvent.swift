@@ -53,6 +53,20 @@ enum WidgetEvent {
     /// The option kind: a pick names one of its `options` by `id`.
     static let optionKinds: Set<String> = ["radio_group"]
     static let chooseEvents = ["toggle"]
+    /// The click kinds (WIDGET_EVENTS.md, "Clicking a button"). `mouse_down`
+    /// and `mouse_up` are named in the table, not defined; a click never runs them.
+    static let clickKinds: Set<String> = ["button", "icon_button"]
+    static let clickEvents = ["click"]
+
+    /// Whether a click runs the widget's node-level `action`: a click kind
+    /// with a string `action` and NO declared `click` behavior. A declared one
+    /// IS the click, even when its condition skips it (the reference's
+    /// `click`), so the action never runs beside it.
+    static func clickRunsNodeAction(_ widget: [String: Any]) -> Bool {
+        guard let kind = widget["type"] as? String, clickKinds.contains(kind),
+              widget["action"] is String else { return false }
+        return declared(widget, events: clickEvents).isEmpty
+    }
 
     static let badValue = "BadValue"
     static let missingValue = "MissingValue"

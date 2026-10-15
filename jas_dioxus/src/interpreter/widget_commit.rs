@@ -133,6 +133,11 @@ pub const CHECK_KINDS: [&str; 1] = ["radio"];
 pub const OPTION_KINDS: [&str; 1] = ["radio_group"];
 /// The one event an option kind raises.
 pub const CHOOSE_EVENTS: [&str; 1] = ["toggle"];
+/// The click kinds (WIDGET_EVENTS.md, "Clicking a button").
+pub const CLICK_KINDS: [&str; 2] = ["button", "icon_button"];
+/// A click, then the two pointer events a click kind may also declare, which
+/// the contract names and does not define.
+pub const CLICK_EVENTS: [&str; 3] = ["click", "mouse_down", "mouse_up"];
 
 /// The events `kind` may declare, in the contract's order; empty for a kind
 /// outside the contract.
@@ -147,6 +152,8 @@ pub fn allowed_events(kind: &str) -> Vec<&'static str> {
         PICK_EVENTS.to_vec()
     } else if OPTION_KINDS.contains(&kind) {
         CHOOSE_EVENTS.to_vec()
+    } else if CLICK_KINDS.contains(&kind) {
+        CLICK_EVENTS.to_vec()
     } else {
         vec![]
     }
@@ -420,7 +427,7 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len()
-                   + CHECK_KINDS.len() + OPTION_KINDS.len());
+                   + CHECK_KINDS.len() + OPTION_KINDS.len() + CLICK_KINDS.len());
         // A kind outside the table has no events. `slider`, `color_bar`,
         // `radio_group` and `icon_button_group` were this control until each
         // joined (2026-10-13 forks A and B2; 2026-10-15 twice);

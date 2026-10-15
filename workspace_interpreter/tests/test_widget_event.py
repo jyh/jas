@@ -50,15 +50,20 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_fifteen_kinds_and_nothing_else(self):
+    def test_the_seventeen_kinds_and_nothing_else(self):
         families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
-                    we.CHECK_KINDS, we.OPTION_KINDS]
+                    we.CHECK_KINDS, we.OPTION_KINDS, we.CLICK_KINDS]
         assert set(we.ALLOWED_EVENTS) == set().union(*families)
         assert len(we.INPUT_KINDS) == 10 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
-        assert sum(len(f) for f in families) == len(set().union(*families)) == 15, \
+        assert we.CLICK_KINDS == {"button", "icon_button"}
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 17, \
             "the families are disjoint"
+
+    def test_a_button_clicks_and_names_its_two_pointer_events(self):
+        for kind in we.CLICK_KINDS:
+            assert we.ALLOWED_EVENTS[kind] == ("click", "mouse_down", "mouse_up"), kind
 
     def test_a_radio_checks_on_click_or_change_and_a_group_on_toggle(self):
         assert we.ALLOWED_EVENTS["radio"] == ("click", "change")
@@ -975,6 +980,155 @@ class TestShippedArtboardOrientation:
     def test_the_shown_orientation_changes_nothing(self):
         r, toggled = self._run(100, 200, "portrait")
         assert r.outcome == "inert" and r.behaviors_run == 0 and toggled is None
+
+
+class TestClickSynthetic:
+    """A click on a CLICK kind (`button`, `icon_button`): its declared `click`
+    behaviors, else its node-level `action` with `params`."""
+
+    ACTIONS = {"record": {"effects": [
+        {"set": {"got_n": "param.n", "got_copy": "param.copy",
+                 "got_target": "param.target", "got_alt": "event.alt"}}]}}
+
+    def _store(self, n=7):
+        store = StateStore()
+        store.init_dialog("d", {"n": n, "hits": 0})
+        return store
+
+    def _button(self, **extra):
+        return {"type": "button", "action": "record",
+                "params": {"n": "dialog.n", "copy": False, "target": "artboard"},
+                **extra}
+
+    def test_a_node_action_dispatches_with_its_params_resolved(self):
+        store = self._store()
+        r = we.click(self._button(), "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("committed", behaviors_run=1)
+        assert store.get("got_n") == 7, "a string param is an expression"
+        assert store.get("got_copy") is False, "a YAML literal is that value"
+        assert store.get("got_target") == "artboard", "a bare null identifier is its name"
+
+    def test_an_icon_button_is_a_click_kind_too(self):
+        store = self._store()
+        w = {"type": "icon_button", "action": "record", "params": {"n": "dialog.n"}}
+        assert we.click(w, "click", store, panel=None,
+                        actions=self.ACTIONS).outcome == "committed"
+        assert store.get("got_n") == 7
+
+    def test_declared_click_behaviors_are_the_click_and_the_action_does_not_run(self):
+        store = self._store()
+        w = self._button(behavior=[
+            {"event": "click", "effects": [{"set": {"dialog.hits": "dialog.hits + 1"}}]},
+            {"event": "click", "effects": [{"set": {"dialog.hits": "dialog.hits + 10"}}]}])
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("committed", behaviors_run=2)
+        assert store.get_dialog("hits") == 11, "both ran, in order"
+        assert store.get("got_n") is None, "the node action did not run"
+
+    def test_a_click_behavior_skipped_by_its_condition_still_owns_the_click(self):
+        store = self._store()
+        w = self._button(behavior=[
+            {"event": "click", "condition": "event.alt",
+             "effects": [{"set": {"dialog.hits": 1}}]}])
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("inert")
+        assert store.get_dialog("hits") == 0 and store.get("got_n") is None
+
+    def test_event_carries_the_modifiers_and_no_value(self):
+        store = self._store()
+        w = self._button(behavior=[
+            {"event": "click", "condition": "event.alt",
+             "effects": [{"set": {"dialog.hits": "event.shift"}}]}])
+        r = we.click(w, "click", store, panel=None,
+                     modifiers={"alt": True, "shift": True}, actions=self.ACTIONS)
+        assert r.outcome == "committed" and store.get_dialog("hits") is True
+        assert we.click(self._button(), "click", self._store(), panel=None,
+                        modifiers={"alt": True}).value is None
+
+    def test_absent_modifiers_read_false_not_null(self):
+        store = self._store()
+        we.click(self._button(), "click", store, panel=None, actions=self.ACTIONS)
+        assert store.get("got_alt") is False
+
+    def test_a_node_action_sees_the_modifiers(self):
+        store = self._store()
+        we.click(self._button(), "click", store, panel=None,
+                 modifiers={"alt": True}, actions=self.ACTIONS)
+        assert store.get("got_alt") is True
+
+    def test_mouse_down_behaviors_are_not_a_click(self):
+        store = self._store()
+        w = {"type": "icon_button", "behavior": [
+            {"event": "mouse_down", "effects": [{"set": {"dialog.hits": 1}}]}]}
+        assert we.click(w, "click", store, panel=None) == we.EventResult("inert")
+        assert store.get_dialog("hits") == 0
+
+    def test_nothing_declared_is_inert(self):
+        assert we.click({"type": "button", "label": "x"}, "click", self._store(),
+                        panel=None) == we.EventResult("inert")
+
+    def test_a_disabled_button_runs_nothing(self):
+        store = self._store()
+        w = self._button(bind={"disabled": "dialog.n > 5"})
+        r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+        assert r == we.EventResult("refused", reason=we.DISABLED)
+        assert store.get("got_n") is None
+
+    def test_only_click_is_a_click(self):
+        store = self._store()
+        for event in ("mouse_down", "mouse_up", "change", "commit", "toggle"):
+            r = we.click(self._button(), event, store, panel=None, actions=self.ACTIONS)
+            assert r == we.EventResult("refused", reason=we.WRONG_EVENT), event
+        assert store.get("got_n") is None
+
+    def test_click_refuses_every_other_kind(self):
+        store = self._store()
+        for kind in ("toggle", "checkbox", "radio", "dropdown", "number_input", "text"):
+            w = {"type": kind, "action": "record", "params": {"n": "dialog.n"}}
+            r = we.click(w, "click", store, panel=None, actions=self.ACTIONS)
+            assert r == we.EventResult("refused", reason=we.WRONG_KIND), kind
+        assert store.get("got_n") is None
+
+
+def _button_labelled(node, label):
+    """The one button in ``node`` whose label is ``label`` (dialog buttons
+    carry no id)."""
+    found = []
+
+    def walk(n):
+        if isinstance(n, dict):
+            if n.get("type") == "button" and n.get("label") == label:
+                found.append(n)
+            for v in n.values():
+                walk(v)
+        elif isinstance(n, list):
+            for v in n:
+                walk(v)
+    walk(node)
+    assert len(found) == 1, (label, len(found))
+    return found[0]
+
+
+class TestShippedRotateButtons:
+    """Rotate Options' Copy and OK both run `rotate_options_confirm`; only the
+    literal `copy:` differs, so a port that reads a YAML `false` as the text
+    "False" (an unknown identifier) copies on OK."""
+
+    def _run(self, label):
+        bundle = load_workspace(os.path.join(REPO_ROOT, "workspace"))
+        w = _button_labelled(bundle["dialogs"]["rotate_options"], label)
+        store = StateStore()
+        store.init_dialog("rotate_options", {"angle": 30, "preview": False})
+        actions = {"rotate_options_confirm": {"effects": [
+            {"set": {"got_angle": "param.angle", "got_copy": "param.copy"}}]}}
+        r = we.click(w, "click", store, panel=None, actions=actions)
+        return r, store.get("got_angle"), store.get("got_copy")
+
+    def test_ok_does_not_copy(self):
+        assert self._run("OK") == (we.EventResult("committed", behaviors_run=1), 30, False)
+
+    def test_copy_copies(self):
+        assert self._run("Copy") == (we.EventResult("committed", behaviors_run=1), 30, True)
 
 
 class TestPickSynthetic:

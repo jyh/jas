@@ -1107,7 +1107,10 @@ struct YamlElementView: View {
             Controller(model: m).toggleMaskLinkedOnSelection()
             return
         }
-        if let actionName = element["action"] as? String {
+        // WIDGET_EVENTS.md, "Clicking a button": a declared `click` behavior
+        // IS the click, so the node's `action` runs only when none is declared.
+        if WidgetEvent.clickRunsNodeAction(element),
+           let actionName = element["action"] as? String {
             let rawParams = (element["params"] as? [String: Any]) ?? [:]
             var resolved: [String: Any] = [:]
             for (k, v) in rawParams {
