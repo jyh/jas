@@ -560,6 +560,52 @@ fn merge_panel_scope(ctx: &mut serde_json::Value, scope: &serde_json::Value) {
     }
 }
 
+/// Close tab `index` the way the spec says (actions.yaml `close_tab`): an
+/// edited document asks to save first (the deferred `open_dialog` of
+/// `save_changes_tab`), and an unedited one is removed. `close_tab` reads
+/// `active_document`, so the tab is made active first. The tab strip's x and
+/// Cmd-W both come here; the caller opens the returned dialog. An index past
+/// the last tab does nothing.
+pub(crate) fn request_close_tab(st: &mut crate::workspace::app_state::AppState, index: usize) -> Vec<serde_json::Value> {
+    if index >= st.tabs.len() {
+        return Vec::new();
+    }
+    st.active_tab = index;
+    let mut params = serde_json::Map::new();
+    params.insert("index".into(), serde_json::json!(index));
+    dispatch_action("close_tab", &params, st)
+}
+
+/// Apply the dialog effects a dispatch deferred (`close_dialog`, `open_dialog`
+/// with its `result_to`), in order, once the `AppState` borrow is released:
+/// opening a dialog reads the app's live state. A click and a tab close both
+/// come here.
+pub(crate) fn apply_deferred_dialog_effects(
+    effects: &[serde_json::Value],
+    app: &crate::workspace::app_state::AppHandle,
+    dialog_signal: &mut Signal<Option<super::dialog_view::DialogState>>,
+) {
+    for eff in effects {
+        if let Some(cd) = eff.get("close_dialog") {
+            super::dialog_view::close_dialog_with_result(dialog_signal, cd.get("result").cloned());
+        }
+        if let Some(od) = eff.get("open_dialog") {
+            let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
+            let (live_state, outer_scope) = {
+                let st = app.borrow();
+                (
+                    crate::workspace::dock_panel::build_live_state_map(&st),
+                    build_dialog_outer_scope(&st),
+                )
+            };
+            super::dialog_view::open_dialog_over(
+                dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope,
+                od.get("result_to").and_then(|r| r.as_str()));
+        }
+    }
+}
+
 /// `dispatch_action` with no panel scope: the app scope alone.
 pub(crate) fn dispatch_action(action: &str, params: &serde_json::Map<String, serde_json::Value>, st: &mut crate::workspace::app_state::AppState) -> Vec<serde_json::Value> {
     dispatch_action_in(action, params, None, st)
@@ -3528,25 +3574,7 @@ fn build_mouse_event_handler(
             } // drop st borrow
 
             // Apply deferred dialog effects (outside AppState borrow)
-            for eff in &deferred_dialog_effects {
-                if let Some(cd) = eff.get("close_dialog") {
-                    super::dialog_view::close_dialog_with_result(
-                        &mut dialog_signal, cd.get("result").cloned());
-                }
-                if let Some(od) = eff.get("open_dialog") {
-                    let dlg_id = od.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let raw_params = od.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
-                    let (live_state, outer_scope) = {
-                        let st = app.borrow();
-                        (
-                            crate::workspace::dock_panel::build_live_state_map(&st),
-                            build_dialog_outer_scope(&st),
-                        )
-                    };
-                    super::dialog_view::open_dialog_over(
-                        &mut dialog_signal, dlg_id, &raw_params, &live_state, &outer_scope, od.get("result_to").and_then(|r| r.as_str()));
-                }
-            }
+            apply_deferred_dialog_effects(&deferred_dialog_effects, &app, &mut dialog_signal);
             revision += 1;
         });
     }))
@@ -14749,6 +14777,98 @@ mod tests {
                 "nullable but not a colour");
         assert!(!null_color_means_none("stroke_width"),
                 "a colour bind on a non-nullable field means nothing here");
+    }
+
+    fn three_tabs() -> AppState {
+        let mut st = AppState::new();
+        while st.tabs.len() < 3 {
+            st.add_tab(crate::workspace::app_state::TabState::new());
+        }
+        st.active_tab = 0;
+        st
+    }
+
+    /// The tab strip's x and Cmd-W close through the YAML `close_tab`
+    /// (actions.yaml), which asks to save an edited document. Until
+    /// 2026-10-15 they called `AppState::close_tab`, which never asks, so an
+    /// edited tab closed and its changes were lost.
+    #[test]
+    fn closing_an_edited_tab_asks_to_save_and_keeps_it() {
+        let mut st = three_tabs();
+        st.tabs[1].model.with_txn(|m| m.set_document(crate::document::document::Document::default()));
+        assert!(st.tabs[1].model.is_modified(), "the control: tab 1 is edited");
+        let deferred = request_close_tab(&mut st, 1);
+        assert_eq!(st.tabs.len(), 3, "nothing is removed before the person answers");
+        assert_eq!(st.active_tab, 1, "the tab being asked about is the one shown");
+        let open = deferred.iter().find_map(|e| e.get("open_dialog")).expect("a dialog opens");
+        assert_eq!(open["id"], serde_json::json!("save_changes_tab"));
+        assert_eq!(open["params"]["index"], serde_json::json!(1), "{open}");
+    }
+
+    #[test]
+    fn closing_an_unedited_tab_removes_it_without_asking() {
+        let mut st = three_tabs();
+        assert!(!st.tabs[1].model.is_modified());
+        let deferred = request_close_tab(&mut st, 1);
+        assert_eq!(st.tabs.len(), 2, "tab 1 is removed");
+        assert!(deferred.iter().all(|e| e.get("open_dialog").is_none()), "{deferred:?}");
+    }
+
+    #[test]
+    fn closing_an_unedited_tab_asks_about_that_tab_not_the_active_one() {
+        // `close_tab` reads `active_document.is_modified`, so the tab must be
+        // made active first: an edited ACTIVE tab must not make an unedited
+        // one ask, nor the reverse.
+        let mut st = three_tabs();
+        st.tabs[0].model.with_txn(|m| m.set_document(crate::document::document::Document::default()));
+        let deferred = request_close_tab(&mut st, 2);
+        assert_eq!(st.tabs.len(), 2, "unedited tab 2 is removed");
+        assert!(deferred.iter().all(|e| e.get("open_dialog").is_none()), "{deferred:?}");
+        assert!(st.tabs[0].model.is_modified(), "the edited tab is still there");
+    }
+
+    /// `AppState::close_tab` closes without asking, so the only caller is the
+    /// `remove_tab` intercept (the spec's no-prompt close). Every surface goes
+    /// through [`request_close_tab`]. Derived by walking `src/`, so a new file
+    /// that calls it is seen.
+    #[test]
+    fn only_remove_tab_closes_a_tab_without_asking() {
+        // Paths compare by COMPONENT (`Path::ends_with`), never as text: a
+        // Windows path prints `\`, and a text match read the intercept as
+        // missing on the Windows lane (2026-10-15).
+        fn walk(dir: &std::path::Path, out: &mut Vec<(std::path::PathBuf, usize)>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    let text = std::fs::read_to_string(&p).unwrap();
+                    let n = text.matches(".close_tab(").count();
+                    if n > 0 {
+                        out.push((p.clone(), n));
+                    }
+                }
+            }
+        }
+        let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let mut sites = vec![];
+        walk(root, &mut sites);
+        let renderer = std::path::Path::new("interpreter").join("renderer.rs");
+        let this = sites.iter().find(|(p, _)| p.ends_with(&renderer));
+        // renderer.rs: the intercept, plus this test's own needle and doc.
+        assert!(this.is_some(), "the control: the intercept is found ({sites:?})");
+        let others: Vec<_> = sites.iter().filter(|(p, _)| !p.ends_with(&renderer)).collect();
+        assert!(others.is_empty(), "a surface closes a tab without asking: {others:?}");
+        let src = std::fs::read_to_string(root.join("interpreter/renderer.rs")).unwrap();
+        let calls = src.lines().filter(|l| l.trim_start().starts_with("st.close_tab(")).count();
+        assert_eq!(calls, 1, "renderer.rs calls it once, in the remove_tab intercept");
+    }
+
+    #[test]
+    fn closing_a_tab_that_does_not_exist_does_nothing() {
+        let mut st = three_tabs();
+        assert!(request_close_tab(&mut st, 7).is_empty());
+        assert_eq!((st.tabs.len(), st.active_tab), (3, 0));
     }
 
     #[test]
