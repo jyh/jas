@@ -1036,6 +1036,23 @@ internal sealed unsafe class Canvas : IDisposable
         ApplyDialogRefresh("open");
     }
 
+    /// <summary>
+    /// #422: a reply that names a tab to remove (`"remove_tab": <index>`). The
+    /// engine owns no tabs, so the shell must remove it -- but this shell holds
+    /// ONE document and the engine has no state for zero (`open_documents` is
+    /// always one entry), so what removing it means is a design question
+    /// (flask §272). Until it is answered the request is REPORTED BY NAME,
+    /// never dropped: before #422 the same press was a loud refusal
+    /// (`UnknownEffect:remove_child`), and a shell that ignored the new key
+    /// would turn it silent.
+    /// </summary>
+    private void ReportUnhostedTab(string reply, string head)
+    {
+        if (ActWire.RemoveTab(reply) is not { } index) { return; }
+        _report($"TAB REMOVE UNHOSTED {head} index={index} -- this shell holds one document "
+              + $"and does not remove it yet {Tids()}");
+    }
+
     // =======================================================================
     // S2 — THE DIALOG HOST'S RENDER HALF
     //
@@ -1131,6 +1148,7 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
         var after = DialogWire.Named(reply);
+        ReportUnhostedTab(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         ApplyDialogRefresh("event");
@@ -4574,6 +4592,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, runHead);
+            ReportUnhostedTab(reply, runHead);
         }
         catch (Exception ex)
         {
@@ -4620,6 +4639,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
+            ReportUnhostedTab(reply, head);
         }
         catch (Exception ex)
         {
@@ -4836,6 +4856,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
+            ReportUnhostedTab(reply, head);
         }
         catch (Exception ex)
         {
