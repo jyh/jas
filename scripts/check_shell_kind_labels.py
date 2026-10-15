@@ -77,17 +77,22 @@ def shell_case_labels(src: str) -> list[str]:
 
 def spec_kinds(src: str) -> set[str]:
     """INPUT_KINDS | BOOLEAN_KINDS, read from the spec's own frozensets."""
+    # EVERY `*_KINDS` table, not two named ones: #429 added CHECK_KINDS and
+    # OPTION_KINDS beside ITEM_KINDS, and a fixed list would have read radio
+    # as a typo. The two original tables must still be there, so a renamed
+    # or emptied spec is refused rather than read as "no kinds".
     out: set[str] = set()
+    tables = dict(re.findall(r"^([A-Z_]+_KINDS)\s*=\s*frozenset\(\{(.*?)\}\)", src, re.S | re.M))
     for name in ("INPUT_KINDS", "BOOLEAN_KINDS"):
-        m = re.search(rf"{name}\s*=\s*frozenset\(\{{(.*?)\}}\)", src, re.S)
-        if not m:
+        if name not in tables:
             refuse(f"{name} is not readable in {SPEC.name}")
-        out |= set(re.findall(r'"([^"]+)"', m.group(1)))
+    for body in tables.values():
+        out |= set(re.findall(r'"([^"]+)"', body))
     return out
 
 
 def workspace_kinds(path: Path) -> set[str]:
-    """Every `type` a panel CONTENT tree actually uses, from the compiled
+    """Every `type` a panel or dialog tree actually uses, from the compiled
     workspace -- the structural kinds (container, row, text, ...) the spec's
     event table has no reason to name."""
     try:
@@ -108,6 +113,8 @@ def workspace_kinds(path: Path) -> set[str]:
                 walk(v)
 
     walk(doc.get("panels", {}))
+    # The dialog door (S2): a dialog's content is drawn by the same switch.
+    walk(doc.get("dialogs", {}))
     return found
 
 
@@ -148,7 +155,7 @@ def main() -> int:
     unknown = sorted(set(labels) - known)
     if unknown:
         fail(
-            "the shell switches on kind(s) no spec table and no panel in the workspace uses: "
+            "the shell switches on kind(s) no spec table and no panel or dialog in the workspace uses: "
             + ", ".join(repr(u) for u in unknown)
             + " -- a label that matches nothing draws a placeholder and is counted as an unbuilt kind, "
               "which is byte-identical to a kind nobody has written yet"
@@ -181,6 +188,14 @@ def self_test() -> int:
     assert "checkbox" in known and "toggle" in known, "fixture: the spec's boolean kinds are not readable"
     assert "number_input" in known and "length_input" in known, "fixture: the spec's input kinds are not readable"
     assert "text" in known, "fixture: a structural kind from the workspace is missing"
+    arms += 1
+
+    # Every spec table counts, not two named ones: `radio` is a CHECK kind and
+    # `radio_group` an OPTION kind (#429), and both live only in DIALOGS, which
+    # the materializer draws since the dialog door (S2).
+    spec = spec_kinds(SPEC.read_text(encoding="utf-8"))
+    assert "radio" in spec and "radio_group" in spec and "dropdown" in spec,         "fixture: the spec's check/option/item kinds are not readable"
+    assert "radio" in workspace_kinds(WORKSPACE), "fixture: the dialogs' kinds are not walked"
     arms += 1
 
     # The gate's whole subject: a typo is NOT in the known set.
