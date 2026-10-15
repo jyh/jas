@@ -651,11 +651,17 @@ static class Program
         // S3 (jas §279): a `separator`'s rule. The plan carries no orientation
         // (not a STATIC_KEY), so the rule follows the rect the plan placed:
         // wider than tall is horizontal, else vertical; an empty rect is none.
-        Eq("separator: a wide rect is a horizontal rule", "horizontal", PanelWire.SeparatorRule(300, 9) ?? "(null)");
-        Eq("separator: a tall rect is a vertical rule (the picker's swatch rule)", "vertical", PanelWire.SeparatorRule(1, 16) ?? "(null)");
-        Eq("separator: a square rect is horizontal", "horizontal", PanelWire.SeparatorRule(8, 8) ?? "(null)");
+        // jas §293 (#439): a declared `orientation` wins over the rect's shape;
+        // the shape rule is only for a separator that declares none.
+        Eq("separator: a declared vertical rule in a wide rect is vertical", "vertical", PanelWire.SeparatorRule("vertical", 300, 9) ?? "(null)");
+        Eq("separator: a declared horizontal rule in a tall rect is horizontal", "horizontal", PanelWire.SeparatorRule("horizontal", 1, 16) ?? "(null)");
+        Eq("separator: an unknown orientation draws nothing, never a guess", "(null)", PanelWire.SeparatorRule("diagonal", 300, 9) ?? "(null)");
+        Eq("separator: a declared rule in an empty rect draws nothing", "(null)", PanelWire.SeparatorRule("vertical", 0, 16) ?? "(null)");
+        Eq("separator: a wide rect is a horizontal rule", "horizontal", PanelWire.SeparatorRule(null, 300, 9) ?? "(null)");
+        Eq("separator: a tall rect is a vertical rule (the picker's swatch rule)", "vertical", PanelWire.SeparatorRule(null, 1, 16) ?? "(null)");
+        Eq("separator: a square rect is horizontal", "horizontal", PanelWire.SeparatorRule(null, 8, 8) ?? "(null)");
         Eq("separator: an empty rect draws nothing", "(null)|(null)",
-            (PanelWire.SeparatorRule(0, 9) ?? "(null)") + "|" + (PanelWire.SeparatorRule(300, 0) ?? "(null)"));
+            (PanelWire.SeparatorRule(null, 0, 9) ?? "(null)") + "|" + (PanelWire.SeparatorRule(null, 300, 0) ?? "(null)"));
         // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
         // an act's reply names (#414). A reply the shell cannot read is NULL,
         // never a closed dialog: "closed" would hide a dialog the engine holds.
