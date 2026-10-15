@@ -124,6 +124,11 @@ public sealed partial class MainWindow
             new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xCD, 0xE3, 0xF7));
         private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneCheckedEdge =
             new(Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x2F, 0x6F, 0xB0));
+        // An unselected anchor cell's fill: CLEAR, never null. A null
+        // background is not hit-testable, so a press would fall through to
+        // the pane beneath and send nothing (measured live on #434's grid).
+        private readonly Microsoft.UI.Xaml.Media.SolidColorBrush _paneClearFill =
+            new(Microsoft.UI.Colors.Transparent);
 
         internal void DrawPane(PanelSnapshot snap)
         {
@@ -497,6 +502,23 @@ public sealed partial class MainWindow
                         el = BuildRadioGroup(leaf, leaf.Options);
                         break;
 
+                    // #434: a `reference_point_widget` is an input kind whose
+                    // rows are its kind's anchors; a square grid of cells, the
+                    // `selected` one filled, a press sending `commit` with the
+                    // anchor. A row count that is not a square is a placeholder.
+                    case "reference_point_widget":
+                        if (leaf.Options is not { Items.Count: > 0 } || PanelWire.GridColumns(leaf.Options.Items.Count) is not { } columns)
+                        {
+                            unmaterialized++;
+                            el = Placeholder(leaf.Type);
+                            break;
+                        }
+                        inputs++;
+                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        optionsRefused += leaf.Options.Refused;
+                        el = BuildAnchorGrid(leaf, leaf.Options, columns);
+                        break;
+
                     // S3 (jas §279): a `separator` is a 1-DIP rule across the
                     // middle of its rect, in the direction the rect runs. No
                     // event, no value; an empty rect is counted and drawn empty.
@@ -600,6 +622,49 @@ public sealed partial class MainWindow
                 row.Children.Add(radio);
             }
             return row;
+        }
+
+        /// <summary>
+        /// #434: a `reference_point_widget`'s cells, one per anchor row, placed
+        /// row by row (<see cref="PanelWire.GridCell"/>). Each cell is named by
+        /// its row's label; a press sends `commit` with the row's value, and the
+        /// next plan's `selected` fills the cell the core chose and gives it the
+        /// automation status `selected`, so a screen reader hears the choice.
+        /// </summary>
+        private AnchorGrid BuildAnchorGrid(PaneLeaf leaf, PaneOptions options, int columns)
+        {
+            var grid = new AnchorGrid();
+            for (var i = 0; i < columns; i++)
+            {
+                grid.RowDefinitions.Add(new RowDefinition());
+                grid.ColumnDefinitions.Add(new ColumnDefinition());
+            }
+            var (id, path) = (leaf.Id, leaf.Path);
+            for (var i = 0; i < options.Items.Count; i++)
+            {
+                var option = options.Items[i];
+                var cell = new Button
+                {
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    Padding = new Thickness(0),
+                    Margin = new Thickness(1),
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch,
+                    BorderThickness = new Thickness(1),
+                    BorderBrush = _paneCheckedEdge,
+                    Background = option.Selected ? _paneCheckedFill : _paneClearFill,
+                };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cell, option.Label);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(cell, option.Selected ? "selected" : "");
+                var (row, column) = PanelWire.GridCell(i, columns);
+                Grid.SetRow(cell, row);
+                Grid.SetColumn(cell, column);
+                var value = option.Value;
+                cell.Click += (_, _) => SendPane(id, "commit", value, path);
+                grid.Children.Add(cell);
+            }
+            return grid;
         }
 
         /// <summary>S3: a `separator`'s rule, centred in its rect (<see cref="PanelWire.SeparatorRule"/>).</summary>
@@ -1063,6 +1128,22 @@ public sealed partial class MainWindow
                     radio.IsEnabled = !off;
                     break;
 
+                case AnchorGrid anchors:
+                {
+                    off = off || leaf.Id.Length == 0;
+                    var items = leaf.Options?.Items;
+                    for (var i = 0; i < anchors.Children.Count; i++)
+                    {
+                        if (anchors.Children[i] is not Button cell) { continue; }
+                        var sel = items is not null && i < items.Count && items[i].Selected;
+                        cell.Background = sel ? _paneCheckedFill : _paneClearFill;
+                        Microsoft.UI.Xaml.Automation.AutomationProperties.SetItemStatus(cell, sel ? "selected" : "");
+                        cell.IsEnabled = !off;
+                        on |= sel;
+                    }
+                    break;
+                }
+
                 case RadioGroupRow group:
                 {
                     off = off || leaf.Id.Length == 0;
@@ -1476,6 +1557,15 @@ internal sealed partial class SwatchTile : Grid
 /// bar's AutomationId reaches the rendered tree.
 /// </summary>
 internal sealed partial class ColorBarSurface : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>#434: a `reference_point_widget`'s grid of anchor cells, a type of its
+/// own so the value applier can tell it from any other Grid; its peer makes the
+/// widget id visible to UI Automation.</summary>
+internal sealed partial class AnchorGrid : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);

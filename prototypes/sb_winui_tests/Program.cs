@@ -617,6 +617,18 @@ static class Program
         // kind (`click`); `radio_group` an option kind (`toggle` carrying the
         // option's id). The engine refuses a press on the checked one
         // (`AlreadyChecked`); the shell never decides that itself.
+        // jas §287 (#434): a `reference_point_widget` plans its kind's nine
+        // anchors as option rows; the face lays any perfect-square count out as
+        // a square grid, row by row, and refuses any other count.
+        Eq("grid: nine rows are three columns", "3", PanelWire.GridColumns(9)?.ToString() ?? "(null)");
+        Eq("grid: four rows are two columns", "2", PanelWire.GridColumns(4)?.ToString() ?? "(null)");
+        Eq("grid: one row is one column", "1", PanelWire.GridColumns(1)?.ToString() ?? "(null)");
+        Eq("grid: no rows is no grid", "(null)", PanelWire.GridColumns(0)?.ToString() ?? "(null)");
+        Eq("grid: eight rows are no square, refused", "(null)", PanelWire.GridColumns(8)?.ToString() ?? "(null)");
+        Eq("grid: the sixth row (middle_right) sits at row 1, column 2", "1|2",
+            PanelWire.GridCell(5, 3) is var (gr, gc) ? $"{gr}|{gc}" : "");
+        Eq("grid: the last row (bottom_right) sits at row 2, column 2", "2|2",
+            PanelWire.GridCell(8, 3) is var (lr, lc) ? $"{lr}|{lc}" : "");
         Eq("radio: a radio sends click, no value", "click|(null)",
             PanelWire.RadioEvent("radio", "x") is var (re, rv) ? $"{re}|{rv ?? "(null)"}" : "");
         Eq("radio: a radio_group sends toggle with the option's id", "toggle|s",

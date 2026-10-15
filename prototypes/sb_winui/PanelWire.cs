@@ -220,6 +220,23 @@ internal static class PanelWire
     internal static (string Event, string? Value) RadioEvent(string type, string optionValue) =>
         type == "radio_group" ? ("toggle", optionValue) : ("click", null);
 
+    /// <summary>
+    /// #434: a `reference_point_widget`'s rows are its kind's nine anchors, row
+    /// by row. The face lays any perfect-square count out as a square grid and
+    /// refuses (null) any other, so it never assumes nine.
+    /// </summary>
+    internal static int? GridColumns(int count)
+    {
+        for (var n = 1; n * n <= count; n++)
+        {
+            if (n * n == count) { return n; }
+        }
+        return null;
+    }
+
+    /// <summary>Row-by-row placement: the <paramref name="index"/>th row's cell.</summary>
+    internal static (int Row, int Column) GridCell(int index, int columns) => (index / columns, index % columns);
+
     /// <summary>A `radio_group` option's face: its label as the core sent it,
     /// empty included (the picker's channel radios carry none), never its id.</summary>
     internal static string RadioFace(PaneOption row) => row.Label;
