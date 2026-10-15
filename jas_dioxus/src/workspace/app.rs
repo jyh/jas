@@ -936,14 +936,23 @@ pub fn App() -> Element {
                 span { "{display_name}" }
                 {
                     let act2 = act.clone();
+                    let app_for_close = app.clone();
                     rsx! {
                         span {
                             style: "margin-left:6px; color:{THEME_TEXT_BUTTON}; cursor:pointer; font-size:14px; line-height:1;",
                             onclick: move |evt: Event<MouseData>| {
                                 evt.stop_propagation();
+                                // Through the YAML `close_tab`, so an edited
+                                // tab asks to save before it closes.
+                                let deferred = Rc::new(RefCell::new(Vec::new()));
+                                let out = deferred.clone();
                                 (act2.borrow_mut())(Box::new(move |st: &mut AppState| {
-                                    st.close_tab(idx);
+                                    *out.borrow_mut() = crate::interpreter::renderer::request_close_tab(st, idx);
                                 }));
+                                let mut sig = yaml_dialog;
+                                let effects = deferred.borrow().clone();
+                                crate::interpreter::renderer::apply_deferred_dialog_effects(
+                                    &effects, &app_for_close, &mut sig);
                             },
                             "\u{00d7}"
                         }

@@ -457,10 +457,17 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if (c == "w" || c == "W") && cmd => {
                 evt.prevent_default();
-                (act.borrow_mut())(Box::new(|st: &mut AppState| {
+                // Through the YAML `close_tab`, so an edited tab asks to save.
+                let deferred = Rc::new(RefCell::new(Vec::new()));
+                let out = deferred.clone();
+                (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                     let idx = st.active_tab;
-                    st.close_tab(idx);
+                    *out.borrow_mut() = crate::interpreter::renderer::request_close_tab(st, idx);
                 }));
+                let mut sig = dialog_sig;
+                let effects = deferred.borrow().clone();
+                crate::interpreter::renderer::apply_deferred_dialog_effects(
+                    &effects, &app_for_keys, &mut sig);
             }
             Key::Character(ref c) if (c == "g" || c == "G") && cmd => {
                 evt.prevent_default();
