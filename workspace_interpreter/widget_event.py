@@ -78,12 +78,20 @@ BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # not text: see `pick`.
 PICK_EVENTS = ("toggle", "alt_toggle")
 ITEM_KINDS = frozenset({"dropdown"})
+# A press that CHECKS and never unchecks: see `check`. Its events are the
+# press synonyms.
+CHECK_KINDS = frozenset({"radio"})
+# A pick of one of a group's `options` by its `id`: see `choose`.
+CHOOSE_EVENTS = ("toggle",)
+OPTION_KINDS = frozenset({"radio_group"})
 
 ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: COMMIT_EVENTS for kind in INPUT_KINDS},
     "text_input": COMMIT_EVENTS + TEXT_ENTRY_EVENTS,
     **{kind: PRESS_EVENTS for kind in BOOLEAN_KINDS},
     **{kind: PICK_EVENTS for kind in ITEM_KINDS},
+    **{kind: PRESS_EVENTS for kind in CHECK_KINDS},
+    **{kind: CHOOSE_EVENTS for kind in OPTION_KINDS},
 }
 
 # The names a behavior's expressions can start from: the store's evaluation
@@ -414,6 +422,87 @@ def press(widget: dict, store: StateStore, *, panel: dict | None,
         return EventResult("inert", value=value)
     _write_bind(target, value, store, panel)
     return EventResult("committed", value=value, bind_written=True)
+
+
+def check(widget: dict, store: StateStore, *, panel: dict | None,
+          **run_kwargs) -> EventResult:
+    """Press a CHECK kind (``radio``): check it, never uncheck it.
+
+    Refuse a wrong kind or a disabled radio. A radio whose bound expression
+    is already true is ``inert``. Otherwise its node-level ``on_check``
+    effects ARE the check (``event.value`` is ``True``, nothing is written
+    behind them); with none, ``True`` is written to a writable bind. Any
+    declared ``click``/``change`` behaviors run after, in order.
+    """
+    if widget.get("type") not in CHECK_KINDS:
+        return EventResult("refused", reason=WRONG_KIND)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    expr = bound_target(widget)
+    if expr is not None and evaluate(expr, store.eval_context({})).to_bool():
+        return EventResult("inert", value=True)
+    ran = 0
+    written = False
+    on_check = widget.get("on_check")
+    if isinstance(on_check, list) and on_check:
+        run_effects(on_check, {"event": {"value": True}}, store, **run_kwargs)
+        ran = 1
+    else:
+        target = writable_target(expr)
+        if target is not None:
+            _write_bind(target, True, store, panel)
+            written = True
+    ran += _run_behaviors(_declared(widget, PRESS_EVENTS), True, store, run_kwargs)
+    return EventResult("committed" if ran or written else "inert", value=True,
+                       bind_written=written, behaviors_run=ran)
+
+
+def choose(widget: dict, option_id, event: str, store: StateStore, *,
+           panel: dict | None, **run_kwargs) -> EventResult:
+    """Pick one option of an OPTION kind (``radio_group``) by its ``id``.
+
+    Refuse a wrong kind, an event other than ``toggle``, a disabled group, a
+    pick naming no option (``MissingValue``) or one the group does not
+    declare (``BadValue``). The option whose ``id`` equals the bound value as
+    text is already checked: ``inert``. Otherwise write the ``id`` (a string)
+    to a writable bind, then run the ``toggle`` behaviors with
+    ``event.value`` set to the ``id``.
+    """
+    if widget.get("type") not in OPTION_KINDS:
+        return EventResult("refused", reason=WRONG_KIND)
+    if event not in CHOOSE_EVENTS:
+        return EventResult("refused", reason=WRONG_EVENT)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    if option_id is None:
+        return EventResult("refused", reason=MISSING_VALUE)
+    options = widget.get("options") if isinstance(widget.get("options"), list) else []
+    if not any(isinstance(o, dict) and o.get("id") == option_id for o in options):
+        return EventResult("refused", reason=BAD_VALUE)
+    expr = bound_target(widget)
+    if expr is not None and _as_text(evaluate(expr, store.eval_context({}))) == option_id:
+        return EventResult("inert", value=option_id)
+    target = writable_target(expr)
+    if target is not None:
+        _write_bind(target, option_id, store, panel)
+    ran = _run_behaviors(_declared(widget, (event,)), option_id, store, run_kwargs)
+    return EventResult("committed" if target is not None or ran else "inert",
+                       value=option_id, bind_written=target is not None,
+                       behaviors_run=ran)
+
+
+def _as_text(v) -> str | None:
+    """A bound value as the text an option ``id`` is compared with: a
+    string as itself, a whole number without its ``.0``, a bool as
+    ``true``/``false``, anything else ``None``."""
+    raw = v.value if hasattr(v, "value") else v
+    if isinstance(raw, bool):
+        return "true" if raw else "false"
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float)):
+        return str(int(raw)) if float(raw).is_integer() else str(raw)
+    return None
 
 
 def pick(widget: dict, item_value, event: str, store: StateStore, *,

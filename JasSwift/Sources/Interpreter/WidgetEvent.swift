@@ -39,6 +39,12 @@ enum WidgetEvent {
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
     static let pickEvents = ["toggle", "alt_toggle"]
     static let itemKinds: Set<String> = ["dropdown"]
+    /// The check kind: a press CHECKS it and never unchecks it. Its events
+    /// are the press synonyms.
+    static let checkKinds: Set<String> = ["radio"]
+    /// The option kind: a pick names one of its `options` by `id`.
+    static let optionKinds: Set<String> = ["radio_group"]
+    static let chooseEvents = ["toggle"]
 
     static let badValue = "BadValue"
     static let missingValue = "MissingValue"
@@ -144,6 +150,104 @@ enum WidgetEvent {
         }
         writeBind(target, value: value, store: store, panel: panel, host: host)
         return Result(outcome: "committed", value: value, bindWritten: true)
+    }
+
+    /// Press the check kind (WIDGET_EVENTS.md, "Checking a radio"): check it,
+    /// never uncheck it. A radio whose bound expression is true is `inert`.
+    /// Its node-level `on_check` effects ARE the check (`event.value` is
+    /// `true`, nothing written behind them); with none, `true` is written to a
+    /// writable bind. Declared `click`/`change` behaviors run after.
+    static func check(
+        widget: [String: Any], store: StateStore, panel: [String: Any]?,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let kind = widget["type"] as? String, checkKinds.contains(kind) else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        let expr = boundTarget(widget)
+        if let expr = expr,
+           evaluate(expr, context: host.scope ?? store.evalContext()).toBool() {
+            return Result(outcome: "inert", value: true)
+        }
+        var ran = 0
+        var written = false
+        if let onCheck = widget["on_check"] as? [Any], !onCheck.isEmpty {
+            var ctx = scopeLocals(host.scope, store: store)
+            ctx["event"] = ["value": true] as [String: Any]
+            runEffects(onCheck, ctx: ctx, store: store, actions: actions, dialogs: dialogs,
+                       platformEffects: platformEffects, model: model)
+            ran = 1
+        } else if let target = writableTarget(expr) {
+            writeBind(target, value: true, store: store, panel: panel, host: host)
+            written = true
+        }
+        ran += runBehaviors(declared(widget, events: pressEvents), value: true, store: store,
+                            actions: actions, dialogs: dialogs,
+                            platformEffects: platformEffects, model: model, host: host)
+        return Result(outcome: ran > 0 || written ? "committed" : "inert", value: true,
+                      bindWritten: written, behaviorsRun: ran)
+    }
+
+    /// Pick one option of the option kind (WIDGET_EVENTS.md, "Picking a radio
+    /// option") by its `id`. The option whose id equals the bound value as
+    /// text (``choiceText(_:)``) is already checked: `inert`. Otherwise the id
+    /// is written to a writable bind, then the `toggle` behaviors run with
+    /// `event.value` the id.
+    static func choose(
+        widget: [String: Any], optionId: String?, event: String, store: StateStore,
+        panel: [String: Any]?,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let kind = widget["type"] as? String, optionKinds.contains(kind) else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        guard chooseEvents.contains(event) else {
+            return Result(outcome: "refused", reason: wrongEvent)
+        }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        guard let optionId = optionId else {
+            return Result(outcome: "refused", reason: missingValue)
+        }
+        let options = (widget["options"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }
+        guard options.contains(where: { $0["id"] as? String == optionId }) else {
+            return Result(outcome: "refused", reason: badValue)
+        }
+        let expr = boundTarget(widget)
+        if let expr = expr,
+           choiceText(evaluate(expr, context: host.scope ?? store.evalContext())) == optionId {
+            return Result(outcome: "inert", value: optionId)
+        }
+        let target = writableTarget(expr)
+        if let target = target {
+            writeBind(target, value: optionId, store: store, panel: panel, host: host)
+        }
+        let ran = runBehaviors(declared(widget, events: chooseEvents), value: optionId,
+                               store: store, actions: actions, dialogs: dialogs,
+                               platformEffects: platformEffects, model: model, host: host)
+        return Result(outcome: target != nil || ran > 0 ? "committed" : "inert",
+                      value: optionId, bindWritten: target != nil, behaviorsRun: ran)
+    }
+
+    /// A bound value as the text an option `id` is compared with: a string as
+    /// itself, a number in its canonical text (a WHOLE number without its
+    /// `.0`: a Swift Double prints 2.0 as "2.0"), a bool as `true`/`false`,
+    /// anything else nil.
+    static func choiceText(_ v: Value) -> String? {
+        switch v {
+        case .string(let s): return s
+        case .bool(let b): return b ? "true" : "false"
+        case .number(let n): return numberToCanonicalString(n)
+        default: return nil
+        }
     }
 
     /// Whether a dropdown's `toggle` item is checked (WIDGET_EVENTS.md,

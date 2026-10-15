@@ -87,7 +87,8 @@ from workspace_interpreter.expr_parser import (  # noqa: E402
 )
 from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
 from workspace_interpreter.widget_event import (  # noqa: E402
-    ALLOWED_EVENTS, BOOLEAN_KINDS, EVENT_ROOTS, INPUT_KINDS, ITEM_KINDS,
+    ALLOWED_EVENTS, BOOLEAN_KINDS, CHECK_KINDS, EVENT_ROOTS, INPUT_KINDS, ITEM_KINDS,
+    OPTION_KINDS,
 )
 
 # A `foreach` without `as:` names its item this (every renderer agrees).
@@ -455,11 +456,13 @@ def self_test() -> int:
             print(f"  FAILED: {name}")
 
     table = {k: tuple(v) for k, v in ALLOWED_EVENTS.items()}
-    # 11 since `color_bar` became an input kind (fork B2, 2026-10-13; 10 with
-    # `slider`, fork A, the same day); the literal
-    # is here so a change to the kind set is a deliberate edit, not a drift.
-    arm("the module table is every value, boolean and item kind",
-        len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS) == 11)
+    # 13 since `radio` (the check kind) and `radio_group` (the option kind)
+    # joined (2026-10-15; 11 since `color_bar` became an input kind, fork B2,
+    # 2026-10-13); the literal is here so a change to the kind set is a
+    # deliberate edit, not a drift.
+    arm("the module table is every value, boolean, item, check and option kind",
+        len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS | CHECK_KINDS
+                          | OPTION_KINDS) == 13)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [

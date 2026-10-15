@@ -3287,6 +3287,60 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// WIDGET_EVENTS.md, "Checking a radio": a press CHECKS a radio through
+    /// its `on_check` and never unchecks it. Shear Options' three axis radios
+    /// share `dialog.axis` through their own comparisons. (The dialog opens
+    /// from a tool event, so the store opens it here.)
+    #[test]
+    fn dialog_event_checks_a_radio_and_a_checked_radio_is_refused_by_name() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        engine_of(e).store.borrow_mut().init_dialog(
+            "shear_options", [("axis".to_string(), serde_json::json!("horizontal"))].into(), None);
+        let (reply, err) = dialog_event(e, r#"{"widget":"sho_axis_vertical","event":"click"}"#);
+        assert!(!reply.is_empty(), "the check ran: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("axis"), &serde_json::json!("vertical"));
+        let (reply, err) = dialog_event(e, r#"{"widget":"sho_axis_vertical","event":"change"}"#);
+        assert!(reply.is_empty() && err.contains("AlreadyChecked"), "a checked radio: {reply} {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("axis"), &serde_json::json!("vertical"));
+        let (reply, err) = dialog_event(e, r#"{"widget":"sho_axis_custom","event":"click"}"#);
+        assert!(!reply.is_empty(), "the control: an unchecked sibling checks: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("axis"), &serde_json::json!("custom"));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// WIDGET_EVENTS.md, "Picking a radio option": the Color Picker's six
+    /// one-option groups share `dialog.radio_channel`; a pick writes the
+    /// option's id. The comparison is as TEXT, so a whole number the engine
+    /// holds as 2.0 matches the id "2" (the reference's int/float note).
+    #[test]
+    fn dialog_event_picks_a_radio_option_by_id() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#4a90d9"}}"##);
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("color_picker"));
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_radio_s","event":"toggle","value":"s"}"#);
+        assert!(!reply.is_empty(), "the pick ran: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("radio_channel"), &serde_json::json!("s"));
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_radio_s","event":"toggle","value":"s"}"#);
+        assert!(reply.is_empty() && err.contains("AlreadyChecked"), "{reply} {err}");
+        for (ev, class) in [(r#"{"widget":"cp_radio_h","event":"toggle","value":"x"}"#, "BadValue"),
+                            (r#"{"widget":"cp_radio_h","event":"toggle"}"#, "MissingValue"),
+                            (r#"{"widget":"cp_radio_h","event":"click","value":"h"}"#, "WrongEvent")] {
+            let (reply, err) = dialog_event(e, ev);
+            assert!(reply.is_empty() && err.contains(class), "{ev}: {reply} {err}");
+            assert_eq!(engine_of(e).store.borrow().get_dialog("radio_channel"), &serde_json::json!("s"));
+        }
+        let (reply, err) = dialog_event(e, r#"{"widget":"cp_radio_h","event":"toggle","value":"h"}"#);
+        assert!(!reply.is_empty(), "the control: another option picks: {err}");
+        engine_of(e).store.borrow_mut().set_dialog("radio_channel", serde_json::json!(2.0));
+        assert_eq!(crate::panel_behavior::option_text(&crate::interpreter::expr::eval(
+            "dialog.radio_channel", &engine_of(e).store.borrow().eval_context())).as_deref(), Some("2"),
+            "a whole number reads as its integer text");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A dialog's buttons have no ids: the shell clicks one by its PLAN path,
     /// and the button's YAML action runs. Cancel on Save Changes closes it.
     #[test]

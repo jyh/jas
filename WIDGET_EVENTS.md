@@ -49,7 +49,7 @@ the field. They now write `event.value`, and Dither's behavior also writes
 
 ## The event table
 
-The table below is the whole vocabulary for the ten value kinds. A
+The table below is the whole vocabulary for the thirteen value kinds. A
 behavior on one of these kinds whose `event` is not listed for that kind
 is refused by the lint.
 
@@ -65,7 +65,9 @@ slider: commit, change
 color_bar: commit, change
 toggle: click, change
 checkbox: click, change
+radio: click, change
 dropdown: toggle, alt_toggle
+radio_group: toggle
 ```
 <!-- widget-event-table:end -->
 
@@ -81,10 +83,15 @@ dropdown: toggle, alt_toggle
 - **Item kinds** are `dropdown`. `toggle` is a plain pick of one declared
   item and `alt_toggle` an Alt pick. They are NOT synonyms: each runs only
   the behaviors declared for itself (see §Picking a dropdown item).
+- **The check kind** is `radio`. `click` and `change` are synonyms: both
+  name "the radio was pressed". A press CHECKS a radio and never unchecks
+  it (see §Checking a radio).
+- **The option kind** is `radio_group`. `toggle` picks one of its
+  `options` by that option's `id` (see §Picking a radio option).
 
 **Outside this contract, deliberately:** every other widget kind. That
-includes `icon_button_group`, `reference_point_widget`,
-`radio_group` and the color widgets other than `color_bar`. Their events are not
+includes `icon_button_group`, `reference_point_widget`
+and the color widgets other than `color_bar`. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
@@ -186,6 +193,53 @@ expression's current truth value, and an unbound widget reads as false.
 3. **Otherwise, write the new boolean to the bound target** when it is
    writable, with its two-way bound global (`committed`). If it is not
    writable, the press is `inert`.
+
+## Checking a radio (the check kind)
+
+A radio is one choice among siblings that share a field. Each radio
+declares its own `bind.checked` expression (Scale Options:
+`dialog.uniform` and `not dialog.uniform`), so the siblings' exclusivity is
+in the YAML, never in the port. A press carries no text.
+
+1. **Refuse a disabled radio** (`Disabled`), and do nothing.
+2. **A radio that is already checked is `inert`.** Its `bind.checked`
+   expression is true, so nothing is written and nothing runs. A press
+   never unchecks a radio.
+3. **If the radio declares `on_check`, that effect list IS the check.**
+   It runs with `event.value` set to `true`, and the bound field is not
+   written. Every shipped radio declares one, because its `bind.checked`
+   is a comparison (`dialog.axis == 'vertical'`) that cannot be written.
+4. **Otherwise, write `true` to the bound target** when it is writable,
+   with its two-way bound global (`committed`). If it is not writable, the
+   press is `inert`.
+
+`on_check` is a field on the node, beside `bind`, not a `behavior` entry.
+That is why the radio's events are `click` and `change` while no shipped
+radio declares a behavior. A radio that also declares `click` or `change`
+behaviors runs those after `on_check`, in declaration order.
+
+## Picking a radio option (the option kind)
+
+A `radio_group` binds ONE expression, as a bare string (`bind:
+"dialog.radio_channel"`), and declares `options`, each with an `id`. The
+option whose `id` equals the bound value, compared as text, is the checked
+one. A pick names one option by its `id`.
+
+1. **Refuse, and do nothing at all, when any of these holds:**
+   - the event is not `toggle` (`WrongEvent`);
+   - the widget is disabled (`Disabled`);
+   - the pick names no option (`MissingValue`);
+   - no declared option has that `id` (`BadValue`).
+2. **The option already checked is `inert`.**
+3. **Otherwise, write the option's `id`, as a string, to the bound
+   target** when it is writable, with its two-way bound global. Then run
+   every behavior declared for `toggle`, with `event.value` set to the
+   `id`. The result is `committed` when either wrote or ran something, and
+   `inert` otherwise.
+
+The Color Picker draws six one-option groups that share
+`dialog.radio_channel`. Picking one writes its channel, which unchecks the
+other five through their own comparisons.
 
 ## What a behavior can read
 
