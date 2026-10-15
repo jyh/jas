@@ -2090,7 +2090,7 @@ fn run_input_behavior(
         return;
     }
     let cs = patch_ctx_for_input(render_ctx, field, committed);
-    for b in &behaviors {
+    for b in behaviors.iter().filter(|b| behavior_condition_holds(b, &cs)) {
         if let Some(effects) = b.get("effects").and_then(|e| e.as_array()) {
             run_yaml_effects(effects, &cs, st);
         }
@@ -4787,7 +4787,7 @@ fn render_icon_button_group(el: &serde_json::Value, ctx: &serde_json::Value, rct
                     let behaviors = behaviors.clone();
                     spawn(async move {
                         let mut st = app.borrow_mut();
-                        for b in &behaviors {
+                        for b in behaviors.iter().filter(|b| behavior_condition_holds(b, &ctx_snap)) {
                             let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
                             let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
                             let mut resolved_params = serde_json::Map::new();
@@ -4876,7 +4876,7 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
                     let behaviors = behaviors.clone();
                     spawn(async move {
                         let mut st = app.borrow_mut();
-                        for b in &behaviors {
+                        for b in behaviors.iter().filter(|b| behavior_condition_holds(b, &ctx_snap)) {
                             let action = b.get("action").and_then(|a| a.as_str()).map(|s| s.to_string());
                             let raw_params = b.get("params").and_then(|p| p.as_object()).cloned().unwrap_or_default();
                             let mut resolved_params = serde_json::Map::new();
@@ -6287,6 +6287,16 @@ fn render_toggle(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &RenderC
             }
         }
     }
+}
+
+/// Whether behavior `b` runs: true when it declares no `condition`, else the
+/// condition's truth in `ctx` (WIDGET_EVENTS.md, "Committing a value", step
+/// 3). The web's value loops dispatch their own behaviors (the input runner,
+/// the icon-button group, the reference-point widget), so each reads the
+/// condition here: Artboard Options' orientation is guarded by one, and
+/// without it pressing the shown orientation swapped it.
+fn behavior_condition_holds(b: &serde_json::Value, ctx: &serde_json::Value) -> bool {
+    b.get("condition").and_then(|c| c.as_str()).map_or(true, |c| expr::eval(c, ctx).to_bool())
 }
 
 /// Partition a radio's `on_check` effects into live-dialog writes and
@@ -9810,6 +9820,30 @@ mod tests {
     use super::*;
     use crate::geometry::element::{Color, Fill, Stroke};
     use crate::workspace::app_state::AppState;
+
+    /// The web's value loops honour a behavior's `condition`. Driven on the
+    /// SHIPPED orientation group: in a portrait dialog, committing "portrait"
+    /// must not run `toggle_artboard_orientation`, while "landscape" must.
+    #[test]
+    fn a_value_loop_honours_the_shipped_orientation_condition() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        fn find<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let group = find(ws.dialog("artboard_options").expect("dialog"), "ao_orientation").expect("ao_orientation");
+        let b = &group["behavior"][0];
+        assert!(b.get("condition").is_some(), "the control: the shipped behavior is guarded");
+        let ctx = |v: &str| serde_json::json!({"dialog": {"width": 100, "height": 200}, "event": {"value": v}});
+        assert!(!behavior_condition_holds(b, &ctx("portrait")), "the shown orientation does not toggle");
+        assert!(behavior_condition_holds(b, &ctx("landscape")), "the other orientation toggles");
+        assert!(behavior_condition_holds(&serde_json::json!({"action": "x"}), &ctx("portrait")),
+                "no condition: the behavior runs");
+    }
 
     /// THE LAYERS-PANEL ROW LABEL, pinned as a VALUE in both ports.
     ///

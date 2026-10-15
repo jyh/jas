@@ -71,7 +71,7 @@ TEXT_ENTRY_EVENTS = ("input", "blur", "keydown")
 
 INPUT_KINDS = frozenset({
     "number_input", "length_input", "text_input",
-    "select", "icon_select", "combo_box", "slider", "color_bar",
+    "select", "icon_select", "icon_button_group", "combo_box", "slider", "color_bar",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # A plain pick and an Alt pick of one declared item. They carry the ITEM,
@@ -251,7 +251,7 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
         point = [number_commit(p, 0.0, 1.0) for p in parts]
         return refused if None in point else (True, point)
 
-    if kind in ("select", "icon_select"):
+    if kind in ("select", "icon_select", "icon_button_group"):
         options = widget.get("options")
         if not isinstance(options, list):
             # Computed options: the shell offered what the expression

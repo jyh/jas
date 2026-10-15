@@ -33,7 +33,7 @@ enum WidgetEvent {
     static let pressEvents = ["click", "change"]
     static let inputKinds: Set<String> = [
         "number_input", "length_input", "text_input",
-        "select", "icon_select", "combo_box", "slider", "color_bar",
+        "select", "icon_select", "icon_button_group", "combo_box", "slider", "color_bar",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
@@ -374,7 +374,7 @@ enum WidgetEvent {
                   let u = numberInputCommit(text: parts[0], min: 0, max: 1),
                   let v = numberInputCommit(text: parts[1], min: 0, max: 1) else { return refused }
             return (true, [u, v])
-        case "select", "icon_select":
+        case "select", "icon_select", "icon_button_group":
             guard let rows = optionRows(widget["options"]) else {
                 // Computed options: the shell offered what the expression
                 // produced, so the text is the value.
@@ -622,6 +622,14 @@ enum WidgetEvent {
 
 /// JSON equality with numbers compared by value, so a store holding `45.0`
 /// equals an expression's `45`. A JSON boolean is not a number.
+/// Whether behavior `b` runs: true when it declares no `condition`, else the
+/// condition's truth in `context` (WIDGET_EVENTS.md, "Committing a value",
+/// step 3). For a view that dispatches a behavior list itself.
+func behaviorConditionHolds(_ b: [String: Any], context: [String: Any]) -> Bool {
+    guard let condition = b["condition"] as? String else { return true }
+    return evaluate(condition, context: context).toBool()
+}
+
 private func jsonValueEqual(_ a: Any?, _ b: Any?) -> Bool {
     let a = a is NSNull ? nil : a, b = b is NSNull ? nil : b
     switch (a, b) {

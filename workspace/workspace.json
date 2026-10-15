@@ -27053,6 +27053,7 @@
                     "behavior": [
                       {
                         "event": "change",
+                        "condition": "event.value != (if dialog.height >= dialog.width then 'portrait' else 'landscape')",
                         "action": "toggle_artboard_orientation"
                       }
                     ]

@@ -284,13 +284,17 @@ fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<Str
 fn options_of(
     node: &Value,
     values: &Map<String, Value>,
+    ctx: &Value,
     path: &[i64],
     withheld: &mut Vec<Value>,
 ) -> Value {
     use crate::interpreter::expr_types::Value as EVal;
-    use crate::interpreter::widget_commit::{option_item, option_text};
+    use crate::interpreter::widget_commit::{option_item, option_text, OPTION_KINDS};
 
     let Some(list) = node.get("options").and_then(Value::as_array) else { return Value::Null };
+    if node.get("type").and_then(Value::as_str).is_some_and(|t| OPTION_KINDS.contains(&t)) {
+        return choice_rows(node, list, ctx, path, withheld);
+    }
     let bound = values.get("bind.value").and_then(Value::as_str);
     let mut picked = false;
     let mut rows = vec![];
@@ -319,7 +323,40 @@ fn options_of(
         if let Some(g) = glyph {
             row["glyph"] = Value::String(g.to_string());
         }
+        // An option may name an icon (the orientation group); the plan's
+        // `icons` map carries it (`icon_names`).
+        if let Some(icon) = item.get("icon").and_then(Value::as_str).filter(|n| !n.contains("{{")) {
+            row["icon"] = Value::String(icon.to_string());
+        }
         rows.push(row);
+    }
+    Value::Array(rows)
+}
+
+/// The option kind's rows (WIDGET_EVENTS.md, "Picking a radio option"):
+/// `{"kind": "option", "value": <id>, "label": <its own label, possibly
+/// empty>, "selected": <bool>}`, one per declared option, in order. `value` is
+/// the `id` a pick sends back. The group's bind is a BARE STRING, which
+/// `bind_values` does not resolve, so it is evaluated here in the leaf's own
+/// scope, and the selected row is the first whose id equals it as text
+/// (`panel_behavior::option_text`: a channel held as 2.0 selects "2"). An
+/// option with no string id, or a templated id or label, is withheld by index.
+fn choice_rows(node: &Value, list: &[Value], ctx: &Value, path: &[i64],
+               withheld: &mut Vec<Value>) -> Value {
+    let bound = crate::interpreter::widget_commit::bound_target(node)
+        .and_then(|e| crate::panel_behavior::option_text(&crate::interpreter::expr::eval(e, ctx)));
+    let mut picked = false;
+    let mut rows = vec![];
+    for (i, o) in list.iter().enumerate() {
+        let id = o.get("id").and_then(Value::as_str);
+        let label = o.get("label").and_then(Value::as_str).unwrap_or("");
+        let Some(id) = id.filter(|id| !id.contains("{{") && !label.contains("{{")) else {
+            withheld.push(json!({"path": path, "key": format!("options[{i}]")}));
+            continue;
+        };
+        let selected = !picked && bound.as_deref() == Some(id);
+        picked |= selected;
+        rows.push(json!({"kind": "option", "value": id, "label": label, "selected": selected}));
     }
     Value::Array(rows)
 }
@@ -386,7 +423,7 @@ struct PanelActions<'a> {
 }
 
 /// The icon names an entry displays: its static `icon`, an `icon` node's
-/// `name`, and the resolved `bind.icon` row.
+/// `name`, the resolved `bind.icon` row, and each option row's `icon`.
 fn icon_names(entry: &Value, out: &mut Vec<String>) {
     let st = &entry["static"];
     let mut push = |v: &Value| {
@@ -401,6 +438,9 @@ fn icon_names(entry: &Value, out: &mut Vec<String>) {
         push(&st["name"]);
     }
     push(&entry["values"]["bind.icon"]);
+    for row in entry["options"].as_array().into_iter().flatten() {
+        push(&row["icon"]);
+    }
 }
 
 fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, withheld: &mut Vec<Value>) -> Value {
@@ -414,7 +454,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
     let (st, held) = static_of(&item.node);
     withheld.extend(held.into_iter().map(|key| json!({"path": item.path, "key": key})));
     let display = display_of(&item.node, &values, &item.ctx);
-    let options = options_of(&item.node, &values, &item.path, withheld);
+    let options = options_of(&item.node, &values, &item.ctx, &item.path, withheld);
     let items = items_of(&item.node, &item.ctx, &item.path, acts, withheld);
     json!({
         "path": item.path,
@@ -2356,6 +2396,53 @@ mod tests {
                 json!([{"kind": "option", "value": "x", "label": "x", "selected": false}]),
             ]
         );
+    }
+
+    /// An option may name an `icon` (Artboard Options' orientation group): its
+    /// row carries the name, and the plan's `icons` map carries the icon, so a
+    /// shell draws it as it draws any icon. The row's `value` is the commit
+    /// text and its `selected` the bound value's, as for a `select`.
+    #[test]
+    fn an_options_icon_reaches_its_row_and_the_plans_icon_map() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "icon_button_group", "id": "o", "bind": {"value": "panel.o"},
+             "options": [{"icon": "orientation_portrait", "value": "portrait"},
+                         {"icon": "orientation_landscape", "value": "landscape"}]}]}});
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let (plan, _) = panel_plan(&panel, 228, 0, &json!({"panel": {"o": "landscape"}}),
+                                   ws.icons(), &Value::Null);
+        let rows = entries_with_nodes(&panel, &json!({"panel": {"o": "landscape"}}))
+            .into_iter().next().expect("a leaf").0["options"].clone();
+        assert_eq!(rows, json!([
+            {"kind": "option", "value": "portrait", "label": "portrait", "icon": "orientation_portrait", "selected": false},
+            {"kind": "option", "value": "landscape", "label": "landscape", "icon": "orientation_landscape", "selected": true}]));
+        for name in ["orientation_portrait", "orientation_landscape"] {
+            assert!(plan["icons"].get(name).is_some(), "the plan carries {name}: {}", plan["icons"]);
+        }
+    }
+
+    /// WIDGET_EVENTS.md, "Picking a radio option": a `radio_group`'s rows are
+    /// its options by `id` (the text a pick sends back), labelled by their own
+    /// label, possibly empty. The selected row is the one whose id equals the
+    /// bound value as text, so a channel held as 2.0 selects "2". The bind is a
+    /// BARE STRING here, which `bind_values` does not resolve, so the row's
+    /// `selected` is the only place the shell reads the group's value.
+    #[test]
+    fn a_radio_group_plans_its_options_by_id_with_the_bound_one_selected() {
+        let group = |bind: &str| json!({"type": "radio_group", "id": "g", "bind": bind,
+            "options": [{"id": "h", "label": ""}, {"id": "2", "label": "Two"}]});
+        let rows = |scope: Value| -> Value {
+            let panel = json!({"content": {"type": "col", "children": [group("panel.ch")]}});
+            entries_with_nodes(&panel, &scope).into_iter().next().expect("a leaf").0["options"].clone()
+        };
+        assert_eq!(rows(json!({"panel": {"ch": "h"}})), json!([
+            {"kind": "option", "value": "h", "label": "", "selected": true},
+            {"kind": "option", "value": "2", "label": "Two", "selected": false}]));
+        let two = rows(json!({"panel": {"ch": 2.0}}));
+        assert_eq!(two[0]["selected"], false, "{two}");
+        assert_eq!(two[1]["selected"], true, "2.0 selects the id \"2\": {two}");
+        let none = rows(json!({"panel": {"ch": "x"}}));
+        assert!(none.as_array().unwrap().iter().all(|r| r["selected"] == false), "a value no id carries selects nothing: {none}");
     }
 
     /// An item the engine could never accept back, or that carries a template,

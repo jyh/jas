@@ -313,6 +313,17 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
         KEY_BACKSPACE => Some("Backspace"),
         _ => None,
     };
+    // flask STATUS §277: Delete and Backspace are `delete_selection` in
+    // `shortcuts.yaml`, and the web keyboard runs it unless the active tool is
+    // editing text (`captures_keyboard`). A YAML tool reports EVERY key handled
+    // once it declares `on_keydown`, so its answer cannot mean "fall through":
+    // the capture test decides, as on the web.
+    if matches!(code, KEY_DELETE | KEY_BACKSPACE) {
+        let captured = engine.tool_slot().as_ref().is_some_and(|(_, t)| t.captures_keyboard());
+        if !captured {
+            return delete_selection_key(engine);
+        }
+    }
     if let Some(key) = named {
         let mut slot = engine.tool_slot();
         let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
@@ -339,6 +350,29 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
         return JasStatus::UnknownVerb;
     };
     unsafe { jas_set_tool(e, index) }
+}
+
+/// The Delete key's `delete_selection`, the web keyboard's reference-aware
+/// form: with nothing selected nothing changes (`UnknownVerb`, so the shell may
+/// let the key fall through). When deleting would ORPHAN a live instance, the
+/// web asks first (`delete_orphan_confirm`); the engine cannot open that
+/// dialog from a key yet, so it deletes NOTHING and names the refusal in
+/// `jas_last_error` rather than delete without asking. Otherwise ONE undo step.
+fn delete_selection_key(engine: &JasEngine) -> JasStatus {
+    let paths: Vec<Vec<usize>> =
+        engine.with_document(|d| d.selection.iter().map(|es| es.path.clone()).collect());
+    if paths.is_empty() {
+        return JasStatus::UnknownVerb;
+    }
+    let orphans = engine.with_document(|d| crate::document::dependency_index::orphaned_references(d, &paths).len());
+    if orphans > 0 {
+        engine.set_last_error(format!(
+            r#"{{"key":"Delete","refused":"delete_orphan_confirm","orphans":{orphans}}}"#
+        ));
+        return JasStatus::UnknownVerb;
+    }
+    engine.with_model_mut(|m| crate::document::op_apply::journal_delete_selection(m, "delete_selection"));
+    JasStatus::Ok
 }
 
 /// How many elements the session currently has selected.
@@ -1062,6 +1096,79 @@ mod tests {
         assert!(unmapped.is_empty(), "select_tool targets with no tool and no declaration: {unmapped:?}");
         for id in KEY_NOT_SELECTABLE {
             assert!(selectable_index(id).is_none(), "`{id}` is declared not selectable but IS: drop it from the list");
+        }
+    }
+
+    /// flask STATUS §277: Delete and Backspace delete the selection, as
+    /// `shortcuts.yaml` binds them (`delete_selection`) and the web keyboard
+    /// does. Before this the engine sent them ONLY to the active tool, whose
+    /// YAML has no Delete branch, so Ctrl+A then Delete on Windows deleted
+    /// nothing, and a following close did not prompt. The deletion is ONE undo
+    /// step and makes the document modified. With nothing selected the key
+    /// changes nothing and is not handled.
+    #[test]
+    fn delete_and_backspace_delete_the_selection_as_one_undo_step() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
+            crate::geometry::test_json::document_to_test_json(d)
+        });
+        for key in [KEY_DELETE, KEY_BACKSPACE] {
+            let e = jas_engine_new();
+            seed(e);
+            unsafe {
+                jas_set_tool(e, 0);
+                // Nothing selected: the key changes nothing and is not handled.
+                let empty = doc(e);
+                assert_eq!(jas_key_event(e, key, 0), JasStatus::UnknownVerb, "key {key:#x}, nothing selected");
+                assert_eq!(doc(e), empty);
+                assert_eq!(crate::ffi::jas_document_modified(e), 0);
+                jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+                jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+                assert_eq!(jas_selection_len(e), 1, "the control: the click selected the rect");
+                let before = doc(e);
+                assert_eq!(jas_key_event(e, key, 0), JasStatus::Ok, "key {key:#x}");
+                assert_eq!(jas_selection_len(e), 0, "key {key:#x}: the selection is empty");
+                assert_ne!(doc(e), before, "key {key:#x}: the rect is gone");
+                assert!(!doc(e).contains("\"rect\""), "key {key:#x}: no rect remains: {}", doc(e));
+                assert_eq!(crate::ffi::jas_document_modified(e), 1, "key {key:#x}: an edit");
+                assert_eq!(jas_key_event(e, 'z' as u32, MOD_CMD), JasStatus::Ok);
+                assert!(doc(e).contains("\"rect\""), "key {key:#x}: Ctrl+Z brings the rect back");
+                jas_engine_free(e);
+            }
+        }
+    }
+
+    /// The Delete key never orphans a live instance without asking. The web
+    /// opens `delete_orphan_confirm`; the engine cannot from a key yet, so it
+    /// deletes NOTHING and names the refusal. The control: the same document
+    /// with the instance selected too orphans nothing, and deletes.
+    #[test]
+    fn the_delete_key_refuses_by_name_to_orphan_an_instance() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let doc = |e: *mut JasEngine| unsafe { &*e }.with_document(|d| {
+            crate::geometry::test_json::document_to_test_json(d)
+        });
+        let e = jas_engine_new();
+        seed(e);
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
+            let path = (&*e).with_document(|d| d.selection.iter().next().map(|es| es.path.clone())).expect("the rect");
+            (&*e).with_model_mut(crate::workspace::menu_native::make_instance);
+            assert!(doc(e).contains("\"rect\"") && doc(e).matches("\"type\"").count() > 2, "the control: an instance exists");
+            (&*e).with_model_mut(|m| crate::document::controller::Controller::select_element(m, &path));
+            let before = doc(e);
+            assert_eq!(jas_key_event(e, KEY_DELETE, 0), JasStatus::UnknownVerb);
+            assert_eq!(doc(e), before, "nothing deleted");
+            let err = crate::ffi::jas_last_error_json(e);
+            let text = String::from_utf8_lossy(std::slice::from_raw_parts(err.ptr, err.len)).into_owned();
+            crate::ffi::jas_free(err);
+            assert!(text.contains("delete_orphan_confirm"), "the refusal is named: {text}");
+            (&*e).with_model_mut(|m| { crate::document::controller::Controller::select_all(m); });
+            assert_eq!(jas_key_event(e, KEY_DELETE, 0), JasStatus::Ok, "the control: no orphan, deleted");
+            assert!(!doc(e).contains("\"rect\""));
+            jas_engine_free(e);
         }
     }
 
