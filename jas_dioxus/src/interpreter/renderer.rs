@@ -2442,47 +2442,13 @@ fn run_yaml_effect(
     // committed by `run_yaml_effects_named` (the action emits `snapshot` first),
     // so the per-verb work is just: resolve → op JSON → op_apply.
     {
-        // The renderer YAML verb → the op_apply verb (drop the `doc.` prefix).
-        const PRINT_FIELD_EFFECTS: &[(&str, &str)] = &[
-            ("doc.set_print_preferences_field", "set_print_preferences_field"),
-            ("doc.set_marks_and_bleed_field", "set_marks_and_bleed_field"),
-            ("doc.set_output_field", "set_output_field"),
-            ("doc.set_output_ink_field", "set_output_ink_field"),
-            ("doc.set_graphics_field", "set_graphics_field"),
-            ("doc.set_color_management_field", "set_color_management_field"),
-            ("doc.set_document_setup_field", "set_document_setup_field"),
-            ("doc.set_advanced_field", "set_advanced_field"),
-        ];
-        for (yaml_key, op_verb) in PRINT_FIELD_EFFECTS {
-            if let Some(spec) = eff.get(*yaml_key).and_then(|v| v.as_object()) {
-                let field = match spec.get("field").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => return deferred,
-                };
-                // Resolve the value expr to a typed Value, then to a RESOLVED
-                // JSON literal (op_apply replays without an eval context).
-                let value_val = match spec.get("value") {
-                    Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-                    Some(v) => super::expr_types::Value::from_json(v),
-                    None => return deferred,
-                };
-                let value_json = super::effects::value_to_json(&value_val);
-                // `index` only applies to set_output_ink_field; absent ⇒ 0
-                // (the helper bounds-checks). A missing index on the ink verb
-                // matched the old early-return — preserve by reading as u64.
-                let mut op = serde_json::json!({
-                    "op": op_verb,
-                    "field": field,
-                    "value": value_json,
-                });
-                if *op_verb == "set_output_ink_field" {
-                    let index = match spec.get("index").and_then(|v| v.as_u64()) {
-                        Some(n) => n,
-                        None => return deferred,
-                    };
-                    op["index"] = serde_json::json!(index);
-                }
-                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+        // The op is built by `effects::print_field_op`, the one builder the
+        // engine's runner calls too (flask STATUS §270: the engine refused
+        // Document Setup's OK until it shared this).
+        for (yaml_key, _) in super::effects::PRINT_FIELD_EFFECTS {
+            if let Some(spec) = eff.get(*yaml_key).filter(|v| v.is_object()) {
+                let op = super::effects::print_field_op(yaml_key, spec, &|e| super::expr::eval(e, &*eval_ctx));
+                if let (Some(op), Some(tab)) = (op, st.tabs.get_mut(st.active_tab)) {
                     let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
                 return deferred;
