@@ -1753,6 +1753,18 @@ fn build_appstate_ctx(
         m.insert("boolean_divide_remove_unpainted".into(), serde_json::json!(bp.divide_remove_unpainted));
         m.insert("boolean_apply_simplify_after_op".into(), serde_json::json!(bp.apply_simplify_after_op));
         m.insert("boolean_simplify_precision".into(), serde_json::json!(bp.simplify_precision));
+        // The Align panel's four state mirrors, from their home
+        // (`st.align_panel`, written by `set_app_state_field`). Until
+        // 2026-10-14 they were absent here, so Use Preview Bounds' toggle,
+        // `not state.align_use_preview_bounds`, read `not null` and a second
+        // press could not turn it off.
+        let ap = &st.align_panel;
+        m.insert("align_to".into(), serde_json::json!(ap.align_to.as_str()));
+        m.insert("align_key_object_path".into(), ap.key_object_path.as_ref()
+            .map(|p| serde_json::json!({"__path__": p}))
+            .unwrap_or(serde_json::Value::Null));
+        m.insert("align_distribute_spacing".into(), serde_json::json!(ap.distribute_spacing));
+        m.insert("align_use_preview_bounds".into(), serde_json::json!(ap.use_preview_bounds));
     }
     // Panel namespace: expose layers_panel_selection as a list of path
     // markers so YAML actions (delete/duplicate_layer_selection) can
@@ -14728,6 +14740,20 @@ mod tests {
                 "nullable but not a colour");
         assert!(!null_color_means_none("stroke_width"),
                 "a colour bind on a non-nullable field means nothing here");
+    }
+    /// Panel menu > Use Preview Bounds is a TOGGLE: `not
+    /// state.align_use_preview_bounds`. The action context must carry the
+    /// flag, or `not null` reads true every time and a second press cannot
+    /// turn it off (the 10-13 bank: absent from `build_appstate_ctx`).
+    #[test]
+    fn toggle_use_preview_bounds_turns_on_and_back_off() {
+        let mut st = AppState::new();
+        assert!(!st.align_panel.use_preview_bounds, "starts off");
+        let none = serde_json::Map::new();
+        dispatch_action("toggle_use_preview_bounds", &none, &mut st);
+        assert!(st.align_panel.use_preview_bounds, "the first press turns it on");
+        dispatch_action("toggle_use_preview_bounds", &none, &mut st);
+        assert!(!st.align_panel.use_preview_bounds, "the second press turns it off");
     }
 
     // ── The web's nested dialog (the reference's `test_nested_dialogs.py`):
