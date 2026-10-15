@@ -470,6 +470,33 @@ public sealed partial class MainWindow
                         el = BuildColorBar(leaf);
                         break;
 
+                    // S3 (jas §282, #429): a `radio` is a check kind -- its own
+                    // `bind.checked`, a `click` that runs its `on_check`. The
+                    // exclusivity is the YAML's (each radio binds its own
+                    // condition), so no two shell radios share a group.
+                    case "radio":
+                        toggles++;
+                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        el = BuildRadio(leaf);
+                        break;
+
+                    // A `radio_group` is an option kind: one radio per planned
+                    // option row, checked by the row's `selected`, a press
+                    // sending `toggle` with the option's id. With no rows it is
+                    // a counted placeholder, as a `select` with no list is.
+                    case "radio_group":
+                        if (leaf.Options is not { Items.Count: > 0 })
+                        {
+                            unmaterialized++;
+                            el = Placeholder(leaf.Type);
+                            break;
+                        }
+                        inputs++;
+                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        optionsRefused += leaf.Options.Refused;
+                        el = BuildRadioGroup(leaf, leaf.Options);
+                        break;
+
                     // S3 (jas §279): a `separator` is a 1-DIP rule across the
                     // middle of its rect, in the direction the rect runs. No
                     // event, no value; an empty rect is counted and drawn empty.
@@ -517,6 +544,62 @@ public sealed partial class MainWindow
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
+        }
+
+        /// <summary>
+        /// S3: a `radio`. A press puts the face back to the core's last answer
+        /// and sends `click` (<see cref="PanelWire.RadioEvent"/>); the next plan
+        /// shows what the core decided. ⛔ ITS OWN GroupName: WinUI groups
+        /// radios that share a parent and unchecks the others itself, which
+        /// would be the shell deciding the YAML's exclusivity.
+        /// </summary>
+        private RadioButton BuildRadio(PaneLeaf leaf)
+        {
+            var radio = new RadioButton
+            {
+                Content = leaf.Literal("label") ?? leaf.Id,
+                FontSize = 12,
+                MinWidth = 0,
+                MinHeight = 0,
+                GroupName = "radio:" + leaf.Path,
+            };
+            var (id, path) = (leaf.Id, leaf.Path);
+            radio.Click += (_, _) =>
+            {
+                radio.IsChecked = radio.Tag is true;
+                var (ev, value) = PanelWire.RadioEvent("radio", "");
+                SendPane(id, ev, value, path);
+            };
+            return radio;
+        }
+
+        /// <summary>S3: a `radio_group`'s option radios, side by side, each in
+        /// its own GroupName for the reason <see cref="BuildRadio"/> gives.</summary>
+        private RadioGroupRow BuildRadioGroup(PaneLeaf leaf, PaneOptions options)
+        {
+            var row = new RadioGroupRow { Orientation = Orientation.Horizontal, Spacing = 6 };
+            var (id, path) = (leaf.Id, leaf.Path);
+            foreach (var option in options.Items)
+            {
+                var radio = new RadioButton
+                {
+                    Content = PanelWire.RadioFace(option),
+                    FontSize = 12,
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    GroupName = "radio:" + path + ":" + option.Value,
+                    Tag = option.Selected,
+                };
+                var value = option.Value;
+                radio.Click += (_, _) =>
+                {
+                    radio.IsChecked = radio.Tag is true;
+                    var (ev, v) = PanelWire.RadioEvent("radio_group", value);
+                    SendPane(id, ev, v, path);
+                };
+                row.Children.Add(radio);
+            }
+            return row;
         }
 
         /// <summary>S3: a `separator`'s rule, centred in its rect (<see cref="PanelWire.SeparatorRule"/>).</summary>
@@ -973,6 +1056,29 @@ public sealed partial class MainWindow
                     bar.Opacity = off ? 0.4 : 1.0;
                     break;
 
+                case RadioButton radio when leaf.Type == "radio":
+                    off = off || leaf.Id.Length == 0;
+                    radio.Tag = on;
+                    radio.IsChecked = on;
+                    radio.IsEnabled = !off;
+                    break;
+
+                case RadioGroupRow group:
+                {
+                    off = off || leaf.Id.Length == 0;
+                    var items = leaf.Options?.Items;
+                    for (var i = 0; i < group.Children.Count; i++)
+                    {
+                        if (group.Children[i] is not RadioButton r) { continue; }
+                        var sel = items is not null && i < items.Count && items[i].Selected;
+                        r.Tag = sel;
+                        r.IsChecked = sel;
+                        r.IsEnabled = !off;
+                        on |= sel;
+                    }
+                    break;
+                }
+
                 case CheckBox toggle:
                     off = off || leaf.Id.Length == 0;
                     toggle.Tag = on;
@@ -1373,4 +1479,10 @@ internal sealed partial class ColorBarSurface : Grid
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>S3: a `radio_group`'s row of option radios, a type of its own so the
+/// value applier can tell it from any other StackPanel.</summary>
+internal sealed partial class RadioGroupRow : StackPanel
+{
 }

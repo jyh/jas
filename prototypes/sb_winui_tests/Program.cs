@@ -613,6 +613,21 @@ static class Program
         Eq("close: any other byte is no answer, never a guess", "unknown(7)", ActWire.CloseReading(7));
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
+        // S3 (jas §282, #429): the two radio kinds' events. `radio` is a check
+        // kind (`click`); `radio_group` an option kind (`toggle` carrying the
+        // option's id). The engine refuses a press on the checked one
+        // (`AlreadyChecked`); the shell never decides that itself.
+        Eq("radio: a radio sends click, no value", "click|(null)",
+            PanelWire.RadioEvent("radio", "x") is var (re, rv) ? $"{re}|{rv ?? "(null)"}" : "");
+        Eq("radio: a radio_group sends toggle with the option's id", "toggle|s",
+            PanelWire.RadioEvent("radio_group", "s") is var (ge, gv) ? $"{ge}|{gv ?? "(null)"}" : "");
+        var radioRows = PanelWire.ReadOptions("""[{"kind":"option","value":"h","label":"","selected":true}]""");
+        Eq("radio_group: a one-option row with an empty label is read, not refused", "1|0|True",
+            radioRows is null ? "(null)" : $"{radioRows.Items.Count}|{radioRows.Refused}|{radioRows.Items[0].Selected}");
+        Eq("radio_group: an empty label is shown empty, never the option's id", "",
+            radioRows is null ? "(null)" : PanelWire.RadioFace(radioRows.Items[0]));
+        Eq("radio_group: a label is shown as sent", "Fit",
+            PanelWire.ReadOptions("""[{"kind":"option","value":"fit","label":"Fit","selected":false}]""") is { } fr ? PanelWire.RadioFace(fr.Items[0]) : "(null)");
         // S3 (jas §279): a `separator`'s rule. The plan carries no orientation
         // (not a STATIC_KEY), so the rule follows the rect the plan placed:
         // wider than tall is horizontal, else vertical; an empty rect is none.
