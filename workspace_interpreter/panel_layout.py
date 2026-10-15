@@ -56,6 +56,7 @@ _KIND_HEIGHT = {
     "toggle": 20,
     "color_bar": 24, "fill_stroke_widget": 44, "gradient_slider": 24,
     "gradient_tile": 24, "dropdown": 20, "tree_view": 200,
+    "reference_point_widget": 28,
 }
 
 _KIND_FALLBACK_W = {
@@ -277,6 +278,8 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
         w = 16 + 4 + _text_w(node, "label", ctx)
     elif t == "radio_group":
         w = _radio_group_w(node, ctx)
+    elif t == "reference_point_widget":
+        w = 28  # the web's repeat(3, 8px) tracks, gap 2px
     elif t == "icon_button_group":
         n = len(node["options"]) if isinstance(node.get("options"), list) else 0
         w = 24 * n + 4 * max(n - 1, 0)

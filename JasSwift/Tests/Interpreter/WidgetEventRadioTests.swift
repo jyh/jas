@@ -177,3 +177,17 @@ private func choose(_ id: String?, _ event: String = "toggle", widget: [String: 
     #expect(WidgetEvent.parseCommit(widget: w, text: "landscape").value as? String == "landscape")
     #expect(!WidgetEvent.parseCommit(widget: w, text: "square").accepted)
 }
+
+// The KIND owns its nine anchors, as the reference's
+// `test_reference_point_widget_takes_one_of_its_nine_anchors`.
+@Test func aReferencePointWidgetTakesOneOfItsNineAnchors() {
+    #expect(WidgetEvent.referencePointAnchors == ["top_left", "top_center", "top_right", "middle_left",
+        "center", "middle_right", "bottom_left", "bottom_center", "bottom_right"])
+    let w: [String: Any] = ["type": "reference_point_widget", "bind": ["value": "panel.rp"]]
+    for a in WidgetEvent.referencePointAnchors {
+        #expect(WidgetEvent.parseCommit(widget: w, text: a).value as? String == a)
+    }
+    for t in ["", "Center", "middle_center", " center"] {
+        #expect(!WidgetEvent.parseCommit(widget: w, text: t).accepted, "\(t)")
+    }
+}

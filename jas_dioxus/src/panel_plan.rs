@@ -291,6 +291,14 @@ fn options_of(
     use crate::interpreter::expr_types::Value as EVal;
     use crate::interpreter::widget_commit::{option_item, option_text, OPTION_KINDS};
 
+    // The reference-point widget's options are its KIND's nine anchors
+    // (WIDGET_EVENTS.md, Parsing), row by row; no YAML declares them.
+    if node.get("type").and_then(Value::as_str) == Some("reference_point_widget") {
+        let bound = values.get("bind.value").and_then(Value::as_str);
+        return Value::Array(crate::interpreter::widget_commit::REFERENCE_POINT_ANCHORS.iter()
+            .map(|a| json!({"kind": "option", "value": a, "label": a, "selected": bound == Some(*a)}))
+            .collect());
+    }
     let Some(list) = node.get("options").and_then(Value::as_array) else { return Value::Null };
     if node.get("type").and_then(Value::as_str).is_some_and(|t| OPTION_KINDS.contains(&t)) {
         return choice_rows(node, list, ctx, path, withheld);
@@ -2396,6 +2404,23 @@ mod tests {
                 json!([{"kind": "option", "value": "x", "label": "x", "selected": false}]),
             ]
         );
+    }
+
+    /// A `reference_point_widget` plans its KIND's nine anchors as option rows,
+    /// row by row, the bound one selected, so a shell draws a 3x3 grid from the
+    /// rows and hard-codes no names (WIDGET_EVENTS.md, Parsing).
+    #[test]
+    fn a_reference_point_widget_plans_its_nine_anchors() {
+        let panel = json!({"content": {"type": "col", "children": [
+            {"type": "reference_point_widget", "id": "rp", "bind": {"value": "panel.rp"}}]}});
+        let rows = entries_with_nodes(&panel, &json!({"panel": {"rp": "center"}}))
+            .into_iter().next().expect("a leaf").0["options"].clone();
+        let rows = rows.as_array().expect("an options channel");
+        let values: Vec<&str> = rows.iter().map(|r| r["value"].as_str().unwrap()).collect();
+        assert_eq!(values, crate::interpreter::widget_commit::REFERENCE_POINT_ANCHORS.to_vec());
+        let selected: Vec<&str> = rows.iter().filter(|r| r["selected"] == true)
+            .map(|r| r["value"].as_str().unwrap()).collect();
+        assert_eq!(selected, ["center"]);
     }
 
     /// An option may name an `icon` (Artboard Options' orientation group): its

@@ -4847,12 +4847,9 @@ fn render_reference_point_widget(el: &serde_json::Value, ctx: &serde_json::Value
         })
         .unwrap_or_default();
 
-    let anchors = [
-        ("top_left", 0, 0), ("top_center", 1, 0), ("top_right", 2, 0),
-        ("middle_left", 0, 1), ("center", 1, 1), ("middle_right", 2, 1),
-        ("bottom_left", 0, 2), ("bottom_center", 1, 2), ("bottom_right", 2, 2),
-    ];
-    let cells: Vec<Element> = anchors.iter().map(|(name, _cx, _cy)| {
+    // The KIND's nine anchors, row by row (WIDGET_EVENTS.md, Parsing).
+    let anchors = super::widget_commit::REFERENCE_POINT_ANCHORS;
+    let cells: Vec<Element> = anchors.iter().map(|name| {
         let active = *name == current_value;
         let key = format!("{id}-{name}");
         let value_str = name.to_string();

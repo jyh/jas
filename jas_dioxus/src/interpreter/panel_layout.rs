@@ -299,6 +299,7 @@ fn kind_height(kind: &str) -> i64 {
         "gradient_tile" => 24,
         "dropdown" => 20,
         "tree_view" => 200,
+        "reference_point_widget" => 28,
         _ => 20,
     }
 }
@@ -445,6 +446,7 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
             "button" => text_w(n, "label", ctx) + 16,
             "checkbox" | "toggle" | "radio" => 16 + 4 + text_w(n, "label", ctx),
             "radio_group" => radio_group_w(n, ctx),
+            "reference_point_widget" => 28, // the web's repeat(3, 8px), gap 2px
             "icon_button_group" => {
                 let k = n.get("options").and_then(Value::as_array).map_or(0, |o| o.len() as i64);
                 24 * k + 4 * (k - 1).max(0)
@@ -1419,6 +1421,10 @@ mod radio_width_tests {
                           {"icon": "orientation_landscape", "value": "landscape"}]);
         assert_eq!(w(json!({"type": "icon_button_group", "options": pair})), 24 + 4 + 24);
         assert_eq!(w(json!({"type": "icon_button_group"})), 0);
+        let rects = layout_panel(&json!({"content": {"type": "row", "children": [
+            {"type": "reference_point_widget"}]}}), 400, 0, &json!({}));
+        let r = &rects.as_array().unwrap().iter().find(|r| r["path"] == json!([0])).expect("a rect at [0]")["rect"];
+        assert_eq!((r["w"].as_i64(), r["h"].as_i64()), (Some(28), Some(28)), "the 3x3 grid: {rects}");
         assert_eq!(w(json!({"type": "radio_group", "options": "dialog.list"})), 0);
     }
 }

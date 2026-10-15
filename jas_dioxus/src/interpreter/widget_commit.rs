@@ -103,9 +103,16 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 
 /// The input kinds: a committed value is parsed, written, then its
 /// `commit`/`change` behaviors run.
-pub const INPUT_KINDS: [&str; 9] = [
+pub const INPUT_KINDS: [&str; 10] = [
     "number_input", "length_input", "text_input", "select", "icon_select", "icon_button_group",
-    "combo_box", "slider", "color_bar",
+    "reference_point_widget", "combo_box", "slider", "color_bar",
+];
+/// The nine anchors a `reference_point_widget` takes, row by row. The KIND
+/// owns them (WIDGET_EVENTS.md, Parsing); no YAML declares them.
+pub const REFERENCE_POINT_ANCHORS: [&str; 9] = [
+    "top_left", "top_center", "top_right",
+    "middle_left", "center", "middle_right",
+    "bottom_left", "bottom_center", "bottom_right",
 ];
 /// The boolean kinds: a declared `click`/`change` behavior IS the press.
 pub const BOOLEAN_KINDS: [&str; 2] = ["toggle", "checkbox"];
@@ -255,6 +262,7 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
                 _ => None,
             }
         }
+        "reference_point_widget" => REFERENCE_POINT_ANCHORS.contains(&text).then(|| Value::String(text.to_string())),
         // A divider is not a row a commit can match (SCHEMA.md, `options`).
         "select" | "icon_select" | "icon_button_group" => match widget.get("options").and_then(option_rows) {
             Some(rows) => rows.into_iter().find_map(|r| {
@@ -416,8 +424,9 @@ mod tests {
         // A kind outside the table has no events. `slider`, `color_bar`,
         // `radio_group` and `icon_button_group` were this control until each
         // joined (2026-10-13 forks A and B2; 2026-10-15 twice);
-        // `reference_point_widget` is outside by the contract's own list.
-        assert!(allowed_events("reference_point_widget").is_empty());
+        // `reference_point_widget` joined the same day; `color_hue_bar` is
+        // outside by the contract's own list.
+        assert!(allowed_events("color_hue_bar").is_empty());
     }
 
     #[test]
@@ -450,6 +459,21 @@ mod tests {
     fn text_input_is_verbatim() {
         for t in ["", "  padded  ", "12", "Layer 1"] {
             assert_eq!(parse(json!({"type": "text_input"}), t), Some(json!(t)));
+        }
+    }
+
+    /// The KIND owns its nine anchors, as the reference's
+    /// `test_reference_point_widget_takes_one_of_its_nine_anchors`.
+    #[test]
+    fn reference_point_widget_takes_one_of_its_nine_anchors() {
+        assert_eq!(REFERENCE_POINT_ANCHORS, ["top_left", "top_center", "top_right", "middle_left",
+            "center", "middle_right", "bottom_left", "bottom_center", "bottom_right"]);
+        let w = json!({"type": "reference_point_widget", "bind": {"value": "panel.rp"}});
+        for a in REFERENCE_POINT_ANCHORS {
+            assert_eq!(parse(w.clone(), a), Some(json!(a)), "{a}");
+        }
+        for t in ["", "Center", "middle_center", " center"] {
+            assert_eq!(parse(w.clone(), t), None, "{t:?}");
         }
     }
 

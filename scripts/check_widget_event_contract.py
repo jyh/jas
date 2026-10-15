@@ -456,14 +456,15 @@ def self_test() -> int:
             print(f"  FAILED: {name}")
 
     table = {k: tuple(v) for k, v in ALLOWED_EVENTS.items()}
-    # 14 since `icon_button_group` became an input kind (2026-10-15; 13 when
+    # 15 since `reference_point_widget` and 14 since `icon_button_group`
+    # became input kinds (2026-10-15; 13 when
     # `radio` (the check kind) and `radio_group` (the option kind) joined that
     # day; 11 since `color_bar` became an input kind, fork B2,
     # 2026-10-13); the literal is here so a change to the kind set is a
     # deliberate edit, not a drift.
     arm("the module table is every value, boolean, item, check and option kind",
         len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS | CHECK_KINDS
-                          | OPTION_KINDS) == 14)
+                          | OPTION_KINDS) == 15)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [
