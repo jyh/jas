@@ -430,6 +430,12 @@ pub fn active_document_view(
         // `filename` is the name the tab shows (`Untitled-N` until a save);
         // `has_filename` says whether it has been saved.
         m.insert("is_modified".to_string(), serde_json::json!(model.is_modified()));
+        // `any_modified`: whether ANY open document has unsaved changes, which
+        // `quit` asks (`actions.yaml`). This view sees one document, so it
+        // answers for that one; a host holding several overrides it
+        // (`renderer::build_active_document_view`). Until 2026-10-15 no port
+        // built it, so `quit` never offered to save.
+        m.insert("any_modified".to_string(), serde_json::json!(model.is_modified()));
         m.insert("has_filename".to_string(), serde_json::json!(!model.filename.starts_with("Untitled-")));
         m.insert("filename".to_string(), serde_json::json!(model.filename));
     }

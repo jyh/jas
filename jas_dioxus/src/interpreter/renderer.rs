@@ -1972,17 +1972,21 @@ pub(crate) fn build_active_document_view(
             m.insert("recent_colors".to_string(), serde_json::Value::Array(vec![]));
             // No document: nothing to save (`runtime_contexts.yaml` defaults).
             m.insert("is_modified".to_string(), serde_json::Value::Bool(false));
+            m.insert("any_modified".to_string(), serde_json::Value::Bool(false));
             m.insert("has_filename".to_string(), serde_json::Value::Bool(false));
             m.insert("filename".to_string(), serde_json::Value::String(String::new()));
         }
         return empty;
     };
-    crate::interpreter::document_views::active_document_view(
+    let mut view = crate::interpreter::document_views::active_document_view(
         &tab.model,
         &st.layers_panel_selection,
         &st.artboards_panel_selection,
         st.artboards_panel_anchor.as_deref(),
-    )
+    );
+    // Over every open tab, not only the active one (`quit`'s question).
+    view["any_modified"] = serde_json::Value::Bool(st.tabs.iter().any(|t| t.model.is_modified()));
+    view
 }
 
 /// Execute one YAML effect against AppState, returning any deferred dialog effects.
@@ -13640,6 +13644,24 @@ mod tests {
         assert_eq!(none["filename"], serde_json::json!(""));
         assert_eq!(none["has_filename"], serde_json::json!(false));
         assert_eq!(none["is_modified"], serde_json::json!(false));
+    }
+
+    /// `quit` asks `active_document.any_modified`: whether ANY open tab has
+    /// unsaved changes, so an edited tab that is not the active one counts.
+    #[test]
+    fn any_modified_counts_every_tab_not_only_the_active_one() {
+        let mut st = AppState::new();
+        while st.tabs.len() < 2 {
+            st.add_tab(crate::workspace::app_state::TabState::new());
+        }
+        st.active_tab = 0;
+        let view = |st: &AppState| super::build_active_document_view(st);
+        assert_eq!(view(&st)["any_modified"], serde_json::json!(false), "nothing edited");
+        st.tabs[1].model.with_txn(|m| m.set_document(crate::document::document::Document::default()));
+        assert_eq!(view(&st)["is_modified"], serde_json::json!(false), "the control: the active tab is clean");
+        assert_eq!(view(&st)["any_modified"], serde_json::json!(true), "tab 1 is edited");
+        st.tabs.clear();
+        assert_eq!(view(&st)["any_modified"], serde_json::json!(false), "no document");
     }
 
     #[test]
