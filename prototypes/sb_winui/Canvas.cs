@@ -328,6 +328,29 @@ internal sealed class PanelClickCmd : Cmd
 }
 
 /// <summary>
+/// S2: a widget of the OPEN dialog, acted on (`jas_dialog_event`, #420). The
+/// act is a panel click's fields with no panel: a dialog's buttons carry no
+/// id, so `Path` is their address.
+/// </summary>
+internal sealed class DialogEventCmd : Cmd
+{
+    internal PanelClickCmd Act = new();
+}
+
+/// <summary>S2: Escape, or the dialog frame's close box (`jas_dialog_dismiss`).</summary>
+internal sealed class DialogDismissCmd : Cmd
+{
+    internal string Via = "hand";
+}
+
+/// <summary>
+/// S2: one published reading of the open dialog, IMMUTABLE for the reason
+/// <see cref="PanelSnapshot"/> is. `Reading` is null when the engine's reply
+/// could not be read, which the UI shows as an error, never as "closed".
+/// </summary>
+internal sealed record DialogSnapshot(DialogReading? Reading, long AvailW, long Seq, string Cause);
+
+/// <summary>
 /// Replay Q6's click sequence on the open panel's widget (W2-6, `SB_PANEL_SYNTH`).
 /// </summary>
 internal sealed class PanelSynthCmd : Cmd
@@ -998,22 +1021,132 @@ internal sealed unsafe class Canvas : IDisposable
     /// different readings and the harness reads them differently -- O3.1 counts
     /// painting rows, O3.1/O3.2 count rows the render thread wrote.
     /// </summary>
-    /// The dialog door's engine half (design 2026-10-14): an act's reply names
-    /// the dialog the engine opened in its store (`"dialog": <id> | null`).
-    /// This shell has no dialog host yet, so it reports the dialog BY NAME and
-    /// dismisses it, leaving no dialog open in the engine. Before the door the
-    /// engine refused the act as `PlatformEffect Dialog:<id>`; the name still
-    /// reaches the report, now with the act having run.
-    private void DismissUnshownDialog(System.Text.Json.JsonElement reply, string head)
+    /// The dialog door (design 2026-10-14): an act's reply names the dialog the
+    /// engine opened in its store (`"dialog": <id> | null`, #414). S2: the
+    /// shell reads that dialog's plan and publishes it for the overlay host.
+    /// Before S2 this dismissed it unshown (`DIALOG UNSHOWN`).
+    private void OpenNamedDialog(System.Text.Json.JsonElement reply, string head)
     {
         if (!reply.TryGetProperty("dialog", out var dialog)
             || dialog.ValueKind != System.Text.Json.JsonValueKind.String)
         {
             return;
         }
+        _report($"DIALOG OPENED {head} dialog={dialog.GetString()} {Tids()}");
+        ApplyDialogRefresh("open");
+    }
+
+    // =======================================================================
+    // S2 — THE DIALOG HOST'S RENDER HALF
+    //
+    // The ENGINE owns the dialog (its store holds the stack, #416); the shell
+    // holds a drawing of the top one and nothing else. Every act on it is a
+    // `jas_dialog_event` or a `jas_dialog_dismiss`, and after each the plan is
+    // read again: a click can close the dialog, return to a parent, or open a
+    // child, and the reply plus the next plan say which.
+    // =======================================================================
+
+    /// <summary>
+    /// The width a dialog is planned at. ⚠️ A DEFAULT, NOT THE DIALOG'S OWN:
+    /// the workspace declares 300 to 720 per dialog, and `jas_dialog_plan`'s
+    /// reply does not carry it. Every DIALOG PLAN row says `avail-w=` so a
+    /// mis-sized dialog is readable from the log.
+    /// </summary>
+    internal const long DialogAvailW = 420;
+
+    private long _dialogSeq;
+
+    /// <summary>The newest dialog reading, published by the render thread for the UI thread.</summary>
+    internal volatile DialogSnapshot? Dialog;
+
+    /// <summary>A <see cref="Dialog"/> was published. Raised on the UI thread.</summary>
+    internal Action? DialogChanged { get; set; }
+
+    internal void DialogEvent(PanelClickCmd act) => _queue.Add(new DialogEventCmd { Act = act });
+
+    internal void DialogDismiss(string via) => _queue.Add(new DialogDismissCmd { Via = via });
+
+    /// <summary>Read the open dialog's plan and publish it, open or closed.</summary>
+    private void ApplyDialogRefresh(string cause)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var raw = JasCore.TakeString(JasCore.jas_dialog_plan(_engine, DialogAvailW, 0));
+        var reading = DialogWire.Read(raw);
+        _dialogSeq++;
+        Dialog = new DialogSnapshot(reading, DialogAvailW, _dialogSeq, cause);
+        PostToUi(() => DialogChanged?.Invoke());
+        if (reading is null)
+        {
+            _report($"RUSTFAIL DIALOG PLAN UNREADABLE cause={cause} bytes={raw.Length} seq={_dialogSeq} {Tids()}");
+            return;
+        }
+        _report(reading.Open
+            ? $"DIALOG PLAN open=true dialog={reading.Id} depth={reading.Depth} modal={(reading.Modal ? "true" : "false")} "
+              + $"avail-w={DialogAvailW} {PlanReading(reading.PlanJson!)} cause={cause} seq={_dialogSeq} {Tids()}"
+            : $"DIALOG PLAN open=false cause={cause} seq={_dialogSeq} {Tids()}");
+    }
+
+    /// <summary>
+    /// A click, commit or press on the open dialog's widget. A refusal runs
+    /// nothing and is reported by class; an act re-reads the dialog, the panes
+    /// and the menu, since a dialog's OK can write the document and app state.
+    /// </summary>
+    private bool ApplyDialogEvent(DialogEventCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
+        var act = cmd.Act;
+        var head = $"via={act.Via} widget={(act.Widget.Length == 0 ? "-" : act.Widget)} "
+                 + $"path={act.Path ?? "-"} event={act.Event}";
+        var ev = PanelEventJson(act);
+        var reply = JasCore.TakeString(JasCore.jas_dialog_event(_engine, ev, (nuint)ev.Length));
+        var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+        if (reply.Length == 0)
+        {
+            _report(channel.Length == 0
+                ? $"RUSTFAIL DIALOG EVENT SILENT {head} -- an empty reply and an empty error channel {Tids()}"
+                : $"DIALOG EVENT REFUSED {head} channel={channel} {Tids()}");
+            // `Unchanged` is a refusal with nothing run, and `NoDialog` means the
+            // drawing is stale: either way the plan is read again.
+            ApplyDialogRefresh("refused");
+            return false;
+        }
+        bool docChanged;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL DIALOG EVENT REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
+            ApplyDialogRefresh("unreadable");
+            return false;
+        }
+        var after = DialogWire.Named(reply);
+        _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
+              + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
+        ApplyDialogRefresh("event");
+        DirtyFromModel();
+        ApplyMenuRefresh("dialog");
+        ApplyPanelRefresh("dialog");
+        ApplyPanesRefresh("dialog");
+        return docChanged;
+    }
+
+    /// <summary>Escape or the close box: the engine closes the top dialog, restoring its preview.</summary>
+    private bool ApplyDialogDismiss(DialogDismissCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return false; }
         var closed = JasCore.jas_dialog_dismiss(_engine);
-        _report($"DIALOG UNSHOWN {head} dialog={dialog.GetString()} dismissed={closed} "
-              + $"-- this shell has no dialog host yet {Tids()}");
+        _report($"DIALOG DISMISS via={cmd.Via} closed={closed} {Tids()}");
+        ApplyDialogRefresh("dismiss");
+        if (closed != 1) { return false; }
+        // A dismissed preview restores the document (`close_dialog`'s snapshot).
+        DirtyFromModel();
+        ApplyMenuRefresh("dialog");
+        ApplyPanelRefresh("dialog");
+        ApplyPanesRefresh("dialog");
+        return true;
     }
 
     internal string Tids()
@@ -1295,6 +1428,14 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
+                    break;
+
+                case DialogEventCmd de:
+                    if (ApplyDialogEvent(de)) { dirty = true; cause = "dialog"; }
+                    break;
+
+                case DialogDismissCmd dd:
+                    if (ApplyDialogDismiss(dd)) { dirty = true; cause = "dialog"; }
                     break;
 
                 case MenuActionCmd ma:
@@ -4424,7 +4565,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
-            DismissUnshownDialog(doc.RootElement, runHead);
+            OpenNamedDialog(doc.RootElement, runHead);
         }
         catch (Exception ex)
         {
@@ -4470,7 +4611,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
-            DismissUnshownDialog(doc.RootElement, head);
+            OpenNamedDialog(doc.RootElement, head);
         }
         catch (Exception ex)
         {
@@ -4686,7 +4827,7 @@ internal sealed unsafe class Canvas : IDisposable
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
-            DismissUnshownDialog(doc.RootElement, head);
+            OpenNamedDialog(doc.RootElement, head);
         }
         catch (Exception ex)
         {

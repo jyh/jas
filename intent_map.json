@@ -267,6 +267,13 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "discard_and_close_tab": {
+      "class": "ui-state",
+      "dispatches": [
+        "remove_tab"
+      ],
+      "doc_verbs": []
+    },
     "dismiss_dialog": {
       "class": "ui-state",
       "doc_verbs": []
@@ -1155,7 +1162,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 201,
+      "ui-state": 202,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1209,7 +1216,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 239,
+    "total_actions": 240,
     "verb_table": {
       "always": [
         "doc.copy_selection",

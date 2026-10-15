@@ -617,6 +617,18 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
         return Vec::new();
     }
 
+    // Native intercept: `remove_tab` (actions.yaml) closes a tab WITHOUT
+    // prompting. Its YAML removes a canvas element and renumbers a tab count,
+    // which describe the tab bar this app keeps natively in `AppState::tabs`,
+    // so the intercept is that model's own close. Save Changes' Discard
+    // reaches it through `discard_and_close_tab` (design 2026-10-14 §10).
+    if action == "remove_tab" {
+        if let Some(index) = params.get("index").and_then(|v| v.as_u64()) {
+            st.close_tab(index as usize);
+        }
+        return Vec::new();
+    }
+
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
     // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md
@@ -14707,6 +14719,23 @@ mod tests {
         assert!(!null_color_means_none("stroke_width"),
                 "a colour bind on a non-nullable field means nothing here");
     }
+
+    #[test]
+    fn discard_removes_the_tab_the_dialog_asked_about() {
+        // Save Changes' Discard (design 2026-10-14 §10): its action closes the
+        // dialog and dispatches `remove_tab`, which the web runs natively as
+        // `AppState::close_tab` (close without prompting).
+        let mut st = AppState::new();
+        while st.tabs.len() < 3 {
+            st.add_tab(crate::workspace::app_state::TabState::new());
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("index".into(), serde_json::json!(1));
+        let deferred = dispatch_action("discard_and_close_tab", &params, &mut st);
+        assert_eq!(st.tabs.len(), 2, "tab 1 is removed");
+        assert!(deferred.iter().any(|e| e.get("close_dialog").is_some()), "the dialog closes: {deferred:?}");
+    }
+
     /// Panel menu > Use Preview Bounds is a TOGGLE: `not
     /// state.align_use_preview_bounds`. The action context must carry the
     /// flag, or `not null` reads true every time and a second press cannot

@@ -696,8 +696,10 @@ struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
  *
  * # The reply
  *
- * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null}`
- * ([`act_reply`]). Each row is a
+ * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
+ * "remove_tab": <index> | null}` ([`act_reply`]). `remove_tab` names a tab
+ * the shell must remove (the engine owns no tabs): an unedited `close_tab`,
+ * or Save Changes' Discard (design 2026-10-14 §10). Each row is a
  * [`jas_panel_event`] delta row, tagged with its `panel`, across every open
  * panel. `doc_changed` says the document moved, so the shell repaints.
  *
