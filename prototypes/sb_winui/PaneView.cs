@@ -28,8 +28,9 @@ public sealed partial class MainWindow
         private readonly bool _topAligned;
 
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
-                          bool topAligned = false, double pad = PanePad)
+                          bool topAligned = false, double pad = PanePad, bool dialog = false)
         {
+            _dialog = dialog;
             _topAligned = topAligned;
             _pad = pad;
             _w = w;
@@ -45,6 +46,13 @@ public sealed partial class MainWindow
         /// control it is, even while a switch is still queued.
         /// </summary>
         internal string _paneDrawnPanel;
+
+        /// <summary>
+        /// S2: this view draws the OPEN DIALOG's plan. Its acts go to
+        /// `jas_dialog_event` instead of a panel, and it writes no `SB_PLAN_OUT`
+        /// (that file is the dock panel's, which the harness compares).
+        /// </summary>
+        private readonly bool _dialog;
 
         /// <summary>The margin round the plan's own coordinates: the panes' 4, the canvas strip's 0.</summary>
         private readonly double _pad;
@@ -210,7 +218,7 @@ public sealed partial class MainWindow
             // #323: the plan bytes this tree was DRAWN from, so a UIA read of the
             // same window is compared against the same selection (the harness's
             // `Compare-SbRenderedTree`). Overwritten at every draw: the newest wins.
-            if (PlanOutPath is { } planOut)
+            if (!_dialog && PlanOutPath is { } planOut)
             {
                 try
                 {
@@ -330,6 +338,17 @@ public sealed partial class MainWindow
                         buttons++;
                         if (leaf.Id.Length == 0) { unaddressable++; }
                         el = BuildIconButton(leaf, icons);
+                        break;
+
+                    // S1 (the dialog door, design §3): a text `button`. Every
+                    // dialog's OK/Cancel/Save/Discard is one, and two panels
+                    // (opacity, concepts) use it. Its event is `click`; a
+                    // dialog's buttons carry no id, so the plan path is the
+                    // address (#420), and the count reads the same predicate.
+                    case "button":
+                        buttons++;
+                        if (!PanelWire.Clickable(leaf.Type, leaf.Id, leaf.Path)) { unaddressable++; }
+                        el = BuildTextButton(leaf);
                         break;
 
                     // A swatch is a filled square whose colour the core sends as
@@ -555,6 +574,34 @@ public sealed partial class MainWindow
                 ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
                 : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00));
 
+        /// <summary>
+        /// S1: a text `button`. Its face is <see cref="PanelWire.ButtonLabel"/>,
+        /// re-read at every draw (a label can be a template the core resolves),
+        /// and a press sends `click` by id or plan path. What the press DOES is
+        /// the node's action or behaviors, run by the core.
+        /// </summary>
+        private Button BuildTextButton(PaneLeaf leaf)
+        {
+            var btn = new Button
+            {
+                Padding = new Thickness(6, 0, 6, 0),
+                MinWidth = 0,
+                MinHeight = 0,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Content = new TextBlock
+                {
+                    FontSize = 12,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            };
+            var summary = leaf.Literal("summary");
+            if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(btn, summary); }
+            var (id, path) = (leaf.Id, leaf.Path);
+            if (PanelWire.Clickable(leaf.Type, id, path)) { btn.Click += (_, _) => OnPaneClick(id, path); }
+            return btn;
+        }
+
         private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons,
                                        bool sendsClick = true)
         {
@@ -773,7 +820,8 @@ public sealed partial class MainWindow
         ///
         /// ⛔ THESE ARE READINGS, NOT EVALUATIONS. Each value is the canonical
         /// string the core resolved; `"true"` is the only true. An unaddressable
-        /// button (no id) is never enabled, since a click could not name it.
+        /// button is never enabled, since a click could not name it: no id, or
+        /// for a `button` neither id nor plan path (<see cref="PanelWire.Clickable"/>).
         /// </summary>
         private (int Disabled, int Checked, int Hidden, int Editing) ApplyLeafValues(FrameworkElement el, PaneLeaf leaf)
         {
@@ -794,7 +842,12 @@ public sealed partial class MainWindow
                     break;
 
                 case Button btn:
-                    off = off || leaf.Id.Length == 0;
+                    off = off || !PanelWire.Clickable(leaf.Type, leaf.Id, leaf.Path);
+                    if (leaf.Type == "button" && btn.Content is TextBlock face)
+                    {
+                        face.Text = PanelWire.ButtonLabel(
+                            leaf.Value("label"), leaf.Literal("label"), leaf.Literal("summary"), leaf.Id);
+                    }
                     btn.IsEnabled = !off;
                     if (on)
                     {
@@ -912,7 +965,7 @@ public sealed partial class MainWindow
         /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null)
         {
-            _w._canvas.PanelClick(new PanelClickCmd
+            var act = new PanelClickCmd
             {
                 PanelId = _paneDrawnPanel,
                 Widget = widget,
@@ -925,7 +978,9 @@ public sealed partial class MainWindow
                 Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
                 Meta = IsKeyDown(Windows.System.VirtualKey.LeftWindows)
                        || IsKeyDown(Windows.System.VirtualKey.RightWindows),
-            });
+            };
+            if (_dialog) { _w._canvas.DialogEvent(act); }
+            else { _w._canvas.PanelClick(act); }
         }
 
         // =======================================================================

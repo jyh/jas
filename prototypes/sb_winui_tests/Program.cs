@@ -567,6 +567,51 @@ static class Program
         Eq("addressable: a negative index is no plan path", "False", PanelWire.Addressable("", "[3,-1]").ToString());
         Eq("addressable: an empty array is no plan path", "False", PanelWire.Addressable("", "[]").ToString());
         Eq("addressable: text that is not JSON is no plan path", "False", PanelWire.Addressable("", "row 3").ToString());
+        // S1 (the dialog door, design §3): a `button`'s face and whether a press
+        // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
+        // their address, as a library swatch's is. `icon_button` keeps its rule.
+        Eq("button: an engine-resolved label wins over the literal", "Save “doc.svg”",
+            PanelWire.ButtonLabel("Save “doc.svg”", "OK", "tip", "b"));
+        Eq("button: the literal label", "OK", PanelWire.ButtonLabel(null, "OK", "tip", "b"));
+        Eq("button: no label falls back to the summary", "tip", PanelWire.ButtonLabel(null, null, "tip", "b"));
+        Eq("button: then to the id", "b", PanelWire.ButtonLabel(null, null, null, "b"));
+        Eq("button: nothing at all is an empty face, never null", "", PanelWire.ButtonLabel(null, null, null, ""));
+        Eq("clickable: a button by plan path alone, a dialog's OK", "True",
+            PanelWire.Clickable("button", "", "[1,0]").ToString());
+        Eq("clickable: a button with neither id nor path", "False",
+            PanelWire.Clickable("button", "", null).ToString());
+        Eq("clickable: an icon_button still needs its id (the panel rule, unchanged)", "False",
+            PanelWire.Clickable("icon_button", "", "[1,0]").ToString());
+        Eq("clickable: an icon_button with an id", "True",
+            PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
+        // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
+        // an act's reply names (#414). A reply the shell cannot read is NULL,
+        // never a closed dialog: "closed" would hide a dialog the engine holds.
+        var shut = DialogWire.Read("""{"open":false}""");
+        Eq("dialog: closed reads closed", "False", shut is null ? "(null)" : shut.Open.ToString());
+        var open = DialogWire.Read("""
+            {"open":true,"id":"save_changes_tab","summary":"Save changes?","modal":true,"depth":2,
+             "plan":{"height":66,"leaves":[],"icons":{}}}
+            """);
+        Eq("dialog: open reads its id, summary, modal and depth", "True|save_changes_tab|Save changes?|True|2",
+            open is null ? "(null)" : $"{open.Open}|{open.Id}|{open.Summary}|{open.Modal}|{open.Depth}");
+        Eq("dialog: the plan is passed on as the planner wrote it", "66",
+            open?.PlanJson is { } pj ? System.Text.Json.JsonDocument.Parse(pj).RootElement.GetProperty("height").GetRawText() : "(null)");
+        Eq("dialog: a summary the engine sent as null is the id", "save_changes_tab",
+            DialogWire.Read("""{"open":true,"id":"save_changes_tab","summary":null,"modal":true,"depth":1,"plan":{}}""")?.Summary ?? "(null)");
+        Eq("dialog: open with no plan is unreadable, never closed", "(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1}""")?.Open.ToString() ?? "(null)");
+        Eq("dialog: open with no id is unreadable", "(null)",
+            DialogWire.Read("""{"open":true,"depth":1,"plan":{}}""")?.Open.ToString() ?? "(null)");
+        Eq("dialog: the empty span is unreadable", "(null)", DialogWire.Read("")?.Open.ToString() ?? "(null)");
+        Eq("dialog: bytes that are not JSON are unreadable", "(null)", DialogWire.Read("{open")?.Open.ToString() ?? "(null)");
+        Eq("dialog: an act's reply naming a dialog", "layer_options",
+            DialogWire.Named("""{"changed":[],"doc_changed":false,"dialog":"layer_options"}""") ?? "(null)");
+        Eq("dialog: an act's reply with dialog null names none", "(null)",
+            DialogWire.Named("""{"changed":[],"doc_changed":false,"dialog":null}""") ?? "(null)");
+        Eq("dialog: an act's reply with no dialog key names none", "(null)",
+            DialogWire.Named("""{"changed":[],"doc_changed":false}""") ?? "(null)");
+        Eq("dialog: an unreadable act reply names none", "(null)", DialogWire.Named("nope") ?? "(null)");
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
             "a parser that ignores its input would pass every case above but the null ones");

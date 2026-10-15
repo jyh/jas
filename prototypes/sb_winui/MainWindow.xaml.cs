@@ -488,6 +488,62 @@ public sealed partial class MainWindow : Window
     private bool _toolbarRefused;
 
     /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
+    /// <summary>S2: whether the dialog layer is up, so input belongs to it.</summary>
+    private bool DialogShown => DialogLayer.Visibility == Visibility.Visible;
+
+    /// <summary>S2: the view drawing the open dialog, rebuilt when the dialog's id changes.</summary>
+    private PaneView? _dialogView;
+    private string? _dialogViewId;
+
+    /// <summary>
+    /// S2: draw the engine's newest dialog reading. Open: the TOP dialog's plan
+    /// through the panel materializer, in the modal layer. Closed: the layer
+    /// goes. ⛔ UNREADABLE IS NOT CLOSED: the layer stays as it was, with a
+    /// RUSTFAIL row, so a dialog the engine holds is never hidden by a guess.
+    /// </summary>
+    private void OnDialogChanged()
+    {
+        if (_canvas.Dialog is not { } snap) { return; }
+        if (snap.Reading is not { } r)
+        {
+            Report($"RUSTFAIL DIALOG DRAW unreadable seq={snap.Seq} cause={snap.Cause} -- the layer is left as it was");
+            return;
+        }
+        if (!r.Open)
+        {
+            var was = _dialogViewId;
+            DialogLayer.Visibility = Visibility.Collapsed;
+            DialogScroll.Content = null;
+            _dialogView = null;
+            _dialogViewId = null;
+            if (was is not null) { Report($"DIALOG HIDDEN dialog={was} seq={snap.Seq} cause={snap.Cause}"); }
+            return;
+        }
+        if (_dialogView is null || _dialogViewId != r.Id)
+        {
+            _dialogView = new PaneView(this, DialogFrame, DialogScroll, snap.AvailW, r.Id, topAligned: true, dialog: true);
+            _dialogViewId = r.Id;
+            DialogScroll.Width = snap.AvailW + 2 * PanePad;
+        }
+        // A tall dialog scrolls inside 80% of the window. Before the window's
+        // first layout there is no height to take 80% of, so none is set.
+        var windowH = ((FrameworkElement)Content).ActualHeight;
+        if (windowH > 0) { DialogScroll.MaxHeight = windowH * 0.8; }
+        DialogTitle.Text = r.Summary;
+        var first = DialogLayer.Visibility != Visibility.Visible;
+        DialogLayer.Visibility = Visibility.Visible;
+        try { _dialogView.DrawPane(new PanelSnapshot(r.Id, r.PlanJson!, snap.Seq, snap.Cause)); }
+        catch (Exception ex)
+        {
+            Report($"RUSTFAIL DIALOG DRAW threw {ex.GetType().Name}: {ex.Message}");
+            return;
+        }
+        // Keyboard focus goes into the layer, so Escape and Tab start there.
+        if (first) { DialogClose.Focus(FocusState.Programmatic); }
+        Report($"DIALOG SHOWN dialog={r.Id} depth={r.Depth} modal={(r.Modal ? "true" : "false")} "
+             + $"seq={snap.Seq} cause={snap.Cause} frame-dips={DialogFrame.ActualWidth:0}x{DialogFrame.ActualHeight:0}");
+    }
+
     private void OnPaneChanged(string key)
     {
         if (!_canvas.Panes.TryGetValue(key, out var snap)) { return; }
@@ -556,6 +612,8 @@ public sealed partial class MainWindow : Window
         _canvas.PaneChanged = OnPaneChanged;
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
+        _canvas.DialogChanged = OnDialogChanged;
+        DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
         // (W2-5, stop 5). Shown here, its column is already taken when the
@@ -1042,6 +1100,17 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // S2: while a dialog is shown, no key reaches the document. Escape
+        // dismisses it (`jas_dialog_dismiss`), from a dialog text box too.
+        if (DialogShown)
+        {
+            if (e.Key == Windows.System.VirtualKey.Escape)
+            {
+                e.Handled = true;
+                _canvas.DialogDismiss("escape");
+            }
+            return;
+        }
         if (e.OriginalSource is TextBox) { return; }
         uint code = e.Key switch
         {
@@ -1073,7 +1142,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs e)
     {
-        if (e.OriginalSource is TextBox) { return; }
+        if (DialogShown || e.OriginalSource is TextBox) { return; }
         uint c = e.Character;
         if (c < 0x20 || c == 0x7F) { return; }
         _canvas.Key(c, KeyMods());
