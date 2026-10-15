@@ -1271,9 +1271,17 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // A menubar item runs in the app's scope, no panel's: `engine_scope` with no
     // panel id reads the state and the active document and seeds nothing. A
     // panel-menu item runs in its panel's scope, seeded as a click's is.
+    // Both carry the colour as SHOWN in `state.*` (the selection's, as the
+    // web's action context does for every action, `action_fill_stroke_values`):
+    // New Swatch and the Color Picker are menubar actions that read
+    // `state.fill_color`, and until 2026-10-15 this arm read the stale copy.
     let scope = match panel {
         Some(pid) => panel_ctx(engine, &ws, pid),
-        None => engine_scope_of(engine, ""),
+        None => {
+            crate::panel_scope::sync_colour_state(
+                &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
+            engine_scope_of(engine, "")
+        }
     };
     // The menu's model-pure verbs (flask STATUS §242: Select All was refused
     // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
@@ -3179,12 +3187,11 @@ mod tests {
     /// `active_document` view closed Print; the flat `let` closed Layer Options
     /// (edit); the shared artboard row closed Artboard Options. 2026-10-15:
     /// the engine's print-config field effects closed Document Setup's
-    /// confirm. What remains: New Swatch and the Color Picker read
-    /// `state.fill_color`, which on the engine is not the selection's fill.
-    const ENGINE_DIALOG_VALUE_GAPS: [&str; 2] = [
-        "new_swatch_opens_swatch_options_with_the_active_fill",
-        "open_color_picker_fill_starts_on_the_fill_colour",
-    ];
+    /// confirm. 2026-10-15 again: a MENUBAR action now carries the selection's
+    /// colours in `state.*`, as a panel action already did, which closed New
+    /// Swatch and the Color Picker. None remains; the list stays, empty, so a
+    /// new gap has to be declared here to pass.
+    const ENGINE_DIALOG_VALUE_GAPS: [&str; 0] = [];
 
     /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's
     /// close box. `jas_dialog_dismiss` closes the open dialog as `close_dialog`
