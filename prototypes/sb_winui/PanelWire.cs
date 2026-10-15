@@ -220,6 +220,31 @@ internal static class PanelWire
     internal static (string Event, string? Value) RadioEvent(string type, string optionValue) =>
         type == "radio_group" ? ("toggle", optionValue) : ("click", null);
 
+    /// <summary>
+    /// #434: a `reference_point_widget`'s rows are its kind's nine anchors, row
+    /// by row. The face lays any perfect-square count out as a square grid and
+    /// refuses (null) any other, so it never assumes nine.
+    /// </summary>
+    internal static int? GridColumns(int count)
+    {
+        for (var n = 1; n * n <= count; n++)
+        {
+            if (n * n == count) { return n; }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// #431: an `icon_button_group`'s buttons sit side by side in the plan's
+    /// rect, each square: the rect's height, or an equal share of its width
+    /// when that is narrower. No options is no cell.
+    /// </summary>
+    internal static double GroupCellSide(double w, double h, int count) =>
+        count <= 0 ? 0 : (w / count < h ? w / count : h);
+
+    /// <summary>Row-by-row placement: the <paramref name="index"/>th row's cell.</summary>
+    internal static (int Row, int Column) GridCell(int index, int columns) => (index / columns, index % columns);
+
     /// <summary>A `radio_group` option's face: its label as the core sent it,
     /// empty included (the picker's channel radios carry none), never its id.</summary>
     internal static string RadioFace(PaneOption row) => row.Label;
@@ -424,7 +449,7 @@ internal static class PanelWire
                 }
                 var selected = row.TryGetProperty("selected", out var sel)
                                && sel.ValueKind == System.Text.Json.JsonValueKind.True;
-                rows.Add(new PaneOption(false, value, label, Str(row, "glyph"), selected));
+                rows.Add(new PaneOption(false, value, label, Str(row, "glyph"), selected, Str(row, "icon")));
             }
             return new PaneOptions(rows, refused);
         }
@@ -806,7 +831,7 @@ internal sealed record SliderTrack(double Min, double Max, double? Step);
 /// W-b: one row of a plan entry's `options` channel. A separator carries no
 /// value and is never offered; see <see cref="PanelWire.ReadOptions"/>.
 /// </summary>
-internal sealed record PaneOption(bool Separator, string Value, string Label, string? Glyph, bool Selected);
+internal sealed record PaneOption(bool Separator, string Value, string Label, string? Glyph, bool Selected, string? Icon = null);
 
 /// <summary>
 /// W-b: a leaf's options as the core sent them, and how many rows this shell
