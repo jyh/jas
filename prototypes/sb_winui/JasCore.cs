@@ -410,6 +410,16 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_dialog_plan(IntPtr engine, long availW, long availH);
 
     /// <summary>
+    /// Close the engine's one document (`jas_document_close`, flask §272 fork
+    /// (a)): the answer to a reply that names <c>"remove_tab": 0</c>. The tab
+    /// bar then draws no tab and every scope reads <c>tab_count</c> 0 and
+    /// <c>active_tab</c> -1. A load (<see cref="jas_load_svg"/>) opens a
+    /// document again. 1 closed; 0 none was open; 255 no engine.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern byte jas_document_close(IntPtr engine);
+
+    /// <summary>
     /// A widget of the OPEN dialog, acted on (`jas_dialog_event`): the
     /// <see cref="jas_panel_behavior"/> event, addressed to the top dialog.
     /// A dialog's buttons carry no id, so a click names the leaf's plan path:
