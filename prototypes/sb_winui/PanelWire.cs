@@ -1012,6 +1012,15 @@ internal static class DialogWire
     /// shell's default (jas §271: the engine invents none).</summary>
     internal static long PlanWidth(long? declared, long fallback) => declared ?? fallback;
 
+    /// <summary>
+    /// jas §284 (a): a tool's pointer gesture has no reply to name a dialog, so
+    /// the plan is read after every release. Publish when the reading differs
+    /// from the dialog shown (null: none), or cannot be read at all; an
+    /// unchanged reading publishes nothing, so a plain click adds no row.
+    /// </summary>
+    internal static bool AfterRelease(string? shown, DialogReading? read) =>
+        read is null || (read.Open ? read.Id : null) != shown;
+
     /// <summary>The dialog an act's reply names as open after it (#414's
     /// `"dialog": <id> | null`); null when it names none or cannot be read.</summary>
     internal static string? Named(string reply)
