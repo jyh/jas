@@ -552,6 +552,16 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// §265: the probe's reading of the canvas strip, naming WHY there is none.
+    /// `NONE` when the strip is not open; `UNREADABLE` when it is open and its
+    /// plan does not parse (a parse failure must never read as "no strip", or it
+    /// would match a baseline frozen without one); otherwise <see cref="TabReading"/>.
+    /// Neither sentinel can collide with a reading, which is empty or opens with `[`.
+    /// </summary>
+    internal static string TabProbeReading(bool open, string? planJson) =>
+        !open ? "NONE" : (planJson is null ? null : TabReading(planJson)) ?? "UNREADABLE";
+
+    /// <summary>
     /// §260: the canvas strip as a certificate reads it -- each tab (a row
     /// <see cref="ActiveBoxes"/> finds) as `path=on|off:"label"`, space-joined in
     /// plan order, where the label is the first text leaf under the tab's path
