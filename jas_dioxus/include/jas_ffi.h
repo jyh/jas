@@ -813,9 +813,11 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
  * # The reply
  *
  * `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
- * "summary", "modal", "depth", "plan"}`: `depth` is how many dialogs are open
- * (2 when the Color Picker sits over Layer Options), and `plan` is
- * [`jas_panel_plan`]'s shape for the TOP dialog.
+ * "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
+ * are open (2 when the Color Picker sits over Layer Options), `width` is the
+ * dialog's declared width or null (the web sizes an undeclared one to its
+ * content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
+ * planned at the caller's `avail_w`.
  *
  * A null engine is the empty span. **BL4**: copy the span, then release with
  * [`jas_free`].

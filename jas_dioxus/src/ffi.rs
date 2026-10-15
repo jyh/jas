@@ -1328,9 +1328,11 @@ pub unsafe extern "C" fn jas_dialog_dismiss(e: *mut JasEngine) -> u8 {
 /// # The reply
 ///
 /// `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
-/// "summary", "modal", "depth", "plan"}`: `depth` is how many dialogs are open
-/// (2 when the Color Picker sits over Layer Options), and `plan` is
-/// [`jas_panel_plan`]'s shape for the TOP dialog.
+/// "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
+/// are open (2 when the Color Picker sits over Layer Options), `width` is the
+/// dialog's declared width or null (the web sizes an undeclared one to its
+/// content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
+/// planned at the caller's `avail_w`.
 ///
 /// A null engine is the empty span. **BL4**: copy the span, then release with
 /// [`jas_free`].
@@ -1365,6 +1367,7 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
         "summary": def.get("summary").cloned().unwrap_or(serde_json::Value::Null),
         "modal": def.get("modal").cloned().unwrap_or(serde_json::Value::Bool(false)),
         "depth": depth,
+        "width": def.get("width").cloned().unwrap_or(serde_json::Value::Null),
         "plan": plan,
     });
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
@@ -3090,14 +3093,13 @@ mod tests {
     /// in 8 cases. The same day: the init context's outer-`param` fix closed
     /// Boolean Options and Layer Options (create); the shared
     /// `active_document` view closed Print; the flat `let` closed Layer Options
-    /// (edit); the shared artboard row closed Artboard Options. What remains:
-    /// Document Setup's confirm does not write the document on the engine's
-    /// route, and New Swatch and the Color Picker read `state.fill_color`,
-    /// which on the engine is not the selection's fill.
-    const ENGINE_DIALOG_VALUE_GAPS: [&str; 3] = [
+    /// (edit); the shared artboard row closed Artboard Options. 2026-10-15:
+    /// the engine's print-config field effects closed Document Setup's
+    /// confirm. What remains: New Swatch and the Color Picker read
+    /// `state.fill_color`, which on the engine is not the selection's fill.
+    const ENGINE_DIALOG_VALUE_GAPS: [&str; 2] = [
         "new_swatch_opens_swatch_options_with_the_active_fill",
         "open_color_picker_fill_starts_on_the_fill_colour",
-        "open_document_setup_reads_back_what_confirm_wrote",
     ];
 
     /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's
@@ -3155,6 +3157,7 @@ mod tests {
         assert_eq!(v["summary"], "Save Changes");
         assert_eq!(v["modal"], true);
         assert_eq!(v["depth"], 1);
+        assert_eq!(v["width"], serde_json::Value::Null, "Save Changes declares no width");
         let leaves = v["plan"]["leaves"].as_array().expect("a panel-shaped plan");
         let buttons = leaves.iter().filter(|l| l["type"] == "button").count();
         assert_eq!(buttons, 3, "Cancel, Discard and Save: {leaves:?}");
@@ -3297,6 +3300,35 @@ mod tests {
         assert_eq!((store.get("fill_color").clone(), store.get("stroke_color").clone()), app,
                    "a dialog-field target writes no app colour");
         drop(store);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Document Setup's OK commits through the engine (flask STATUS §270: it
+    /// was refused as `UnknownDocEffect:doc.set_document_setup_field`). The
+    /// eight print-config `doc.*_field` effects reach the document through
+    /// `op_apply`, the verb the web's renderer already calls.
+    #[test]
+    fn document_setup_ok_commits_its_fields_on_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_document_setup"}"#);
+        assert!(reply.contains(r#""dialog":"document_setup""#), "{reply} {err}");
+        // flask STATUS §270: the plan names the dialog's declared width, so
+        // the shell can size its layer (the workspace declares 300 to 720).
+        let plan: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 420, 0) })).unwrap();
+        let declared = crate::interpreter::workspace::Workspace::load().unwrap()
+            .dialog("document_setup").unwrap()["width"].clone();
+        assert!(declared.is_number(), "Document Setup declares a width: {declared}");
+        assert_eq!(plan["width"], declared);
+        let (reply, err) = dialog_event(e, r#"{"widget":"ds_grid_size","event":"commit","value":"42"}"#);
+        assert!(!reply.is_empty(), "the grid size committed: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("grid_size").as_f64(), Some(42.0));
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+        assert_eq!(engine_of(e).model.borrow().document().document_setup.grid_size, 42.0,
+                   "the document took the dialog's value");
         unsafe { jas_engine_free(e) };
     }
 
