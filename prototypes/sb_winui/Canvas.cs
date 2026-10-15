@@ -1037,20 +1037,38 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
-    /// #422: a reply that names a tab to remove (`"remove_tab": <index>`). The
-    /// engine owns no tabs, so the shell must remove it -- but this shell holds
-    /// ONE document and the engine has no state for zero (`open_documents` is
-    /// always one entry), so what removing it means is a design question
-    /// (flask §272). Until it is answered the request is REPORTED BY NAME,
-    /// never dropped: before #422 the same press was a loud refusal
-    /// (`UnknownEffect:remove_child`), and a shell that ignored the new key
-    /// would turn it silent.
+    /// #422 + jas §274: a reply that names a tab to remove (`"remove_tab":
+    /// <index>`). The engine owns no tabs and this shell holds ONE document,
+    /// so tab 0 is closed in the engine (`jas_document_close`): every scope
+    /// then reads no document, the strip plans with no tab bar, and the
+    /// surface is hidden (<see cref="DocumentOpenChanged"/>). Any other index
+    /// names a tab this shell does not have, and is refused by name. The
+    /// callers re-read the panes and the menu after this, as after any act.
     /// </summary>
-    private void ReportUnhostedTab(string reply, string head)
+    private void ApplyRemoveTab(string reply, string head)
     {
         if (ActWire.RemoveTab(reply) is not { } index) { return; }
-        _report($"TAB REMOVE UNHOSTED {head} index={index} -- this shell holds one document "
-              + $"and does not remove it yet {Tids()}");
+        if (ActWire.Removal(index) != "close")
+        {
+            _report($"RUSTFAIL TAB REMOVE REFUSED {head} index={index} -- this shell holds one document, at index 0 {Tids()}");
+            return;
+        }
+        var close = ActWire.CloseReading(JasCore.jas_document_close(_engine));
+        _report($"TAB REMOVED {head} index={index} close={close} {Tids()}");
+        if (close == "closed") { SetDocumentOpen(false); }
+    }
+
+    /// <summary>Whether the engine holds an open document. Render thread only.</summary>
+    private bool _documentOpen = true;
+
+    /// <summary>The document was closed (false) or opened again (true). Raised on the UI thread.</summary>
+    internal Action<bool>? DocumentOpenChanged { get; set; }
+
+    private void SetDocumentOpen(bool open)
+    {
+        if (_documentOpen == open) { return; }
+        _documentOpen = open;
+        PostToUi(() => DocumentOpenChanged?.Invoke(open));
     }
 
     // =======================================================================
@@ -1140,7 +1158,7 @@ internal sealed unsafe class Canvas : IDisposable
             return false;
         }
         var after = DialogWire.Named(reply);
-        ReportUnhostedTab(reply, head);
+        ApplyRemoveTab(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         ApplyDialogRefresh("event");
@@ -2072,6 +2090,8 @@ internal sealed unsafe class Canvas : IDisposable
         }
         LastStatus = $"LOADED '{l.Label}' ({l.Svg.Length} bytes) into the RETAINED engine "
                    + $"loads(shell)={_loadsShell}";
+        // jas §274: a load opens a document again after `jas_document_close`.
+        SetDocumentOpen(true);
         return true;
     }
 
@@ -4584,7 +4604,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, runHead);
-            ReportUnhostedTab(reply, runHead);
+            ApplyRemoveTab(reply, runHead);
         }
         catch (Exception ex)
         {
@@ -4631,7 +4651,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
-            ReportUnhostedTab(reply, head);
+            ApplyRemoveTab(reply, head);
         }
         catch (Exception ex)
         {
@@ -4848,7 +4868,7 @@ internal sealed unsafe class Canvas : IDisposable
             docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
-            ReportUnhostedTab(reply, head);
+            ApplyRemoveTab(reply, head);
         }
         catch (Exception ex)
         {

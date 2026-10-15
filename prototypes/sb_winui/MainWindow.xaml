@@ -123,6 +123,20 @@
             Visibility="Collapsed" />
 
         <!--
+          NO DOCUMENT (jas 274): after the engine closes its one document
+          (jas_document_close, on a reply naming remove_tab 0), the surface is
+          hidden behind this plain cover until a load opens a document again.
+          It names nothing and draws nothing; it takes every press meant for
+          the surface, so no gesture reaches the unshown model.
+        -->
+        <Border
+            x:Name="NoDocumentCover"
+            Grid.Row="1"
+            Grid.Column="1"
+            Background="#FF101418"
+            Visibility="Collapsed" />
+
+        <!--
           THE PANEL PANE, AND IT IS A MOUNT POINT LIKE THE MENUBAR (W2-5).
 
           Every control inside it is materialized at runtime from the core's

@@ -488,6 +488,20 @@ public sealed partial class MainWindow : Window
     private bool _toolbarRefused;
 
     /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
+    /// <summary>
+    /// jas §274: the engine closed its one document (false) or a load opened
+    /// one again (true). Closed, the surface is covered and no key reaches the
+    /// engine's unshown model; the strip's own plan already draws no tab.
+    /// </summary>
+    private void OnDocumentOpenChanged(bool open)
+    {
+        NoDocumentCover.Visibility = open ? Visibility.Collapsed : Visibility.Visible;
+        Report($"DOCUMENT SURFACE {(open ? "shown" : "hidden")} canvas-dips={Canvas.ActualWidth:0}x{Canvas.ActualHeight:0}");
+    }
+
+    /// <summary>Whether a document is open, so keys belong to it.</summary>
+    private bool DocumentShown => NoDocumentCover.Visibility != Visibility.Visible;
+
     /// <summary>S2: whether the dialog layer is up, so input belongs to it.</summary>
     private bool DialogShown => DialogLayer.Visibility == Visibility.Visible;
 
@@ -613,6 +627,7 @@ public sealed partial class MainWindow : Window
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
         _canvas.DialogChanged = OnDialogChanged;
+        _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
@@ -1111,7 +1126,7 @@ public sealed partial class MainWindow : Window
             }
             return;
         }
-        if (e.OriginalSource is TextBox) { return; }
+        if (e.OriginalSource is TextBox || !DocumentShown) { return; }
         uint code = e.Key switch
         {
             Windows.System.VirtualKey.Escape => JasCore.KeyEscape,
@@ -1142,7 +1157,7 @@ public sealed partial class MainWindow : Window
     /// </summary>
     private void OnCharacterReceived(UIElement sender, CharacterReceivedRoutedEventArgs e)
     {
-        if (DialogShown || e.OriginalSource is TextBox) { return; }
+        if (DialogShown || !DocumentShown || e.OriginalSource is TextBox) { return; }
         uint c = e.Character;
         if (c < 0x20 || c == 0x7F) { return; }
         _canvas.Key(c, KeyMods());
