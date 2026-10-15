@@ -5,10 +5,10 @@
 /// jas_dioxus silently: the widget's output is a panel-state string, not document
 /// geometry, so no canonical-JSON golden would ever see it.
 
-/// The 3x3 reference-point anchors, ROW-MAJOR, matching Rust's
-/// `render_reference_point_widget`.
-let referencePointAnchorRowsForTest: [[String]] = [
-    ["top_left", "top", "top_right"],
-    ["left", "center", "right"],
-    ["bottom_left", "bottom", "bottom_right"],
-]
+/// The 3x3 reference-point anchors, ROW-MAJOR: the KIND's nine
+/// (`WidgetEvent.referencePointAnchors`, WIDGET_EVENTS.md Parsing), three to a
+/// row. Until 2026-10-15 this was typed here as `top`/`left`/`right`/`bottom`,
+/// names no `anchor_offset_*` case and no spec enum member carries.
+let referencePointAnchorRowsForTest: [[String]] = stride(from: 0, to: 9, by: 3).map {
+    Array(WidgetEvent.referencePointAnchors[$0..<$0 + 3])
+}

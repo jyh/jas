@@ -71,13 +71,21 @@ TEXT_ENTRY_EVENTS = ("input", "blur", "keydown")
 
 INPUT_KINDS = frozenset({
     "number_input", "length_input", "text_input",
-    "select", "icon_select", "icon_button_group", "combo_box", "slider", "color_bar",
+    "select", "icon_select", "icon_button_group", "reference_point_widget",
+    "combo_box", "slider", "color_bar",
 })
 BOOLEAN_KINDS = frozenset({"toggle", "checkbox"})
 # A plain pick and an Alt pick of one declared item. They carry the ITEM,
 # not text: see `pick`.
 PICK_EVENTS = ("toggle", "alt_toggle")
 ITEM_KINDS = frozenset({"dropdown"})
+# The nine anchors a `reference_point_widget` takes, row by row. The KIND owns
+# them (WIDGET_EVENTS.md, Parsing); no YAML declares them.
+REFERENCE_POINT_ANCHORS = (
+    "top_left", "top_center", "top_right",
+    "middle_left", "center", "middle_right",
+    "bottom_left", "bottom_center", "bottom_right",
+)
 # A press that CHECKS and never unchecks: see `check`. Its events are the
 # press synonyms.
 CHECK_KINDS = frozenset({"radio"})
@@ -250,6 +258,9 @@ def parse_commit(widget: dict, text: str) -> tuple[bool, Any]:
             return refused
         point = [number_commit(p, 0.0, 1.0) for p in parts]
         return refused if None in point else (True, point)
+
+    if kind == "reference_point_widget":
+        return (True, text) if text in REFERENCE_POINT_ANCHORS else refused
 
     if kind in ("select", "icon_select", "icon_button_group"):
         options = widget.get("options")

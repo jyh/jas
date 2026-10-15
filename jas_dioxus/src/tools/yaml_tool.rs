@@ -317,7 +317,10 @@ impl YamlTool {
             &mut self.store,
             Some(model),
             actions,
-            None,
+            // A tool's `open_dialog` (Scale/Rotate/Shear Options, Artboard
+            // Options) resolves against the real dialog table and opens in
+            // this store; the host takes it with `take_opened_dialog`.
+            workspace.as_ref().map(|ws| ws.dialogs()),
             Some(action_name.as_str()),
         );
     }
@@ -554,6 +557,17 @@ impl CanvasTool for YamlTool {
         // way when Escape-to-commit-pen-path stopped working in
         // dx serve. Dispatch here too, with empty modifiers.
         self.on_key_event(model, key, KeyMods::default())
+    }
+
+    fn take_opened_dialog(&mut self) -> Option<(String, serde_json::Map<String, serde_json::Value>)> {
+        let id = self.store.dialog_id()?.to_string();
+        let params: serde_json::Map<String, serde_json::Value> = self.store.dialog_params()
+            .map(|p| p.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
+            .unwrap_or_default();
+        while self.store.dialog_id().is_some() {
+            self.store.close_dialog();
+        }
+        Some((id, params))
     }
 
     fn on_key_event(
