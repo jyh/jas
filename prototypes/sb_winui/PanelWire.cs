@@ -182,6 +182,24 @@ internal static class PanelWire
     internal static bool Addressable(string id, string? path) =>
         id.Length > 0 || PlanPath(path) is not null;
 
+    /// <summary>
+    /// S1: a `button`'s face. The core resolves a `{{`-bearing label into the
+    /// leaf's `values` (Save Changes' "Save {{param.filename}}") and sends a
+    /// literal one in `static`; the resolved one wins. With no label, the
+    /// summary, then the id, as `icon_button`'s text face falls back. Never null.
+    /// </summary>
+    internal static string ButtonLabel(string? boundLabel, string? literalLabel, string? summary, string id) =>
+        boundLabel ?? literalLabel ?? summary ?? id;
+
+    /// <summary>
+    /// S1: whether a press on a button can reach the core, so whether it is
+    /// enabled. A `button` is addressed like a swatch (<see cref="Addressable"/>):
+    /// a dialog's OK and Cancel carry NO id, only a plan path (#420). Every
+    /// other button keeps the id rule it shipped with.
+    /// </summary>
+    internal static bool Clickable(string type, string id, string? path) =>
+        type == "button" ? Addressable(id, path) : id.Length > 0;
+
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
     {

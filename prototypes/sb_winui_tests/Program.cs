@@ -567,6 +567,23 @@ static class Program
         Eq("addressable: a negative index is no plan path", "False", PanelWire.Addressable("", "[3,-1]").ToString());
         Eq("addressable: an empty array is no plan path", "False", PanelWire.Addressable("", "[]").ToString());
         Eq("addressable: text that is not JSON is no plan path", "False", PanelWire.Addressable("", "row 3").ToString());
+        // S1 (the dialog door, design §3): a `button`'s face and whether a press
+        // can reach the core. A dialog's OK/Cancel carry NO id; the plan path is
+        // their address, as a library swatch's is. `icon_button` keeps its rule.
+        Eq("button: an engine-resolved label wins over the literal", "Save “doc.svg”",
+            PanelWire.ButtonLabel("Save “doc.svg”", "OK", "tip", "b"));
+        Eq("button: the literal label", "OK", PanelWire.ButtonLabel(null, "OK", "tip", "b"));
+        Eq("button: no label falls back to the summary", "tip", PanelWire.ButtonLabel(null, null, "tip", "b"));
+        Eq("button: then to the id", "b", PanelWire.ButtonLabel(null, null, null, "b"));
+        Eq("button: nothing at all is an empty face, never null", "", PanelWire.ButtonLabel(null, null, null, ""));
+        Eq("clickable: a button by plan path alone, a dialog's OK", "True",
+            PanelWire.Clickable("button", "", "[1,0]").ToString());
+        Eq("clickable: a button with neither id nor path", "False",
+            PanelWire.Clickable("button", "", null).ToString());
+        Eq("clickable: an icon_button still needs its id (the panel rule, unchanged)", "False",
+            PanelWire.Clickable("icon_button", "", "[1,0]").ToString());
+        Eq("clickable: an icon_button with an id", "True",
+            PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
             "a parser that ignores its input would pass every case above but the null ones");

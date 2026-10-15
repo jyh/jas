@@ -332,6 +332,17 @@ public sealed partial class MainWindow
                         el = BuildIconButton(leaf, icons);
                         break;
 
+                    // S1 (the dialog door, design §3): a text `button`. Every
+                    // dialog's OK/Cancel/Save/Discard is one, and two panels
+                    // (opacity, concepts) use it. Its event is `click`; a
+                    // dialog's buttons carry no id, so the plan path is the
+                    // address (#420), and the count reads the same predicate.
+                    case "button":
+                        buttons++;
+                        if (!PanelWire.Clickable(leaf.Type, leaf.Id, leaf.Path)) { unaddressable++; }
+                        el = BuildTextButton(leaf);
+                        break;
+
                     // A swatch is a filled square whose colour the core sends as
                     // `bind.color` (STATUS-flask §110: 228 of Swatches' 234 leaves
                     // were placeholders). NOT a Button: ApplyLeafValues' Button arm
@@ -555,6 +566,34 @@ public sealed partial class MainWindow
                 ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0xFF, c.R, c.G, c.B))
                 : new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00));
 
+        /// <summary>
+        /// S1: a text `button`. Its face is <see cref="PanelWire.ButtonLabel"/>,
+        /// re-read at every draw (a label can be a template the core resolves),
+        /// and a press sends `click` by id or plan path. What the press DOES is
+        /// the node's action or behaviors, run by the core.
+        /// </summary>
+        private Button BuildTextButton(PaneLeaf leaf)
+        {
+            var btn = new Button
+            {
+                Padding = new Thickness(6, 0, 6, 0),
+                MinWidth = 0,
+                MinHeight = 0,
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment = VerticalAlignment.Center,
+                Content = new TextBlock
+                {
+                    FontSize = 12,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                },
+            };
+            var summary = leaf.Literal("summary");
+            if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(btn, summary); }
+            var (id, path) = (leaf.Id, leaf.Path);
+            if (PanelWire.Clickable(leaf.Type, id, path)) { btn.Click += (_, _) => OnPaneClick(id, path); }
+            return btn;
+        }
+
         private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons,
                                        bool sendsClick = true)
         {
@@ -773,7 +812,8 @@ public sealed partial class MainWindow
         ///
         /// ⛔ THESE ARE READINGS, NOT EVALUATIONS. Each value is the canonical
         /// string the core resolved; `"true"` is the only true. An unaddressable
-        /// button (no id) is never enabled, since a click could not name it.
+        /// button is never enabled, since a click could not name it: no id, or
+        /// for a `button` neither id nor plan path (<see cref="PanelWire.Clickable"/>).
         /// </summary>
         private (int Disabled, int Checked, int Hidden, int Editing) ApplyLeafValues(FrameworkElement el, PaneLeaf leaf)
         {
@@ -794,7 +834,12 @@ public sealed partial class MainWindow
                     break;
 
                 case Button btn:
-                    off = off || leaf.Id.Length == 0;
+                    off = off || !PanelWire.Clickable(leaf.Type, leaf.Id, leaf.Path);
+                    if (leaf.Type == "button" && btn.Content is TextBlock face)
+                    {
+                        face.Text = PanelWire.ButtonLabel(
+                            leaf.Value("label"), leaf.Literal("label"), leaf.Literal("summary"), leaf.Id);
+                    }
                     btn.IsEnabled = !off;
                     if (on)
                     {
