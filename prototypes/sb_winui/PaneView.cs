@@ -736,7 +736,7 @@ public sealed partial class MainWindow
         private Grid BuildSeparator(PaneLeaf leaf)
         {
             var host = new Grid { IsHitTestVisible = false };
-            var rule = PanelWire.SeparatorRule(leaf.W, leaf.H);
+            var rule = PanelWire.SeparatorRule(leaf.Literal("orientation"), leaf.W, leaf.H);
             if (rule is null) { return host; }
             host.Children.Add(new Border
             {
