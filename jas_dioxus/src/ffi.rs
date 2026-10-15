@@ -1320,6 +1320,62 @@ pub unsafe extern "C" fn jas_dialog_dismiss(e: *mut JasEngine) -> u8 {
     1
 }
 
+/// **The open dialog's plan** (the dialog door, design 2026-10-14): the panel
+/// planner over the dialog's `content`, so the shell materializes a dialog
+/// body with the code that materializes a panel. The context is the engine's
+/// scope plus the dialog's own (`dialog.*`, its state; `param.*`, its params).
+///
+/// # The reply
+///
+/// `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
+/// "summary", "modal", "depth", "plan"}`: `depth` is how many dialogs are open
+/// (2 when the Color Picker sits over Layer Options), and `plan` is
+/// [`jas_panel_plan`]'s shape for the TOP dialog.
+///
+/// A null engine is the empty span. **BL4**: copy the span, then release with
+/// [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_h: i64) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Some(ws) = crate::interpreter::workspace::Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let (id, depth, scope) = {
+        let store = engine.store.borrow();
+        let Some(id) = store.dialog_id().map(str::to_string) else {
+            return JasBytes::from_string(r#"{"open":false}"#.to_string());
+        };
+        (id, store.dialog_depth(), store.eval_context())
+    };
+    let Some(def) = ws.dialog(&id) else {
+        return JasBytes::from_string(r#"{"open":false}"#.to_string());
+    };
+    let mut spec = def.clone();
+    spec["id"] = serde_json::Value::String(id.clone());
+    let mut ctx = crate::panel_scope::engine_scope(
+        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    for key in ["dialog", "param"] {
+        if let Some(v) = scope.get(key) {
+            ctx[key] = v.clone();
+        }
+    }
+    let (plan, _rows) = crate::panel_plan::panel_plan(&spec, avail_w, avail_h, &ctx, ws.icons(), ws.actions());
+    let reply = serde_json::json!({
+        "open": true,
+        "id": id,
+        "summary": def.get("summary").cloned().unwrap_or(serde_json::Value::Null),
+        "modal": def.get("modal").cloned().unwrap_or(serde_json::Value::Bool(false)),
+        "depth": depth,
+        "plan": plan,
+    });
+    JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
+}
+
 /// **The shell names the document it opened or saved** (flask §256): the
 /// model's `filename`, which the canvas tab shows (`workspace.open_documents`,
 /// owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
@@ -2972,6 +3028,70 @@ mod tests {
         drop(store);
         assert_eq!(unsafe { jas_dialog_dismiss(e) }, 0, "none is open now");
         assert_eq!(unsafe { jas_dialog_dismiss(std::ptr::null_mut()) }, 255);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE DIALOG DOOR, the plan: `jas_dialog_plan` is the panel planner over
+    /// the OPEN dialog's `content`, evaluated with the dialog's own scope
+    /// (`dialog.*`, `param.*`) beside the engine's. With no dialog open it
+    /// answers `{"open": false}`, never an empty span.
+    #[test]
+    fn dialog_plan_plans_the_open_dialog_with_its_own_values() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let plan = |e| take(unsafe { jas_dialog_plan(e, 420, 640) });
+        let v: serde_json::Value = serde_json::from_str(&plan(e)).unwrap();
+        assert_eq!(v, serde_json::json!({"open": false}), "nothing open");
+
+        // An edited tab closing asks to save: the action corpus's case.
+        for act in [r#"{"action":"select_all","params":{}}"#,
+                    r#"{"action":"set_stroke_cap","params":{"cap":"square"}}"#] {
+            let _ = dispatch(e, act);
+        }
+        let (reply, err) = dispatch(e, r#"{"action":"close_tab","params":{"index":0}}"#);
+        assert!(reply.contains(r#""dialog":"save_changes_tab""#), "{reply} {err}");
+        let v: serde_json::Value = serde_json::from_str(&plan(e)).unwrap();
+        assert_eq!(v["open"], true);
+        assert_eq!(v["id"], "save_changes_tab");
+        assert_eq!(v["summary"], "Save Changes");
+        assert_eq!(v["modal"], true);
+        assert_eq!(v["depth"], 1);
+        let leaves = v["plan"]["leaves"].as_array().expect("a panel-shaped plan");
+        let buttons = leaves.iter().filter(|l| l["type"] == "button").count();
+        assert_eq!(buttons, 3, "Cancel, Discard and Save: {leaves:?}");
+        // The prompt names the document from the dialog's OWN param.
+        let filename = engine_of(e).store.borrow().eval_context()["param"]["filename"].clone();
+        let filename = filename.as_str().filter(|f| !f.is_empty())
+            .unwrap_or_else(|| panic!("the dialog's filename param: {filename}")).to_string();
+        assert!(leaves.iter().any(|l| l.to_string().contains(&format!("Save changes to \\\"{filename}\\\"?"))),
+                "a text leaf resolves param.filename ({filename}): {leaves:?}");
+
+        assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
+        let v: serde_json::Value = serde_json::from_str(&plan(e)).unwrap();
+        assert_eq!(v["open"], false, "closed");
+        assert_eq!(take(unsafe { jas_dialog_plan(std::ptr::null_mut(), 420, 640) }), "", "a null engine");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A nested dialog plans the TOP one and says how deep the stack is: the
+    /// Color Picker over Layer Options plans the picker at depth 2, and
+    /// dismissing it plans Layer Options again at depth 1. A caller's params
+    /// are values (#415), so the swatch's target is passed as the string it
+    /// evaluates to in the YAML.
+    #[test]
+    fn dialog_plan_plans_the_top_of_a_nested_stack() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let plan = |e| serde_json::from_str::<serde_json::Value>(&take(unsafe { jas_dialog_plan(e, 420, 640) })).unwrap();
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let (reply, err) = dispatch(e,
+            r##"{"action":"open_color_picker","params":{"target":"dialog.color","color":"#4a90d9"}}"##);
+        assert!(reply.contains(r#""dialog":"color_picker""#), "{reply} {err}");
+        let v = plan(e);
+        assert_eq!((v["id"].clone(), v["depth"].clone()), (serde_json::json!("color_picker"), serde_json::json!(2)));
+        assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
+        let v = plan(e);
+        assert_eq!((v["id"].clone(), v["depth"].clone()), (serde_json::json!("layer_options"), serde_json::json!(1)));
         unsafe { jas_engine_free(e) };
     }
 
