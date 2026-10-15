@@ -211,6 +211,19 @@ internal static class PanelWire
     internal static string? SeparatorRule(double w, double h) =>
         w <= 0 || h <= 0 ? null : (w >= h ? "horizontal" : "vertical");
 
+    /// <summary>
+    /// S3 (#429, WIDGET_EVENTS.md): what a press on a radio sends. `radio` is a
+    /// check kind: `click`, no value. `radio_group` is an option kind: `toggle`
+    /// carrying the pressed option's id. A press on the checked one is the
+    /// engine's to refuse (`AlreadyChecked`), never filtered here.
+    /// </summary>
+    internal static (string Event, string? Value) RadioEvent(string type, string optionValue) =>
+        type == "radio_group" ? ("toggle", optionValue) : ("click", null);
+
+    /// <summary>A `radio_group` option's face: its label as the core sent it,
+    /// empty included (the picker's channel radios carry none), never its id.</summary>
+    internal static string RadioFace(PaneOption row) => row.Label;
+
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
     {
