@@ -49,7 +49,7 @@ the field. They now write `event.value`, and Dither's behavior also writes
 
 ## The event table
 
-The table below is the whole vocabulary for the fourteen value kinds. A
+The table below is the whole vocabulary for the fifteen value kinds. A
 behavior on one of these kinds whose `event` is not listed for that kind
 is refused by the lint.
 
@@ -61,6 +61,7 @@ text_input: commit, change, input, blur, keydown
 select: commit, change
 icon_select: commit, change
 icon_button_group: commit, change
+reference_point_widget: commit, change
 combo_box: commit, change
 slider: commit, change
 color_bar: commit, change
@@ -73,7 +74,7 @@ radio_group: toggle
 <!-- widget-event-table:end -->
 
 - **Input kinds** are `number_input`, `length_input`, `text_input`,
-  `select`, `icon_select`, `icon_button_group`, `combo_box`, `slider` and `color_bar`. `commit` and `change` are
+  `select`, `icon_select`, `icon_button_group`, `reference_point_widget`, `combo_box`, `slider` and `color_bar`. `commit` and `change` are
   synonyms on these kinds: both name "a value was committed".
 - **`text_input` has three more events: `input`, `blur` and `keydown`.**
   They are not commits. A commit never runs them. They carry search-as-
@@ -91,8 +92,7 @@ radio_group: toggle
   `options` by that option's `id` (see §Picking a radio option).
 
 **Outside this contract, deliberately:** every other widget kind. That
-includes `reference_point_widget`
-and the color widgets other than `color_bar`. Their events are not
+includes the color widgets other than `color_bar`. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
@@ -266,6 +266,7 @@ expression that reads another root, or that does not parse.
 | `number_input` | a number by the number grammar, clamped to the widget's declared `min:` / `max:` | the text is not in the grammar |
 | `length_input` | `parse_length(text, unit:)` in pt (`UNIT_INPUTS.md`), clamped to the declared `min:` / `max:`. A blank entry is `null` when the widget declares `nullable: true`. | the parse refuses, or the entry is blank and the widget is not nullable |
 | `text_input` | the text, verbatim (including the empty string and surrounding spaces) | never |
+| `reference_point_widget` | the text itself, when it is one of the kind's nine anchors, row by row: `top_left`, `top_center`, `top_right`, `middle_left`, `center`, `middle_right`, `bottom_left`, `bottom_center`, `bottom_right`. The KIND owns this vocabulary; no YAML declares it. | any other text |
 | `select`, `icon_select`, `icon_button_group` | the declared value of the option whose `value`, written as a string, equals the text. With computed options (an expression, not a list) the text itself. | no declared option matches |
 | `combo_box` | a number (clamped as above) when the text is in the number grammar; otherwise the text | the text is blank |
 | `slider` | a number by the number grammar, clamped to `min:` / `max:` as `number_input` is, then SNAPPED to the declared `step:`: `min + floor((v − min) / step + 0.5) · step` (half up, offset from `min`, or from 0 with no `min`), then clamped again so a snap never leaves the range. No `step:`, or a step that is not a positive number, does not snap. A shell reports a drag as `change` (live) and the release as `commit`; both parse the same way. | the text is not in the grammar |
@@ -369,8 +370,9 @@ module, none of them is a measured failure.
   (`jas_dioxus/src/interpreter/renderer.rs:6341`), so a Magic Wand
   tolerance commit writes nothing and runs nothing.
 - **Rust, `change` is dispatched only by `icon_button_group` and
-  `reference_point_widget`** (`renderer.rs:5923`, `:6030`), which are
-  outside this contract.
+  `reference_point_widget`** (`render_icon_button_group`,
+  `render_reference_point_widget`), each from its own loop, which reads a
+  behavior's `condition` (2026-10-15).
 - **Rust, `toggle`: a declared `click` behavior replaces the write**
   (`renderer.rs:7405-7406`), which conforms. A declared `change` behavior
   does not run.

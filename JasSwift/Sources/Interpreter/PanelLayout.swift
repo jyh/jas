@@ -310,6 +310,7 @@ public enum PanelLayout {
         case "gradient_tile": return 24
         case "dropdown": return 20
         case "tree_view": return 200
+        case "reference_point_widget": return 28
         default: return 20
         }
     }
@@ -400,6 +401,8 @@ public enum PanelLayout {
                 w = 16 + 4 + textW(n, "label", ctx)
             case "radio_group":
                 w = radioGroupW(n, ctx)
+            case "reference_point_widget":
+                w = 28  // the web's repeat(3, 8px), gap 2px
             case "icon_button_group":
                 let k = (n["options"] as? [Any])?.count ?? 0
                 w = 24 * k + 4 * max(k - 1, 0)

@@ -31,3 +31,12 @@ private func width(_ leaf: [String: Any]) -> Int? {
     #expect(width(["type": "icon_button_group"]) == 0)
     #expect(width(["type": "radio_group", "options": "dialog.list"]) == 0)
 }
+
+// The reference-point widget's 3x3 grid, as the reference's
+// `test_a_reference_point_widget_is_its_3x3_grid`: 28 x 28.
+@Test func aReferencePointWidgetIsItsThreeByThreeGrid() {
+    let rects = PanelLayout.layoutPanel(["content": ["type": "row", "children": [
+        ["type": "reference_point_widget"]]]], availW: 400)
+    let rc = rects.first(where: { ($0["path"] as? [Int]) == [0] })?["rect"] as? [String: Any]
+    #expect(rc?["w"] as? Int == 28 && rc?["h"] as? Int == 28)
+}

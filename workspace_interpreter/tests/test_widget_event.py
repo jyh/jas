@@ -50,14 +50,14 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_fourteen_kinds_and_nothing_else(self):
+    def test_the_fifteen_kinds_and_nothing_else(self):
         families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
                     we.CHECK_KINDS, we.OPTION_KINDS]
         assert set(we.ALLOWED_EVENTS) == set().union(*families)
-        assert len(we.INPUT_KINDS) == 9 and len(we.BOOLEAN_KINDS) == 2
+        assert len(we.INPUT_KINDS) == 10 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
-        assert sum(len(f) for f in families) == len(set().union(*families)) == 14, \
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 15, \
             "the families are disjoint"
 
     def test_a_radio_checks_on_click_or_change_and_a_group_on_toggle(self):
@@ -175,6 +175,27 @@ class TestParseByKind:
         assert we.parse_commit(w, "2") == (True, 2)
         assert we.parse_commit(w, "Letter") == (False, None)
         assert we.parse_commit(w, "legal") == (False, None)
+
+    def test_reference_point_widget_takes_one_of_its_nine_anchors(self):
+        # The KIND owns its vocabulary (WIDGET_EVENTS.md, Parsing): the nine
+        # anchors of a 3x3 grid, row by row. No YAML declares them.
+        w = {"type": "reference_point_widget", "bind": {"value": "panel.rp"}}
+        assert we.REFERENCE_POINT_ANCHORS == (
+            "top_left", "top_center", "top_right", "middle_left", "center",
+            "middle_right", "bottom_left", "bottom_center", "bottom_right")
+        for a in we.REFERENCE_POINT_ANCHORS:
+            assert we.parse_commit(w, a) == (True, a)
+        for t in ("", "Center", "middle_center", " center"):
+            assert we.parse_commit(w, t) == (False, None), t
+
+    def test_the_nine_anchors_are_the_shipped_preference_enum(self):
+        # Derived, never typed: the Artboards panel's `reference_point` state
+        # is an enum of exactly these, in this order. (Swift's grid wrote
+        # `top`/`left`/`right`/`bottom` until 2026-10-15, values no enum
+        # member and no `anchor_offset_*` case carries.)
+        bundle = load_workspace(os.path.join(REPO_ROOT, "workspace"))
+        enum = bundle["panels"]["artboards_panel_content"]["state"]["reference_point"]["values"]
+        assert tuple(enum) == we.REFERENCE_POINT_ANCHORS
 
     def test_icon_button_group_is_a_select(self):
         # Artboard Options' orientation: options carry an `icon` and a
