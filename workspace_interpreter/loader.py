@@ -179,8 +179,29 @@ def load_workspace(path: str) -> dict:
                         content = item.get("content")
                         if isinstance(content, dict):
                             resolve_templates(content, templates)
+    _inline_brand_svgs(data, path)
     _WORKSPACE_CACHE[cache_key] = data
     return data
+
+
+def _inline_brand_svgs(data: dict, workspace_path: str) -> None:
+    """Inline each ``app.brand.<key>`` SVG path as ``<key>_svg`` TEXT, so a
+    port with no file access to ``assets/`` (the engine, a WinUI shell) draws
+    ``brand_logo`` from the bundle alone. Paths are relative to the repo root,
+    the workspace directory's parent, as jas_flask resolved them at runtime. A
+    path that cannot be read inlines as the empty string, as there."""
+    brand = (data.get("app") or {}).get("brand")
+    if not isinstance(brand, dict):
+        return
+    root = os.path.dirname(os.path.abspath(workspace_path))
+    for key, rel in list(brand.items()):
+        if not (isinstance(rel, str) and rel.endswith(".svg")):
+            continue
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                brand[f"{key}_svg"] = f.read()
+        except OSError:
+            brand[f"{key}_svg"] = ""
 
 
 def resolve_includes(element: dict, workspace_dir: str) -> None:

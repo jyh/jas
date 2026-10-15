@@ -214,6 +214,17 @@ fn numbers_of(node: &Value) -> Map<String, Value> {
 /// find a stale or invented string shadowing a resolved value.
 fn display_of(node: &Value, values: &Map<String, Value>, ctx: &Value) -> Map<String, Value> {
     let mut out = Map::new();
+    // The workspace's own logo (`app.brand.logo_small_svg`, inlined by the
+    // compiler): a shell draws `brand_logo` from this, never from an asset of
+    // its own.
+    if node.get("type").and_then(Value::as_str) == Some("brand_logo") {
+        if let Some(svg) = crate::interpreter::workspace::Workspace::load()
+            .and_then(|ws| ws.data()["app"]["brand"]["logo_small_svg"].as_str().map(str::to_string))
+            .filter(|s| !s.is_empty())
+        {
+            out.insert("logo.svg".to_string(), Value::String(svg));
+        }
+    }
     if node.get("type").and_then(Value::as_str) == Some("brush_preview") {
         let brush = ctx.get("brush").unwrap_or(&Value::Null);
         if let Some(svg) = crate::brush_preview::preview_svg(brush) {
@@ -2437,6 +2448,20 @@ mod tests {
         let got: Vec<Value> = entries_with_nodes(&panel, &json!({}))
             .into_iter().map(|(e, _)| e["static"]["orientation"].clone()).collect();
         assert_eq!(got, vec![json!("vertical"), json!("horizontal"), Value::Null], "undeclared stays absent");
+    }
+
+    /// A `brand_logo` leaf carries the workspace's own logo, `app.brand`'s
+    /// `logo_small_svg` (inlined by the compiler from `assets/brand/`), in its
+    /// `display`, as a `brush_preview` carries its SVG. A shell draws it with no
+    /// jas-specific asset of its own (flask STATUS §281, `# 293`).
+    #[test]
+    fn a_brand_logo_leaf_carries_the_workspaces_logo() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let want = ws.data()["app"]["brand"]["logo_small_svg"].as_str().unwrap_or("").to_string();
+        assert!(want.contains("<svg"), "the control: the bundle carries the logo");
+        let panel = json!({"content": {"type": "col", "children": [{"type": "brand_logo", "id": "logo"}]}});
+        let e = entries_with_nodes(&panel, &json!({})).into_iter().next().expect("a leaf").0;
+        assert_eq!(e["display"]["logo.svg"], json!(want), "{}", e["display"]);
     }
 
     /// An option may name an `icon` (Artboard Options' orientation group): its
