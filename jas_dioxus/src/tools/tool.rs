@@ -251,6 +251,12 @@ pub trait CanvasTool {
     /// events (including app shortcuts like cmd+z) and route them to
     /// [`on_key_event`]. Used by the in-place text editor.
     fn captures_keyboard(&self) -> bool { false }
+    /// A dialog this tool's last event opened, handed over to the host and
+    /// closed in the tool: its id and its params, RESOLVED in the tool's own
+    /// scope (`artboard.yaml` passes `tool.artboard.hit_artboard_id`). The
+    /// host opens it in the app's store, where every dialog lives. `None`
+    /// when the event opened none.
+    fn take_opened_dialog(&mut self) -> Option<(String, serde_json::Map<String, serde_json::Value>)> { None }
     /// Optional cursor CSS override. When `Some`, the canvas displays this
     /// cursor instead of the static [`ToolKind::cursor_css`] value.
     fn cursor_css_override(&self) -> Option<String> { None }
