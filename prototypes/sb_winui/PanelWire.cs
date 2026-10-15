@@ -203,13 +203,17 @@ internal static class PanelWire
         type is "button" or "icon_button" ? Addressable(id, path) : id.Length > 0;
 
     /// <summary>
-    /// S3: which rule a `separator` draws in its rect. The plan carries no
-    /// `orientation` (it is not a STATIC_KEY), so the rule follows the
-    /// plan's own geometry: wider than tall (or square) is horizontal, taller
-    /// is vertical. An empty rect draws nothing (null).
+    /// S3: which rule a `separator` draws in its rect. A declared
+    /// `orientation` (a STATIC_KEY since #439) wins; an unknown one draws
+    /// nothing rather than a guess. A separator that declares none follows
+    /// the plan's own geometry: wider than tall (or square) is horizontal,
+    /// taller is vertical. An empty rect draws nothing (null).
     /// </summary>
-    internal static string? SeparatorRule(double w, double h) =>
-        w <= 0 || h <= 0 ? null : (w >= h ? "horizontal" : "vertical");
+    internal static string? SeparatorRule(string? declared, double w, double h) =>
+        w <= 0 || h <= 0 ? null
+        : declared is null ? (w >= h ? "horizontal" : "vertical")
+        : declared is "horizontal" or "vertical" ? declared
+        : null;
 
     /// <summary>
     /// S3 (#429, WIDGET_EVENTS.md): what a press on a radio sends. `radio` is a
