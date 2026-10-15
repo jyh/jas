@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JasLib
 
@@ -445,7 +446,7 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
     let v = HyphenationDialogValues(
         hyphenate: true,
-        minWord: 6, minBefore: 3, minAfter: 1,  // minAfter default -> omitted
+        minWord: 8, minBefore: 3, minAfter: 2,  // minAfter default -> omitted
         limit: 2, zone: 36, bias: 0,            // bias default -> omitted
         capitalized: true)
     applyHyphenationDialogToSelection(v,
@@ -454,7 +455,7 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     if case .text(let t) = elem {
         let w = t.tspans[0]
         #expect(w.jasHyphenate == true)
-        #expect(w.jasHyphenateMinWord == 6)
+        #expect(w.jasHyphenateMinWord == 8)
         #expect(w.jasHyphenateMinBefore == 3)
         #expect(w.jasHyphenateMinAfter == nil)  // identity-omit
         #expect(w.jasHyphenateLimit == 2)
@@ -473,7 +474,7 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
     let v = HyphenationDialogValues(
         hyphenate: false,
-        minWord: 3, minBefore: 1, minAfter: 1,
+        minWord: 6, minBefore: 2, minAfter: 2,
         limit: 0, zone: 0, bias: 0, capitalized: false)
     applyHyphenationDialogToSelection(v,
         controller: Controller(model: model), store: store)
@@ -489,4 +490,35 @@ private func selectAreaTextWithWrapper(_ model: Model) {
         #expect(w.jasHyphenateBias == nil)
         #expect(w.jasHyphenateCapitalized == nil)
     }
+}
+
+/// The Hyphenation dialog's declared defaults ARE what an unattributed
+/// paragraph renders with (ruled 2026-10-15, A2: 6 / 2 / 2). Derived from
+/// the dialog's YAML, never typed: OK on the defaults writes no attribute,
+/// and the layout reads an absent attribute as the same value. Mirrors Rust
+/// `the_hyphenation_dialogs_defaults_are_what_an_unattributed_paragraph_renders`.
+@Test func theHyphenationDialogsDefaultsAreWhatAnUnattributedParagraphRenders() throws {
+    let defaults = try #require(WorkspaceData.load()?.dialogStateDefaults("paragraph_hyphenation"))
+    func def(_ k: String) throws -> Double { try #require((defaults[k] as? NSNumber)?.doubleValue, "\(k)") }
+    let (word, before, after) = (try def("hyphenate_min_word"), try def("hyphenate_min_before"),
+                                 try def("hyphenate_min_after"))
+    let model = Model()
+    selectAreaTextWithWrapper(model)
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
+    applyHyphenationDialogToSelection(
+        HyphenationDialogValues(hyphenate: true, minWord: word, minBefore: before, minAfter: after,
+                                limit: try def("hyphenate_limit"), zone: try def("hyphenate_zone"),
+                                bias: try def("hyphenate_bias"), capitalized: false),
+        controller: Controller(model: model), store: store)
+    guard case .text(let t) = model.document.getElement([0, 0]) else {
+        Issue.record("the fixture is text"); return
+    }
+    #expect(t.tspans[0].jasHyphenate == true, "the control: the master switch was written")
+    #expect(t.tspans[0].jasHyphenateMinWord == nil && t.tspans[0].jasHyphenateMinBefore == nil
+            && t.tspans[0].jasHyphenateMinAfter == nil, "OK on the declared defaults writes no attribute")
+    let seg = try #require(buildParagraphSegments(tspans: t.tspans, content: t.content, isArea: true).first)
+    #expect(Double(seg.hyphenateMinWord) == word)
+    #expect(Double(seg.hyphenateMinBefore) == before)
+    #expect(Double(seg.hyphenateMinAfter) == after)
 }

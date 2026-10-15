@@ -2340,7 +2340,7 @@
       ]
     },
     "paragraph_hyphenation_confirm": {
-      "description": "OK handler for the Hyphenation dialog. The native apps intercept this action via apply_dialog_confirm, reading the 7 dialog state fields (min-word, after-first-N, before-last-N, hyphen-limit, zone, better/faster bias, capitalized-words) plus the master hyphenate toggle, and writing them as jas:hyphenate-* attributes onto every paragraph wrapper tspan in the selection. Also mirrors the master toggle to panel.hyphenate so the main Paragraph panel checkbox reflects the dialog commit. Then clears the preview snapshot so close_dialog does not restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (master off, min-word 6, after-first 3, before-last 2, limit 0, zone 0, bias 0, capitalized off) are omitted from the wrapper.\n",
+      "description": "OK handler for the Hyphenation dialog. The native apps intercept this action via apply_dialog_confirm, reading the 7 dialog state fields (min-word, after-first-N, before-last-N, hyphen-limit, zone, better/faster bias, capitalized-words) plus the master hyphenate toggle, and writing them as jas:hyphenate-* attributes onto every paragraph wrapper tspan in the selection. Also mirrors the master toggle to panel.hyphenate so the main Paragraph panel checkbox reflects the dialog commit. Then clears the preview snapshot so close_dialog does not restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (master off, min-word 6, after-first 2, before-last 2, limit 0, zone 0, bias 0, capitalized off) are omitted from the wrapper.\n",
       "category": "paragraph",
       "effects": [
         {
@@ -31529,21 +31529,21 @@
         },
         "hyphenate_min_word": {
           "type": "number",
-          "default": 3,
+          "default": 6,
           "min": 2,
           "max": 25,
           "description": "Words Longer Than N letters. jas:hyphenate-min-word."
         },
         "hyphenate_min_before": {
           "type": "number",
-          "default": 1,
+          "default": 2,
           "min": 1,
           "max": 10,
           "description": "After First N letters. jas:hyphenate-min-before."
         },
         "hyphenate_min_after": {
           "type": "number",
-          "default": 1,
+          "default": 2,
           "min": 1,
           "max": 10,
           "description": "Before Last N letters. jas:hyphenate-min-after."

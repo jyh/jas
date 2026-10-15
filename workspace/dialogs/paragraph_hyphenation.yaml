@@ -53,19 +53,19 @@ paragraph_hyphenation:
         stays in sync with the dialog commit.
     hyphenate_min_word:
       type: number
-      default: 3
+      default: 6
       min: 2
       max: 25
       description: "Words Longer Than N letters. jas:hyphenate-min-word."
     hyphenate_min_before:
       type: number
-      default: 1
+      default: 2
       min: 1
       max: 10
       description: "After First N letters. jas:hyphenate-min-before."
     hyphenate_min_after:
       type: number
-      default: 1
+      default: 2
       min: 1
       max: 10
       description: "Before Last N letters. jas:hyphenate-min-after."

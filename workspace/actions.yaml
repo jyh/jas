@@ -2094,7 +2094,7 @@ actions:
       the preview snapshot so close_dialog does not restore (commits
       the user's edits) and closes the dialog. Per the identity-value
       rule, fields equal to their spec defaults (master off, min-word
-      6, after-first 3, before-last 2, limit 0, zone 0, bias 0,
+      6, after-first 2, before-last 2, limit 0, zone 0, bias 0,
       capitalized off) are omitted from the wrapper.
     category: paragraph
     effects:
