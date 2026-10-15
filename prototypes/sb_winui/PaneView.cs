@@ -309,6 +309,7 @@ public sealed partial class MainWindow
             var (menus, itemsRefused) = (0, 0);
             var swatches = 0;
             var spacers = 0;
+            var separators = 0;
             var (previews, previewEmpty) = (0, 0);
             foreach (var leaf in leaves)
             {
@@ -469,6 +470,14 @@ public sealed partial class MainWindow
                         el = BuildColorBar(leaf);
                         break;
 
+                    // S3 (jas §279): a `separator` is a 1-DIP rule across the
+                    // middle of its rect, in the direction the rect runs. No
+                    // event, no value; an empty rect is counted and drawn empty.
+                    case "separator":
+                        separators++;
+                        el = BuildSeparator(leaf);
+                        break;
+
                     // A `spacer` is layout-only flex: the plan already gave it
                     // its room, and it draws nothing in any port. Counted, never
                     // drawn as a `[spacer]` placeholder.
@@ -503,11 +512,28 @@ public sealed partial class MainWindow
             // and asserts only `leaves` and `controls`; nothing sums the category
             // counters, and the self-test's row is an INPUT to that parser.
             _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
-                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} previews={previews} preview-empty={previewEmpty} "
+                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} "
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
             if (_paneIconsPending == 0) { ReportPaneIcons(); }
+        }
+
+        /// <summary>S3: a `separator`'s rule, centred in its rect (<see cref="PanelWire.SeparatorRule"/>).</summary>
+        private Grid BuildSeparator(PaneLeaf leaf)
+        {
+            var host = new Grid { IsHitTestVisible = false };
+            var rule = PanelWire.SeparatorRule(leaf.W, leaf.H);
+            if (rule is null) { return host; }
+            host.Children.Add(new Border
+            {
+                Background = _paneMutedBrush,
+                Width = rule == "horizontal" ? double.NaN : 1,
+                Height = rule == "horizontal" ? 1 : double.NaN,
+                HorizontalAlignment = rule == "horizontal" ? HorizontalAlignment.Stretch : HorizontalAlignment.Center,
+                VerticalAlignment = rule == "horizontal" ? VerticalAlignment.Center : VerticalAlignment.Stretch,
+            });
+            return host;
         }
 
         /// <summary>A kind this shell does not draw: a muted `[type]`, COUNTED by the caller, never dropped.</summary>
