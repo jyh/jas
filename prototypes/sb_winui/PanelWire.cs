@@ -1027,6 +1027,23 @@ internal static class DialogWire
 internal static class ActWire
 {
     /// <summary>
+    /// jas §274: what a named tab removal means in THIS shell, which holds one
+    /// document at index 0. `close`: call `jas_document_close`. `no-such-tab`:
+    /// any other index, refused by name, never mapped onto tab 0.
+    /// </summary>
+    internal static string Removal(int index) => index == 0 ? "close" : "no-such-tab";
+
+    /// <summary>`jas_document_close`'s byte, read: 1 closed, 0 none was open,
+    /// 255 no engine; any other byte is no answer, never a guess.</summary>
+    internal static string CloseReading(byte rc) => rc switch
+    {
+        1 => "closed",
+        0 => "none-open",
+        255 => "no-engine",
+        _ => $"unknown({rc})",
+    };
+
+    /// <summary>
     /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
     /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
     /// shell removes it. Null when the reply names none, an older engine sent

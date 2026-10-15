@@ -602,6 +602,15 @@ static class Program
             (ActWire.RemoveTab("""{"remove_tab":-1}""")?.ToString() ?? "(null)") + "|"
             + (ActWire.RemoveTab("""{"remove_tab":"0"}""")?.ToString() ?? "(null)"));
         Eq("remove_tab: unreadable bytes name none", "(null)", ActWire.RemoveTab("{")?.ToString() ?? "(null)");
+        // jas §274: this shell holds ONE document (tab 0). A named tab 0 closes it
+        // (`jas_document_close`); any other index names a tab this shell does
+        // not have, refused by name, never mapped onto tab 0.
+        Eq("remove_tab: tab 0 closes the one document", "close", ActWire.Removal(0));
+        Eq("remove_tab: another index is no tab this shell holds", "no-such-tab", ActWire.Removal(1));
+        Eq("close: 1 closed the document", "closed", ActWire.CloseReading(1));
+        Eq("close: 0 found none open", "none-open", ActWire.CloseReading(0));
+        Eq("close: 255 had no engine", "no-engine", ActWire.CloseReading(255));
+        Eq("close: any other byte is no answer, never a guess", "unknown(7)", ActWire.CloseReading(7));
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
         // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
