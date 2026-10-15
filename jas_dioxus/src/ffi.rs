@@ -138,6 +138,12 @@ fn json_str(s: &str) -> String {
 /// even though the C ABI cannot carry it (BL2).
 pub struct JasEngine {
     model: RefCell<Model>,
+    /// Whether the engine's one document is OPEN (flask STATUS §272, fork
+    /// (a)). [`jas_document_close`] clears it after a reply names
+    /// `remove_tab`; a load ([`JasEngine::replace_document`]) sets it again.
+    /// While it is clear, the scope reads no tab (`tab_count` 0, `active_tab`
+    /// -1, an empty `open_documents`), which is `remove_tab`'s own spec.
+    document_open: std::cell::Cell<bool>,
     last_error: RefCell<Option<String>>,
     /// The panel state a materialized panel binds to (S-C.1).
     ///
@@ -248,6 +254,7 @@ impl JasEngine {
 
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
+        self.document_open.set(true);
     }
 
     fn new() -> Self {
@@ -268,6 +275,7 @@ impl JasEngine {
         crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
             model: RefCell::new(Model::default()),
+            document_open: std::cell::Cell::new(true),
             last_error: RefCell::new(None),
             panel: RefCell::new(panel),
             registry: RefCell::new(PanelRegistry::default()),
@@ -537,6 +545,14 @@ pub unsafe extern "C" fn jas_menu_state(
 /// moves it. This is the adapter that pairs the panel slice with the store and
 /// the model, because only the engine holds all three. The scope is PER PANEL
 /// (wave 2, A6): each panel reads its own `panel.*`.
+/// The engine's scope for `panel_id` ("" for none), read with whether its
+/// one document is open ([`jas_document_close`]).
+fn engine_scope_of(engine: &JasEngine, panel_id: &str) -> serde_json::Value {
+    crate::panel_scope::engine_scope_open(
+        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id,
+        engine.document_open.get())
+}
+
 fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::Value {
     seed_panel(engine, ws, panel_id);
     // The store's copy of the colour state is what an action's guard reads
@@ -544,8 +560,7 @@ fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::
     // selection's, as the web's action context does (`action_fill_stroke_values`).
     crate::panel_scope::sync_colour_state(
         &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
-    crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id)
+    engine_scope_of(engine, panel_id)
 }
 
 /// Give `panel_id` a store scope, seeded from its declared `state:` defaults,
@@ -847,8 +862,10 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 ///
 /// # The reply
 ///
-/// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null}`
-/// ([`act_reply`]). Each row is a
+/// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
+/// "remove_tab": <index> | null}` ([`act_reply`]). `remove_tab` names a tab
+/// the shell must remove (the engine owns no tabs): an unedited `close_tab`,
+/// or Save Changes' Discard (design 2026-10-14 §10). Each row is a
 /// [`jas_panel_event`] delta row, tagged with its `panel`, across every open
 /// panel. `doc_changed` says the document moved, so the shell repaints.
 ///
@@ -914,12 +931,13 @@ pub unsafe extern "C" fn jas_panel_behavior(
     // behaviour in the colour scope like any panel's; the value branches of
     // `run_widget_behavior` still refuse Color by name.
     let scope = panel_ctx(engine, &ws, id);
-    let ran = {
+    let (ran, removed_tab) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
-        crate::panel_behavior::run_widget_behavior(
-            id, spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host)
+        let mut host = crate::panel_behavior::EngineHost::default();
+        let ran = crate::panel_behavior::run_widget_behavior(
+            id, spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
+        (ran, host.removed_tab)
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -944,7 +962,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -1025,7 +1043,7 @@ fn colour_value_commit(
         let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
         ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
         *engine.last_error.borrow_mut() = None;
-        let reply = act_reply(engine, &sync.changed, doc_changed);
+        let reply = act_reply(engine, &sync.changed, doc_changed, None);
         let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
         ffi_instr::record_out(Crossing::PanelBehavior, out.len);
         return out;
@@ -1074,7 +1092,7 @@ fn colour_value_commit(
         let ran = {
             let mut store = engine.store.borrow_mut();
             let mut model = engine.model.borrow_mut();
-            let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+            let mut host = crate::panel_behavior::EngineHost::default();
             crate::panel_behavior::run_action(
                 Some(id), "set_active_color", Some(&params), false, &scope, &mut store, &mut model,
                 ws.actions(), ws.dialogs(), &mut host)
@@ -1091,7 +1109,7 @@ fn colour_value_commit(
     } else {
         *engine.last_error.borrow_mut() = None;
     }
-    let reply = act_reply(engine, &sync.changed, doc_changed);
+    let reply = act_reply(engine, &sync.changed, doc_changed, None);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -1102,9 +1120,11 @@ fn colour_value_commit(
 /// in the engine's store after the act (the dialog door, design 2026-10-14):
 /// a shell that reads an id there asks for that dialog's plan, and `null`
 /// means none is open, so a shell showing one closes it.
-fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool) -> serde_json::Value {
+fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool,
+                                   remove_tab: Option<i64>) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
-    serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog})
+    serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
+                       "remove_tab": remove_tab})
 }
 
 /// Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
@@ -1209,8 +1229,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // panel-menu item runs in its panel's scope, seeded as a click's is.
     let scope = match panel {
         Some(pid) => panel_ctx(engine, &ws, pid),
-        None => crate::panel_scope::engine_scope(
-            &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), ""),
+        None => engine_scope_of(engine, ""),
     };
     // The menu's model-pure verbs (flask STATUS §242: Select All was refused
     // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
@@ -1224,16 +1243,17 @@ pub unsafe extern "C" fn jas_dispatch_action(
             state_changed: false,
         })
     }).flatten();
-    let ran = if let Some(ran) = native {
-        Ok(ran)
+    let (ran, removed_tab) = if let Some(ran) = native {
+        (Ok(ran), None)
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
-        crate::panel_behavior::run_action(
+        let mut host = crate::panel_behavior::EngineHost::default();
+        let ran = crate::panel_behavior::run_action(
             panel, action, params, item.is_none(), &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
-            &mut host)
+            &mut host);
+        (ran, host.removed_tab)
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1257,7 +1277,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     } else {
         set_panel_event_error(engine, "Unchanged", action);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::DispatchAction, out.len);
     out
@@ -1328,9 +1348,11 @@ pub unsafe extern "C" fn jas_dialog_dismiss(e: *mut JasEngine) -> u8 {
 /// # The reply
 ///
 /// `{"open": false}` when no dialog is open. Otherwise `{"open": true, "id",
-/// "summary", "modal", "depth", "plan"}`: `depth` is how many dialogs are open
-/// (2 when the Color Picker sits over Layer Options), and `plan` is
-/// [`jas_panel_plan`]'s shape for the TOP dialog.
+/// "summary", "modal", "depth", "width", "plan"}`: `depth` is how many dialogs
+/// are open (2 when the Color Picker sits over Layer Options), `width` is the
+/// dialog's declared width or null (the web sizes an undeclared one to its
+/// content), and `plan` is [`jas_panel_plan`]'s shape for the TOP dialog,
+/// planned at the caller's `avail_w`.
 ///
 /// A null engine is the empty span. **BL4**: copy the span, then release with
 /// [`jas_free`].
@@ -1365,6 +1387,7 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
         "summary": def.get("summary").cloned().unwrap_or(serde_json::Value::Null),
         "modal": def.get("modal").cloned().unwrap_or(serde_json::Value::Bool(false)),
         "depth": depth,
+        "width": def.get("width").cloned().unwrap_or(serde_json::Value::Null),
         "plan": plan,
     });
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
@@ -1374,8 +1397,7 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
 /// no panel, plus the dialog's own `dialog.*` (its state) and `param.*` (its
 /// params) from `store_ctx`, the store's eval context.
 fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::Value {
-    let mut ctx = crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    let mut ctx = engine_scope_of(engine, "");
     for key in ["dialog", "param"] {
         if let Some(v) = store_ctx.get(key) {
             ctx[key] = v.clone();
@@ -1448,12 +1470,13 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         Err(r) => return refuse(r),
     };
     let scope = dialog_ctx(engine, &store_ctx);
-    let ran = {
+    let (ran, removed_tab) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
-        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
-        crate::panel_behavior::run_dialog_widget_behavior(
-            spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host)
+        let mut host = crate::panel_behavior::EngineHost::default();
+        let ran = crate::panel_behavior::run_dialog_widget_behavior(
+            spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
+        (ran, host.removed_tab)
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1471,8 +1494,24 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
+}
+
+/// **Close the engine's one document** (flask STATUS §272, fork (a)): the
+/// shell's answer to a reply that names `"remove_tab": 0`. The tab bar then
+/// draws no tab, and every scope reads `tab_count` 0, `active_tab` -1 and an
+/// empty `workspace.open_documents`, which is what `remove_tab`'s spec says
+/// for the last tab ("set active_tab to -1"). The model is kept, unshown; a
+/// load opens a document again. 1 when it closed an open document, 0 when
+/// none was open, 255 for a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_close(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    u8::from(engine.document_open.replace(false))
 }
 
 /// **The shell names the document it opened or saved** (flask §256): the
@@ -3090,14 +3129,13 @@ mod tests {
     /// in 8 cases. The same day: the init context's outer-`param` fix closed
     /// Boolean Options and Layer Options (create); the shared
     /// `active_document` view closed Print; the flat `let` closed Layer Options
-    /// (edit); the shared artboard row closed Artboard Options. What remains:
-    /// Document Setup's confirm does not write the document on the engine's
-    /// route, and New Swatch and the Color Picker read `state.fill_color`,
-    /// which on the engine is not the selection's fill.
-    const ENGINE_DIALOG_VALUE_GAPS: [&str; 3] = [
+    /// (edit); the shared artboard row closed Artboard Options. 2026-10-15:
+    /// the engine's print-config field effects closed Document Setup's
+    /// confirm. What remains: New Swatch and the Color Picker read
+    /// `state.fill_color`, which on the engine is not the selection's fill.
+    const ENGINE_DIALOG_VALUE_GAPS: [&str; 2] = [
         "new_swatch_opens_swatch_options_with_the_active_fill",
         "open_color_picker_fill_starts_on_the_fill_colour",
-        "open_document_setup_reads_back_what_confirm_wrote",
     ];
 
     /// THE DIALOG DOOR, the shell's one non-YAML act: Escape or the window's
@@ -3155,6 +3193,7 @@ mod tests {
         assert_eq!(v["summary"], "Save Changes");
         assert_eq!(v["modal"], true);
         assert_eq!(v["depth"], 1);
+        assert_eq!(v["width"], serde_json::Value::Null, "Save Changes declares no width");
         let leaves = v["plan"]["leaves"].as_array().expect("a panel-shaped plan");
         let buttons = leaves.iter().filter(|l| l["type"] == "button").count();
         assert_eq!(buttons, 3, "Cancel, Discard and Save: {leaves:?}");
@@ -3297,6 +3336,79 @@ mod tests {
         assert_eq!((store.get("fill_color").clone(), store.get("stroke_color").clone()), app,
                    "a dialog-field target writes no app colour");
         drop(store);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Document Setup's OK commits through the engine (flask STATUS §270: it
+    /// was refused as `UnknownDocEffect:doc.set_document_setup_field`). The
+    /// eight print-config `doc.*_field` effects reach the document through
+    /// `op_apply`, the verb the web's renderer already calls.
+    #[test]
+    fn document_setup_ok_commits_its_fields_on_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_document_setup"}"#);
+        assert!(reply.contains(r#""dialog":"document_setup""#), "{reply} {err}");
+        // flask STATUS §270: the plan names the dialog's declared width, so
+        // the shell can size its layer (the workspace declares 300 to 720).
+        let plan: serde_json::Value = serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 420, 0) })).unwrap();
+        let declared = crate::interpreter::workspace::Workspace::load().unwrap()
+            .dialog("document_setup").unwrap()["width"].clone();
+        assert!(declared.is_number(), "Document Setup declares a width: {declared}");
+        assert_eq!(plan["width"], declared);
+        let (reply, err) = dialog_event(e, r#"{"widget":"ds_grid_size","event":"commit","value":"42"}"#);
+        assert!(!reply.is_empty(), "the grid size committed: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("grid_size").as_f64(), Some(42.0));
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+        assert_eq!(engine_of(e).model.borrow().document().document_setup.grid_size, 42.0,
+                   "the document took the dialog's value");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// SAVE CHANGES' DISCARD REMOVES THE TAB (design 2026-10-14 §10): the
+    /// engine owns no tabs, so it NAMES the removal in its reply
+    /// (`"remove_tab": <index>`) and the shell removes that tab. `close_tab`
+    /// passes the index into the dialog, and Discard passes it on.
+    #[test]
+    fn discard_names_the_tab_to_remove_and_cancel_names_none() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let ask = |e| {
+            for act in [r#"{"action":"select_all","params":{}}"#,
+                        r#"{"action":"set_stroke_cap","params":{"cap":"square"}}"#,
+                        r#"{"action":"close_tab","params":{"index":2}}"#] {
+                let _ = dispatch(e, act);
+            }
+            assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("save_changes_tab"));
+        };
+        ask(e);
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "Cancel"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["remove_tab"], serde_json::Value::Null, "Cancel keeps the tab: {reply}");
+        ask(e);
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "Discard"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "Discard closed the dialog: {reply}");
+        assert_eq!(v["remove_tab"], 2, "the tab the dialog asked about: {reply}");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// An UNEDITED tab closes at once: `close_tab`'s else-arm dispatches
+    /// `remove_tab`, which the engine names instead of refusing it as
+    /// `UnknownEffect:remove_child` (measured before this, 2026-10-14).
+    #[test]
+    fn close_tab_on_an_unedited_document_names_the_tab_to_remove() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"close_tab","params":{"index":0}}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["remove_tab"], 0, "{reply} {err}");
+        assert_eq!(v["dialog"], serde_json::Value::Null);
         unsafe { jas_engine_free(e) };
     }
 
@@ -3521,6 +3633,43 @@ mod tests {
         // and only it (owner note 4b: tabs are drawn from the open documents).
         assert_eq!(canvas_tabs(e).len(), 1, "nothing ran");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// THE "NO DOCUMENT" STATE (flask STATUS §272, fork (a)): a shell told
+    /// `"remove_tab": 0` closes the engine's one document. The tab bar then
+    /// draws no tab, the scope reads `tab_count` 0 and `active_tab` -1 (the
+    /// spec's own "no tab", `state.yaml`), and a load opens a document again.
+    #[test]
+    fn document_close_empties_the_tab_bar_and_a_load_reopens_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        assert_eq!(canvas_tabs(e).len(), 1, "the engine's one document");
+        assert_eq!(unsafe { jas_document_close(e) }, 1, "it was open");
+        // No open document hides the bar itself (it draws only while there
+        // are tabs), so "no tab" is: no tab bar, or one with nothing under it.
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "canvas_pane", 1600, 900)).expect("plan JSON");
+        let all: Vec<&serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .flat_map(|k| plan[*k].as_array().into_iter().flatten()).collect();
+        assert!(!all.is_empty(), "the canvas pane still plans: {plan}");
+        assert!(all.iter().all(|x| x["id"] != "canvas_tab_bar"), "no document, no tab bar");
+        let state = &panel_ctx_of(e)["state"];
+        assert_eq!((state["tab_count"].clone(), state["active_tab"].clone()),
+                   (serde_json::json!(0), serde_json::json!(-1)), "the scope reads no tab");
+        assert_eq!(unsafe { jas_document_close(e) }, 0, "already closed");
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/rect_with_stroke.svg")).unwrap();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        assert_eq!(canvas_tabs(e).len(), 1, "a load opens a document again");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(1));
+        assert_eq!(unsafe { jas_document_close(std::ptr::null_mut()) }, 255);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The scope a panel's widgets are evaluated in, for a test to read.
+    fn panel_ctx_of(e: *mut JasEngine) -> serde_json::Value {
+        let ws = Workspace::load().unwrap();
+        panel_ctx(engine_of(e), &ws, crate::panel_behavior::ALIGN_PANEL)
     }
 
     /// The canvas pane's document tabs: the entries one level under
@@ -3907,7 +4056,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "dialog", "doc_changed"], "{reply}");
+        assert_eq!(keys, vec!["changed", "dialog", "doc_changed", "remove_tab"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -3931,7 +4080,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"dialog":null,"doc_changed":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -3987,13 +4136,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"dialog":null,"doc_changed":true}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"dialog":null,"doc_changed":true,"remove_tab":null}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"dialog":null,"doc_changed":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
@@ -5749,7 +5898,7 @@ mod tests {
             &serde_json::json!({"widget":"cp_hex","event":"commit","value":"12ab34"})).unwrap();
         let mut store = crate::interpreter::state_store::StateStore::new();
         let mut model = crate::document::model::Model::default();
-        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+        let mut host = crate::panel_behavior::EngineHost::default();
         let r = crate::panel_behavior::run_widget_behavior(
             id, spec, &ev, &serde_json::json!({"state": {"fill_on_top": true, "fill_color": "#112233"}}),
             &mut store, &mut model, ws.actions(), ws.dialogs(),

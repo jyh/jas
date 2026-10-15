@@ -617,6 +617,18 @@ pub(crate) fn dispatch_action_in(action: &str, params: &serde_json::Map<String, 
         return Vec::new();
     }
 
+    // Native intercept: `remove_tab` (actions.yaml) closes a tab WITHOUT
+    // prompting. Its YAML removes a canvas element and renumbers a tab count,
+    // which describe the tab bar this app keeps natively in `AppState::tabs`,
+    // so the intercept is that model's own close. Save Changes' Discard
+    // reaches it through `discard_and_close_tab` (design 2026-10-14 §10).
+    if action == "remove_tab" {
+        if let Some(index) = params.get("index").and_then(|v| v.as_u64()) {
+            st.close_tab(index as usize);
+        }
+        return Vec::new();
+    }
+
     // Native intercept: artboards_panel_select with shift/meta modifier.
     // The YAML action's else-branch is a no-op stub; native apps handle
     // range-extend (shift) and toggle (meta) directly. ARTBOARDS.md
@@ -2430,47 +2442,13 @@ fn run_yaml_effect(
     // committed by `run_yaml_effects_named` (the action emits `snapshot` first),
     // so the per-verb work is just: resolve → op JSON → op_apply.
     {
-        // The renderer YAML verb → the op_apply verb (drop the `doc.` prefix).
-        const PRINT_FIELD_EFFECTS: &[(&str, &str)] = &[
-            ("doc.set_print_preferences_field", "set_print_preferences_field"),
-            ("doc.set_marks_and_bleed_field", "set_marks_and_bleed_field"),
-            ("doc.set_output_field", "set_output_field"),
-            ("doc.set_output_ink_field", "set_output_ink_field"),
-            ("doc.set_graphics_field", "set_graphics_field"),
-            ("doc.set_color_management_field", "set_color_management_field"),
-            ("doc.set_document_setup_field", "set_document_setup_field"),
-            ("doc.set_advanced_field", "set_advanced_field"),
-        ];
-        for (yaml_key, op_verb) in PRINT_FIELD_EFFECTS {
-            if let Some(spec) = eff.get(*yaml_key).and_then(|v| v.as_object()) {
-                let field = match spec.get("field").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => return deferred,
-                };
-                // Resolve the value expr to a typed Value, then to a RESOLVED
-                // JSON literal (op_apply replays without an eval context).
-                let value_val = match spec.get("value") {
-                    Some(serde_json::Value::String(s)) => super::expr::eval(s, &*eval_ctx),
-                    Some(v) => super::expr_types::Value::from_json(v),
-                    None => return deferred,
-                };
-                let value_json = super::effects::value_to_json(&value_val);
-                // `index` only applies to set_output_ink_field; absent ⇒ 0
-                // (the helper bounds-checks). A missing index on the ink verb
-                // matched the old early-return — preserve by reading as u64.
-                let mut op = serde_json::json!({
-                    "op": op_verb,
-                    "field": field,
-                    "value": value_json,
-                });
-                if *op_verb == "set_output_ink_field" {
-                    let index = match spec.get("index").and_then(|v| v.as_u64()) {
-                        Some(n) => n,
-                        None => return deferred,
-                    };
-                    op["index"] = serde_json::json!(index);
-                }
-                if let Some(tab) = st.tabs.get_mut(st.active_tab) {
+        // The op is built by `effects::print_field_op`, the one builder the
+        // engine's runner calls too (flask STATUS §270: the engine refused
+        // Document Setup's OK until it shared this).
+        for (yaml_key, _) in super::effects::PRINT_FIELD_EFFECTS {
+            if let Some(spec) = eff.get(*yaml_key).filter(|v| v.is_object()) {
+                let op = super::effects::print_field_op(yaml_key, spec, &|e| super::expr::eval(e, &*eval_ctx));
+                if let (Some(op), Some(tab)) = (op, st.tabs.get_mut(st.active_tab)) {
                     let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
                 }
                 return deferred;
@@ -14741,6 +14719,23 @@ mod tests {
         assert!(!null_color_means_none("stroke_width"),
                 "a colour bind on a non-nullable field means nothing here");
     }
+
+    #[test]
+    fn discard_removes_the_tab_the_dialog_asked_about() {
+        // Save Changes' Discard (design 2026-10-14 §10): its action closes the
+        // dialog and dispatches `remove_tab`, which the web runs natively as
+        // `AppState::close_tab` (close without prompting).
+        let mut st = AppState::new();
+        while st.tabs.len() < 3 {
+            st.add_tab(crate::workspace::app_state::TabState::new());
+        }
+        let mut params = serde_json::Map::new();
+        params.insert("index".into(), serde_json::json!(1));
+        let deferred = dispatch_action("discard_and_close_tab", &params, &mut st);
+        assert_eq!(st.tabs.len(), 2, "tab 1 is removed");
+        assert!(deferred.iter().any(|e| e.get("close_dialog").is_some()), "the dialog closes: {deferred:?}");
+    }
+
     /// Panel menu > Use Preview Bounds is a TOGGLE: `not
     /// state.align_use_preview_bounds`. The action context must carry the
     /// flag, or `not null` reads true every time and a second press cannot

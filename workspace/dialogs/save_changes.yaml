@@ -3,9 +3,12 @@ save_changes_tab:
   description: >
     Confirmation dialog shown when closing a tab with unsaved changes.
     Three options: Save the document, Discard changes, or Cancel.
+    `index` is the tab being closed: Discard passes it on, so the tab
+    that is removed is the one the dialog asked about.
   modal: true
   params:
     filename: { type: string }
+    index: { type: number }
   content:
     type: container
     layout: column
@@ -16,7 +19,7 @@ save_changes_tab:
         style: { justify: end, gap: 8 }
         children:
           - { type: button, label: "Cancel",  action: dismiss_dialog }
-          - { type: button, label: "Discard", action: close_without_saving }
+          - { type: button, label: "Discard", action: discard_and_close_tab, params: { index: "param.index" } }
           - { type: button, label: "Save",    action: save_and_close, variant: primary }
 
 save_changes_window:

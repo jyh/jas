@@ -408,14 +408,26 @@ pub fn seed_colour_mode(slice: &PanelState, store: &mut StateStore) {
 /// canvas tab bar draws one tab per entry (owner note 4b). The engine has no
 /// layout save/load, so the other two properties are their declared defaults.
 pub fn workspace_facts(model: &Model) -> Value {
-    serde_json::json!({
-        "active_layout_name": "",
-        "has_saved_layout": false,
-        "open_documents": [{
+    workspace_facts_open(model, true)
+}
+
+/// [`workspace_facts`] for an engine whose one document may be CLOSED
+/// (`ffi::jas_document_close`): no open document is an empty
+/// `open_documents`, so the canvas tab bar draws no tab.
+pub fn workspace_facts_open(model: &Model, open: bool) -> Value {
+    let documents = if open {
+        serde_json::json!([{
             "index": 0,
             "is_modified": model.is_modified(),
             "name": model.filename,
-        }],
+        }])
+    } else {
+        serde_json::json!([])
+    };
+    serde_json::json!({
+        "active_layout_name": "",
+        "has_saved_layout": false,
+        "open_documents": documents,
     })
 }
 
@@ -459,17 +471,27 @@ fn engine_document_view(store: &StateStore, model: &Model) -> Value {
 /// Keys are inserted in sorted order, so the scope does not depend on a hash
 /// map's iteration order.
 pub fn engine_scope(slice: &PanelState, store: &StateStore, model: &Model, panel_id: &str) -> Value {
+    engine_scope_open(slice, store, model, panel_id, true)
+}
+
+/// [`engine_scope`] for an engine whose one document may be CLOSED: then the
+/// scope reads no tab, `tab_count` 0 and `active_tab` -1 (`state.yaml`'s
+/// "-1 = none"), and an empty `workspace.open_documents`.
+pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, panel_id: &str,
+                         document_open: bool) -> Value {
     // Every panel reads the colour state as it is SHOWN (`effective`).
     let slice = &slice.effective(model);
     let mut scope = slice.scope(model.document());
     let mut state: Map<String, Value> = sorted(store.get_all());
     state.extend(slice.state_keys());
     // Owner note 4b: the engine holds exactly ONE document, so it is the one
-    // open tab and the front one, whatever the store's defaults say.
-    state.insert("tab_count".into(), 1.into());
-    state.insert("active_tab".into(), 0.into());
+    // open tab and the front one, whatever the store's defaults say, until
+    // the shell closes it (fork (a), flask STATUS §272).
+    let (tabs, active) = if document_open { (1, 0) } else { (0, -1) };
+    state.insert("tab_count".into(), tabs.into());
+    state.insert("active_tab".into(), active.into());
     scope["state"] = Value::Object(state);
-    scope["workspace"] = workspace_facts(model);
+    scope["workspace"] = workspace_facts_open(model, document_open);
     if let (Some(own), Some(panel)) = (store.panel_scope(panel_id), scope["panel"].as_object_mut()) {
         panel.extend(sorted(own));
         if panel_id == crate::interpreter::properties_host::PROPERTIES_PANEL {

@@ -208,9 +208,18 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   the engine's store (the dialog door, design 2026-10-14, which replaced
 ///   A12's refusal), and the FFI reply names it so a shell can show it.
 ///
+/// * `remove_tab` is claimed and NAMED, not run: the engine owns no tabs (the
+///   shell does), so the host records the index in [`EngineHost::removed_tab`]
+///   and the FFI reply carries it for the shell to act on (design 2026-10-14
+///   §10). Its YAML (`remove_child`, the tab count) is the shell's to do.
+///
 /// Everything else is declined, so the runner reports it.
+#[derive(Default)]
 pub struct EngineHost {
     pub artboard_selection: Vec<String>,
+    /// The tab a `remove_tab` asked the shell to remove. Set, never appended:
+    /// the pre-flight and the real run each record the same index.
+    pub removed_tab: Option<i64>,
 }
 
 impl EffectHost for EngineHost {
@@ -252,6 +261,15 @@ impl EffectHost for EngineHost {
         model: Option<&mut Model>,
     ) -> Option<Option<Unhandled>> {
         use crate::interpreter::symbols_host::{run, Outcome, ACTIONS};
+        // An index that is not an integer is declined, so the YAML runs and
+        // its `remove_child` refuses by name rather than removing a guess.
+        if action == "remove_tab" {
+            if let Some(i) = params.get("index").and_then(Value::as_i64) {
+                self.removed_tab = Some(i);
+                return Some(None);
+            }
+            return None;
+        }
         if !ACTIONS.contains(&action) {
             return None;
         }
@@ -1041,7 +1059,7 @@ mod tests {
             let scope = crate::panel_scope::engine_scope(&slice, &store, &model, panel);
             let r = run_widget_behavior(panel, spec, &click("ap_new", false), &scope, &mut store,
                                         &mut model, ws.actions(), ws.dialogs(),
-                                        &mut EngineHost { artboard_selection: vec![] });
+                                        &mut EngineHost::default());
             assert!(r.is_ok(), "ap_new #{want}: {r:?}");
             assert_eq!(model.document().artboards.len(), want, "ap_new #{want}");
             let last = model.document().artboards.last().expect("an artboard");
@@ -1069,13 +1087,13 @@ mod tests {
                                 &mut StateStore::new(), model, &synthetic_actions(),
                                 &json!({}), host)
         };
-        let refused = run_with(&mut EngineHost { artboard_selection: vec![] }, &mut model);
+        let refused = run_with(&mut EngineHost::default(), &mut model);
         assert_eq!(refused, Err(Refusal { class: "PlatformEffect",
                                           detail: "UnknownEffect:zz_mark".into() }));
         assert_eq!(json(&model), before, "a refused batch changed the document");
         assert!(!model.in_txn(), "a refused batch left a transaction open");
 
-        let mut plus = EnginePlus { engine: EngineHost { artboard_selection: vec![] },
+        let mut plus = EnginePlus { engine: EngineHost::default(),
                                     extra: "zz_mark", ran_extra: 0 };
         let ran = run_with(&mut plus, &mut model);
         assert!(ran.is_ok(), "the same batch with the key hosted must run: {ran:?}");
@@ -1114,7 +1132,7 @@ mod tests {
         let mut store = StateStore::new();
         store.set("boolean_apply_simplify_after_op", json!(true));
         store.set("boolean_simplify_precision", json!(5.0));
-        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut host = EngineHost::default();
         assert!(host.run("snapshot", &Value::Null, &mut store, Some(&mut model)));
         assert!(host.run("boolean_union", &Value::Null, &mut store, Some(&mut model)));
         model.commit_txn();
@@ -1138,7 +1156,7 @@ mod tests {
         for (alt, want_live) in [(false, 0usize), (true, 1)] {
             let mut model = overlapping();
             let r = run("boolean_panel_content", &click("boolean_union_button", alt),
-                        &mut model, &mut EngineHost { artboard_selection: vec![] });
+                        &mut model, &mut EngineHost::default());
             assert!(r.is_ok(), "alt={alt}: {r:?}");
             let k = kids(&model);
             assert_eq!(k.len(), 1, "alt={alt}: two squares become one element: {k:?}");
@@ -1169,7 +1187,7 @@ mod tests {
 
     #[test]
     fn the_engine_host_runs_a_snapshot_and_the_align_keys_and_declines_the_rest() {
-        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut host = EngineHost::default();
         let mut store = StateStore::new();
         let mut model = misaligned(&[0, 1]);
         assert!(host.run("snapshot", &Value::Null, &mut store, Some(&mut model)));
@@ -1198,7 +1216,7 @@ mod tests {
         let ws = crate::interpreter::workspace::Workspace::load().unwrap();
         let dialogs = ws.data()["dialogs"].clone();
         for arg in [json!({"id": "boolean_options", "params": {}}), json!("boolean_options")] {
-            let mut host = EngineHost { artboard_selection: vec![] };
+            let mut host = EngineHost::default();
             let mut store = StateStore::new();
             let mut model = misaligned(&[0]);
             assert_eq!(host.refuse("open_dialog", &arg), None, "{arg}");
@@ -1320,7 +1338,7 @@ mod tests {
             let ev = parse_event(&json!({"widget": "dd", "event": "toggle", "value": value})).unwrap();
             let mut model = Model::default();
             run_widget_behavior("zz_panel", &spec, &ev, &json!({"state": {}, "panel": {}}), store,
-                                &mut model, &json!({}), &json!({}), &mut EngineHost { artboard_selection: vec![] })
+                                &mut model, &json!({}), &json!({}), &mut EngineHost::default())
         };
         let mut store = StateStore::new();
         store.init_panel("zz_panel", std::collections::HashMap::new());
@@ -1336,7 +1354,7 @@ mod tests {
     fn a_refused_batch_that_edits_first_leaves_the_model_untouched() {
         let mut model = misaligned(&[0, 1]);
         let mut store = StateStore::new();
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let generation = model.generation();
         let r = run_synthetic("edits_first", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Err(Refusal::new("PlatformEffect", "UnknownEffect:zz_first")));
@@ -1373,7 +1391,7 @@ mod tests {
         let mut model = model_with(vec![rect(10.0, 0.0, 5.0, 5.0)], &[0]);
         let mut store = StateStore::new();
         store.init_panel(PROPERTIES_PANEL, std::collections::HashMap::new());
-        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut host = EngineHost::default();
         let batch = [json!({"set_panel_state": {"panel": "properties", "key": "prop_x", "value": "40"}})];
         let report = run_effects_hosted(&batch, &json!({}), &mut store, Some(&mut model), None,
                                         None, None, &mut host);
@@ -1398,7 +1416,7 @@ mod tests {
     fn a_stroke_render_key_write_reaches_the_selection_in_one_step() {
         let mut model = stroked(&[0]);
         let mut store = StateStore::new();
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let r = run_synthetic("strokes_twice", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Ok(Ran { doc_changed: true, state_changed: true }));
         assert_eq!(caps_and_joins(&model), vec!["Round/Bevel", "Butt/Miter"]);
@@ -1414,7 +1432,7 @@ mod tests {
     fn a_refused_batch_that_strokes_first_leaves_the_selection_untouched() {
         let mut model = stroked(&[0, 1]);
         let mut store = StateStore::new();
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let generation = model.generation();
         let r = run_synthetic("strokes_then_refused", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Err(Refusal::new("PlatformEffect", "UnknownEffect:zz_first")));
@@ -1433,7 +1451,7 @@ mod tests {
     /// nothing.
     #[test]
     fn the_engine_host_applies_a_render_key_and_ignores_other_globals() {
-        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut host = EngineHost::default();
         let mut model = stroked(&[0, 1]);
         let mut store = StateStore::new();
         store.set("stroke_cap", json!("square"));
@@ -1459,7 +1477,7 @@ mod tests {
     #[test]
     fn the_engine_host_applies_the_active_colour() {
         use crate::geometry::element::Color;
-        let mut host = EngineHost { artboard_selection: vec![] };
+        let mut host = EngineHost::default();
         let mut model = misaligned(&[0]);
         let mut store = StateStore::new();
         store.set("fill_color", json!("#ff0000"));
@@ -1482,7 +1500,7 @@ mod tests {
         let mut model = misaligned(&[0, 1]);
         let mut store = StateStore::new();
         store.init_panel("zz_panel", Default::default());
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let r = run_synthetic("reads_live", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: true }));
         assert_eq!(host.marks, 2, "once in the pre-flight and once for real");
@@ -1503,7 +1521,7 @@ mod tests {
     fn only_the_named_events_behaviors_run() {
         let mut model = misaligned(&[0, 1]);
         let mut store = StateStore::new();
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let r = run_synthetic("clicks_only", "double_click", &mut model, &mut store, &mut host);
         assert_eq!(r, Err(Refusal::new("EmptyBehavior", "clicks_only")));
         assert_eq!(host.marks, 0);
@@ -1520,7 +1538,7 @@ mod tests {
         let mut model = misaligned(&[0, 1]);
         let mut store = StateStore::new();
         store.init_panel("zz_panel", Default::default());
-        let mut host = MarkHost { engine: EngineHost { artboard_selection: vec![] }, marks: 0 };
+        let mut host = MarkHost { engine: EngineHost::default(), marks: 0 };
         let r = run_synthetic("acts_with_params", "click", &mut model, &mut store, &mut host);
         assert_eq!(r, Ok(Ran { doc_changed: false, state_changed: true }));
         assert_eq!(store.get_panel("zz_panel", "got"), &json!("artboard"));
@@ -1533,7 +1551,7 @@ mod tests {
         let mut model = misaligned(&[0, 1]);
         let ev = parse_event(&json!({"widget": "lp_tree", "event": "drag_move"})).unwrap();
         let r = run("layers_panel_content", &ev, &mut model,
-                    &mut EngineHost { artboard_selection: vec![] });
+                    &mut EngineHost::default());
         assert_eq!(r, Err(Refusal::new("EmptyBehavior", "lp_tree")));
     }
 
@@ -1642,7 +1660,7 @@ mod tests {
         let mut model = Model::default();
         let r = run_widget_behavior(PROBE, &spec, &ev, &scope, &mut store, &mut model,
                                     &json!({}), &json!({}),
-                                    &mut EngineHost { artboard_selection: vec![] });
+                                    &mut EngineHost::default());
         (r, store)
     }
 

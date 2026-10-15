@@ -1048,7 +1048,7 @@ actions:
       - if:
           condition: "active_document.is_modified"
           then:
-            - open_dialog: { id: save_changes_tab, params: { filename: "active_document.filename" } }
+            - open_dialog: { id: save_changes_tab, params: { filename: "active_document.filename", index: "param.index" } }
           else:
             - dispatch: { action: remove_tab, params: { index: "param.index" } }
   remove_tab:
@@ -1161,6 +1161,20 @@ actions:
     effects:
       - close_dialog: null
       - log: "close_without_saving"
+  discard_and_close_tab:
+    description: >
+      Close a document tab without saving its changes. Called from the
+      save_changes_tab dialog when the user clicks Discard, with the index
+      of the tab the dialog asked about. Closes the dialog, then removes
+      the tab with remove_tab, discarding its unsaved modifications. The
+      button passes the index as this action's own param, because the
+      dialog's params are gone once it closes.
+    category: dialog
+    params:
+      index: { type: number }
+    effects:
+      - close_dialog: null
+      - dispatch: { action: remove_tab, params: { index: "param.index" } }
   save_and_close:
     description: >
       Save the active document and then close its tab. Called from the

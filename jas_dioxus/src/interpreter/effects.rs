@@ -271,15 +271,21 @@ fn run_effects_into<'h>(
                         host.as_deref_mut(), report);
             }
             // `- snapshot` (every align and boolean action's first effect) is
-            // a string. Both references offer it to the host as a key with a
-            // null argument; with no host, or one that declines it, this
-            // runner skips it, as it always has.
+            // a string. The reference runs a bare string as `{s: null}`
+            // (`effects.py`): the host first, then the built-in arms, so a
+            // bare `- clear_dialog_snapshot` (Document Setup's OK) or
+            // `- close_dialog` runs. A key neither knows keeps its own
+            // report, `BareString`, as it always has.
             serde_json::Value::String(s) => {
-                let hosted = host.as_deref_mut().map_or(false, |h| {
-                    h.run(s, &serde_json::Value::Null, store, model.as_deref_mut())
-                });
-                if !hosted {
+                let mut one = serde_json::Map::new();
+                one.insert(s.clone(), serde_json::Value::Null);
+                let mut sub = EffectsReport::default();
+                run_one(&one, &ctx, store, model.as_deref_mut(), actions, dialogs,
+                        host.as_deref_mut(), &mut sub);
+                if sub.unhandled == [Unhandled::UnknownEffect(s.clone())] {
                     report.unhandled.push(Unhandled::BareString(s.clone()));
+                } else {
+                    report.unhandled.extend(sub.unhandled);
                 }
             }
             other => {
@@ -1297,6 +1303,45 @@ fn run_brush_effect(
         }
         _ => report.unhandled.push(Unhandled::UnknownEffect(name.to_string())),
     }
+}
+
+/// The eight print-config field effects and the `op_apply` verb each one
+/// journals. The web's renderer and the engine's runner both route them
+/// through [`print_field_op`] and `op_apply`, so the field-match, the type
+/// coercion and the journaled op are one implementation.
+pub(crate) const PRINT_FIELD_EFFECTS: &[(&str, &str)] = &[
+    ("doc.set_print_preferences_field", "set_print_preferences_field"),
+    ("doc.set_marks_and_bleed_field", "set_marks_and_bleed_field"),
+    ("doc.set_output_field", "set_output_field"),
+    ("doc.set_output_ink_field", "set_output_ink_field"),
+    ("doc.set_graphics_field", "set_graphics_field"),
+    ("doc.set_color_management_field", "set_color_management_field"),
+    ("doc.set_document_setup_field", "set_document_setup_field"),
+    ("doc.set_advanced_field", "set_advanced_field"),
+];
+
+/// The `op_apply` op the print-config effect `yaml_key` asks for: its verb,
+/// the `field`, and the `value` RESOLVED through `eval` to a JSON literal
+/// (op_apply replays without an eval context). `set_output_ink_field` also
+/// carries its `index`. `None` for a key that is not one of the eight, or a
+/// spec with no `field`, no `value`, or (the ink verb) no `index`: the effect
+/// then changes nothing, as the renderer's inline version did.
+pub(crate) fn print_field_op(
+    yaml_key: &str,
+    spec: &serde_json::Value,
+    eval: &dyn Fn(&str) -> super::expr_types::Value,
+) -> Option<serde_json::Value> {
+    let (_, verb) = PRINT_FIELD_EFFECTS.iter().find(|(k, _)| *k == yaml_key)?;
+    let field = spec.get("field")?.as_str()?;
+    let value = match spec.get("value")? {
+        serde_json::Value::String(s) => eval(s),
+        v => super::expr_types::Value::from_json(v),
+    };
+    let mut op = serde_json::json!({"op": verb, "field": field, "value": value_to_json(&value)});
+    if *verb == "set_output_ink_field" {
+        op["index"] = serde_json::json!(spec.get("index")?.as_u64()?);
+    }
+    Some(op)
 }
 
 fn run_doc_effect(
@@ -2655,6 +2700,13 @@ fn run_doc_effect(
                 let rw = (x2 - x1).abs();
                 let rh = (y2 - y1).abs();
                 Controller::partial_select_rect(model, rx, ry, rw, rh, additive);
+            }
+        }
+        // The print-config field effects (Document Setup's OK and its
+        // siblings), through the builder and verb the web shares.
+        n if PRINT_FIELD_EFFECTS.iter().any(|(k, _)| *k == n) => {
+            if let Some(op) = print_field_op(n, spec, &|e| eval_expr(e, store, ctx)) {
+                let _ = crate::document::op_apply::op_apply(model, &op);
             }
         }
         // W2b-14: the seven artboard keys, web-free, so the engine hosts them
