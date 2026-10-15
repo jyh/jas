@@ -359,6 +359,10 @@ final class YamlTool: CanvasTool {
         let actionName = "\(spec.id) \(eventName)"
         runEffects(handlerEffects, ctx: ctx, store: store,
                    actions: actions,
+                   // A tool's `open_dialog` (Scale/Rotate/Shear Options, Artboard
+                   // Options) resolves against the real dialog table and opens in
+                   // this store; the host takes it with `takeOpenedDialog`.
+                   dialogs: ws?.data["dialogs"] as? [String: Any],
                    platformEffects: effects,
                    model: model, actionName: actionName)
         _ = _reg
@@ -383,6 +387,13 @@ final class YamlTool: CanvasTool {
                                          dragging: dragging),
                  model: ctx.model)
         ctx.requestUpdate()
+    }
+
+    func takeOpenedDialog() -> (id: String, params: [String: Any])? {
+        guard let id = store.getDialogId() else { return nil }
+        let params = store.getDialogParams() ?? [:]
+        while store.getDialogId() != nil { store.closeDialog() }
+        return (id, params)
     }
 
     func onRelease(_ ctx: ToolContext, x: Double, y: Double, shift: Bool, alt: Bool) {

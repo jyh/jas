@@ -593,6 +593,12 @@ pub fn App() -> Element {
 
     // --- Mouse events ---
 
+    // --- YAML dialog signal (created here so the keyboard handler can
+    // open the reference-aware delete confirm dialog, and the canvas's
+    // mouseup can open a dialog a TOOL opened; the context provider is
+    // registered below alongside the other menu-bar signals). ---
+    let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
+
     let on_mousedown = {
         let act = act.clone();
         move |evt: Event<MouseData>| {
@@ -690,22 +696,30 @@ pub fn App() -> Element {
             let mods = evt.data().modifiers();
             let shift = mods.shift();
             let alt = mods.alt();
+            let mut dialog_sig = yaml_dialog;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
-                let pending = if let Some(tab) = st.tab_mut()
+                let (pending, opened) = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         crate::recorder::hooks::pointer_event(
                             "release", cx, cy, shift, alt, false, kind, &app_state, &tab.model,
                         );
                         tool.sync_global_state(&app_state);
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
-                        tool.drain_pending_panel_writes()
+                        (tool.drain_pending_panel_writes(), tool.take_opened_dialog())
                     } else {
-                        Vec::new()
+                        (Vec::new(), None)
                     };
                 apply_pending_panel_writes(st, pending);
                 st.sync_align_key_object_from_selection();
+                // A dialog the tool opened (Scale's Alt-click) opens in the app's
+                // dialog signal (flask STATUS §285). Its params are VALUES
+                // resolved in the tool's scope, which `open_dialog` takes as such.
+                if let Some((id, params)) = opened {
+                    let live_state = crate::workspace::dock_panel::build_live_state_map(st);
+                    crate::interpreter::dialog_view::open_dialog(&mut dialog_sig, &id, &params, &live_state);
+                }
             }));
         }
     };
@@ -799,11 +813,6 @@ pub fn App() -> Element {
         }
     };
 
-    // --- YAML dialog signal (created here so the keyboard handler can
-    // open the reference-aware delete confirm dialog; the context
-    // provider is registered below alongside the other menu-bar
-    // signals). ---
-    let yaml_dialog = use_signal(|| Option::<crate::interpreter::dialog_view::DialogState>::None);
 
     // --- Keyboard events ---
     let on_keydown =

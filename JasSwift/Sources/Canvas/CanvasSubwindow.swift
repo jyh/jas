@@ -4031,6 +4031,11 @@ class CanvasNSView: NSView {
         let shift = event.modifierFlags.contains(.shift)
         let alt = event.modifierFlags.contains(.option)
         activeTool.onRelease(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
+        // A dialog the tool opened (Scale's Alt-click) moves to the model's
+        // store, where the app's dialog view reads it (flask STATUS §285).
+        if let opened = activeTool.takeOpenedDialog() {
+            openToolDialog(opened, model: ctx.model)
+        }
     }
 
     // MARK: - Test helper
