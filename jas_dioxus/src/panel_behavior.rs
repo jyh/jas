@@ -105,7 +105,8 @@ fn opacity_prop_key(key: &str) -> Option<&'static str> {
 use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
-    self, BOOLEAN_KINDS, COMMIT_EVENTS, INPUT_KINDS, ITEM_KINDS, PICK_EVENTS, PRESS_EVENTS,
+    self, BOOLEAN_KINDS, CHECK_KINDS, CHOOSE_EVENTS, COMMIT_EVENTS, INPUT_KINDS, ITEM_KINDS,
+    OPTION_KINDS, PICK_EVENTS, PRESS_EVENTS,
 };
 pub use crate::panel_scope::COLOUR_PANEL;
 
@@ -588,7 +589,9 @@ fn run_widget_behavior_in(
     // slice (`ffi::colour_value_commit`); its clicks run below like any panel's.
     let writes_value = (INPUT_KINDS.contains(&kind) && COMMIT_EVENTS.contains(&ev.event.as_str()))
         || (BOOLEAN_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()))
-        || ITEM_KINDS.contains(&kind);
+        || ITEM_KINDS.contains(&kind)
+        || (CHECK_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()))
+        || OPTION_KINDS.contains(&kind);
     if panel_id == Some(COLOUR_PANEL) && writes_value {
         return Err(Refusal::new("PanelNotHosted", COLOUR_PANEL));
     }
@@ -603,6 +606,13 @@ fn run_widget_behavior_in(
     // behaviors read `item`, which only a pick binds.
     if ITEM_KINDS.contains(&kind) {
         return pick(panel_id, node, ev, scope, store, model, actions, dialogs, host);
+    }
+    if CHECK_KINDS.contains(&kind) && PRESS_EVENTS.contains(&ev.event.as_str()) {
+        return check(panel_id, spec, node, ev, scope, store, model, actions, dialogs, host);
+    }
+    // EVERY event on an option kind is a pick of an option or a refusal.
+    if OPTION_KINDS.contains(&kind) {
+        return choose(panel_id, spec, node, ev, scope, store, model, actions, dialogs, host);
     }
 
     let mut cond_scope = scope.clone();
@@ -914,6 +924,102 @@ fn press(
     }
     run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
+}
+
+/// A press on the check kind (WIDGET_EVENTS.md, "Checking a radio"). The
+/// disabled refusal has already run. A radio whose bound expression is true
+/// is refused as `AlreadyChecked` (the contract's `inert`: a press never
+/// unchecks). Otherwise ONE batch: the node's `on_check` effects, which ARE
+/// the check, or with none the bind write of `true`; then every declared
+/// `click`/`change` behavior. `event.value` is `true`.
+#[allow(clippy::too_many_arguments)]
+fn check(
+    panel_id: Option<&str>,
+    spec: &Value,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    if widget_commit::bound_target(node).is_some_and(|e| eval(e, scope).to_bool()) {
+        return Err(Refusal::new("AlreadyChecked", ev.widget.clone()));
+    }
+    let mut batch: Vec<Value> = match node.get("on_check").and_then(Value::as_array) {
+        Some(effects) if !effects.is_empty() => effects.clone(),
+        _ => bind_write(node, spec, panel_id),
+    };
+    batch.extend(value_behaviors(node, &PRESS_EVENTS, &ev.widget)?.0);
+    if batch.is_empty() {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+    run_batch(panel_id, &batch, value_event(ev, Value::Bool(true)), scope, store, model, actions,
+              dialogs, host)
+}
+
+/// A pick on the option kind (WIDGET_EVENTS.md, "Picking a radio option").
+/// The disabled refusal has already run. `WrongEvent` for an event other than
+/// `toggle`; `MissingValue` for no option named; `BadValue` for an id no
+/// option declares, or a value that is not text. The option whose id equals
+/// the bound value as text ([`option_text`]) is refused as `AlreadyChecked`.
+/// Otherwise ONE batch: the bind write of the id, then the `toggle`
+/// behaviors, with `event.value` the id.
+#[allow(clippy::too_many_arguments)]
+fn choose(
+    panel_id: Option<&str>,
+    spec: &Value,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    if !CHOOSE_EVENTS.contains(&ev.event.as_str()) {
+        return Err(Refusal::new("WrongEvent", ev.widget.clone()));
+    }
+    let named = match &ev.value {
+        None | Some(Value::Null) => return Err(Refusal::new("MissingValue", ev.widget.clone())),
+        Some(Value::String(t)) => t.clone(),
+        Some(_) => return Err(Refusal::new("BadValue", ev.widget.clone())),
+    };
+    let declared = node.get("options").and_then(Value::as_array).into_iter().flatten()
+        .any(|o| o.get("id").and_then(Value::as_str) == Some(named.as_str()));
+    if !declared {
+        return Err(Refusal::new("BadValue", ev.widget.clone()));
+    }
+    if widget_commit::bound_target(node)
+        .is_some_and(|e| option_text(&eval(e, scope)).as_deref() == Some(named.as_str()))
+    {
+        return Err(Refusal::new("AlreadyChecked", ev.widget.clone()));
+    }
+    let mut batch = bind_write(node, spec, panel_id);
+    batch.extend(value_behaviors(node, &CHOOSE_EVENTS, &ev.widget)?.0);
+    if batch.is_empty() {
+        return Err(Refusal::new("EmptyBehavior", ev.widget.clone()));
+    }
+    run_batch(panel_id, &batch, value_event(ev, Value::String(named)), scope, store, model,
+              actions, dialogs, host)
+}
+
+/// A bound value as the text an option's `id` is compared with: a string as
+/// itself, a number by `f64`'s Display (which writes a WHOLE number without
+/// its `.0`, so a channel held as 2.0 reads "2"; a mutant adding an explicit
+/// whole-number arm survived, 2026-10-15), a bool as `true`/`false`, anything
+/// else `None`.
+pub(crate) fn option_text(v: &crate::interpreter::expr_types::Value) -> Option<String> {
+    use crate::interpreter::expr_types::Value as V;
+    match v {
+        V::Str(s) => Some(s.clone()),
+        V::Bool(b) => Some(b.to_string()),
+        V::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
 }
 
 /// A pick on an item kind (WIDGET_EVENTS.md, "Picking a dropdown item"). The

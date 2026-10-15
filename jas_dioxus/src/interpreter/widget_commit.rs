@@ -119,6 +119,13 @@ pub const TEXT_ENTRY_EVENTS: [&str; 3] = ["input", "blur", "keydown"];
 pub const ITEM_KINDS: [&str; 1] = ["dropdown"];
 /// A plain pick and an Alt pick. NOT synonyms: each runs its own behaviors.
 pub const PICK_EVENTS: [&str; 2] = ["toggle", "alt_toggle"];
+/// The check kind: a press CHECKS it and never unchecks it. Its events are
+/// the press synonyms ([`PRESS_EVENTS`]).
+pub const CHECK_KINDS: [&str; 1] = ["radio"];
+/// The option kind: a pick names one of its `options` by `id`.
+pub const OPTION_KINDS: [&str; 1] = ["radio_group"];
+/// The one event an option kind raises.
+pub const CHOOSE_EVENTS: [&str; 1] = ["toggle"];
 
 /// The events `kind` may declare, in the contract's order; empty for a kind
 /// outside the contract.
@@ -127,10 +134,12 @@ pub fn allowed_events(kind: &str) -> Vec<&'static str> {
         COMMIT_EVENTS.iter().chain(TEXT_ENTRY_EVENTS.iter()).copied().collect()
     } else if INPUT_KINDS.contains(&kind) {
         COMMIT_EVENTS.to_vec()
-    } else if BOOLEAN_KINDS.contains(&kind) {
+    } else if BOOLEAN_KINDS.contains(&kind) || CHECK_KINDS.contains(&kind) {
         PRESS_EVENTS.to_vec()
     } else if ITEM_KINDS.contains(&kind) {
         PICK_EVENTS.to_vec()
+    } else if OPTION_KINDS.contains(&kind) {
+        CHOOSE_EVENTS.to_vec()
     } else {
         vec![]
     }
@@ -402,12 +411,13 @@ mod tests {
             assert_eq!(allowed_events(kind.trim()), events, "{kind}");
             seen += 1;
         }
-        assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len());
-        // A kind outside the table has no events. `slider` and then
-        // `color_bar` were this control until each became an input kind
-        // (2026-10-13, forks A and B2); `radio_group` is outside by the
+        assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len()
+                   + CHECK_KINDS.len() + OPTION_KINDS.len());
+        // A kind outside the table has no events. `slider`, `color_bar` and
+        // then `radio_group` were this control until each joined (2026-10-13
+        // forks A and B2; 2026-10-15); `icon_button_group` is outside by the
         // contract's own list.
-        assert!(allowed_events("radio_group").is_empty());
+        assert!(allowed_events("icon_button_group").is_empty());
     }
 
     #[test]

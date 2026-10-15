@@ -50,12 +50,19 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_eleven_kinds_and_nothing_else(self):
-        assert set(we.ALLOWED_EVENTS) == we.INPUT_KINDS | we.BOOLEAN_KINDS | we.ITEM_KINDS
+    def test_the_thirteen_kinds_and_nothing_else(self):
+        families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
+                    we.CHECK_KINDS, we.OPTION_KINDS]
+        assert set(we.ALLOWED_EVENTS) == set().union(*families)
         assert len(we.INPUT_KINDS) == 8 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
-        assert not (we.INPUT_KINDS & we.BOOLEAN_KINDS)
-        assert not ((we.INPUT_KINDS | we.BOOLEAN_KINDS) & we.ITEM_KINDS)
+        assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 13, \
+            "the families are disjoint"
+
+    def test_a_radio_checks_on_click_or_change_and_a_group_on_toggle(self):
+        assert we.ALLOWED_EVENTS["radio"] == ("click", "change")
+        assert we.ALLOWED_EVENTS["radio_group"] == ("toggle",)
 
     def test_a_dropdown_picks_on_toggle_or_alt_toggle(self):
         assert we.ALLOWED_EVENTS["dropdown"] == ("toggle", "alt_toggle")
@@ -767,6 +774,153 @@ def _dropdown(**extra):
 
 
 _ACTIONS = {"act_all": {"effects": [{"set": {"all_ran": "true"}}]}}
+
+
+# ── Checking a radio, picking a radio option ───────────────────
+
+
+class TestCheckSynthetic:
+    PID = "probe_panel_content"
+
+    def _radio(self, **extra):
+        return {"type": "radio", "bind": {"checked": "dialog.axis == 'v'"},
+                "on_check": [{"set": {"dialog.axis": "'v'"}}], **extra}
+
+    def _store(self, axis):
+        store = StateStore()
+        store.init_dialog("d", {"axis": axis, "n": 0})
+        return store
+
+    def test_on_check_is_the_check_and_the_comparison_is_not_written(self):
+        store = self._store("h")
+        r = we.check(self._radio(), store, panel=None)
+        assert r == we.EventResult("committed", value=True, behaviors_run=1)
+        assert store.get_dialog("axis") == "v"
+
+    def test_a_checked_radio_is_inert_and_never_unchecks(self):
+        store = self._store("v")
+        w = self._radio(on_check=[{"set": {"dialog.n": "dialog.n + 1"}}])
+        assert we.check(w, store, panel=None) == we.EventResult("inert", value=True)
+        assert store.get_dialog("n") == 0, "on_check did not run"
+
+    def test_a_disabled_radio_moves_nothing(self):
+        store = self._store("h")
+        w = self._radio(bind={"checked": "dialog.axis == 'v'", "disabled": "true"})
+        assert we.check(w, store, panel=None) == we.EventResult("refused", reason=we.DISABLED)
+        assert store.get_dialog("axis") == "h"
+
+    def test_no_on_check_writes_true_to_a_writable_bind(self):
+        store = _panel_store(self.PID, {"on": False})
+        r = we.check({"type": "radio", "bind": {"checked": "panel.on"}}, store, panel=None)
+        assert r == we.EventResult("committed", value=True, bind_written=True)
+        assert store.get_panel(self.PID, "on") is True
+
+    def test_no_on_check_and_no_writable_bind_is_inert(self):
+        store = self._store("h")
+        r = we.check({"type": "radio", "bind": {"checked": "dialog.axis == 'v'"}}, store, panel=None)
+        assert r == we.EventResult("inert", value=True)
+        assert store.get_dialog("axis") == "h"
+
+    def test_declared_press_behaviors_run_after_on_check(self):
+        store = self._store("h")
+        w = self._radio(behavior=[
+            {"event": "click", "effects": [{"set": {"dialog.n": "dialog.axis == 'v'"}}]},
+            {"event": "alt_toggle", "effects": [{"set": {"dialog.n": 99}}]}])
+        r = we.check(w, store, panel=None)
+        assert r.outcome == "committed" and r.behaviors_run == 2
+        assert store.get_dialog("n") is True, "the behavior read the axis on_check wrote"
+
+    def test_check_refuses_every_other_kind(self):
+        store = _panel_store(self.PID, {"on": False})
+        for kind in ("toggle", "checkbox", "radio_group", "dropdown", "number_input"):
+            r = we.check({"type": kind, "bind": {"checked": "panel.on"}}, store, panel=None)
+            assert r == we.EventResult("refused", reason=we.WRONG_KIND), kind
+        assert store.get_panel(self.PID, "on") is False
+
+    def test_press_refuses_a_radio(self):
+        store = self._store("h")
+        assert we.press(self._radio(), store, panel=None).reason == we.WRONG_KIND
+
+
+class TestChooseSynthetic:
+    def _group(self, **extra):
+        return {"type": "radio_group", "bind": "dialog.channel",
+                "options": [{"id": "h", "label": ""}, {"id": "s", "label": ""}], **extra}
+
+    def _store(self, channel="h"):
+        store = StateStore()
+        store.init_dialog("d", {"channel": channel, "n": 0})
+        return store
+
+    def test_a_pick_writes_the_options_id(self):
+        store = self._store("h")
+        r = we.choose(self._group(), "s", "toggle", store, panel=None)
+        assert r == we.EventResult("committed", value="s", bind_written=True)
+        assert store.get_dialog("channel") == "s"
+
+    def test_the_checked_option_is_inert(self):
+        store = self._store("h")
+        assert we.choose(self._group(), "h", "toggle", store, panel=None) == \
+            we.EventResult("inert", value="h")
+
+    def test_the_comparison_is_as_text(self):
+        # 2.0, not 2. Here the evaluator already reads a whole 2.0 as the
+        # int 2, so the mutant `str(raw)` SURVIVES in this port (equivalent,
+        # recorded), and in Rust too (f64's Display writes 2.0 as "2"). In
+        # Swift, whose Double prints "2.0", the rule is load-bearing: its
+        # mutant is killed by WidgetEventRadioTests (2026-10-15).
+        store = self._store(2.0)
+        g = self._group(options=[{"id": "2"}, {"id": "3"}])
+        assert we.choose(g, "2", "toggle", store, panel=None).outcome == "inert"
+        assert we.choose(g, "3", "toggle", store, panel=None).outcome == "committed"
+        assert store.get_dialog("channel") == "3", "the id is written as a string"
+
+    def test_refusals_move_nothing(self):
+        cases = [("s", "change", we.WRONG_EVENT), (None, "toggle", we.MISSING_VALUE),
+                 ("x", "toggle", we.BAD_VALUE)]
+        for value, event, reason in cases:
+            store = self._store("h")
+            r = we.choose(self._group(), value, event, store, panel=None)
+            assert r == we.EventResult("refused", reason=reason), (value, event)
+            assert store.get_dialog("channel") == "h"
+        # A bare-string bind cannot declare `disabled`; the dict form can.
+        for disabled, outcome in (("true", "refused"), ("false", "committed")):
+            store = self._store("h")
+            g = self._group(bind={"value": "dialog.channel", "disabled": disabled})
+            assert we.choose(g, "s", "toggle", store, panel=None).outcome == outcome, disabled
+
+    def test_toggle_behaviors_run_after_the_write(self):
+        store = self._store("h")
+        g = self._group(behavior=[{"event": "toggle", "effects": [{"set": {"dialog.n": "event.value"}}]}])
+        r = we.choose(g, "s", "toggle", store, panel=None)
+        assert r == we.EventResult("committed", value="s", bind_written=True, behaviors_run=1)
+        assert store.get_dialog("n") == "s"
+
+    def test_choose_refuses_every_other_kind(self):
+        store = self._store("h")
+        for kind in ("radio", "dropdown", "select"):
+            r = we.choose({**self._group(), "type": kind}, "s", "toggle", store, panel=None)
+            assert r == we.EventResult("refused", reason=we.WRONG_KIND), kind
+
+
+class TestShippedShearAxis:
+    """The shipped Shear Options radios, from the compiled bundle: three
+    siblings share `dialog.axis` through their own comparisons."""
+
+    def test_checking_vertical_unchecks_horizontal(self):
+        from workspace_interpreter.loader import load_workspace
+        bundle = load_workspace(os.path.join(REPO_ROOT, "workspace"))
+        dlg = bundle["dialogs"]["shear_options"]
+        horizontal = find_element_by_id(dlg, "sho_axis_horizontal")
+        vertical = find_element_by_id(dlg, "sho_axis_vertical")
+        store = StateStore()
+        store.init_dialog("shear_options", {"axis": "horizontal"})
+        checked = lambda w: we.evaluate_in(store, w["bind"]["checked"])
+        assert checked(horizontal) and not checked(vertical), "the control"
+        assert we.check(vertical, store, panel=None).outcome == "committed"
+        assert store.get_dialog("axis") == "vertical"
+        assert checked(vertical) and not checked(horizontal)
+        assert we.check(vertical, store, panel=None).outcome == "inert"
 
 
 class TestPickSynthetic:
