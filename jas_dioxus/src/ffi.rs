@@ -138,6 +138,12 @@ fn json_str(s: &str) -> String {
 /// even though the C ABI cannot carry it (BL2).
 pub struct JasEngine {
     model: RefCell<Model>,
+    /// Whether the engine's one document is OPEN (flask STATUS §272, fork
+    /// (a)). [`jas_document_close`] clears it after a reply names
+    /// `remove_tab`; a load ([`JasEngine::replace_document`]) sets it again.
+    /// While it is clear, the scope reads no tab (`tab_count` 0, `active_tab`
+    /// -1, an empty `open_documents`), which is `remove_tab`'s own spec.
+    document_open: std::cell::Cell<bool>,
     last_error: RefCell<Option<String>>,
     /// The panel state a materialized panel binds to (S-C.1).
     ///
@@ -248,6 +254,7 @@ impl JasEngine {
 
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
+        self.document_open.set(true);
     }
 
     fn new() -> Self {
@@ -268,6 +275,7 @@ impl JasEngine {
         crate::panel_scope::seed_library_data(&mut store);
         JasEngine {
             model: RefCell::new(Model::default()),
+            document_open: std::cell::Cell::new(true),
             last_error: RefCell::new(None),
             panel: RefCell::new(panel),
             registry: RefCell::new(PanelRegistry::default()),
@@ -537,6 +545,14 @@ pub unsafe extern "C" fn jas_menu_state(
 /// moves it. This is the adapter that pairs the panel slice with the store and
 /// the model, because only the engine holds all three. The scope is PER PANEL
 /// (wave 2, A6): each panel reads its own `panel.*`.
+/// The engine's scope for `panel_id` ("" for none), read with whether its
+/// one document is open ([`jas_document_close`]).
+fn engine_scope_of(engine: &JasEngine, panel_id: &str) -> serde_json::Value {
+    crate::panel_scope::engine_scope_open(
+        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id,
+        engine.document_open.get())
+}
+
 fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::Value {
     seed_panel(engine, ws, panel_id);
     // The store's copy of the colour state is what an action's guard reads
@@ -544,8 +560,7 @@ fn panel_ctx(engine: &JasEngine, ws: &Workspace, panel_id: &str) -> serde_json::
     // selection's, as the web's action context does (`action_fill_stroke_values`).
     crate::panel_scope::sync_colour_state(
         &mut engine.store.borrow_mut(), &engine.panel.borrow().effective(&engine.model.borrow()));
-    crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), panel_id)
+    engine_scope_of(engine, panel_id)
 }
 
 /// Give `panel_id` a store scope, seeded from its declared `state:` defaults,
@@ -1214,8 +1229,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // panel-menu item runs in its panel's scope, seeded as a click's is.
     let scope = match panel {
         Some(pid) => panel_ctx(engine, &ws, pid),
-        None => crate::panel_scope::engine_scope(
-            &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), ""),
+        None => engine_scope_of(engine, ""),
     };
     // The menu's model-pure verbs (flask STATUS §242: Select All was refused
     // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
@@ -1383,8 +1397,7 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
 /// no panel, plus the dialog's own `dialog.*` (its state) and `param.*` (its
 /// params) from `store_ctx`, the store's eval context.
 fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::Value {
-    let mut ctx = crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    let mut ctx = engine_scope_of(engine, "");
     for key in ["dialog", "param"] {
         if let Some(v) = store_ctx.get(key) {
             ctx[key] = v.clone();
@@ -1483,6 +1496,22 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     }
     let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
+}
+
+/// **Close the engine's one document** (flask STATUS §272, fork (a)): the
+/// shell's answer to a reply that names `"remove_tab": 0`. The tab bar then
+/// draws no tab, and every scope reads `tab_count` 0, `active_tab` -1 and an
+/// empty `workspace.open_documents`, which is what `remove_tab`'s spec says
+/// for the last tab ("set active_tab to -1"). The model is kept, unshown; a
+/// load opens a document again. 1 when it closed an open document, 0 when
+/// none was open, 255 for a null engine.
+///
+/// # Safety
+/// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_document_close(e: *mut JasEngine) -> u8 {
+    let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
+    u8::from(engine.document_open.replace(false))
 }
 
 /// **The shell names the document it opened or saved** (flask §256): the
@@ -3604,6 +3633,43 @@ mod tests {
         // and only it (owner note 4b: tabs are drawn from the open documents).
         assert_eq!(canvas_tabs(e).len(), 1, "nothing ran");
         unsafe { jas_engine_free(e) };
+    }
+
+    /// THE "NO DOCUMENT" STATE (flask STATUS §272, fork (a)): a shell told
+    /// `"remove_tab": 0` closes the engine's one document. The tab bar then
+    /// draws no tab, the scope reads `tab_count` 0 and `active_tab` -1 (the
+    /// spec's own "no tab", `state.yaml`), and a load opens a document again.
+    #[test]
+    fn document_close_empties_the_tab_bar_and_a_load_reopens_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        assert_eq!(canvas_tabs(e).len(), 1, "the engine's one document");
+        assert_eq!(unsafe { jas_document_close(e) }, 1, "it was open");
+        // No open document hides the bar itself (it draws only while there
+        // are tabs), so "no tab" is: no tab bar, or one with nothing under it.
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "canvas_pane", 1600, 900)).expect("plan JSON");
+        let all: Vec<&serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .flat_map(|k| plan[*k].as_array().into_iter().flatten()).collect();
+        assert!(!all.is_empty(), "the canvas pane still plans: {plan}");
+        assert!(all.iter().all(|x| x["id"] != "canvas_tab_bar"), "no document, no tab bar");
+        let state = &panel_ctx_of(e)["state"];
+        assert_eq!((state["tab_count"].clone(), state["active_tab"].clone()),
+                   (serde_json::json!(0), serde_json::json!(-1)), "the scope reads no tab");
+        assert_eq!(unsafe { jas_document_close(e) }, 0, "already closed");
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/rect_with_stroke.svg")).unwrap();
+        engine_of(e).replace_document(crate::geometry::svg::try_svg_to_document(&svg).unwrap());
+        assert_eq!(canvas_tabs(e).len(), 1, "a load opens a document again");
+        assert_eq!(panel_ctx_of(e)["state"]["tab_count"], serde_json::json!(1));
+        assert_eq!(unsafe { jas_document_close(std::ptr::null_mut()) }, 255);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The scope a panel's widgets are evaluated in, for a test to read.
+    fn panel_ctx_of(e: *mut JasEngine) -> serde_json::Value {
+        let ws = Workspace::load().unwrap();
+        panel_ctx(engine_of(e), &ws, crate::panel_behavior::ALIGN_PANEL)
     }
 
     /// The canvas pane's document tabs: the entries one level under

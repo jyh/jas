@@ -862,6 +862,20 @@ struct JasBytes jas_dialog_event(struct JasEngine *e,
                                  uintptr_t event_len);
 
 /**
+ * **Close the engine's one document** (flask STATUS §272, fork (a)): the
+ * shell's answer to a reply that names `"remove_tab": 0`. The tab bar then
+ * draws no tab, and every scope reads `tab_count` 0, `active_tab` -1 and an
+ * empty `workspace.open_documents`, which is what `remove_tab`'s spec says
+ * for the last tab ("set active_tab to -1"). The model is kept, unshown; a
+ * load opens a document again. 1 when it closed an open document, 0 when
+ * none was open, 255 for a null engine.
+ *
+ * # Safety
+ * `e` must be NULL or a pointer from `jas_engine_new` that is still live.
+ */
+uint8_t jas_document_close(struct JasEngine *e);
+
+/**
  * **The shell names the document it opened or saved** (flask §256): the
  * model's `filename`, which the canvas tab shows (`workspace.open_documents`,
  * owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the
