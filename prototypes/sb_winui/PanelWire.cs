@@ -202,6 +202,15 @@ internal static class PanelWire
     internal static bool Clickable(string type, string id, string? path) =>
         type is "button" or "icon_button" ? Addressable(id, path) : id.Length > 0;
 
+    /// <summary>
+    /// S3: which rule a `separator` draws in its rect. The plan carries no
+    /// `orientation` (it is not a STATIC_KEY), so the rule follows the
+    /// plan's own geometry: wider than tall (or square) is horizontal, taller
+    /// is vertical. An empty rect draws nothing (null).
+    /// </summary>
+    internal static string? SeparatorRule(double w, double h) =>
+        w <= 0 || h <= 0 ? null : (w >= h ? "horizontal" : "vertical");
+
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
     {

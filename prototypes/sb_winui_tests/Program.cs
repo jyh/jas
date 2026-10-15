@@ -613,6 +613,14 @@ static class Program
         Eq("close: any other byte is no answer, never a guess", "unknown(7)", ActWire.CloseReading(7));
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
+        // S3 (jas §279): a `separator`'s rule. The plan carries no orientation
+        // (not a STATIC_KEY), so the rule follows the rect the plan placed:
+        // wider than tall is horizontal, else vertical; an empty rect is none.
+        Eq("separator: a wide rect is a horizontal rule", "horizontal", PanelWire.SeparatorRule(300, 9) ?? "(null)");
+        Eq("separator: a tall rect is a vertical rule (the picker's swatch rule)", "vertical", PanelWire.SeparatorRule(1, 16) ?? "(null)");
+        Eq("separator: a square rect is horizontal", "horizontal", PanelWire.SeparatorRule(8, 8) ?? "(null)");
+        Eq("separator: an empty rect draws nothing", "(null)|(null)",
+            (PanelWire.SeparatorRule(0, 9) ?? "(null)") + "|" + (PanelWire.SeparatorRule(300, 0) ?? "(null)"));
         // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
         // an act's reply names (#414). A reply the shell cannot read is NULL,
         // never a closed dialog: "closed" would hide a dialog the engine holds.
