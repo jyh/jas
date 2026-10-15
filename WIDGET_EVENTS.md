@@ -5,7 +5,7 @@
 > `POLICY.md` §1. The frozen ports honor the tag, not this document.
 
 This document says what happens when a person commits a value into a
-panel or dialog widget, or presses a boolean one:
+panel or dialog widget, presses a boolean one, or clicks a button:
 
 - which declared events run,
 - what `event.value` holds,
@@ -49,7 +49,7 @@ the field. They now write `event.value`, and Dither's behavior also writes
 
 ## The event table
 
-The table below is the whole vocabulary for the fifteen value kinds. A
+The table below is the whole vocabulary for the seventeen kinds it names. A
 behavior on one of these kinds whose `event` is not listed for that kind
 is refused by the lint.
 
@@ -70,6 +70,8 @@ checkbox: click, change
 radio: click, change
 dropdown: toggle, alt_toggle
 radio_group: toggle
+button: click, mouse_down, mouse_up
+icon_button: click, mouse_down, mouse_up
 ```
 <!-- widget-event-table:end -->
 
@@ -90,6 +92,11 @@ radio_group: toggle
   it (see §Checking a radio).
 - **The option kind** is `radio_group`. `toggle` picks one of its
   `options` by that option's `id` (see §Picking a radio option).
+- **The click kinds** are `button` and `icon_button`. `click` runs the
+  widget's `click` behaviors, else its node-level `action` (see §Clicking a
+  button). `mouse_down` and `mouse_up` carry press-and-hold handling. A
+  click never runs them, and this document does not define them beyond
+  naming them.
 
 **Outside this contract, deliberately:** every other widget kind. That
 includes the color widgets other than `color_bar`. Their events are not
@@ -242,6 +249,43 @@ The Color Picker draws six one-option groups that share
 `dialog.radio_channel`. Picking one writes its channel, which unchecks the
 other five through their own comparisons.
 
+## Clicking a button (the click kinds)
+
+A `button` or `icon_button` can say what a click does in two ways: with
+`click` behaviors, or with `action` and `params` on the node itself
+(`SCHEMA.md` §Widget types). Every shipped dialog's OK, Cancel, Save and
+Discard uses the node-level form (67 buttons, 2026-10-15). A click carries
+no text and no value.
+
+1. **Refuse, and do nothing at all, when any of these holds:**
+   - the event is not `click` (`WrongEvent`);
+   - the widget's `bind.disabled` expression is true (`Disabled`).
+2. **If the widget declares any `click` behavior, those behaviors ARE the
+   click.** They run in declaration order, and the node-level `action`
+   does not run.
+   - This holds even when every declared behavior's `condition` is false.
+     A skipped behavior still owns the click, as it owns a boolean press,
+     and the result is then `inert`.
+   - The lint refuses a widget that declares both, because its `action`
+     could never run. No shipped widget does.
+3. **Otherwise, a node-level `action` is dispatched with its `params`**,
+   exactly as a behavior's `action` is (§What a behavior can read). A
+   string param is an expression, a YAML literal (`copy: false`) is that
+   value, and a bare identifier that evaluates to null is its own name
+   (`tool: selection` is the string "selection"). The result is
+   `committed`.
+4. **A widget with neither is `inert`.** A click writes no bind.
+
+`event` is the click's modifier keys: `event.shift`, `event.ctrl`,
+`event.meta` and `event.alt`, each `false` when the key was not held. There
+is no `event.value`. The Boolean panel's "Alt-click makes a compound
+shape" reads `event.alt` in a behavior's `condition`.
+
+Rotate, Scale and Shear Options each have a Copy and an OK button that
+dispatch the same action and differ only in a literal `copy:`. A port that
+turned the YAML `false` into the text `False`, an unknown name, would copy
+on OK. The reference's `TestShippedRotateButtons` holds this.
+
 ## What a behavior can read
 
 Every expression a behavior evaluates starts from one of these names.
@@ -385,6 +429,20 @@ module, none of them is a measured failure.
 - **Both ports clamp `length_input`, and `UNIT_INPUTS.md` said "reject".**
   The ports were right, and that document is amended in the same change
   as this one.
+- **The click kinds (§Clicking a button).** The web renderer conforms: its
+  click handler is built from the declared `click` behaviors, and the
+  node's `action` is used only when there are none (`render_button`,
+  `renderer.rs`). The engine's door ran the node's `action` when every
+  click behavior's `condition` was false, and Swift's view ran the node's
+  `action` INSTEAD of any declared behavior. Both now follow step 2
+  (2026-10-15; `panel_behavior.rs`, `WidgetEvent.clickRunsNodeAction`). No
+  shipped widget reached either difference, and the lint keeps it that way.
+- **Swift, a node-level `action`'s params** are evaluated against the view's
+  render context, and a param that evaluates to null is DROPPED rather than
+  passed as null or as its own name (`YamlPanelBodyView.swift`,
+  `handleWidgetClick`). No shipped node-level param is a bare identifier,
+  and an action reads a dropped param as null, so no shipped click differs.
+  Swift's view does not route a click through `WidgetEvent` yet.
 - **Resolved: `SCHEMA.md` §behavior used to say that an entry's `action`
   runs before its `effects`.** Both active ports run the effects first, in
   their value handlers (`renderer.rs:3175-3186`,

@@ -621,10 +621,12 @@ fn run_widget_behavior_in(
     }
     let mut batch: Vec<Value> = vec![];
     let mut chosen = 0usize;
+    let mut declared = 0usize;
     for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
         if b.get("event").and_then(Value::as_str).unwrap_or("click") != ev.event {
             continue;
         }
+        declared += 1;
         if let Some(cond) = b.get("condition").and_then(Value::as_str) {
             if !eval(cond, &cond_scope).to_bool() {
                 continue;
@@ -647,10 +649,12 @@ fn run_widget_behavior_in(
         }
     }
     // SCHEMA.md's `button`/`icon_button` take `action` and `params` on the node
-    // itself. A click no declared behavior took runs that action, as the web's
-    // element renderer does (behaviors first, then the shorthand). Every
-    // shipped node-level action is on a dialog button (67, 2026-10-14).
-    if chosen == 0 && ev.event == "click" {
+    // itself. WIDGET_EVENTS.md, "Clicking a button": a declared `click`
+    // behavior IS the click, even when its condition skips it, so the node's
+    // action runs only when none is declared (the reference's `click`, and the
+    // web's element renderer). Every shipped node-level action is on a dialog
+    // button (67, 2026-10-14), none beside a click behavior (the lint).
+    if declared == 0 && ev.event == "click" {
         if let Some(action) = node.get("action").and_then(Value::as_str) {
             let mut d = Map::new();
             d.insert("action".into(), Value::String(action.to_string()));
@@ -1427,6 +1431,33 @@ mod tests {
                            "active_document": {"selection_count": model.document().selection.len()}});
         run_widget_behavior("zz_panel", &synthetic_panel(), &ev, &scope, store, model,
                             &synthetic_actions(), &json!({}), host)
+    }
+
+    /// WIDGET_EVENTS.md, "Clicking a button": a declared `click` behavior IS
+    /// the click, so a node-level `action` never runs beside it, even when
+    /// every behavior's condition is false (the reference's `click`; the web
+    /// renderer agrees). With no click behavior declared, the action runs.
+    #[test]
+    fn a_declared_click_behavior_owns_the_click_even_when_skipped() {
+        let spec = |behavior: Value| json!({"content": {"type": "container", "id": "root",
+            "children": [{"id": "b", "type": "button", "action": "rec", "behavior": behavior}]}});
+        let actions = json!({"rec": {"effects": [{"set": {"hit": "true"}}]}});
+        let run = |behavior: Value, store: &mut StateStore| {
+            let ev = parse_event(&json!({"widget": "b", "event": "click"})).unwrap();
+            let mut model = Model::default();
+            run_widget_behavior("zz_panel", &spec(behavior), &ev,
+                                &json!({"state": {}, "panel": {}}), store, &mut model,
+                                &actions, &json!({}), &mut EngineHost::default())
+        };
+        let mut store = StateStore::new();
+        store.init_panel("zz_panel", std::collections::HashMap::new());
+        let skipped = json!([{"event": "click", "condition": "false",
+                              "effects": [{"set": {"other": "true"}}]}]);
+        assert_eq!(run(skipped, &mut store).unwrap_err(), Refusal::new("EmptyBehavior", "b"));
+        assert_eq!(store.get("hit"), &Value::Null, "the node action did not run");
+        let held = json!([{"event": "mouse_down", "effects": [{"set": {"other": "true"}}]}]);
+        assert!(run(held, &mut store).is_ok(), "the control: a mouse_down is not a click");
+        assert_eq!(store.get("hit"), &json!(true));
     }
 
     /// A pick's item list may carry bare `separator` strings, as `options`

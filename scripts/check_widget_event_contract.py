@@ -10,8 +10,11 @@ guessed, and the guesses differ. The contract is now written down once, in
 `workspace_interpreter/widget_event.py` (ALLOWED_EVENTS), and this gate holds
 two other copies of it to that one:
 
-  1. THE YAML. Every behavior on one of the ten value kinds names an event
-     the contract lists for that kind. A `number_input` with `event: click`,
+  1. THE YAML. Every behavior on one of the contract's kinds names an event
+     the contract lists for that kind. A click kind (`button`,
+     `icon_button`) that declares a node-level `action` AND a `click`
+     behavior is a finding: the behavior owns the click, so the action is
+     text no executor runs. A `number_input` with `event: click`,
      or a `toggle` with `event: commit`, is a behavior no executor will run
      the same way twice.
   2. THE DOCUMENT. WIDGET_EVENTS.md carries the table between its
@@ -87,12 +90,32 @@ from workspace_interpreter.expr_parser import (  # noqa: E402
 )
 from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
 from workspace_interpreter.widget_event import (  # noqa: E402
-    ALLOWED_EVENTS, BOOLEAN_KINDS, CHECK_KINDS, EVENT_ROOTS, INPUT_KINDS, ITEM_KINDS,
-    OPTION_KINDS,
+    ALLOWED_EVENTS, BOOLEAN_KINDS, CHECK_KINDS, CLICK_EVENTS, CLICK_KINDS, EVENT_ROOTS,
+    INPUT_KINDS, ITEM_KINDS, OPTION_KINDS,
 )
 
 # A `foreach` without `as:` names its item this (every renderer agrees).
 FOREACH_DEFAULT_NAME = "item"
+# A `tree_view`'s `row_template` binds each row's element as `node`
+# (SCHEMA.md, tree_view: "the following ... node.*").
+TREE_VIEW = "tree_view"
+TREE_ROW_KEY = "row_template"
+TREE_ROW_NAME = "node"
+# A dispatch param that is a BARE identifier evaluating to null is its own
+# name (`effects._dispatch_param`), so `tool: selection` is the string
+# "selection", not a read. These two bare names stay findings anyway: they
+# read as the event's value (the Gradient panel's defect) and would pass the
+# literal string.
+BARE_VALUE_NAMES = ("value", "checked")
+
+
+def is_bare_literal(text: str) -> bool:
+    """True for a dispatch param the reference passes as its own name when
+    it evaluates to null: every character alphanumeric or `_` (Python's
+    `isalnum`, as `_dispatch_param` uses). A root name reads non-null, so it
+    is a read, and is never a finding either way."""
+    return (bool(text) and all(c.isalnum() or c == "_" for c in text)
+            and text not in EVENT_ROOTS and text not in BARE_VALUE_NAMES)
 
 DOCUMENT = ROOT / "WIDGET_EVENTS.md"
 TABLE_BEGIN = "<!-- widget-event-table:begin -->"
@@ -185,6 +208,8 @@ def behavior_expressions(entry: dict):
     def add_params(where, params, names):
         if isinstance(params, dict):
             for k, v in params.items():
+                if isinstance(v, str) and is_bare_literal(v) and v not in names:
+                    continue  # a literal by the dispatch rule, not a read
                 add(f"{where}.{k}", v, names)
 
     def effects(effs, where, names):
@@ -268,6 +293,8 @@ def census(docs: list, table: dict, roots: frozenset = EVENT_ROOTS):
                 item = name if isinstance(name, str) else None
             for key, value in node.items():
                 inner = items | {item} if key == "do" and item else items
+                if key == TREE_ROW_KEY and kind == TREE_VIEW:
+                    inner = inner | {TREE_ROW_NAME}
                 visit(value, rel, inner)
         elif isinstance(node, list):
             for value in node:
@@ -294,6 +321,12 @@ def census(docs: list, table: dict, roots: frozenset = EVENT_ROOTS):
         if not isinstance(behaviors, list):
             findings.append((rel, wid, kind, "behavior is not a list"))
             return
+        if kind in CLICK_KINDS and isinstance(node.get("action"), str) and any(
+                isinstance(e, dict) and e.get("event") in CLICK_EVENTS
+                for e in behaviors):
+            findings.append((rel, wid, kind, "declares a node-level action and a "
+                             "click behavior; the behavior owns the click, so the "
+                             "action never runs"))
         for i, entry in enumerate(behaviors):
             if not isinstance(entry, dict):
                 findings.append((rel, wid, kind, f"behavior[{i}] is not a mapping"))
@@ -462,9 +495,11 @@ def self_test() -> int:
     # day; 11 since `color_bar` became an input kind, fork B2,
     # 2026-10-13); the literal is here so a change to the kind set is a
     # deliberate edit, not a drift.
-    arm("the module table is every value, boolean, item, check and option kind",
+    # 17 since `button` and `icon_button` (the click kinds) joined, 2026-10-15.
+    arm("the module table is every value, boolean, item, check, option and "
+        "click kind",
         len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS | CHECK_KINDS
-                          | OPTION_KINDS) == 15)
+                          | OPTION_KINDS | CLICK_KINDS) == 17)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [
@@ -473,7 +508,7 @@ def self_test() -> int:
     built = len(clean)
     arm("the clean fixture has a behavior for every table cell",
         built == sum(len(v) for v in table.values()) and built > 8)
-    outside = {"type": "icon_button", "id": "ib",
+    outside = {"type": "tree_view", "id": "tv",
                "behavior": [{"event": "mouse_down"}, {"event": "anything"}]}
 
     def attempt(widgets, doc=None, extra=None, tracked=None, roots=EVENT_ROOTS):
@@ -677,6 +712,54 @@ def self_test() -> int:
          "behavior": [commit_with(sets("row.v"))]}]}])
     arm("a foreach item, outside its do, is RED",
         [(x[1], "reads 'row'" in x[3]) for x in f] == [("outside", True)])
+
+    # A dispatch param that is a BARE identifier evaluating to null is its own
+    # name (`effects._dispatch_param`): the toolbar's `tool: selection`.
+    for label, entry in (
+            ("a behavior's params", {"event": "commit", "action": "a",
+                                     "params": {"tool": "selection"}}),
+            ("a dispatch's params", commit_with(
+                [{"dispatch": {"action": "a", "params": {"t": "key_object"}}}]))):
+        f, _ = gate(with_entry(entry))
+        arm(f"a bare literal in {label} is GREEN", f == [])
+    for label, entry in (
+            ("a dotted read in params", {"event": "commit", "action": "a",
+                                         "params": {"p": "selection.x"}}),
+            ("a bare literal outside params", commit_with(sets("selection")))):
+        f, _ = gate(with_entry(entry))
+        arm(f"{label} is still RED", len(f) == 1 and "reads 'selection'" in f[0][3])
+    for name in BARE_VALUE_NAMES:
+        f, _ = gate(with_entry({"event": "commit", "action": "a",
+                                "params": {"p": name}}))
+        arm(f"the bare name '{name}' in params is still RED (it reads as the "
+            "event's value and is the literal string)",
+            len(f) == 1 and f"reads '{name}'" in f[0][3])
+
+    # A `tree_view`'s `row_template` binds `node` (SCHEMA.md, tree_view).
+    def in_tree(reader, key="row_template", kind="tree_view"):
+        return clean + [{"type": kind, "id": "tree", key: {
+            "type": "container", "children": [{
+                "type": "icon_button", "id": "row_btn", "behavior": [
+                    {"event": "click", "effects": [{"set": {"k": reader}}]}]}]}}]
+    f, _ = gate(in_tree("node.id"))
+    arm("a row_template reading `node` is GREEN", f == [])
+    f, _ = gate(in_tree("node.id", key="children"))
+    arm("`node` outside a row_template is RED",
+        len(f) == 1 and "reads 'node'" in f[0][3])
+    f, _ = gate(in_tree("node.id", kind="container"))
+    arm("a row_template on a kind that is not a tree_view binds nothing",
+        len(f) == 1 and "reads 'node'" in f[0][3])
+
+    # A click kind declaring both a node-level `action` and a `click` behavior:
+    # the behaviors own the click, so the action is dead text.
+    for kind in sorted(CLICK_KINDS):
+        f, _ = gate(clean + [{"type": kind, "id": "both", "action": "a",
+                              "behavior": [{"event": "click", "effects": sets("event.alt")}]}])
+        arm(f"a {kind} with an action AND a click behavior is RED",
+            len(f) == 1 and f[0][1] == "both" and "never runs" in f[0][3])
+        f, _ = gate(clean + [{"type": kind, "id": "hold", "action": "a",
+                              "behavior": [{"event": "mouse_down", "effects": sets("event.alt")}]}])
+        arm(f"a {kind} with an action and only a mouse_down behavior is GREEN", f == [])
 
     f, _ = gate(with_entry(commit_with(sets("a +"))))
     arm("an unparseable expression is RED, not skipped",

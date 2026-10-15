@@ -92,6 +92,14 @@ CHECK_KINDS = frozenset({"radio"})
 # A pick of one of a group's `options` by its `id`: see `choose`.
 CHOOSE_EVENTS = ("toggle",)
 OPTION_KINDS = frozenset({"radio_group"})
+# A click runs the widget's `click` behaviors, else its node-level `action`:
+# see `click`. `mouse_down` and `mouse_up` are named and not defined here
+# (press-and-hold buttons); a click never runs them.
+CLICK_EVENTS = ("click",)
+POINTER_EVENTS = ("mouse_down", "mouse_up")
+CLICK_KINDS = frozenset({"button", "icon_button"})
+# The modifier keys a click carries as `event.*`; an absent one reads false.
+CLICK_MODIFIERS = ("shift", "ctrl", "meta", "alt")
 
 ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: COMMIT_EVENTS for kind in INPUT_KINDS},
@@ -100,6 +108,7 @@ ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: PICK_EVENTS for kind in ITEM_KINDS},
     **{kind: PRESS_EVENTS for kind in CHECK_KINDS},
     **{kind: CHOOSE_EVENTS for kind in OPTION_KINDS},
+    **{kind: CLICK_EVENTS + POINTER_EVENTS for kind in CLICK_KINDS},
 }
 
 # The names a behavior's expressions can start from: the store's evaluation
@@ -116,7 +125,7 @@ BAD_VALUE = "BadValue"          # the kind's parse refused the text
 MISSING_VALUE = "MissingValue"  # a commit carried no text at all
 DISABLED = "Disabled"           # bind.disabled is true
 WRONG_KIND = "WrongKind"        # commit on a non-input kind, press on a non-boolean
-WRONG_EVENT = "WrongEvent"      # a pick whose event the item kinds do not raise
+WRONG_EVENT = "WrongEvent"      # an event the kind's procedure does not take
 
 
 @dataclass(frozen=True)
@@ -360,12 +369,13 @@ def _declared(widget: dict, events: tuple[str, ...]) -> list[dict]:
 
 
 def _run_behaviors(behaviors: list[dict], value, store, run_kwargs: dict,
-                   scope: dict | None = None) -> int:
+                   scope: dict | None = None, event: dict | None = None) -> int:
     """Run ``behaviors`` in order; the count excludes a false ``condition``.
-    ``scope`` adds names beside ``event`` (a pick's ``item``)."""
+    ``scope`` adds names beside ``event`` (a pick's ``item``). ``event``
+    replaces the default ``{"value": value}`` (a click's modifiers)."""
     ran = 0
     for b in behaviors:
-        ctx = {**(scope or {}), "event": {"value": value}}
+        ctx = {**(scope or {}), "event": event if event is not None else {"value": value}}
         condition = b.get("condition")
         if isinstance(condition, str) and not evaluate(
                 condition, store.eval_context(ctx)).to_bool():
@@ -500,6 +510,39 @@ def choose(widget: dict, option_id, event: str, store: StateStore, *,
     return EventResult("committed" if target is not None or ran else "inert",
                        value=option_id, bind_written=target is not None,
                        behaviors_run=ran)
+
+
+def click(widget: dict, event: str, store: StateStore, *, panel: dict | None,
+          modifiers: dict | None = None, **run_kwargs) -> EventResult:
+    """Click a CLICK kind (``button``, ``icon_button``).
+
+    Refuse a wrong kind, an event other than ``click`` (``WrongEvent``) and a
+    disabled widget. ``event`` is the click's modifiers (``shift``, ``ctrl``,
+    ``meta``, ``alt``; an absent one is false) and carries no value. If the
+    widget declares any ``click`` behavior, those behaviors ARE the click, run
+    in order, and the node-level ``action`` does not run, even when every
+    condition is false. Otherwise a node-level ``action`` is dispatched with
+    its ``params``, exactly as a behavior's ``action`` is. A click that runs
+    nothing is ``inert``. A click writes no bind.
+    """
+    del panel  # no bind write: accepted for the procedures' common signature
+    if widget.get("type") not in CLICK_KINDS:
+        return EventResult("refused", reason=WRONG_KIND)
+    if event not in CLICK_EVENTS:
+        return EventResult("refused", reason=WRONG_EVENT)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    mods = {k: bool((modifiers or {}).get(k, False)) for k in CLICK_MODIFIERS}
+    declared = _declared(widget, CLICK_EVENTS)
+    if declared:
+        ran = _run_behaviors(declared, None, store, run_kwargs, event=mods)
+        return EventResult("committed" if ran else "inert", behaviors_run=ran)
+    action = widget.get("action")
+    if not isinstance(action, str):
+        return EventResult("inert")
+    ran = _run_behaviors([{"action": action, "params": widget.get("params")}],
+                         None, store, run_kwargs, event=mods)
+    return EventResult("committed", behaviors_run=ran)
 
 
 def _as_text(v) -> str | None:
