@@ -235,6 +235,8 @@ impl JasEngine {
         f(&mut self.model.borrow_mut())
     }
 
+    /// Name a refusal for [`jas_last_error_json`] from a sibling module.
+    pub(crate) fn set_last_error(&self, json: String) { *self.last_error.borrow_mut() = Some(json); }
     pub(crate) fn dpi_scale(&self) -> f64 { self.dpi_scale.get() }
     pub(crate) fn set_dpi_scale(&self, s: f64) { self.dpi_scale.set(s); }
     pub(crate) fn tool_slot(
