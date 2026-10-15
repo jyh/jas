@@ -103,9 +103,9 @@ pub fn clamp_to_declared(v: f64, min: Option<f64>, max: Option<f64>) -> f64 {
 
 /// The input kinds: a committed value is parsed, written, then its
 /// `commit`/`change` behaviors run.
-pub const INPUT_KINDS: [&str; 8] = [
-    "number_input", "length_input", "text_input", "select", "icon_select", "combo_box",
-    "slider", "color_bar",
+pub const INPUT_KINDS: [&str; 9] = [
+    "number_input", "length_input", "text_input", "select", "icon_select", "icon_button_group",
+    "combo_box", "slider", "color_bar",
 ];
 /// The boolean kinds: a declared `click`/`change` behavior IS the press.
 pub const BOOLEAN_KINDS: [&str; 2] = ["toggle", "checkbox"];
@@ -256,7 +256,7 @@ pub fn parse_commit(widget: &serde_json::Value, text: &str) -> Option<serde_json
             }
         }
         // A divider is not a row a commit can match (SCHEMA.md, `options`).
-        "select" | "icon_select" => match widget.get("options").and_then(option_rows) {
+        "select" | "icon_select" | "icon_button_group" => match widget.get("options").and_then(option_rows) {
             Some(rows) => rows.into_iter().find_map(|r| {
                 (r["kind"] == "option" && option_text(&r["value"]).as_deref() == Some(text))
                     .then(|| r["value"].clone())
@@ -413,11 +413,11 @@ mod tests {
         }
         assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len()
                    + CHECK_KINDS.len() + OPTION_KINDS.len());
-        // A kind outside the table has no events. `slider`, `color_bar` and
-        // then `radio_group` were this control until each joined (2026-10-13
-        // forks A and B2; 2026-10-15); `icon_button_group` is outside by the
-        // contract's own list.
-        assert!(allowed_events("icon_button_group").is_empty());
+        // A kind outside the table has no events. `slider`, `color_bar`,
+        // `radio_group` and `icon_button_group` were this control until each
+        // joined (2026-10-13 forks A and B2; 2026-10-15 twice);
+        // `reference_point_widget` is outside by the contract's own list.
+        assert!(allowed_events("reference_point_widget").is_empty());
     }
 
     #[test]

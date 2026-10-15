@@ -50,14 +50,14 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_thirteen_kinds_and_nothing_else(self):
+    def test_the_fourteen_kinds_and_nothing_else(self):
         families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
                     we.CHECK_KINDS, we.OPTION_KINDS]
         assert set(we.ALLOWED_EVENTS) == set().union(*families)
-        assert len(we.INPUT_KINDS) == 8 and len(we.BOOLEAN_KINDS) == 2
+        assert len(we.INPUT_KINDS) == 9 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
-        assert sum(len(f) for f in families) == len(set().union(*families)) == 13, \
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 14, \
             "the families are disjoint"
 
     def test_a_radio_checks_on_click_or_change_and_a_group_on_toggle(self):
@@ -175,6 +175,15 @@ class TestParseByKind:
         assert we.parse_commit(w, "2") == (True, 2)
         assert we.parse_commit(w, "Letter") == (False, None)
         assert we.parse_commit(w, "legal") == (False, None)
+
+    def test_icon_button_group_is_a_select(self):
+        # Artboard Options' orientation: options carry an `icon` and a
+        # `value`, and no label. A commit is the option's value text.
+        w = {"type": "icon_button_group", "options": [
+            {"icon": "orientation_portrait", "value": "portrait"},
+            {"icon": "orientation_landscape", "value": "landscape"}]}
+        assert we.parse_commit(w, "landscape") == (True, "landscape")
+        assert we.parse_commit(w, "square") == (False, None)
 
     def test_icon_select_is_a_select(self):
         w = {"type": "icon_select", "options": [
@@ -921,6 +930,30 @@ class TestShippedShearAxis:
         assert store.get_dialog("axis") == "vertical"
         assert checked(vertical) and not checked(horizontal)
         assert we.check(vertical, store, panel=None).outcome == "inert"
+
+
+class TestShippedArtboardOrientation:
+    """Artboard Options' orientation group (`ao_orientation`): its `change`
+    runs `toggle_artboard_orientation`, which SWAPS width and height. A commit
+    of the orientation already shown must not swap it, so the behavior is
+    guarded by its own condition (the web renderer ran it on every click)."""
+
+    def _run(self, width, height, text):
+        bundle = load_workspace(os.path.join(REPO_ROOT, "workspace"))
+        w = find_element_by_id(bundle["dialogs"]["artboard_options"], "ao_orientation")
+        store = StateStore()
+        store.init_dialog("artboard_options", {"width": width, "height": height})
+        actions = {"toggle_artboard_orientation": {"effects": [{"set": {"toggled": "true"}}]}}
+        r = we.commit(w, text, store, panel=None, actions=actions)
+        return r, store.get("toggled")
+
+    def test_the_other_orientation_toggles(self):
+        r, toggled = self._run(100, 200, "landscape")
+        assert r.outcome == "committed" and r.behaviors_run == 1 and toggled is True
+
+    def test_the_shown_orientation_changes_nothing(self):
+        r, toggled = self._run(100, 200, "portrait")
+        assert r.outcome == "inert" and r.behaviors_run == 0 and toggled is None
 
 
 class TestPickSynthetic:

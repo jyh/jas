@@ -290,7 +290,11 @@ artboard_options:
                 bind:
                   value: "if dialog.height >= dialog.width then 'portrait' else 'landscape'"
                 behavior:
+                  # The action SWAPS width and height, so it runs only when the
+                  # picked orientation is not the one already shown: pressing
+                  # the shown orientation changes nothing.
                   - event: change
+                    condition: "event.value != (if dialog.height >= dialog.width then 'portrait' else 'landscape')"
                     action: toggle_artboard_orientation
           - type: col
             col: 2

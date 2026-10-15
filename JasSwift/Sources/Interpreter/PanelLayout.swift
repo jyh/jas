@@ -256,6 +256,18 @@ public enum PanelLayout {
     /// Resolved text width: `evaluateText(node[key], ctx)` codepoints * CHAR_WIDTH.
     /// A literal (no `{{}}`) passes through `evaluateText` unchanged so non-bound
     /// panels stay byte-identical. UNICODE CODE POINTS, not bytes / UTF-16 units.
+    /// A `radio_group`'s options in a row: each a 16 indicator plus, when it
+    /// has a label, a 4 gap and the label; options 6 apart. Computed options
+    /// (an expression) have no declared rows, so the width is 0.
+    private static func radioGroupW(_ n: [String: Any], _ ctx: [String: Any]) -> Int {
+        guard let options = n["options"] as? [Any] else { return 0 }
+        let widths = options.compactMap { $0 as? [String: Any] }.map { o -> Int in
+            let labelled = !((o["label"] as? String) ?? "").isEmpty
+            return 16 + (labelled ? 4 + textW(o, "label", ctx) : 0)
+        }
+        return widths.reduce(0, +) + 6 * max(widths.count - 1, 0)
+    }
+
     private static func textW(_ n: [String: Any], _ key: String, _ ctx: [String: Any]) -> Int {
         guard let raw = n[key] as? String else { return 0 }
         let resolved = evaluateText(raw, context: ctx)
@@ -384,8 +396,13 @@ public enum PanelLayout {
                 w = textW(n, "content", ctx)
             case "button":
                 w = textW(n, "label", ctx) + 16
-            case "checkbox", "toggle":
+            case "checkbox", "toggle", "radio":
                 w = 16 + 4 + textW(n, "label", ctx)
+            case "radio_group":
+                w = radioGroupW(n, ctx)
+            case "icon_button_group":
+                let k = (n["options"] as? [Any])?.count ?? 0
+                w = 24 * k + 4 * max(k - 1, 0)
             case "color_swatch":
                 w = 16
             case "icon_button":

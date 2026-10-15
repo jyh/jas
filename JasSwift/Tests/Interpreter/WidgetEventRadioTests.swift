@@ -150,3 +150,30 @@ private func choose(_ id: String?, _ event: String = "toggle", widget: [String: 
         #expect(r.outcome == "refused" && r.reason == WidgetEvent.wrongKind, "\(kind)")
     }
 }
+
+// The view's `change` loop honours a behavior's `condition`, driven on the
+// SHIPPED orientation group, as Rust's
+// `a_value_loop_honours_the_shipped_orientation_condition`.
+@Test func aViewChangeLoopHonoursTheShippedOrientationCondition() throws {
+    let ws = try #require(WorkspaceData.load())
+    let dialogs = try #require(ws.data["dialogs"] as? [String: Any])
+    let group = try #require(WidgetEvent.findWidget(in: dialogs["artboard_options"], id: "ao_orientation"))
+    let b = try #require((group["behavior"] as? [[String: Any]])?.first)
+    #expect(b["condition"] != nil, "the control: the shipped behavior is guarded")
+    let ctx = { (v: String) -> [String: Any] in
+        ["dialog": ["width": 100, "height": 200], "event": ["value": v]] }
+    #expect(!behaviorConditionHolds(b, context: ctx("portrait")), "the shown orientation does not toggle")
+    #expect(behaviorConditionHolds(b, context: ctx("landscape")), "the other orientation toggles")
+    #expect(behaviorConditionHolds(["action": "x"], context: ctx("portrait")), "no condition: it runs")
+}
+
+// Artboard Options' orientation group is an input kind: a commit is the
+// option's value text, as the reference's `test_icon_button_group_is_a_select`.
+@Test func anIconButtonGroupIsASelect() {
+    let w: [String: Any] = ["type": "icon_button_group", "options": [
+        ["icon": "orientation_portrait", "value": "portrait"],
+        ["icon": "orientation_landscape", "value": "landscape"]] as [Any]]
+    #expect(WidgetEvent.parseCommit(widget: w, text: "landscape").accepted)
+    #expect(WidgetEvent.parseCommit(widget: w, text: "landscape").value as? String == "landscape")
+    #expect(!WidgetEvent.parseCommit(widget: w, text: "square").accepted)
+}
