@@ -2090,9 +2090,10 @@ public func applyHyphenationDialogToSelection(
         value.flatMap { $0 ? true : nil }
     }
     let hyph = optB(v.hyphenate)
-    let minWord = optN(v.minWord, default: 3)
-    let minBefore = optN(v.minBefore, default: 1)
-    let minAfter = optN(v.minAfter, default: 1)
+    // Ruled 2026-10-15 (A2): what the layout reads an absent attribute as.
+    let minWord = optN(v.minWord, default: 6)
+    let minBefore = optN(v.minBefore, default: 2)
+    let minAfter = optN(v.minAfter, default: 2)
     let limit = optN(v.limit, default: 0)
     let zone = optN(v.zone, default: 0)
     let bias = optN(v.bias, default: 0)
