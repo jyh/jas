@@ -1357,13 +1357,7 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
     };
     let mut spec = def.clone();
     spec["id"] = serde_json::Value::String(id.clone());
-    let mut ctx = crate::panel_scope::engine_scope(
-        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
-    for key in ["dialog", "param"] {
-        if let Some(v) = scope.get(key) {
-            ctx[key] = v.clone();
-        }
-    }
+    let ctx = dialog_ctx(engine, &scope);
     let (plan, _rows) = crate::panel_plan::panel_plan(&spec, avail_w, avail_h, &ctx, ws.icons(), ws.actions());
     let reply = serde_json::json!({
         "open": true,
@@ -1373,6 +1367,111 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
         "depth": depth,
         "plan": plan,
     });
+    JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
+}
+
+/// The scope a widget of the open dialog is evaluated in: the engine's, with
+/// no panel, plus the dialog's own `dialog.*` (its state) and `param.*` (its
+/// params) from `store_ctx`, the store's eval context.
+fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::Value {
+    let mut ctx = crate::panel_scope::engine_scope(
+        &engine.panel.borrow(), &engine.store.borrow(), &engine.model.borrow(), "");
+    for key in ["dialog", "param"] {
+        if let Some(v) = store_ctx.get(key) {
+            ctx[key] = v.clone();
+        }
+    }
+    ctx
+}
+
+/// **A widget of the open dialog, acted on** (the dialog door, design
+/// 2026-10-14 §1.2): [`jas_panel_behavior`]'s event, addressed to the TOP
+/// dialog instead of a panel. OK, Cancel, Save and Discard are YAML buttons
+/// with actions, so the shell answers a dialog by CLICKING them, by plan path
+/// (`{"path":[...],"event":"click"}`; a dialog's buttons carry no id) or by
+/// widget id. A commit or a press writes the dialog's own `dialog.<ident>`
+/// and mirrors no global, as the reference's `widget_event` writes a widget
+/// with no panel; no panel is made active. Escape is [`jas_dialog_dismiss`].
+///
+/// # The reply
+///
+/// [`jas_panel_behavior`]'s ([`act_reply`]). Its `dialog` is the dialog open
+/// AFTER the act: `null` when the click closed it, the parent's id when a
+/// nested dialog returned to it, a new id when the click opened one. The
+/// shell then re-reads [`jas_dialog_plan`].
+///
+/// # ⛔ A refusal runs NOTHING
+///
+/// The empty span, and [`jas_last_error_json`] reads `{"panel_event":
+/// "<class>","detail":"<detail>"}`: `NoDialog` when no dialog is open, else
+/// the classes [`jas_panel_behavior`] names. A run that changed nothing also
+/// reads `Unchanged`. A null engine is the empty span.
+/// **BL4**: copy the span, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or live; the span must be NULL or valid for its length.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const u8, event_len: usize) -> JasBytes {
+    let Some(engine) = (unsafe { e.as_ref() }) else {
+        return JasBytes::empty();
+    };
+    let Ok(raw) = (unsafe { utf8(event_json, event_len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(ev) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    let Some(ws) = Workspace::load() else {
+        return JasBytes::empty();
+    };
+    let (id, store_ctx) = {
+        let store = engine.store.borrow();
+        let Some(id) = store.dialog_id().map(str::to_string) else {
+            drop(store);
+            set_panel_event_error(engine, "NoDialog", "");
+            return JasBytes::empty();
+        };
+        (id, store.eval_context())
+    };
+    let Some(spec) = ws.dialog(&id) else {
+        set_panel_event_error(engine, "MissingTarget", &id);
+        return JasBytes::empty();
+    };
+    let refuse = |r: crate::panel_behavior::Refusal| {
+        set_panel_event_error(engine, r.class, &r.detail);
+        JasBytes::empty()
+    };
+    let ev = match crate::panel_behavior::parse_event(&ev) {
+        Ok(ev) => ev,
+        Err(r) => return refuse(r),
+    };
+    let scope = dialog_ctx(engine, &store_ctx);
+    let ran = {
+        let mut store = engine.store.borrow_mut();
+        let mut model = engine.model.borrow_mut();
+        let mut host = crate::panel_behavior::EngineHost { artboard_selection: vec![] };
+        crate::panel_behavior::run_dialog_widget_behavior(
+            spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host)
+    };
+    let ran = match ran {
+        Ok(ran) => ran,
+        Err(r) => return refuse(r),
+    };
+    // A dialog's OK can write the colour slice's `state.*` keys (the picker's
+    // fill/stroke targets), so the slice adopts them as after a panel click.
+    if engine.panel.borrow_mut().adopt_store_state(&engine.store.borrow(), Some(&engine.model.borrow())) {
+        crate::panel_scope::sync_colour_state(&mut engine.store.borrow_mut(), &engine.panel.borrow());
+    }
+    let sync = engine.registry.borrow_mut().sync(&ws, &|pid| panel_ctx(engine, &ws, pid));
+    let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
+    if ran.doc_changed || ran.state_changed || moved {
+        *engine.last_error.borrow_mut() = None;
+    } else {
+        set_panel_event_error(engine, "Unchanged", &ev.widget);
+    }
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
 }
 
@@ -3092,6 +3191,136 @@ mod tests {
         assert_eq!(unsafe { jas_dialog_dismiss(e) }, 1);
         let v = plan(e);
         assert_eq!((v["id"].clone(), v["depth"].clone()), (serde_json::json!("layer_options"), serde_json::json!(1)));
+        unsafe { jas_engine_free(e) };
+    }
+
+    fn dialog_event(e: *mut JasEngine, json: &str) -> (String, String) {
+        let reply = take(unsafe { jas_dialog_event(e, json.as_ptr(), json.len()) });
+        (reply, take(unsafe { jas_last_error_json(e) }))
+    }
+
+    /// The plan path of the open dialog's leaf of `kind` whose static text
+    /// contains `label` (a button carries no id, so a shell addresses it by
+    /// the path the plan gave it).
+    fn dialog_leaf_path(e: *mut JasEngine, kind: &str, label: &str) -> serde_json::Value {
+        let v: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 420, 640) })).unwrap();
+        let leaves = v["plan"]["leaves"].as_array().expect("an open dialog's plan");
+        leaves.iter().find(|l| l["type"] == kind && l.to_string().contains(label))
+            .unwrap_or_else(|| panic!("no {kind} leaf with {label:?}: {leaves:?}"))["path"].clone()
+    }
+
+    /// THE DIALOG DOOR, the event: a commit or a press on an open dialog's
+    /// widget writes the DIALOG's own field (`dialog.<key>`), as the
+    /// reference's `widget_event` writes a widget with no panel. Nothing is
+    /// mirrored into a global, and no panel is made active.
+    #[test]
+    fn dialog_event_commits_and_presses_write_the_open_dialogs_own_fields() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let (active, globals) = {
+            let store = engine_of(e).store.borrow();
+            assert_eq!(store.dialog_id(), Some("layer_options"));
+            (store.active_panel_id().map(str::to_string), store.eval_context()["state"].clone())
+        };
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_name_input","event":"commit","value":"Ink"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "layer_options", "{reply}");
+        assert!(err.is_empty(), "a commit that moved the dialog clears the channel: {err}");
+        let lock = engine_of(e).store.borrow().get_dialog("lock").clone();
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_lock","event":"click"}"#);
+        assert!(!reply.is_empty(), "the press ran: {err}");
+        let store = engine_of(e).store.borrow();
+        assert_eq!(store.get_dialog("name"), &serde_json::json!("Ink"), "the commit wrote dialog.name");
+        assert_eq!(store.get_dialog("lock"), &serde_json::Value::Bool(!lock.as_bool().unwrap_or(false)),
+                   "the press negated dialog.lock ({lock})");
+        assert_eq!(store.active_panel_id().map(str::to_string), active, "no panel was made active");
+        assert_eq!(store.eval_context()["state"], globals, "a dialog field mirrors no global");
+        drop(store);
+        // Both ways: the second press reads the FIRST press's write from the
+        // dialog's own scope, so a scope without `dialog.*` cannot turn it back.
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_lock","event":"click"}"#);
+        assert!(!reply.is_empty(), "the second press ran: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_dialog("lock"), &lock,
+                   "the second press restored dialog.lock");
+        assert!(dialog_leaf_path(e, "text_input", "Ink").is_array(), "the plan shows the committed name");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A dialog's buttons have no ids: the shell clicks one by its PLAN path,
+    /// and the button's YAML action runs. Cancel on Save Changes closes it.
+    #[test]
+    fn dialog_event_clicks_a_button_by_its_plan_path() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        for act in [r#"{"action":"select_all","params":{}}"#,
+                    r#"{"action":"set_stroke_cap","params":{"cap":"square"}}"#,
+                    r#"{"action":"close_tab","params":{"index":0}}"#] {
+            let _ = dispatch(e, act);
+        }
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), Some("save_changes_tab"));
+        let path = dialog_leaf_path(e, "button", "Cancel");
+        let ev = serde_json::json!({"path": path, "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "Cancel closed the dialog: {reply}");
+        assert_eq!(engine_of(e).store.borrow().dialog_id(), None);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The nested law (#416) through the shell's door: the swatch in Layer
+    /// Options opens the Color Picker OVER it, and the picker's OK returns
+    /// its colour to the parent's `dialog.color`, leaving the app's colours
+    /// alone. The picker's colour is set in its store, as a drag on its
+    /// gradient would leave it.
+    #[test]
+    fn dialog_event_returns_the_nested_pickers_colour_to_its_parent() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_color_swatch","event":"click"}"#);
+        assert!(reply.contains(r#""dialog":"color_picker""#), "the swatch opened the picker: {reply} {err}");
+        let app = {
+            let mut store = engine_of(e).store.borrow_mut();
+            assert_eq!(store.dialog_depth(), 2, "nested over Layer Options");
+            store.set_dialog("color", serde_json::json!("#12ab34"));
+            (store.get("fill_color").clone(), store.get("stroke_color").clone())
+        };
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "layer_options", "OK returned to the parent: {reply}");
+        let store = engine_of(e).store.borrow();
+        assert_eq!(store.dialog_depth(), 1);
+        assert_eq!(store.get_dialog("color"), &serde_json::json!("#12ab34"), "the parent took the result");
+        assert_eq!((store.get("fill_color").clone(), store.get("stroke_color").clone()), app,
+                   "a dialog-field target writes no app colour");
+        drop(store);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The door's refusals run nothing: no dialog open is `NoDialog`; a
+    /// disabled widget is `Disabled`; a bad event is `BadJson`; a null engine
+    /// is the empty span.
+    #[test]
+    fn dialog_event_refusals_run_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_lock","event":"click"}"#);
+        assert_eq!(reply, "");
+        assert!(err.contains(r#""panel_event":"NoDialog""#), "{err}");
+        let _ = dispatch(e, r#"{"action":"open_layer_options","params":{"mode":"create"}}"#);
+        let before = engine_of(e).store.borrow().eval_context();
+        let (reply, err) = dialog_event(e, r#"{"widget":"lo_template","event":"click"}"#);
+        assert_eq!(reply, "");
+        assert!(err.contains(r#""panel_event":"Disabled""#), "{err}");
+        let (reply, err) = dialog_event(e, "{not json");
+        assert_eq!(reply, "");
+        assert!(err.contains(r#""panel_event":"BadJson""#), "{err}");
+        assert_eq!(engine_of(e).store.borrow().eval_context(), before, "a refusal changed nothing");
+        let ev = r#"{"widget":"lo_lock","event":"click"}"#;
+        assert_eq!(take(unsafe { jas_dialog_event(std::ptr::null_mut(), ev.as_ptr(), ev.len()) }), "");
         unsafe { jas_engine_free(e) };
     }
 

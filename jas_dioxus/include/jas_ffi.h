@@ -826,6 +826,38 @@ uint8_t jas_dialog_dismiss(struct JasEngine *e);
 struct JasBytes jas_dialog_plan(struct JasEngine *e, int64_t avail_w, int64_t avail_h);
 
 /**
+ * **A widget of the open dialog, acted on** (the dialog door, design
+ * 2026-10-14 §1.2): [`jas_panel_behavior`]'s event, addressed to the TOP
+ * dialog instead of a panel. OK, Cancel, Save and Discard are YAML buttons
+ * with actions, so the shell answers a dialog by CLICKING them, by plan path
+ * (`{"path":[...],"event":"click"}`; a dialog's buttons carry no id) or by
+ * widget id. A commit or a press writes the dialog's own `dialog.<ident>`
+ * and mirrors no global, as the reference's `widget_event` writes a widget
+ * with no panel; no panel is made active. Escape is [`jas_dialog_dismiss`].
+ *
+ * # The reply
+ *
+ * [`jas_panel_behavior`]'s ([`act_reply`]). Its `dialog` is the dialog open
+ * AFTER the act: `null` when the click closed it, the parent's id when a
+ * nested dialog returned to it, a new id when the click opened one. The
+ * shell then re-reads [`jas_dialog_plan`].
+ *
+ * # ⛔ A refusal runs NOTHING
+ *
+ * The empty span, and [`jas_last_error_json`] reads `{"panel_event":
+ * "<class>","detail":"<detail>"}`: `NoDialog` when no dialog is open, else
+ * the classes [`jas_panel_behavior`] names. A run that changed nothing also
+ * reads `Unchanged`. A null engine is the empty span.
+ * **BL4**: copy the span, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or live; the span must be NULL or valid for its length.
+ */
+struct JasBytes jas_dialog_event(struct JasEngine *e,
+                                 const uint8_t *event_json,
+                                 uintptr_t event_len);
+
+/**
  * **The shell names the document it opened or saved** (flask §256): the
  * model's `filename`, which the canvas tab shows (`workspace.open_documents`,
  * owner note 4b). [`crate::ffi_paint::jas_load_svg`] takes bytes only and the

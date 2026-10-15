@@ -410,6 +410,20 @@ internal static unsafe class JasCore
     internal static extern JasBytes jas_dialog_plan(IntPtr engine, long availW, long availH);
 
     /// <summary>
+    /// A widget of the OPEN dialog, acted on (`jas_dialog_event`): the
+    /// <see cref="jas_panel_behavior"/> event, addressed to the top dialog.
+    /// A dialog's buttons carry no id, so a click names the leaf's plan path:
+    /// <c>{"path":[1,0],"event":"click"}</c>. The reply is
+    /// <c>{"changed","doc_changed","dialog"}</c>, where <c>dialog</c> is the
+    /// dialog open AFTER the act (null when it closed). Empty span on a
+    /// refusal (<c>NoDialog</c> when none is open), read the class from
+    /// <c>jas_last_error_json</c>. Copy the span, then release it with
+    /// <c>jas_free</c>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_dialog_event(IntPtr engine, byte[] eventJson, nuint eventLen);
+
+    /// <summary>
     /// The shell names the document it opened or saved (#406): the model's
     /// <c>filename</c>, which the canvas tab shows. ⛔ UTF-8 BYTES, NOT A
     /// STRING (BL5), as <see cref="jas_load_svg"/>. 1 named; 0 refused (null,
