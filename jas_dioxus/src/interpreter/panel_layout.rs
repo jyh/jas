@@ -248,6 +248,20 @@ fn text_w(n: &Value, key: &str, ctx: &Value) -> i64 {
     }
 }
 
+/// A `radio_group`'s options in a row: each a 16 indicator plus, when it has
+/// a label, a 4 gap and the label; options 6 apart. Computed options (an
+/// expression) have no declared rows, so the width is 0.
+fn radio_group_w(n: &Value, ctx: &Value) -> i64 {
+    let Some(options) = n.get("options").and_then(Value::as_array) else { return 0 };
+    let widths: Vec<i64> = options.iter().filter(|o| o.is_object())
+        .map(|o| {
+            let labelled = o.get("label").and_then(Value::as_str).is_some_and(|l| !l.is_empty());
+            16 + if labelled { 4 + text_w(o, "label", ctx) } else { 0 }
+        })
+        .collect();
+    widths.iter().sum::<i64>() + 6 * (widths.len() as i64 - 1).max(0)
+}
+
 fn is_fill(kind: &str) -> bool {
     matches!(
         kind,
@@ -429,7 +443,12 @@ fn leaf_size(n: &Value, avail_w: i64, ctx: &Value) -> (i64, i64) {
         match t {
             "text" => text_w(n, "content", ctx),
             "button" => text_w(n, "label", ctx) + 16,
-            "checkbox" | "toggle" => 16 + 4 + text_w(n, "label", ctx),
+            "checkbox" | "toggle" | "radio" => 16 + 4 + text_w(n, "label", ctx),
+            "radio_group" => radio_group_w(n, ctx),
+            "icon_button_group" => {
+                let k = n.get("options").and_then(Value::as_array).map_or(0, |o| o.len() as i64);
+                24 * k + 4 * (k - 1).max(0)
+            }
             "color_swatch" => 16,
             "icon_button" => 24,
             "icon" => 20,
@@ -1366,5 +1385,40 @@ mod position_and_size_tests {
     fn a_position_that_is_not_two_numbers_is_not_honoured() {
         let r = rects(col(json!([btn(json!({"size": 10})), at(json!("50%"), json!(7), btn(json!({"size": 10})))])), 200);
         assert_eq!(r[&vec![1]].1, 10, "laid out in the flow, after its sibling");
+    }
+}
+
+/// The two radio kinds have a width, as the reference's
+/// `test_panel_layout_radio_width.py` pins, arm for arm. No shipped PANEL holds
+/// a radio, so the panel goldens do not witness it.
+#[cfg(test)]
+mod radio_width_tests {
+    use super::{layout_panel, CHAR_WIDTH};
+    use serde_json::{json, Value};
+
+    fn w(leaf: Value) -> i64 {
+        let rects = layout_panel(&json!({"content": {"type": "row", "children": [leaf]}}), 400, 0, &json!({}));
+        rects.as_array().unwrap().iter().find(|r| r["path"] == json!([0]))
+            .and_then(|r| r["rect"]["w"].as_i64()).expect("a rect at [0]")
+    }
+
+    #[test]
+    fn a_radio_is_sized_as_a_checkbox() {
+        assert_eq!(w(json!({"type": "radio", "label": "Vertical"})), 16 + 4 + 8 * CHAR_WIDTH);
+        assert_eq!(w(json!({"type": "checkbox", "label": "Vertical"})), 16 + 4 + 8 * CHAR_WIDTH, "the control");
+    }
+
+    #[test]
+    fn a_radio_group_is_its_options_in_a_row_six_apart() {
+        assert_eq!(w(json!({"type": "radio_group", "options": [{"id": "h", "label": ""}]})), 16);
+        let opts = json!([{"id": "a", "label": "Ab"}, {"id": "b"}, {"id": "c", "label": "C"}]);
+        assert_eq!(w(json!({"type": "radio_group", "options": opts})),
+                   (16 + 4 + 2 * CHAR_WIDTH) + 6 + 16 + 6 + (16 + 4 + CHAR_WIDTH));
+        assert_eq!(w(json!({"type": "radio_group"})), 0);
+        let pair = json!([{"icon": "orientation_portrait", "value": "portrait"},
+                          {"icon": "orientation_landscape", "value": "landscape"}]);
+        assert_eq!(w(json!({"type": "icon_button_group", "options": pair})), 24 + 4 + 24);
+        assert_eq!(w(json!({"type": "icon_button_group"})), 0);
+        assert_eq!(w(json!({"type": "radio_group", "options": "dialog.list"})), 0);
     }
 }
