@@ -1047,10 +1047,11 @@ internal sealed unsafe class Canvas : IDisposable
     // =======================================================================
 
     /// <summary>
-    /// The width a dialog is planned at. ⚠️ A DEFAULT, NOT THE DIALOG'S OWN:
-    /// the workspace declares 300 to 720 per dialog, and `jas_dialog_plan`'s
-    /// reply does not carry it. Every DIALOG PLAN row says `avail-w=` so a
-    /// mis-sized dialog is readable from the log.
+    /// The width a dialog with NO declared width is planned at. jas §271: the
+    /// reply carries the declared width (15 of 33 declare one, 300 to 720) or
+    /// null, and the engine invents no default, so this is the shell's. A
+    /// dialog that declares one is planned at this first, then re-planned at
+    /// its own; every DIALOG PLAN row says `avail-w=` and `width=`.
     /// </summary>
     internal const long DialogAvailW = 420;
 
@@ -1072,8 +1073,14 @@ internal sealed unsafe class Canvas : IDisposable
         if (_engine == IntPtr.Zero) { return; }
         var raw = JasCore.TakeString(JasCore.jas_dialog_plan(_engine, DialogAvailW, 0));
         var reading = DialogWire.Read(raw);
+        var availW = DialogWire.PlanWidth(reading?.Width, DialogAvailW);
+        if (reading is { Open: true } && availW != DialogAvailW)
+        {
+            raw = JasCore.TakeString(JasCore.jas_dialog_plan(_engine, availW, 0));
+            reading = DialogWire.Read(raw);
+        }
         _dialogSeq++;
-        Dialog = new DialogSnapshot(reading, DialogAvailW, _dialogSeq, cause);
+        Dialog = new DialogSnapshot(reading, availW, _dialogSeq, cause);
         PostToUi(() => DialogChanged?.Invoke());
         if (reading is null)
         {
@@ -1082,7 +1089,8 @@ internal sealed unsafe class Canvas : IDisposable
         }
         _report(reading.Open
             ? $"DIALOG PLAN open=true dialog={reading.Id} depth={reading.Depth} modal={(reading.Modal ? "true" : "false")} "
-              + $"avail-w={DialogAvailW} {PlanReading(reading.PlanJson!)} cause={cause} seq={_dialogSeq} {Tids()}"
+              + $"avail-w={availW} width={reading.Width?.ToString() ?? "none"} {PlanReading(reading.PlanJson!)} "
+              + $"cause={cause} seq={_dialogSeq} {Tids()}"
             : $"DIALOG PLAN open=false cause={cause} seq={_dialogSeq} {Tids()}");
     }
 
