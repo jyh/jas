@@ -92,9 +92,10 @@ fn path_of(v: &Value) -> Vec<i64> {
 /// (`description`), and a shell that received those would be handed something
 /// to evaluate or would show a paragraph where a label belongs. Measured on the
 /// compiled workspace (W2-5a): these eight are the display strings panel
-/// widgets carry.
-pub const STATIC_KEYS: [&str; 8] =
-    ["content", "label", "summary", "icon", "name", "unit", "suffix", "placeholder"];
+/// widgets carry. `orientation` joined 2026-10-15: a separator's declared
+/// direction, which a shell otherwise guessed from its rect's shape.
+pub const STATIC_KEYS: [&str; 9] =
+    ["content", "label", "summary", "icon", "name", "unit", "suffix", "placeholder", "orientation"];
 
 /// The node keys whose LITERAL bool a shell may act on (W2b-9 prerequisite).
 ///
@@ -2421,6 +2422,21 @@ mod tests {
         let selected: Vec<&str> = rows.iter().filter(|r| r["selected"] == true)
             .map(|r| r["value"].as_str().unwrap()).collect();
         assert_eq!(selected, ["center"]);
+    }
+
+    /// A separator's declared `orientation` reaches the shell (flask STATUS
+    /// §279/§280: the WinUI rule followed the rect's shape, because the plan
+    /// carried no orientation). The Color panel's `cp_swatch_rule` is a 1 px
+    /// VERTICAL rule 16 high that the shape rule can read either way.
+    #[test]
+    fn a_separators_orientation_is_static() {
+        let panel = json!({"content": {"type": "row", "children": [
+            {"type": "separator", "orientation": "vertical", "style": {"height": 16}},
+            {"type": "separator", "orientation": "horizontal"},
+            {"type": "separator"}]}});
+        let got: Vec<Value> = entries_with_nodes(&panel, &json!({}))
+            .into_iter().map(|(e, _)| e["static"]["orientation"].clone()).collect();
+        assert_eq!(got, vec![json!("vertical"), json!("horizontal"), Value::Null], "undeclared stays absent");
     }
 
     /// An option may name an `icon` (Artboard Options' orientation group): its
