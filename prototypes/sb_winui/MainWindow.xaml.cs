@@ -508,6 +508,7 @@ public sealed partial class MainWindow : Window
     /// <summary>S2: the view drawing the open dialog, rebuilt when the dialog's id changes.</summary>
     private PaneView? _dialogView;
     private string? _dialogViewId;
+    private long _dialogViewW;
 
     /// <summary>
     /// S2: draw the engine's newest dialog reading. Open: the TOP dialog's plan
@@ -533,8 +534,11 @@ public sealed partial class MainWindow : Window
             if (was is not null) { Report($"DIALOG HIDDEN dialog={was} seq={snap.Seq} cause={snap.Cause}"); }
             return;
         }
-        if (_dialogView is null || _dialogViewId != r.Id)
+        // A view's width is fixed at build, so a new dialog OR a new width
+        // (a pop to a parent that declares another) builds a new one.
+        if (_dialogView is null || _dialogViewId != r.Id || _dialogViewW != snap.AvailW)
         {
+            _dialogViewW = snap.AvailW;
             _dialogView = new PaneView(this, DialogFrame, DialogScroll, snap.AvailW, r.Id, topAligned: true, dialog: true);
             _dialogViewId = r.Id;
             DialogScroll.Width = snap.AvailW + 2 * PanePad;
@@ -554,7 +558,7 @@ public sealed partial class MainWindow : Window
         }
         // Keyboard focus goes into the layer, so Escape and Tab start there.
         if (first) { DialogClose.Focus(FocusState.Programmatic); }
-        Report($"DIALOG SHOWN dialog={r.Id} depth={r.Depth} modal={(r.Modal ? "true" : "false")} "
+        Report($"DIALOG SHOWN dialog={r.Id} depth={r.Depth} modal={(r.Modal ? "true" : "false")} avail-w={snap.AvailW} "
              + $"seq={snap.Seq} cause={snap.Cause} frame-dips={DialogFrame.ActualWidth:0}x{DialogFrame.ActualHeight:0}");
     }
 

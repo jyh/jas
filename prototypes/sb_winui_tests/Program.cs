@@ -634,6 +634,22 @@ static class Program
             DialogWire.Read("""{"open":true,"depth":1,"plan":{}}""")?.Open.ToString() ?? "(null)");
         Eq("dialog: the empty span is unreadable", "(null)", DialogWire.Read("")?.Open.ToString() ?? "(null)");
         Eq("dialog: bytes that are not JSON are unreadable", "(null)", DialogWire.Read("{open")?.Open.ToString() ?? "(null)");
+        // jas §271: the reply carries the dialog's DECLARED width, or null (18 of
+        // 33 declare none, and the web sizes those to content). The shell plans
+        // at the declared width, else at its own default.
+        Eq("dialog width: a declared width is read", "460",
+            DialogWire.Read("""{"open":true,"id":"document_setup","depth":1,"width":460,"plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: null is no declared width", "(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":null,"plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: an older engine with no key is no declared width, and the dialog still reads", "True|(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"plan":{}}""") is { } nw ? $"{nw.Open}|{nw.Width?.ToString() ?? "(null)"}" : "(null)");
+        Eq("dialog width: zero or negative is no width", "(null)|(null)",
+            (DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":0,"plan":{}}""")?.Width?.ToString() ?? "(null)") + "|"
+            + (DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":-5,"plan":{}}""")?.Width?.ToString() ?? "(null)"));
+        Eq("dialog width: a string is no width", "(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":"460","plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: plan at the declared width", "720", DialogWire.PlanWidth(720, 420).ToString());
+        Eq("dialog width: plan at the default when none is declared", "420", DialogWire.PlanWidth(null, 420).ToString());
         Eq("dialog: an act's reply naming a dialog", "layer_options",
             DialogWire.Named("""{"changed":[],"doc_changed":false,"dialog":"layer_options"}""") ?? "(null)");
         Eq("dialog: an act's reply with dialog null names none", "(null)",

@@ -951,7 +951,8 @@ internal static class PanelMenuWire
 /// the engine holds (2 when the Color Picker sits over Layer Options); the
 /// shell draws only the TOP one, whose plan this is.
 /// </summary>
-internal sealed record DialogReading(bool Open, string Id, string Summary, bool Modal, int Depth, string? PlanJson);
+internal sealed record DialogReading(bool Open, string Id, string Summary, bool Modal, int Depth, string? PlanJson,
+                                     long? Width = null);
 
 /// <summary>
 /// S2, the dialog door's shell half: the two replies the overlay host reads.
@@ -986,13 +987,21 @@ internal static class DialogWire
                 : name;
             var modal = root.TryGetProperty("modal", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True;
             var depth = root.TryGetProperty("depth", out var d) && d.TryGetInt32(out var n) ? n : 1;
-            return new DialogReading(true, name, summary, modal, depth, plan.GetRawText());
+            // §271: the declared width, or null. Null, a missing key (an older
+            // engine), or anything but a positive integer is "none declared".
+            long? width = root.TryGetProperty("width", out var w) && w.ValueKind == System.Text.Json.JsonValueKind.Number
+                          && w.TryGetInt64(out var wv) && wv > 0 ? wv : null;
+            return new DialogReading(true, name, summary, modal, depth, plan.GetRawText(), width);
         }
         catch (System.Text.Json.JsonException)
         {
             return null;
         }
     }
+
+    /// <summary>The width a dialog is planned at: its declared one, else the
+    /// shell's default (jas §271: the engine invents none).</summary>
+    internal static long PlanWidth(long? declared, long fallback) => declared ?? fallback;
 
     /// <summary>The dialog an act's reply names as open after it (#414's
     /// `"dialog": <id> | null`); null when it names none or cannot be read.</summary>
