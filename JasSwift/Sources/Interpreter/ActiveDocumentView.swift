@@ -42,6 +42,7 @@ public func buildActiveDocumentView(
             ] as [String: Any],
             // No document: nothing to save (`runtime_contexts.yaml` defaults).
             "is_modified": false,
+            "any_modified": false,
             "has_filename": false,
             "filename": "",
             "document_setup": documentSetupView(.default),
@@ -229,6 +230,11 @@ public func buildActiveDocumentView(
         // `filename` is the name the tab shows (`Untitled-N` until a save).
         // Mirrors Rust `build_active_document_view`.
         "is_modified": m.isModified,
+        // Whether ANY open document has unsaved changes, which `quit` asks
+        // (actions.yaml). This view sees one model, so it answers for that one,
+        // as Rust's shared `active_document_view` does. Until 2026-10-15 no port
+        // built it, so the YAML `quit` never offered to save.
+        "any_modified": m.isModified,
         "has_filename": !m.filename.hasPrefix("Untitled-"),
         "filename": m.filename,
         "document_setup": documentSetupView(m.document.documentSetup),

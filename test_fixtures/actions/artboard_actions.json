@@ -270,5 +270,29 @@
     "expected_dialog": {
       "id": "save_changes_tab"
     }
+  },
+  {
+    "name": "quit_with_an_edited_document_asks_to_save",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "set_stroke_cap",
+        "params": {
+          "cap": "square"
+        }
+      },
+      {
+        "action": "quit",
+        "params": {}
+      }
+    ],
+    "expected_json": "quit_with_an_edited_document_expected.json",
+    "expected_dialog": {
+      "id": "save_changes_window"
+    }
   }
 ]
