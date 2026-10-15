@@ -620,6 +620,14 @@ static class Program
         // jas §287 (#434): a `reference_point_widget` plans its kind's nine
         // anchors as option rows; the face lays any perfect-square count out as
         // a square grid, row by row, and refuses any other count.
+        // #431: an `icon_button_group`'s option rows name an `icon`, which the
+        // plan's `icons` map carries; the reader keeps the name, or null.
+        var iconRows = PanelWire.ReadOptions("""[{"kind":"option","value":"portrait","label":"portrait","icon":"orientation_portrait","selected":false},{"kind":"option","value":"x","label":"x","selected":true}]""");
+        Eq("options: a row's icon is read", "orientation_portrait", iconRows?.Items[0].Icon ?? "(null)");
+        Eq("options: a row with no icon reads none", "(null)", iconRows?.Items[1].Icon ?? "(null)");
+        Eq("icon group: two buttons in a 56x28 rect are 28 square", "28", PanelWire.GroupCellSide(56, 28, 2).ToString());
+        Eq("icon group: a narrow rect shares its width", "20", PanelWire.GroupCellSide(40, 28, 2).ToString());
+        Eq("icon group: no options is no cell", "0", PanelWire.GroupCellSide(56, 28, 0).ToString());
         Eq("grid: nine rows are three columns", "3", PanelWire.GridColumns(9)?.ToString() ?? "(null)");
         Eq("grid: four rows are two columns", "2", PanelWire.GridColumns(4)?.ToString() ?? "(null)");
         Eq("grid: one row is one column", "1", PanelWire.GridColumns(1)?.ToString() ?? "(null)");
