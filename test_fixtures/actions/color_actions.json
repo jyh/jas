@@ -207,6 +207,23 @@
     }
   },
   {
+    "name": "save_swatch_library_opens_with_an_empty_name",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "save_swatch_library",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_print_dialog_expected.json",
+    "expected_dialog": {
+      "id": "swatch_library_save",
+      "state": {
+        "name": ""
+      }
+    }
+  },
+  {
     "name": "open_color_picker_stroke_starts_on_the_stroke_colour",
     "setup_svg": "rect_with_stroke.svg",
     "actions": [
