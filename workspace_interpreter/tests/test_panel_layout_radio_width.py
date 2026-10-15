@@ -45,6 +45,14 @@ def test_an_icon_button_group_is_its_buttons_four_apart():
     assert _w({"type": "icon_button_group"}) == 0
 
 
+def test_a_reference_point_widget_is_its_3x3_grid():
+    # The web's `repeat(3, 8px)` tracks with `gap: 2px`, both ways: 28 x 28.
+    rows = layout_panel({"content": {"type": "row", "children": [
+        {"type": "reference_point_widget"}]}}, 400)
+    rect = next(r["rect"] for r in rows if r["path"] == [0])
+    assert (rect["w"], rect["h"]) == (28, 28)
+
+
 def test_a_group_with_no_options_is_empty():
     assert _w({"type": "radio_group"}) == 0
     assert _w({"type": "radio_group", "options": "dialog.list"}) == 0, "computed options: unknown"

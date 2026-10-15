@@ -23,9 +23,15 @@ struct ArtboardWidgetTests {
         let rows = referencePointAnchorRowsForTest
         #expect(rows.count == 3, "three rows")
         #expect(rows.allSatisfy { $0.count == 3 }, "three cells each")
-        #expect(rows[0] == ["top_left", "top", "top_right"], "top row")
-        #expect(rows[1] == ["left", "center", "right"], "middle row")
-        #expect(rows[2] == ["bottom_left", "bottom", "bottom_right"], "bottom row")
+        #expect(rows[0] == ["top_left", "top_center", "top_right"], "top row")
+        #expect(rows[1] == ["middle_left", "center", "middle_right"], "middle row")
+        #expect(rows[2] == ["bottom_left", "bottom_center", "bottom_right"], "bottom row")
+        // Every cell is a name `anchor_offset_x` places (a name it does not
+        // know reads 0, the left edge, which `top`/`left` did silently).
+        for name in rows.flatMap({ $0 }) where !name.hasSuffix("_left") {
+            let v = evaluate("anchor_offset_x('\(name)', 10)", context: [:])
+            #expect(v != .number(0), "\(name) is placed")
+        }
         // Exactly nine distinct anchors, no duplicate cell.
         #expect(Set(rows.flatMap { $0 }).count == 9, "nine distinct anchors")
         // "center" is the widget's declared default and must be present.
