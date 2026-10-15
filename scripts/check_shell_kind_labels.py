@@ -76,7 +76,7 @@ def shell_case_labels(src: str) -> list[str]:
 
 
 def spec_kinds(src: str) -> set[str]:
-    """INPUT_KINDS | BOOLEAN_KINDS, read from the spec's own frozensets."""
+    """Every `*_KINDS` table's kinds, read from the spec's own frozensets."""
     # EVERY `*_KINDS` table, not two named ones: #429 added CHECK_KINDS and
     # OPTION_KINDS beside ITEM_KINDS, and a fixed list would have read radio
     # as a typo. The two original tables must still be there, so a renamed

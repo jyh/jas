@@ -617,6 +617,26 @@ static class Program
         // kind (`click`); `radio_group` an option kind (`toggle` carrying the
         // option's id). The engine refuses a press on the checked one
         // (`AlreadyChecked`); the shell never decides that itself.
+        // jas §287 (#434): a `reference_point_widget` plans its kind's nine
+        // anchors as option rows; the face lays any perfect-square count out as
+        // a square grid, row by row, and refuses any other count.
+        // #431: an `icon_button_group`'s option rows name an `icon`, which the
+        // plan's `icons` map carries; the reader keeps the name, or null.
+        var iconRows = PanelWire.ReadOptions("""[{"kind":"option","value":"portrait","label":"portrait","icon":"orientation_portrait","selected":false},{"kind":"option","value":"x","label":"x","selected":true}]""");
+        Eq("options: a row's icon is read", "orientation_portrait", iconRows?.Items[0].Icon ?? "(null)");
+        Eq("options: a row with no icon reads none", "(null)", iconRows?.Items[1].Icon ?? "(null)");
+        Eq("icon group: two buttons in a 56x28 rect are 28 square", "28", PanelWire.GroupCellSide(56, 28, 2).ToString());
+        Eq("icon group: a narrow rect shares its width", "20", PanelWire.GroupCellSide(40, 28, 2).ToString());
+        Eq("icon group: no options is no cell", "0", PanelWire.GroupCellSide(56, 28, 0).ToString());
+        Eq("grid: nine rows are three columns", "3", PanelWire.GridColumns(9)?.ToString() ?? "(null)");
+        Eq("grid: four rows are two columns", "2", PanelWire.GridColumns(4)?.ToString() ?? "(null)");
+        Eq("grid: one row is one column", "1", PanelWire.GridColumns(1)?.ToString() ?? "(null)");
+        Eq("grid: no rows is no grid", "(null)", PanelWire.GridColumns(0)?.ToString() ?? "(null)");
+        Eq("grid: eight rows are no square, refused", "(null)", PanelWire.GridColumns(8)?.ToString() ?? "(null)");
+        Eq("grid: the sixth row (middle_right) sits at row 1, column 2", "1|2",
+            PanelWire.GridCell(5, 3) is var (gr, gc) ? $"{gr}|{gc}" : "");
+        Eq("grid: the last row (bottom_right) sits at row 2, column 2", "2|2",
+            PanelWire.GridCell(8, 3) is var (lr, lc) ? $"{lr}|{lc}" : "");
         Eq("radio: a radio sends click, no value", "click|(null)",
             PanelWire.RadioEvent("radio", "x") is var (re, rv) ? $"{re}|{rv ?? "(null)"}" : "");
         Eq("radio: a radio_group sends toggle with the option's id", "toggle|s",
