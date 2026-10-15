@@ -246,6 +246,40 @@
     }
   },
   {
+    "name": "save_appearance_as_opens_with_an_empty_name",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "save_appearance_as",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_print_dialog_expected.json",
+    "expected_dialog": {
+      "id": "appearance_save_as",
+      "state": {
+        "name": ""
+      }
+    }
+  },
+  {
+    "name": "save_workspace_as_opens_with_an_empty_name",
+    "setup_svg": "rect_with_stroke.svg",
+    "actions": [
+      {
+        "action": "save_workspace_as",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_print_dialog_expected.json",
+    "expected_dialog": {
+      "id": "workspace_save_as",
+      "state": {
+        "name": ""
+      }
+    }
+  },
+  {
     "name": "close_tab_on_an_edited_document_asks_to_save",
     "setup_svg": "rect_with_stroke.svg",
     "actions": [
