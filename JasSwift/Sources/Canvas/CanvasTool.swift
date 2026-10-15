@@ -81,6 +81,11 @@ extension CanvasTool {
     func activate(_ ctx: ToolContext) {}
     func deactivate(_ ctx: ToolContext) {}
     func capturesKeyboard() -> Bool { false }
+    /// A dialog this tool's last event opened, handed to the host and closed
+    /// in the tool: its id and its params, resolved in the tool's own scope.
+    /// The host opens it in the model's store. Nil when the event opened none
+    /// (Rust `CanvasTool::take_opened_dialog`).
+    func takeOpenedDialog() -> (id: String, params: [String: Any])? { nil }
     func isEditing() -> Bool { false }
     func cursorOverride() -> String? { nil }
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool { false }
@@ -195,4 +200,38 @@ func createTools() -> [Tool: CanvasTool] {
         }
     }
     return registry
+}
+
+
+/// Open in the MODEL's store a dialog a tool opened: the same `open_dialog`
+/// effect an action runs, so the dialog's `init` evaluates in the app's scope.
+/// The params arrive RESOLVED in the tool's scope and the effect evaluates each
+/// as an expression, so each travels as a literal (``toolParamLiteral(_:)``);
+/// a param with no literal opens nothing. Rust `ffi::open_tool_dialog`.
+@discardableResult
+func openToolDialog(_ opened: (id: String, params: [String: Any]), model: Model) -> Bool {
+    var literal: [String: Any] = [:]
+    for (k, v) in opened.params {
+        guard let expr = toolParamLiteral(v) else { return false }
+        literal[k] = expr
+    }
+    let ws = WorkspaceData.load()
+    runEffects([["open_dialog": ["id": opened.id, "params": literal] as [String: Any]]],
+               ctx: [:], store: model.stateStore,
+               actions: ws?.actions(), dialogs: ws?.data["dialogs"] as? [String: Any],
+               model: model)
+    return model.stateStore.getDialogId() == opened.id
+}
+
+/// A resolved value as an expression that evaluates back to it: a string in
+/// single quotes (nil when it holds one), a number or bool as its text, null.
+/// Rust `ffi::tool_param_literal`.
+func toolParamLiteral(_ v: Any) -> String? {
+    if v is NSNull { return "null" }
+    if let n = v as? NSNumber {
+        if String(cString: n.objCType) == "c" || String(cString: n.objCType) == "B" { return n.boolValue ? "true" : "false" }
+        return n.stringValue
+    }
+    if let s = v as? String { return s.contains("'") ? nil : "'\(s)'" }
+    return nil
 }
