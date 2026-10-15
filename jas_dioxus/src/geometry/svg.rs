@@ -1098,7 +1098,7 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                 format!(" xml:lang=\"{}\"", escape_xml(&e.xml_lang))
             } else { String::new() };
             let aa_attr = if !e.aa_mode.is_empty() {
-                format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
+                format!(" jas:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
             let rotate_attr = if !e.rotate.is_empty() {
                 format!(" rotate=\"{}\"", e.rotate)
@@ -1110,7 +1110,7 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                 format!(" vertical-scale=\"{}\"", e.vertical_scale)
             } else { String::new() };
             let kern_attr = if !e.kerning.is_empty() {
-                format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
+                format!(" jas:kerning-mode=\"{}\"", escape_xml(&e.kerning))
             } else { String::new() };
             // `text-anchor` rides the same trailing slot as the kerning mode:
             // both are emitted only when set, so a file without either is
@@ -1189,7 +1189,7 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                 format!(" xml:lang=\"{}\"", escape_xml(&e.xml_lang))
             } else { String::new() };
             let aa_attr = if !e.aa_mode.is_empty() {
-                format!(" urn:jas:1:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
+                format!(" jas:aa-mode=\"{}\"", escape_xml(&e.aa_mode))
             } else { String::new() };
             let rotate_attr = if !e.rotate.is_empty() {
                 format!(" rotate=\"{}\"", e.rotate)
@@ -1201,7 +1201,7 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                 format!(" vertical-scale=\"{}\"", e.vertical_scale)
             } else { String::new() };
             let kern_attr = if !e.kerning.is_empty() {
-                format!(" urn:jas:1:kerning-mode=\"{}\"", escape_xml(&e.kerning))
+                format!(" jas:kerning-mode=\"{}\"", escape_xml(&e.kerning))
             } else { String::new() };
             let is_flat = e.tspans.len() == 1 && e.tspans[0].has_no_overrides();
             let (space_attr, body) = if is_flat {
@@ -1626,22 +1626,22 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
         attrs.push_str(&format!(" rotate=\"{}\"", fmt(v)));
     }
     if let Some(v) = &t.jas_role {
-        attrs.push_str(&format!(" urn:jas:1:role=\"{}\"", escape_xml(v)));
+        attrs.push_str(&format!(" jas:role=\"{}\"", escape_xml(v)));
     }
     if let Some(v) = t.jas_left_indent {
-        attrs.push_str(&format!(" urn:jas:1:left-indent=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:left-indent=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_right_indent {
-        attrs.push_str(&format!(" urn:jas:1:right-indent=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:right-indent=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate=\"{}\"", v));
+        attrs.push_str(&format!(" jas:hyphenate=\"{}\"", v));
     }
     if let Some(v) = t.jas_hanging_punctuation {
-        attrs.push_str(&format!(" urn:jas:1:hanging-punctuation=\"{}\"", v));
+        attrs.push_str(&format!(" jas:hanging-punctuation=\"{}\"", v));
     }
     if let Some(v) = &t.jas_list_style {
-        attrs.push_str(&format!(" urn:jas:1:list-style=\"{}\"", escape_xml(v)));
+        attrs.push_str(&format!(" jas:list-style=\"{}\"", escape_xml(v)));
     }
     if let Some(v) = &t.text_align {
         attrs.push_str(&format!(" text-align=\"{}\"", escape_xml(v)));
@@ -1653,66 +1653,73 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
         attrs.push_str(&format!(" text-indent=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_space_before {
-        attrs.push_str(&format!(" urn:jas:1:space-before=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:space-before=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_space_after {
-        attrs.push_str(&format!(" urn:jas:1:space-after=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:space-after=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_word_spacing_min {
-        attrs.push_str(&format!(" urn:jas:1:word-spacing-min=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:word-spacing-min=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_word_spacing_desired {
-        attrs.push_str(&format!(" urn:jas:1:word-spacing-desired=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:word-spacing-desired=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_word_spacing_max {
-        attrs.push_str(&format!(" urn:jas:1:word-spacing-max=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:word-spacing-max=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_letter_spacing_min {
-        attrs.push_str(&format!(" urn:jas:1:letter-spacing-min=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:letter-spacing-min=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_letter_spacing_desired {
-        attrs.push_str(&format!(" urn:jas:1:letter-spacing-desired=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:letter-spacing-desired=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_letter_spacing_max {
-        attrs.push_str(&format!(" urn:jas:1:letter-spacing-max=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:letter-spacing-max=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_glyph_scaling_min {
-        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-min=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:glyph-scaling-min=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_glyph_scaling_desired {
-        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-desired=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:glyph-scaling-desired=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_glyph_scaling_max {
-        attrs.push_str(&format!(" urn:jas:1:glyph-scaling-max=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:glyph-scaling-max=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_auto_leading {
-        attrs.push_str(&format!(" urn:jas:1:auto-leading=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:auto-leading=\"{}\"", fmt(v)));
     }
     if let Some(v) = &t.jas_single_word_justify {
-        attrs.push_str(&format!(" urn:jas:1:single-word-justify=\"{}\"", escape_xml(v)));
+        attrs.push_str(&format!(" jas:single-word-justify=\"{}\"", escape_xml(v)));
     }
     if let Some(v) = t.jas_hyphenate_min_word {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-word=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-min-word=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_min_before {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-before=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-min-before=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_min_after {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-min-after=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-min-after=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_limit {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-limit=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-limit=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_zone {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-zone=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-zone=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_bias {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-bias=\"{}\"", fmt(v)));
+        attrs.push_str(&format!(" jas:hyphenate-bias=\"{}\"", fmt(v)));
     }
     if let Some(v) = t.jas_hyphenate_capitalized {
-        attrs.push_str(&format!(" urn:jas:1:hyphenate-capitalized=\"{}\"", v));
+        attrs.push_str(&format!(" jas:hyphenate-capitalized=\"{}\"", v));
     }
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
+}
+
+/// A jas attribute by its local name: `jas:<name>` (written since 2026-10-15,
+/// a valid QName under the declared `xmlns:jas`), else `urn:jas:1:<name>`
+/// (the spelling every earlier file carries), so old files still read.
+fn jas_attr<'a>(attrs: &'a HashMap<String, String>, name: &str) -> Option<&'a String> {
+    attrs.get(&format!("jas:{name}")).or_else(|| attrs.get(&format!("urn:jas:1:{name}")))
 }
 
 /// Parse an SVG `<tspan>` child node into one or more Tspans.
@@ -1744,58 +1751,58 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             parts.sort();
             parts
         }),
-        jas_role: node.attrs.get("urn:jas:1:role").cloned(),
-        jas_left_indent: node.attrs.get("urn:jas:1:left-indent")
+        jas_role: jas_attr(&node.attrs, "role").cloned(),
+        jas_left_indent: jas_attr(&node.attrs, "left-indent")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_right_indent: node.attrs.get("urn:jas:1:right-indent")
+        jas_right_indent: jas_attr(&node.attrs, "right-indent")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate: node.attrs.get("urn:jas:1:hyphenate")
+        jas_hyphenate: jas_attr(&node.attrs, "hyphenate")
             .map(|v| v == "true"),
-        jas_hanging_punctuation: node.attrs.get("urn:jas:1:hanging-punctuation")
+        jas_hanging_punctuation: jas_attr(&node.attrs, "hanging-punctuation")
             .map(|v| v == "true"),
-        jas_list_style: node.attrs.get("urn:jas:1:list-style").cloned(),
+        jas_list_style: jas_attr(&node.attrs, "list-style").cloned(),
         text_align: node.attrs.get("text-align").cloned(),
         text_align_last: node.attrs.get("text-align-last").cloned(),
         text_indent: node.attrs.get("text-indent")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_space_before: node.attrs.get("urn:jas:1:space-before")
+        jas_space_before: jas_attr(&node.attrs, "space-before")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_space_after: node.attrs.get("urn:jas:1:space-after")
+        jas_space_after: jas_attr(&node.attrs, "space-after")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_word_spacing_min: node.attrs.get("urn:jas:1:word-spacing-min")
+        jas_word_spacing_min: jas_attr(&node.attrs, "word-spacing-min")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_word_spacing_desired: node.attrs.get("urn:jas:1:word-spacing-desired")
+        jas_word_spacing_desired: jas_attr(&node.attrs, "word-spacing-desired")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_word_spacing_max: node.attrs.get("urn:jas:1:word-spacing-max")
+        jas_word_spacing_max: jas_attr(&node.attrs, "word-spacing-max")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_letter_spacing_min: node.attrs.get("urn:jas:1:letter-spacing-min")
+        jas_letter_spacing_min: jas_attr(&node.attrs, "letter-spacing-min")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_letter_spacing_desired: node.attrs.get("urn:jas:1:letter-spacing-desired")
+        jas_letter_spacing_desired: jas_attr(&node.attrs, "letter-spacing-desired")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_letter_spacing_max: node.attrs.get("urn:jas:1:letter-spacing-max")
+        jas_letter_spacing_max: jas_attr(&node.attrs, "letter-spacing-max")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_glyph_scaling_min: node.attrs.get("urn:jas:1:glyph-scaling-min")
+        jas_glyph_scaling_min: jas_attr(&node.attrs, "glyph-scaling-min")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_glyph_scaling_desired: node.attrs.get("urn:jas:1:glyph-scaling-desired")
+        jas_glyph_scaling_desired: jas_attr(&node.attrs, "glyph-scaling-desired")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_glyph_scaling_max: node.attrs.get("urn:jas:1:glyph-scaling-max")
+        jas_glyph_scaling_max: jas_attr(&node.attrs, "glyph-scaling-max")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_auto_leading: node.attrs.get("urn:jas:1:auto-leading")
+        jas_auto_leading: jas_attr(&node.attrs, "auto-leading")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_single_word_justify: node.attrs.get("urn:jas:1:single-word-justify").cloned(),
-        jas_hyphenate_min_word: node.attrs.get("urn:jas:1:hyphenate-min-word")
+        jas_single_word_justify: jas_attr(&node.attrs, "single-word-justify").cloned(),
+        jas_hyphenate_min_word: jas_attr(&node.attrs, "hyphenate-min-word")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_min_before: node.attrs.get("urn:jas:1:hyphenate-min-before")
+        jas_hyphenate_min_before: jas_attr(&node.attrs, "hyphenate-min-before")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_min_after: node.attrs.get("urn:jas:1:hyphenate-min-after")
+        jas_hyphenate_min_after: jas_attr(&node.attrs, "hyphenate-min-after")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_limit: node.attrs.get("urn:jas:1:hyphenate-limit")
+        jas_hyphenate_limit: jas_attr(&node.attrs, "hyphenate-limit")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_zone: node.attrs.get("urn:jas:1:hyphenate-zone")
+        jas_hyphenate_zone: jas_attr(&node.attrs, "hyphenate-zone")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_bias: node.attrs.get("urn:jas:1:hyphenate-bias")
+        jas_hyphenate_bias: jas_attr(&node.attrs, "hyphenate-bias")
             .and_then(|s| s.parse::<f64>().ok()),
-        jas_hyphenate_capitalized: node.attrs.get("urn:jas:1:hyphenate-capitalized")
+        jas_hyphenate_capitalized: jas_attr(&node.attrs, "hyphenate-capitalized")
             .map(|v| v == "true"),
         ..Tspan::default_tspan()
     };
@@ -2517,13 +2524,13 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
                 .or_else(|| node.attrs.get("lang"))
                 .cloned()
                 .unwrap_or_default();
-            let aa = node.attrs.get("urn:jas:1:aa-mode")
+            let aa = jas_attr(&node.attrs, "aa-mode")
                 .cloned()
                 .unwrap_or_default();
             let rotate = get_s(node, "rotate", "").to_string();
             let h_scale = get_s(node, "horizontal-scale", "").to_string();
             let v_scale = get_s(node, "vertical-scale", "").to_string();
-            let kerning = node.attrs.get("urn:jas:1:kerning-mode")
+            let kerning = jas_attr(&node.attrs, "kerning-mode")
                 .cloned()
                 .unwrap_or_default();
 
@@ -5011,8 +5018,8 @@ mod tests {
                 "expected text-align in serialised SVG, got: {}", svg);
         assert!(svg.contains(r#"text-align-last="left""#));
         assert!(svg.contains(r#"text-indent="-18""#));
-        assert!(svg.contains(r#"urn:jas:1:space-before="6""#));
-        assert!(svg.contains(r#"urn:jas:1:space-after="12""#));
+        assert!(svg.contains(r#"jas:space-before="6""#));
+        assert!(svg.contains(r#"jas:space-after="12""#));
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
@@ -5046,12 +5053,12 @@ mod tests {
         doc.layers[0].children_mut().unwrap()
             .push(std::rc::Rc::new(Element::Text(t)));
         let svg = document_to_svg(&doc);
-        assert!(svg.contains(r#"urn:jas:1:left-indent="18""#),
+        assert!(svg.contains(r#"jas:left-indent="18""#),
                 "expected left-indent in serialised SVG, got: {}", svg);
-        assert!(svg.contains(r#"urn:jas:1:right-indent="9""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate="true""#));
-        assert!(svg.contains(r#"urn:jas:1:hanging-punctuation="true""#));
-        assert!(svg.contains(r#"urn:jas:1:list-style="num-decimal""#));
+        assert!(svg.contains(r#"jas:right-indent="9""#));
+        assert!(svg.contains(r#"jas:hyphenate="true""#));
+        assert!(svg.contains(r#"jas:hanging-punctuation="true""#));
+        assert!(svg.contains(r#"jas:list-style="num-decimal""#));
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
@@ -5065,9 +5072,43 @@ mod tests {
         assert_eq!(w.jas_list_style.as_deref(), Some("num-decimal"));
     }
 
+    /// jas's attributes are written as `jas:<name>` under the declared
+    /// `xmlns:jas`, a valid XML QName. Until 2026-10-15 they were written
+    /// `urn:jas:1:<name>`, an undeclared prefix, which a strict XML reader
+    /// (Swift's XMLDocument) refuses for the WHOLE file: the document opened
+    /// empty. Old files keep that spelling, so the reader accepts both.
+    #[test]
+    fn jas_attributes_are_valid_qnames_and_the_old_spelling_still_reads() {
+        use crate::geometry::tspan::Tspan;
+        let mut doc = Document::default();
+        let mut t = crate::geometry::element::empty_text_elem(10.0, 20.0, 200.0, 80.0);
+        t.tspans = vec![
+            Tspan { id: 0, jas_role: Some("paragraph".into()), jas_word_spacing_min: Some(70.0),
+                    ..Tspan::default_tspan() },
+            Tspan { id: 1, content: "hello".into(), ..Tspan::default_tspan() },
+        ];
+        doc.layers[0].children_mut().unwrap().push(std::rc::Rc::new(Element::Text(t)));
+        let svg = document_to_svg(&doc);
+        assert!(svg.contains(r#" jas:role="paragraph""#), "the new spelling: {svg}");
+        assert!(!svg.contains("urn:jas:1:"), "no undeclared-prefix attribute names remain: {svg}");
+        assert!(svg.contains(r#"xmlns:jas="urn:jas:1""#), "the prefix is declared: {svg}");
+        // Built in pieces so a mechanical rewrite of the old spelling cannot
+        // turn this arm into a no-op (it did once, the same afternoon).
+        const OLD_SPELLING: &str = concat!(" urn", ":jas:1:");
+        let old = svg.replace(" jas:", OLD_SPELLING);
+        assert!(old.contains(r#"urn:jas:1:role="paragraph""#) && old != svg, "the control: the old spelling was made");
+        for (label, text) in [("new", svg.clone()), ("old", svg.replace(" jas:", OLD_SPELLING))] {
+            let back = svg_to_document(&text);
+            let children = back.layers[0].children().unwrap();
+            let Element::Text(t) = &*children[0] else { panic!("{label}: expected Text") };
+            assert_eq!(t.tspans[0].jas_role.as_deref(), Some("paragraph"), "{label}");
+            assert_eq!(t.tspans[0].jas_word_spacing_min, Some(70.0), "{label}");
+        }
+    }
+
     #[test]
     fn svg_jas_role_paragraph_roundtrips_through_document() {
-        // Phase 1a: a <tspan urn:jas:1:role="paragraph"> in document SVG
+        // Phase 1a: a <tspan jas:role="paragraph"> in document SVG
         // parses with jas_role=Some("paragraph") and serialises back
         // with the role attribute preserved.
         use crate::geometry::tspan::Tspan;
@@ -5088,8 +5129,8 @@ mod tests {
         doc.layers[0].children_mut().unwrap()
             .push(std::rc::Rc::new(Element::Text(t)));
         let svg = document_to_svg(&doc);
-        assert!(svg.contains(r#"urn:jas:1:role="paragraph""#),
-                "expected urn:jas:1:role in serialised SVG, got: {}", svg);
+        assert!(svg.contains(r#"jas:role="paragraph""#),
+                "expected jas:role in serialised SVG, got: {}", svg);
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
@@ -5156,12 +5197,12 @@ mod tests {
         doc.layers[0].children_mut().unwrap()
             .push(std::rc::Rc::new(Element::Text(t)));
         let svg = document_to_svg(&doc);
-        // Spot-check a few attributes appear with the urn:jas:1: prefix.
-        assert!(svg.contains(r#"urn:jas:1:word-spacing-min="75""#));
-        assert!(svg.contains(r#"urn:jas:1:letter-spacing-desired="0""#));
-        assert!(svg.contains(r#"urn:jas:1:glyph-scaling-max="105""#));
-        assert!(svg.contains(r#"urn:jas:1:auto-leading="140""#));
-        assert!(svg.contains(r#"urn:jas:1:single-word-justify="left""#));
+        // Spot-check a few attributes appear with the jas: prefix.
+        assert!(svg.contains(r#"jas:word-spacing-min="75""#));
+        assert!(svg.contains(r#"jas:letter-spacing-desired="0""#));
+        assert!(svg.contains(r#"jas:glyph-scaling-max="105""#));
+        assert!(svg.contains(r#"jas:auto-leading="140""#));
+        assert!(svg.contains(r#"jas:single-word-justify="left""#));
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };
@@ -5203,13 +5244,13 @@ mod tests {
         doc.layers[0].children_mut().unwrap()
             .push(std::rc::Rc::new(Element::Text(t)));
         let svg = document_to_svg(&doc);
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-word="6""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-before="3""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-min-after="2""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-limit="2""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-zone="36""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-bias="0.5""#));
-        assert!(svg.contains(r#"urn:jas:1:hyphenate-capitalized="true""#));
+        assert!(svg.contains(r#"jas:hyphenate-min-word="6""#));
+        assert!(svg.contains(r#"jas:hyphenate-min-before="3""#));
+        assert!(svg.contains(r#"jas:hyphenate-min-after="2""#));
+        assert!(svg.contains(r#"jas:hyphenate-limit="2""#));
+        assert!(svg.contains(r#"jas:hyphenate-zone="36""#));
+        assert!(svg.contains(r#"jas:hyphenate-bias="0.5""#));
+        assert!(svg.contains(r#"jas:hyphenate-capitalized="true""#));
         let doc2 = svg_to_document(&svg);
         let children = doc2.layers[0].children().unwrap();
         let Element::Text(t) = &*children[0] else { panic!("expected Text"); };

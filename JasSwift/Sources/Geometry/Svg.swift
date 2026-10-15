@@ -437,7 +437,7 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     if !lineHeight.isEmpty { s += " line-height=\"\(lineHeight)\"" }
     if !letterSpacing.isEmpty { s += " letter-spacing=\"\(letterSpacing)\"" }
     if !xmlLang.isEmpty { s += " xml:lang=\"\(escapeXml(xmlLang))\"" }
-    if !aaMode.isEmpty { s += " urn:jas:1:aa-mode=\"\(escapeXml(aaMode))\"" }
+    if !aaMode.isEmpty { s += " jas:aa-mode=\"\(escapeXml(aaMode))\"" }
     if !rotate.isEmpty { s += " rotate=\"\(rotate)\"" }
     if !horizontalScale.isEmpty { s += " horizontal-scale=\"\(horizontalScale)\"" }
     if !verticalScale.isEmpty { s += " vertical-scale=\"\(verticalScale)\"" }
@@ -445,7 +445,7 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     // Rust's writer; both are emitted only when set, so a file without
     // either is byte-identical to what this writer produced before.
     if !textAnchor.isEmpty { s += " text-anchor=\"\(escapeXml(textAnchor))\"" }
-    if !kerning.isEmpty { s += " urn:jas:1:kerning-mode=\"\(escapeXml(kerning))\"" }
+    if !kerning.isEmpty { s += " jas:kerning-mode=\"\(escapeXml(kerning))\"" }
     return s
 }
 
@@ -480,22 +480,22 @@ private func tspanSvg(_ t: Tspan) -> String {
         attrs += " rotate=\"\(fmt(v))\""
     }
     if let v = t.jasRole {
-        attrs += " urn:jas:1:role=\"\(escapeXml(v))\""
+        attrs += " jas:role=\"\(escapeXml(v))\""
     }
     if let v = t.jasLeftIndent {
-        attrs += " urn:jas:1:left-indent=\"\(fmt(v))\""
+        attrs += " jas:left-indent=\"\(fmt(v))\""
     }
     if let v = t.jasRightIndent {
-        attrs += " urn:jas:1:right-indent=\"\(fmt(v))\""
+        attrs += " jas:right-indent=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenate {
-        attrs += " urn:jas:1:hyphenate=\"\(v)\""
+        attrs += " jas:hyphenate=\"\(v)\""
     }
     if let v = t.jasHangingPunctuation {
-        attrs += " urn:jas:1:hanging-punctuation=\"\(v)\""
+        attrs += " jas:hanging-punctuation=\"\(v)\""
     }
     if let v = t.jasListStyle {
-        attrs += " urn:jas:1:list-style=\"\(escapeXml(v))\""
+        attrs += " jas:list-style=\"\(escapeXml(v))\""
     }
     if let v = t.textAlign {
         attrs += " text-align=\"\(escapeXml(v))\""
@@ -507,64 +507,64 @@ private func tspanSvg(_ t: Tspan) -> String {
         attrs += " text-indent=\"\(fmt(v))\""
     }
     if let v = t.jasSpaceBefore {
-        attrs += " urn:jas:1:space-before=\"\(fmt(v))\""
+        attrs += " jas:space-before=\"\(fmt(v))\""
     }
     if let v = t.jasSpaceAfter {
-        attrs += " urn:jas:1:space-after=\"\(fmt(v))\""
+        attrs += " jas:space-after=\"\(fmt(v))\""
     }
     if let v = t.jasWordSpacingMin {
-        attrs += " urn:jas:1:word-spacing-min=\"\(fmt(v))\""
+        attrs += " jas:word-spacing-min=\"\(fmt(v))\""
     }
     if let v = t.jasWordSpacingDesired {
-        attrs += " urn:jas:1:word-spacing-desired=\"\(fmt(v))\""
+        attrs += " jas:word-spacing-desired=\"\(fmt(v))\""
     }
     if let v = t.jasWordSpacingMax {
-        attrs += " urn:jas:1:word-spacing-max=\"\(fmt(v))\""
+        attrs += " jas:word-spacing-max=\"\(fmt(v))\""
     }
     if let v = t.jasLetterSpacingMin {
-        attrs += " urn:jas:1:letter-spacing-min=\"\(fmt(v))\""
+        attrs += " jas:letter-spacing-min=\"\(fmt(v))\""
     }
     if let v = t.jasLetterSpacingDesired {
-        attrs += " urn:jas:1:letter-spacing-desired=\"\(fmt(v))\""
+        attrs += " jas:letter-spacing-desired=\"\(fmt(v))\""
     }
     if let v = t.jasLetterSpacingMax {
-        attrs += " urn:jas:1:letter-spacing-max=\"\(fmt(v))\""
+        attrs += " jas:letter-spacing-max=\"\(fmt(v))\""
     }
     if let v = t.jasGlyphScalingMin {
-        attrs += " urn:jas:1:glyph-scaling-min=\"\(fmt(v))\""
+        attrs += " jas:glyph-scaling-min=\"\(fmt(v))\""
     }
     if let v = t.jasGlyphScalingDesired {
-        attrs += " urn:jas:1:glyph-scaling-desired=\"\(fmt(v))\""
+        attrs += " jas:glyph-scaling-desired=\"\(fmt(v))\""
     }
     if let v = t.jasGlyphScalingMax {
-        attrs += " urn:jas:1:glyph-scaling-max=\"\(fmt(v))\""
+        attrs += " jas:glyph-scaling-max=\"\(fmt(v))\""
     }
     if let v = t.jasAutoLeading {
-        attrs += " urn:jas:1:auto-leading=\"\(fmt(v))\""
+        attrs += " jas:auto-leading=\"\(fmt(v))\""
     }
     if let v = t.jasSingleWordJustify {
-        attrs += " urn:jas:1:single-word-justify=\"\(escapeXml(v))\""
+        attrs += " jas:single-word-justify=\"\(escapeXml(v))\""
     }
     if let v = t.jasHyphenateMinWord {
-        attrs += " urn:jas:1:hyphenate-min-word=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-min-word=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateMinBefore {
-        attrs += " urn:jas:1:hyphenate-min-before=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-min-before=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateMinAfter {
-        attrs += " urn:jas:1:hyphenate-min-after=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-min-after=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateLimit {
-        attrs += " urn:jas:1:hyphenate-limit=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-limit=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateZone {
-        attrs += " urn:jas:1:hyphenate-zone=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-zone=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateBias {
-        attrs += " urn:jas:1:hyphenate-bias=\"\(fmt(v))\""
+        attrs += " jas:hyphenate-bias=\"\(fmt(v))\""
     }
     if let v = t.jasHyphenateCapitalized {
-        attrs += " urn:jas:1:hyphenate-capitalized=\"\(v)\""
+        attrs += " jas:hyphenate-capitalized=\"\(v)\""
     }
     return "<tspan\(attrs)>\(escapeXml(t.content))</tspan>"
 }
@@ -1481,58 +1481,58 @@ private func parseTspan(_ node: XMLElement) -> [Tspan] {
             raw.split(whereSeparator: { $0.isWhitespace })
                 .compactMap { Double($0) }
         } ?? []
-    let jasRole = node.attribute(forName: "urn:jas:1:role")?.stringValue
-    let jasLeftIndent = (node.attribute(forName: "urn:jas:1:left-indent")?.stringValue)
+    let jasRole = node.attribute(forName: "jas:role")?.stringValue
+    let jasLeftIndent = (node.attribute(forName: "jas:left-indent")?.stringValue)
         .flatMap(Double.init)
-    let jasRightIndent = (node.attribute(forName: "urn:jas:1:right-indent")?.stringValue)
+    let jasRightIndent = (node.attribute(forName: "jas:right-indent")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenate = (node.attribute(forName: "urn:jas:1:hyphenate")?.stringValue)
+    let jasHyphenate = (node.attribute(forName: "jas:hyphenate")?.stringValue)
         .map { $0 == "true" }
-    let jasHangingPunctuation = (node.attribute(forName: "urn:jas:1:hanging-punctuation")?.stringValue)
+    let jasHangingPunctuation = (node.attribute(forName: "jas:hanging-punctuation")?.stringValue)
         .map { $0 == "true" }
-    let jasListStyle = node.attribute(forName: "urn:jas:1:list-style")?.stringValue
+    let jasListStyle = node.attribute(forName: "jas:list-style")?.stringValue
     let textAlign = node.attribute(forName: "text-align")?.stringValue
     let textAlignLast = node.attribute(forName: "text-align-last")?.stringValue
     let textIndent = (node.attribute(forName: "text-indent")?.stringValue)
         .flatMap(Double.init)
-    let jasSpaceBefore = (node.attribute(forName: "urn:jas:1:space-before")?.stringValue)
+    let jasSpaceBefore = (node.attribute(forName: "jas:space-before")?.stringValue)
         .flatMap(Double.init)
-    let jasSpaceAfter = (node.attribute(forName: "urn:jas:1:space-after")?.stringValue)
+    let jasSpaceAfter = (node.attribute(forName: "jas:space-after")?.stringValue)
         .flatMap(Double.init)
-    let jasWordSpacingMin = (node.attribute(forName: "urn:jas:1:word-spacing-min")?.stringValue)
+    let jasWordSpacingMin = (node.attribute(forName: "jas:word-spacing-min")?.stringValue)
         .flatMap(Double.init)
-    let jasWordSpacingDesired = (node.attribute(forName: "urn:jas:1:word-spacing-desired")?.stringValue)
+    let jasWordSpacingDesired = (node.attribute(forName: "jas:word-spacing-desired")?.stringValue)
         .flatMap(Double.init)
-    let jasWordSpacingMax = (node.attribute(forName: "urn:jas:1:word-spacing-max")?.stringValue)
+    let jasWordSpacingMax = (node.attribute(forName: "jas:word-spacing-max")?.stringValue)
         .flatMap(Double.init)
-    let jasLetterSpacingMin = (node.attribute(forName: "urn:jas:1:letter-spacing-min")?.stringValue)
+    let jasLetterSpacingMin = (node.attribute(forName: "jas:letter-spacing-min")?.stringValue)
         .flatMap(Double.init)
-    let jasLetterSpacingDesired = (node.attribute(forName: "urn:jas:1:letter-spacing-desired")?.stringValue)
+    let jasLetterSpacingDesired = (node.attribute(forName: "jas:letter-spacing-desired")?.stringValue)
         .flatMap(Double.init)
-    let jasLetterSpacingMax = (node.attribute(forName: "urn:jas:1:letter-spacing-max")?.stringValue)
+    let jasLetterSpacingMax = (node.attribute(forName: "jas:letter-spacing-max")?.stringValue)
         .flatMap(Double.init)
-    let jasGlyphScalingMin = (node.attribute(forName: "urn:jas:1:glyph-scaling-min")?.stringValue)
+    let jasGlyphScalingMin = (node.attribute(forName: "jas:glyph-scaling-min")?.stringValue)
         .flatMap(Double.init)
-    let jasGlyphScalingDesired = (node.attribute(forName: "urn:jas:1:glyph-scaling-desired")?.stringValue)
+    let jasGlyphScalingDesired = (node.attribute(forName: "jas:glyph-scaling-desired")?.stringValue)
         .flatMap(Double.init)
-    let jasGlyphScalingMax = (node.attribute(forName: "urn:jas:1:glyph-scaling-max")?.stringValue)
+    let jasGlyphScalingMax = (node.attribute(forName: "jas:glyph-scaling-max")?.stringValue)
         .flatMap(Double.init)
-    let jasAutoLeading = (node.attribute(forName: "urn:jas:1:auto-leading")?.stringValue)
+    let jasAutoLeading = (node.attribute(forName: "jas:auto-leading")?.stringValue)
         .flatMap(Double.init)
-    let jasSingleWordJustify = node.attribute(forName: "urn:jas:1:single-word-justify")?.stringValue
-    let jasHyphenateMinWord = (node.attribute(forName: "urn:jas:1:hyphenate-min-word")?.stringValue)
+    let jasSingleWordJustify = node.attribute(forName: "jas:single-word-justify")?.stringValue
+    let jasHyphenateMinWord = (node.attribute(forName: "jas:hyphenate-min-word")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateMinBefore = (node.attribute(forName: "urn:jas:1:hyphenate-min-before")?.stringValue)
+    let jasHyphenateMinBefore = (node.attribute(forName: "jas:hyphenate-min-before")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateMinAfter = (node.attribute(forName: "urn:jas:1:hyphenate-min-after")?.stringValue)
+    let jasHyphenateMinAfter = (node.attribute(forName: "jas:hyphenate-min-after")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateLimit = (node.attribute(forName: "urn:jas:1:hyphenate-limit")?.stringValue)
+    let jasHyphenateLimit = (node.attribute(forName: "jas:hyphenate-limit")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateZone = (node.attribute(forName: "urn:jas:1:hyphenate-zone")?.stringValue)
+    let jasHyphenateZone = (node.attribute(forName: "jas:hyphenate-zone")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateBias = (node.attribute(forName: "urn:jas:1:hyphenate-bias")?.stringValue)
+    let jasHyphenateBias = (node.attribute(forName: "jas:hyphenate-bias")?.stringValue)
         .flatMap(Double.init)
-    let jasHyphenateCapitalized = (node.attribute(forName: "urn:jas:1:hyphenate-capitalized")?.stringValue)
+    let jasHyphenateCapitalized = (node.attribute(forName: "jas:hyphenate-capitalized")?.stringValue)
         .map { $0 == "true" }
     let chars = Array(content)
 
@@ -2144,11 +2144,11 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
         let ls = elem.attribute(forName: "letter-spacing")?.stringValue ?? ""
         let lang = elem.attribute(forName: "xml:lang")?.stringValue
                 ?? elem.attribute(forName: "lang")?.stringValue ?? ""
-        let aa = elem.attribute(forName: "urn:jas:1:aa-mode")?.stringValue ?? ""
+        let aa = elem.attribute(forName: "jas:aa-mode")?.stringValue ?? ""
         let rotate = elem.attribute(forName: "rotate")?.stringValue ?? ""
         let hScale = elem.attribute(forName: "horizontal-scale")?.stringValue ?? ""
         let vScale = elem.attribute(forName: "vertical-scale")?.stringValue ?? ""
-        let kern = elem.attribute(forName: "urn:jas:1:kerning-mode")?.stringValue ?? ""
+        let kern = elem.attribute(forName: "jas:kerning-mode")?.stringValue ?? ""
         // Check for <textPath> child
         if let children = elem.children {
             for child in children {
@@ -2320,7 +2320,24 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
     }
 }
 
+/// A file written before 2026-10-15 spells jas's attributes `urn:jas:1:<name>`,
+/// an undeclared prefix, and XMLDocument refuses the WHOLE file for it (the
+/// document opened empty). Rewrite that spelling to `jas:<name>` and declare
+/// the namespace if the file does not, so old files open with their values.
+/// The `urn:jas:1:` needle ends in a colon, so the namespace VALUE
+/// (`xmlns:jas="urn:jas:1"`) is never rewritten.
+func normalizeLegacyJasAttributes(_ svg: String) -> String {
+    guard svg.contains("urn:jas:1:") else { return svg }
+    var out = svg.replacingOccurrences(
+        of: #"(\s)urn:jas:1:"#, with: "$1jas:", options: .regularExpression)
+    if !out.contains("xmlns:jas="), let r = out.range(of: "<svg") {
+        out.replaceSubrange(r, with: "<svg xmlns:jas=\"urn:jas:1\"")
+    }
+    return out
+}
+
 public func svgToDocument(_ svg: String) -> Document {
+    let svg = normalizeLegacyJasAttributes(svg)
     guard let data = svg.data(using: .utf8) else {
         print("Warning: SVG string is not valid UTF-8")
         // SVG has no artboards concept — return with empty artboards

@@ -1111,7 +1111,7 @@ pub struct TextElem {
     pub xml_lang: String,
     /// Jas custom anti-alias mode — `"None"`, `"Sharp"`, `"Crisp"`,
     /// `"Strong"`, `"Smooth"`, or empty. Emitted as the custom SVG
-    /// attribute `urn:jas:1:aa-mode`; also maps to CSS `text-rendering`
+    /// attribute `jas:aa-mode`; also maps to CSS `text-rendering`
     /// on export. Panel field: Anti-aliasing.
     #[serde(default)]
     pub aa_mode: String,
@@ -1129,7 +1129,7 @@ pub struct TextElem {
     #[serde(default)]
     pub vertical_scale: String,
     /// Kerning adjustment — stored verbatim as the value of the
-    /// `urn:jas:1:kerning-mode` custom attribute. Named modes
+    /// `jas:kerning-mode` custom attribute. Named modes
     /// (`"Auto"`, `"Optical"`, `"Metrics"`) or a length like
     /// `"0.025em"`. Empty = Auto (default). Panel field: Kerning.
     #[serde(default)]

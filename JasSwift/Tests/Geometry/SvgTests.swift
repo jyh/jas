@@ -387,10 +387,10 @@ private func roundtrip(_ doc: Document) -> Document {
 }
 
 @Test func svgJasRoleEmittedOnTspan() {
-    // Phase 1a: a wrapper Tspan with jasRole="paragraph" emits
-    // urn:jas:1:role="paragraph" on the <tspan> element. Full
-    // document round-trip through XMLDocument is deferred to
-    // Phase 1b alongside the xmlns:jas namespace work.
+    // A wrapper Tspan with jasRole="paragraph" emits jas:role="paragraph"
+    // on the <tspan> element, under the declared xmlns:jas (2026-10-15; it
+    // was `urn:jas:1:role`, which XMLDocument refuses). The full round trip
+    // is `svgParagraphWrapperRoundTripsThroughTheReader`.
     let tspans = [
         Tspan(id: 0, content: "", jasRole: "paragraph"),
         Tspan(id: 1, content: "hello"),
@@ -399,9 +399,49 @@ private func roundtrip(_ doc: Document) -> Document {
         .text(Text(x: 0, y: 0, tspans: tspans))
     ])])
     let svg = documentToSvg(doc)
-    #expect(svg.contains("urn:jas:1:role=\"paragraph\""),
-            "expected urn:jas:1:role in serialised SVG, got: \(svg)")
+    #expect(svg.contains(" jas:role=\"paragraph\""),
+            "expected jas:role in serialised SVG, got: \(svg)")
+    #expect(svg.contains("xmlns:jas=\"urn:jas:1\""), "the prefix is declared")
     #expect(svg.contains(">hello</tspan>"))
+}
+
+/// A paragraph wrapper's `jas:` attributes survive a FULL round trip through
+/// the reader. Until 2026-10-15 the writer emitted `urn:jas:1:role`, an
+/// undeclared prefix, XMLDocument refused the whole file, and the reader
+/// returned an EMPTY document: a saved file with a paragraph opened blank.
+@Test func svgParagraphWrapperRoundTripsThroughTheReader() {
+    let tspans = [
+        Tspan(id: 0, content: "", jasRole: "paragraph", jasWordSpacingMin: 70, jasAutoLeading: 110),
+        Tspan(id: 1, content: "hello"),
+    ]
+    let doc2 = roundtrip(Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 0, tspans: tspans))
+    ])]))
+    guard let first = doc2.layers.first?.children.first, case .text(let t) = first else {
+        Issue.record("the round trip lost the text element"); return
+    }
+    #expect(t.tspans.count == 2)
+    #expect(t.tspans[0].jasRole == "paragraph")
+    #expect(t.tspans[0].jasWordSpacingMin == 70)
+    #expect(t.tspans[0].jasAutoLeading == 110)
+    #expect(t.tspans[1].content == "hello")
+}
+
+/// A file written before 2026-10-15 spells the attributes `urn:jas:1:<name>`.
+/// It must still open, with its values: old files are the user's documents.
+@Test func svgReaderAcceptsTheOldUrnSpelling() {
+    let svg = """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" width="100" height="100">
+      <g><text x="0" y="20" font-size="16"><tspan urn:jas:1:role="paragraph" urn:jas:1:word-spacing-min="70"></tspan><tspan>hello</tspan></text></g>
+    </svg>
+    """
+    let doc = svgToDocument(svg)
+    guard let first = doc.layers.first?.children.first, case .text(let t) = first else {
+        Issue.record("an old-spelling file opened empty"); return
+    }
+    #expect(t.tspans[0].jasRole == "paragraph")
+    #expect(t.tspans[0].jasWordSpacingMin == 70)
 }
 
 @Test func svgTspanRoundTripPreservesOverrides() {
