@@ -12868,9 +12868,9 @@ mod tests {
         select_first_text(&mut st);
         st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
             hyphenate: Some(true),
-            min_word: Some(6.0),
+            min_word: Some(8.0),
             min_before: Some(3.0),
-            min_after: Some(1.0),  // default → omitted
+            min_after: Some(2.0),  // default → omitted
             limit: Some(2.0),
             zone: Some(36.0),
             bias: Some(0.0),  // default → omitted
@@ -12881,7 +12881,7 @@ mod tests {
         if let crate::geometry::element::Element::Text(t) = elem {
             let w = &t.tspans[0];
             assert_eq!(w.jas_hyphenate, Some(true));
-            assert_eq!(w.jas_hyphenate_min_word, Some(6.0));
+            assert_eq!(w.jas_hyphenate_min_word, Some(8.0));
             assert_eq!(w.jas_hyphenate_min_before, Some(3.0));
             assert_eq!(w.jas_hyphenate_min_after, None);  // identity-omit
             assert_eq!(w.jas_hyphenate_limit, Some(2.0));
@@ -12901,9 +12901,9 @@ mod tests {
         select_first_text(&mut st);
         st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
             hyphenate: Some(false),
-            min_word: Some(3.0),
-            min_before: Some(1.0),
-            min_after: Some(1.0),
+            min_word: Some(6.0),
+            min_before: Some(2.0),
+            min_after: Some(2.0),
             limit: Some(0.0),
             zone: Some(0.0),
             bias: Some(0.0),
@@ -12922,6 +12922,40 @@ mod tests {
             assert_eq!(w.jas_hyphenate_bias, None);
             assert_eq!(w.jas_hyphenate_capitalized, None);
         }
+    }
+
+    /// The Hyphenation dialog's declared defaults ARE what an unattributed
+    /// paragraph renders with (ruled 2026-10-15, A2: 6 / 2 / 2, the layouts'
+    /// values). Derived from the dialog's YAML, never typed: OK on the
+    /// defaults writes no attribute, and the layout reads an absent attribute
+    /// as the same value, so the dialog never shows one number while the
+    /// paragraph renders another.
+    #[test]
+    fn the_hyphenation_dialogs_defaults_are_what_an_unattributed_paragraph_renders() {
+        let ws = crate::interpreter::workspace::Workspace::load().unwrap();
+        let state = &ws.dialog("paragraph_hyphenation").unwrap()["state"];
+        let def = |k: &str| state[k]["default"].as_f64().unwrap_or_else(|| panic!("{k} has a numeric default"));
+        let (word, before, after) = (def("hyphenate_min_word"), def("hyphenate_min_before"), def("hyphenate_min_after"));
+        // (1) OK on the defaults writes nothing.
+        let mut st = AppState::new();
+        select_first_text(&mut st);
+        st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
+            hyphenate: Some(true),
+            min_word: Some(word), min_before: Some(before), min_after: Some(after),
+            limit: Some(def("hyphenate_limit")), zone: Some(def("hyphenate_zone")),
+            bias: Some(def("hyphenate_bias")), capitalized: Some(false),
+        });
+        let elem = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap();
+        let crate::geometry::element::Element::Text(t) = elem else { panic!("the fixture is text") };
+        let w = &t.tspans[0];
+        assert_eq!(w.jas_hyphenate, Some(true), "the control: the dialog's master switch was written");
+        assert_eq!((w.jas_hyphenate_min_word, w.jas_hyphenate_min_before, w.jas_hyphenate_min_after),
+                   (None, None, None), "OK on the declared defaults writes no attribute");
+        // (2) The layout reads those absent attributes as the declared defaults.
+        let seg = crate::algorithms::text_layout_paragraph::build_segments_from_text(&t.tspans, &t.content(), true);
+        let seg = seg.first().expect("one paragraph segment");
+        assert_eq!((seg.hyphenate_min_word as f64, seg.hyphenate_min_before as f64, seg.hyphenate_min_after as f64),
+                   (word, before, after), "an unattributed paragraph renders with the dialog's defaults");
     }
 
     // ── active_document canvas-selection view ─────────────────

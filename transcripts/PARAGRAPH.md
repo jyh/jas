@@ -519,9 +519,9 @@ dialog:
 | Field | Type | Unit | Range | Default | Storage |
 |---|---|---|---|---|---|
 | `HYPHENATE_MASTER_CHECKBOX` | checkbox | — | bool | false | `jas:hyphenate` (shared with `HYPHENATE_CHECKBOX` on the main panel) |
-| `HYPHENATE_MIN_WORD_VALUE` | numeric_input | letters | 2–25 | 3 | `jas:hyphenate-min-word` |
-| `HYPHENATE_MIN_BEFORE_VALUE` | numeric_input | letters | 1–10 | 1 | `jas:hyphenate-min-before` |
-| `HYPHENATE_MIN_AFTER_VALUE` | numeric_input | letters | 1–10 | 1 | `jas:hyphenate-min-after` |
+| `HYPHENATE_MIN_WORD_VALUE` | numeric_input | letters | 2–25 | 6 | `jas:hyphenate-min-word` |
+| `HYPHENATE_MIN_BEFORE_VALUE` | numeric_input | letters | 1–10 | 2 | `jas:hyphenate-min-before` |
+| `HYPHENATE_MIN_AFTER_VALUE` | numeric_input | letters | 1–10 | 2 | `jas:hyphenate-min-after` |
 | `HYPHENATE_LIMIT_VALUE` | numeric_input | hyphens | 0–25 (0 = unlimited) | 0 | `jas:hyphenate-limit` |
 | `HYPHENATE_ZONE_VALUE` | numeric_input | pt | 0–1296 | 0 | `jas:hyphenate-zone` |
 | `HYPHENATE_BIAS_SLIDER` | slider | — | 7-step discrete (0–6) | 0 | `jas:hyphenate-bias` |

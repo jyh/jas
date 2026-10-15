@@ -1967,7 +1967,8 @@ impl AppState {
     /// Commit the 8 Hyphenation-dialog field values onto every
     /// paragraph wrapper tspan in the selection. Per the
     /// identity-value rule each value at its spec default
-    /// (master off, min-word 3, min-before 1, min-after 1,
+    /// (master off, min-word 6, min-before 2, min-after 2 -- ruled
+    /// 2026-10-15 (A2): what the layout reads an absent attribute as --
     /// limit 0, zone 0, bias 0, capitalized off) writes `None` so
     /// the wrapper attribute is omitted. Master mirrors panel
     /// state — sync_paragraph_panel_from_selection picks up the
@@ -1984,9 +1985,9 @@ impl AppState {
             value.and_then(|v| if !v { None } else { Some(true) })
         }
         let hyph = opt_b(v.hyphenate);
-        let min_word = opt_n(v.min_word, 3.0);
-        let min_before = opt_n(v.min_before, 1.0);
-        let min_after = opt_n(v.min_after, 1.0);
+        let min_word = opt_n(v.min_word, 6.0);
+        let min_before = opt_n(v.min_before, 2.0);
+        let min_after = opt_n(v.min_after, 2.0);
         let limit = opt_n(v.limit, 0.0);
         let zone = opt_n(v.zone, 0.0);
         let bias = opt_n(v.bias, 0.0);
