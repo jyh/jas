@@ -3378,6 +3378,29 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The reference-point widget is an input kind: a commit of an anchor runs
+    /// its `change`, `set_artboard_reference_point` with `anchor: event.value`,
+    /// which writes the Artboards panel's preference. Before it joined the
+    /// contract the engine's click path carried no value, so the anchor was null.
+    #[test]
+    fn dialog_event_commits_a_reference_point_anchor() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        {
+            let mut store = engine_of(e).store.borrow_mut();
+            store.init_panel("artboards", [("reference_point".to_string(), serde_json::json!("center"))].into());
+            store.set_active_panel(Some("artboards"));
+            store.init_dialog("artboard_options", [("width".to_string(), serde_json::json!(100.0))].into(), None);
+        }
+        let (reply, err) = dialog_event(e, r#"{"widget":"ao_reference_point","event":"change","value":"top_left"}"#);
+        assert!(!reply.is_empty(), "the commit ran: {err}");
+        assert_eq!(engine_of(e).store.borrow().get_panel("artboards", "reference_point"),
+                   &serde_json::json!("top_left"));
+        let (reply, err) = dialog_event(e, r#"{"widget":"ao_reference_point","event":"change","value":"middle_center"}"#);
+        assert!(reply.is_empty() && err.contains("BadValue"), "not an anchor: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A dialog's buttons have no ids: the shell clicks one by its PLAN path,
     /// and the button's YAML action runs. Cancel on Save Changes closes it.
     #[test]

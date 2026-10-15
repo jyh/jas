@@ -33,12 +33,20 @@ enum WidgetEvent {
     static let pressEvents = ["click", "change"]
     static let inputKinds: Set<String> = [
         "number_input", "length_input", "text_input",
-        "select", "icon_select", "icon_button_group", "combo_box", "slider", "color_bar",
+        "select", "icon_select", "icon_button_group", "reference_point_widget",
+        "combo_box", "slider", "color_bar",
     ]
     static let booleanKinds: Set<String> = ["toggle", "checkbox"]
     /// A plain pick and an Alt pick of one declared item. NOT synonyms.
     static let pickEvents = ["toggle", "alt_toggle"]
     static let itemKinds: Set<String> = ["dropdown"]
+    /// The nine anchors a `reference_point_widget` takes, row by row. The KIND
+    /// owns them (WIDGET_EVENTS.md, Parsing); no YAML declares them.
+    static let referencePointAnchors = [
+        "top_left", "top_center", "top_right",
+        "middle_left", "center", "middle_right",
+        "bottom_left", "bottom_center", "bottom_right",
+    ]
     /// The check kind: a press CHECKS it and never unchecks it. Its events
     /// are the press synonyms.
     static let checkKinds: Set<String> = ["radio"]
@@ -374,6 +382,8 @@ enum WidgetEvent {
                   let u = numberInputCommit(text: parts[0], min: 0, max: 1),
                   let v = numberInputCommit(text: parts[1], min: 0, max: 1) else { return refused }
             return (true, [u, v])
+        case "reference_point_widget":
+            return referencePointAnchors.contains(text) ? (true, text) : (false, nil)
         case "select", "icon_select", "icon_button_group":
             guard let rows = optionRows(widget["options"]) else {
                 // Computed options: the shell offered what the expression
