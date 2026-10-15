@@ -580,8 +580,28 @@ static class Program
             PanelWire.Clickable("button", "", "[1,0]").ToString());
         Eq("clickable: a button with neither id nor path", "False",
             PanelWire.Clickable("button", "", null).ToString());
-        Eq("clickable: an icon_button still needs its id (the panel rule, unchanged)", "False",
-            PanelWire.Clickable("icon_button", "", "[1,0]").ToString());
+        // ⛔ REVERSED on purpose (flask §272): 26 workspace icon_buttons carry no
+        // id -- the canvas strip's close box and 23 tool-alternates buttons --
+        // and the id rule left every one disabled. A plan path addresses them.
+        Eq("clickable: an icon_button by plan path alone, the strip's close box", "True",
+            PanelWire.Clickable("icon_button", "", "[1,0,0,1]").ToString());
+        Eq("clickable: an icon_button with neither id nor path", "False",
+            PanelWire.Clickable("icon_button", "", null).ToString());
+        Eq("clickable: a dropdown keeps the id rule (its button sends nothing)", "False",
+            PanelWire.Clickable("dropdown", "", "[2]").ToString());
+        // #422: every action reply names a tab the SHELL must remove, or null.
+        Eq("remove_tab: a reply naming tab 0", "0",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":0}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: a reply naming tab 2", "2",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":2}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: null names none", "(null)",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: an older engine with no key names none", "(null)",
+            ActWire.RemoveTab("""{"changed":[],"doc_changed":false}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: a negative or non-integer index names none", "(null)|(null)",
+            (ActWire.RemoveTab("""{"remove_tab":-1}""")?.ToString() ?? "(null)") + "|"
+            + (ActWire.RemoveTab("""{"remove_tab":"0"}""")?.ToString() ?? "(null)"));
+        Eq("remove_tab: unreadable bytes name none", "(null)", ActWire.RemoveTab("{")?.ToString() ?? "(null)");
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
         // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
@@ -605,6 +625,22 @@ static class Program
             DialogWire.Read("""{"open":true,"depth":1,"plan":{}}""")?.Open.ToString() ?? "(null)");
         Eq("dialog: the empty span is unreadable", "(null)", DialogWire.Read("")?.Open.ToString() ?? "(null)");
         Eq("dialog: bytes that are not JSON are unreadable", "(null)", DialogWire.Read("{open")?.Open.ToString() ?? "(null)");
+        // jas §271: the reply carries the dialog's DECLARED width, or null (18 of
+        // 33 declare none, and the web sizes those to content). The shell plans
+        // at the declared width, else at its own default.
+        Eq("dialog width: a declared width is read", "460",
+            DialogWire.Read("""{"open":true,"id":"document_setup","depth":1,"width":460,"plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: null is no declared width", "(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":null,"plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: an older engine with no key is no declared width, and the dialog still reads", "True|(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"plan":{}}""") is { } nw ? $"{nw.Open}|{nw.Width?.ToString() ?? "(null)"}" : "(null)");
+        Eq("dialog width: zero or negative is no width", "(null)|(null)",
+            (DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":0,"plan":{}}""")?.Width?.ToString() ?? "(null)") + "|"
+            + (DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":-5,"plan":{}}""")?.Width?.ToString() ?? "(null)"));
+        Eq("dialog width: a string is no width", "(null)",
+            DialogWire.Read("""{"open":true,"id":"x","depth":1,"width":"460","plan":{}}""")?.Width?.ToString() ?? "(null)");
+        Eq("dialog width: plan at the declared width", "720", DialogWire.PlanWidth(720, 420).ToString());
+        Eq("dialog width: plan at the default when none is declared", "420", DialogWire.PlanWidth(null, 420).ToString());
         Eq("dialog: an act's reply naming a dialog", "layer_options",
             DialogWire.Named("""{"changed":[],"doc_changed":false,"dialog":"layer_options"}""") ?? "(null)");
         Eq("dialog: an act's reply with dialog null names none", "(null)",

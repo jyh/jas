@@ -193,12 +193,14 @@ internal static class PanelWire
 
     /// <summary>
     /// S1: whether a press on a button can reach the core, so whether it is
-    /// enabled. A `button` is addressed like a swatch (<see cref="Addressable"/>):
-    /// a dialog's OK and Cancel carry NO id, only a plan path (#420). Every
-    /// other button keeps the id rule it shipped with.
+    /// enabled. A `button` or `icon_button` is addressed like a swatch
+    /// (<see cref="Addressable"/>): a dialog's OK and Cancel, the canvas
+    /// strip's close box and the 23 tool-alternates buttons carry NO id, only
+    /// a plan path (#420). Any other kind drawn as a button (a dropdown, whose
+    /// button sends nothing itself) keeps the id rule.
     /// </summary>
     internal static bool Clickable(string type, string id, string? path) =>
-        type == "button" ? Addressable(id, path) : id.Length > 0;
+        type is "button" or "icon_button" ? Addressable(id, path) : id.Length > 0;
 
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
@@ -949,7 +951,8 @@ internal static class PanelMenuWire
 /// the engine holds (2 when the Color Picker sits over Layer Options); the
 /// shell draws only the TOP one, whose plan this is.
 /// </summary>
-internal sealed record DialogReading(bool Open, string Id, string Summary, bool Modal, int Depth, string? PlanJson);
+internal sealed record DialogReading(bool Open, string Id, string Summary, bool Modal, int Depth, string? PlanJson,
+                                     long? Width = null);
 
 /// <summary>
 /// S2, the dialog door's shell half: the two replies the overlay host reads.
@@ -984,13 +987,21 @@ internal static class DialogWire
                 : name;
             var modal = root.TryGetProperty("modal", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True;
             var depth = root.TryGetProperty("depth", out var d) && d.TryGetInt32(out var n) ? n : 1;
-            return new DialogReading(true, name, summary, modal, depth, plan.GetRawText());
+            // §271: the declared width, or null. Null, a missing key (an older
+            // engine), or anything but a positive integer is "none declared".
+            long? width = root.TryGetProperty("width", out var w) && w.ValueKind == System.Text.Json.JsonValueKind.Number
+                          && w.TryGetInt64(out var wv) && wv > 0 ? wv : null;
+            return new DialogReading(true, name, summary, modal, depth, plan.GetRawText(), width);
         }
         catch (System.Text.Json.JsonException)
         {
             return null;
         }
     }
+
+    /// <summary>The width a dialog is planned at: its declared one, else the
+    /// shell's default (jas §271: the engine invents none).</summary>
+    internal static long PlanWidth(long? declared, long fallback) => declared ?? fallback;
 
     /// <summary>The dialog an act's reply names as open after it (#414's
     /// `"dialog": <id> | null`); null when it names none or cannot be read.</summary>
@@ -1003,6 +1014,34 @@ internal static class DialogWire
                    && doc.RootElement.TryGetProperty("dialog", out var d)
                    && d.ValueKind == System.Text.Json.JsonValueKind.String
                 ? d.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>The keys an action reply carries for the shell to act on.</summary>
+internal static class ActWire
+{
+    /// <summary>
+    /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
+    /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
+    /// shell removes it. Null when the reply names none, an older engine sent
+    /// no key, or the value is not a non-negative integer.
+    /// </summary>
+    internal static int? RemoveTab(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("remove_tab", out var t)
+                   && t.ValueKind == System.Text.Json.JsonValueKind.Number
+                   && t.TryGetInt32(out var i) && i >= 0
+                ? i
                 : null;
         }
         catch (System.Text.Json.JsonException)
