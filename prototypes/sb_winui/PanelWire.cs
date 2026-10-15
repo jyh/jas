@@ -193,12 +193,14 @@ internal static class PanelWire
 
     /// <summary>
     /// S1: whether a press on a button can reach the core, so whether it is
-    /// enabled. A `button` is addressed like a swatch (<see cref="Addressable"/>):
-    /// a dialog's OK and Cancel carry NO id, only a plan path (#420). Every
-    /// other button keeps the id rule it shipped with.
+    /// enabled. A `button` or `icon_button` is addressed like a swatch
+    /// (<see cref="Addressable"/>): a dialog's OK and Cancel, the canvas
+    /// strip's close box and the 23 tool-alternates buttons carry NO id, only
+    /// a plan path (#420). Any other kind drawn as a button (a dropdown, whose
+    /// button sends nothing itself) keeps the id rule.
     /// </summary>
     internal static bool Clickable(string type, string id, string? path) =>
-        type == "button" ? Addressable(id, path) : id.Length > 0;
+        type is "button" or "icon_button" ? Addressable(id, path) : id.Length > 0;
 
     /// <summary>A plan path's text as integers, or null when it is not one.</summary>
     internal static int[]? PlanPath(string? path)
@@ -1003,6 +1005,34 @@ internal static class DialogWire
                    && doc.RootElement.TryGetProperty("dialog", out var d)
                    && d.ValueKind == System.Text.Json.JsonValueKind.String
                 ? d.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>The keys an action reply carries for the shell to act on.</summary>
+internal static class ActWire
+{
+    /// <summary>
+    /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
+    /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
+    /// shell removes it. Null when the reply names none, an older engine sent
+    /// no key, or the value is not a non-negative integer.
+    /// </summary>
+    internal static int? RemoveTab(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("remove_tab", out var t)
+                   && t.ValueKind == System.Text.Json.JsonValueKind.Number
+                   && t.TryGetInt32(out var i) && i >= 0
+                ? i
                 : null;
         }
         catch (System.Text.Json.JsonException)

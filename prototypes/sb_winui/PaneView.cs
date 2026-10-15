@@ -336,7 +336,7 @@ public sealed partial class MainWindow
 
                     case "icon_button":
                         buttons++;
-                        if (leaf.Id.Length == 0) { unaddressable++; }
+                        if (!PanelWire.Clickable(leaf.Type, leaf.Id, leaf.Path)) { unaddressable++; }
                         el = BuildIconButton(leaf, icons);
                         break;
 
@@ -621,7 +621,13 @@ public sealed partial class MainWindow
                 },
             };
             var summary = leaf.Literal("summary");
-            if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(btn, summary); }
+            if (!string.IsNullOrEmpty(summary))
+            {
+                ToolTipService.SetToolTip(btn, summary);
+                // Its face is a picture, so without this an assistive reader
+                // (and the harness's UIA hand) finds a button with no name.
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(btn, summary);
+            }
 
             var id = leaf.Id;
             var path = leaf.Path;

@@ -580,8 +580,28 @@ static class Program
             PanelWire.Clickable("button", "", "[1,0]").ToString());
         Eq("clickable: a button with neither id nor path", "False",
             PanelWire.Clickable("button", "", null).ToString());
-        Eq("clickable: an icon_button still needs its id (the panel rule, unchanged)", "False",
-            PanelWire.Clickable("icon_button", "", "[1,0]").ToString());
+        // ⛔ REVERSED on purpose (flask §272): 26 workspace icon_buttons carry no
+        // id -- the canvas strip's close box and 23 tool-alternates buttons --
+        // and the id rule left every one disabled. A plan path addresses them.
+        Eq("clickable: an icon_button by plan path alone, the strip's close box", "True",
+            PanelWire.Clickable("icon_button", "", "[1,0,0,1]").ToString());
+        Eq("clickable: an icon_button with neither id nor path", "False",
+            PanelWire.Clickable("icon_button", "", null).ToString());
+        Eq("clickable: a dropdown keeps the id rule (its button sends nothing)", "False",
+            PanelWire.Clickable("dropdown", "", "[2]").ToString());
+        // #422: every action reply names a tab the SHELL must remove, or null.
+        Eq("remove_tab: a reply naming tab 0", "0",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":0}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: a reply naming tab 2", "2",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":2}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: null names none", "(null)",
+            ActWire.RemoveTab("""{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: an older engine with no key names none", "(null)",
+            ActWire.RemoveTab("""{"changed":[],"doc_changed":false}""")?.ToString() ?? "(null)");
+        Eq("remove_tab: a negative or non-integer index names none", "(null)|(null)",
+            (ActWire.RemoveTab("""{"remove_tab":-1}""")?.ToString() ?? "(null)") + "|"
+            + (ActWire.RemoveTab("""{"remove_tab":"0"}""")?.ToString() ?? "(null)"));
+        Eq("remove_tab: unreadable bytes name none", "(null)", ActWire.RemoveTab("{")?.ToString() ?? "(null)");
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
         // S2 (the dialog door): `jas_dialog_plan`'s reply (#419) and the `dialog`
