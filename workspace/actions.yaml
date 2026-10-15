@@ -2986,10 +2986,23 @@ actions:
       - log: "toggle_artboard_chain_link (native)"
 
   toggle_artboard_orientation:
-    description: "Swap dialog.width <-> dialog.height around the current reference-point anchor."
+    description: >
+      Swap dialog.width and dialog.height around the current reference-point
+      anchor (the Artboards panel's reference_point): the anchor point of the
+      artboard stays where it was, and the rectangle turns about it. First
+      dialog.x_stored and dialog.y_stored move by the anchor's offset in the
+      old size minus its offset in the new size; then the two sizes swap. The
+      swap is three sequential sets (w = w + h, h = w - h, w = w - h), because
+      a set writes its keys in order and one map cannot exchange two fields.
+      Toggling twice restores the dialog exactly.
     category: artboards
     effects:
-      - log: "toggle_artboard_orientation (native)"
+      - set:
+          dialog.x_stored: "dialog.x_stored + anchor_offset_x(panel.reference_point, dialog.width) - anchor_offset_x(panel.reference_point, dialog.height)"
+          dialog.y_stored: "dialog.y_stored + anchor_offset_y(panel.reference_point, dialog.height) - anchor_offset_y(panel.reference_point, dialog.width)"
+      - set: { dialog.width: "dialog.width + dialog.height" }
+      - set: { dialog.height: "dialog.width - dialog.height" }
+      - set: { dialog.width: "dialog.width - dialog.height" }
 
   set_artboard_fill_preset:
     description: "Translate dialog.fill dropdown selection into dialog.fill hex / transparent."

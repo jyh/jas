@@ -3458,6 +3458,35 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Artboard Options' orientation pair: Landscape on a portrait dialog runs
+    /// `toggle_artboard_orientation`, now YAML effects (flask STATUS §290, it
+    /// was a `log:` stub refused as a platform effect). Around the centre
+    /// anchor, 100x200 at (10, 20) becomes 200x100 at (-40, 70), as the
+    /// reference's `test_artboard_orientation.py` derives.
+    #[test]
+    fn dialog_event_landscape_swaps_the_artboard_around_its_anchor() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        {
+            let mut store = engine_of(e).store.borrow_mut();
+            store.init_panel("artboards", [("reference_point".to_string(), serde_json::json!("center"))].into());
+            store.set_active_panel(Some("artboards"));
+            store.init_dialog("artboard_options", [
+                ("width".to_string(), serde_json::json!(100.0)), ("height".to_string(), serde_json::json!(200.0)),
+                ("x_stored".to_string(), serde_json::json!(10.0)), ("y_stored".to_string(), serde_json::json!(20.0)),
+            ].into(), None);
+        }
+        let (reply, err) = dialog_event(e, r#"{"widget":"ao_orientation","event":"commit","value":"landscape"}"#);
+        assert!(!reply.is_empty(), "the toggle ran: {err}");
+        let store = engine_of(e).store.borrow();
+        let n = |k: &str| store.get_dialog(k).as_f64().unwrap_or(f64::NAN);
+        assert_eq!((n("width"), n("height"), n("x_stored"), n("y_stored")), (200.0, 100.0, -40.0, 70.0));
+        drop(store);
+        let (reply, err) = dialog_event(e, r#"{"widget":"ao_orientation","event":"commit","value":"landscape"}"#);
+        assert!(reply.is_empty() || err.contains("Unchanged"), "the shown orientation runs nothing: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A dialog's buttons have no ids: the shell clicks one by its PLAN path,
     /// and the button's YAML action runs. Cancel on Save Changes closes it.
     #[test]
