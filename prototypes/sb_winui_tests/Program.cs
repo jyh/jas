@@ -915,6 +915,13 @@ static class Program
             Show(PanelWire.TabReading(canvasPlan)));
         Eq("canvas tab reading: a plan with no tabs reads empty, an unparseable one null", "|(null)",
             Show(PanelWire.TabReading("""{"chrome":[],"leaves":[],"hidden":[]}""")) + "|" + Show(PanelWire.TabReading("{")));
+        // §265: the probe's tab reading names WHY there is no reading. A strip that
+        // is not open is NONE; a plan that does not parse is UNREADABLE, never NONE,
+        // so a parse failure cannot match a baseline frozen with no strip.
+        Eq("canvas tab probe: no strip open reads NONE", "NONE", PanelWire.TabProbeReading(false, null));
+        Eq("canvas tab probe: an open strip whose plan does not parse reads UNREADABLE", "UNREADABLE", PanelWire.TabProbeReading(true, "{"));
+        Eq("canvas tab probe: an open strip reads its tabs", "[0,0]=on:\"\" [0,1]=off:\"\"", PanelWire.TabProbeReading(true, canvasPlan));
+        Eq("canvas tab probe: an open strip with no tabs reads empty, not NONE", "", PanelWire.TabProbeReading(true, """{"chrome":[],"leaves":[],"hidden":[]}"""));
         Eq("canvas tabs: the surface starts where the plan places it", "24", Show(PanelWire.SurfaceTop(canvasPlan, "drawing_surface")?.ToString()));
         Eq("canvas tabs: a plan without the surface names no top", "(null)|(null)",
             Show(PanelWire.SurfaceTop(canvasPlan, "no_such")?.ToString()) + "|" + Show(PanelWire.SurfaceTop("{", "drawing_surface")?.ToString()));

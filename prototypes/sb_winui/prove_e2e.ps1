@@ -281,6 +281,10 @@ if ($Freeze) {
         Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
         exit 7
     }
+    if ($r.tab_sha -eq 'UNREADABLE') {
+        Out-Line "E2E-FROZEN v1 item=$item REFUSED -- the canvas strip was open and its plan did not parse (tab=UNREADABLE); a baseline is never frozen from an unread strip"
+        exit 7
+    }
     New-Item -ItemType Directory -Force -Path $Baseline | Out-Null
     ($reading | ConvertTo-Json) | Set-Content -Path (Join-Path $Baseline 'baseline.json') -Encoding ascii
     Copy-Item $probe (Join-Path $Baseline 'probe.json') -Force
@@ -305,9 +309,10 @@ $core = if ($isSelection) {
 # A baseline frozen before the tab was read has no `tab_sha`: that is a FAIL
 # naming the re-freeze, never a pass on the half of `tree` it does hold.
 $planOk = $r.plan_panel -eq $b.plan_panel -and $r.plan_sha -eq $b.plan_sha
-$tabOk  = $null -ne $b.tab_sha -and $r.tab_sha -eq $b.tab_sha
+$tabOk  = $null -ne $b.tab_sha -and $r.tab_sha -ne 'UNREADABLE' -and $r.tab_sha -eq $b.tab_sha
 $tree = if ($planOk -and $tabOk) { 'PASS' }
         elseif (-not $planOk) { "FAIL(plan=$($r.plan_panel)/$($r.plan_sha) want=$($b.plan_panel)/$($b.plan_sha))" }
+        elseif ($r.tab_sha -eq 'UNREADABLE') { "FAIL(tab=UNREADABLE: the strip was open and its plan did not parse)" }
         elseif ($null -eq $b.tab_sha) { "FAIL(tab=$($r.tab_sha) want=NONE-FROZEN: the baseline predates the tab reading; re-freeze)" }
         else { "FAIL(tab=$($r.tab_sha) want=$($b.tab_sha))" }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }

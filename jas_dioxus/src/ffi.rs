@@ -3324,6 +3324,22 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// Use Preview Bounds is a toggle on the engine's route too: its
+    /// `state.align_use_preview_bounds` is the store's, so a second press
+    /// turns it back off (the web route could not; see the renderer's arm).
+    #[test]
+    fn dispatch_toggle_use_preview_bounds_turns_on_and_back_off() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let read = |e| engine_of(e).store.borrow().get("align_use_preview_bounds").clone();
+        assert_eq!(read(e), serde_json::json!(false), "starts off");
+        let _ = dispatch(e, r#"{"action":"toggle_use_preview_bounds"}"#);
+        assert_eq!(read(e), serde_json::json!(true));
+        let _ = dispatch(e, r#"{"action":"toggle_use_preview_bounds"}"#);
+        assert_eq!(read(e), serde_json::json!(false), "the second press turns it off");
+        unsafe { jas_engine_free(e) };
+    }
+
     fn engine_on(fixture: &str) -> *mut JasEngine {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
         let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
