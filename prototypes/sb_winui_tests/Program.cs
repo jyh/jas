@@ -680,6 +680,22 @@ static class Program
         Eq("dialog: an act's reply with no dialog key names none", "(null)",
             DialogWire.Named("""{"changed":[],"doc_changed":false}""") ?? "(null)");
         Eq("dialog: an unreadable act reply names none", "(null)", DialogWire.Named("nope") ?? "(null)");
+        // jas §284 (a): after every pointer release the shell reads the plan and
+        // publishes only a reading that differs from what is shown.
+        var relShut = DialogWire.Read("""{"open":false}""");
+        var relScale = DialogWire.Read("""{"open":true,"id":"scale_options","depth":1,"plan":{}}""");
+        Eq("release: nothing shown, a tool opened a dialog -> publish", "True",
+            DialogWire.AfterRelease(null, relScale).ToString());
+        Eq("release: nothing shown, none open -> publish nothing", "False",
+            DialogWire.AfterRelease(null, relShut).ToString());
+        Eq("release: the shown dialog is still open -> publish nothing", "False",
+            DialogWire.AfterRelease("scale_options", relScale).ToString());
+        Eq("release: another dialog than the shown one -> publish", "True",
+            DialogWire.AfterRelease("shear_options", relScale).ToString());
+        Eq("release: the shown dialog closed -> publish", "True",
+            DialogWire.AfterRelease("scale_options", relShut).ToString());
+        Eq("release: an unreadable plan is published, never swallowed", "True",
+            DialogWire.AfterRelease(null, null).ToString());
         Check("swatch: CONTROL: two colours read differently",
             ShowRgb(PanelWire.SwatchColor("#664040")) != ShowRgb(PanelWire.SwatchColor("#406640")),
             "a parser that ignores its input would pass every case above but the null ones");
