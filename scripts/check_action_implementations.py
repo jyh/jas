@@ -147,7 +147,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 60
+MIN_LOG_ONLY = 59
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -433,8 +433,11 @@ def self_test() -> int:
     anchors = {
         # verified by hand: menu_bar.rs:67 real body / JasCommands "undo"
         "undo": "native_both",
-        # verified: neither port contains the string at all
-        "toggle_artboard_orientation": "dead_both",
+        # verified: neither port contains the string at all. Until 2026-10-15
+        # this anchor was `toggle_artboard_orientation`, which then became
+        # effects in actions.yaml and left the log-only set; its sibling stub
+        # from the same dialog holds the class.
+        "toggle_artboard_chain_link": "dead_both",
         # save_as was DIVERGENT:swift when this gate was written and is
         # native_both since council O1.1 wired jas_dioxus's picker. The anchor
         # MOVED WITH THE FIX -- an anchor is a claim about the tree like any
@@ -500,6 +503,11 @@ def self_test() -> int:
     # is now effects in actions.yaml (an `if`/`set` per sized preset), driven
     # in all three interpreters against the dropdown's own labels. One stub,
     # a delta of 1.
+    #
+    # 59 when `toggle_artboard_orientation` left (2026-10-15, flask STATUS
+    # §290): an anchor-preserving swap in four `set`s, driven in the reference
+    # (every anchor, and twice is the identity) and on the engine's dialog door.
+    # One stub, a delta of 1.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")
