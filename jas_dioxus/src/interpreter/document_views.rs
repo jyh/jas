@@ -436,6 +436,10 @@ pub fn active_document_view(
         // (`renderer::build_active_document_view`). Until 2026-10-15 no port
         // built it, so `quit` never offered to save.
         m.insert("any_modified".to_string(), serde_json::json!(model.is_modified()));
+        // The selected paragraphs' justification values, which the
+        // Justification dialog's `init:` reads (`paragraph_host::justification_values`).
+        m.insert("paragraph_wrappers".to_string(), serde_json::Value::Object(
+            crate::interpreter::paragraph_host::justification_values(model.document())));
         m.insert("has_filename".to_string(), serde_json::json!(!model.filename.starts_with("Untitled-")));
         m.insert("filename".to_string(), serde_json::json!(model.filename));
     }

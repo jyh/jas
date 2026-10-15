@@ -119,6 +119,23 @@ paragraph_justification:
   # wrapper attrs across the selection. A future patch extends the
   # harness to capture attr maps keyed by element path and wires
   # each dialog field's restore here.
+  # Each field opens on the value every selected paragraph agrees on, and
+  # null (a blank field) where they differ (PARAGRAPH.md §Justification
+  # Dialog, "Mixed selection"). An absent attribute reads as the default
+  # above; with no paragraph selected, every field is its default. OK leaves
+  # a field that is still blank untouched on every paragraph.
+  init:
+    word_spacing_min: "active_document.paragraph_wrappers.word_spacing_min"
+    word_spacing_desired: "active_document.paragraph_wrappers.word_spacing_desired"
+    word_spacing_max: "active_document.paragraph_wrappers.word_spacing_max"
+    letter_spacing_min: "active_document.paragraph_wrappers.letter_spacing_min"
+    letter_spacing_desired: "active_document.paragraph_wrappers.letter_spacing_desired"
+    letter_spacing_max: "active_document.paragraph_wrappers.letter_spacing_max"
+    glyph_scaling_min: "active_document.paragraph_wrappers.glyph_scaling_min"
+    glyph_scaling_desired: "active_document.paragraph_wrappers.glyph_scaling_desired"
+    glyph_scaling_max: "active_document.paragraph_wrappers.glyph_scaling_max"
+    auto_leading: "active_document.paragraph_wrappers.auto_leading"
+    single_word_justify: "active_document.paragraph_wrappers.single_word_justify"
   preview_targets: {}
 
   content:

@@ -1994,6 +1994,24 @@ public func applyJustificationDialogToSelection(
     let gsMax = optN(v.glyphScalingMax, default: 100)
     let auto = optN(v.autoLeading, default: 120)
     let swj = v.singleWordJustify.flatMap { $0 == "justify" ? nil : $0 }
+    // A nil field was BLANK in the dialog (the paragraphs differ) and leaves
+    // each wrapper's own value; a given value writes, omitted at its identity.
+    func write(_ t: Tspan) -> Tspan {
+        func pick<T>(_ given: T?, _ written: T?, _ existing: T?) -> T? { given == nil ? existing : written }
+        return withJustificationAttrs(
+            t,
+            wsMin: pick(v.wordSpacingMin, wsMin, t.jasWordSpacingMin),
+            wsDes: pick(v.wordSpacingDesired, wsDes, t.jasWordSpacingDesired),
+            wsMax: pick(v.wordSpacingMax, wsMax, t.jasWordSpacingMax),
+            lsMin: pick(v.letterSpacingMin, lsMin, t.jasLetterSpacingMin),
+            lsDes: pick(v.letterSpacingDesired, lsDes, t.jasLetterSpacingDesired),
+            lsMax: pick(v.letterSpacingMax, lsMax, t.jasLetterSpacingMax),
+            gsMin: pick(v.glyphScalingMin, gsMin, t.jasGlyphScalingMin),
+            gsDes: pick(v.glyphScalingDesired, gsDes, t.jasGlyphScalingDesired),
+            gsMax: pick(v.glyphScalingMax, gsMax, t.jasGlyphScalingMax),
+            autoLeading: pick(v.autoLeading, auto, t.jasAutoLeading),
+            swj: pick(v.singleWordJustify, swj, t.jasSingleWordJustify))
+    }
 
     let model = controller.model
     let doc = model.document
@@ -2015,24 +2033,14 @@ public func applyJustificationDialogToSelection(
             var tspans = t.tspans
             let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
-                tspans[i] = withJustificationAttrs(
-                    tspans[i],
-                    wsMin: wsMin, wsDes: wsDes, wsMax: wsMax,
-                    lsMin: lsMin, lsDes: lsDes, lsMax: lsMax,
-                    gsMin: gsMin, gsDes: gsDes, gsMax: gsMax,
-                    autoLeading: auto, swj: swj)
+                tspans[i] = write(tspans[i])
             }
             newElem = .text(t.withTspans(tspans))
         case .textPath(let tp):
             var tspans = tp.tspans
             let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
-                tspans[i] = withJustificationAttrs(
-                    tspans[i],
-                    wsMin: wsMin, wsDes: wsDes, wsMax: wsMax,
-                    lsMin: lsMin, lsDes: lsDes, lsMax: lsMax,
-                    gsMin: gsMin, gsDes: gsDes, gsMax: gsMax,
-                    autoLeading: auto, swj: swj)
+                tspans[i] = write(tspans[i])
             }
             newElem = .textPath(tp.withTspans(tspans))
         default:
