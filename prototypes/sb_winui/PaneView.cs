@@ -28,8 +28,9 @@ public sealed partial class MainWindow
         private readonly bool _topAligned;
 
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
-                          bool topAligned = false, double pad = PanePad)
+                          bool topAligned = false, double pad = PanePad, bool dialog = false)
         {
+            _dialog = dialog;
             _topAligned = topAligned;
             _pad = pad;
             _w = w;
@@ -45,6 +46,13 @@ public sealed partial class MainWindow
         /// control it is, even while a switch is still queued.
         /// </summary>
         internal string _paneDrawnPanel;
+
+        /// <summary>
+        /// S2: this view draws the OPEN DIALOG's plan. Its acts go to
+        /// `jas_dialog_event` instead of a panel, and it writes no `SB_PLAN_OUT`
+        /// (that file is the dock panel's, which the harness compares).
+        /// </summary>
+        private readonly bool _dialog;
 
         /// <summary>The margin round the plan's own coordinates: the panes' 4, the canvas strip's 0.</summary>
         private readonly double _pad;
@@ -210,7 +218,7 @@ public sealed partial class MainWindow
             // #323: the plan bytes this tree was DRAWN from, so a UIA read of the
             // same window is compared against the same selection (the harness's
             // `Compare-SbRenderedTree`). Overwritten at every draw: the newest wins.
-            if (PlanOutPath is { } planOut)
+            if (!_dialog && PlanOutPath is { } planOut)
             {
                 try
                 {
@@ -957,7 +965,7 @@ public sealed partial class MainWindow
         /// </summary>
         private void SendPane(string widget, string eventName, string? value, string? path = null)
         {
-            _w._canvas.PanelClick(new PanelClickCmd
+            var act = new PanelClickCmd
             {
                 PanelId = _paneDrawnPanel,
                 Widget = widget,
@@ -970,7 +978,9 @@ public sealed partial class MainWindow
                 Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
                 Meta = IsKeyDown(Windows.System.VirtualKey.LeftWindows)
                        || IsKeyDown(Windows.System.VirtualKey.RightWindows),
-            });
+            };
+            if (_dialog) { _w._canvas.DialogEvent(act); }
+            else { _w._canvas.PanelClick(act); }
         }
 
         // =======================================================================

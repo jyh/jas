@@ -943,3 +943,71 @@ internal static class PanelMenuWire
         return int.TryParse(idx, out var n) ? (group, n) : null;
     }
 }
+
+/// <summary>
+/// S2: one reading of `jas_dialog_plan` (#419). `Depth` is how many dialogs
+/// the engine holds (2 when the Color Picker sits over Layer Options); the
+/// shell draws only the TOP one, whose plan this is.
+/// </summary>
+internal sealed record DialogReading(bool Open, string Id, string Summary, bool Modal, int Depth, string? PlanJson);
+
+/// <summary>
+/// S2, the dialog door's shell half: the two replies the overlay host reads.
+/// ⛔ A REPLY THIS CANNOT READ IS NULL, NEVER "CLOSED": reading it as closed
+/// would hide a dialog the engine still holds, and every later click would go
+/// to panels under a modal the person cannot see.
+/// </summary>
+internal static class DialogWire
+{
+    /// <summary>`{"open": false}`, or `{"open": true, "id", "summary", "modal",
+    /// "depth", "plan"}`; null when the bytes are not that.</summary>
+    internal static DialogReading? Read(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("open", out var open)
+                || open.ValueKind is not (System.Text.Json.JsonValueKind.True or System.Text.Json.JsonValueKind.False))
+            {
+                return null;
+            }
+            if (!open.GetBoolean()) { return new DialogReading(false, "", "", false, 0, null); }
+            if (!root.TryGetProperty("id", out var id) || id.ValueKind != System.Text.Json.JsonValueKind.String
+                || !root.TryGetProperty("plan", out var plan) || plan.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return null;
+            }
+            var name = id.GetString() ?? "";
+            var summary = root.TryGetProperty("summary", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String
+                ? s.GetString() ?? name
+                : name;
+            var modal = root.TryGetProperty("modal", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.True;
+            var depth = root.TryGetProperty("depth", out var d) && d.TryGetInt32(out var n) ? n : 1;
+            return new DialogReading(true, name, summary, modal, depth, plan.GetRawText());
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The dialog an act's reply names as open after it (#414's
+    /// `"dialog": <id> | null`); null when it names none or cannot be read.</summary>
+    internal static string? Named(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("dialog", out var d)
+                   && d.ValueKind == System.Text.Json.JsonValueKind.String
+                ? d.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+}

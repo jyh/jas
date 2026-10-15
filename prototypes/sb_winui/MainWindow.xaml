@@ -184,5 +184,62 @@
             FontSize="14"
             Foreground="#CCFFFFFF"
             Text="starting" />
+
+        <!--
+          S2, THE DIALOG HOST (the dialog door, design 2026-10-14 section 5):
+          an IN-WINDOW MODAL LAYER, not a ContentDialog. WinUI allows one
+          ContentDialog at a time and its Hide() reads the same as a person's
+          Esc (both measured on the Windows box), while the engine
+          holds a STACK of dialogs. This layer draws the TOP dialog's plan
+          (jas_dialog_plan) with the panel materializer, and its smoke takes
+          every press meant for what lies under it. Last in the grid, so it is
+          drawn over everything. Collapsed until the engine names a dialog.
+        -->
+        <Grid
+            x:Name="DialogLayer"
+            Grid.RowSpan="3"
+            Grid.ColumnSpan="3"
+            Background="#80000000"
+            Visibility="Collapsed">
+            <Border
+                x:Name="DialogFrame"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="#FFF3F3F3"
+                BorderBrush="#FF2A2F36"
+                BorderThickness="1"
+                CornerRadius="4"
+                RequestedTheme="Light">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Background="#FFE4E4E4">
+                        <TextBlock
+                            x:Name="DialogTitle"
+                            Margin="8,6,32,6"
+                            FontSize="13"
+                            FontWeight="SemiBold"
+                            Foreground="#FF1A1A1A"
+                            TextTrimming="CharacterEllipsis" />
+                        <Button
+                            x:Name="DialogClose"
+                            HorizontalAlignment="Right"
+                            VerticalAlignment="Center"
+                            Margin="0,0,4,0"
+                            Padding="6,0,6,0"
+                            MinWidth="0"
+                            MinHeight="0"
+                            Content="&#x2715;" />
+                    </Grid>
+                    <ScrollViewer
+                        x:Name="DialogScroll"
+                        Grid.Row="1"
+                        HorizontalScrollBarVisibility="Disabled"
+                        VerticalScrollBarVisibility="Auto" />
+                </Grid>
+            </Border>
+        </Grid>
     </Grid>
 </Window>
