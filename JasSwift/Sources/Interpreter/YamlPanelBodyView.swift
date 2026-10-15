@@ -2018,10 +2018,12 @@ struct YamlElementView: View {
     }
 
     /// Dispatch a widget's `behavior: [{event: change, action: …, params: …}]`
-    /// with a STRING `event.value`, for the two kinds outside the widget event
-    /// contract that raise `change`: `icon_button_group` and
-    /// `reference_point_widget` (an orientation, a 3×3 anchor name). The value
-    /// widgets' events are `PanelWidgetEvents`'.
+    /// with a STRING `event.value`, for `icon_button_group` (an input kind of
+    /// the widget event contract since 2026-10-15) and `reference_point_widget`
+    /// (outside it): an orientation, a 3×3 anchor name. A behavior whose
+    /// `condition` is false does not run (``behaviorConditionHolds``): Artboard
+    /// Options' orientation is guarded by one. The value widgets' events are
+    /// `PanelWidgetEvents`'.
     private func handleChangeBehavior(stringValue: String) {
         handleChangeBehavior(eventValue: stringValue)
     }
@@ -2035,7 +2037,8 @@ struct YamlElementView: View {
         var ctxWithEvent = context
         ctxWithEvent["event"] = ["value": value] as [String: Any]
         if let pid = panelId { model.stateStore.setActivePanel(pid) }
-        for entry in behavior where (entry["event"] as? String) == "change" {
+        for entry in behavior where (entry["event"] as? String) == "change"
+            && behaviorConditionHolds(entry, context: ctxWithEvent) {
             let effects = (entry["effects"] as? [Any]) ?? []
             if !effects.isEmpty {
                 runEffects(effects, ctx: ctxWithEvent, store: model.stateStore,

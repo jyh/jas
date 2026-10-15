@@ -1395,12 +1395,16 @@ pub unsafe extern "C" fn jas_dialog_plan(e: *mut JasEngine, avail_w: i64, avail_
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
 }
 
-/// The scope a widget of the open dialog is evaluated in: the engine's, with
-/// no panel, plus the dialog's own `dialog.*` (its state) and `param.*` (its
-/// params) from `store_ctx`, the store's eval context.
+/// The scope a widget of the open dialog is evaluated in: the engine's, plus
+/// the dialog's own `dialog.*` (its state) and `param.*` (its params) and the
+/// ACTIVE panel's `panel.*`, from `store_ctx`, the store's eval context, as
+/// the reference evaluates a dialog widget.
 fn dialog_ctx(engine: &JasEngine, store_ctx: &serde_json::Value) -> serde_json::Value {
     let mut ctx = engine_scope_of(engine, "");
-    for key in ["dialog", "param"] {
+    // `panel` is the ACTIVE panel's scope, as the reference's `eval_context`
+    // carries it with a dialog open: Artboard Options reads the Artboards
+    // panel's `panel.reference_point`.
+    for key in ["dialog", "param", "panel"] {
         if let Some(v) = store_ctx.get(key) {
             ctx[key] = v.clone();
         }
@@ -3340,6 +3344,37 @@ mod tests {
         assert_eq!(crate::panel_behavior::option_text(&crate::interpreter::expr::eval(
             "dialog.radio_channel", &engine_of(e).store.borrow().eval_context())).as_deref(), Some("2"),
             "a whole number reads as its integer text");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The dialog's scope carries the ACTIVE PANEL's `panel.*`, as the
+    /// reference's store does (`eval_context` with a dialog open). Artboard
+    /// Options opens from the Artboards panel and reads its
+    /// `panel.reference_point` (the 3x3 widget and the X / Y display); the
+    /// engine's scope carried only `dialog` and `param`, so it read "" (flask
+    /// STATUS §281).
+    #[test]
+    fn the_dialog_scope_reads_the_active_panels_fields() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("multi_layer.svg");
+        {
+            let mut store = engine_of(e).store.borrow_mut();
+            store.init_panel("artboards", [("reference_point".to_string(), serde_json::json!("top_left"))].into());
+            store.set_active_panel(Some("artboards"));
+            store.init_dialog("artboard_options", [("width".to_string(), serde_json::json!(100.0))].into(), None);
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(&take(unsafe { jas_dialog_plan(e, 380, 640) })).unwrap();
+        fn find<'a>(n: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+            if n.get("id").and_then(|v| v.as_str()) == Some(id) { return Some(n); }
+            match n {
+                serde_json::Value::Object(m) => m.values().find_map(|v| find(v, id)),
+                serde_json::Value::Array(a) => a.iter().find_map(|v| find(v, id)),
+                _ => None,
+            }
+        }
+        let leaf = find(&v, "ao_reference_point").expect("the widget is planned");
+        assert_eq!(leaf["values"]["bind.value"], "top_left", "{leaf}");
         unsafe { jas_engine_free(e) };
     }
 

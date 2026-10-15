@@ -173,6 +173,18 @@ def _text_w(node: dict, key: str, ctx: dict) -> int:
     return len(resolved) * CHAR_WIDTH
 
 
+def _radio_group_w(node: dict, ctx: dict) -> int:
+    """A ``radio_group``'s options in a row: each a 16 indicator plus, when it
+    has a label, a 4 gap and the label; options 6 apart. Computed options (an
+    expression) have no declared rows, so the width is 0."""
+    options = node.get("options")
+    if not isinstance(options, list):
+        return 0
+    widths = [16 + (4 + _text_w(o, "label", ctx) if o.get("label") else 0)
+              for o in options if isinstance(o, dict)]
+    return sum(widths) + 6 * max(len(widths) - 1, 0)
+
+
 def _resolve_dim(v: Any, avail: int) -> int | None:
     if v is None:
         return None
@@ -261,8 +273,13 @@ def _leaf_size(node: dict, avail_w: int, ctx: dict) -> int:
         w = _text_w(node, "content", ctx)
     elif t == "button":
         w = _text_w(node, "label", ctx) + 16
-    elif t in ("checkbox", "toggle"):
+    elif t in ("checkbox", "toggle", "radio"):
         w = 16 + 4 + _text_w(node, "label", ctx)
+    elif t == "radio_group":
+        w = _radio_group_w(node, ctx)
+    elif t == "icon_button_group":
+        n = len(node["options"]) if isinstance(node.get("options"), list) else 0
+        w = 24 * n + 4 * max(n - 1, 0)
     elif t == "color_swatch":
         w = 16
     elif t == "icon_button":
