@@ -487,7 +487,6 @@ public sealed partial class MainWindow : Window
     }
     private bool _toolbarRefused;
 
-    /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
     /// <summary>
     /// jas §274: the engine closed its one document (false) or a load opened
     /// one again (true). Closed, the surface is covered and no key reaches the
@@ -562,6 +561,7 @@ public sealed partial class MainWindow : Window
              + $"seq={snap.Seq} cause={snap.Cause} frame-dips={DialogFrame.ActualWidth:0}x{DialogFrame.ActualHeight:0}");
     }
 
+    /// <summary>A registry pane's new plan was published. Draw it, on the UI thread.</summary>
     private void OnPaneChanged(string key)
     {
         if (!_canvas.Panes.TryGetValue(key, out var snap)) { return; }
@@ -2132,6 +2132,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    /// <summary>Each built menu item's action, by its id: what SB_MENU_SYNTH reads.</summary>
+    private readonly Dictionary<string, string> _menuActions = new(StringComparer.Ordinal);
+    private bool _menuSynthDone;
+
     /// <summary>
     /// Join the two passes on `path` and materialize the result.
     ///
@@ -2140,10 +2144,6 @@ public sealed partial class MainWindow : Window
     /// checked}`. A `path` of length 1 is a top-level menu, length 2 an entry in
     /// it, length 3 an entry in a submenu.
     /// </summary>
-    /// <summary>Each built menu item's action, by its id: what SB_MENU_SYNTH reads.</summary>
-    private readonly Dictionary<string, string> _menuActions = new(StringComparer.Ordinal);
-    private bool _menuSynthDone;
-
     private (int Items, int Enabled) BuildMenu(MenuSnapshot snap)
     {
         // PER REBUILD, not cumulative: the row reports what THIS menubar could
