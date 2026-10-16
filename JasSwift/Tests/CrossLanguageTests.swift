@@ -5464,6 +5464,8 @@ private let actionFixtures = [
     // YAML coverage census (2026-10-10): the Stroke panel cap, join and
     // a dashed toggle, dispatched with a stroked rect selected.
     "stroke_actions.json",
+    "brush_actions.json",
+    "transform_options_actions.json",
     // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
     // artboards_panel_select, which is itself a verb with no other case.
     "artboard_actions.json",
@@ -5919,7 +5921,14 @@ private func unwrapSeeds(_ el: Element) -> Element {
     for k in kids {
         let cleaned = unwrapSeeds(k)
         if case .group(let g) = cleaned, g.name == seedWrapperName {
-            next.append(contentsOf: g.children)
+            // An operation may TRANSFORM the wrapper (Scale, Rotate, Shear on a
+            // selected group); compose it into each child (wrapper ∘ child)
+            // rather than drop it. Mirrors Rust `unwrap_seeds` (2026-10-16).
+            if let w = g.transform {
+                next.append(contentsOf: g.children.map { $0.withTransformPremultiplied(w) })
+            } else {
+                next.append(contentsOf: g.children)
+            }
         } else {
             next.append(cleaned)
         }
@@ -5976,6 +5985,13 @@ private let seedExempt: [String: String] = [
 /// the wrapper — which is a different element from the leaf underneath it.
 private let seedKnown: Set<String> = [
     "make_compound_shape.json::make_compound_shape_two_rects",
+    // SCALE STROKES REACHES THE SELECTED ELEMENT, NOT A GROUP'S LEAVES
+    // (2026-10-16, measured): a scale with scale_strokes multiplies the selected
+    // element's own stroke width, so a bare rect's width goes 2 -> 3 while the
+    // rect inside a selected group keeps 2 (the group has no stroke). Both
+    // carry the same composed transform. Raised for a ruling (the spec maps
+    // coordinates; the ports store a transform). Mirrors Rust's KNOWN.
+    "transform_options_actions.json::scale_options_confirm_uniform_150",
     // The four Alt+click compound-creating variants: make_compound_shape with
     // another operation, so the wrappers survive as the compound's operands,
     // which the unwrap cannot reach. Same artifact as the row above; Rust's
