@@ -84,5 +84,16 @@ public func artboardsPanelSelectionIds(_ model: Model) -> [String] {
         as? [Any])?.compactMap { $0 as? String } ?? []
 }
 
-/// RED-FIRST STUB (replaced in the next commit).
-func artboardToolFacts(_ model: Model) -> [String: Any] { [:] }
+/// The Artboards panel's facts a canvas tool reads (its selection and
+/// shift-click anchor), handed to the active tool before every pointer event
+/// and every claimed key (`setDocumentFacts`): the tool runs on its own store,
+/// which holds neither (ARTBOARD_TOOL.md §Mousedown disambiguation order).
+/// Rust's `AppState::artboard_tool_facts` and `JasEngine::artboard_facts`
+/// hand the same keys.
+func artboardToolFacts(_ model: Model) -> [String: Any] {
+    let anchor = model.stateStore.getPanelState(artboardsPanelScope)["panel_selection_anchor"] as? String
+    return [
+        "artboards_panel_selection_ids": artboardsPanelSelectionIds(model),
+        "artboards_panel_anchor": anchor.map { $0 as Any } ?? NSNull(),
+    ]
+}
