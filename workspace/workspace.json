@@ -21199,6 +21199,10 @@
       "menu_label": "Artboard Tool",
       "shortcut": "Shift+O",
       "tool_options_action": "fit_all_artboards",
+      "claims_keys": [
+        "Delete",
+        "Backspace"
+      ],
       "state": {
         "mode": {
           "default": "idle",
@@ -21618,7 +21622,7 @@
             "if": "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'",
             "then": [
               {
-                "if": "len(active_document.artboards_panel_selection_ids) > 0",
+                "if": "active_document.artboards_panel_selection_ids.length > 0",
                 "then": [
                   {
                     "doc.artboard.delete_panel_selected": {}
@@ -21638,7 +21642,7 @@
       },
       "overlay": [
         {
-          "if": "len(active_document.artboards_panel_selection_ids) == 1",
+          "if": "active_document.artboards_panel_selection_ids.length == 1",
           "render": {
             "type": "artboard_resize_handles",
             "artboard_id": "active_document.artboards_panel_selection_ids[0]"
