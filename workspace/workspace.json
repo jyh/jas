@@ -124,6 +124,15 @@
         }
       ]
     },
+    "save_all_then_close": {
+      "description": "Save every modified document, then close the application window. The host does it, in that order, and closes only after every save succeeded: a native app saves each tab and quits, and the engine, which can neither save nor close, names it in its reply (`\"save_all_then_close\": true`) for the shell to act on, as `close_window` names a bare close. It is never `close_window`, because a shell that closed on that before saving would lose the edits. Reached from Save Changes' Save All. The browser app has no window of its own to close, so there it does nothing.\n",
+      "category": "file",
+      "effects": [
+        {
+          "log": "save_all_then_close"
+        }
+      ]
+    },
     "undo": {
       "description": "Undo the last editing operation on the active document. Pops the most recent entry from the undo stack, reverses its effect on the canvas, and pushes it onto the redo stack. The canvas re-renders to reflect the prior state. Disabled when the undo stack is empty.\n",
       "category": "edit",
@@ -1194,14 +1203,14 @@
       ]
     },
     "save_all_and_close": {
-      "description": "Save all modified documents and then close the application window. Called from the save_changes_window dialog when the user clicks Save All. Iterates through all open tabs, saves any with unsaved changes, then closes the dialog and the application.\n",
+      "description": "Save all modified documents and then close the application window. Called from the save_changes_window dialog when the user clicks Save All. Closes the dialog, then hands the saving and the close to the host with `save_all_then_close`, which saves every tab with unsaved changes and closes the application only after they are saved.\n",
       "category": "dialog",
       "effects": [
         {
-          "log": "save_all_and_close"
+          "close_dialog": null
         },
         {
-          "close_dialog": null
+          "dispatch": "save_all_then_close"
         }
       ]
     },

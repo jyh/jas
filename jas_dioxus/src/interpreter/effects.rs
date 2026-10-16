@@ -13784,8 +13784,15 @@ mod tests {
         assert_eq!(report_of_real_action("new_symbol"),
                    vec![Unhandled::Logged("new_symbol".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
+        // (`save` on an untitled document dispatches `save_as`, a log too.)
+        assert_eq!(report_of_real_action("save_and_close"),
+                   vec![Unhandled::Logged("save_as: show native save dialog".into()),
+                        Unhandled::Logged("save_and_close".into())]);
+        // A DISPATCHED log is reported by the name of the action that logs it:
+        // Save All's work is the host's `save_all_then_close` (jas STATUS # 303),
+        // which no host here claims.
         assert_eq!(report_of_real_action("save_all_and_close"),
-                   vec![Unhandled::Logged("save_all_and_close".into())]);
+                   vec![Unhandled::Logged("save_all_then_close".into())]);
         // A declared placeholder. The YAML omits `effects`, and the compiled
         // workspace writes `effects: []`, so this is the EMPTY-LIST path; the
         // no-list path is driven by the hand-built catalog above.

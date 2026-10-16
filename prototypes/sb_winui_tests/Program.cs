@@ -610,6 +610,20 @@ static class Program
         Eq("close: 1 closed the document", "closed", ActWire.CloseReading(1));
         Eq("close: 0 found none open", "none-open", ActWire.CloseReading(0));
         Eq("close: 255 had no engine", "no-engine", ActWire.CloseReading(255));
+        // jas §300: every act reply names a window close (`"close_window":
+        // <bool>`): `quit` with nothing edited, and Save Changes' Don't Save.
+        // The shell closes ONLY on a named true, never on a refusal or a guess.
+        Eq("close_window: quit with nothing edited closes", "True",
+            ActWire.CloseWindow("""{"changed":[],"close_window":true,"dialog":null,"doc_changed":false,"remove_tab":null}""").ToString());
+        Eq("close_window: quit with an edit asks first and keeps the window", "False",
+            ActWire.CloseWindow("""{"changed":[],"close_window":false,"dialog":"save_changes_window","doc_changed":false,"remove_tab":null}""").ToString());
+        Eq("close_window: an older engine with no key keeps the window", "False",
+            ActWire.CloseWindow("""{"changed":[],"dialog":null,"doc_changed":false}""").ToString());
+        Eq("close_window: a non-boolean keeps the window", "False|False",
+            ActWire.CloseWindow("""{"close_window":"true"}""").ToString() + "|"
+            + ActWire.CloseWindow("""{"close_window":1}""").ToString());
+        Eq("close_window: a refusal's empty reply keeps the window", "False", ActWire.CloseWindow("").ToString());
+        Eq("close_window: unreadable bytes keep the window", "False", ActWire.CloseWindow("{").ToString());
         Eq("close: any other byte is no answer, never a guess", "unknown(7)", ActWire.CloseReading(7));
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());

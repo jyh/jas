@@ -216,6 +216,11 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * `close_window` is claimed and NAMED the same way: the engine owns no
 ///   window, so the host records it in [`EngineHost::closed_window`] and the
 ///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
+/// * `save_all_then_close` is claimed and NAMED the same way: the engine can
+///   neither save nor close, so the host records it in
+///   [`EngineHost::save_all_then_close`] and the reply carries
+///   `"save_all_then_close": true` (jas STATUS # 303). It never sets
+///   `closed_window`: the shell closes only after its saves succeed.
 ///
 /// * `delete_selection` is claimed and RUN by the Delete key's law
 ///   (`menu_native::delete_selection`): an orphan opens
@@ -230,6 +235,8 @@ pub struct EngineHost {
     pub removed_tab: Option<i64>,
     /// A `close_window` asked the shell to close the application window.
     pub closed_window: bool,
+    /// A `save_all_then_close` asked the shell to save every document, then close.
+    pub save_all_then_close: bool,
 }
 
 impl EffectHost for EngineHost {
@@ -293,6 +300,10 @@ impl EffectHost for EngineHost {
                 let params = [("count".to_string(), Value::from(count))].into_iter().collect();
                 open_dialog_in(ID, def, Some(params), None, &Value::Null, store, Some(model));
             }
+            return Some(None);
+        }
+        if action == "save_all_then_close" {
+            self.save_all_then_close = true;
             return Some(None);
         }
         if action == "remove_tab" {
