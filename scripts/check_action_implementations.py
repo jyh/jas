@@ -147,7 +147,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 60
+MIN_LOG_ONLY = 61
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -508,6 +508,13 @@ def self_test() -> int:
     # §290): an anchor-preserving swap in four `set`s, driven in the reference
     # (every anchor, and twice is the identity) and on the engine's dialog door.
     # One stub, a delta of 1.
+    #
+    # 61 when `save_all_then_close` JOINED (2026-10-15, jas STATUS # 303): Save
+    # All's work, "save every document, then close", is the host's, so its
+    # body is a `log` the engine claims and names in its act reply
+    # (`"save_all_then_close": true`), exactly as `close_window`'s below.
+    # Log-only by design, not a stub. `save_all_and_close` did not join: it
+    # closes the dialog and dispatches it. A delta of 1.
     #
     # 60 when `close_window` JOINED (2026-10-15, jas STATUS # 299/# 300): the
     # host closes the window, so its body is a `log` that the engine claims

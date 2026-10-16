@@ -115,6 +115,20 @@ actions:
     category: file
     effects:
       - log: "close_window"
+  save_all_then_close:
+    description: >
+      Save every modified document, then close the application window. The
+      host does it, in that order, and closes only after every save
+      succeeded: a native app saves each tab and quits, and the engine, which
+      can neither save nor close, names it in its reply
+      (`"save_all_then_close": true`) for the shell to act on, as
+      `close_window` names a bare close. It is never `close_window`, because a
+      shell that closed on that before saving would lose the edits. Reached
+      from Save Changes' Save All. The browser app has no window of its own
+      to close, so there it does nothing.
+    category: file
+    effects:
+      - log: "save_all_then_close"
 
   # ── Edit ──────────────────────────────────────────────────
   undo:
@@ -1202,12 +1216,13 @@ actions:
     description: >
       Save all modified documents and then close the application window.
       Called from the save_changes_window dialog when the user clicks
-      Save All. Iterates through all open tabs, saves any with unsaved
-      changes, then closes the dialog and the application.
+      Save All. Closes the dialog, then hands the saving and the close to
+      the host with `save_all_then_close`, which saves every tab with
+      unsaved changes and closes the application only after they are saved.
     category: dialog
     effects:
-      - log: "save_all_and_close"
       - close_dialog: null
+      - dispatch: save_all_then_close
 
 
   new_swatch:

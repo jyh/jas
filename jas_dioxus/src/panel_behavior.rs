@@ -216,6 +216,11 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * `close_window` is claimed and NAMED the same way: the engine owns no
 ///   window, so the host records it in [`EngineHost::closed_window`] and the
 ///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
+/// * `save_all_then_close` is claimed and NAMED the same way: the engine can
+///   neither save nor close, so the host records it in
+///   [`EngineHost::save_all_then_close`] and the reply carries
+///   `"save_all_then_close": true` (jas STATUS # 303). It never sets
+///   `closed_window`: the shell closes only after its saves succeed.
 ///
 /// * `paragraph_justification_confirm` and `paragraph_hyphenation_confirm`
 ///   are INTERCEPTED, never claimed: the host writes the dialog's values to
@@ -231,6 +236,8 @@ pub struct EngineHost {
     pub removed_tab: Option<i64>,
     /// A `close_window` asked the shell to close the application window.
     pub closed_window: bool,
+    /// A `save_all_then_close` asked the shell to save every document, then close.
+    pub save_all_then_close: bool,
 }
 
 impl EffectHost for EngineHost {
@@ -297,6 +304,10 @@ impl EffectHost for EngineHost {
                 }
             }
             return None;
+        }
+        if action == "save_all_then_close" {
+            self.save_all_then_close = true;
+            return Some(None);
         }
         if action == "remove_tab" {
             if let Some(i) = params.get("index").and_then(Value::as_i64) {
