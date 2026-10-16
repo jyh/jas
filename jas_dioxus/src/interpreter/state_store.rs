@@ -620,6 +620,17 @@ impl StateStore {
             .collect();
         ctx.insert("tool".to_string(), serde_json::Value::Object(tool_obj));
 
+        // The data namespace (brush_libraries, swatch_libraries), so a dialog
+        // init or an action reads `data.*` from the store the library effects
+        // write, as `state_store.py` does. Until 2026-10-15 no port's context
+        // carried it, so Brush Options' edit-mode inits were null everywhere.
+        // An unseeded store reads as `{}`, the reference's default.
+        ctx.insert("data".to_string(), if self.data.is_null() {
+            serde_json::Value::Object(serde_json::Map::new())
+        } else {
+            self.data.clone()
+        });
+
         // Dialog state
         if let Some(ref dialog) = self.dialog {
             let dialog_obj: serde_json::Value = serde_json::Value::Object(
@@ -647,6 +658,14 @@ impl StateStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eval_context_carries_the_data_namespace() {
+        let mut store = StateStore::new();
+        assert_eq!(store.eval_context()["data"], serde_json::json!({}), "unseeded reads as {{}}");
+        store.set_data(serde_json::json!({"brush_libraries": {"x": {"brushes": []}}}));
+        assert_eq!(store.eval_context()["data"], serde_json::json!({"brush_libraries": {"x": {"brushes": []}}}));
+    }
 
     #[test]
     fn get_set() {
