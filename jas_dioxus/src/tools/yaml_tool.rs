@@ -15,7 +15,7 @@ use crate::painter::overlay_ctx::OverlayCtx;
 
 use crate::document::model::Model;
 use crate::interpreter::doc_primitives;
-use crate::interpreter::effects::run_effects;
+use crate::interpreter::effects::{run_effects_hosted, EffectHost, Unhandled};
 use crate::interpreter::state_store::StateStore;
 use crate::tools::tool::{CanvasTool, KeyMods};
 
@@ -31,6 +31,13 @@ pub struct ToolSpec {
     pub cursor: Option<String>,
     pub menu_label: Option<String>,
     pub shortcut: Option<String>,
+    /// Keys this tool's `on_keydown` takes BEFORE the app's shortcuts
+    /// (`claims_keys:`), because the handler owns their fall-through: the
+    /// Artboard tool's Delete deletes the panel-selected artboards, else
+    /// dispatches `delete_selection` itself (ARTBOARD_TOOL.md §Delete
+    /// behavior). A YAML tool reports every key handled, so without the
+    /// list no route could tell which keys it means.
+    pub claims_keys: Vec<String>,
     /// Initial values for `$tool.<id>.<var>` state, keyed by variable
     /// name. Applied via [`StateStore::init_tool`] when a YamlTool is
     /// registered; handlers read and write them via scope-routed `set:`
@@ -79,6 +86,11 @@ impl ToolSpec {
             .get("shortcut")
             .and_then(|v| v.as_str())
             .map(String::from);
+        let claims_keys = spec
+            .get("claims_keys")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|k| k.as_str().map(String::from)).collect())
+            .unwrap_or_default();
         let state_defaults = parse_state_defaults(spec.get("state"));
         let handlers = parse_handlers(spec.get("handlers"));
         let overlay = parse_overlay(spec.get("overlay"));
@@ -87,6 +99,7 @@ impl ToolSpec {
             cursor,
             menu_label,
             shortcut,
+            claims_keys,
             state_defaults,
             handlers,
             overlay,
@@ -180,6 +193,10 @@ fn parse_overlay(val: Option<&serde_json::Value>) -> Vec<OverlaySpec> {
 pub struct YamlTool {
     spec: ToolSpec,
     store: StateStore,
+    /// Document facts the HOST knows and this tool's private store does not
+    /// (the Artboards panel's selection), merged into every dispatch's
+    /// `active_document`. Set by [`CanvasTool::set_document_facts`].
+    document_facts: serde_json::Map<String, serde_json::Value>,
 }
 
 impl YamlTool {
@@ -188,7 +205,7 @@ impl YamlTool {
     pub fn new(spec: ToolSpec) -> Self {
         let mut store = StateStore::new();
         store.init_tool(&spec.id, spec.state_defaults.clone());
-        Self { spec, store }
+        Self { spec, store, document_facts: serde_json::Map::new() }
     }
 
     /// Build directly from raw workspace spec JSON. Returns `None` when
@@ -292,9 +309,13 @@ impl YamlTool {
             .as_ref()
             .and_then(|ws| ws.data().get("preferences").cloned())
             .unwrap_or(serde_json::Value::Null);
+        let mut active_document = Self::active_document_payload(model);
+        if let Some(o) = active_document.as_object_mut() {
+            o.extend(self.document_facts.clone());
+        }
         let ctx = serde_json::json!({
             "event": event_payload,
-            "active_document": Self::active_document_payload(model),
+            "active_document": active_document,
             "preferences": preferences,
         });
         // Registration tears down on guard drop — handler panics still
@@ -311,7 +332,7 @@ impl YamlTool {
         // that emit select_in_rect / translate_selection / copy_selection
         // originate, with the REAL StateStore (not renderer.rs's throwaway one).
         let action_name = format!("{} {}", self.spec.id, event_name);
-        run_effects(
+        run_effects_hosted(
             &effects,
             &ctx,
             &mut self.store,
@@ -322,7 +343,27 @@ impl YamlTool {
             // this store; the host takes it with `take_opened_dialog`.
             workspace.as_ref().map(|ws| ws.dialogs()),
             Some(action_name.as_str()),
+            &mut ToolHost,
         );
+    }
+}
+
+/// The host a YAML tool's handlers run under. It claims the actions a tool
+/// dispatches whose YAML body is the menu's `log`, so they RUN rather than
+/// log: `delete_selection` (the Artboard tool's Delete falls through to it).
+/// A dialog it opens lands in the tool's store, where the host's
+/// `take_opened_dialog` takes it. Every effect key is declined, as before.
+struct ToolHost;
+
+impl EffectHost for ToolHost {
+    fn run(&mut self, _key: &str, _arg: &serde_json::Value, _store: &mut StateStore,
+           _model: Option<&mut Model>) -> bool {
+        false
+    }
+
+    fn run_action(&mut self, action: &str, _params: &serde_json::Value, store: &mut StateStore,
+                  model: Option<&mut Model>) -> Option<Option<Unhandled>> {
+        (action == "delete_selection").then(|| crate::workspace::menu_native::run_delete_selection(store, model))
     }
 }
 
@@ -568,6 +609,14 @@ impl CanvasTool for YamlTool {
             self.store.close_dialog();
         }
         Some((id, params))
+    }
+
+    fn set_document_facts(&mut self, facts: &serde_json::Value) {
+        self.document_facts = facts.as_object().cloned().unwrap_or_default();
+    }
+
+    fn claims_key(&self, key: &str) -> bool {
+        self.spec.claims_keys.iter().any(|k| k == key)
     }
 
     fn on_key_event(

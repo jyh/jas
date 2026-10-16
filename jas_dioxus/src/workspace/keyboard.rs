@@ -601,6 +601,44 @@ pub(crate) fn make_keydown_handler(
                 }));
             }
             Key::Delete | Key::Backspace => {
+                // A tool that CLAIMS the key (`claims_keys`: the Artboard
+                // tool's Delete, ARTBOARD_TOOL.md §Delete behavior) takes it,
+                // and its handler owns the fall-through to `delete_selection`.
+                // It runs on its own store, so it is handed the Artboards
+                // panel's selection; a dialog it opens (an orphaning delete)
+                // moves to the app's dialog signal, as a pointer event's does.
+                let name: &'static str = if matches!(key, Key::Delete) { "Delete" } else { "Backspace" };
+                let claimed = {
+                    let st = app_for_keys.borrow();
+                    st.tab().and_then(|tab| tab.tools.get(&st.active_tool).map(|t| t.claims_key(name)))
+                        .unwrap_or(false)
+                };
+                if claimed {
+                    evt.prevent_default();
+                    let km = crate::tools::tool::KeyMods {
+                        shift: mods.shift(), ctrl: mods.ctrl(), alt: mods.alt(), meta: mods.meta(),
+                    };
+                    let mut dialog_sig = dialog_sig;
+                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        let kind = st.active_tool;
+                        let facts = serde_json::json!({
+                            "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
+                        });
+                        let opened = if let Some(tab) = st.tab_mut()
+                            && let Some(tool) = tab.tools.get_mut(&kind) {
+                                tool.set_document_facts(&facts);
+                                tool.on_key_event(&mut tab.model, name, km);
+                                tool.take_opened_dialog()
+                            } else {
+                                None
+                            };
+                        if let Some((id, params)) = opened {
+                            let live_state = crate::workspace::dock_panel::build_live_state_map(st);
+                            crate::interpreter::dialog_view::open_dialog(&mut dialog_sig, &id, &params, &live_state);
+                        }
+                    }));
+                    return;
+                }
                 // Reference-aware delete (warn-then-orphan). Phase A:
                 // compute the pure orphaned_references predicate over the
                 // current selection. Empty -> delete inline exactly as

@@ -566,7 +566,7 @@ pub fn seed_library_data(store: &mut StateStore) {
 /// Before it the scope stated the selection as a hard-coded `[]` and carried no
 /// `current_artboard`, so `ap_new` created a default-sized artboard where the
 /// action says "the current artboard's size".
-fn artboard_facts(store: &StateStore, doc: &Document) -> Map<String, Value> {
+pub(crate) fn artboard_facts(store: &StateStore, doc: &Document) -> Map<String, Value> {
     let selected: Vec<String> = store
         .panel_scope("artboards")
         .and_then(|p| p.get("artboards_panel_selection"))
