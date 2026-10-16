@@ -281,10 +281,6 @@ internal sealed class PanelOpenCmd : Cmd
 }
 
 /// <summary>
-/// A person clicked a panel control. The shell reports WHICH control and the
-/// modifier keys; the engine runs what the panel spec declares (BL1, A6).
-/// </summary>
-/// <summary>
 /// A person chose a menu item the shell does not run itself. The shell reports
 /// WHICH item; the engine runs its action (`jas_dispatch_action`, BL1).
 /// </summary>
@@ -309,6 +305,10 @@ internal sealed class PanelMenuCmd : Cmd
     internal string Via = "hand";
 }
 
+/// <summary>
+/// A person clicked a panel control. The shell reports WHICH control and the
+/// modifier keys; the engine runs what the panel spec declares (BL1, A6).
+/// </summary>
 internal sealed class PanelClickCmd : Cmd
 {
     internal string PanelId = "";
@@ -3898,7 +3898,6 @@ internal sealed unsafe class Canvas : IDisposable
         return (u, r);
     }
 
-    /// <summary>How many elements the core says the document holds.</summary>
     /// <summary>
     /// P1's reading: how many elements the core is holding.
     ///

@@ -278,6 +278,12 @@ jobs:
       # MainWindow.xaml, the self-test REDDED and named this missing step. It
       # fired on its first real occasion, in the PR that caused it.
       - run: python scripts/check_shell_no_interpreter.py
+      # No WinUI C# member carries two `/// <summary>` blocks: a member
+      # inserted between a doc comment and its member leaves the summary on the
+      # wrong one, compiles, and warns nowhere (#452, #465; flask's census of
+      # four more). Red on `main` when written, at exactly those four.
+      - run: python scripts/check_cs_doc_summaries.py --self-test
+      - run: python scripts/check_cs_doc_summaries.py
       # ⭐ THE SCENE JOIN (wave 1 / W5). LIVE FROM THE FIRST COMMIT, unlike W0's
       # gate: its clauses are about two lists AGREEING, and both lists exist on
       # `main`. It was RED on `main` when written -- `abi` and `app` were
@@ -1068,6 +1074,8 @@ jobs:
           python scripts/check_shell_abi_bindings.py
           python scripts/check_shell_no_interpreter.py --self-test
           python scripts/check_shell_no_interpreter.py
+          python scripts/check_cs_doc_summaries.py --self-test
+          python scripts/check_cs_doc_summaries.py
           python scripts/check_op_vocabulary.py --self-test
           python scripts/check_op_vocabulary.py
           # W2b-9's widget-kind join reads `Materializer.cs`, which SHIPS to
