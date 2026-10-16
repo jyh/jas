@@ -3061,13 +3061,36 @@ function Read-SbInputScript([string]$Json) {
 # numeric equality would certify it. The first differing byte is named.
 function Compare-SbReadBack([string]$Got, [string]$Want) {
     if ([string]::IsNullOrEmpty($Got)) { return 'NOT RUN(empty read-back)' }
-    if ($Got -ceq $Want) { return "PASS(bytes=$($Got.Length))" }
+    # THE OPEN'S ARTBOARD (flask STATUS 319). Every reference runner builds a
+    # script's setup with the codec, which adds no artboard, so no expected
+    # names one; the shell opens the setup as a person does (#461), which adds
+    # the at-least-one artboard with a FRESH id, random per run (ARTBOARDS.md).
+    # Set aside exactly that one -- named 'Artboard 1', an 8-character base36
+    # id -- and only when the expected names no artboards; refuse by name
+    # anything else in its place. The receipt says it was set aside.
+    $note = ''
+    if (-not $Want.Contains('"artboards":') -and $Got.StartsWith('{"artboards":[')) {
+        $m = [regex]::Match($Got, '^\{"artboards":\[(\{[^{}\[\]]*\}(?:,\{[^{}\[\]]*\})*)\],')
+        if (-not $m.Success) { return 'FAIL(the read-back opens with an artboards member this reader cannot delimit)' }
+        $abs = @([regex]::Matches($m.Groups[1].Value, '\{[^{}\[\]]*\}'))
+        if ($abs.Count -ne 1) {
+            return ('FAIL(the read-back carries {0} artboards where the expected names none; the open adds exactly one)' -f $abs.Count)
+        }
+        $abId = [regex]::Match($abs[0].Value, '"id":"([^"]*)"').Groups[1].Value
+        $abName = [regex]::Match($abs[0].Value, '"name":"([^"]*)"').Groups[1].Value
+        if ($abId -cnotmatch '^[0-9a-z]{8}$' -or $abName -cne 'Artboard 1') {
+            return ('FAIL(an artboard the expected does not name, and not the one the open adds: id "{0}" name "{1}")' -f $abId, $abName)
+        }
+        $Got = '{' + $Got.Substring($m.Length)
+        $note = '; the open''s artboard set aside'
+    }
+    if ($Got -ceq $Want) { return "PASS(bytes=$($Got.Length)$note)" }
     $n = [math]::Min($Got.Length, $Want.Length)
     $i = 0
     while ($i -lt $n -and $Got[$i] -ceq $Want[$i]) { $i++ }
     $g = $Got.Substring($i, [math]::Min(24, $Got.Length - $i))
     $w = $Want.Substring($i, [math]::Min(24, $Want.Length - $i))
-    return "FAIL(at byte $i of got=$($Got.Length) want=$($Want.Length): got `"$g`" want `"$w`")"
+    return "FAIL(at byte $i of got=$($Got.Length) want=$($Want.Length): got `"$g`" want `"$w`"$note)"
 }
 
 # ---------------------------------------------------------------------------
