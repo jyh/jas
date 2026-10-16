@@ -2837,6 +2837,8 @@ pub(crate) mod tests {
         // YAML coverage census (2026-10-10): the Stroke panel cap, join and
         // a dashed toggle, dispatched with a stroked rect selected.
         "stroke_actions.json",
+        "brush_actions.json",
+        "transform_options_actions.json",
         // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
         // artboards_panel_select, which is itself a verb with no other case.
         "artboard_actions.json",
@@ -8750,7 +8752,26 @@ pub(crate) mod tests {
                         if g.common.name.as_deref() == Some("__seed_wrapper__"));
                     if is_seed {
                         if let Element::Group(g) = &cleaned {
-                            for gc in &g.children { next.push(gc.clone()); }
+                            // An operation may TRANSFORM the wrapper (Scale,
+                            // Rotate, Shear on a selected group). Dropping the
+                            // wrapper dropped that transform, so every transform
+                            // read as a disagreement by construction. Compose it
+                            // into each child instead: the child's world
+                            // transform is wrapper ∘ child (2026-10-16).
+                            for gc in &g.children {
+                                match &g.common.transform {
+                                    Some(w) => {
+                                        let mut c = (**gc).clone();
+                                        let composed = match c.common().transform {
+                                            Some(t) => w.multiply(&t),
+                                            None => *w,
+                                        };
+                                        c.common_mut().transform = Some(composed);
+                                        next.push(std::rc::Rc::new(c));
+                                    }
+                                    None => next.push(gc.clone()),
+                                }
+                            }
                         }
                     } else {
                         next.push(std::rc::Rc::new(cleaned));
@@ -8803,6 +8824,13 @@ pub(crate) mod tests {
         // Removing a row here still requires either a fix or a recorded ruling.
         const KNOWN: &[&str] = &[
             "make_compound_shape.json::make_compound_shape_two_rects",
+            // SCALE STROKES REACHES THE SELECTED ELEMENT, NOT A GROUP'S LEAVES
+            // (2026-10-16, measured): `compose_matrix_over_paths` multiplies the
+            // selected element's own stroke width, so a bare rect goes 2 -> 3
+            // while the rect inside a selected group keeps 2 (a group has no
+            // stroke). Both carry the same composed transform. Raised for a
+            // ruling: the spec maps coordinates, the ports store a transform.
+            "transform_options_actions.json::scale_options_confirm_uniform_150",
             // The four Alt+click compound-creating variants are make_compound_shape
             // with another operation: the wrappers survive as the LIVE element's
             // operands, which `unwrap_seeds` cannot reach (`children_mut` is None
