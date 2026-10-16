@@ -105,6 +105,9 @@ jobs:
       # workspace_interpreter/tests/test_state_read_findings.py, which fails on
       # the pre-repair YAML; the gate below is the guard against the NEXT one.
       - run: python scripts/check_state_reads.py --self-test && python scripts/check_state_reads.py
+      # A call to a function no evaluator defines is null, silently, in every
+      # port (`len(...)` hid the Artboard tool's Delete branch; PR #460).
+      - run: python scripts/check_expr_functions.py --self-test && python scripts/check_expr_functions.py
       - run: bash scripts/check_panel_goldens.sh
       - run: python scripts/check_path_b_exclusions.py
       - run: bash scripts/check_intent_map.sh
@@ -972,6 +975,8 @@ jobs:
           # each became and why no port gained an operator.
           python scripts/check_state_reads.py --self-test
           python scripts/check_state_reads.py
+          python scripts/check_expr_functions.py --self-test
+          python scripts/check_expr_functions.py
           bash scripts/check_panel_goldens.sh
           python scripts/check_path_b_exclusions.py
           bash scripts/check_intent_map.sh
