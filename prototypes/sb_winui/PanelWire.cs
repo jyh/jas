@@ -1104,6 +1104,27 @@ internal static class ActWire
     };
 
     /// <summary>
+    /// jas §300: `"close_window": <bool>`, in every act reply. True for `quit`
+    /// with nothing edited and for Save Changes' Don't Save. Only a named
+    /// `true` closes. An older engine with no key, a non-boolean, a refusal's
+    /// empty reply, or unreadable bytes all keep the window.
+    /// </summary>
+    internal static bool CloseWindow(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("close_window", out var c)
+                   && c.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
     /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
     /// shell removes it. Null when the reply names none, an older engine sent
