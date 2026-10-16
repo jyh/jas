@@ -83,3 +83,6 @@ public func artboardsPanelSelectionIds(_ model: Model) -> [String] {
         .getPanelState(artboardsPanelScope)["artboards_panel_selection"]
         as? [Any])?.compactMap { $0 as? String } ?? []
 }
+
+/// RED-FIRST STUB (replaced in the next commit).
+func artboardToolFacts(_ model: Model) -> [String: Any] { [:] }
