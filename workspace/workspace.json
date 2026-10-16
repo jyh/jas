@@ -21261,6 +21261,9 @@
         "hit_handle_pos": {
           "default": null
         },
+        "click_narrows": {
+          "default": null
+        },
         "hover_kind": {
           "default": "empty"
         },
@@ -21555,6 +21558,19 @@
                 "doc.preview.clear": {}
               }
             ]
+          },
+          {
+            "if": "tool.artboard.mode == 'moving_pending' && not tool.artboard.moved",
+            "then": [
+              {
+                "doc.artboard.click_narrow": {}
+              }
+            ]
+          },
+          {
+            "set": {
+              "tool.artboard.click_narrows": "null"
+            }
           },
           {
             "set": {

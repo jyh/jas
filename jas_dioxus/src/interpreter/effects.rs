@@ -1988,6 +1988,11 @@ fn run_doc_effect(
                     cursor_x, cursor_y, shift_held);
             }
         }
+        "doc.artboard.click_narrow" => {
+            // The mouseup half of a plain click on an artboard that was
+            // already selected (ARTBOARD_TOOL.md §Click-to-activate).
+            artboard_click_narrow(store);
+        }
         "doc.artboard.move_commit" => {
             // Drag-to-move commit. The live-update path has already
             // written final positions to model; this effect rounds
@@ -3848,6 +3853,25 @@ fn artboard_panel_fact(store: &StateStore, ctx: &serde_json::Value, key: &str) -
         .or_else(|| store.eval_context().get("active_document").and_then(|d| d.get(key)).cloned())
 }
 
+/// Queue the panel writes that make `id` the whole selection and the anchor
+/// (a plain click, ARTBOARDS.md §Selection semantics).
+fn artboard_select_only(store: &mut StateStore, id: String) {
+    store.push_panel_state_write("artboards", "artboards_panel_selection", serde_json::json!([id.clone()]));
+    store.push_panel_state_write("artboards", "panel_selection_anchor", serde_json::Value::String(id));
+}
+
+/// Implementation of doc.artboard.click_narrow: the mouseup half of a plain
+/// click on an artboard that was already selected (`tool.artboard.click_narrows`,
+/// latched by probe_hit). Narrows the selection to it; a no-op when the press
+/// latched nothing.
+fn artboard_click_narrow(store: &mut StateStore) {
+    let id = store.eval_context().get("tool").and_then(|t| t.get("artboard"))
+        .and_then(|a| a.get("click_narrows")).and_then(|v| v.as_str()).map(String::from);
+    if let Some(id) = id {
+        artboard_select_only(store, id);
+    }
+}
+
 /// The panel-selected artboard ids (move, resize, duplicate, delete), by
 /// [`artboard_panel_fact`]. Empty when no artboards are panel-selected.
 fn artboard_panel_selection(store: &StateStore, ctx: &serde_json::Value) -> Vec<String> {
@@ -4752,6 +4776,7 @@ fn artboard_probe_hit(
     // Reset hit-state defaults; specific arms below override.
     store.set_tool("artboard", "hit_artboard_id", serde_json::Value::Null);
     store.set_tool("artboard", "hit_handle_pos", serde_json::Value::Null);
+    store.set_tool("artboard", "click_narrows", serde_json::Value::Null);
 
     let doc = model.document();
 
@@ -4882,18 +4907,16 @@ fn artboard_probe_hit(
                 serde_json::json!(new_sel),
             );
             // Anchor unchanged on cmd-click.
+        } else if current_sel.contains(&hit_id) {
+            // Plain press on an artboard ALREADY selected: leave the
+            // selection alone, so a drag moves every selected artboard
+            // (§Drag-to-move, multi-select). The click resolves at mouseup
+            // (§Click-to-activate): a release without a drag narrows the
+            // selection to this one (`doc.artboard.click_narrow`).
+            store.set_tool("artboard", "click_narrows", serde_json::Value::String(hit_id));
         } else {
-            // Plain click — replace, set anchor.
-            store.push_panel_state_write(
-                "artboards",
-                "artboards_panel_selection",
-                serde_json::json!([hit_id.clone()]),
-            );
-            store.push_panel_state_write(
-                "artboards",
-                "panel_selection_anchor",
-                serde_json::Value::String(hit_id),
-            );
+            // Plain click on an artboard not selected — replace, set anchor.
+            artboard_select_only(store, hit_id);
         }
         return;
     }

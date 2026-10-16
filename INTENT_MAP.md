@@ -12,7 +12,7 @@ bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
 
-**45 `doc.*` effect verbs -- including every DRAWING verb**
+**46 `doc.*` effect verbs -- including every DRAWING verb**
 (`doc.add_element`, `doc.add_path_from_buffer`,
 `doc.add_path_from_anchor_buffer`, the blob-brush / paintbrush
 commit verbs, ...) -- **are reachable only from tool/panel/dialog
