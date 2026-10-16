@@ -4665,7 +4665,7 @@ private func assertGestureTest(_ tc: [String: Any]) {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json"]
+private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json", "pencil.draw.json"]
 
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
