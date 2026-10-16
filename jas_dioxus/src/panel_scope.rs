@@ -189,9 +189,10 @@ impl PanelState {
             "active_document": {
                 "artboards": artboards_json(doc),
                 "artboards_count": doc.artboards.len(),
-                // No panel-selection model in this slice. Stated as an empty
-                // list rather than omitted, because `mem(x, null)` and
-                // `mem(x, [])` are different questions to the evaluator.
+                // The slice holds no panel selection; `engine_scope`
+                // overwrites this with the store's (`artboard_facts`). Stated
+                // as an empty list rather than omitted, because
+                // `mem(x, null)` and `mem(x, [])` are different questions.
                 "artboards_panel_selection_ids": Value::Array(vec![]),
             },
         })
@@ -447,7 +448,14 @@ fn engine_document_view(store: &StateStore, model: &Model) -> Value {
     let artboards: Vec<String> = read("artboards", "artboards_panel_selection")
         .and_then(|v| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()))
         .unwrap_or_default();
-    let anchor = read("artboards", "artboards_panel_anchor");
+    // The panel's own state key (`artboards.yaml` declares
+    // `panel_selection_anchor`); the view publishes it as
+    // `artboards_panel_anchor`. Until 2026-10-16 this read the view's name,
+    // which no store holds. ⚠️ A SURVIVING MUTANT, RECORDED: reverting this
+    // key reds nothing, because the one caller (`engine_scope`) extends the
+    // view with `artboard_facts`, which publishes the same key from the same
+    // store key; that arm is `the_engine_scope_derives_the_artboard_facts…`.
+    let anchor = read("artboards", "panel_selection_anchor");
     crate::interpreter::document_views::active_document_view(
         model, &layers, &artboards, anchor.as_ref().and_then(Value::as_str))
 }
@@ -561,7 +569,8 @@ pub fn seed_library_data(store: &mut StateStore) {
 /// * `current_artboard` / `current_artboard_id`: the first SELECTED artboard in
 ///   DOCUMENT order, else the first artboard; `{}` and `null` when there is none,
 ///   so `current_artboard.width` does not null-deref;
-/// * `next_artboard_name`: the smallest unused "Artboard N".
+/// * `next_artboard_name`: the smallest unused "Artboard N";
+/// * `artboards_panel_anchor`: the store's `panel_selection_anchor`, else null.
 ///
 /// Before it the scope stated the selection as a hard-coded `[]` and carried no
 /// `current_artboard`, so `ap_new` created a default-sized artboard where the
@@ -580,6 +589,12 @@ pub(crate) fn artboard_facts(store: &StateStore, doc: &Document) -> Map<String, 
         .or_else(|| doc.artboards.first());
     let mut m = Map::new();
     m.insert("artboards_panel_selection_ids".into(), json!(selected));
+    // The shift-click range's anchor (the panel's `panel_selection_anchor`),
+    // under the view's name, as `document_views::active_document_view`
+    // publishes it: the Artboard tool's canvas Shift-click reads it.
+    let anchor = store.panel_scope("artboards").and_then(|p| p.get("panel_selection_anchor"))
+        .filter(|v| v.is_string()).cloned().unwrap_or(Value::Null);
+    m.insert("artboards_panel_anchor".into(), anchor);
     m.insert("current_artboard_id".into(), current.map_or(Value::Null, |a| json!(a.id)));
     m.insert(
         "current_artboard".into(),
@@ -1293,11 +1308,14 @@ mod tests {
         let panel = "artboards_panel_content";
 
         let mut store = StateStore::new();
-        store.init_panel("artboards", std::collections::HashMap::from([(
-            "artboards_panel_selection".to_string(),
-            json!(["c", 7, "b"]),
-        )]));
+        store.init_panel("artboards", std::collections::HashMap::from([
+            ("artboards_panel_selection".to_string(), json!(["c", 7, "b"])),
+            ("panel_selection_anchor".to_string(), json!("c")),
+        ]));
         let ad = engine_scope(&slice, &store, &model, panel)["active_document"].clone();
+        // The panel's anchor key, published under the view's name (until
+        // 2026-10-16 the view read its own name from the store: always null).
+        assert_eq!(ad["artboards_panel_anchor"], json!("c"), "{ad}");
         // Only strings are ids (the reference filters the same way).
         assert_eq!(ad["artboards_panel_selection_ids"], json!(["c", "b"]), "{ad}");
         // DOCUMENT order: "b" precedes "c" in the list, though "c" was selected first.
@@ -1315,5 +1333,6 @@ mod tests {
         assert_eq!(empty["artboards_panel_selection_ids"], json!([]), "{empty}");
         assert_eq!(empty["current_artboard_id"], json!("a"), "{empty}");
         assert_eq!(empty["current_artboard"]["width"], json!(100.0), "{empty}");
+        assert_eq!(empty["artboards_panel_anchor"], json!(null), "{empty}");
     }
 }
