@@ -103,7 +103,18 @@ actions:
           then:
             - open_dialog: { id: save_changes_window }
           else:
-            - log: "quit: close window"
+            - dispatch: close_window
+  close_window:
+    description: >
+      Close the application window without prompting. The host does it: a
+      native app closes its window, and the engine, which owns no window,
+      names it in its reply (`"close_window": true`) for the shell to act on,
+      as `remove_tab` names a tab removal. Reached from `quit` when no
+      document is modified, and from Save Changes' Don't Save. The browser
+      app has no window of its own to close, so there it does nothing.
+    category: file
+    effects:
+      - log: "close_window"
 
   # ── Edit ──────────────────────────────────────────────────
   undo:
@@ -1153,14 +1164,15 @@ actions:
       - close_dialog
   close_without_saving:
     description: >
-      Close the tab or window without saving changes. Called from the
-      save-changes dialog when the user clicks Discard or Don't Save.
-      Closes the dialog first, then proceeds with the close operation,
-      discarding any unsaved modifications.
+      Close the window without saving changes. Called from the
+      save_changes_window dialog when the user clicks Don't Save (the tab
+      dialog's Discard is `discard_and_close_tab`). Closes the dialog, then
+      closes the window with `close_window`, discarding any unsaved
+      modifications.
     category: dialog
     effects:
       - close_dialog: null
-      - log: "close_without_saving"
+      - dispatch: close_window
   discard_and_close_tab:
     description: >
       Close a document tab without saving its changes. Called from the

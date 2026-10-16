@@ -907,7 +907,9 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 /// # The reply
 ///
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
-/// "remove_tab": <index> | null}` ([`act_reply`]). `remove_tab` names a tab
+/// "remove_tab": <index> | null, "close_window": <bool>}` ([`act_reply`]).
+/// `close_window` names a window close the shell must do (the engine owns no
+/// window): `quit` with nothing edited, or Save Changes' Don't Save. `remove_tab` names a tab
 /// the shell must remove (the engine owns no tabs): an unedited `close_tab`,
 /// or Save Changes' Discard (design 2026-10-14 §10). Each row is a
 /// [`jas_panel_event`] delta row, tagged with its `panel`, across every open
@@ -975,13 +977,13 @@ pub unsafe extern "C" fn jas_panel_behavior(
     // behaviour in the colour scope like any panel's; the value branches of
     // `run_widget_behavior` still refuse Color by name.
     let scope = panel_ctx(engine, &ws, id);
-    let (ran, removed_tab) = {
+    let (ran, named) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost::default();
         let ran = crate::panel_behavior::run_widget_behavior(
             id, spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
-        (ran, host.removed_tab)
+        (ran, (host.removed_tab, host.closed_window))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1006,7 +1008,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -1087,7 +1089,7 @@ fn colour_value_commit(
         let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
         ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
         *engine.last_error.borrow_mut() = None;
-        let reply = act_reply(engine, &sync.changed, doc_changed, None);
+        let reply = act_reply(engine, &sync.changed, doc_changed, (None, false));
         let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
         ffi_instr::record_out(Crossing::PanelBehavior, out.len);
         return out;
@@ -1153,7 +1155,7 @@ fn colour_value_commit(
     } else {
         *engine.last_error.borrow_mut() = None;
     }
-    let reply = act_reply(engine, &sync.changed, doc_changed, None);
+    let reply = act_reply(engine, &sync.changed, doc_changed, (None, false));
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::PanelBehavior, out.len);
     out
@@ -1165,10 +1167,10 @@ fn colour_value_commit(
 /// a shell that reads an id there asks for that dialog's plan, and `null`
 /// means none is open, so a shell showing one closes it.
 fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: bool,
-                                   remove_tab: Option<i64>) -> serde_json::Value {
+                                   (remove_tab, close_window): (Option<i64>, bool)) -> serde_json::Value {
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
-                       "remove_tab": remove_tab})
+                       "remove_tab": remove_tab, "close_window": close_window})
 }
 
 /// Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
@@ -1295,8 +1297,8 @@ pub unsafe extern "C" fn jas_dispatch_action(
             state_changed: false,
         })
     }).flatten();
-    let (ran, removed_tab) = if let Some(ran) = native {
-        (Ok(ran), None)
+    let (ran, named) = if let Some(ran) = native {
+        (Ok(ran), (None, false))
     } else {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
@@ -1305,7 +1307,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
             panel, action, params, item.is_none(), &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
             &mut host);
-        (ran, host.removed_tab)
+        (ran, (host.removed_tab, host.closed_window))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1329,7 +1331,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     } else {
         set_panel_event_error(engine, "Unchanged", action);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
     let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
     ffi_instr::record_out(Crossing::DispatchAction, out.len);
     out
@@ -1526,13 +1528,13 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         Err(r) => return refuse(r),
     };
     let scope = dialog_ctx(engine, &store_ctx);
-    let (ran, removed_tab) = {
+    let (ran, named) = {
         let mut store = engine.store.borrow_mut();
         let mut model = engine.model.borrow_mut();
         let mut host = crate::panel_behavior::EngineHost::default();
         let ran = crate::panel_behavior::run_dialog_widget_behavior(
             spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
-        (ran, host.removed_tab)
+        (ran, (host.removed_tab, host.closed_window))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1550,7 +1552,7 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
     } else {
         set_panel_event_error(engine, "Unchanged", &ev.widget);
     }
-    let reply = act_reply(engine, &sync.changed, ran.doc_changed, removed_tab);
+    let reply = act_reply(engine, &sync.changed, ran.doc_changed, named);
     JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default())
 }
 
@@ -3619,6 +3621,36 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// QUIT names the window close, as `close_tab` names a tab removal: the
+    /// engine owns no window, so `quit` with nothing edited, and Save Changes'
+    /// Don't Save, reply `"close_window": true` for the shell to act on. Until
+    /// 2026-10-15 the first was a log line (`PlatformEffect Logged:quit: close
+    /// window`), which a shell could read only as prose (flask STATUS # 298).
+    #[test]
+    fn quit_names_the_window_close_and_an_edit_asks_first() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"quit","params":{}}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["close_window"], true, "nothing edited: the window closes ({reply} {err})");
+        assert_eq!(v["dialog"], serde_json::Value::Null);
+        unsafe { jas_engine_free(e) };
+
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let _ = dispatch(e, r#"{"action":"set_stroke_cap","params":{"cap":"square"}}"#);
+        let (reply, err) = dispatch(e, r#"{"action":"quit","params":{}}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "save_changes_window", "an edit asks first: {reply} {err}");
+        assert_eq!(v["close_window"], false, "and does not close yet: {reply}");
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "Don't Save"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "Don't Save closed the dialog: {reply}");
+        assert_eq!(v["close_window"], true, "and names the window close: {reply} {err}");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The door's refusals run nothing: no dialog open is `NoDialog`; a
     /// disabled widget is `Disabled`; a bad event is `BadJson`; a null engine
     /// is the empty span.
@@ -3738,10 +3770,11 @@ mod tests {
             "paste -> Logged:paste: offset 24pt",
             "paste_in_place -> Logged:paste_in_place: offset 0",
             "paste_preserving_layers -> Logged:paste_preserving_layers: offset 24pt",
-            // Files and the window: the Windows shell runs open_file, save,
-            // save_as and quit itself (`MainWindow.Invoke`); revert reads a file.
+            // Files: the Windows shell runs open_file, save and save_as itself
+            // (`MainWindow.Invoke`); revert reads a file. `quit` left this list
+            // on 2026-10-15: with nothing edited it names `close_window` in the
+            // reply, and with an edit it opens Save Changes.
             "open_file -> Logged:open_file: show native file dialog",
-            "quit -> Logged:quit: close window",
             "revert -> Logged:revert: reload {{active_document.filename}}",
             "save -> Logged:save_as: show native save dialog",
             "save_as -> Logged:save_as: show native save dialog",
@@ -4263,7 +4296,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "dialog", "doc_changed", "remove_tab"], "{reply}");
+        assert_eq!(keys, vec!["changed", "close_window", "dialog", "doc_changed", "remove_tab"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -4287,7 +4320,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}"#);
+        assert_eq!(reply, r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -4343,13 +4376,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"dialog":null,"doc_changed":true,"remove_tab":null}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":true,"remove_tab":null}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"dialog":null,"doc_changed":false,"remove_tab":null}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second

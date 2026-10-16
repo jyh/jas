@@ -213,6 +213,9 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   shell does), so the host records the index in [`EngineHost::removed_tab`]
 ///   and the FFI reply carries it for the shell to act on (design 2026-10-14
 ///   §10). Its YAML (`remove_child`, the tab count) is the shell's to do.
+/// * `close_window` is claimed and NAMED the same way: the engine owns no
+///   window, so the host records it in [`EngineHost::closed_window`] and the
+///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
 ///
 /// Everything else is declined, so the runner reports it.
 #[derive(Default)]
@@ -221,6 +224,8 @@ pub struct EngineHost {
     /// The tab a `remove_tab` asked the shell to remove. Set, never appended:
     /// the pre-flight and the real run each record the same index.
     pub removed_tab: Option<i64>,
+    /// A `close_window` asked the shell to close the application window.
+    pub closed_window: bool,
 }
 
 impl EffectHost for EngineHost {
@@ -264,6 +269,10 @@ impl EffectHost for EngineHost {
         use crate::interpreter::symbols_host::{run, Outcome, ACTIONS};
         // An index that is not an integer is declined, so the YAML runs and
         // its `remove_child` refuses by name rather than removing a guess.
+        if action == "close_window" {
+            self.closed_window = true;
+            return Some(None);
+        }
         if action == "remove_tab" {
             if let Some(i) = params.get("index").and_then(Value::as_i64) {
                 self.removed_tab = Some(i);
