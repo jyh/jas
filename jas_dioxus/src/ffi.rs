@@ -3651,6 +3651,68 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// The paragraph wrapper the engine's document holds for its first text.
+    fn first_wrapper(e: *mut JasEngine) -> crate::geometry::tspan::Tspan {
+        let model = engine_of(e).model.borrow();
+        crate::interpreter::paragraph_host::selected_wrappers(model.document())
+            .into_iter().next().expect("the selection holds a paragraph wrapper")
+    }
+
+    /// JUSTIFICATION'S OK WRITES THE DOCUMENT IN THE ENGINE, as the web app's
+    /// does. Until 2026-10-15 only the web renderer handled
+    /// `paragraph_justification_confirm`, so OK on the engine closed the dialog
+    /// and wrote nothing. A field the person changed is written; a field left
+    /// at the paragraph's own value stays; one undo takes the whole OK back.
+    #[test]
+    fn justification_ok_writes_the_wrappers_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("paragraph_justified.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        assert_eq!(first_wrapper(e).jas_word_spacing_min, Some(70.0), "the fixture's own value");
+        let (reply, err) = dispatch(e, r#"{"action":"open_paragraph_justification","params":{}}"#);
+        assert!(reply.contains("paragraph_justification"), "the dialog opened: {reply} {err}");
+        let (reply, err) = dialog_event(e, r#"{"widget":"pj_word_spacing_min","event":"commit","value":"60"}"#);
+        assert!(!reply.is_empty(), "the commit ran: {err}");
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+        assert_eq!(v["doc_changed"], true, "OK wrote the document: {reply} {err}");
+        let w = first_wrapper(e);
+        assert_eq!(w.jas_word_spacing_min, Some(60.0), "the changed field is written");
+        assert_eq!(w.jas_word_spacing_desired, Some(95.0), "an untouched field keeps the paragraph's value");
+        assert_eq!(w.jas_single_word_justify.as_deref(), Some("left"), "and so does the select");
+        undo(e); // the shell sends undo as an op
+        assert_eq!(first_wrapper(e).jas_word_spacing_min, Some(70.0), "one undo takes the OK back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// HYPHENATION'S OK WRITES THE DOCUMENT IN THE ENGINE, the same law: the
+    /// master checkbox and a detail field reach the wrapper.
+    #[test]
+    fn hyphenation_ok_writes_the_wrappers_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("paragraph_justified.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        assert_eq!(first_wrapper(e).jas_hyphenate, None, "the fixture does not hyphenate");
+        let (reply, err) = dispatch(e, r#"{"action":"open_paragraph_hyphenation","params":{}}"#);
+        assert!(reply.contains("paragraph_hyphenation"), "the dialog opened: {reply} {err}");
+        let (reply, err) = dialog_event(e, r#"{"widget":"ph_master","event":"click"}"#);
+        assert!(!reply.is_empty(), "the master press ran: {err}");
+        let (reply, err) = dialog_event(e, r#"{"widget":"ph_min_word","event":"commit","value":"8"}"#);
+        assert!(!reply.is_empty(), "the commit ran: {err}");
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "OK"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], serde_json::Value::Null, "OK closed the dialog: {reply}");
+        assert_eq!(v["doc_changed"], true, "OK wrote the document: {reply} {err}");
+        let w = first_wrapper(e);
+        assert_eq!(w.jas_hyphenate, Some(true), "the master is written");
+        assert_eq!(w.jas_hyphenate_min_word, Some(8.0), "and the changed detail field");
+        assert_eq!(w.jas_hyphenate_min_before, None, "a field at its default is omitted");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// The door's refusals run nothing: no dialog open is `NoDialog`; a
     /// disabled widget is `Disabled`; a bad event is `BadJson`; a null engine
     /// is the empty span.

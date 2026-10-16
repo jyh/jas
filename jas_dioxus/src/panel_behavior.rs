@@ -217,6 +217,11 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   window, so the host records it in [`EngineHost::closed_window`] and the
 ///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
 ///
+/// * `paragraph_justification_confirm` and `paragraph_hyphenation_confirm`
+///   are INTERCEPTED, never claimed: the host writes the dialog's values to
+///   the selection through `paragraph_host`, then declines, so their YAML
+///   (clear the snapshot, close the dialog) runs as always.
+///
 /// Everything else is declined, so the runner reports it.
 #[derive(Default)]
 pub struct EngineHost {
@@ -272,6 +277,26 @@ impl EffectHost for EngineHost {
         if action == "close_window" {
             self.closed_window = true;
             return Some(None);
+        }
+        // The paragraph dialogs' OK (PARAGRAPH.md §Justification Dialog,
+        // §Hyphenation Dialog): the values are written to the document HERE,
+        // through `paragraph_host`, the law the web app calls too, and then
+        // the host DECLINES, so the action's YAML still clears the preview
+        // snapshot and closes the dialog. That is an INTERCEPT, as the native
+        // apps' `apply_dialog_confirm` is: act before the YAML, never instead
+        // of it. Until 2026-10-15 OK on the engine closed and wrote nothing.
+        if action == "paragraph_justification_confirm" || action == "paragraph_hyphenation_confirm" {
+            if let Some(model) = model {
+                use crate::interpreter::paragraph_host as ph;
+                // A null field is a blank one (the paragraphs differ).
+                let get = |k: &str| Some(store.get_dialog(k).clone()).filter(|v| !v.is_null());
+                if action == "paragraph_justification_confirm" {
+                    ph::apply_justification_dialog(model, &ph::JustificationDialogValues::from_dialog(get));
+                } else {
+                    ph::apply_hyphenation_dialog(model, &ph::HyphenationDialogValues::from_dialog(get));
+                }
+            }
+            return None;
         }
         if action == "remove_tab" {
             if let Some(i) = params.get("index").and_then(Value::as_i64) {

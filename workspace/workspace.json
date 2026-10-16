@@ -2326,7 +2326,7 @@
       ]
     },
     "paragraph_justification_confirm": {
-      "description": "OK handler for the Justification dialog. The native apps intercept this action via apply_dialog_confirm, reading the 11 dialog state fields (word/letter/glyph spacing min/desired/max + auto-leading + single-word-justify) and writing them as jas:* attributes onto every paragraph wrapper tspan in the selection. Then clears the preview snapshot so close_dialog doesn't restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (word-spacing 80/100/133, letter-spacing 0/0/0, glyph-scaling 100/100/100, auto-leading 120, single-word- justify 'justify') are omitted from the wrapper.\n",
+      "description": "OK handler for the Justification dialog. The native apps and the engine intercept this action before its effects run, reading the 11 dialog state fields (word/letter/glyph spacing min/desired/max + auto-leading + single-word-justify) and writing them as jas:* attributes onto every paragraph wrapper tspan in the selection. Then clears the preview snapshot so close_dialog doesn't restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (word-spacing 80/100/133, letter-spacing 0/0/0, glyph-scaling 100/100/100, auto-leading 120, single-word- justify 'justify') are omitted from the wrapper.\n",
       "category": "paragraph",
       "effects": [
         {
@@ -2349,7 +2349,7 @@
       ]
     },
     "paragraph_hyphenation_confirm": {
-      "description": "OK handler for the Hyphenation dialog. The native apps intercept this action via apply_dialog_confirm, reading the 7 dialog state fields (min-word, after-first-N, before-last-N, hyphen-limit, zone, better/faster bias, capitalized-words) plus the master hyphenate toggle, and writing them as jas:hyphenate-* attributes onto every paragraph wrapper tspan in the selection. Also mirrors the master toggle to panel.hyphenate so the main Paragraph panel checkbox reflects the dialog commit. Then clears the preview snapshot so close_dialog does not restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (master off, min-word 6, after-first 2, before-last 2, limit 0, zone 0, bias 0, capitalized off) are omitted from the wrapper.\n",
+      "description": "OK handler for the Hyphenation dialog. The native apps and the engine intercept this action before its effects run, reading the 7 dialog state fields (min-word, after-first-N, before-last-N, hyphen-limit, zone, better/faster bias, capitalized-words) plus the master hyphenate toggle, and writing them as jas:hyphenate-* attributes onto every paragraph wrapper tspan in the selection. Also mirrors the master toggle to panel.hyphenate so the main Paragraph panel checkbox reflects the dialog commit. Then clears the preview snapshot so close_dialog does not restore (commits the user's edits) and closes the dialog. Per the identity-value rule, fields equal to their spec defaults (master off, min-word 6, after-first 2, before-last 2, limit 0, zone 0, bias 0, capitalized off) are omitted from the wrapper.\n",
       "category": "paragraph",
       "effects": [
         {

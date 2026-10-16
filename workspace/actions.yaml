@@ -2071,8 +2071,8 @@ actions:
       - open_dialog: { id: paragraph_justification }
   paragraph_justification_confirm:
     description: >
-      OK handler for the Justification dialog. The native apps
-      intercept this action via apply_dialog_confirm, reading the 11
+      OK handler for the Justification dialog. The native apps and
+      the engine intercept this action before its effects run, reading the 11
       dialog state fields (word/letter/glyph spacing min/desired/max
       + auto-leading + single-word-justify) and writing them as
       jas:* attributes onto every paragraph wrapper tspan in the
@@ -2095,8 +2095,8 @@ actions:
       - open_dialog: { id: paragraph_hyphenation }
   paragraph_hyphenation_confirm:
     description: >
-      OK handler for the Hyphenation dialog. The native apps
-      intercept this action via apply_dialog_confirm, reading the 7
+      OK handler for the Hyphenation dialog. The native apps and
+      the engine intercept this action before its effects run, reading the 7
       dialog state fields (min-word, after-first-N, before-last-N,
       hyphen-limit, zone, better/faster bias, capitalized-words) plus
       the master hyphenate toggle, and writing them as jas:hyphenate-*
