@@ -214,6 +214,8 @@ internal sealed class MenuRefreshCmd : Cmd
 internal sealed class SaveCmd : Cmd
 {
     internal string Path = "";
+    /// <summary>jas §305: Save All's save. The window closes only if it wrote the file.</summary>
+    internal bool ThenClose;
 }
 
 /// <summary>Load an SVG the UI thread chose. Same split as <see cref="SaveCmd"/>.</summary>
@@ -990,7 +992,8 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     internal void RefreshMenu(string cause) => _queue.Add(new MenuRefreshCmd { Cause = cause });
 
-    internal void Save(string path) => _queue.Add(new SaveCmd { Path = path });
+    internal void Save(string path, bool thenClose = false) =>
+        _queue.Add(new SaveCmd { Path = path, ThenClose = thenClose });
 
     internal void Open(string path) => _queue.Add(new OpenCmd { Path = path });
 
@@ -1006,7 +1009,7 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void RequestQuit(string via) => _queue.Add(new QuitRequestCmd { Via = via });
 
-    /// <summary>The engine named the window close (`close_window`). Raised on the UI thread.</summary>
+    /// <summary>The window may close: the engine named `close_window`, or Save All saved. Raised on the UI thread.</summary>
     internal Action? CloseApproved { get; set; }
 
     /// <summary>
@@ -1043,6 +1046,7 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         ApplyCloseWindow(reply, $"item=quit action=quit {head}");
+        ApplySaveAllThenClose(reply, $"item=quit action=quit {head}");
     }
 
     /// <summary>
@@ -1055,6 +1059,36 @@ internal sealed unsafe class Canvas : IDisposable
         if (!ActWire.CloseWindow(reply)) { return; }
         _report($"WINDOW CLOSE named {head} {Tids()}");
         PostToUi(() => CloseApproved?.Invoke());
+    }
+
+    /// <summary>The engine's Save All asks the shell to save. Raised on the UI thread.</summary>
+    internal Action? SaveAllRequested { get; set; }
+
+    /// <summary>
+    /// jas §305: a reply that names `save_all_then_close: true` (Save Changes'
+    /// Save All). The engine cannot save, so the shell saves this shell's one
+    /// document and closes only if the save wrote it. With nothing to save it
+    /// closes at once. Read beside <see cref="ApplyCloseWindow"/> on every act
+    /// reply. The modified flag is the MODEL's, read here; an unreadable one
+    /// counts as modified, so the shell saves rather than drop an edit.
+    /// </summary>
+    private void ApplySaveAllThenClose(string reply, string head)
+    {
+        if (!ActWire.SaveAllThenClose(reply)) { return; }
+        var modified = TitleVerdict.DirtyFromModel(JasCore.jas_document_modified(_engine)) ?? true;
+        var step = ActWire.SaveAllStep(_documentOpen, modified);
+        _report($"SAVE ALL named {head} document-open={(_documentOpen ? "true" : "false")} "
+              + $"modified={(modified ? "true" : "false")} step={step} {Tids()}");
+        if (step == "close") { PostToUi(() => CloseApproved?.Invoke()); }
+        else { PostToUi(() => SaveAllRequested?.Invoke()); }
+    }
+
+    /// <summary>Save All's save is done: close only if it wrote the file.</summary>
+    private void ApplyAfterSaveAll(bool saved, string path)
+    {
+        var after = ActWire.AfterSaveAll(saved);
+        _report($"SAVE ALL saved={(saved ? "true" : "false")} path={path} window={after} {Tids()}");
+        if (after == "close") { PostToUi(() => CloseApproved?.Invoke()); }
     }
 
     /// <summary>
@@ -1231,6 +1265,7 @@ internal sealed unsafe class Canvas : IDisposable
         var after = DialogWire.Named(reply);
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
+        ApplySaveAllThenClose(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         ApplyDialogRefresh("event");
@@ -1515,7 +1550,8 @@ internal sealed unsafe class Canvas : IDisposable
                 case SaveCmd sv:
                     // A save to a new path renames the document, so the canvas
                     // tab is re-read.
-                    if (ApplySave(sv.Path)) { _panelStale = true; }
+                    if (ApplySave(sv.Path, out var saved)) { _panelStale = true; }
+                    if (sv.ThenClose) { ApplyAfterSaveAll(saved, sv.Path); }
                     break;
 
                 case OpenCmd op:
@@ -3635,8 +3671,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// every save; two saves either side of an edit must differ, and only a
     /// digest on the row lets a reader see that.
     /// </summary>
-    private bool ApplySave(string path)
+    private bool ApplySave(string path, out bool saved)
     {
+        saved = false;
         if (_engine == IntPtr.Zero) { return false; }
         try
         {
@@ -3653,6 +3690,7 @@ internal sealed unsafe class Canvas : IDisposable
             _documentPath = path;
             JasCore.jas_document_mark_saved(_engine);
             DirtyFromModel();
+            saved = true;
             _report($"RUSTOK SAVE path={path} bytes={svg.Length} sha={sha} {Tids()}");
             if (renamed) { NameDocument(path, "save"); }
             return renamed;
@@ -4698,6 +4736,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, runHead);
             ApplyRemoveTab(reply, runHead);
             ApplyCloseWindow(reply, runHead);
+            ApplySaveAllThenClose(reply, runHead);
         }
         catch (Exception ex)
         {
@@ -4746,6 +4785,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
+            ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
         {
@@ -4964,6 +5004,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
+            ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
         {
