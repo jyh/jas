@@ -235,6 +235,9 @@ public func buildActiveDocumentView(
         // as Rust's shared `active_document_view` does. Until 2026-10-15 no port
         // built it, so the YAML `quit` never offered to save.
         "any_modified": m.isModified,
+        // The selected paragraphs' justification values, which the
+        // Justification dialog's `init:` reads (`paragraphJustificationValues`).
+        "paragraph_wrappers": paragraphJustificationValues(model: m),
         "has_filename": !m.filename.hasPrefix("Untitled-"),
         "filename": m.filename,
         "document_setup": documentSetupView(m.document.documentSetup),

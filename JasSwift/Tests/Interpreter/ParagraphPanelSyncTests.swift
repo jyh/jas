@@ -522,3 +522,37 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     #expect(Double(seg.hyphenateMinBefore) == before)
     #expect(Double(seg.hyphenateMinAfter) == after)
 }
+
+/// PARAGRAPH.md §Justification Dialog, "Mixed selection": a field the dialog
+/// opened BLANK and the person did not touch is nil at OK, and leaves each
+/// paragraph's own value; an edited field writes to all. Until 2026-10-15
+/// nil CLEARED the attribute, although `JustificationDialogValues` already
+/// said it "should not write". Mirrors Rust
+/// `a_blank_justification_field_at_ok_leaves_each_paragraph_its_own_value`.
+@Test func aBlankJustificationFieldAtOkLeavesEachParagraphItsOwnValue() throws {
+    let here = URL(fileURLWithPath: #filePath)
+    let svgURL = here.deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("test_fixtures/svg/paragraph_justified_mixed.svg")
+    let model = Model(document: svgToDocument(try String(contentsOf: svgURL, encoding: .utf8)))
+    Controller(model: model).selectAll()
+    func wrappers() -> [(Double?, Double?)] {
+        model.document.selection.compactMap { es -> (Double?, Double?)? in
+            guard case .text(let t) = model.document.getElement(es.path),
+                  let w = t.tspans.first(where: { $0.jasRole == "paragraph" }) else { return nil }
+            return (w.jasWordSpacingMin, w.jasWordSpacingDesired)
+        }
+    }
+    let before = wrappers()
+    #expect(before.count == 2 && before[0].0 == 70 && before[1].0 == 85, "the control: two paragraphs differ in min")
+    applyJustificationDialogToSelection(JustificationDialogValues(
+        wordSpacingMin: nil, wordSpacingDesired: 90, wordSpacingMax: 140,
+        letterSpacingMin: 0, letterSpacingDesired: 0, letterSpacingMax: 0,
+        glyphScalingMin: 100, glyphScalingDesired: 100, glyphScalingMax: 100,
+        autoLeading: 110, singleWordJustify: "left"),
+        controller: Controller(model: model))
+    let after = wrappers()
+    #expect(after.count == 2)
+    #expect(after.map { $0.0 } == [70, 85], "the blank min is untouched on each paragraph")
+    #expect(after.map { $0.1 } == [90, 90], "the edited desired writes to both")
+}

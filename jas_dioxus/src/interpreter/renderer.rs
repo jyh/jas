@@ -12860,6 +12860,34 @@ mod tests {
         }
     }
 
+    /// PARAGRAPH.md §Justification Dialog, "Mixed selection": a field the
+    /// dialog opened BLANK (the paragraphs differ) and the person did not
+    /// touch is still null at OK, and leaves each paragraph's own value. An
+    /// edited field writes to all. Until 2026-10-15 a null CLEARED the
+    /// attribute, which reset the differing values to the default.
+    #[test]
+    fn a_blank_justification_field_at_ok_leaves_each_paragraph_its_own_value() {
+        let svg = include_str!("../../../test_fixtures/svg/paragraph_justified_mixed.svg");
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        let wrappers = |st: &AppState| -> Vec<(Option<f64>, Option<f64>)> {
+            crate::interpreter::paragraph_host::selected_wrappers(st.tabs[st.active_tab].model.document())
+                .iter().map(|w| (w.jas_word_spacing_min, w.jas_word_spacing_desired)).collect()
+        };
+        assert_eq!(wrappers(&st), vec![(Some(70.0), Some(95.0)), (Some(85.0), Some(95.0))], "the control: two paragraphs differ in min");
+        st.apply_justification_dialog_to_selection(JustificationDialogValues {
+            word_spacing_min: None, word_spacing_desired: Some(90.0), word_spacing_max: Some(140.0),
+            letter_spacing_min: Some(0.0), letter_spacing_desired: Some(0.0), letter_spacing_max: Some(0.0),
+            glyph_scaling_min: Some(100.0), glyph_scaling_desired: Some(100.0), glyph_scaling_max: Some(100.0),
+            auto_leading: Some(110.0), single_word_justify: Some("left".into()),
+        });
+        assert_eq!(wrappers(&st), vec![(Some(70.0), Some(90.0)), (Some(85.0), Some(90.0))],
+                   "the blank min is untouched on each paragraph; the edited desired writes to both");
+    }
+
     // ── Phase 9: Hyphenation dialog OK commit ────────────────
 
     #[test]

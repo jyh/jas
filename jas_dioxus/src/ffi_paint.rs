@@ -2178,7 +2178,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 81, "the fixture corpus changed size");
+        assert_eq!(total, 83, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2251,6 +2251,14 @@ mod tests {
         // stroked paths with no fill. Both pins bumped; `check_svg_corpus_pin.py`
         // agreed on a Mac before this lane ran. Expected to present.
         //
+        // ⛔ 81 → 83 (jas, 2026-10-15, the Justification dialog's cases):
+        // `paragraph_justified.svg` (one area text whose paragraph wrapper
+        // carries word spacing 70/95/140, auto leading 110, single-word
+        // justify "left") and `paragraph_justified_mixed.svg` (two such texts,
+        // the second at word-spacing min 85). Both are plain area text, the
+        // kind row DA made present. Both pins bumped; `check_svg_corpus_pin.py`
+        // agreed on a Mac before this lane ran. Expected to present.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2261,6 +2269,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 81, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 83, "the whole corpus presents");
     }
 }

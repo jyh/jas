@@ -8943,6 +8943,10 @@
           "type": "bool",
           "description": "Any open document has unsaved changes"
         },
+        "paragraph_wrappers": {
+          "type": "object",
+          "description": "The Justification dialog's eleven fields as the selected paragraphs hold them: the value every selected paragraph agrees on, null where they differ, and an absent attribute read as the dialog's declared default. With no paragraph selected every field is its default. The dialog's init reads it."
+        },
         "has_selection": {
           "type": "bool",
           "description": "One or more objects are selected"
@@ -32055,6 +32059,19 @@
           "default": false,
           "description": "Preview checkbox. When on, every edit live-applies to the selected paragraphs. Cancel always rolls back to the on-open snapshot via the Phase 0 preview snapshot/restore harness. Defaults to off each time the dialog opens.\n"
         }
+      },
+      "init": {
+        "word_spacing_min": "active_document.paragraph_wrappers.word_spacing_min",
+        "word_spacing_desired": "active_document.paragraph_wrappers.word_spacing_desired",
+        "word_spacing_max": "active_document.paragraph_wrappers.word_spacing_max",
+        "letter_spacing_min": "active_document.paragraph_wrappers.letter_spacing_min",
+        "letter_spacing_desired": "active_document.paragraph_wrappers.letter_spacing_desired",
+        "letter_spacing_max": "active_document.paragraph_wrappers.letter_spacing_max",
+        "glyph_scaling_min": "active_document.paragraph_wrappers.glyph_scaling_min",
+        "glyph_scaling_desired": "active_document.paragraph_wrappers.glyph_scaling_desired",
+        "glyph_scaling_max": "active_document.paragraph_wrappers.glyph_scaling_max",
+        "auto_leading": "active_document.paragraph_wrappers.auto_leading",
+        "single_word_justify": "active_document.paragraph_wrappers.single_word_justify"
       },
       "preview_targets": {},
       "content": {

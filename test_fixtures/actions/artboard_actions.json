@@ -280,6 +280,95 @@
     }
   },
   {
+    "name": "open_paragraph_justification_shows_the_selections_values",
+    "setup_svg": "paragraph_justified.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "open_paragraph_justification",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_paragraph_justification_selected_expected.json",
+    "expected_dialog": {
+      "id": "paragraph_justification",
+      "state": {
+        "word_spacing_min": 70,
+        "word_spacing_desired": 95,
+        "word_spacing_max": 140,
+        "letter_spacing_min": 0,
+        "letter_spacing_desired": 0,
+        "letter_spacing_max": 0,
+        "glyph_scaling_min": 100,
+        "glyph_scaling_desired": 100,
+        "glyph_scaling_max": 100,
+        "auto_leading": 110,
+        "single_word_justify": "left"
+      }
+    }
+  },
+  {
+    "name": "open_paragraph_justification_leaves_a_differing_field_blank",
+    "setup_svg": "paragraph_justified_mixed.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "open_paragraph_justification",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_paragraph_justification_mixed_expected.json",
+    "expected_dialog": {
+      "id": "paragraph_justification",
+      "state": {
+        "word_spacing_min": null,
+        "word_spacing_desired": 95,
+        "word_spacing_max": 140,
+        "letter_spacing_min": 0,
+        "letter_spacing_desired": 0,
+        "letter_spacing_max": 0,
+        "glyph_scaling_min": 100,
+        "glyph_scaling_desired": 100,
+        "glyph_scaling_max": 100,
+        "auto_leading": 110,
+        "single_word_justify": "left"
+      }
+    }
+  },
+  {
+    "name": "open_paragraph_justification_with_nothing_selected_shows_the_defaults",
+    "setup_svg": "paragraph_justified.svg",
+    "actions": [
+      {
+        "action": "open_paragraph_justification",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_paragraph_justification_unselected_expected.json",
+    "expected_dialog": {
+      "id": "paragraph_justification",
+      "state": {
+        "word_spacing_min": 80,
+        "word_spacing_desired": 100,
+        "word_spacing_max": 133,
+        "letter_spacing_min": 0,
+        "letter_spacing_desired": 0,
+        "letter_spacing_max": 0,
+        "glyph_scaling_min": 100,
+        "glyph_scaling_desired": 100,
+        "glyph_scaling_max": 100,
+        "auto_leading": 120,
+        "single_word_justify": "justify"
+      }
+    }
+  },
+  {
     "name": "close_tab_on_an_edited_document_asks_to_save",
     "setup_svg": "rect_with_stroke.svg",
     "actions": [

@@ -359,3 +359,56 @@ public func applyParagraphPanelMutualExclusion(
         }
     }
 }
+
+/// The Justification dialog's eleven fields as the SELECTED paragraphs hold
+/// them (PARAGRAPH.md §Justification Dialog, "Mixed selection"): the value
+/// every selected paragraph wrapper agrees on, or NSNull when they differ. An
+/// absent attribute is the dialog's declared default, read from the dialog's
+/// own `state:`. With no paragraph selected every field is its default. The
+/// dialog's `init:` reads it as `active_document.paragraph_wrappers`. Mirrors
+/// Rust `paragraph_host::justification_values`, including text-on-path
+/// wrappers (which `paragraphPanelLiveOverrides` does not read).
+public func paragraphJustificationValues(model: Model) -> [String: Any] {
+    let defaults = WorkspaceData.load()?.dialogStateDefaults("paragraph_justification") ?? [:]
+    var wrappers: [Tspan] = []
+    for es in model.document.selection {
+        guard let elem = model.document.tryGetElement(es.path) else { continue }
+        let tspans: [Tspan]
+        switch elem {
+        case .text(let t): tspans = t.tspans
+        case .textPath(let tp): tspans = tp.tspans
+        default: continue
+        }
+        wrappers.append(contentsOf: tspans.filter { $0.jasRole == "paragraph" })
+    }
+    let fields: [(String, (Tspan) -> Any?)] = [
+        ("word_spacing_min", { $0.jasWordSpacingMin }),
+        ("word_spacing_desired", { $0.jasWordSpacingDesired }),
+        ("word_spacing_max", { $0.jasWordSpacingMax }),
+        ("letter_spacing_min", { $0.jasLetterSpacingMin }),
+        ("letter_spacing_desired", { $0.jasLetterSpacingDesired }),
+        ("letter_spacing_max", { $0.jasLetterSpacingMax }),
+        ("glyph_scaling_min", { $0.jasGlyphScalingMin }),
+        ("glyph_scaling_desired", { $0.jasGlyphScalingDesired }),
+        ("glyph_scaling_max", { $0.jasGlyphScalingMax }),
+        ("auto_leading", { $0.jasAutoLeading }),
+        ("single_word_justify", { $0.jasSingleWordJustify }),
+    ]
+    func same(_ a: Any, _ b: Any) -> Bool {
+        if let x = (a as? NSNumber)?.doubleValue ?? (a as? Double),
+           let y = (b as? NSNumber)?.doubleValue ?? (b as? Double) { return abs(x - y) < 1e-9 }
+        if let x = a as? String, let y = b as? String { return x == y }
+        return false
+    }
+    var out: [String: Any] = [:]
+    for (key, read) in fields {
+        let def: Any = defaults[key] ?? NSNull()
+        let values: [Any] = wrappers.map { w in
+            if let v = read(w), !(v is NSNull) { return v }
+            return def
+        }
+        guard let first = values.first else { out[key] = def; continue }
+        out[key] = values.allSatisfy { same($0, first) } ? first : NSNull()
+    }
+    return out
+}

@@ -1880,8 +1880,12 @@ impl AppState {
     ) {
         use crate::geometry::element::Element;
         // Identity-value defaults from PARAGRAPH.md §Justification Dialog.
-        fn opt_n(value: Option<f64>, default: f64) -> Option<f64> {
-            value.and_then(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
+        // Each value is `Option<Option<_>>`: OUTER None is a field the dialog
+        // left blank (the paragraphs differ, PARAGRAPH.md "Mixed selection"),
+        // which leaves every paragraph's own attribute; `Some(None)` is a
+        // value at its identity, which omits the attribute.
+        fn opt_n(value: Option<f64>, default: f64) -> Option<Option<f64>> {
+            value.map(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
         }
         let ws_min = opt_n(v.word_spacing_min, 80.0);
         let ws_des = opt_n(v.word_spacing_desired, 100.0);
@@ -1894,7 +1898,20 @@ impl AppState {
         let gs_max = opt_n(v.glyph_scaling_max, 100.0);
         let auto_leading = opt_n(v.auto_leading, 120.0);
         let single_word_justify = v.single_word_justify
-            .filter(|s| s != "justify");
+            .map(|s| (s != "justify").then_some(s));
+        let write = |w: &mut crate::geometry::tspan::Tspan| {
+            if let Some(x) = ws_min { w.jas_word_spacing_min = x; }
+            if let Some(x) = ws_des { w.jas_word_spacing_desired = x; }
+            if let Some(x) = ws_max { w.jas_word_spacing_max = x; }
+            if let Some(x) = ls_min { w.jas_letter_spacing_min = x; }
+            if let Some(x) = ls_des { w.jas_letter_spacing_desired = x; }
+            if let Some(x) = ls_max { w.jas_letter_spacing_max = x; }
+            if let Some(x) = gs_min { w.jas_glyph_scaling_min = x; }
+            if let Some(x) = gs_des { w.jas_glyph_scaling_desired = x; }
+            if let Some(x) = gs_max { w.jas_glyph_scaling_max = x; }
+            if let Some(x) = auto_leading { w.jas_auto_leading = x; }
+            if let Some(x) = &single_word_justify { w.jas_single_word_justify = x.clone(); }
+        };
 
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
         let target_paths: Vec<Vec<usize>> = {
@@ -1917,18 +1934,7 @@ impl AppState {
                     let mut tspans = new_t.tspans.clone();
                     let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.jas_word_spacing_min = ws_min;
-                        w.jas_word_spacing_desired = ws_des;
-                        w.jas_word_spacing_max = ws_max;
-                        w.jas_letter_spacing_min = ls_min;
-                        w.jas_letter_spacing_desired = ls_des;
-                        w.jas_letter_spacing_max = ls_max;
-                        w.jas_glyph_scaling_min = gs_min;
-                        w.jas_glyph_scaling_desired = gs_des;
-                        w.jas_glyph_scaling_max = gs_max;
-                        w.jas_auto_leading = auto_leading;
-                        w.jas_single_word_justify = single_word_justify.clone();
+                        write(&mut tspans[i]);
                     }
                     new_t.tspans = tspans;
                     Some(Element::Text(new_t))
@@ -1938,18 +1944,7 @@ impl AppState {
                     let mut tspans = new_tp.tspans.clone();
                     let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.jas_word_spacing_min = ws_min;
-                        w.jas_word_spacing_desired = ws_des;
-                        w.jas_word_spacing_max = ws_max;
-                        w.jas_letter_spacing_min = ls_min;
-                        w.jas_letter_spacing_desired = ls_des;
-                        w.jas_letter_spacing_max = ls_max;
-                        w.jas_glyph_scaling_min = gs_min;
-                        w.jas_glyph_scaling_desired = gs_des;
-                        w.jas_glyph_scaling_max = gs_max;
-                        w.jas_auto_leading = auto_leading;
-                        w.jas_single_word_justify = single_word_justify.clone();
+                        write(&mut tspans[i]);
                     }
                     new_tp.tspans = tspans;
                     Some(Element::TextPath(new_tp))

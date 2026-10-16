@@ -56,6 +56,9 @@ runtime_contexts:
       any_modified:
         type: bool
         description: "Any open document has unsaved changes"
+      paragraph_wrappers:
+        type: object
+        description: "The Justification dialog's eleven fields as the selected paragraphs hold them: the value every selected paragraph agrees on, null where they differ, and an absent attribute read as the dialog's declared default. With no paragraph selected every field is its default. The dialog's init reads it."
       has_selection:
         type: bool
         description: "One or more objects are selected"

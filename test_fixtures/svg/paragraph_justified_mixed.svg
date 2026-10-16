@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:jas="urn:jas:1" viewBox="13.3333 26.6667 586.6667 106.6667" width="586.6667" height="106.6667">
+  <sodipodi:namedview id="namedview1">
+    <inkscape:page x="0" y="0" width="816" height="1056" id="nh2t87bs" inkscape:label="Artboard 1"/>
+  </sodipodi:namedview>
+  <g inkscape:groupmode="layer" inkscape:label="Layer">
+    <text x="13.3333" y="43.7333" font-family="sans-serif" font-size="21.3333" style="inline-size: 266.6667px; white-space: pre-wrap;" fill="rgb(0,0,0)" stroke="none" xml:space="preserve"><tspan jas:role="paragraph" jas:word-spacing-min="70" jas:word-spacing-desired="95" jas:word-spacing-max="140" jas:auto-leading="110" jas:single-word-justify="left"></tspan><tspan>hello world</tspan></text>
+
+    <text x="333.3333" y="43.7333" font-family="sans-serif" font-size="21.3333" style="inline-size: 266.6667px; white-space: pre-wrap;" fill="rgb(0,0,0)" stroke="none" xml:space="preserve"><tspan jas:role="paragraph" jas:word-spacing-min="85" jas:word-spacing-desired="95" jas:word-spacing-max="140" jas:auto-leading="110" jas:single-word-justify="left"></tspan><tspan>hello world</tspan></text>
+
+  </g>
+</svg>
