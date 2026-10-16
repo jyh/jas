@@ -3105,6 +3105,24 @@ pub fn try_svg_to_document(svg: &str) -> Option<Document> {
 /// and where a Letter default used to be invented instead.
 pub fn open_svg_document(svg: &str) -> Document {
     let mut doc = svg_to_document(svg);
+    open_pages(&mut doc, svg);
+    doc
+}
+
+/// [`open_svg_document`] for a caller that must REFUSE a file it cannot read
+/// (the native shell's `jas_load_svg`): `None` where [`try_svg_to_document`]
+/// refuses, else the opened document with its pages. Until 2026-10-15 that
+/// export read the codec alone, so every drawing opened on WinUI had NO
+/// artboard and its Artboards panel drew no rows (flask STATUS § 313).
+pub fn try_open_svg_document(svg: &str) -> Option<Document> {
+    let mut doc = try_svg_to_document(svg)?;
+    open_pages(&mut doc, svg);
+    Some(doc)
+}
+
+/// The pages a person gets on open: the root's stated sheet when the file
+/// declares none, then the at-least-one-artboard invariant (ARTBOARDS.md).
+fn open_pages(doc: &mut Document, svg: &str) {
     if doc.artboards.is_empty() {
         if let Some(root) = parse_xml(svg) {
             let _unit = UserUnitScope::enter(root_user_unit_pt(&root));
@@ -3112,7 +3130,6 @@ pub fn open_svg_document(svg: &str) -> Document {
         }
     }
     crate::document::artboard::ensure_artboards_invariant(&mut doc.artboards, None);
-    doc
 }
 
 /// The page a file states on its root when it declares none of its own: the
@@ -3743,6 +3760,26 @@ fn get_named_colors() -> &'static HashMap<&'static str, (u8, u8, u8)> {
 mod tests {
     use super::*;
     use crate::geometry::element::*;
+
+    /// The shell's open (`jas_load_svg`) OPENS, it does not merely decode: a
+    /// drawing that declares no page gets its root's sheet and at least one
+    /// artboard, and a file the codec refuses is still refused (flask STATUS
+    /// § 313: until 2026-10-15 WinUI opened every drawing with none).
+    #[test]
+    fn try_open_svg_document_has_pages_and_still_refuses() {
+        let svg = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),
+            "/../test_fixtures/svg/complex_document.svg")).expect("fixture");
+        assert!(try_svg_to_document(&svg).expect("decodes").artboards.is_empty(),
+                "the control: the codec alone gives no page");
+        let doc = try_open_svg_document(&svg).expect("opens");
+        assert_eq!(doc.artboards.len(), 1, "opening gives the page");
+        // Ids are minted per open, so compare the pages without them.
+        let page = |a: &crate::document::artboard::Artboard| (a.name.clone(), a.x, a.y, a.width, a.height);
+        assert_eq!(doc.artboards.iter().map(page).collect::<Vec<_>>(),
+                   open_svg_document(&svg).artboards.iter().map(page).collect::<Vec<_>>(),
+                   "the same pages as the app's open");
+        assert!(try_open_svg_document("not xml at all").is_none(), "a bad file is still refused");
+    }
 
     fn make_rect(x: f64, y: f64, w: f64, h: f64) -> Element {
         Element::Rect(RectElem {
