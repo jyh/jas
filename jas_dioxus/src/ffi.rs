@@ -3802,6 +3802,53 @@ mod tests {
         e
     }
 
+    /// `delete_selection` BY ACTION, the route a tool's YAML takes (the
+    /// Artboard tool's Delete dispatches it) and the action corpus runs. Its
+    /// `actions.yaml` body is a `log`, the menu's own verb, so until 2026-10-15
+    /// the engine ran nothing on this route. The engine's host now runs the
+    /// Delete key's law: nothing selected changes nothing; an orphan opens
+    /// `delete_orphan_confirm` (the dialog door) and deletes nothing until its
+    /// Delete; otherwise one undo step.
+    #[test]
+    fn delete_selection_by_action_runs_the_delete_keys_law() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        const DELETE: &str = r#"{"action":"delete_selection","params":{}}"#;
+        let e = engine_on("rect_with_stroke.svg");
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, DELETE);
+        assert_eq!(doc_json(e), before, "nothing selected: nothing deleted ({reply} {err})");
+
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let path = engine_of(e).with_document(|d| d.selection.iter().next().map(|es| es.path.clone()))
+            .expect("the rect");
+        engine_of(e).with_model_mut(crate::workspace::menu_native::make_instance);
+        engine_of(e).with_model_mut(|m| crate::document::controller::Controller::select_element(m, &path));
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, DELETE);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "delete_orphan_confirm", "an orphan asks first: {reply} {err}");
+        assert_eq!(doc_json(e), before, "and deletes nothing yet");
+        assert_eq!(engine_of(e).store.borrow().dialog_params().and_then(|p| p.get("count")).cloned(),
+                   Some(serde_json::json!(1)), "the dialog names the count");
+        let ev = serde_json::json!({"path": dialog_leaf_path(e, "button", "Delete"), "event": "click"}).to_string();
+        let (reply, err) = dialog_event(e, &ev);
+        assert!(!reply.is_empty(), "its Delete ran: {err}");
+        assert_ne!(doc_json(e), before, "its Delete deletes");
+        unsafe { jas_engine_free(e) };
+
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, DELETE);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(err, "", "nothing refused: {reply}");
+        assert_eq!(v["doc_changed"], true, "no orphan: deleted ({reply})");
+        assert_eq!(engine_of(e).with_document(|d| d.selection.len()), 0, "the selection is empty");
+        undo(e);
+        assert_eq!(doc_json(e), before, "one undo brings it back");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// SELECT ALL FROM THE MENU (flask STATUS §242, 2026-10-13: Edit > Select
     /// All on Windows read `PlatformEffect`, `Logged:select_all`). Its
     /// `actions.yaml` entry is a `log` stub: the behaviour is the menu's own,
