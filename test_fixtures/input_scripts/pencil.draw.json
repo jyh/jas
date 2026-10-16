@@ -1,0 +1,18 @@
+{
+  "item": "pencil.draw",
+  "spec": "workspace/tools/pencil.yaml",
+  "setup_svg": "circle_basic.svg",
+  "tool": "pencil",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 10, "y": 20},
+    {"kind": "move", "x": 30, "y": 30, "dragging": true},
+    {"kind": "move", "x": 50, "y": 40, "dragging": true},
+    {"kind": "move", "x": 70, "y": 50, "dragging": true},
+    {"kind": "move", "x": 90, "y": 60, "dragging": true},
+    {"kind": "move", "x": 110, "y": 70, "dragging": true},
+    {"kind": "release", "x": 110, "y": 70},
+    {"read": "document"}
+  ],
+  "expected_json": "pencil.draw.expected.json"
+}

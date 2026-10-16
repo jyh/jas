@@ -1946,7 +1946,8 @@ pub(crate) mod tests {
     /// its pointer steps are the gesture events; any other step this runner
     /// cannot replay yet is REFUSED by name, never skipped; and the script must
     /// end on `{"read": "document"}`, or it asserts nothing.
-    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json", "rect.draw_shift.json"];
+    const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+                                       "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json"];
 
     #[cfg(feature = "web")]
     fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
@@ -1956,9 +1957,20 @@ pub(crate) mod tests {
                    "script {item}: must end on a document read");
         let mut events = vec![];
         for (i, st) in steps[..steps.len() - 1].iter().enumerate() {
-            match st.get("kind").and_then(|k| k.as_str()) {
-                Some("press" | "move" | "release") => events.push(st.clone()),
-                _ => panic!("script {item}: step {i} {st} is not replayable at level 1 yet (pointer steps only)"),
+            match (st.get("kind").and_then(|k| k.as_str()), st.get("key").and_then(|k| k.as_str())) {
+                (Some("press" | "move" | "release"), _) => events.push(st.clone()),
+                // A KEY step (the key corpus's chord form): the engine's key
+                // order, `replay::replay_key`. The engine takes no `meta`.
+                (None, Some(key)) => {
+                    assert!(!st.get("meta").and_then(|v| v.as_bool()).unwrap_or(false),
+                            "script {item}: step {i} {st} carries meta, which the engine's key route does not take");
+                    let mut ev = serde_json::json!({"kind": "key", "key": key});
+                    for m in ["ctrl", "shift", "alt"] {
+                        if let Some(v) = st.get(m) { ev[m] = v.clone(); }
+                    }
+                    events.push(ev);
+                }
+                _ => panic!("script {item}: step {i} {st} is not replayable at level 1 yet (pointer and key steps only)"),
             }
         }
         serde_json::json!({

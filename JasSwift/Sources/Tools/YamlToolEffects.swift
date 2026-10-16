@@ -194,9 +194,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let brushSlug = (params["brush_slug"] as? String) ?? ""
         let name = (dialog["brush_name"] as? String) ?? "Brush"
         let brushType = (dialog["brush_type"] as? String) ?? "calligraphic"
-        let angle = (dialog["angle"] as? Double) ?? 0.0
-        let roundness = (dialog["roundness"] as? Double) ?? 100.0
-        let size = (dialog["size"] as? Double) ?? 5.0
+        // Through NSNumber: a dialog commit stores a whole number as a Swift
+        // Int, which `as? Double` does not read (the artboard resize, #470).
+        let angle = (dialog["angle"] as? NSNumber)?.doubleValue ?? 0.0
+        let roundness = (dialog["roundness"] as? NSNumber)?.doubleValue ?? 100.0
+        let size = (dialog["size"] as? NSNumber)?.doubleValue ?? 5.0
         let angleVar = (dialog["angle_variation"] as? [String: Any]) ?? ["mode": "fixed"]
         let roundnessVar = (dialog["roundness_variation"] as? [String: Any]) ?? ["mode": "fixed"]
         let sizeVar = (dialog["size_variation"] as? [String: Any]) ?? ["mode": "fixed"]

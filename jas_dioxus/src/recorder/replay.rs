@@ -151,11 +151,15 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
     }
 
     for ev in tc["events"].as_array().unwrap() {
-        let x = ev["x"].as_f64().unwrap();
-        let y = ev["y"].as_f64().unwrap();
         // shift/alt default false; dragging defaults false.
         let shift = ev.get("shift").and_then(|v| v.as_bool()).unwrap_or(false);
         let alt = ev.get("alt").and_then(|v| v.as_bool()).unwrap_or(false);
+        if ev["kind"].as_str() == Some("key") {
+            replay_key(&mut model, &mut tool, ev);
+            continue;
+        }
+        let x = ev["x"].as_f64().unwrap();
+        let y = ev["y"].as_f64().unwrap();
         match ev["kind"].as_str().unwrap() {
             "press" => tool.on_press(&mut model, x, y, shift, alt),
             "move" => {
@@ -168,6 +172,42 @@ pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
     }
     crate::document::artboard::set_test_id_rng(None);
     model
+}
+
+#[cfg(feature = "web")]
+/// One KEY event of a gesture case (`{"kind": "key", "key": <name>, "ctrl":
+/// b, "shift": b, "alt": b}`): an input script's key step at level 1
+/// (docs/TESTING.md section 6). The key takes the ENGINE's order
+/// ([`route_key`](crate::workspace::resolve_key::route_key), the one
+/// `jas_key_event` runs), carried out on this case's model and tool.
+///
+/// ⛔ Not mirrored: a tool that CLAIMS Delete is handed the Artboards panel's
+/// selection in the engine; this runner holds no panel store, so a claimed
+/// Delete here sees none. No script does that yet.
+fn replay_key(model: &mut Model, tool: &mut crate::tools::yaml_tool::YamlTool, ev: &Value) {
+    use crate::tools::tool::{CanvasTool, KeyMods};
+    use crate::workspace::resolve_key::{route_key, KeyRoute};
+    let name = ev["key"].as_str().expect("a key event names its key");
+    let b = |k: &str| ev.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+    let km = KeyMods { shift: b("shift"), ctrl: b("ctrl"), alt: b("alt"), meta: false };
+    let route = route_key(name, km, |k| tool.captures_keyboard() || tool.claims_key(k));
+    match route {
+        KeyRoute::DeleteSelection => {
+            // The engine's outcome: nothing selected and a would-orphan delete
+            // both change nothing.
+            let _ = crate::workspace::menu_native::delete_selection(model);
+        }
+        KeyRoute::ToolKey(k) => { tool.on_key_event(model, k, km); }
+        KeyRoute::Undo => model.undo(),
+        KeyRoute::Redo => model.redo(),
+        KeyRoute::SelectTool(id) => {
+            tool.deactivate(model);
+            *tool = build_gesture_tool(&id);
+            tool.activate(model);
+        }
+        KeyRoute::Unhandled => {}
+        KeyRoute::BadKey => panic!("key event {ev}: {name:?} is not a key the engine takes"),
+    }
 }
 
 #[cfg(feature = "web")]
