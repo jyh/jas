@@ -369,7 +369,9 @@ public func applyParagraphPanelMutualExclusion(
 /// Rust `paragraph_host::justification_values`, including text-on-path
 /// wrappers (which `paragraphPanelLiveOverrides` does not read).
 public func paragraphJustificationValues(model: Model) -> [String: Any] {
-    let defaults = WorkspaceData.load()?.dialogStateDefaults("paragraph_justification") ?? [:]
+    let ws = WorkspaceData.load()
+    let justification = ws?.dialogStateDefaults("paragraph_justification") ?? [:]
+    let hyphenation = ws?.dialogStateDefaults("paragraph_hyphenation") ?? [:]
     var wrappers: [Tspan] = []
     for es in model.document.selection {
         guard let elem = model.document.tryGetElement(es.path) else { continue }
@@ -381,28 +383,37 @@ public func paragraphJustificationValues(model: Model) -> [String: Any] {
         }
         wrappers.append(contentsOf: tspans.filter { $0.jasRole == "paragraph" })
     }
-    let fields: [(String, (Tspan) -> Any?)] = [
-        ("word_spacing_min", { $0.jasWordSpacingMin }),
-        ("word_spacing_desired", { $0.jasWordSpacingDesired }),
-        ("word_spacing_max", { $0.jasWordSpacingMax }),
-        ("letter_spacing_min", { $0.jasLetterSpacingMin }),
-        ("letter_spacing_desired", { $0.jasLetterSpacingDesired }),
-        ("letter_spacing_max", { $0.jasLetterSpacingMax }),
-        ("glyph_scaling_min", { $0.jasGlyphScalingMin }),
-        ("glyph_scaling_desired", { $0.jasGlyphScalingDesired }),
-        ("glyph_scaling_max", { $0.jasGlyphScalingMax }),
-        ("auto_leading", { $0.jasAutoLeading }),
-        ("single_word_justify", { $0.jasSingleWordJustify }),
+    let fields: [(String, Bool, (Tspan) -> Any?)] = [
+        ("word_spacing_min", false, { $0.jasWordSpacingMin }),
+        ("word_spacing_desired", false, { $0.jasWordSpacingDesired }),
+        ("word_spacing_max", false, { $0.jasWordSpacingMax }),
+        ("letter_spacing_min", false, { $0.jasLetterSpacingMin }),
+        ("letter_spacing_desired", false, { $0.jasLetterSpacingDesired }),
+        ("letter_spacing_max", false, { $0.jasLetterSpacingMax }),
+        ("glyph_scaling_min", false, { $0.jasGlyphScalingMin }),
+        ("glyph_scaling_desired", false, { $0.jasGlyphScalingDesired }),
+        ("glyph_scaling_max", false, { $0.jasGlyphScalingMax }),
+        ("auto_leading", false, { $0.jasAutoLeading }),
+        ("single_word_justify", false, { $0.jasSingleWordJustify }),
+        ("hyphenate", true, { $0.jasHyphenate }),
+        ("hyphenate_min_word", true, { $0.jasHyphenateMinWord }),
+        ("hyphenate_min_before", true, { $0.jasHyphenateMinBefore }),
+        ("hyphenate_min_after", true, { $0.jasHyphenateMinAfter }),
+        ("hyphenate_limit", true, { $0.jasHyphenateLimit }),
+        ("hyphenate_zone", true, { $0.jasHyphenateZone }),
+        ("hyphenate_bias", true, { $0.jasHyphenateBias }),
+        ("hyphenate_capitalized", true, { $0.jasHyphenateCapitalized }),
     ]
     func same(_ a: Any, _ b: Any) -> Bool {
         if let x = (a as? NSNumber)?.doubleValue ?? (a as? Double),
            let y = (b as? NSNumber)?.doubleValue ?? (b as? Double) { return abs(x - y) < 1e-9 }
+        if let x = a as? Bool, let y = b as? Bool { return x == y }
         if let x = a as? String, let y = b as? String { return x == y }
         return false
     }
     var out: [String: Any] = [:]
-    for (key, read) in fields {
-        let def: Any = defaults[key] ?? NSNull()
+    for (key, inHyphenation, read) in fields {
+        let def: Any = (inHyphenation ? hyphenation : justification)[key] ?? NSNull()
         let values: [Any] = wrappers.map { w in
             if let v = read(w), !(v is NSNull) { return v }
             return def

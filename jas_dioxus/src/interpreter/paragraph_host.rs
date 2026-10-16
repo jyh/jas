@@ -511,36 +511,46 @@ pub fn panel_from_document(doc: &crate::document::document::Document)
     pp
 }
 
-/// The Justification dialog's eleven fields as the SELECTED paragraphs hold
-/// them (PARAGRAPH.md §Justification Dialog, "Mixed selection"): a field is
+/// The Justification and Hyphenation dialogs' fields as the SELECTED
+/// paragraphs hold them (PARAGRAPH.md §Justification Dialog, "Mixed
+/// selection"; the Hyphenation dialog stores on the same wrappers): a field is
 /// the value every selected paragraph wrapper agrees on, or null when they
-/// differ. An ABSENT attribute is the dialog's declared default, read from
-/// the dialog's own `state:`, so the dialog and this view cannot disagree on
-/// it. With no paragraph selected every field is its default. The dialog's
-/// `init:` reads this as `active_document.paragraph_wrappers`.
-pub fn justification_values(doc: &crate::document::document::Document)
+/// differ. An ABSENT attribute is its dialog's declared default, read from
+/// that dialog's own `state:`, so a dialog and this view cannot disagree on
+/// it. With no paragraph selected every field is its default. Both dialogs'
+/// `init:` read this as `active_document.paragraph_wrappers`.
+pub fn paragraph_dialog_values(doc: &crate::document::document::Document)
     -> serde_json::Map<String, serde_json::Value> {
     use serde_json::{json, Value};
-    let defaults = crate::interpreter::workspace::Workspace::load()
-        .and_then(|ws| ws.dialog("paragraph_justification").cloned())
-        .map(|d| d["state"].clone())
-        .unwrap_or(Value::Null);
-    let fields: [(&str, fn(&Tspan) -> Option<Value>); 11] = [
-        ("word_spacing_min", |t| t.jas_word_spacing_min.map(|x| json!(x))),
-        ("word_spacing_desired", |t| t.jas_word_spacing_desired.map(|x| json!(x))),
-        ("word_spacing_max", |t| t.jas_word_spacing_max.map(|x| json!(x))),
-        ("letter_spacing_min", |t| t.jas_letter_spacing_min.map(|x| json!(x))),
-        ("letter_spacing_desired", |t| t.jas_letter_spacing_desired.map(|x| json!(x))),
-        ("letter_spacing_max", |t| t.jas_letter_spacing_max.map(|x| json!(x))),
-        ("glyph_scaling_min", |t| t.jas_glyph_scaling_min.map(|x| json!(x))),
-        ("glyph_scaling_desired", |t| t.jas_glyph_scaling_desired.map(|x| json!(x))),
-        ("glyph_scaling_max", |t| t.jas_glyph_scaling_max.map(|x| json!(x))),
-        ("auto_leading", |t| t.jas_auto_leading.map(|x| json!(x))),
-        ("single_word_justify", |t| t.jas_single_word_justify.clone().map(Value::String)),
+    let ws = crate::interpreter::workspace::Workspace::load();
+    let state_of = |id: &str| ws.as_ref().and_then(|w| w.dialog(id).cloned())
+        .map(|d| d["state"].clone()).unwrap_or(Value::Null);
+    let (justification, hyphenation) = (state_of("paragraph_justification"), state_of("paragraph_hyphenation"));
+    let fields: [(&str, bool, fn(&Tspan) -> Option<Value>); 19] = [
+        ("word_spacing_min", false, |t| t.jas_word_spacing_min.map(|x| json!(x))),
+        ("word_spacing_desired", false, |t| t.jas_word_spacing_desired.map(|x| json!(x))),
+        ("word_spacing_max", false, |t| t.jas_word_spacing_max.map(|x| json!(x))),
+        ("letter_spacing_min", false, |t| t.jas_letter_spacing_min.map(|x| json!(x))),
+        ("letter_spacing_desired", false, |t| t.jas_letter_spacing_desired.map(|x| json!(x))),
+        ("letter_spacing_max", false, |t| t.jas_letter_spacing_max.map(|x| json!(x))),
+        ("glyph_scaling_min", false, |t| t.jas_glyph_scaling_min.map(|x| json!(x))),
+        ("glyph_scaling_desired", false, |t| t.jas_glyph_scaling_desired.map(|x| json!(x))),
+        ("glyph_scaling_max", false, |t| t.jas_glyph_scaling_max.map(|x| json!(x))),
+        ("auto_leading", false, |t| t.jas_auto_leading.map(|x| json!(x))),
+        ("single_word_justify", false, |t| t.jas_single_word_justify.clone().map(Value::String)),
+        ("hyphenate", true, |t| t.jas_hyphenate.map(Value::Bool)),
+        ("hyphenate_min_word", true, |t| t.jas_hyphenate_min_word.map(|x| json!(x))),
+        ("hyphenate_min_before", true, |t| t.jas_hyphenate_min_before.map(|x| json!(x))),
+        ("hyphenate_min_after", true, |t| t.jas_hyphenate_min_after.map(|x| json!(x))),
+        ("hyphenate_limit", true, |t| t.jas_hyphenate_limit.map(|x| json!(x))),
+        ("hyphenate_zone", true, |t| t.jas_hyphenate_zone.map(|x| json!(x))),
+        ("hyphenate_bias", true, |t| t.jas_hyphenate_bias.map(|x| json!(x))),
+        ("hyphenate_capitalized", true, |t| t.jas_hyphenate_capitalized.map(Value::Bool)),
     ];
     let wrappers = selected_wrappers(doc);
     let mut m = serde_json::Map::new();
-    for (key, read) in fields {
+    for (key, in_hyphenation, read) in fields {
+        let defaults = if in_hyphenation { &hyphenation } else { &justification };
         let default = defaults[key]["default"].clone();
         let mut values = wrappers.iter().map(|w| read(w).unwrap_or_else(|| default.clone()));
         let first = values.next();

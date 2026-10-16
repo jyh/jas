@@ -12888,6 +12888,31 @@ mod tests {
                    "the blank min is untouched on each paragraph; the edited desired writes to both");
     }
 
+    /// The Hyphenation dialog's twin of the Justification rule: a field it
+    /// opened BLANK (the paragraphs differ) and the person did not touch is
+    /// null at OK and leaves each paragraph's own value; an edited field
+    /// writes to all.
+    #[test]
+    fn a_blank_hyphenation_field_at_ok_leaves_each_paragraph_its_own_value() {
+        let svg = include_str!("../../../test_fixtures/svg/paragraph_hyphenated_mixed.svg");
+        let mut st = AppState::new();
+        st.add_tab(crate::workspace::app_state::TabState::new());
+        st.tabs[st.active_tab].model = crate::document::model::Model::new(
+            crate::geometry::svg::svg_to_document(svg), None);
+        crate::document::controller::Controller::select_all(&mut st.tabs[st.active_tab].model);
+        let wrappers = |st: &AppState| -> Vec<(Option<f64>, Option<f64>)> {
+            crate::interpreter::paragraph_host::selected_wrappers(st.tabs[st.active_tab].model.document())
+                .iter().map(|w| (w.jas_hyphenate_min_word, w.jas_hyphenate_min_before)).collect()
+        };
+        assert_eq!(wrappers(&st), vec![(Some(8.0), Some(4.0)), (Some(8.0), Some(5.0))], "the control: min-before differs");
+        st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
+            hyphenate: Some(true), min_word: Some(9.0), min_before: None, min_after: Some(3.0),
+            limit: Some(0.0), zone: Some(0.0), bias: Some(0.0), capitalized: Some(true),
+        });
+        assert_eq!(wrappers(&st), vec![(Some(9.0), Some(4.0)), (Some(9.0), Some(5.0))],
+                   "the blank min-before is untouched on each paragraph; the edited min-word writes to both");
+    }
+
     // ── Phase 9: Hyphenation dialog OK commit ────────────────
 
     #[test]
