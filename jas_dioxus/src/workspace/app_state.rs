@@ -594,6 +594,19 @@ impl Default for SwatchesPanelState {
 
 
 impl AppState {
+    /// The Artboards panel's facts a canvas tool reads (its selection and
+    /// shift-click anchor), handed to the active tool before every pointer
+    /// event and every claimed key (`CanvasTool::set_document_facts`): the
+    /// tool runs on its own store, which holds neither (ARTBOARD_TOOL.md
+    /// §Mousedown disambiguation order). The engine's routes hand the same
+    /// keys (`JasEngine::artboard_facts`).
+    pub(crate) fn artboard_tool_facts(&self) -> serde_json::Value {
+        serde_json::json!({
+            "artboards_panel_selection_ids": self.artboards_panel_selection,
+            "artboards_panel_anchor": self.artboards_panel_anchor,
+        })
+    }
+
     pub(crate) fn new() -> Self {
         let app_config = Self::load_app_config();
         let workspace_layout = Self::load_or_migrate_workspace(&app_config);

@@ -1964,14 +1964,14 @@ fn run_doc_effect(
                 let vp_cursor_y = eval_number(args.get("cursor_y"), store, ctx);
                 let (press_x, press_y) = viewport_to_doc(model, vp_press_x, vp_press_y);
                 let (cursor_x, cursor_y) = viewport_to_doc(model, vp_cursor_x, vp_cursor_y);
-                artboard_move_apply(model, store, press_x, press_y,
+                artboard_move_apply(model, store, ctx, press_x, press_y,
                     cursor_x, cursor_y, false);
             }
         }
         "doc.artboard.duplicate_commit" => {
             // Re-applies translate with integer-pt rounded
             // displacement; same path as move_commit.
-            artboard_move_commit(model, store);
+            artboard_move_commit(model, store, ctx);
         }
         "doc.artboard.move_apply" => {
             // Live drag-to-move per ARTBOARD_TOOL.md §Drag-to-move.
@@ -1984,7 +1984,7 @@ fn run_doc_effect(
                 let (press_x, press_y) = viewport_to_doc(model, vp_press_x, vp_press_y);
                 let (cursor_x, cursor_y) = viewport_to_doc(model, vp_cursor_x, vp_cursor_y);
                 let shift_held = eval_bool(args.get("shift_held"), store, ctx);
-                artboard_move_apply(model, store, press_x, press_y,
+                artboard_move_apply(model, store, ctx, press_x, press_y,
                     cursor_x, cursor_y, shift_held);
             }
         }
@@ -1996,7 +1996,7 @@ fn run_doc_effect(
             // ARTBOARD_TOOL.md §Common rules — multi-select rounds
             // the displacement vector ONCE so relative spacing is
             // preserved). Tool state cleanup happens in YAML.
-            artboard_move_commit(model, store);
+            artboard_move_commit(model, store, ctx);
         }
         "doc.artboard.create_commit" => {
             // Drag-to-create commit per ARTBOARD_TOOL.md §Drag-to-create.
@@ -2030,14 +2030,12 @@ fn run_doc_effect(
             // converted to document coords via the canvas zoom + pan.
             // shift / cmd / alt are the modifier state at mousedown.
             //
-            // Phase 1.2 implements the hit-test math + tool-state
-            // writes; panel-selection AppState writes land in Phase
-            // 1.3 (the canvas → AppState write path requires routing
-            // through apply_artboards_panel_field, which lives outside
-            // run_doc_effect's reach today). Until then, a hit on an
-            // artboard interior still sets the tool mode, but the
-            // panel UI doesn't update visually until the next
-            // panel-side click.
+            // The panel-selection writes are QUEUED on the tool's store
+            // (`push_panel_state_write`); the host drains them after the
+            // event (`drain_pending_panel_writes`: the web's canvas
+            // routing, the engine's pointer route) and applies them to the
+            // Artboards panel. The selection it reads arrives the other way,
+            // in the call's `active_document` (`artboard_panel_selection`).
             if let serde_json::Value::Object(args) = spec {
                 let vp_x = eval_number(args.get("x"), store, ctx);
                 let vp_y = eval_number(args.get("y"), store, ctx);
@@ -2045,7 +2043,7 @@ fn run_doc_effect(
                 let shift = eval_bool(args.get("shift"), store, ctx);
                 let cmd = eval_bool(args.get("cmd"), store, ctx);
                 let alt = eval_bool(args.get("alt"), store, ctx);
-                artboard_probe_hit(model, store, doc_x, doc_y, shift, cmd, alt);
+                artboard_probe_hit(model, store, ctx, doc_x, doc_y, shift, cmd, alt);
             }
         }
         "doc.path.probe_partial_hit" => {
@@ -3836,21 +3834,26 @@ fn path_commit_anchor_edit(
     }
 }
 
-/// Read the panel-selected artboard ids from the eval context. Used
-/// by canvas-side artboard effects that operate on the selection
-/// (move, resize, duplicate, delete). Empty when no artboards are
-/// panel-selected.
-fn read_artboard_panel_selection(store: &StateStore) -> Vec<String> {
-    store
-        .eval_context()
-        .get("active_document")
-        .and_then(|d| d.get("artboards_panel_selection_ids"))
+/// One `active_document` fact a canvas-side artboard effect reads (the
+/// Artboards panel's selection or anchor): the CALL's `active_document`
+/// first, then the store's own context. A tool runs on its own store, so its
+/// host hands it the panel's facts before every event (`set_document_facts`;
+/// the engine's pointer and key routes, 2026-10-16); the store's context is
+/// the fallback the other routes have always used.
+fn artboard_panel_fact(store: &StateStore, ctx: &serde_json::Value, key: &str) -> Option<serde_json::Value> {
+    ctx.get("active_document")
+        .and_then(|d| d.get(key))
+        .filter(|v| !v.is_null())
+        .cloned()
+        .or_else(|| store.eval_context().get("active_document").and_then(|d| d.get(key)).cloned())
+}
+
+/// The panel-selected artboard ids (move, resize, duplicate, delete), by
+/// [`artboard_panel_fact`]. Empty when no artboards are panel-selected.
+fn artboard_panel_selection(store: &StateStore, ctx: &serde_json::Value) -> Vec<String> {
+    artboard_panel_fact(store, ctx, "artboards_panel_selection_ids")
         .and_then(|v| v.as_array().cloned())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
+        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
         .unwrap_or_default()
 }
 
@@ -4047,6 +4050,7 @@ fn artboard_contains_element_bounds(
 fn artboard_move_apply(
     model: &mut Model,
     store: &mut StateStore,
+    ctx: &serde_json::Value,
     press_x: f64,
     press_y: f64,
     cursor_x: f64,
@@ -4062,7 +4066,7 @@ fn artboard_move_apply(
             dx = 0.0;
         }
     }
-    let target_ids = read_artboard_panel_selection(store);
+    let target_ids = artboard_panel_selection(store, ctx);
     if target_ids.is_empty() {
         // Click-to-activate hadn't established a selection yet (the
         // panel-selection write path lands in a follow-up phase). Use
@@ -4088,12 +4092,12 @@ fn artboard_move_apply(
 /// whole-pt artboard positions. Multi-select rounds the displacement
 /// vector ONCE before applying so relative spacing between selected
 /// artboards is preserved per ARTBOARD_TOOL.md §Common rules.
-fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
+fn artboard_move_commit(model: &mut Model, store: &mut StateStore, ctx: &serde_json::Value) {
     // Read press / cursor from tool state to compute the final
     // displacement; the YAML state machine doesn't pass them to
     // commit because the live-update path already wrote them.
-    let ctx = store.eval_context();
-    let tool = ctx.get("tool").and_then(|t| t.get("artboard"));
+    let store_ctx = store.eval_context();
+    let tool = store_ctx.get("tool").and_then(|t| t.get("artboard"));
     let Some(t) = tool else { return; };
     let read_num = |k: &str| -> f64 {
         t.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0)
@@ -4121,7 +4125,7 @@ fn artboard_move_commit(model: &mut Model, store: &mut StateStore) {
     dx = dx.round();
     dy = dy.round();
 
-    let mut target_ids = read_artboard_panel_selection(store);
+    let mut target_ids = artboard_panel_selection(store, ctx);
     if target_ids.is_empty() {
         // Same single-artboard fallback as move_apply.
         let hit_id = t
@@ -4238,16 +4242,7 @@ fn artboard_delete_panel_selected_with_ids(model: &mut Model, target_ids: &[Stri
 /// every panel-selected artboard from document.artboards, subject
 /// to the at-least-one invariant. Snapshots for undo before mutating.
 fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore, ctx: &serde_json::Value) {
-    // The CALL's `active_document` first: a tool runs on its own store, so
-    // its host hands it the panel selection in the dispatch context (the
-    // engine's key route, 2026-10-15). The store's own context is the
-    // fallback the other routes have always used.
-    let from_ctx: Option<Vec<String>> = ctx
-        .get("active_document")
-        .and_then(|d| d.get("artboards_panel_selection_ids"))
-        .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
-    let target_ids = from_ctx.unwrap_or_else(|| read_artboard_panel_selection(store));
+    let target_ids = artboard_panel_selection(store, ctx);
     artboard_delete_panel_selected_with_ids(model, &target_ids);
 }
 
@@ -4742,15 +4737,12 @@ fn artboard_create_commit(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64)
 /// YAML state machine to dispatch the correct gesture in
 /// on_mousemove / on_mouseup.
 ///
-/// Phase 1.2 scope: hit-test math and tool-state writes. Panel-
-/// selection writes (which require AppState mutation outside
-/// run_doc_effect's reach) are deferred to Phase 1.3 — the panel UI
-/// is unaffected by this handler today, but the gesture state
-/// machine transitions correctly so move / resize / duplicate
-/// dispatch in subsequent phases.
+/// It reads the panel selection and anchor by [`artboard_panel_fact`] and
+/// queues the click's selection writes for the host to drain.
 fn artboard_probe_hit(
     model: &mut Model,
     store: &mut StateStore,
+    ctx: &serde_json::Value,
     x: f64,
     y: f64,
     shift_held: bool,
@@ -4768,26 +4760,9 @@ fn artboard_probe_hit(
     //    artboard fills) and always win against any artboard interior
     //    at the same cursor position.
     //
-    //    Phase 1.2 reads panel-selection from the model's view of
-    //    artboards via store.eval_context (the `panel.<key>` and
-    //    `active_document.<key>` namespaces are populated at render
-    //    time). Until panel-selection writes land in Phase 1.3, this
-    //    branch fires only for selections established by the
-    //    Artboards Panel.
-    let sel = store
-        .eval_context()
-        .get("active_document")
-        .and_then(|d| d.get("artboards_panel_selection_ids"))
-        .cloned()
-        .unwrap_or(serde_json::Value::Array(vec![]));
-    let sel_ids: Vec<String> = sel
-        .as_array()
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
+    //    The selection is the CALL's `active_document` first (the host
+    //    hands the tool the panel's facts), then the store's context.
+    let sel_ids = artboard_panel_selection(store, ctx);
     if sel_ids.len() == 1 {
         if let Some(ab) = doc.artboards.iter().find(|a| a.id == sel_ids[0]) {
             // Handle hit radius — viewport pixels divided by zoom for
@@ -4860,21 +4835,9 @@ fn artboard_probe_hit(
         //   Shift-click → range from anchor to clicked (anchor
         //                 unchanged). If no anchor, behaves as plain.
         //   Cmd-click   → toggle in / out (anchor unchanged).
-        let ctx = store.eval_context();
-        let active_doc = ctx.get("active_document");
-        let current_sel: Vec<String> = active_doc
-            .and_then(|d| d.get("artboards_panel_selection_ids"))
-            .and_then(|v| v.as_array().cloned())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let anchor: Option<String> = active_doc
-            .and_then(|d| d.get("artboards_panel_anchor"))
-            .and_then(|v| v.as_str())
-            .map(String::from);
+        let current_sel = artboard_panel_selection(store, ctx);
+        let anchor: Option<String> = artboard_panel_fact(store, ctx, "artboards_panel_anchor")
+            .and_then(|v| v.as_str().map(String::from));
 
         if shift_held {
             // Range select from anchor to hit_id, using

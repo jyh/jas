@@ -626,6 +626,7 @@ pub fn App() -> Element {
                 // empty defaults (else the blob brush commits fill=None).
                 // Built from &st BEFORE the mutable tab borrow below.
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
+                let facts = st.artboard_tool_facts();
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         // Recorder seam hook (dormant unless armed):
@@ -635,6 +636,7 @@ pub fn App() -> Element {
                             "press", cx, cy, shift, alt, false, kind, &app_state, &tab.model,
                         );
                         tool.sync_global_state(&app_state);
+                        tool.set_document_facts(&facts);
                         tool.on_press(&mut tab.model, cx, cy, shift, alt);
                         tool.drain_pending_panel_writes()
                     } else {
@@ -671,12 +673,14 @@ pub fn App() -> Element {
             (act_canvas.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
+                let facts = st.artboard_tool_facts();
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         crate::recorder::hooks::pointer_event(
                             "move", cx, cy, shift, alt, dragging, kind, &app_state, &tab.model,
                         );
                         tool.sync_global_state(&app_state);
+                        tool.set_document_facts(&facts);
                         tool.on_move(&mut tab.model, cx, cy, shift, alt, dragging);
                         tool.drain_pending_panel_writes()
                     } else {
@@ -700,12 +704,14 @@ pub fn App() -> Element {
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
                 let app_state = crate::workspace::dock_panel::build_tool_state_map(st);
+                let facts = st.artboard_tool_facts();
                 let (pending, opened) = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
                         crate::recorder::hooks::pointer_event(
                             "release", cx, cy, shift, alt, false, kind, &app_state, &tab.model,
                         );
                         tool.sync_global_state(&app_state);
+                        tool.set_document_facts(&facts);
                         tool.on_release(&mut tab.model, cx, cy, shift, alt);
                         (tool.drain_pending_panel_writes(), tool.take_opened_dialog())
                     } else {
@@ -732,8 +738,10 @@ pub fn App() -> Element {
             let cy = coords.y;
             (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                 let kind = st.active_tool;
+                let facts = st.artboard_tool_facts();
                 let pending = if let Some(tab) = st.tab_mut()
                     && let Some(tool) = tab.tools.get_mut(&kind) {
+                        tool.set_document_facts(&facts);
                         tool.on_double_click(&mut tab.model, cx, cy);
                         tool.drain_pending_panel_writes()
                     } else {

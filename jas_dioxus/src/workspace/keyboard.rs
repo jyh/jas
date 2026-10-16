@@ -621,9 +621,7 @@ pub(crate) fn make_keydown_handler(
                     let mut dialog_sig = dialog_sig;
                     (act.borrow_mut())(Box::new(move |st: &mut AppState| {
                         let kind = st.active_tool;
-                        let facts = serde_json::json!({
-                            "artboards_panel_selection_ids": st.artboards_panel_selection.clone(),
-                        });
+                        let facts = st.artboard_tool_facts();
                         let opened = if let Some(tab) = st.tab_mut()
                             && let Some(tool) = tab.tools.get_mut(&kind) {
                                 tool.set_document_facts(&facts);

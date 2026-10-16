@@ -6921,20 +6921,14 @@ mod tests {
     // Artboard has id, name, x, y, width, height — the fields asserted
     // here are x / y / width / height and the list length).
     //
-    // RESIZE COVERAGE NOTE: the resize gesture is NOT covered through
-    // the press-on-handle seam. probe_hit's resize-handle branch only
-    // fires when active_document.artboards_panel_selection_ids holds
-    // exactly one id, and it reads that from store.eval_context() —
-    // which, in the headless CanvasTool dispatch path, never carries an
-    // active_document namespace (YamlTool::dispatch builds an
-    // active_document payload with only view_offset / zoom; the doc.*
-    // effect handlers read the StateStore's own eval_context, which has
-    // no active_document at all). So a real press on a corner cannot
-    // transition the machine to `resizing` here. The resize MATH is
-    // already pinned directly in effects.rs
-    // (test_artboard_resize_compute_*); driving it through the seam
-    // would require app-level panel-selection plumbing the headless
-    // harness lacks. Reported, not faked.
+    // RESIZE COVERAGE: probe_hit's resize-handle branch fires only when
+    // the panel selection holds exactly one id. The tool runs on its own
+    // store, which never holds it, so every host hands it the Artboards
+    // panel's facts before each event (`set_document_facts`; the web's
+    // canvas handlers and the engine's pointer route, 2026-10-16), and the
+    // effect reads the call's `active_document` first. Until then a press
+    // on a handle could not reach `resizing` through this seam or in any
+    // app, and a press on the corner moved the artboard instead.
 
     /// Load the real Artboard tool from the embedded workspace bundle,
     /// the same path the running app uses.
@@ -6975,6 +6969,26 @@ mod tests {
             .find(|ab| ab.id == "A")
             .expect("artboard A must still be present");
         (a.x, a.y, a.width, a.height)
+    }
+
+    #[test]
+    fn artboard_parity_drag_a_handle_of_the_panel_selected_artboard_resizes_it() {
+        let mut tool = artboard_yaml_tool().expect("the artboard tool is in the workspace");
+        let drag = |tool: &mut YamlTool| {
+            let mut model = model_with_one_artboard();
+            tool.activate(&mut model);
+            // The SE handle of A (200, 200), dragged to (250, 230).
+            tool.on_press(&mut model, 200.0, 200.0, false, false);
+            tool.on_move(&mut model, 250.0, 230.0, false, false, true);
+            tool.on_release(&mut model, 250.0, 230.0, false, false);
+            artboard_a_rect(&model)
+        };
+        tool.set_document_facts(&serde_json::json!({ "artboards_panel_selection_ids": ["A"] }));
+        assert_eq!(drag(&mut tool), (0.0, 0.0, 250.0, 230.0), "the SE handle resizes; the NW corner stays");
+        // The control: with no panel selection there are no handles, so the
+        // same press is on the interior and the drag MOVES A.
+        tool.set_document_facts(&serde_json::json!({ "artboards_panel_selection_ids": [] }));
+        assert_eq!(drag(&mut tool), (50.0, 30.0, 200.0, 200.0), "no selection: the corner press moves A");
     }
 
     #[test]
