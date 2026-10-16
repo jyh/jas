@@ -1109,14 +1109,36 @@ internal static class ActWire
     /// `true` closes. An older engine with no key, a non-boolean, a refusal's
     /// empty reply, or unreadable bytes all keep the window.
     /// </summary>
-    internal static bool CloseWindow(string reply)
+    internal static bool CloseWindow(string reply) => NamedTrue(reply, "close_window");
+
+    /// <summary>
+    /// jas §305: `"save_all_then_close": <bool>`, in every act reply. True when
+    /// Save Changes' Save All runs, and never with `close_window`: the engine
+    /// cannot save, so the SHELL saves every modified document and closes only
+    /// if every save succeeded. Only a named `true` acts.
+    /// </summary>
+    internal static bool SaveAllThenClose(string reply) => NamedTrue(reply, "save_all_then_close");
+
+    /// <summary>
+    /// Save All's first step in this shell, which holds ONE document. `close`:
+    /// there is nothing to save (no document open, or it is unmodified).
+    /// `save`: save it first, then <see cref="AfterSaveAll"/>.
+    /// </summary>
+    internal static string SaveAllStep(bool documentOpen, bool modified) =>
+        documentOpen && modified ? "save" : "close";
+
+    /// <summary>After Save All's save: `close` only if it wrote the file, else `keep`.</summary>
+    internal static string AfterSaveAll(bool saved) => saved ? "close" : "keep";
+
+    /// <summary>Whether a reply names <paramref name="key"/> as a JSON `true`.</summary>
+    private static bool NamedTrue(string reply, string key)
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
-                   && doc.RootElement.TryGetProperty("close_window", out var c)
-                   && c.ValueKind == System.Text.Json.JsonValueKind.True;
+                   && doc.RootElement.TryGetProperty(key, out var v)
+                   && v.ValueKind == System.Text.Json.JsonValueKind.True;
         }
         catch (System.Text.Json.JsonException)
         {
