@@ -236,7 +236,7 @@ internal sealed class QuitCmd : Cmd
 /// <summary>
 /// jas §299: a person asked to quit (`menu` or the window's X, `window`). The
 /// ENGINE runs `quit`; its reply decides whether the window closes or stays
-/// to show a dialog (<see cref="ActWire.QuitOutcome"/>).
+/// to show a dialog (<see cref="ApplyCloseWindow"/>).
 /// </summary>
 internal sealed class QuitRequestCmd : Cmd
 {
@@ -1006,14 +1006,15 @@ internal sealed unsafe class Canvas : IDisposable
 
     internal void RequestQuit(string via) => _queue.Add(new QuitRequestCmd { Via = via });
 
-    /// <summary>The engine's `quit` let the window close. Raised on the UI thread.</summary>
+    /// <summary>The engine named the window close (`close_window`). Raised on the UI thread.</summary>
     internal Action? CloseApproved { get; set; }
 
     /// <summary>
-    /// jas §299: Quit and the window's X run the engine's `quit`. An edited
-    /// document's reply names `save_changes_window`, which the dialog door
-    /// shows, and the window stays. Any other reply, or the refusal the
-    /// unedited branch's log makes, closes. Every outcome is a row.
+    /// jas §299: Quit and the window's X run the engine's `quit`. With nothing
+    /// edited the reply names `close_window: true` and the window closes; an
+    /// edited document's reply names `save_changes_window`, which the dialog
+    /// door shows, and the window stays. A refusal keeps it. Every outcome is
+    /// a row.
     /// </summary>
     private void ApplyQuitRequest(QuitRequestCmd cmd)
     {
@@ -1027,15 +1028,32 @@ internal sealed unsafe class Canvas : IDisposable
         var json = System.Text.Encoding.UTF8.GetBytes("{\"action\":\"quit\"}");
         var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
         var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
-        var outcome = ActWire.QuitOutcome(reply);
-        _report($"QUIT ASKED {head} outcome={outcome} reply={(reply.Length == 0 ? "(empty)" : "read")} "
+        var close = ActWire.CloseWindow(reply);
+        _report($"QUIT ASKED {head} outcome={(close ? "close" : "stay")} reply={(reply.Length == 0 ? "(empty)" : "read")} "
               + $"channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
-        if (outcome == "stay")
+        if (reply.Length == 0) { return; }
+        try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             OpenNamedDialog(doc.RootElement, $"item=quit action=quit {head}");
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            _report($"RUSTFAIL QUIT REPLY UNREADABLE {head} {Tids()}");
             return;
         }
+        ApplyCloseWindow(reply, $"item=quit action=quit {head}");
+    }
+
+    /// <summary>
+    /// jas §300: a reply that names `close_window: true` closes the window, as
+    /// `remove_tab` closes a tab: `quit` with nothing edited, or Save Changes'
+    /// Don't Save. Read beside <see cref="ApplyRemoveTab"/> on every act reply.
+    /// </summary>
+    private void ApplyCloseWindow(string reply, string head)
+    {
+        if (!ActWire.CloseWindow(reply)) { return; }
+        _report($"WINDOW CLOSE named {head} {Tids()}");
         PostToUi(() => CloseApproved?.Invoke());
     }
 
@@ -1212,6 +1230,7 @@ internal sealed unsafe class Canvas : IDisposable
         }
         var after = DialogWire.Named(reply);
         ApplyRemoveTab(reply, head);
+        ApplyCloseWindow(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
         ApplyDialogRefresh("event");
@@ -4678,6 +4697,7 @@ internal sealed unsafe class Canvas : IDisposable
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, runHead);
             ApplyRemoveTab(reply, runHead);
+            ApplyCloseWindow(reply, runHead);
         }
         catch (Exception ex)
         {
@@ -4725,6 +4745,7 @@ internal sealed unsafe class Canvas : IDisposable
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
+            ApplyCloseWindow(reply, head);
         }
         catch (Exception ex)
         {
@@ -4942,6 +4963,7 @@ internal sealed unsafe class Canvas : IDisposable
             changedRows = doc.RootElement.GetProperty("changed").GetArrayLength();
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
+            ApplyCloseWindow(reply, head);
         }
         catch (Exception ex)
         {

@@ -635,7 +635,7 @@ public sealed partial class MainWindow : Window
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
-            Report("WINDOW CLOSE approved by the engine's quit");
+            Report("WINDOW CLOSE approved by the engine");
             Close();
         };
         DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
@@ -738,7 +738,7 @@ public sealed partial class MainWindow : Window
         AppWindow.Closing += OnAppWindowClosing;
     }
 
-    /// <summary>Set once the engine's `quit` let the window close.</summary>
+    /// <summary>Set once the engine named the window close.</summary>
     private bool _closeApproved;
 
     private void OnAppWindowClosing(Microsoft.UI.Windowing.AppWindow sender,

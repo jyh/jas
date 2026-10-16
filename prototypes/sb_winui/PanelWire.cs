@@ -1110,27 +1110,23 @@ internal static class ActWire
     /// no key, or the value is not a non-negative integer.
     /// </summary>
     /// <summary>
-    /// jas §299: what `quit`'s reply asks of the window. `stay`: the reply
-    /// names a dialog (an edited document's `save_changes_window`), and the
-    /// window stays to show it. `close`: anything else. The engine does not
-    /// yet NAME a close (its unedited branch is a log, refused as a platform
-    /// effect), so until it does (§300), a reply that opens no dialog closes,
-    /// as Quit did before it reached the engine. Never keyed on the log text.
+    /// jas §300: `"close_window": <bool>`, in every act reply. True for `quit`
+    /// with nothing edited and for Save Changes' Don't Save. Only a named
+    /// `true` closes. An older engine with no key, a non-boolean, a refusal's
+    /// empty reply, or unreadable bytes all keep the window.
     /// </summary>
-    internal static string QuitOutcome(string reply)
+    internal static bool CloseWindow(string reply)
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(reply);
             return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
-                   && doc.RootElement.TryGetProperty("dialog", out var d)
-                   && d.ValueKind == System.Text.Json.JsonValueKind.String
-                ? "stay"
-                : "close";
+                   && doc.RootElement.TryGetProperty("close_window", out var c)
+                   && c.ValueKind == System.Text.Json.JsonValueKind.True;
         }
         catch (System.Text.Json.JsonException)
         {
-            return "close";
+            return false;
         }
     }
 
