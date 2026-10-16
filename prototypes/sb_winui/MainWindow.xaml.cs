@@ -632,6 +632,12 @@ public sealed partial class MainWindow : Window
         _canvas.DockChanged = OnDockChanged;
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
+        _canvas.CloseApproved = () =>
+        {
+            _closeApproved = true;
+            Report("WINDOW CLOSE approved by the engine");
+            Close();
+        };
         DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
 
         // ⭐ THE PANE IS SHOWN BEFORE THE FIRST LAYOUT, AND ONLY FOR THE APP
@@ -728,6 +734,20 @@ public sealed partial class MainWindow : Window
 
         // ONE `jas_engine_free`, at Quit, on the thread that made the engine.
         Closed += OnWindowClosed;
+        // jas §299: the X asks the engine first, as Quit does.
+        AppWindow.Closing += OnAppWindowClosing;
+    }
+
+    /// <summary>Set once the engine named the window close.</summary>
+    private bool _closeApproved;
+
+    private void OnAppWindowClosing(Microsoft.UI.Windowing.AppWindow sender,
+                                    Microsoft.UI.Windowing.AppWindowClosingEventArgs args)
+    {
+        Report($"WINDOW CLOSING asked approved={(_closeApproved ? "true" : "false")}");
+        if (_closeApproved) { return; }
+        args.Cancel = true;
+        _canvas.RequestQuit("window");
     }
 
     // =======================================================================
@@ -1271,6 +1291,7 @@ public sealed partial class MainWindow : Window
 
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
+        Report("WINDOW CLOSED");
         _canvas.Quit();
         _canvas.Dispose();
     }
@@ -2319,8 +2340,9 @@ public sealed partial class MainWindow : Window
                 SaveDocument(action == "save_as");
                 break;
             case "quit":
-                _canvas.Quit();
-                Close();
+                // jas §299: the engine's `quit` decides; an edited document
+                // shows Save Changes and the window stays.
+                _canvas.RequestQuit("menu");
                 break;
             default:
                 // Every other item runs IN THE ENGINE by its id (the owner's notes,
