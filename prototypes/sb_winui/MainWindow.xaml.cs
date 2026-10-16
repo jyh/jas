@@ -632,10 +632,11 @@ public sealed partial class MainWindow : Window
         _canvas.DockChanged = OnDockChanged;
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
+        _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
         _canvas.CloseApproved = () =>
         {
             _closeApproved = true;
-            Report("WINDOW CLOSE approved by the engine");
+            Report("WINDOW CLOSE approved");
             Close();
         };
         DialogClose.Click += (_, _) => _canvas.DialogDismiss("close-box");
@@ -2387,7 +2388,7 @@ public sealed partial class MainWindow : Window
     }
 
     /// <summary>File ▸ Save / Save As. The path is the UI thread's; the bytes are the core's.</summary>
-    private async void SaveDocument(bool forceAsk)
+    private async void SaveDocument(bool forceAsk, bool thenClose = false)
     {
         try
         {
@@ -2400,11 +2401,16 @@ public sealed partial class MainWindow : Window
                 picker.FileTypeChoices.Add("SVG", new List<string> { ".svg" });
                 picker.SuggestedFileName = "drawing";
                 var file = await picker.PickSaveFileAsync();
-                if (file is null) { Report("SAVE CANCELLED save=PICKER"); return; }
+                if (file is null)
+                {
+                    // jas §305: a Save All whose save is cancelled keeps the window.
+                    Report("SAVE CANCELLED save=PICKER" + (thenClose ? " save-all=window-kept" : ""));
+                    return;
+                }
                 path = file.Path;
             }
             _savePath = path;
-            _canvas.Save(path);
+            _canvas.Save(path, thenClose);
         }
         catch (Exception ex)
         {
