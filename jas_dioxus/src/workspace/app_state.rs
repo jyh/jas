@@ -881,10 +881,13 @@ impl AppState {
             return;
         }
         self.tabs.remove(index);
+        // `remove_tab` (actions.yaml): the tab to the LEFT of the one
+        // removed, else the new first tab. A tab after the shown one keeps
+        // it shown; a tab before it shifts its index down by one.
         if self.tabs.is_empty() {
             self.active_tab = 0;
-        } else if self.active_tab >= self.tabs.len() {
-            self.active_tab = self.tabs.len() - 1;
+        } else if self.active_tab == index {
+            self.active_tab = index.saturating_sub(1);
         } else if self.active_tab > index {
             self.active_tab -= 1;
         }

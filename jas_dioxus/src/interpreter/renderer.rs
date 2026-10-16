@@ -14875,11 +14875,21 @@ mod tests {
         let mut st = named();
         let _ = request_close_tab(&mut st, 2);
         assert_eq!(st.tabs[st.active_tab].model.filename, "t1", "the tab to the left");
-        // The control: closing a tab that is not shown, directly, keeps the shown one.
+        // The control: `remove_tab` on a tab that is NOT shown keeps the
+        // shown one shown, whether it sits before or after the removed tab.
+        let remove = |st: &mut AppState, i: usize| {
+            let params = serde_json::json!({ "index": i });
+            dispatch_action_in("remove_tab", params.as_object().unwrap(), None, st);
+        };
         let mut st = named();
         st.active_tab = 2;
-        st.close_tab(0);
-        assert_eq!(st.tabs[st.active_tab].model.filename, "t2", "the shown tab stays shown");
+        remove(&mut st, 0);
+        assert_eq!(names(&st), ["t1", "t2"]);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t2", "a tab before the shown one");
+        let mut st = named();
+        st.active_tab = 0;
+        remove(&mut st, 2);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t0", "a tab after the shown one");
     }
 
     #[test]
