@@ -1,0 +1,10 @@
+{
+    "item":  "rounded_rect.draw",
+    "surface":  "2379x1333",
+    "frame_hash":  "ae844aabbfa7e246bf3c7821c4b6e89a757fb3925659a5cbf2772be15b741a27",
+    "plan_panel":  "align_panel_content",
+    "plan_sha":  "b7227f4d30f7b39b",
+    "tab":  "[0,0]=on:\"circle_basic.svg\"",
+    "tab_sha":  "3d4a5b380473bf18",
+    "selection_count":  1
+}

@@ -1841,3 +1841,54 @@ private func s7CommandCount(
     #expect(s7CommandCount(true, ins, 15, 7.5, at: [0, 0]) == 3)
     #expect(s7CommandCount(true, ins, 15, 107.5, at: [0, 1, 0]) == 3)
 }
+
+// MARK: - brush.options_confirm reads whole numbers (bank 10-16 §1 item 1)
+//
+// A dialog commit stores an integral number as a Swift `Int`
+// (`valueToAnyDlg` -> `intIfIntegral`), and `as? Double` does not read a Swift
+// `Int` out of `Any`: the shape that collapsed the artboard resize (#470). The
+// defaults (0, 100, 5) are themselves whole, so only a value that DIFFERS from
+// its default can show the read failing.
+
+private func brushConfirm(_ dialog: [String: Any], mode: String = "create",
+                          slug: String = "") -> [String: Any]? {
+    let store = StateStore()
+    store.setDataPath("brush_libraries", ["lib": ["brushes": [
+        ["name": "Old", "slug": "old", "type": "calligraphic",
+         "angle": 1.0, "roundness": 2.0, "size": 3.0],
+    ]]])
+    store.initDialog("brush_options", defaults: dialog,
+                     params: ["mode": mode, "library": "lib", "brush_slug": slug])
+    let effects = buildYamlToolEffects(model: Model())
+    _ = effects["brush.options_confirm"]!(NSNull(), [:], store)
+    let brushes = store.getDataPath("brush_libraries.lib.brushes") as? [[String: Any]] ?? []
+    return brushes.first { ($0["slug"] as? String) == (mode == "create" ? "new" : slug) }
+}
+
+private func num(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue ?? (v as? Double) }
+
+@Test func brushOptionsConfirmCreateReadsWholeNumbers() {
+    let b = brushConfirm(["brush_name": "New", "brush_type": "calligraphic",
+                          "angle": 45, "roundness": 50, "size": 12])
+    #expect(num(b?["angle"]) == 45)
+    #expect(num(b?["roundness"]) == 50)
+    #expect(num(b?["size"]) == 12)
+}
+
+@Test func brushOptionsConfirmLibraryEditReadsWholeNumbers() {
+    let b = brushConfirm(["brush_name": "Old", "brush_type": "calligraphic",
+                          "angle": 45, "roundness": 50, "size": 12],
+                         mode: "library_edit", slug: "old")
+    #expect(num(b?["angle"]) == 45)
+    #expect(num(b?["roundness"]) == 50)
+    #expect(num(b?["size"]) == 12)
+}
+
+@Test func brushOptionsConfirmStillReadsFractions() {
+    // The control: a Double reads today, and must keep reading.
+    let b = brushConfirm(["brush_name": "New", "brush_type": "calligraphic",
+                          "angle": 45.5, "roundness": 50.5, "size": 12.5])
+    #expect(num(b?["angle"]) == 45.5)
+    #expect(num(b?["roundness"]) == 50.5)
+    #expect(num(b?["size"]) == 12.5)
+}

@@ -322,71 +322,62 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
         alt: mods & MOD_ALT != 0,
         meta: false,
     };
-    let named = match code {
-        KEY_ESCAPE => Some("Escape"),
-        KEY_ENTER => Some("Enter"),
-        KEY_DELETE => Some("Delete"),
-        KEY_BACKSPACE => Some("Backspace"),
-        _ => None,
+    // The key's NAME, as `route_key` takes it: a named key or the character.
+    let name: String = match code {
+        KEY_ESCAPE => "Escape".into(),
+        KEY_ENTER => "Enter".into(),
+        KEY_DELETE => "Delete".into(),
+        KEY_BACKSPACE => "Backspace".into(),
+        _ => match char::from_u32(code) {
+            Some(ch) => ch.to_string(),
+            None => return JasStatus::BadParamType,
+        },
     };
-    // flask STATUS §277: Delete and Backspace are `delete_selection` in
-    // `shortcuts.yaml`, and the web keyboard runs it unless the active tool is
-    // editing text (`captures_keyboard`). A YAML tool reports EVERY key handled
-    // once it declares `on_keydown`, so its answer cannot mean "fall through":
-    // the capture test decides, as on the web.
-    if matches!(code, KEY_DELETE | KEY_BACKSPACE) {
-        // A tool that CLAIMS the key (`claims_keys`, the Artboard tool's
-        // Delete) takes it too, and owns the fall-through.
-        let key = if code == KEY_DELETE { "Delete" } else { "Backspace" };
-        let captured = engine.tool_slot().as_ref()
-            .is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(key));
-        // A claimed key reaches a tool that runs on its own store, so hand it
-        // the Artboards panel's selection the engine's store holds (the
-        // Artboard tool's Delete reads `artboards_panel_selection_ids`).
-        if engine.tool_slot().as_ref().is_some_and(|(_, t)| t.claims_key(key)) {
-            let facts = engine.artboard_facts();
-            if let Some((_, t)) = engine.tool_slot().as_mut() {
-                t.set_document_facts(&facts);
+    use crate::workspace::resolve_key::{route_key, KeyRoute};
+    // The ORDER is `route_key`'s, shared with the level-1 input-script runner.
+    // flask STATUS §277: a YAML tool reports EVERY key handled once it declares
+    // `on_keydown`, so its answer cannot mean "fall through": whether the tool
+    // CAPTURES the keyboard or CLAIMS the key decides, as on the web.
+    let route = {
+        let slot = engine.tool_slot();
+        route_key(&name, km, |key| {
+            slot.as_ref().is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(key))
+        })
+    };
+    match route {
+        KeyRoute::DeleteSelection => delete_selection_key(engine),
+        KeyRoute::ToolKey(key) => {
+            // A claimed Delete reaches a tool that runs on its own store, so
+            // hand it the Artboards panel's selection the engine's store holds
+            // (the Artboard tool's Delete reads `artboards_panel_selection_ids`).
+            if engine.tool_slot().as_ref().is_some_and(|(_, t)| t.claims_key(key)) {
+                let facts = engine.artboard_facts();
+                if let Some((_, t)) = engine.tool_slot().as_mut() {
+                    t.set_document_facts(&facts);
+                }
             }
+            let mut slot = engine.tool_slot();
+            let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
+            let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
+            // A dialog the key opened in the tool (the Artboard tool's Delete
+            // falling through to an orphaning `delete_selection`) moves to the
+            // engine's store, as a pointer event's does.
+            let opened = tool.take_opened_dialog();
+            drop(slot);
+            if let Some((id, params)) = opened {
+                crate::ffi::open_tool_dialog(engine, &id, &params);
+            }
+            if handled { JasStatus::Ok } else { JasStatus::UnknownVerb }
         }
-        if !captured {
-            return delete_selection_key(engine);
-        }
+        KeyRoute::Undo => { engine.with_model_mut(|m| m.undo()); JasStatus::Ok }
+        KeyRoute::Redo => { engine.with_model_mut(|m| m.redo()); JasStatus::Ok }
+        KeyRoute::SelectTool(id) => match selectable_index(&id) {
+            Some(index) => unsafe { jas_set_tool(e, index) },
+            None => JasStatus::UnknownVerb,
+        },
+        KeyRoute::Unhandled => JasStatus::UnknownVerb,
+        KeyRoute::BadKey => JasStatus::BadParamType,
     }
-    if let Some(key) = named {
-        let mut slot = engine.tool_slot();
-        let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
-        let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
-        // A dialog the key opened in the tool (the Artboard tool's Delete
-        // falling through to an orphaning `delete_selection`) moves to the
-        // engine's store, as a pointer event's does.
-        let opened = tool.take_opened_dialog();
-        drop(slot);
-        if let Some((id, params)) = opened {
-            crate::ffi::open_tool_dialog(engine, &id, &params);
-        }
-        return if handled { JasStatus::Ok } else { JasStatus::UnknownVerb };
-    }
-    let Some(ch) = char::from_u32(code) else { return JasStatus::BadParamType };
-    let chord = crate::workspace::resolve_key::KeyChord::new(&ch.to_string(), km.ctrl, km.shift, km.alt, false);
-    let Some(cmd) = crate::workspace::resolve_key::resolve_key(&chord) else { return JasStatus::UnknownVerb };
-    // W5-3c: a COMMAND chord acts only where the engine can do the action
-    // itself. Undo and redo are the model's (his finding 2026-10-10, "Ctrl-Z is
-    // not working"); every other chord stays the menu's, so it is not handled.
-    if km.ctrl {
-        return match cmd.action.as_str() {
-            "undo" => { engine.with_model_mut(|m| m.undo()); JasStatus::Ok }
-            "redo" => { engine.with_model_mut(|m| m.redo()); JasStatus::Ok }
-            _ => JasStatus::UnknownVerb,
-        };
-    }
-    if cmd.action != "select_tool" {
-        return JasStatus::UnknownVerb;
-    }
-    let Some(index) = cmd.params.get("tool").and_then(|v| v.as_str()).and_then(selectable_index) else {
-        return JasStatus::UnknownVerb;
-    };
-    unsafe { jas_set_tool(e, index) }
 }
 
 /// The Delete key's `delete_selection`, the web keyboard's reference-aware

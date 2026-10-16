@@ -3023,6 +3023,16 @@ function Read-SbInputScript([string]$Json) {
         if ($names -contains 'mods' -and @($st.mods).Count -gt 0) {
             return (& $no "step $i carries modifiers ($(@($st.mods) -join ',')): send_hand.ps1 injects none")
         }
+        # The script form names each modifier as a boolean on the step
+        # (`"shift": true`, TESTING.md section 6), so a reader that looked only
+        # at `mods` DROPPED it and the gesture ran unmodified. Anything but an
+        # explicit false is a modifier this driver cannot inject.
+        $named = @(@('shift', 'alt', 'ctrl', 'meta') | Where-Object {
+            $names -contains $_ -and -not ($st.$_ -is [bool] -and -not $st.$_)
+        })
+        if ($named.Count -gt 0) {
+            return (& $no "step $i carries modifiers ($($named -join ',')): send_hand.ps1 injects none")
+        }
         $acts.Add($st)
     }
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
