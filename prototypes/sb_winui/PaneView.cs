@@ -92,7 +92,7 @@ public sealed partial class MainWindow
             string Path, string Type, string Id, double X, double Y, double W, double H,
             Dictionary<string, string> Values, Dictionary<string, string> Static,
             Dictionary<string, string> Display, PaneOptions? Options, PaneItems? Items,
-            SliderTrack? Track = null)
+            SliderTrack? Track = null, IReadOnlyList<string>? Events = null)
         {
             internal string? Value(string key) => Values.TryGetValue(key, out var v) ? v : null;
             internal string? Literal(string key) => Static.TryGetValue(key, out var v) ? v : null;
@@ -157,7 +157,10 @@ public sealed partial class MainWindow
                     PanelWire.ReadItems(e.TryGetProperty("items", out var its) ? its.GetRawText() : null),
                     // Fork A: a slider's track from the `numbers` channel; null
                     // (no channel, an older core) leaves it a counted placeholder.
-                    PanelWire.ReadSliderTrack(e.TryGetProperty("numbers", out var nums) ? nums.GetRawText() : null)));
+                    PanelWire.ReadSliderTrack(e.TryGetProperty("numbers", out var nums) ? nums.GetRawText() : null),
+                    // jas §316 (#464): the events the node answers; null from an
+                    // older core, which then routes no press on a text.
+                    PanelWire.ReadEvents(e.TryGetProperty("events", out var evs) ? evs.GetRawText() : null)));
             }
             var icons = new Dictionary<string, (string Viewbox, string Svg)>();
             foreach (var ic in root.GetProperty("icons").EnumerateObject())
@@ -316,14 +319,18 @@ public sealed partial class MainWindow
             var spacers = 0;
             var separators = 0;
             var (previews, previewEmpty) = (0, 0);
+            var textClicks = 0;
             foreach (var leaf in leaves)
             {
                 FrameworkElement el;
                 switch (leaf.Type)
                 {
+                    // A `text` is a label unless the plan says it answers `click`
+                    // (jas §316): an Artboards row's number and name select the
+                    // row. The kind does not decide; `text-clicks` counts them.
                     case "text":
                         texts++;
-                        el = new TextBlock
+                        var label = new TextBlock
                         {
                             FontSize = 12,
                             Foreground = _paneInkBrush,
@@ -331,6 +338,13 @@ public sealed partial class MainWindow
                             TextWrapping = TextWrapping.NoWrap,
                             VerticalAlignment = VerticalAlignment.Center,
                         };
+                        if (PanelWire.RoutesPress(leaf.Events, leaf.Id, leaf.Path))
+                        {
+                            textClicks++;
+                            var (textId, textPath) = (leaf.Id, leaf.Path);
+                            label.Tapped += (_, _) => OnPaneClick(textId, textPath);
+                        }
+                        el = label;
                         break;
 
                     // A bare `icon` is decoration: no id, no bind, no click. It
@@ -577,7 +591,7 @@ public sealed partial class MainWindow
             // assumed: `harness_common.ps1` reads this row BY NAME (`Get-SbField`)
             // and asserts only `leaves` and `controls`; nothing sums the category
             // counters, and the self-test's row is an INPUT to that parser.
-            _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} "
+            _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} text-clicks={textClicks} "
                  + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} "
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
@@ -758,12 +772,6 @@ public sealed partial class MainWindow
         };
 
         /// <summary>
-        /// An `icon_button`: its tooltip is the core's `summary`, its click is the
-        /// widget id, and its face is the named icon -- or, stop 4's fallback, the
-        /// button's own label or summary text, COUNTED as `icon-text`. Never blank:
-        /// the text face is shown first and replaced only by an icon that loaded.
-        /// </summary>
-        /// <summary>
         /// A `brush_preview`: no id, no bind, no click (the tile around it carries
         /// the click). Its face is the core's drawing, through the icon loader; a
         /// leaf the core sent no drawing for stays empty and is counted.
@@ -841,6 +849,12 @@ public sealed partial class MainWindow
             return btn;
         }
 
+        /// <summary>
+        /// An `icon_button`: its tooltip is the core's `summary`, its click is the
+        /// widget id, and its face is the named icon -- or, stop 4's fallback, the
+        /// button's own label or summary text, COUNTED as `icon-text`. Never blank:
+        /// the text face is shown first and replaced only by an icon that loaded.
+        /// </summary>
         private Button BuildIconButton(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons,
                                        bool sendsClick = true)
         {
