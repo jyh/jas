@@ -99,3 +99,33 @@ mod tests {
         }
     }
 }
+
+/// What [`delete_selection`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeleteOutcome {
+    /// Nothing was selected, so nothing changed.
+    NothingSelected,
+    /// Deleting would ORPHAN this many live instances, so nothing was deleted:
+    /// the caller asks first (`delete_orphan_confirm`, its `count` param).
+    WouldOrphan(usize),
+    /// The selection was deleted, as ONE undo step.
+    Deleted,
+}
+
+/// Edit > Delete and the Delete key: the web keyboard's REFERENCE-AWARE delete,
+/// one law for every engine route (the key, and `delete_selection` by action,
+/// which a tool's YAML dispatches). It never orphans a live instance without
+/// asking: it reports [`DeleteOutcome::WouldOrphan`] and deletes nothing.
+pub fn delete_selection(model: &mut Model) -> DeleteOutcome {
+    let paths: Vec<Vec<usize>> =
+        model.document().selection.iter().map(|es| es.path.clone()).collect();
+    if paths.is_empty() {
+        return DeleteOutcome::NothingSelected;
+    }
+    let orphans = crate::document::dependency_index::orphaned_references(model.document(), &paths).len();
+    if orphans > 0 {
+        return DeleteOutcome::WouldOrphan(orphans);
+    }
+    crate::document::op_apply::journal_delete_selection(model, "delete_selection");
+    DeleteOutcome::Deleted
+}
