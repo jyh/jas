@@ -518,7 +518,9 @@ pub unsafe extern "C" fn jas_load_svg(engine: *mut c_void, svg: *const u8, len: 
     let Ok(text) = core::str::from_utf8(bytes) else {
         return JAS_PAINT_BAD_SVG;
     };
-    let Some(doc) = crate::geometry::svg::try_svg_to_document(text) else {
+    // OPENED, not merely decoded: the pages and the at-least-one-artboard
+    // invariant, as every app's open does (flask STATUS § 313).
+    let Some(doc) = crate::geometry::svg::try_open_svg_document(text) else {
         return JAS_PAINT_BAD_SVG;
     };
     engine.replace_document(doc);
@@ -1984,6 +1986,22 @@ mod tests {
     /// would open a truncated file, show a blank canvas, and report success --
     /// and the user would conclude their artwork was lost rather than that the
     /// file was bad. Those are opposite diagnoses.
+    /// A drawing opened through the shell's door has its artboards (flask
+    /// STATUS § 313): `complex_document.svg` declares no page, and until
+    /// 2026-10-15 it opened with NONE, so the Artboards panel drew no rows.
+    #[test]
+    fn an_opened_drawing_has_its_artboards() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let svg = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"),
+            "/../test_fixtures/svg/complex_document.svg")).expect("fixture");
+        let e = crate::ffi::jas_engine_new();
+        let rc = unsafe { jas_load_svg(e.cast(), svg.as_ptr(), svg.len()) };
+        assert_eq!(rc, JAS_PAINT_OK, "the fixture opens");
+        let n = unsafe { &*e }.with_document(|d| d.artboards.len());
+        assert!(n >= 1, "the opened drawing has an artboard: {n}");
+        unsafe { crate::ffi::jas_engine_free(e) };
+    }
+
     #[test]
     fn a_malformed_file_is_refused_rather_than_opened_as_a_blank_drawing() {
         // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
