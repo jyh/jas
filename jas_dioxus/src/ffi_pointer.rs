@@ -366,20 +366,17 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
 /// dialog from a key yet, so it deletes NOTHING and names the refusal in
 /// `jas_last_error` rather than delete without asking. Otherwise ONE undo step.
 fn delete_selection_key(engine: &JasEngine) -> JasStatus {
-    let paths: Vec<Vec<usize>> =
-        engine.with_document(|d| d.selection.iter().map(|es| es.path.clone()).collect());
-    if paths.is_empty() {
-        return JasStatus::UnknownVerb;
+    use crate::workspace::menu_native::{delete_selection, DeleteOutcome};
+    match engine.with_model_mut(delete_selection) {
+        DeleteOutcome::NothingSelected => JasStatus::UnknownVerb,
+        DeleteOutcome::WouldOrphan(orphans) => {
+            engine.set_last_error(format!(
+                r#"{{"key":"Delete","refused":"delete_orphan_confirm","orphans":{orphans}}}"#
+            ));
+            JasStatus::UnknownVerb
+        }
+        DeleteOutcome::Deleted => JasStatus::Ok,
     }
-    let orphans = engine.with_document(|d| crate::document::dependency_index::orphaned_references(d, &paths).len());
-    if orphans > 0 {
-        engine.set_last_error(format!(
-            r#"{{"key":"Delete","refused":"delete_orphan_confirm","orphans":{orphans}}}"#
-        ));
-        return JasStatus::UnknownVerb;
-    }
-    engine.with_model_mut(|m| crate::document::op_apply::journal_delete_selection(m, "delete_selection"));
-    JasStatus::Ok
 }
 
 /// How many elements the session currently has selected.

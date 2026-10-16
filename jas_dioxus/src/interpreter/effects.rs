@@ -2714,10 +2714,21 @@ fn run_doc_effect(
         n if super::artboard_effects::KEYS.contains(&n) => {
             super::artboard_effects::run(n, spec, ctx, store, model);
         }
+        // doc.delete_selection: delete every selected element, the
+        // reference-aware delete's OK path (`delete_orphan_confirm_ok`). The
+        // YAML lists `snapshot` before it, and the selection is preserved
+        // across the confirm dialog, so this deletes exactly what the person
+        // was about to delete. Through the shared `op_apply` dispatcher, so the
+        // deletion JOURNALS as a real `delete_selection` op (OP_LOG.md §9 P4).
+        // Moved here from the web renderer 2026-10-15 so the engine runs it.
+        "doc.delete_selection" => {
+            let _ = crate::document::op_apply::op_apply(
+                model, &serde_json::json!({ "op": "delete_selection" }));
+        }
         _ => {
             // Effects not implemented in this phase change nothing, and are
-            // reported. doc.delete_selection, doc.add_element, doc.set_attr
-            // land in later phases alongside the tools that need them.
+            // reported. doc.add_element and doc.set_attr land in later phases
+            // alongside the tools that need them.
             report.unhandled.push(Unhandled::UnknownDocEffect(name.to_string()));
         }
     }
