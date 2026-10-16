@@ -740,6 +740,13 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  * The core runs the action's effects as `jas_panel_behavior` runs a widget's,
  * with no panel made active.
  *
+ * `{"key": <name>, "mods": {"shift": b, "alt": b, "ctrl": b}}` is a KEY: the
+ * engine resolves it (the active tool, then `shortcuts.yaml`; an unclaimed
+ * Delete or Backspace is the action `delete_selection`) and replies as for an
+ * action. `<name>` is `Delete`, `Backspace`, `Enter`, `Escape` or one
+ * character; anything else is refused `BadKey`. A key nothing handled replies
+ * EMPTY with `KeyUnhandled`, so the shell may apply its own default.
+ *
  * The owner's notes (2026-10-11): the Windows menus drew every item live and
  * ran five; File > New made no tab, because nothing ran `new_document`.
  *
