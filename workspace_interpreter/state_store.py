@@ -1025,6 +1025,11 @@ class StateStore:
         # Tool scope — one nested dict per registered tool. Expressions
         # read as tool.<id>.<key>. Populated by YamlTool.
         ctx["tool"] = {tid: dict(scope) for tid, scope in self._tools.items()}
+        # The data namespace (brush_libraries, swatch_libraries), so a dialog
+        # init or an action reads `data.*` from the store the library effects
+        # write. Until 2026-10-15 no port's context carried it, so Brush
+        # Options' edit-mode inits were null everywhere.
+        ctx["data"] = self._data
         if self._dialog_id is not None:
             # Evaluate any get: lambdas in dialog props so derived
             # keys (e.g. color_picker's h = hsb_h(color)) appear in

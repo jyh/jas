@@ -293,8 +293,9 @@ That covers its `condition`, its `params`, and the expressions in its
 effects.
 
 - the roots the event binds: `event`, `state`, `panel`, `tool`, `dialog`,
-  `param` and `active_document` (`EVENT_ROOTS` in the module, derived from
-  the store's evaluation context by its tests);
+  `param`, `active_document` and `data`, the store's library data
+  (`EVENT_ROOTS` in the module, derived from the store's evaluation context
+  by its tests);
 - the item name of an enclosing `foreach` (`as:`, else `item`), which the
   port's view supplies;
 - a name bound by a `fun` or a `let`.
