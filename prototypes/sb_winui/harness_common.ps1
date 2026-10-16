@@ -3025,15 +3025,35 @@ function Read-SbInputScript([string]$Json) {
         }
         # The script form names each modifier as a boolean on the step
         # (`"shift": true`, TESTING.md section 6), so a reader that looked only
-        # at `mods` DROPPED it and the gesture ran unmodified. Anything but an
-        # explicit false is a modifier this driver cannot inject.
-        $named = @(@('shift', 'alt', 'ctrl', 'meta') | Where-Object {
-            $names -contains $_ -and -not ($st.$_ -is [bool] -and -not $st.$_)
-        })
+        # at `mods` DROPPED it and the gesture ran unmodified. A value that is
+        # not a boolean is refused; alt, ctrl and meta set true are modifiers
+        # this driver cannot inject. Shift is delivered (below).
+        foreach ($mod in @('shift', 'alt', 'ctrl', 'meta')) {
+            if ($names -contains $mod -and $st.$mod -isnot [bool]) {
+                return (& $no "step $i $mod is not a boolean")
+            }
+        }
+        $named = @(@('alt', 'ctrl', 'meta') | Where-Object { $names -contains $_ -and $st.$_ })
         if ($named.Count -gt 0) {
             return (& $no "step $i carries modifiers ($($named -join ',')): send_hand.ps1 injects none")
         }
         $acts.Add($st)
+    }
+    # SHIFT IS HELD, NOT PRESSED PER STEP: send_hand.ps1 puts it down before the
+    # press or before the first move and lifts it after the release. So the only
+    # scripts it can deliver faithfully carry shift on every step, or on every
+    # step after the press (the corpus form, draw_rect_shift.json). Any other
+    # shape is refused by name, never delivered as something it is not.
+    $shiftAt = @(for ($j = 0; $j -lt $acts.Count; $j++) {
+        if (@($acts[$j].PSObject.Properties | ForEach-Object { $_.Name }) -contains 'shift' -and $acts[$j].shift) { $j }
+    })
+    $shift = 'none'
+    if ($shiftAt.Count -gt 0) {
+        if ($shiftAt.Count -eq $acts.Count) { $shift = 'press' }
+        elseif ($shiftAt.Count -eq $acts.Count - 1 -and $shiftAt[0] -eq 1) { $shift = 'move' }
+        else {
+            return (& $no "shift on step(s) $($shiftAt -join ',') is not held to the release: send_hand.ps1 holds shift from the press or from the first move, through the release")
+        }
     }
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
     foreach ($r in $reads) {
@@ -3063,6 +3083,7 @@ function Read-SbInputScript([string]$Json) {
     [pscustomobject]@{
         Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
         DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
+        Shift = $shift
     }
 }
 

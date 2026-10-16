@@ -93,6 +93,8 @@ if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item
 
 # The gesture, in document units, exactly as the script states it.
 $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves
+# Captured here for the same reason as `$tool`: `$sc` is reused for the scale.
+$shiftMode = if ($sc.Shift) { $sc.Shift } else { 'none' }
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -160,7 +162,7 @@ try {
 
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
-                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves" +
+                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode" +
                 " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
@@ -242,6 +244,22 @@ function Get-SbCoords($node, [string]$pfx, $acc) {
     }
 }
 $moved = 'UNREADABLE'
+# A HELD SHIFT IS READ FROM THE HAND'S OWN RECEIPT: the shell's POINTER row does
+# not carry modifiers, so the hand saying it put shift down and lifted it after
+# the release is the drive's evidence; the read-back is the arrival's.
+$shiftTag = ''
+if ($shiftMode -ne 'none') {
+    # The hand writes its receipt AFTER the release that triggers the probe, so
+    # wait (bounded) for it rather than read a file that may not exist yet.
+    $hr = ''
+    for ($w = 0; $w -lt 50 -and -not $hr.Contains('shift-up='); $w++) {
+        if (Test-Path $receipt) { $hr = [string](Get-Content $receipt -Raw -Encoding UTF8) }
+        if (-not $hr.Contains('shift-up=')) { Start-Sleep -Milliseconds 100 }
+    }
+    $want = "shift=$shiftMode shift-down=before-$shiftMode shift-up=after-release"
+    $shiftTag = ",shift=$shiftMode"
+    if (-not $hr.Contains($want) -and $drive -like 'PASS*') { $drive = "FAIL(the hand's receipt lacks '$want')" }
+}
 if ($drive -notlike 'PASS*') { $ddx = [double]::NaN; $ddy = [double]::NaN }
 $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # The moved-by-delta arm is a SECOND METHOD for a selection drag only: another
@@ -324,7 +342,7 @@ $tree = if ($planOk -and $tabOk) { 'PASS' }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
-$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves):$drive " +
+$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag):$drive " +
         "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
