@@ -122,7 +122,10 @@ def scan(root_dir: str):
             if not fn.endswith((".yaml", ".yml")) or fn in CSS_FILES:
                 continue
             path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(path, ROOT)
+            # Relative to the SCANNED directory's parent, never to ROOT: on the
+            # Windows lane the self-test's temp dir is on C: and the checkout
+            # on D:, and `relpath` across drives raises (measured in CI).
+            rel = os.path.relpath(path, os.path.dirname(os.path.abspath(root_dir)))
             with open(path, encoding="utf-8") as f:
                 try:
                     doc = yaml.safe_load(f)
