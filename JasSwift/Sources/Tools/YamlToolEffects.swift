@@ -1338,6 +1338,19 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // doc.artboard.move_commit — drag-to-move commit with integer-pt
     // rounded displacement (preserves multi-select relative spacing
     // per ARTBOARD_TOOL.md §Common rules).
+    // doc.artboard.click_narrow — the mouseup half of a plain click on an
+    // artboard that was already selected (tool.artboard.click_narrows,
+    // latched by probe_hit): the selection narrows to it. A no-op when the
+    // press latched nothing. ARTBOARD_TOOL.md §Click-to-activate.
+    effects["doc.artboard.click_narrow"] = { _, _, store in
+        let abCtx = (store.evalContext()["tool"] as? [String: Any])?["artboard"] as? [String: Any]
+        if let id = abCtx?["click_narrows"] as? String {
+            artboardsPanelWrite(model, "artboards_panel_selection", [id])
+            artboardsPanelWrite(model, "panel_selection_anchor", id)
+        }
+        return nil
+    }
+
     effects["doc.artboard.move_commit"] = { _, ctx, store in
         artboardMoveCommit(model: model, store: store, ctx: ctx)
         return nil
@@ -4044,6 +4057,7 @@ private func artboardProbeHit(
     // Reset hit-state defaults.
     store.setTool("artboard", "hit_artboard_id", nil)
     store.setTool("artboard", "hit_handle_pos", nil)
+    store.setTool("artboard", "click_narrows", nil)
 
     let doc = model.document
 
@@ -4114,6 +4128,12 @@ private func artboardProbeHit(
             }
             artboardsPanelWrite(model, "artboards_panel_selection", newSel)
             // Anchor unchanged.
+        } else if currentSel.contains(hit.id) {
+            // Plain press on an artboard ALREADY selected: leave the
+            // selection alone, so a drag moves every selected artboard
+            // (§Drag-to-move, multi-select). The click resolves at mouseup
+            // (§Click-to-activate): `doc.artboard.click_narrow`. Rust, the same.
+            store.setTool("artboard", "click_narrows", hit.id)
         } else {
             // Plain — replace, set anchor.
             artboardsPanelWrite(model, "artboards_panel_selection", [hit.id])
