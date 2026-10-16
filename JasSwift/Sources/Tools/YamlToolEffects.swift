@@ -672,12 +672,19 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         // opApply (a BRACKETED edit + one recorded scale_transform op). Absent/
         // false journal (the PREVIEW path and live drag) keeps the unbracketed
         // scaleApply, which journals nothing (the out-of-band preview channel).
+        // The flags the caller PASSES win over state (the dialog's confirm
+        // and preview do): an action's context carries its own `state` map,
+        // which shadows the store. Mirrors Rust (2026-10-16).
+        let (stStrokes, stCorners) = resolveScaleFlags(store: store, ctx: ctx)
+        let flags = (
+            args["scale_strokes"] != nil ? evalBool(args["scale_strokes"], store: store, ctx: ctx) : stStrokes,
+            args["scale_corners"] != nil ? evalBool(args["scale_corners"], store: store, ctx: ctx) : stCorners)
         if evalBool(args["journal"], store: store, ctx: ctx) {
             scaleApplyJournaled(model: model, store: store, ctx: ctx,
-                                sx: sx, sy: sy, copy: copy)
+                                sx: sx, sy: sy, copy: copy, flags: flags)
         } else {
             scaleApply(model: model, store: store, ctx: ctx,
-                       sx: sx, sy: sy, copy: copy)
+                       sx: sx, sy: sy, copy: copy, flags: flags)
         }
         return nil
     }
@@ -3278,7 +3285,7 @@ private func resolveScaleFlags(store: StateStore, ctx: [String: Any]) -> (Bool, 
 /// the live mutation byte-identical to replay. Mirrors Rust `scale_apply_journaled`.
 private func scaleApplyJournaled(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     let controller = Controller(model: model)
@@ -3288,7 +3295,7 @@ private func scaleApplyJournaled(
     // Resolve the reference point + flags AFTER the copy (matching the preview
     // path, which resolves the ref point post-copy against the duplicates).
     let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
-    let (scaleStrokes, scaleCorners) = resolveScaleFlags(store: store, ctx: ctx)
+    let (scaleStrokes, scaleCorners) = flags
     opApply(model, controller, [
         "op": "scale_transform", "sx": sx, "sy": sy, "rx": rx, "ry": ry,
         "scale_strokes": scaleStrokes, "scale_corners": scaleCorners,
@@ -3340,37 +3347,20 @@ private func shearApplyJournaled(
 /// the matrix to the duplicates.
 private func scaleApply(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
     let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
     let matrix = TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
 
-    let evalCtx = store.evalContext(extra: ctx)
-    let scaleStrokes: Bool = {
-        if case .bool(let b) = evaluate("state.scale_strokes", context: evalCtx) { return b }
-        return true
-    }()
-    let scaleCorners: Bool = {
-        if case .bool(let b) = evaluate("state.scale_corners", context: evalCtx) { return b }
-        return false
-    }()
-    let strokeFactor = TransformApply.strokeWidthFactor(sx: sx, sy: sy)
-
-    var newDoc = model.document
-    for es in newDoc.selection {
-        guard isValidPath(newDoc, es.path) else { continue }
-        let elem = newDoc.getElement(es.path)
-        var newElem = elem.withTransformPremultiplied(matrix)
-        if scaleStrokes {
-            newElem = scaleElementStrokeWidth(newElem, factor: strokeFactor)
-        }
-        if scaleCorners {
-            newElem = scaleElementCorners(newElem, sxAbs: abs(sx), syAbs: abs(sy))
-        }
-        newDoc = newDoc.replaceElement(es.path, with: newElem)
-    }
+    // The SHARED compose, as the confirm path and Rust's preview use, so the
+    // preview draws what OK will commit (2026-10-16).
+    let (scaleStrokes, scaleCorners) = flags
+    let newDoc = composeMatrixOverPaths(
+        model.document, model.document.selection.map { $0.path }, matrix,
+        strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
+        corners: scaleCorners ? (abs(sx), abs(sy)) : nil)
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
     model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
@@ -3421,34 +3411,6 @@ private func shearApply(
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
     model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
-}
-
-/// Multiply the element's stroke-width by `factor` if present.
-private func scaleElementStrokeWidth(_ elem: Element, factor: Double) -> Element {
-    guard let stroke = elem.stroke else { return elem }
-    let newStroke = Stroke(
-        color: stroke.color, width: stroke.width * factor,
-        linecap: stroke.linecap, linejoin: stroke.linejoin,
-        miterLimit: stroke.miterLimit, align: stroke.align,
-        dashPattern: stroke.dashPattern,
-        startArrow: stroke.startArrow, endArrow: stroke.endArrow,
-        startArrowScale: stroke.startArrowScale,
-        endArrowScale: stroke.endArrowScale,
-        arrowAlign: stroke.arrowAlign, opacity: stroke.opacity)
-    return withStroke(elem, stroke: newStroke)
-}
-
-/// Scale a rounded_rect's rx / ry by (sxAbs, syAbs). No-op on
-/// other element types — corner radii are only modeled on Rect.
-private func scaleElementCorners(_ elem: Element, sxAbs: Double, syAbs: Double) -> Element {
-    if case .rect(let r) = elem {
-        return .rect(Rect(
-            x: r.x, y: r.y, width: r.width, height: r.height,
-            rx: r.rx * sxAbs, ry: r.ry * syAbs,
-            fill: r.fill, stroke: r.stroke, opacity: r.opacity,
-            transform: r.transform, locked: r.locked, visibility: r.visibility))
-    }
-    return elem
 }
 
 private func evalNumber(_ arg: Any?, store: StateStore, ctx: [String: Any]) -> Double {
