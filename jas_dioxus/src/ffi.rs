@@ -1196,12 +1196,82 @@ struct Named {
     save_all_then_close: bool,
 }
 
+/// A KEY by [`jas_dispatch_action`]: `{"key": <name>, "mods": {"shift": b,
+/// "alt": b, "ctrl": b}}` (flask STATUS § 310, jas § 311). `<name>` is
+/// `Delete`, `Backspace`, `Enter`, `Escape` or one character; anything else is
+/// refused `BadKey`. The ENGINE resolves it, so the shell holds no binding:
+///
+/// * an unmodified Delete or Backspace that the active tool neither captures
+///   nor claims runs the ACTION `delete_selection` (its reply names
+///   `delete_orphan_confirm` when deleting would orphan an instance);
+/// * every other key goes through [`crate::ffi_pointer::jas_key_event`]'s
+///   order: the active tool, then `shortcuts.yaml`.
+///
+/// The reply is the act reply, after the same aftermath as an action. A key
+/// nothing handled and that changed nothing replies EMPTY with
+/// `{"panel_event":"KeyUnhandled","detail":<name>}`, so the shell may apply
+/// its own default.
+unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, name: &str,
+                       mods: Option<&serde_json::Value>) -> JasBytes {
+    use crate::ffi_pointer::{KEY_BACKSPACE, KEY_DELETE, KEY_ENTER, KEY_ESCAPE, MOD_ALT, MOD_CMD, MOD_SHIFT};
+    let code = match name {
+        "Delete" => KEY_DELETE,
+        "Backspace" => KEY_BACKSPACE,
+        "Enter" => KEY_ENTER,
+        "Escape" => KEY_ESCAPE,
+        _ => {
+            let mut chars = name.chars();
+            match (chars.next(), chars.next()) {
+                (Some(c), None) => c as u32,
+                _ => {
+                    set_panel_event_error(engine, "BadKey", name);
+                    return JasBytes::empty();
+                }
+            }
+        }
+    };
+    let flag = |k: &str| mods.and_then(|m| m.get(k)).and_then(serde_json::Value::as_bool).unwrap_or(false);
+    let mask = if flag("shift") { MOD_SHIFT } else { 0 }
+        | if flag("alt") { MOD_ALT } else { 0 }
+        | if flag("ctrl") { MOD_CMD } else { 0 };
+    if matches!(code, KEY_DELETE | KEY_BACKSPACE) && mask & MOD_CMD == 0 {
+        let taken = engine.tool_slot().as_ref()
+            .is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(name));
+        if !taken {
+            const DELETE: &str = r#"{"action":"delete_selection"}"#;
+            return unsafe { jas_dispatch_action(e, DELETE.as_ptr(), DELETE.len()) };
+        }
+    }
+    let generation = engine.model.borrow().generation();
+    let status = unsafe { crate::ffi_pointer::jas_key_event(e, code, mask) };
+    let doc_changed = engine.model.borrow().generation() != generation;
+    if status != JasStatus::Ok && !doc_changed {
+        set_panel_event_error(engine, "KeyUnhandled", name);
+        return JasBytes::empty();
+    }
+    let _ = crate::ffi_pointer::sync_tool_to_state(engine);
+    let sync = engine.registry.borrow_mut().sync(ws, &|pid| panel_ctx(engine, ws, pid));
+    ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
+    *engine.last_error.borrow_mut() = None;
+    let reply = act_reply(engine, &sync.changed, doc_changed, Named::default());
+    let out = JasBytes::from_string(serde_json::to_string(&reply).unwrap_or_default());
+    ffi_instr::record_out(Crossing::DispatchAction, out.len);
+    out
+}
+
 /// Run one workspace ACTION, as a menu item runs it: `{"menu_item": <id>}`, the
 /// item's own `action` and `params` read from the menubar (the shell names WHICH
 /// item was chosen, BL1, and never authors params; the menu structure carries
 /// none), or `{"action": <id>, "params": {...}}` directly, `params` optional.
 /// The core runs the action's effects as `jas_panel_behavior` runs a widget's,
 /// with no panel made active.
+///
+/// `{"key": <name>, "mods": {"shift": b, "alt": b, "ctrl": b}}` is a KEY: the
+/// engine resolves it (the active tool, then `shortcuts.yaml`; an unclaimed
+/// Delete or Backspace is the action `delete_selection`) and replies as for an
+/// action. `<name>` is `Delete`, `Backspace`, `Enter`, `Escape` or one
+/// character; anything else is refused `BadKey`. A key nothing handled replies
+/// EMPTY with `KeyUnhandled`, so the shell may apply its own default.
 ///
 /// The owner's notes (2026-10-11): the Windows menus drew every item live and
 /// ran five; File > New made no tab, because nothing ran `new_document`.
@@ -1246,6 +1316,11 @@ pub unsafe extern "C" fn jas_dispatch_action(
     let Some(ws) = Workspace::load() else {
         return JasBytes::empty();
     };
+    // `{"key": <name>, "mods": {"shift","alt","ctrl"}}`: a KEY, resolved in the
+    // engine and answered with the act reply (flask STATUS § 310, jas § 311).
+    if let Some(name) = req.get("key").and_then(serde_json::Value::as_str) {
+        return unsafe { dispatch_key(e, engine, &ws, name, req.get("mods")) };
+    }
     // `{"panel": <content id>, "menu_index": <i>}`: that PANEL menu's item i,
     // run with its panel active and in its panel's scope.
     let panel = req.get("panel").and_then(serde_json::Value::as_str);
@@ -3923,6 +3998,46 @@ mod tests {
         assert_eq!(engine_of(e).with_document(|d| d.selection.len()), 0, "the selection is empty");
         undo(e);
         assert_eq!(doc_json(e), before, "one undo brings it back");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A KEY BY `jas_dispatch_action` (flask STATUS § 310, jas § 311):
+    /// `{"key": <name>, "mods": {...}}` is resolved IN THE ENGINE (the active
+    /// tool, then `shortcuts.yaml`) and answered with the normal act reply, so
+    /// a dialog it opens arrives in `dialog` and the shell holds no binding.
+    /// Delete deletes, one undo step; an orphaning Delete names
+    /// `delete_orphan_confirm` and deletes nothing; Ctrl+Z undoes; a key name
+    /// the engine does not know is refused by name.
+    #[test]
+    fn a_key_by_dispatch_is_resolved_in_the_engine_and_replies() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, r#"{"key":"Delete"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["doc_changed"], true, "Delete deleted: {reply} {err}");
+        assert_eq!(engine_of(e).with_document(|d| d.selection.len()), 0);
+        let (reply, err) = dispatch(e, r#"{"key":"z","mods":{"ctrl":true}}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["doc_changed"], true, "Ctrl+Z undid: {reply} {err}");
+        assert_eq!(doc_json(e), before, "one undo brings it back");
+        let (reply, err) = dispatch(e, r#"{"key":"F13"}"#);
+        assert_eq!(reply, "", "an unknown key name is refused");
+        assert!(err.contains("BadKey"), "by name: {err}");
+        unsafe { jas_engine_free(e) };
+
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let path = engine_of(e).with_document(|d| d.selection.iter().next().map(|es| es.path.clone()))
+            .expect("the rect");
+        engine_of(e).with_model_mut(crate::workspace::menu_native::make_instance);
+        engine_of(e).with_model_mut(|m| crate::document::controller::Controller::select_element(m, &path));
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, r#"{"key":"Backspace"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["dialog"], "delete_orphan_confirm", "an orphaning key asks, in the reply: {reply} {err}");
+        assert_eq!(doc_json(e), before, "and deletes nothing yet");
         unsafe { jas_engine_free(e) };
     }
 
