@@ -1198,21 +1198,23 @@ mod tests {
     }
 
     /// A dialog a TOOL opens reaches the engine's store (flask STATUS §283,
-    /// §285): Scale's Alt-held click without a drag opens `scale_options`
-    /// (`scale.yaml`). The tool's handlers run on its own private store, so
-    /// before this its `open_dialog` resolved against no dialog table and was
-    /// dropped. The control: the same click without Alt opens nothing.
+    /// §285): an Alt-held click without a drag opens the transform tool's
+    /// options dialog (`scale.yaml`, `rotate.yaml`, `shear.yaml`). The tool's
+    /// handlers run on its own private store, so before this its `open_dialog`
+    /// resolved against no dialog table and was dropped. The control: the same
+    /// click without Alt opens nothing. Scale was the only tool driven until
+    /// 2026-10-15; Rotate and Shear share its shape and are driven here too.
     #[test]
     fn a_tool_opened_dialog_reaches_the_engine() {
         let _counters = crate::ffi_instr::test_lock::lock();
-        let open = |mods: u32| -> String {
+        let open = |tool: &str, mods: u32| -> String {
             let e = jas_engine_new();
             seed(e);
             unsafe {
                 jas_set_tool(e, 0);
                 jas_pointer_event(e, KIND_PRESS, 60.0, 60.0, 0);
                 jas_pointer_event(e, KIND_RELEASE, 60.0, 60.0, 0);
-                assert_eq!(jas_set_tool(e, selectable_index("scale").expect("scale")), JasStatus::Ok);
+                assert_eq!(jas_set_tool(e, selectable_index(tool).expect(tool)), JasStatus::Ok);
                 assert_eq!(jas_pointer_event(e, KIND_PRESS, 80.0, 80.0, mods), JasStatus::Ok);
                 assert_eq!(jas_pointer_event(e, KIND_RELEASE, 80.0, 80.0, mods), JasStatus::Ok);
                 let b = crate::ffi::jas_dialog_plan(e, 380, 640);
@@ -1222,9 +1224,13 @@ mod tests {
                 plan
             }
         };
-        assert!(open(0).starts_with(r#"{"open":false"#), "the control: no Alt, no dialog: {}", open(0));
-        let alt = open(MOD_ALT);
-        assert!(alt.contains(r#""id":"scale_options""#) && alt.contains(r#""open":true"#), "{alt}");
+        for tool in ["scale", "rotate", "shear"] {
+            let plain = open(tool, 0);
+            assert!(plain.starts_with(r#"{"open":false"#), "{tool}: the control, no Alt, no dialog: {plain}");
+            let alt = open(tool, MOD_ALT);
+            let id = format!(r#""id":"{tool}_options""#);
+            assert!(alt.contains(&id) && alt.contains(r#""open":true"#), "{tool}: {alt}");
+        }
     }
 
     /// W5-3a: Escape reaches the active tool. The selection tool cancels its
