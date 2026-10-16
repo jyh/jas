@@ -3510,7 +3510,7 @@ class CanvasNSView: NSView {
         if let ctx = toolContext {
             let key = canonicalKeyName(event)
             if activeTool.claimsKey(key) {
-                activeTool.setDocumentFacts(["artboards_panel_selection_ids": artboardsPanelSelection])
+                activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
                 let mods = KeyMods(
                     shift: event.modifierFlags.contains(.shift),
                     ctrl: event.modifierFlags.contains(.control),
@@ -3772,6 +3772,7 @@ class CanvasNSView: NSView {
             ensureBlinkTimer()
             return
         }
+        activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onPress(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
         ensureBlinkTimer()
     }
@@ -4015,6 +4016,7 @@ class CanvasNSView: NSView {
         guard let ctx = toolContext else { return }
         let pt = convert(event.locationInWindow, from: nil)
         let alt = event.modifierFlags.contains(.option)
+        activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: false, alt: alt, dragging: false)
         // Cursor override (e.g. "none" inside the edited text) depends on
         // the live pointer position, so invalidate the cursor rects on
@@ -4033,6 +4035,7 @@ class CanvasNSView: NSView {
         // lets the Selection tool's mid-drag alt-copy branch (selection.yaml) fire
         // when the user presses Option AFTER the drag begins.
         let alt = event.modifierFlags.contains(.option)
+        activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onMove(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt, dragging: true)
     }
 
@@ -4041,6 +4044,7 @@ class CanvasNSView: NSView {
         let pt = convert(event.locationInWindow, from: nil)
         let shift = event.modifierFlags.contains(.shift)
         let alt = event.modifierFlags.contains(.option)
+        activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onRelease(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
         // A dialog the tool opened (Scale's Alt-click) moves to the model's
         // store, where the app's dialog view reads it (flask STATUS §285).
@@ -4054,6 +4058,7 @@ class CanvasNSView: NSView {
     /// Test helper: simulate a complete drag from start to end point.
     func simulateDrag(from start: NSPoint, to end: NSPoint, extend: Bool = false) {
         guard let ctx = toolContext else { return }
+        activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onPress(ctx, x: start.x, y: start.y, shift: extend, alt: false)
         activeTool.onMove(ctx, x: end.x, y: end.y, shift: extend, alt: false, dragging: true)
         activeTool.onRelease(ctx, x: end.x, y: end.y, shift: extend, alt: false)
