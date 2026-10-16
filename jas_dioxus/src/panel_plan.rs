@@ -39,6 +39,7 @@
 //!          "static": {"<STATIC_KEYS key>": "<the node's literal>", ...},
 //!          "flags": {"<FLAG_KEYS key>": <the node's literal bool>, ...},
 //!          "numbers": {"<NUMBER_KEYS key>": <the node's literal number>, ...},
+//!          "events": ["<event>", ...],  the events the node ANSWERS (see [`events_of`])
 //!          "display": {"<bind key>": "<the core-formatted display string>", ...},
 //!          "options": null | [{"kind": "option", "value", "label", "selected"[, "glyph"]}
 //!                             | {"kind": "separator"}, ...]}
@@ -159,6 +160,30 @@ fn flags_of(node: &Value) -> Map<String, Value> {
         if let Some(b) = node.get(key).and_then(Value::as_bool) {
             out.insert(key.to_string(), Value::Bool(b));
         }
+    }
+    out
+}
+
+/// The events a node ANSWERS, so a shell knows which leaves to route a press
+/// on without knowing their kind (flask STATUS § 315: WinUI built a `text`
+/// leaf with no pointer handler, so an Artboards row could not be selected):
+/// the `event` of each `behavior` entry, in declared order and once each, and
+/// `click` when the node carries a node-level `action` (WIDGET_EVENTS.md,
+/// "Clicking a button"). `[]` for a node that answers nothing.
+fn events_of(node: &Value) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    let mut add = |ev: &str| {
+        if !out.iter().any(|v| v == ev) {
+            out.push(Value::String(ev.to_string()));
+        }
+    };
+    for b in node.get("behavior").and_then(Value::as_array).into_iter().flatten() {
+        if let Some(ev) = b.get("event").and_then(Value::as_str) {
+            add(ev);
+        }
+    }
+    if node.get("action").and_then(Value::as_str).is_some() {
+        add("click");
     }
     out
 }
@@ -485,6 +510,7 @@ fn entry(item: &RenderLeaf, values: Map<String, Value>, acts: &PanelActions, wit
         "static": st,
         "flags": flags_of(&item.node),
         "numbers": numbers_of(&item.node),
+        "events": events_of(&item.node),
         "display": display,
         "options": options,
         "items": items,

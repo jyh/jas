@@ -2985,6 +2985,30 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// A PLAN ENTRY NAMES THE EVENTS ITS NODE ANSWERS (flask STATUS § 315):
+    /// `"events"` lists the `event`s of the node's `behavior`, in declared order
+    /// and once each, with `click` for a node-level `action`. A shell routes a
+    /// press on any leaf whose events hold `click` (WinUI built a `text` leaf
+    /// with no pointer handler, so an Artboards row could not be selected).
+    #[test]
+    fn a_plan_entry_names_the_events_its_node_answers() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        let mut doc = crate::document::document::Document::default();
+        doc.artboards = (0..2).map(|i| Artboard::default_with_id(format!("ab{i:04}"))).collect();
+        let e = engine_with(Model::new(doc, None));
+        let plan: serde_json::Value =
+            serde_json::from_str(&plan_of(e, "artboards_panel_content", 228, 600)).expect("plan JSON");
+        let all: Vec<&serde_json::Value> = ["chrome", "containers", "leaves"].iter()
+            .filter_map(|k| plan[*k].as_array()).flatten().collect();
+        let events_of = |id: &str| all.iter().find(|r| r["id"] == id).map(|r| r["events"].clone());
+        assert_eq!(events_of("ap_number"), Some(serde_json::json!(["click"])));
+        assert_eq!(events_of("ap_name"), Some(serde_json::json!(["click", "click_and_wait"])), "declared order, once each");
+        assert!(all.iter().all(|r| r["events"].is_array()), "every entry carries the key");
+        assert!(all.iter().any(|r| r["events"] == serde_json::json!([])), "the control: a leaf that answers nothing");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// **W2b-16 (A13, D12): a `foreach` row is addressed by its plan PATH.**
     /// The engine re-expands the foreach from the same scope the plan used,
     /// binds the row's loop variable, and runs the widget's behavior for THAT
