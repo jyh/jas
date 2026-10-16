@@ -1281,10 +1281,11 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // ARTBOARD_TOOL.md §Mousedown disambiguation order. Sets
     // tool.artboard.{mode, hit_artboard_id, hit_handle_pos} and
     // (for interior / empty hits) writes panel-selection per the
-    // click rules from ARTBOARDS.md §Selection semantics. Swift's
-    // StateStore is the panel-state authority — store.setPanel
-    // updates the panel UI directly (no separate AppState plumbing
-    // needed, unlike Rust which has a pending-writes buffer).
+    // click rules from ARTBOARDS.md §Selection semantics. The tool runs
+    // on its own store, so the writes go to the MODEL's store, where the
+    // Artboards panel reads them (`artboardsPanelWrite`); Rust queues them
+    // and its host applies them after the event. Until 2026-10-16 they
+    // went to the tool's own store, which no panel reads.
     effects["doc.artboard.probe_hit"] = { spec, ctx, store in
         guard let args = spec as? [String: Any] else { return nil }
         let x = evalNumber(args["x"], store: store, ctx: ctx)
@@ -1292,7 +1293,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let shift = evalBool(args["shift"], store: store, ctx: ctx)
         let cmd = evalBool(args["cmd"], store: store, ctx: ctx)
         let alt = evalBool(args["alt"], store: store, ctx: ctx)
-        artboardProbeHit(model: model, store: store,
+        artboardProbeHit(model: model, store: store, ctx: ctx,
                          x: x, y: y,
                          shiftHeld: shift, cmdHeld: cmd, altHeld: alt)
         return nil
@@ -1327,7 +1328,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
         let shiftHeld = evalBool(args["shift_held"], store: store, ctx: ctx)
         artboardMoveApply(
-            model: model, store: store,
+            model: model, store: store, ctx: ctx,
             pressX: pressX, pressY: pressY,
             cursorX: cursorX, cursorY: cursorY,
             shiftHeld: shiftHeld)
@@ -1337,8 +1338,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // doc.artboard.move_commit — drag-to-move commit with integer-pt
     // rounded displacement (preserves multi-select relative spacing
     // per ARTBOARD_TOOL.md §Common rules).
-    effects["doc.artboard.move_commit"] = { _, _, store in
-        artboardMoveCommit(model: model, store: store)
+    effects["doc.artboard.move_commit"] = { _, ctx, store in
+        artboardMoveCommit(model: model, store: store, ctx: ctx)
         return nil
     }
 
@@ -1366,7 +1367,7 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let cursorX = evalNumber(args["cursor_x"], store: store, ctx: ctx)
         let cursorY = evalNumber(args["cursor_y"], store: store, ctx: ctx)
         artboardMoveApply(
-            model: model, store: store,
+            model: model, store: store, ctx: ctx,
             pressX: pressX, pressY: pressY,
             cursorX: cursorX, cursorY: cursorY,
             shiftHeld: false)
@@ -1374,8 +1375,8 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     }
 
     // doc.artboard.duplicate_commit — same path as move_commit.
-    effects["doc.artboard.duplicate_commit"] = { _, _, store in
-        artboardMoveCommit(model: model, store: store)
+    effects["doc.artboard.duplicate_commit"] = { _, ctx, store in
+        artboardMoveCommit(model: model, store: store, ctx: ctx)
         return nil
     }
 
@@ -4036,7 +4037,7 @@ private func readEyedropperConfig(
 /// selection per the click rules. (x, y) are in document coordinates
 /// — the canvas widget transforms viewport pixels before passing.
 private func artboardProbeHit(
-    model: Model, store: StateStore,
+    model: Model, store: StateStore, ctx: [String: Any],
     x: Double, y: Double,
     shiftHeld: Bool, cmdHeld: Bool, altHeld: Bool
 ) {
@@ -4047,9 +4048,9 @@ private func artboardProbeHit(
     let doc = model.document
 
     // 1. Resize handle of the single panel-selected artboard.
-    let active = store.evalContext()["active_document"] as? [String: Any]
-    let selIds = (active?["artboards_panel_selection_ids"] as? [Any])?
-        .compactMap { $0 as? String } ?? []
+    // The selection is the CALL's `active_document` first (the host hands
+    // the tool the panel's facts), then the store's context.
+    let selIds = readArtboardPanelSelection(store, ctx)
     if selIds.count == 1,
        let ab = doc.artboards.first(where: { $0.id == selIds[0] })
     {
@@ -4087,9 +4088,8 @@ private func artboardProbeHit(
         store.setTool("artboard", "hit_artboard_id", hit.id)
 
         // Panel-selection write per click rules.
-        let currentSel = (active?["artboards_panel_selection_ids"] as? [Any])?
-            .compactMap { $0 as? String } ?? []
-        let anchor = active?["artboards_panel_anchor"] as? String
+        let currentSel = readArtboardPanelSelection(store, ctx)
+        let anchor = artboardPanelFact(store, ctx, "artboards_panel_anchor") as? String
 
         if shiftHeld {
             // Range from anchor to hit, using document.artboards order.
@@ -4097,13 +4097,13 @@ private func artboardProbeHit(
             if let a = anchor, let ai = ids.firstIndex(of: a),
                let ti = ids.firstIndex(of: hit.id) {
                 let lo = min(ai, ti); let hi = max(ai, ti)
-                store.setPanel("artboards", "artboards_panel_selection",
+                artboardsPanelWrite(model, "artboards_panel_selection",
                                Array(ids[lo...hi]))
                 // Anchor unchanged.
             } else {
                 // No anchor — fall back to plain replace.
-                store.setPanel("artboards", "artboards_panel_selection", [hit.id])
-                store.setPanel("artboards", "panel_selection_anchor", hit.id)
+                artboardsPanelWrite(model, "artboards_panel_selection", [hit.id])
+                artboardsPanelWrite(model, "panel_selection_anchor", hit.id)
             }
         } else if cmdHeld {
             var newSel = currentSel
@@ -4112,12 +4112,12 @@ private func artboardProbeHit(
             } else {
                 newSel.append(hit.id)
             }
-            store.setPanel("artboards", "artboards_panel_selection", newSel)
+            artboardsPanelWrite(model, "artboards_panel_selection", newSel)
             // Anchor unchanged.
         } else {
             // Plain — replace, set anchor.
-            store.setPanel("artboards", "artboards_panel_selection", [hit.id])
-            store.setPanel("artboards", "panel_selection_anchor", hit.id)
+            artboardsPanelWrite(model, "artboards_panel_selection", [hit.id])
+            artboardsPanelWrite(model, "panel_selection_anchor", hit.id)
         }
         return
     }
@@ -4125,8 +4125,8 @@ private func artboardProbeHit(
     // 3. Empty canvas — drag-to-create on threshold; click clears
     //    panel-selection.
     store.setTool("artboard", "mode", "creating")
-    store.setPanel("artboards", "artboards_panel_selection", [String]())
-    store.setPanel("artboards", "panel_selection_anchor", nil)
+    artboardsPanelWrite(model, "artboards_panel_selection", [String]())
+    artboardsPanelWrite(model, "panel_selection_anchor", nil)
 }
 
 /// Implementation of doc.artboard.probe_hover per
@@ -4180,11 +4180,32 @@ private func artboardProbeHover(
     store.setTool("artboard", "hover_kind", "empty")
 }
 
-/// Read the panel-selected artboard ids from the eval context.
-private func readArtboardPanelSelection(_ store: StateStore) -> [String] {
-    let active = store.evalContext()["active_document"] as? [String: Any]
-    return (active?["artboards_panel_selection_ids"] as? [Any])?
+/// One `active_document` fact a canvas-side artboard effect reads (the
+/// Artboards panel's selection or anchor): the CALL's `active_document` first,
+/// then the store's own context. A tool runs on its own store, so its host
+/// hands it the panel's facts before every event (`setDocumentFacts`); Rust's
+/// `artboard_panel_fact`, the same order.
+private func artboardPanelFact(_ store: StateStore, _ ctx: [String: Any], _ key: String) -> Any? {
+    if let v = (ctx["active_document"] as? [String: Any])?[key], !(v is NSNull) { return v }
+    return (store.evalContext()["active_document"] as? [String: Any])?[key]
+}
+
+/// The panel-selected artboard ids, by ``artboardPanelFact``.
+private func readArtboardPanelSelection(_ store: StateStore, _ ctx: [String: Any]) -> [String] {
+    (artboardPanelFact(store, ctx, "artboards_panel_selection_ids") as? [Any])?
         .compactMap { $0 as? String } ?? []
+}
+
+/// Write one Artboards-panel key in the MODEL's store, where the panel reads
+/// it, seeding the panel's scope from its declared defaults first: `setPanel`
+/// drops a write to a panel with no scope (Rust `apply_tool_panel_writes`).
+private func artboardsPanelWrite(_ model: Model, _ key: String, _ value: Any?) {
+    let store = model.stateStore
+    if !store.hasPanel(artboardsPanelScope) {
+        store.initPanel(artboardsPanelScope,
+                        defaults: WorkspaceData.load()?.panelStateDefaults(artboardsPanelScope) ?? [:])
+    }
+    store.setPanel(artboardsPanelScope, key, value)
 }
 
 /// True iff `inner` (an element's bbox) is fully contained in
@@ -4332,7 +4353,7 @@ private func artboardTranslateFromPreview(
 /// doc.artboard.move_apply implementation per ARTBOARD_TOOL.md
 /// §Drag-to-move.
 private func artboardMoveApply(
-    model: Model, store: StateStore,
+    model: Model, store: StateStore, ctx: [String: Any],
     pressX: Double, pressY: Double,
     cursorX: Double, cursorY: Double,
     shiftHeld: Bool
@@ -4342,7 +4363,7 @@ private func artboardMoveApply(
     if shiftHeld {
         if abs(dx) > abs(dy) { dy = 0 } else { dx = 0 }
     }
-    var targetIds = readArtboardPanelSelection(store)
+    var targetIds = readArtboardPanelSelection(store, ctx)
     if targetIds.isEmpty {
         // Single-artboard fallback to hit_artboard_id (set by
         // probe_hit). Same shape as Rust.
@@ -4539,8 +4560,12 @@ private func artboardResizeApply(
 private func artboardResizeCommit(model: Model, store: StateStore) {
     let toolCtx = store.evalContext()["tool"] as? [String: Any]
     guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
-    let cursorX = (abCtx["cursor_x"] as? Double) ?? 0
-    let cursorY = (abCtx["cursor_y"] as? Double) ?? 0
+    // Through NSNumber, as artboardMoveCommit reads them: the evaluator
+    // stores a whole-number cursor as an Int, and a plain `as? Double` then
+    // reads 0, so a resize ending on a whole point collapsed the artboard to
+    // 1 x 1 (found 2026-10-16 by the first test to drive a resize here).
+    let cursorX = (abCtx["cursor_x"] as? NSNumber)?.doubleValue ?? 0
+    let cursorY = (abCtx["cursor_y"] as? NSNumber)?.doubleValue ?? 0
     let shiftHeld = (abCtx["shift_held"] as? Bool) ?? false
     let altHeld = (abCtx["alt_held"] as? Bool) ?? false
     let handlePos = (abCtx["hit_handle_pos"] as? String) ?? ""
@@ -4644,11 +4669,7 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
 /// doc.artboard.delete_panel_selected — at-least-one invariant
 /// per ARTBOARDS.md.
 private func artboardDeletePanelSelected(model: Model, store: StateStore, ctx: [String: Any]) {
-    // The CALL's `active_document` first: a tool runs on its own store, so
-    // its host hands it the panel selection (Rust, the same order).
-    let fromCtx = ((ctx["active_document"] as? [String: Any])?["artboards_panel_selection_ids"] as? [Any])?
-        .compactMap { $0 as? String }
-    let targetIds = fromCtx ?? readArtboardPanelSelection(store)
+    let targetIds = readArtboardPanelSelection(store, ctx)
     if targetIds.isEmpty { return }
     let total = model.document.artboards.count
     if targetIds.count >= total { return }  // invariant block
@@ -4664,7 +4685,7 @@ private func artboardDeletePanelSelected(model: Model, store: StateStore, ctx: [
 /// doc.artboard.move_commit — re-applies translate with integer-pt
 /// rounded displacement vector (preserves multi-select relative
 /// spacing).
-private func artboardMoveCommit(model: Model, store: StateStore) {
+private func artboardMoveCommit(model: Model, store: StateStore, ctx: [String: Any]) {
     let toolCtx = store.evalContext()["tool"] as? [String: Any]
     guard let abCtx = toolCtx?["artboard"] as? [String: Any] else { return }
     // press_x / cursor_x are stored via `set: ... = event.x`, whose
@@ -4688,7 +4709,7 @@ private func artboardMoveCommit(model: Model, store: StateStore) {
     dx = dx.rounded()
     dy = dy.rounded()
 
-    var targetIds = readArtboardPanelSelection(store)
+    var targetIds = readArtboardPanelSelection(store, ctx)
     if targetIds.isEmpty {
         if let id = abCtx["hit_artboard_id"] as? String {
             targetIds = [id]
