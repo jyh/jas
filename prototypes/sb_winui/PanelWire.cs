@@ -183,6 +183,39 @@ internal static class PanelWire
         id.Length > 0 || PlanPath(path) is not null;
 
     /// <summary>
+    /// The events a plan entry says its node ANSWERS (`"events"`, #464), in
+    /// the order the core sent them. Null when there is no channel (an older
+    /// core) or it is not an array; a non-string entry is skipped. `[]` is an
+    /// answer: the node answers nothing.
+    /// </summary>
+    internal static IReadOnlyList<string>? ReadEvents(string? eventsJson)
+    {
+        if (string.IsNullOrEmpty(eventsJson)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(eventsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            var events = new List<string>();
+            foreach (var v in root.EnumerateArray())
+            {
+                if (v.ValueKind == System.Text.Json.JsonValueKind.String) { events.Add(v.GetString()!); }
+            }
+            return events;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Whether a press on a leaf is sent as `click`: the plan says the node
+    /// answers `click`, and the leaf has an address (<see cref="Addressable"/>).
+    /// The shell does not decide by kind (jas §316): an Artboards row's `text`
+    /// answers `click`, a heading's does not. No list routes nothing.
+    /// </summary>
+    internal static bool RoutesPress(IReadOnlyList<string>? events, string id, string? path) =>
+        events is not null && events.Contains("click") && Addressable(id, path);
+
+    /// <summary>
     /// S1: a `button`'s face. The core resolves a `{{`-bearing label into the
     /// leaf's `values` (Save Changes' "Save {{param.filename}}") and sends a
     /// literal one in `static`; the resolved one wins. With no label, the
@@ -574,12 +607,6 @@ internal static class PanelWire
     internal static string? ColorBarChange(string? point, string? lastSent) =>
         point is not null && point != lastSent ? point : null;
 
-    /// <summary>
-    /// §252 (#399): the bytes of a `display.picture`, a `data:image/bmp;base64,`
-    /// URI. Null for no picture, another media type, malformed base64, or bytes
-    /// that do not open with the BMP signature `BM`. Decoding is all the shell
-    /// does: every pixel is already the engine's colour.
-    /// </summary>
     /// <summary>§255: a chrome row carrying `bind.active` (a document tab), by path; drawn behind its leaves.</summary>
     internal sealed record ActiveBox(string Path, double X, double Y, double W, double H, bool Active);
 
@@ -724,6 +751,12 @@ internal static class PanelWire
         || !string.Equals(System.IO.Path.GetFullPath(current), System.IO.Path.GetFullPath(path),
                           StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// §252 (#399): the bytes of a `display.picture`, a `data:image/bmp;base64,`
+    /// URI. Null for no picture, another media type, malformed base64, or bytes
+    /// that do not open with the BMP signature `BM`. Decoding is all the shell
+    /// does: every pixel is already the engine's colour.
+    /// </summary>
     internal static byte[]? PictureBytes(string? uri)
     {
         const string prefix = "data:image/bmp;base64,";
