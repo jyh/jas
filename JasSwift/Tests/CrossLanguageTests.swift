@@ -4506,7 +4506,7 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     guard let ws = WorkspaceData.load() else {
         fatalError("workspace.json failed to load")
     }
-    guard let tool = loadYamlTool(toolId, in: ws) else {
+    guard var tool = loadYamlTool(toolId, in: ws) else {
         fatalError("workspace declares no tool '\(toolId)' (or it failed to parse)")
     }
 
@@ -4531,11 +4531,45 @@ private func runGestureModel(_ tc: [String: Any]) -> Model {
     }
 
     for ev in tc["events"] as! [[String: Any]] {
-        let x = (ev["x"] as! NSNumber).doubleValue
-        let y = (ev["y"] as! NSNumber).doubleValue
         // shift/alt default false; dragging defaults false on move.
         let shift = (ev["shift"] as? Bool) ?? false
         let alt = (ev["alt"] as? Bool) ?? false
+        if ev["kind"] as? String == "key" {
+            // A KEY event: an input script's key step at level 1, in the
+            // engine's key order (`routeKey`). Mirrors Rust `replay_key`.
+            let name = ev["key"] as! String
+            let km = KeyMods(shift: shift, ctrl: (ev["ctrl"] as? Bool) ?? false, alt: alt)
+            switch routeKey(name, km, toolTakes: { tool.capturesKeyboard() || tool.claimsKey($0) }) {
+            case .deleteSelection:
+                // The engine's Delete key: nothing selected, or a delete that
+                // would orphan an instance, changes nothing (never a dialog).
+                let doc = model.document
+                if !doc.selection.isEmpty
+                    && DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path)).isEmpty {
+                    model.editDocument(doc.deleteSelection())
+                }
+            case .toolKey(let k):
+                _ = tool.onKeyEvent(ctx, k, km)
+            case .undo:
+                model.undo()
+            case .redo:
+                model.redo()
+            case .selectTool(let id):
+                tool.deactivate(ctx)
+                guard let next = loadYamlTool(id, in: ws) else {
+                    fatalError("workspace declares no tool '\(id)'")
+                }
+                tool = next
+                tool.activate(ctx)
+            case .unhandled:
+                break
+            case .badKey:
+                Issue.record("key event \(ev): \(name) is not a key the engine takes")
+            }
+            continue
+        }
+        let x = (ev["x"] as! NSNumber).doubleValue
+        let y = (ev["y"] as! NSNumber).doubleValue
         switch ev["kind"] as! String {
         case "press":
             tool.onPress(ctx, x: x, y: y, shift: shift, alt: alt)
@@ -4665,7 +4699,8 @@ private func assertGestureTest(_ tc: [String: Any]) {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json"]
+private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+                                     "shortcut.delete.json", "shortcut.undo.json"]
 
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
@@ -4680,11 +4715,21 @@ private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.
         }
         var events: [[String: Any]] = []
         for (i, st) in steps.dropLast().enumerated() {
-            guard let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) else {
-                Issue.record("script \(item): step \(i) is not replayable at level 1 yet (pointer steps only)")
-                continue
+            if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+                events.append(st)
+            } else if st["kind"] == nil, let key = st["key"] as? String {
+                // A KEY step (the key corpus's chord form). Mirrors Rust
+                // `script_as_gesture_case`; the engine takes no `meta`.
+                if (st["meta"] as? Bool) ?? false {
+                    Issue.record("script \(item): step \(i) carries meta, which the engine's key route does not take")
+                    continue
+                }
+                var ev: [String: Any] = ["kind": "key", "key": key]
+                for m in ["ctrl", "shift", "alt"] { if let v = st[m] { ev[m] = v } }
+                events.append(ev)
+            } else {
+                Issue.record("script \(item): step \(i) is not replayable at level 1 yet (pointer and key steps only)")
             }
-            events.append(st)
         }
         let tc: [String: Any] = ["name": item, "setup_svg": script["setup_svg"]!, "tool": script["tool"]!,
                                  "app_state": script["app_state"] ?? [:], "events": events]
