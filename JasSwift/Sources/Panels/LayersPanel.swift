@@ -931,6 +931,18 @@ public enum LayersPanel {
             }
             platformEffects[key] = handler
         }
+        // EVERY OTHER TOOL-TABLE EFFECT, where this table has none (2026-10-16).
+        // Lifting by key left every key nobody named a SILENT NO-OP here:
+        // `doc.set_attr_on_selection` (Apply / Remove Brush), `doc.snapshot`,
+        // and the Scale, Rotate and Shear dialogs' `doc.{scale,rotate,shear}.apply`
+        // with `doc.preview.{restore,clear}`, so those five dialog OKs and the
+        // brush apply changed nothing on the Mac while Rust ran them. Measured by
+        // `brush_actions.json` and `transform_options_actions.json`. Rust has one
+        // effect match for tools and actions; this makes the action table a
+        // superset of the tool table, and this table's own handlers still win.
+        for (key, handler) in toolViewEffects where platformEffects[key] == nil {
+            platformEffects[key] = handler
+        }
         if onCloseDialog != nil {
             platformEffects["close_dialog"] = closeDialogHandler
         }

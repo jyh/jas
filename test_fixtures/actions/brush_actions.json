@@ -1,0 +1,46 @@
+[
+  {
+    "name": "apply_brush_to_selection_sets_the_composed_id",
+    "setup_svg": "corner_path.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "apply_brush_to_selection",
+        "params": {
+          "library": "default_brushes",
+          "brush_slug": "oval_5pt"
+        }
+      }
+    ],
+    "expected_json": "apply_brush_to_selection_sets_the_composed_id_expected.json"
+  },
+  {
+    "name": "remove_brush_from_selection_after_apply_restores_the_path",
+    "setup_svg": "corner_path.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "apply_brush_to_selection",
+        "params": {
+          "library": "default_brushes",
+          "brush_slug": "oval_5pt"
+        }
+      },
+      {
+        "action": "remove_brush_from_selection",
+        "params": {}
+      }
+    ],
+    "expected_json": "remove_brush_from_selection_after_apply_restores_the_path_expected.json"
+  }
+]
