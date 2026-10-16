@@ -217,6 +217,10 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   window, so the host records it in [`EngineHost::closed_window`] and the
 ///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
 ///
+/// * `delete_selection` is claimed and RUN by the Delete key's law
+///   (`menu_native::delete_selection`): an orphan opens
+///   `delete_orphan_confirm`; its own YAML is the menu's `log`.
+///
 /// Everything else is declined, so the runner reports it.
 #[derive(Default)]
 pub struct EngineHost {
@@ -271,6 +275,24 @@ impl EffectHost for EngineHost {
         // its `remove_child` refuses by name rather than removing a guess.
         if action == "close_window" {
             self.closed_window = true;
+            return Some(None);
+        }
+        // `delete_selection` by action (a tool's YAML dispatches it; its own
+        // body is the menu's `log`): the Delete key's reference-aware law. An
+        // orphan opens `delete_orphan_confirm` through the dialog door with
+        // its `count`, as the web's Delete does, and deletes nothing.
+        if action == "delete_selection" {
+            use crate::workspace::menu_native::{delete_selection, DeleteOutcome};
+            let Some(model) = model else { return Some(Some(Unhandled::NoModel(action.into()))) };
+            if let DeleteOutcome::WouldOrphan(count) = delete_selection(model) {
+                const ID: &str = "delete_orphan_confirm";
+                let ws = crate::interpreter::workspace::Workspace::load();
+                let Some(def) = ws.as_ref().and_then(|w| w.dialog(ID)) else {
+                    return Some(Some(Unhandled::UnknownDialog(ID.into())));
+                };
+                let params = [("count".to_string(), Value::from(count))].into_iter().collect();
+                open_dialog_in(ID, def, Some(params), None, &Value::Null, store, Some(model));
+            }
             return Some(None);
         }
         if action == "remove_tab" {
