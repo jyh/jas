@@ -734,6 +734,12 @@ public struct ContentView: View {
     }
 }
 
+/// RED-FIRST STUB (replaced in the next commit).
+func tabAfterClose(ids: [UUID], closing: UUID, selected: UUID?) -> UUID? {
+    if selected != closing { return selected }
+    return ids.first { $0 != closing }
+}
+
 // MARK: - Tab label with close button
 
 struct CanvasTabLabel: View {
