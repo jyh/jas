@@ -450,7 +450,10 @@ fn engine_document_view(store: &StateStore, model: &Model) -> Value {
     // The panel's own state key (`artboards.yaml` declares
     // `panel_selection_anchor`); the view publishes it as
     // `artboards_panel_anchor`. Until 2026-10-16 this read the view's name,
-    // which no store holds, so the anchor was always null.
+    // which no store holds. ⚠️ A SURVIVING MUTANT, RECORDED: reverting this
+    // key reds nothing, because the one caller (`engine_scope`) extends the
+    // view with `artboard_facts`, which publishes the same key from the same
+    // store key; that arm is `the_engine_scope_derives_the_artboard_facts…`.
     let anchor = read("artboards", "panel_selection_anchor");
     crate::interpreter::document_views::active_document_view(
         model, &layers, &artboards, anchor.as_ref().and_then(Value::as_str))
@@ -1304,11 +1307,14 @@ mod tests {
         let panel = "artboards_panel_content";
 
         let mut store = StateStore::new();
-        store.init_panel("artboards", std::collections::HashMap::from([(
-            "artboards_panel_selection".to_string(),
-            json!(["c", 7, "b"]),
-        )]));
+        store.init_panel("artboards", std::collections::HashMap::from([
+            ("artboards_panel_selection".to_string(), json!(["c", 7, "b"])),
+            ("panel_selection_anchor".to_string(), json!("c")),
+        ]));
         let ad = engine_scope(&slice, &store, &model, panel)["active_document"].clone();
+        // The panel's anchor key, published under the view's name (until
+        // 2026-10-16 the view read its own name from the store: always null).
+        assert_eq!(ad["artboards_panel_anchor"], json!("c"), "{ad}");
         // Only strings are ids (the reference filters the same way).
         assert_eq!(ad["artboards_panel_selection_ids"], json!(["c", "b"]), "{ad}");
         // DOCUMENT order: "b" precedes "c" in the list, though "c" was selected first.
@@ -1326,5 +1332,6 @@ mod tests {
         assert_eq!(empty["artboards_panel_selection_ids"], json!([]), "{empty}");
         assert_eq!(empty["current_artboard_id"], json!("a"), "{empty}");
         assert_eq!(empty["current_artboard"]["width"], json!(100.0), "{empty}");
+        assert_eq!(empty["artboards_panel_anchor"], json!(null), "{empty}");
     }
 }
