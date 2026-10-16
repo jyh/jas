@@ -723,10 +723,10 @@ public struct ContentView: View {
                 if model.isModified { return }
             }
         }
+        let next = tabAfterClose(ids: workspace.canvases.map(\.id), closing: id,
+                                 selected: workspace.selectedTab)
         workspace.canvases.removeAll { $0.id == id }
-        if workspace.selectedTab == id {
-            workspace.selectedTab = workspace.canvases.first?.id
-        }
+        workspace.selectedTab = next
     }
 
     public static func saveModel(_ model: Model) {
@@ -734,10 +734,15 @@ public struct ContentView: View {
     }
 }
 
-/// RED-FIRST STUB (replaced in the next commit).
+/// The tab shown after `closing` is removed from `ids`, per `remove_tab`
+/// (actions.yaml): a tab that is not shown closes and the shown one stays;
+/// the shown tab closes and the tab to its LEFT is shown, else the new first
+/// tab, else none. Rust's `AppState::close_tab`, the same rule.
 func tabAfterClose(ids: [UUID], closing: UUID, selected: UUID?) -> UUID? {
     if selected != closing { return selected }
-    return ids.first { $0 != closing }
+    guard let i = ids.firstIndex(of: closing) else { return selected }
+    if i > 0 { return ids[i - 1] }
+    return ids.count > 1 ? ids[1] : nil
 }
 
 // MARK: - Tab label with close button
