@@ -1476,11 +1476,34 @@ pub fn compose_matrix_over_paths(
     new_doc
 }
 
+/// The factor the STORED stroke width is multiplied by, so the DRAWN width is
+/// what SCALE_TOOL.md § Apply behavior says. The scale is stored as a transform,
+/// and a stroke is drawn in the transformed space (drawn = stored ×
+/// √|det CTM|), so the transform alone already scales the drawn stroke by
+/// √|sx·sy|. Scale Strokes ON: leave the width (`None`). OFF: divide by
+/// √|sx·sy|. Exact for a uniform scale; a non-uniform scale under a stored
+/// transform draws the stroke anisotropically, which only mapping the
+/// coordinates could avoid (a spec question, his: 10-17 pack ask 4).
+pub fn stroke_compensation(sx: f64, sy: f64, scale_strokes: bool) -> Option<f64> {
+    if scale_strokes {
+        None
+    } else {
+        Some(1.0 / crate::algorithms::transform_apply::stroke_width_factor(sx, sy))
+    }
+}
+
 /// Multiply an element's stroke-width by `factor` in place (no-op without a
-/// stroke). Document-layer twin of effects.rs's `scale_element_stroke_width`, kept
+/// stroke). A container has no stroke of its own: the factor reaches every
+/// leaf under it, since the container's transform scales them all. Document-layer twin of effects.rs's `scale_element_stroke_width`, kept
 /// here so the shared compose does not reach up into the interpreter layer.
 fn scale_elem_stroke_width(elem: &mut crate::geometry::element::Element, factor: f64) {
     use crate::geometry::element::Element;
+    if let Some(kids) = elem.children_mut() {
+        for k in kids.iter_mut() {
+            scale_elem_stroke_width(std::rc::Rc::make_mut(k), factor);
+        }
+        return;
+    }
     let strokes = match elem {
         Element::Line(e) => e.stroke.as_mut(),
         Element::Rect(e) => e.stroke.as_mut(),
@@ -1536,11 +1559,7 @@ pub fn apply_scale(
     }
     let targets = controller::selection_to_ids(model.document());
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
-    let stroke_factor = if scale_strokes {
-        Some(transform_apply::stroke_width_factor(sx, sy))
-    } else {
-        None
-    };
+    let stroke_factor = stroke_compensation(sx, sy, scale_strokes);
     let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
     let paths = selection_paths(model.document());
     let new_doc = compose_matrix_over_paths(

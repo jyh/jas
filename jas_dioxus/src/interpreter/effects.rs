@@ -2264,10 +2264,19 @@ fn run_doc_effect(
                     let shift = eval_bool(args.get("shift"), store, ctx);
                     drag_to_scale_factors(px, py, cx, cy, rx, ry, shift)
                 };
+                // The flags the caller PASSES win over state (the dialog's
+                // confirm and preview do): the action ctx's `state` map shadows
+                // the store, so a confirm's own `set` of state.scale_strokes is
+                // not readable here (2026-10-16).
+                let (st_strokes, st_corners) = resolve_scale_flags(store, ctx);
+                let flags = (
+                    if args.contains_key("scale_strokes") { eval_bool(args.get("scale_strokes"), store, ctx) } else { st_strokes },
+                    if args.contains_key("scale_corners") { eval_bool(args.get("scale_corners"), store, ctx) } else { st_corners },
+                );
                 if eval_bool(args.get("journal"), store, ctx) {
-                    scale_apply_journaled(model, store, ctx, sx, sy, copy);
+                    scale_apply_journaled(model, store, ctx, sx, sy, copy, flags);
                 } else {
-                    scale_apply(model, store, ctx, sx, sy, copy);
+                    scale_apply(model, store, ctx, sx, sy, copy, flags);
                 }
             }
         }
@@ -6900,6 +6909,7 @@ fn scale_apply(
     sx: f64,
     sy: f64,
     copy: bool,
+    (scale_strokes, scale_corners): (bool, bool),
 ) {
     use crate::algorithms::transform_apply;
     use crate::document::controller::Controller;
@@ -6912,9 +6922,7 @@ fn scale_apply(
     }
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
-    let (scale_strokes, scale_corners) = resolve_scale_flags(store, ctx);
-    let stroke_factor =
-        if scale_strokes { Some(transform_apply::stroke_width_factor(sx, sy)) } else { None };
+    let stroke_factor = crate::document::op_apply::stroke_compensation(sx, sy, scale_strokes);
     let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
     let paths = op_apply_selection_paths(model);
     let new_doc = compose_matrix_over_paths(
@@ -6937,6 +6945,7 @@ fn scale_apply_journaled(
     sx: f64,
     sy: f64,
     copy: bool,
+    (scale_strokes, scale_corners): (bool, bool),
 ) {
     if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
         return; // Identity — nothing to do (no copy, no op).
@@ -6949,7 +6958,6 @@ fn scale_apply_journaled(
     // resolves against the now-selected duplicates, matching the preview path,
     // which also resolves the ref point post-copy).
     let (rx, ry) = resolve_reference_point(model, store, ctx);
-    let (scale_strokes, scale_corners) = resolve_scale_flags(store, ctx);
     let op = serde_json::json!({
         "op": "scale_transform",
         "sx": sx, "sy": sy, "rx": rx, "ry": ry,

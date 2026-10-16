@@ -5985,13 +5985,6 @@ private let seedExempt: [String: String] = [
 /// the wrapper — which is a different element from the leaf underneath it.
 private let seedKnown: Set<String> = [
     "make_compound_shape.json::make_compound_shape_two_rects",
-    // SCALE STROKES REACHES THE SELECTED ELEMENT, NOT A GROUP'S LEAVES
-    // (2026-10-16, measured): a scale with scale_strokes multiplies the selected
-    // element's own stroke width, so a bare rect's width goes 2 -> 3 while the
-    // rect inside a selected group keeps 2 (the group has no stroke). Both
-    // carry the same composed transform. Raised for a ruling (the spec maps
-    // coordinates; the ports store a transform). Mirrors Rust's KNOWN.
-    "transform_options_actions.json::scale_options_confirm_uniform_150",
     // The four Alt+click compound-creating variants: make_compound_shape with
     // another operation, so the wrappers survive as the compound's operands,
     // which the unwrap cannot reach. Same artifact as the row above; Rust's
