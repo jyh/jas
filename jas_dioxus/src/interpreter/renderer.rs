@@ -306,28 +306,12 @@ fn apply_dialog_confirm(
         }
         // Phase 8: Justification dialog OK. Commit the 11 dialog
         // fields as jas:* attributes onto every paragraph wrapper
-        // tspan in the selection. Mixed-selection semantics: each
-        // field writes to all selected wrappers (untouched fields
-        // commit their displayed value too — the panel's mixed
-        // aggregator already shows blank for disagree, so the
-        // implementation can write the dialog's current value
-        // unconditionally).
+        // tspan in the selection, through `paragraph_host`, the law
+        // the engine runs too. A blank field (the paragraphs differ)
+        // leaves each wrapper's own value.
         "paragraph_justification_confirm" => {
-            let f = |k: &str| dialog.get(k).and_then(|v| v.as_f64());
-            let s = |k: &str| dialog.get(k).and_then(|v| v.as_str()).map(String::from);
-            st.apply_justification_dialog_to_selection(JustificationDialogValues {
-                word_spacing_min: f("word_spacing_min"),
-                word_spacing_desired: f("word_spacing_desired"),
-                word_spacing_max: f("word_spacing_max"),
-                letter_spacing_min: f("letter_spacing_min"),
-                letter_spacing_desired: f("letter_spacing_desired"),
-                letter_spacing_max: f("letter_spacing_max"),
-                glyph_scaling_min: f("glyph_scaling_min"),
-                glyph_scaling_desired: f("glyph_scaling_desired"),
-                glyph_scaling_max: f("glyph_scaling_max"),
-                auto_leading: f("auto_leading"),
-                single_word_justify: s("single_word_justify"),
-            });
+            st.apply_justification_dialog_to_selection(
+                JustificationDialogValues::from_dialog(|k| dialog.get(k).cloned()));
         }
         // Phase 9: Hyphenation dialog OK. Commits the master
         // checkbox + 7 jas:hyphenate-* attributes onto every
@@ -336,18 +320,8 @@ fn apply_dialog_confirm(
         // sync after the OK fires (panel.hyphenate read live from
         // the wrapper next time the panel renders).
         "paragraph_hyphenation_confirm" => {
-            let f = |k: &str| dialog.get(k).and_then(|v| v.as_f64());
-            let b = |k: &str| dialog.get(k).and_then(|v| v.as_bool());
-            st.apply_hyphenation_dialog_to_selection(HyphenationDialogValues {
-                hyphenate: b("hyphenate"),
-                min_word: f("hyphenate_min_word"),
-                min_before: f("hyphenate_min_before"),
-                min_after: f("hyphenate_min_after"),
-                limit: f("hyphenate_limit"),
-                zone: f("hyphenate_zone"),
-                bias: f("hyphenate_bias"),
-                capitalized: b("hyphenate_capitalized"),
-            });
+            st.apply_hyphenation_dialog_to_selection(
+                HyphenationDialogValues::from_dialog(|k| dialog.get(k).cloned()));
         }
         // brush_options_confirm is handled by the
         // brush.options_confirm effect handler in effects.rs (the
@@ -472,36 +446,11 @@ fn apply_brush_options_confirm(
     }
 }
 
-/// 11 Justification-dialog field values, packed for one commit pass.
-/// `None` means the dialog field was blank (mixed selection) and
-/// should not write — the existing wrapper attr stays. Phase 8.
-pub(crate) struct JustificationDialogValues {
-    pub word_spacing_min: Option<f64>,
-    pub word_spacing_desired: Option<f64>,
-    pub word_spacing_max: Option<f64>,
-    pub letter_spacing_min: Option<f64>,
-    pub letter_spacing_desired: Option<f64>,
-    pub letter_spacing_max: Option<f64>,
-    pub glyph_scaling_min: Option<f64>,
-    pub glyph_scaling_desired: Option<f64>,
-    pub glyph_scaling_max: Option<f64>,
-    pub auto_leading: Option<f64>,
-    pub single_word_justify: Option<String>,
-}
-
-/// 8 Hyphenation-dialog field values (master + 7 sub-controls).
-/// `None` means the dialog field was blank (mixed selection) and
-/// should not write. Phase 9.
-pub(crate) struct HyphenationDialogValues {
-    pub hyphenate: Option<bool>,
-    pub min_word: Option<f64>,
-    pub min_before: Option<f64>,
-    pub min_after: Option<f64>,
-    pub limit: Option<f64>,
-    pub zone: Option<f64>,
-    pub bias: Option<f64>,
-    pub capitalized: Option<bool>,
-}
+// The two dialogs' values and their OK law live in the ungated
+// `paragraph_host`, which the engine calls too.
+pub(crate) use crate::interpreter::paragraph_host::{
+    HyphenationDialogValues, JustificationDialogValues,
+};
 
 /// Dispatch a named action. Tries hardcoded handlers first, then falls
 /// through to the YAML actions catalog for open_dialog, dispatch, etc.

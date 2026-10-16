@@ -1869,186 +1869,31 @@ impl AppState {
     }
 
     /// Commit the 11 Justification-dialog field values onto every
-    /// paragraph wrapper tspan in the selection. Per the
-    /// identity-value rule each numeric value at its spec default
-    /// (word-spacing 80/100/133, letter-spacing 0/0/0, glyph-scaling
-    /// 100/100/100, auto-leading 120) writes `None` so the wrapper
-    /// attribute is omitted. Phase 8.
+    /// paragraph wrapper tspan in the selection, through the engine's own
+    /// law ([`paragraph_host::apply_justification_dialog`]). Phase 8.
+    ///
+    /// [`paragraph_host::apply_justification_dialog`]: crate::interpreter::paragraph_host::apply_justification_dialog
     pub(crate) fn apply_justification_dialog_to_selection(
         &mut self,
-        v: crate::interpreter::renderer::JustificationDialogValues,
+        v: crate::interpreter::paragraph_host::JustificationDialogValues,
     ) {
-        use crate::geometry::element::Element;
-        // Identity-value defaults from PARAGRAPH.md §Justification Dialog.
-        // Each value is `Option<Option<_>>`: OUTER None is a field the dialog
-        // left blank (the paragraphs differ, PARAGRAPH.md "Mixed selection"),
-        // which leaves every paragraph's own attribute; `Some(None)` is a
-        // value at its identity, which omits the attribute.
-        fn opt_n(value: Option<f64>, default: f64) -> Option<Option<f64>> {
-            value.map(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
-        }
-        let ws_min = opt_n(v.word_spacing_min, 80.0);
-        let ws_des = opt_n(v.word_spacing_desired, 100.0);
-        let ws_max = opt_n(v.word_spacing_max, 133.0);
-        let ls_min = opt_n(v.letter_spacing_min, 0.0);
-        let ls_des = opt_n(v.letter_spacing_desired, 0.0);
-        let ls_max = opt_n(v.letter_spacing_max, 0.0);
-        let gs_min = opt_n(v.glyph_scaling_min, 100.0);
-        let gs_des = opt_n(v.glyph_scaling_desired, 100.0);
-        let gs_max = opt_n(v.glyph_scaling_max, 100.0);
-        let auto_leading = opt_n(v.auto_leading, 120.0);
-        let single_word_justify = v.single_word_justify
-            .map(|s| (s != "justify").then_some(s));
-        let write = |w: &mut crate::geometry::tspan::Tspan| {
-            if let Some(x) = ws_min { w.jas_word_spacing_min = x; }
-            if let Some(x) = ws_des { w.jas_word_spacing_desired = x; }
-            if let Some(x) = ws_max { w.jas_word_spacing_max = x; }
-            if let Some(x) = ls_min { w.jas_letter_spacing_min = x; }
-            if let Some(x) = ls_des { w.jas_letter_spacing_desired = x; }
-            if let Some(x) = ls_max { w.jas_letter_spacing_max = x; }
-            if let Some(x) = gs_min { w.jas_glyph_scaling_min = x; }
-            if let Some(x) = gs_des { w.jas_glyph_scaling_desired = x; }
-            if let Some(x) = gs_max { w.jas_glyph_scaling_max = x; }
-            if let Some(x) = auto_leading { w.jas_auto_leading = x; }
-            if let Some(x) = &single_word_justify { w.jas_single_word_justify = x.clone(); }
-        };
-
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
-        let target_paths: Vec<Vec<usize>> = {
-            let doc = tab.model.document();
-            doc.selection.iter()
-                .filter_map(|es| {
-                    let elem = doc.get_element(&es.path)?;
-                    matches!(elem, Element::Text(_) | Element::TextPath(_))
-                        .then(|| es.path.clone())
-                })
-                .collect()
-        };
-        if target_paths.is_empty() { return; }
-        tab.model.begin_txn();
-        for path in target_paths {
-            let doc = tab.model.document().clone();
-            let new_elem = match doc.get_element(&path) {
-                Some(Element::Text(t)) => {
-                    let mut new_t = t.clone();
-                    let mut tspans = new_t.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        write(&mut tspans[i]);
-                    }
-                    new_t.tspans = tspans;
-                    Some(Element::Text(new_t))
-                }
-                Some(Element::TextPath(tp)) => {
-                    let mut new_tp = tp.clone();
-                    let mut tspans = new_tp.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        write(&mut tspans[i]);
-                    }
-                    new_tp.tspans = tspans;
-                    Some(Element::TextPath(new_tp))
-                }
-                _ => None,
-            };
-            if let Some(elem) = new_elem {
-                let new_doc = doc.replace_element(&path, elem);
-                tab.model.set_document(new_doc);
-            }
-        }
-        tab.model.commit_txn();
+        crate::interpreter::paragraph_host::apply_justification_dialog(&mut tab.model, &v);
     }
 
-    /// Commit the 8 Hyphenation-dialog field values onto every
-    /// paragraph wrapper tspan in the selection. Per the
-    /// identity-value rule each value at its spec default
-    /// (master off, min-word 6, min-before 2, min-after 2 -- ruled
-    /// 2026-10-15 (A2): what the layout reads an absent attribute as --
-    /// limit 0, zone 0, bias 0, capitalized off) writes `None` so
-    /// the wrapper attribute is omitted. Master mirrors panel
-    /// state — sync_paragraph_panel_from_selection picks up the
-    /// new value next render. Phase 9.
+    /// Commit the 8 Hyphenation-dialog field values onto every paragraph
+    /// wrapper tspan in the selection, through the engine's own law
+    /// ([`paragraph_host::apply_hyphenation_dialog`]). The master also
+    /// mirrors into the typed panel state, so the main panel's checkbox
+    /// reflects the commit before the next selection-change sync. Phase 9.
+    ///
+    /// [`paragraph_host::apply_hyphenation_dialog`]: crate::interpreter::paragraph_host::apply_hyphenation_dialog
     pub(crate) fn apply_hyphenation_dialog_to_selection(
         &mut self,
-        v: crate::interpreter::renderer::HyphenationDialogValues,
+        v: crate::interpreter::paragraph_host::HyphenationDialogValues,
     ) {
-        use crate::geometry::element::Element;
-        // `Option<Option<_>>`, as the Justification handler: OUTER None is a
-        // field the dialog left blank (the paragraphs differ), which leaves
-        // every paragraph's own attribute; `Some(None)` omits it at identity.
-        fn opt_n(value: Option<f64>, default: f64) -> Option<Option<f64>> {
-            value.map(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
-        }
-        fn opt_b(value: Option<bool>) -> Option<Option<bool>> {
-            value.map(|v| if !v { None } else { Some(true) })
-        }
-        let hyph = opt_b(v.hyphenate);
-        let min_word = opt_n(v.min_word, 6.0);
-        let min_before = opt_n(v.min_before, 2.0);
-        let min_after = opt_n(v.min_after, 2.0);
-        let limit = opt_n(v.limit, 0.0);
-        let zone = opt_n(v.zone, 0.0);
-        let bias = opt_n(v.bias, 0.0);
-        let capitalized = opt_b(v.capitalized);
-        let write = |w: &mut crate::geometry::tspan::Tspan| {
-            if let Some(x) = hyph { w.jas_hyphenate = x; }
-            if let Some(x) = min_word { w.jas_hyphenate_min_word = x; }
-            if let Some(x) = min_before { w.jas_hyphenate_min_before = x; }
-            if let Some(x) = min_after { w.jas_hyphenate_min_after = x; }
-            if let Some(x) = limit { w.jas_hyphenate_limit = x; }
-            if let Some(x) = zone { w.jas_hyphenate_zone = x; }
-            if let Some(x) = bias { w.jas_hyphenate_bias = x; }
-            if let Some(x) = capitalized { w.jas_hyphenate_capitalized = x; }
-        };
-
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
-        let target_paths: Vec<Vec<usize>> = {
-            let doc = tab.model.document();
-            doc.selection.iter()
-                .filter_map(|es| {
-                    let elem = doc.get_element(&es.path)?;
-                    matches!(elem, Element::Text(_) | Element::TextPath(_))
-                        .then(|| es.path.clone())
-                })
-                .collect()
-        };
-        if target_paths.is_empty() { return; }
-        tab.model.begin_txn();
-        for path in target_paths {
-            let doc = tab.model.document().clone();
-            let new_elem = match doc.get_element(&path) {
-                Some(Element::Text(t)) => {
-                    let mut new_t = t.clone();
-                    let mut tspans = new_t.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        write(&mut tspans[i]);
-                    }
-                    new_t.tspans = tspans;
-                    Some(Element::Text(new_t))
-                }
-                Some(Element::TextPath(tp)) => {
-                    let mut new_tp = tp.clone();
-                    let mut tspans = new_tp.tspans.clone();
-                    let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
-                    for i in wrapper_idx {
-                        write(&mut tspans[i]);
-                    }
-                    new_tp.tspans = tspans;
-                    Some(Element::TextPath(new_tp))
-                }
-                _ => None,
-            };
-            if let Some(elem) = new_elem {
-                let new_doc = doc.replace_element(&path, elem);
-                tab.model.set_document(new_doc);
-            }
-        }
-        tab.model.commit_txn();
-        // Master mirror: keep the typed paragraph panel state in
-        // sync so the main panel's HYPHENATE_CHECKBOX reflects the
-        // dialog's commit immediately rather than waiting for the
-        // next selection-change sync.
+        crate::interpreter::paragraph_host::apply_hyphenation_dialog(&mut tab.model, &v);
         if let Some(h) = v.hyphenate {
             self.paragraph_panel.hyphenate = h;
         }
@@ -2098,10 +1943,9 @@ impl AppState {
 /// rendered string — the user sees the paragraph collapse to a
 /// single line the moment any Paragraph-panel control is clicked.
 ///
-/// Used by every paragraph-panel apply path:
-/// `apply_paragraph_panel_to_selection`,
-/// `apply_justification_dialog_to_selection`, and
-/// `apply_hyphenation_dialog_to_selection`.
+/// Used by every paragraph apply path, all in `paragraph_host`:
+/// `apply_to_selection`, `apply_justification_dialog` and
+/// `apply_hyphenation_dialog`.
 /// Build a `Tspan` override template from the Character panel state
 /// that forces every panel-driven field onto the targeted tspans
 /// regardless of element-level defaults. Used by the per-range
