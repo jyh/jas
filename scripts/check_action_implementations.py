@@ -147,7 +147,7 @@ RUST_CMD_PREFIX = ("toggle_pane", "toggle_panel")
 # silently stopped matching would report every action dead and read as a
 # catastrophe rather than as a broken parse -- but one that matched everything
 # would read as a clean tree, which is the dangerous direction.
-MIN_LOG_ONLY = 59
+MIN_LOG_ONLY = 60
 MIN_RUST_ARMS = 60
 MIN_SWIFT_ARMS = 60
 
@@ -508,6 +508,17 @@ def self_test() -> int:
     # §290): an anchor-preserving swap in four `set`s, driven in the reference
     # (every anchor, and twice is the identity) and on the engine's dialog door.
     # One stub, a delta of 1.
+    #
+    # 60 when `close_window` JOINED (2026-10-15, jas STATUS # 299/# 300): the
+    # host closes the window, so its body is a `log` that the engine claims
+    # and names in its act reply (`"close_window": true`), as `remove_tab`'s
+    # is claimed. It is log-only by design, not a stub. It lands in "no
+    # dispatch entry in either port" because the two ports this gate reads
+    # (the web app, Swift) have none: the browser has no window of its own,
+    # and Swift's Quit is native (`applicationShouldTerminate`). Its claimer
+    # is the ENGINE host, which this gate does not read. `quit` and
+    # `close_without_saving` dispatch it and did not join (each has a
+    # non-log effect). A delta of 1.
     if len(rust) < MIN_RUST_ARMS:
         failures.append(f"  c: only {len(rust)} rust dispatch labels parsed "
                         f"(floor {MIN_RUST_ARMS}) -- the extraction is broken")

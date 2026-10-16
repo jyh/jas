@@ -153,8 +153,15 @@
       ],
       "doc_verbs": []
     },
+    "close_window": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "close_without_saving": {
       "class": "ui-state",
+      "dispatches": [
+        "close_window"
+      ],
       "doc_verbs": []
     },
     "collapse_dock": {
@@ -627,6 +634,9 @@
     },
     "quit": {
       "class": "ui-state",
+      "dispatches": [
+        "close_window"
+      ],
       "doc_verbs": []
     },
     "rearrange_artboards": {
@@ -1162,7 +1172,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 202,
+      "ui-state": 203,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1216,7 +1226,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 240,
+    "total_actions": 241,
     "verb_table": {
       "always": [
         "doc.copy_selection",

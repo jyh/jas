@@ -13773,8 +13773,8 @@ mod tests {
         assert_eq!(report_of_real_action("new_symbol"),
                    vec![Unhandled::Logged("new_symbol".into())]);
         // A log BESIDE a handled effect is still a stub for the real work.
-        assert_eq!(report_of_real_action("close_without_saving"),
-                   vec![Unhandled::Logged("close_without_saving".into())]);
+        assert_eq!(report_of_real_action("save_all_and_close"),
+                   vec![Unhandled::Logged("save_all_and_close".into())]);
         // A declared placeholder. The YAML omits `effects`, and the compiled
         // workspace writes `effects: []`, so this is the EMPTY-LIST path; the
         // no-list path is driven by the hand-built catalog above.
