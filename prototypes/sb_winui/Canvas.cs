@@ -112,7 +112,8 @@ internal sealed class RepaintCmd : Cmd
     internal string Cause = "repaint";
 }
 
-/// <summary>One key for `jas_key_event` (W5-3b), queued like a pointer event.</summary>
+/// <summary>One key (W5-3b), queued like a pointer event. Sent to the engine
+/// by `jas_dispatch_action` as `{"key", "mods"}` (jas §314).</summary>
 internal sealed class KeyCmd : Cmd
 {
     internal uint Code;
@@ -1050,6 +1051,64 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
+    /// jas §314: a key goes to the engine as a dispatch, `{"key", "mods"}`, and
+    /// the ENGINE resolves it (the active tool's claim, then `shortcuts.yaml`).
+    /// Its act reply is read as any act's: a dialog it names (Delete's orphan
+    /// confirm), a tab removal, a window close. A key nothing handled
+    /// (`KeyUnhandled`) is no failure and writes no row; any other refusal does.
+    /// </summary>
+    private void ApplyKey(KeyCmd k)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var name = k.Code switch
+        {
+            JasCore.KeyEscape => "Escape",
+            JasCore.KeyEnter => "Enter",
+            JasCore.KeyDelete => "Delete",
+            JasCore.KeyBackspace => "Backspace",
+            _ => KeyWire.CharName(k.Code),
+        };
+        if (name is null)
+        {
+            _report($"RUSTFAIL KEY UNNAMED code=0x{k.Code:X} -- no key name to send {Tids()}");
+            return;
+        }
+        var request = KeyWire.Request(name, (k.Mods & JasCore.ModShift) != 0,
+                                      (k.Mods & JasCore.ModAlt) != 0, (k.Mods & JasCore.ModCmd) != 0)!;
+        var json = System.Text.Encoding.UTF8.GetBytes(request);
+        var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
+        var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+        var head = $"key={name} mods={k.Mods}";
+        if (reply.Length == 0)
+        {
+            if (!channel.Contains("\"KeyUnhandled\"", StringComparison.Ordinal))
+            {
+                _report(channel.Length == 0
+                    ? $"RUSTFAIL KEY SILENT {head} -- an empty reply and an empty error channel {Tids()}"
+                    : $"KEY REFUSED {head} channel={channel} {Tids()}");
+            }
+            return;
+        }
+        bool docChanged;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            docChanged = doc.RootElement.GetProperty("doc_changed").GetBoolean();
+            OpenNamedDialog(doc.RootElement, head);
+        }
+        catch (Exception ex)
+        {
+            _report($"RUSTFAIL KEY REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
+            return;
+        }
+        ApplyRemoveTab(reply, head);
+        ApplyCloseWindow(reply, head);
+        ApplySaveAllThenClose(reply, head);
+        _report($"KEY RAN {head} doc-changed={(docChanged ? "true" : "false")} "
+              + $"dialog={DialogWire.Named(reply) ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
+    }
+
+    /// <summary>
     /// jas §300: a reply that names `close_window: true` closes the window, as
     /// `remove_tab` closes a tab: `quit` with nothing edited, or Save Changes'
     /// Don't Save. Read beside <see cref="ApplyRemoveTab"/> on every act reply.
@@ -1500,7 +1559,7 @@ internal sealed unsafe class Canvas : IDisposable
                 case KeyCmd k:
                     // IN ORDER with the pointer events around it: Escape between a
                     // press and its release is what cancels a marquee.
-                    if (_engine != IntPtr.Zero) { JasCore.jas_key_event(_engine, k.Code, k.Mods); }
+                    ApplyKey(k);
                     DirtyFromModel();
                     dirty = true;
                     cause = "key";

@@ -624,6 +624,19 @@ static class Program
             + ActWire.CloseWindow("""{"close_window":1}""").ToString());
         Eq("close_window: a refusal's empty reply keeps the window", "False", ActWire.CloseWindow("").ToString());
         Eq("close_window: unreadable bytes keep the window", "False", ActWire.CloseWindow("{").ToString());
+        // jas §314: a key goes to the engine as `{"key": <name>, "mods": {...}}`
+        // through `jas_dispatch_action`; the engine resolves it, the shell holds
+        // no binding. Every flag is written, true or false.
+        Eq("key: Delete with no modifier", """{"key":"Delete","mods":{"shift":false,"alt":false,"ctrl":false}}""",
+            KeyWire.Request("Delete", shift: false, alt: false, ctrl: false));
+        Eq("key: Ctrl+Shift+z", """{"key":"z","mods":{"shift":true,"alt":false,"ctrl":true}}""",
+            KeyWire.Request("z", shift: true, alt: false, ctrl: true));
+        Eq("key: a quote is escaped as JSON", """{"key":"\"","mods":{"shift":false,"alt":true,"ctrl":false}}""",
+            KeyWire.Request("\"", shift: false, alt: true, ctrl: false));
+        Eq("key: an empty name is no request", "(null)", KeyWire.Request("", false, false, false) ?? "(null)");
+        Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",
+            (KeyWire.CharName('O') ?? "(null)") + "|" + (KeyWire.CharName('=') ?? "(null)") + "|"
+            + (KeyWire.CharName(0x07) ?? "(null)") + "|" + (KeyWire.CharName(0x7F) ?? "(null)"));
         // jas §305: Save All names `"save_all_then_close": <bool>`, never with
         // `close_window`. The SHELL saves every modified document, then closes
         // only if every save succeeded. Only a named true acts.
