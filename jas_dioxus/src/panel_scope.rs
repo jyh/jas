@@ -189,9 +189,10 @@ impl PanelState {
             "active_document": {
                 "artboards": artboards_json(doc),
                 "artboards_count": doc.artboards.len(),
-                // No panel-selection model in this slice. Stated as an empty
-                // list rather than omitted, because `mem(x, null)` and
-                // `mem(x, [])` are different questions to the evaluator.
+                // The slice holds no panel selection; `engine_scope`
+                // overwrites this with the store's (`artboard_facts`). Stated
+                // as an empty list rather than omitted, because
+                // `mem(x, null)` and `mem(x, [])` are different questions.
                 "artboards_panel_selection_ids": Value::Array(vec![]),
             },
         })
