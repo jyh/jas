@@ -280,3 +280,51 @@ public func parseShortcut(_ shortcut: String) -> ParsedShortcut? {
     }
     return ParsedShortcut(key: key, modifiers: modifiers)
 }
+
+/// What one key press does, decided in ONE place: the engine's key order
+/// (Rust `workspace::resolve_key::route_key`, which `jas_key_event` runs) and
+/// the level-1 input-script runner's (docs/TESTING.md section 6). Callers carry
+/// out the decision on their own model.
+public enum KeyRoute: Equatable {
+    /// The action `delete_selection` (an unclaimed Delete or Backspace).
+    case deleteSelection
+    /// The active tool's `onKeyEvent`, with this named key.
+    case toolKey(String)
+    case undo
+    case redo
+    /// Switch to this tool id (a `select_tool` shortcut, unmodified).
+    case selectTool(String)
+    /// Nothing handles it.
+    case unhandled
+    /// Not a key token the engine takes: a named key or one character.
+    case badKey
+}
+
+/// Mirrors Rust `route_key`. `name` is `Escape`, `Enter`, `Delete`,
+/// `Backspace` or one character; `toolTakes(key)` says whether the active tool
+/// captures the keyboard or claims that key. `mods.ctrl` is the command chord.
+public func routeKey(_ name: String, _ mods: KeyMods, toolTakes: (String) -> Bool) -> KeyRoute {
+    switch name {
+    case "Delete", "Backspace":
+        // An unclaimed Delete or Backspace is `delete_selection`, unless the
+        // tool is editing text or claims the key (the Artboard tool's Delete).
+        return toolTakes(name) ? .toolKey(name) : .deleteSelection
+    case "Escape", "Enter":
+        return .toolKey(name)
+    default:
+        break
+    }
+    guard name.count == 1 else { return .badKey }
+    let chord = KeyChord(key: name, ctrl: mods.ctrl, shift: mods.shift, alt: mods.alt, meta: false)
+    guard let cmd = resolveKeyChord(chord) else { return .unhandled }
+    // A COMMAND chord acts only where the core can do the action itself.
+    if mods.ctrl {
+        switch cmd.action {
+        case "undo": return .undo
+        case "redo": return .redo
+        default: return .unhandled
+        }
+    }
+    guard cmd.action == "select_tool", let tool = cmd.params["tool"] else { return .unhandled }
+    return .selectTool(tool)
+}
