@@ -125,3 +125,121 @@ pub fn resolve_key_in(chord: &KeyChord, shortcuts: &[Value]) -> Option<ResolvedC
     }
     None
 }
+
+/// What one key press does, decided in ONE place (the engine's key order, and
+/// the level-1 input-script runner's: docs/TESTING.md section 6). The callers
+/// carry out the decision on their own model; the ORDER lives here only, so a
+/// script replayed at level 1 takes the key the way the app does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KeyRoute {
+    /// The action `delete_selection` (an unclaimed Delete or Backspace).
+    DeleteSelection,
+    /// The active tool's `on_key_event`, with this named key.
+    ToolKey(&'static str),
+    /// The model's undo.
+    Undo,
+    /// The model's redo.
+    Redo,
+    /// Switch to this tool id (a `select_tool` shortcut, unmodified).
+    SelectTool(String),
+    /// Nothing handles it; the shell may apply its own default.
+    Unhandled,
+    /// Not a key token the engine takes: a named key or one character.
+    BadKey,
+}
+
+/// The engine's key order (`ffi_pointer::jas_key_event`). `name` is `Escape`,
+/// `Enter`, `Delete`, `Backspace` or one character; `tool_takes(key)` says
+/// whether the active tool captures the keyboard or claims that key.
+pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
+                 tool_takes: impl Fn(&str) -> bool) -> KeyRoute {
+    let named: Option<&'static str> = match name {
+        "Escape" => Some("Escape"),
+        "Enter" => Some("Enter"),
+        "Delete" => Some("Delete"),
+        "Backspace" => Some("Backspace"),
+        _ => None,
+    };
+    if let Some(key) = named {
+        // flask STATUS § 277: an unclaimed Delete or Backspace is
+        // `delete_selection` (shortcuts.yaml), unless the tool is editing text
+        // or claims the key (the Artboard tool's Delete). Escape and Enter
+        // always go to the tool (Escape cancels a marquee, Enter commits a pen).
+        if matches!(key, "Delete" | "Backspace") && !tool_takes(key) {
+            return KeyRoute::DeleteSelection;
+        }
+        return KeyRoute::ToolKey(key);
+    }
+    let mut chars = name.chars();
+    let (Some(ch), None) = (chars.next(), chars.next()) else { return KeyRoute::BadKey };
+    let chord = KeyChord::new(&ch.to_string(), mods.ctrl, mods.shift, mods.alt, false);
+    let Some(cmd) = resolve_key(&chord) else { return KeyRoute::Unhandled };
+    // W5-3c: a COMMAND chord acts only where the engine can do the action
+    // itself; every other chord stays the menu's.
+    if mods.ctrl {
+        return match cmd.action.as_str() {
+            "undo" => KeyRoute::Undo,
+            "redo" => KeyRoute::Redo,
+            _ => KeyRoute::Unhandled,
+        };
+    }
+    if cmd.action != "select_tool" {
+        return KeyRoute::Unhandled;
+    }
+    match cmd.params.get("tool").and_then(|v| v.as_str()) {
+        Some(id) => KeyRoute::SelectTool(id.to_string()),
+        None => KeyRoute::Unhandled,
+    }
+}
+
+#[cfg(test)]
+mod route_key_tests {
+    use super::{route_key, KeyRoute};
+    use crate::tools::tool::KeyMods;
+
+    fn m(ctrl: bool, shift: bool) -> KeyMods { KeyMods { shift, ctrl, alt: false, meta: false } }
+    fn free(_: &str) -> bool { false }
+    fn takes(_: &str) -> bool { true }
+
+    #[test]
+    fn an_unclaimed_delete_or_backspace_deletes_the_selection() {
+        assert_eq!(route_key("Delete", m(false, false), free), KeyRoute::DeleteSelection);
+        assert_eq!(route_key("Backspace", m(false, false), free), KeyRoute::DeleteSelection);
+    }
+
+    #[test]
+    fn a_claimed_delete_goes_to_the_tool() {
+        assert_eq!(route_key("Delete", m(false, false), takes), KeyRoute::ToolKey("Delete"));
+        assert_eq!(route_key("Backspace", m(false, false), takes), KeyRoute::ToolKey("Backspace"));
+    }
+
+    #[test]
+    fn escape_and_enter_go_to_the_tool_whether_or_not_it_captures() {
+        assert_eq!(route_key("Escape", m(false, false), free), KeyRoute::ToolKey("Escape"));
+        assert_eq!(route_key("Enter", m(false, false), free), KeyRoute::ToolKey("Enter"));
+    }
+
+    #[test]
+    fn a_command_chord_acts_only_for_undo_and_redo() {
+        assert_eq!(route_key("Z", m(true, false), free), KeyRoute::Undo);
+        assert_eq!(route_key("z", m(true, false), free), KeyRoute::Undo);
+        assert_eq!(route_key("Z", m(true, true), free), KeyRoute::Redo);
+        // Ctrl+G is `group` in shortcuts.yaml: the menu's, not the key route's.
+        assert_eq!(route_key("G", m(true, false), free), KeyRoute::Unhandled);
+    }
+
+    #[test]
+    fn an_unmodified_tool_letter_selects_that_tool() {
+        assert_eq!(route_key("V", m(false, false), free), KeyRoute::SelectTool("selection".into()));
+        assert_eq!(route_key("M", m(false, false), free), KeyRoute::SelectTool("rect".into()));
+    }
+
+    #[test]
+    fn an_unbound_character_is_unhandled_and_a_long_token_is_refused() {
+        // The engine's own `jas_key_event` routes `ch.to_string()`; a token of
+        // two characters never reaches it (`dispatch_key` refuses BadKey).
+        assert_eq!(route_key("J", m(false, false), free), KeyRoute::Unhandled);
+        assert_eq!(route_key("Tab", m(false, false), free), KeyRoute::BadKey);
+        assert_eq!(route_key("", m(false, false), free), KeyRoute::BadKey);
+    }
+}
