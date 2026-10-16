@@ -1,0 +1,98 @@
+[
+  {
+    "name": "scale_options_confirm_uniform_150",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "scale_options_confirm",
+        "params": {
+          "uniform": true,
+          "uniform_pct": 150,
+          "horizontal_pct": 100,
+          "vertical_pct": 100,
+          "scale_strokes": true,
+          "scale_corners": false,
+          "preview": false,
+          "copy": false
+        }
+      }
+    ],
+    "expected_json": "scale_options_confirm_uniform_150_expected.json"
+  },
+  {
+    "name": "scale_options_confirm_copy_nonuniform",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "scale_options_confirm",
+        "params": {
+          "uniform": false,
+          "uniform_pct": 100,
+          "horizontal_pct": 50,
+          "vertical_pct": 200,
+          "scale_strokes": false,
+          "scale_corners": false,
+          "preview": false,
+          "copy": true
+        }
+      }
+    ],
+    "expected_json": "scale_options_confirm_copy_nonuniform_expected.json"
+  },
+  {
+    "name": "rotate_options_confirm_45",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "rotate_options_confirm",
+        "params": {
+          "angle": 45,
+          "preview": false,
+          "copy": false
+        }
+      }
+    ],
+    "expected_json": "rotate_options_confirm_45_expected.json"
+  },
+  {
+    "name": "shear_options_confirm_30_horizontal",
+    "setup_svg": "rect_with_stroke.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "shear_options_confirm",
+        "params": {
+          "angle": 30,
+          "axis": "horizontal",
+          "axis_angle": 0,
+          "preview": false,
+          "copy": false
+        }
+      }
+    ],
+    "expected_json": "shear_options_confirm_30_horizontal_expected.json"
+  }
+]
