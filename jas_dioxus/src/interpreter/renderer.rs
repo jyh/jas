@@ -14847,6 +14847,51 @@ mod tests {
         assert_eq!(open["params"]["index"], serde_json::json!(1), "{open}");
     }
 
+    /// `remove_tab` (actions.yaml) selects the tab to the LEFT of the one it
+    /// removed, else the new first tab: `active_tab = param.index - 1` when
+    /// the index is above 0, else 0. The tab removed is the active one, since
+    /// `request_close_tab` shows a tab before closing it. Until 2026-10-16
+    /// `close_tab` kept the index, so the tab to the RIGHT was selected.
+    #[test]
+    fn closing_the_active_tab_selects_the_tab_to_its_left() {
+        let names = |st: &AppState| -> Vec<String> { st.tabs.iter().map(|t| t.model.filename.clone()).collect() };
+        let named = || {
+            let mut st = three_tabs();
+            for (i, t) in st.tabs.iter_mut().enumerate() {
+                t.model.filename = format!("t{i}");
+            }
+            st
+        };
+        // The middle tab: its left neighbour, t0, is selected (not t2).
+        let mut st = named();
+        let _ = request_close_tab(&mut st, 1);
+        assert_eq!(names(&st), ["t0", "t2"]);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t0", "the tab to the left");
+        // The first tab: nothing to its left, so the new first tab, t1.
+        let mut st = named();
+        let _ = request_close_tab(&mut st, 0);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t1", "no left neighbour: the new first tab");
+        // The last tab: its left neighbour, t1.
+        let mut st = named();
+        let _ = request_close_tab(&mut st, 2);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t1", "the tab to the left");
+        // The control: `remove_tab` on a tab that is NOT shown keeps the
+        // shown one shown, whether it sits before or after the removed tab.
+        let remove = |st: &mut AppState, i: usize| {
+            let params = serde_json::json!({ "index": i });
+            dispatch_action_in("remove_tab", params.as_object().unwrap(), None, st);
+        };
+        let mut st = named();
+        st.active_tab = 2;
+        remove(&mut st, 0);
+        assert_eq!(names(&st), ["t1", "t2"]);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t2", "a tab before the shown one");
+        let mut st = named();
+        st.active_tab = 0;
+        remove(&mut st, 2);
+        assert_eq!(st.tabs[st.active_tab].model.filename, "t0", "a tab after the shown one");
+    }
+
     #[test]
     fn closing_an_unedited_tab_removes_it_without_asking() {
         let mut st = three_tabs();
