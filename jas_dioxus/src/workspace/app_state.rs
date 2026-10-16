@@ -1973,11 +1973,14 @@ impl AppState {
         v: crate::interpreter::renderer::HyphenationDialogValues,
     ) {
         use crate::geometry::element::Element;
-        fn opt_n(value: Option<f64>, default: f64) -> Option<f64> {
-            value.and_then(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
+        // `Option<Option<_>>`, as the Justification handler: OUTER None is a
+        // field the dialog left blank (the paragraphs differ), which leaves
+        // every paragraph's own attribute; `Some(None)` omits it at identity.
+        fn opt_n(value: Option<f64>, default: f64) -> Option<Option<f64>> {
+            value.map(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
         }
-        fn opt_b(value: Option<bool>) -> Option<bool> {
-            value.and_then(|v| if !v { None } else { Some(true) })
+        fn opt_b(value: Option<bool>) -> Option<Option<bool>> {
+            value.map(|v| if !v { None } else { Some(true) })
         }
         let hyph = opt_b(v.hyphenate);
         let min_word = opt_n(v.min_word, 6.0);
@@ -1987,6 +1990,16 @@ impl AppState {
         let zone = opt_n(v.zone, 0.0);
         let bias = opt_n(v.bias, 0.0);
         let capitalized = opt_b(v.capitalized);
+        let write = |w: &mut crate::geometry::tspan::Tspan| {
+            if let Some(x) = hyph { w.jas_hyphenate = x; }
+            if let Some(x) = min_word { w.jas_hyphenate_min_word = x; }
+            if let Some(x) = min_before { w.jas_hyphenate_min_before = x; }
+            if let Some(x) = min_after { w.jas_hyphenate_min_after = x; }
+            if let Some(x) = limit { w.jas_hyphenate_limit = x; }
+            if let Some(x) = zone { w.jas_hyphenate_zone = x; }
+            if let Some(x) = bias { w.jas_hyphenate_bias = x; }
+            if let Some(x) = capitalized { w.jas_hyphenate_capitalized = x; }
+        };
 
         let Some(tab) = self.tabs.get_mut(self.active_tab) else { return };
         let target_paths: Vec<Vec<usize>> = {
@@ -2009,15 +2022,7 @@ impl AppState {
                     let mut tspans = new_t.tspans.clone();
                     let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.jas_hyphenate = hyph;
-                        w.jas_hyphenate_min_word = min_word;
-                        w.jas_hyphenate_min_before = min_before;
-                        w.jas_hyphenate_min_after = min_after;
-                        w.jas_hyphenate_limit = limit;
-                        w.jas_hyphenate_zone = zone;
-                        w.jas_hyphenate_bias = bias;
-                        w.jas_hyphenate_capitalized = capitalized;
+                        write(&mut tspans[i]);
                     }
                     new_t.tspans = tspans;
                     Some(Element::Text(new_t))
@@ -2027,15 +2032,7 @@ impl AppState {
                     let mut tspans = new_tp.tspans.clone();
                     let wrapper_idx = ensure_paragraph_wrapper(&mut tspans);
                     for i in wrapper_idx {
-                        let w = &mut tspans[i];
-                        w.jas_hyphenate = hyph;
-                        w.jas_hyphenate_min_word = min_word;
-                        w.jas_hyphenate_min_before = min_before;
-                        w.jas_hyphenate_min_after = min_after;
-                        w.jas_hyphenate_limit = limit;
-                        w.jas_hyphenate_zone = zone;
-                        w.jas_hyphenate_bias = bias;
-                        w.jas_hyphenate_capitalized = capitalized;
+                        write(&mut tspans[i]);
                     }
                     new_tp.tspans = tspans;
                     Some(Element::TextPath(new_tp))

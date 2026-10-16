@@ -369,6 +369,58 @@
     }
   },
   {
+    "name": "open_paragraph_hyphenation_shows_the_selections_values_and_blanks_a_difference",
+    "setup_svg": "paragraph_hyphenated_mixed.svg",
+    "actions": [
+      {
+        "action": "select_all",
+        "params": {}
+      },
+      {
+        "action": "open_paragraph_hyphenation",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_paragraph_hyphenation_selected_expected.json",
+    "expected_dialog": {
+      "id": "paragraph_hyphenation",
+      "state": {
+        "hyphenate": true,
+        "hyphenate_min_word": 8,
+        "hyphenate_min_before": null,
+        "hyphenate_min_after": 3,
+        "hyphenate_limit": 0,
+        "hyphenate_zone": 0,
+        "hyphenate_bias": 0,
+        "hyphenate_capitalized": true
+      }
+    }
+  },
+  {
+    "name": "open_paragraph_hyphenation_with_nothing_selected_shows_the_defaults",
+    "setup_svg": "paragraph_hyphenated_mixed.svg",
+    "actions": [
+      {
+        "action": "open_paragraph_hyphenation",
+        "params": {}
+      }
+    ],
+    "expected_json": "open_paragraph_hyphenation_unselected_expected.json",
+    "expected_dialog": {
+      "id": "paragraph_hyphenation",
+      "state": {
+        "hyphenate": false,
+        "hyphenate_min_word": 6,
+        "hyphenate_min_before": 2,
+        "hyphenate_min_after": 2,
+        "hyphenate_limit": 0,
+        "hyphenate_zone": 0,
+        "hyphenate_bias": 0,
+        "hyphenate_capitalized": false
+      }
+    }
+  },
+  {
     "name": "close_tab_on_an_edited_document_asks_to_save",
     "setup_svg": "rect_with_stroke.svg",
     "actions": [
