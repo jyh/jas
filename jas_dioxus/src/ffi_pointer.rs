@@ -259,6 +259,10 @@ pub unsafe extern "C" fn jas_pointer_event(
     let alt = mods & MOD_ALT != 0;
     let dragging = mods & MOD_DRAGGING != 0;
 
+    // The tool runs on its own store, so hand it the Artboards panel's facts
+    // (selection, anchor) before every event, as the key route does for a
+    // claimed key: the Artboard tool's handles, click and move read them.
+    let facts = engine.artboard_facts();
     let mut slot = engine.tool_slot();
     if slot.is_none() {
         // Default to the first tool rather than refusing: a shell that never
@@ -273,6 +277,7 @@ pub unsafe extern "C" fn jas_pointer_event(
         *slot = Some((0, built));
     }
     let (_, tool) = slot.as_mut().expect("just built");
+    tool.set_document_facts(&facts);
 
     engine.with_model_mut(|m| match kind {
         KIND_PRESS => tool.on_press(m, dx, dy, shift, alt),
@@ -280,9 +285,12 @@ pub unsafe extern "C" fn jas_pointer_event(
         _ => tool.on_release(m, dx, dy, shift, alt),
     });
     // A dialog the tool opened (Scale's Alt-click) moves to the engine's store,
-    // where `jas_dialog_plan` reads it (flask STATUS §285).
+    // where `jas_dialog_plan` reads it (flask STATUS §285); the panel writes it
+    // queued (the Artboard tool's click selection) go there too.
     let opened = tool.take_opened_dialog();
+    let writes = tool.drain_pending_panel_writes();
     drop(slot);
+    crate::ffi::apply_tool_panel_writes(engine, writes);
     if let Some((id, params)) = opened {
         crate::ffi::open_tool_dialog(engine, &id, &params);
     }
