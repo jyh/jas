@@ -1104,12 +1104,6 @@ internal static class ActWire
     };
 
     /// <summary>
-    /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
-    /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
-    /// shell removes it. Null when the reply names none, an older engine sent
-    /// no key, or the value is not a non-negative integer.
-    /// </summary>
-    /// <summary>
     /// jas §300: `"close_window": <bool>`, in every act reply. True for `quit`
     /// with nothing edited and for Save Changes' Don't Save. Only a named
     /// `true` closes. An older engine with no key, a non-boolean, a refusal's
@@ -1130,6 +1124,12 @@ internal static class ActWire
         }
     }
 
+    /// <summary>
+    /// #422: `"remove_tab": <index> | null`. The engine owns no tabs, so an
+    /// unedited `close_tab`, or Save Changes' Discard, NAMES the tab and the
+    /// shell removes it. Null when the reply names none, an older engine sent
+    /// no key, or the value is not a non-negative integer.
+    /// </summary>
     internal static int? RemoveTab(string reply)
     {
         try
