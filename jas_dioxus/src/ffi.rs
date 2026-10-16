@@ -3060,6 +3060,88 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// THE ARTBOARD TOOL ON THE POINTER ROUTE SEES AND WRITES THE ARTBOARDS
+    /// PANEL'S SELECTION (ARTBOARD_TOOL.md §Mousedown disambiguation order,
+    /// §Click-to-activate). The tool runs on its own store, so the engine hands
+    /// it the panel's facts before every pointer event and takes the selection
+    /// writes it queues after. Until 2026-10-16 the pointer route did neither:
+    /// a panel-selected artboard showed no live handles to the tool (a press on
+    /// its corner MOVED it), and a canvas click never reached the panel.
+    #[test]
+    fn the_artboard_tool_on_the_pointer_route_sees_and_writes_the_panel_selection() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        use crate::ffi_pointer::{
+            jas_pointer_event, jas_set_tool, selectable_index, KIND_MOVE, KIND_PRESS, KIND_RELEASE,
+            MOD_DRAGGING, MOD_SHIFT,
+        };
+        // Three Letter artboards side by side: ab0000 at x 0, ab0001 at 700,
+        // ab0002 at 1400. Zoom 1, no pan, so a pointer point is a document point.
+        let setup = |row: Option<usize>| -> *mut JasEngine {
+            let mut doc = crate::document::document::Document::default();
+            doc.artboards = (0..3).map(|i| {
+                let mut ab = Artboard::default_with_id(format!("ab{i:04}"));
+                ab.x = 700.0 * i as f64;
+                ab
+            }).collect();
+            let mut model = Model::new(doc, None);
+            model.zoom_level = 1.0;
+            model.view_offset_x = 0.0;
+            model.view_offset_y = 0.0;
+            let e = engine_with(model);
+            unsafe { assert_eq!(jas_set_tool(e, selectable_index("artboard").expect("artboard")), JasStatus::Ok) };
+            if let Some(n) = row {
+                let plan: serde_json::Value =
+                    serde_json::from_str(&plan_of(e, "artboards_panel_content", 228, 600)).expect("plan JSON");
+                let path: serde_json::Value = ["chrome", "containers", "leaves"].iter()
+                    .filter_map(|k| plan[*k].as_array()).flatten()
+                    .filter(|r| r["id"] == "ap_number").map(|r| r["path"].clone()).nth(n).expect("row");
+                let (reply, err) = behave(e, "artboards_panel_content", &format!(r#"{{"path":{path},"event":"click"}}"#));
+                assert!(!reply.is_empty(), "row {n} refused: {err}");
+            }
+            e
+        };
+        let gesture = |e: *mut JasEngine, from: (f64, f64), to: (f64, f64), mods: u32| unsafe {
+            assert_eq!(jas_pointer_event(e, KIND_PRESS, from.0, from.1, mods), JasStatus::Ok);
+            if from != to {
+                assert_eq!(jas_pointer_event(e, KIND_MOVE, to.0, to.1, mods | MOD_DRAGGING), JasStatus::Ok);
+            }
+            assert_eq!(jas_pointer_event(e, KIND_RELEASE, to.0, to.1, mods), JasStatus::Ok);
+        };
+        let bounds = |e: *mut JasEngine, i: usize| engine_of(e).with_document(|d| {
+            let ab = &d.artboards[i];
+            (ab.x, ab.y, ab.width, ab.height)
+        });
+        let panel_selection = |e: *mut JasEngine| -> Vec<String> {
+            engine_of(e).artboard_facts()["artboards_panel_selection_ids"].as_array()
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default()
+        };
+
+        // 1. A press on the SE handle of the panel-selected artboard RESIZES it.
+        let e = setup(Some(1));
+        assert_eq!(panel_selection(e), vec!["ab0001".to_string()], "the control: row 1 is selected");
+        gesture(e, (1312.0, 792.0), (1362.0, 842.0), 0);
+        assert_eq!(bounds(e, 1), (700.0, 0.0, 662.0, 842.0), "the SE handle resizes; the NW corner stays");
+        assert_eq!(bounds(e, 0), (0.0, 0.0, 612.0, 792.0), "the control: ab0000 is untouched");
+        unsafe { jas_engine_free(e) };
+
+        // 2. A click inside an artboard on the canvas selects it in the panel.
+        let e = setup(None);
+        assert!(panel_selection(e).is_empty(), "the control: nothing is selected");
+        gesture(e, (1000.0, 400.0), (1000.0, 400.0), 0);
+        assert_eq!(panel_selection(e), vec!["ab0001".to_string()], "the click reaches the panel");
+        assert_eq!(bounds(e, 1), (700.0, 0.0, 612.0, 792.0), "a click moves nothing");
+        unsafe { jas_engine_free(e) };
+
+        // 3. A Shift-click ranges from the anchor the panel's row click set.
+        let e = setup(Some(0));
+        gesture(e, (1700.0, 400.0), (1700.0, 400.0), MOD_SHIFT);
+        assert_eq!(panel_selection(e), vec!["ab0000".to_string(), "ab0001".to_string(), "ab0002".to_string()],
+            "the range runs from the row's anchor to the clicked artboard");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// A PLAN ENTRY NAMES THE EVENTS ITS NODE ANSWERS (flask STATUS § 315):
     /// `"events"` lists the `event`s of the node's `behavior`, in declared order
     /// and once each, with `click` for a node-level `action`. A shell routes a
