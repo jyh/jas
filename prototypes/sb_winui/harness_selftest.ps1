@@ -2115,6 +2115,41 @@ Test-Case 'is: a modifier is refused, never dropped' {
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; mods = @('shift') }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
 } 'REFUSED: step 0 carries modifiers (shift): send_hand.ps1 injects none'
+# §331 node 1: the script form carries modifiers as NAMED booleans on the step
+# (`"shift": true`, TESTING.md section 6, every gesture corpus), never as `mods`.
+# A named modifier the driver cannot inject is refused by name, never dropped.
+Test-Case 'is: a named shift = true on a press is refused, never dropped' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (shift): send_hand.ps1 injects none'
+Test-Case 'is: a named alt = true on a press is refused, never dropped' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; alt = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (alt): send_hand.ps1 injects none'
+Test-Case 'is: a named ctrl = true on a press is refused, never dropped' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; ctrl = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (ctrl): send_hand.ps1 injects none'
+Test-Case 'is: a named meta = true on a press is refused, never dropped' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; meta = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (meta): send_hand.ps1 injects none'
+Test-Case 'is: a named shift on a MOVE is refused too, the corpus form (draw_rect_shift.json)' {
+    $m2 = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $m2, $sRelease, $sRead)))
+} 'REFUSED: step 1 carries modifiers (shift): send_hand.ps1 injects none'
+Test-Case 'is: two named modifiers are both named in the refusal' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $true; ctrl = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (shift,ctrl): send_hand.ps1 injects none'
+Test-Case 'is: a named modifier that is not a boolean is refused, never read as false' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = 1 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 0 carries modifiers (shift): send_hand.ps1 injects none'
+Test-Case 'is: CONTROL -- a named modifier set false is no modifier and passes' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $false; alt = $false; ctrl = $false; meta = $false }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
 Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
