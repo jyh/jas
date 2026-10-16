@@ -37,6 +37,11 @@ cursor: crosshair
 menu_label: "Artboard Tool"
 shortcut: "Shift+O"
 tool_options_action: "fit_all_artboards"
+# Delete and Backspace go to this tool's on_keydown BEFORE the app's
+# shortcuts: its handler owns the fall-through (ARTBOARD_TOOL.md §Delete
+# behavior): panel-selected artboards are deleted, else it dispatches
+# delete_selection itself.
+claims_keys: [Delete, Backspace]
 
 state:
   mode:
@@ -267,7 +272,7 @@ handlers:
     #   else → fall through to global delete_selection
     - if: "(event.key == 'Delete' || event.key == 'Backspace') && tool.artboard.mode == 'idle'"
       then:
-        - if: "len(active_document.artboards_panel_selection_ids) > 0"
+        - if: "active_document.artboards_panel_selection_ids.length > 0"
           then:
             - "doc.artboard.delete_panel_selected": {}
           else:
@@ -289,7 +294,7 @@ handlers:
 #      artboards re-render at their in-flight bounds and no overlay is
 #      needed.
 overlay:
-  - if: "len(active_document.artboards_panel_selection_ids) == 1"
+  - if: "active_document.artboards_panel_selection_ids.length == 1"
     render:
       type: artboard_resize_handles
       artboard_id: "active_document.artboards_panel_selection_ids[0]"

@@ -206,6 +206,14 @@ impl JasEngine {
         f(self.model.borrow().document())
     }
 
+    /// The artboard facts the Artboards panel reads (`artboards_panel_selection_ids`,
+    /// `current_artboard`, …), from the engine's store and document: what a
+    /// tool running on its own store is handed before a claimed key.
+    pub(crate) fn artboard_facts(&self) -> serde_json::Value {
+        serde_json::Value::Object(crate::panel_scope::artboard_facts(
+            &self.store.borrow(), self.model.borrow().document()))
+    }
+
     /// Open `doc` as the session's document — a NEW model, not a mutation.
     ///
     /// ⛔ `Model::new`, NOT `set_document`, AND THE DIFFERENCE IS THE UNDO
@@ -2928,6 +2936,52 @@ mod tests {
         let (doc, sel) = state(e);
         assert!(doc.symbols.is_empty(), "OK deletes the master");
         assert_eq!(sel, Some(serde_json::Value::Null), "and clears the panel selection");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE ARTBOARD TOOL'S DELETE (ARTBOARD_TOOL.md §Delete behavior): with
+    /// artboards selected in the Artboards panel, Delete deletes THEM; with
+    /// none, it falls through to `delete_selection` (the elements). The tool
+    /// says so in `artboard.yaml`'s `on_keydown`, and claims the two keys with
+    /// `claims_keys`. Until 2026-10-15 every port ran the global delete first,
+    /// so the tool's branch never ran (flask STATUS § 310).
+    #[test]
+    fn the_artboard_tools_delete_deletes_the_panel_selected_artboards() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::artboard::Artboard;
+        use crate::ffi_pointer::{jas_key_event, jas_set_tool, selectable_index, KEY_DELETE};
+        let setup = |panel_row: bool| -> *mut JasEngine {
+            let e = engine_on("rect_with_stroke.svg");
+            engine_of(e).with_model_mut(|m| {
+                let mut doc = m.document().clone();
+                doc.artboards = (0..3).map(|i| Artboard::default_with_id(format!("ab{i:04}"))).collect();
+                m.set_document_unbracketed(doc, crate::document::model::NonUndoableIntent::TestOnly);
+            });
+            let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+            unsafe { assert_eq!(jas_set_tool(e, selectable_index("artboard").expect("artboard")), JasStatus::Ok) };
+            if panel_row {
+                let plan: serde_json::Value =
+                    serde_json::from_str(&plan_of(e, "artboards_panel_content", 228, 600)).expect("plan JSON");
+                let row: serde_json::Value = ["chrome", "containers", "leaves"].iter()
+                    .filter_map(|k| plan[*k].as_array()).flatten()
+                    .filter(|r| r["id"] == "ap_number").map(|r| r["path"].clone()).nth(1).expect("row 1");
+                let (reply, err) = behave(e, "artboards_panel_content", &format!(r#"{{"path":{row},"event":"click"}}"#));
+                assert!(!reply.is_empty(), "row 1 refused: {err}");
+            }
+            e
+        };
+        let counts = |e: *mut JasEngine| engine_of(e).with_document(|d| (d.artboards.len(), d.selection.len()));
+
+        let e = setup(true);
+        let before = counts(e);
+        assert!(before.1 > 0, "the control: elements are selected too");
+        unsafe { jas_key_event(e, KEY_DELETE, 0) };
+        assert_eq!(counts(e), (2, before.1), "the panel-selected artboard is deleted, the elements stay");
+        unsafe { jas_engine_free(e) };
+
+        let e = setup(false);
+        unsafe { jas_key_event(e, KEY_DELETE, 0) };
+        assert_eq!(counts(e), (3, 0), "nothing panel-selected: the elements are deleted");
         unsafe { jas_engine_free(e) };
     }
 

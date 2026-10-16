@@ -251,6 +251,14 @@ pub trait CanvasTool {
     /// events (including app shortcuts like cmd+z) and route them to
     /// [`on_key_event`]. Used by the in-place text editor.
     fn captures_keyboard(&self) -> bool { false }
+    /// Return true if the tool takes `key` (a named key such as `"Delete"`)
+    /// BEFORE the app's shortcuts and routes it to [`on_key_event`]: a YAML
+    /// tool's `claims_keys`. The tool's handler then owns the fall-through.
+    fn claims_key(&self, _key: &str) -> bool { false }
+    /// Hand the tool document facts its host knows and the tool cannot read
+    /// (the Artboards panel's selection, `artboards_panel_selection_ids`). A
+    /// YAML tool merges them into its handlers' `active_document`.
+    fn set_document_facts(&mut self, _facts: &serde_json::Value) {}
     /// A dialog this tool's last event opened, handed over to the host and
     /// closed in the tool: its id and its params, RESOLVED in the tool's own
     /// scope (`artboard.yaml` passes `tool.artboard.hit_artboard_id`). The

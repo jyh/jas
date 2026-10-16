@@ -129,3 +129,26 @@ pub fn delete_selection(model: &mut Model) -> DeleteOutcome {
     crate::document::op_apply::journal_delete_selection(model, "delete_selection");
     DeleteOutcome::Deleted
 }
+
+/// `delete_selection` as a host runs it, for every host that claims it (the
+/// engine's, and a YAML tool's, whose Delete dispatches it): the Delete key's
+/// reference-aware law (`menu_native::delete_selection`). A would-be orphan
+/// opens `delete_orphan_confirm` in `store` with its `count` and deletes
+/// nothing. `None` when it ran; the refusal otherwise.
+pub fn run_delete_selection(
+    store: &mut crate::interpreter::state_store::StateStore, model: Option<&mut Model>,
+) -> Option<crate::interpreter::effects::Unhandled> {
+    use crate::interpreter::effects::{open_dialog_in, Unhandled};
+    use serde_json::Value;
+    let Some(model) = model else { return Some(Unhandled::NoModel("delete_selection".into())) };
+    if let DeleteOutcome::WouldOrphan(count) = delete_selection(model) {
+        const ID: &str = "delete_orphan_confirm";
+        let ws = crate::interpreter::workspace::Workspace::load();
+        let Some(def) = ws.as_ref().and_then(|w| w.dialog(ID)) else {
+            return Some(Unhandled::UnknownDialog(ID.into()));
+        };
+        let params = [("count".to_string(), Value::from(count))].into_iter().collect();
+        open_dialog_in(ID, def, Some(params), None, &Value::Null, store, Some(model));
+    }
+    None
+}

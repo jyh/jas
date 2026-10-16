@@ -685,6 +685,14 @@ private func runOne(
         } else {
             return
         }
+        // A host that RUNS this action natively registers it as
+        // `action:<name>` (a YAML tool's `delete_selection`, whose own body is
+        // the menu's `log`); it runs instead of the YAML. Rust
+        // `EffectHost::run_action`.
+        if let native = platformEffects["action:\(actionName)"] {
+            _ = native(params, ctx, store)
+            return
+        }
         if let actionsDef = actions, let actionDef = actionsDef[actionName] as? [String: Any] {
             // The action's `effects:` is a heterogeneous YAML list — bare
             // string entries (`- snapshot`) coexist with map entries

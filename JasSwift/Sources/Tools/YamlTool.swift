@@ -22,6 +22,10 @@ struct ToolSpec {
     let cursor: String?
     let menuLabel: String?
     let shortcut: String?
+    /// Keys this tool's `on_keydown` takes BEFORE the app's shortcuts
+    /// (`claims_keys:`), because the handler owns their fall-through (the
+    /// Artboard tool's Delete). Rust `ToolSpec::claims_keys`.
+    let claimsKeys: [String]
     /// Initial values for `$tool.<id>.<var>` state.
     let stateDefaults: [String: Any]
     /// Event handlers keyed by event name (on_mousedown, on_mousemove,
@@ -43,6 +47,7 @@ struct ToolSpec {
             cursor: spec["cursor"] as? String,
             menuLabel: spec["menu_label"] as? String,
             shortcut: spec["shortcut"] as? String,
+            claimsKeys: (spec["claims_keys"] as? [Any])?.compactMap { $0 as? String } ?? [],
             stateDefaults: parseStateDefaults(spec["state"]),
             handlers: parseHandlers(spec["handlers"]),
             overlay: parseOverlay(spec["overlay"])
@@ -170,6 +175,13 @@ let bridgedStateKeys: [String] = [
 final class YamlTool: CanvasTool {
     let spec: ToolSpec
     private let store: StateStore
+    /// Document facts the host knows and this tool's store does not, merged
+    /// into every dispatch's `active_document` (Rust `document_facts`).
+    private var documentFacts: [String: Any] = [:]
+
+    func claimsKey(_ key: String) -> Bool { spec.claimsKeys.contains(key) }
+
+    func setDocumentFacts(_ facts: [String: Any]) { documentFacts = facts }
 
     init(spec: ToolSpec) {
         self.spec = spec
@@ -335,13 +347,15 @@ final class YamlTool: CanvasTool {
         let ws = WorkspaceData.load()
         let actions = ws?.actions()
         let preferences = ws?.data["preferences"] ?? NSNull()
+        var activeDocument: [String: Any] = [
+            "view_offset_x": model.viewOffsetX,
+            "view_offset_y": model.viewOffsetY,
+            "zoom_level": model.zoomLevel,
+        ]
+        activeDocument.merge(documentFacts) { _, fact in fact }
         let ctx: [String: Any] = [
             "event": payload,
-            "active_document": [
-                "view_offset_x": model.viewOffsetX,
-                "view_offset_y": model.viewOffsetY,
-                "zoom_level": model.zoomLevel,
-            ] as [String: Any],
+            "active_document": activeDocument,
             "preferences": preferences,
         ]
         // Registration tears down on DocRegistration deinit — handler
