@@ -2145,6 +2145,47 @@ Test-Case 'rb: a longer read-back FAILS where the expected ends' {
     Compare-SbReadBack -Got '{"a":1.0}x' -Want '{"a":1.0}'
 } 'FAIL(at byte 9 of got=10 want=9: got "x" want "")'
 
+# THE OPEN'S ARTBOARD (flask STATUS 319). Every reference runner builds a
+# script's setup with the codec (`svg_to_document`), which adds no artboard, so
+# no `*.expected.json` names one. The shell opens the setup as a person does
+# (`jas_load_svg` -> `try_open_svg_document`, #461), which adds the
+# at-least-one artboard with a FRESH id (ARTBOARDS.md), random per run. The
+# read-back sets aside exactly that artboard, only when the expected names
+# none, and refuses by name anything else in its place.
+function New-SbRbArtboard([string]$Id, [string]$Name = 'Artboard 1') {
+    '{"fill":"transparent","height":792.0,"id":"' + $Id + '","name":"' + $Name +
+        '","show_center_mark":false,"show_cross_hairs":false,"show_video_safe_areas":false,"video_ruler_pixel_aspect_ratio":1.0,"width":612.0,"x":0.0,"y":0.0}'
+}
+function New-SbRbGot([string[]]$Artboards, [string]$Rest = '"layers":[]}') {
+    '{"artboards":[' + ($Artboards -join ',') + '],' + $Rest
+}
+Test-Case 'rb: the open''s one artboard is set aside when the expected names none, and the receipt says so' {
+    Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard '8mlh5odx')) -Want '{"layers":[]}'
+} 'PASS(bytes=13; the open''s artboard set aside)'
+Test-Case 'rb: two runs whose open minted different ids read the same verdict' {
+    $a = Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard '8mlh5odx')) -Want '{"layers":[]}'
+    $b = Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard 'mnjytnxx')) -Want '{"layers":[]}'
+    "same=$($a -ceq $b)"
+} 'same=True'
+Test-Case 'rb: an expected that names artboards is compared byte for byte, the id included' {
+    Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard '8mlh5odx')) -Want (New-SbRbGot @(New-SbRbArtboard 'mnjytnxx'))
+} 'FAIL(at byte 57 of got=248 want=248: got "8mlh5odx","name":"Artboa" want "mnjytnxx","name":"Artboa")'
+Test-Case 'rb: two artboards where the expected names none is a FAIL by name, never a set-aside' {
+    Compare-SbReadBack -Got (New-SbRbGot @((New-SbRbArtboard '8mlh5odx'), (New-SbRbArtboard 'mnjytnxx' 'Artboard 2'))) -Want '{"layers":[]}'
+} 'FAIL(the read-back carries 2 artboards where the expected names none; the open adds exactly one)'
+Test-Case 'rb: an artboard not named as the open names it is a FAIL by name' {
+    Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard '8mlh5odx' 'Artboard 2')) -Want '{"layers":[]}'
+} 'FAIL(an artboard the expected does not name, and not the one the open adds: id "8mlh5odx" name "Artboard 2")'
+Test-Case 'rb: an artboard whose id is not a minted one is a FAIL by name' {
+    Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard 'AB12')) -Want '{"layers":[]}'
+} 'FAIL(an artboard the expected does not name, and not the one the open adds: id "AB12" name "Artboard 1")'
+Test-Case 'rb: what follows the set-aside artboard is still compared byte for byte' {
+    Compare-SbReadBack -Got (New-SbRbGot @(New-SbRbArtboard '8mlh5odx')) -Want '{"layers":[1]}'
+} 'FAIL(at byte 11 of got=13 want=14: got "]}" want "1]}"; the open''s artboard set aside)'
+Test-Case 'rb: an artboards member this reader cannot delimit is a FAIL by name' {
+    Compare-SbReadBack -Got '{"artboards":[{"name":"a]b"}],"layers":[]}' -Want '{"layers":[]}'
+} 'FAIL(the read-back opens with an artboards member this reader cannot delimit)'
+
 # ---------------------------------------------------------------------------
 # Q6.D -- THE DOCK OPENED AND DREW EVERY TAB GROUP (jas's #316 review, item 1)
 #
