@@ -556,3 +556,32 @@ private func selectAreaTextWithWrapper(_ model: Model) {
     #expect(after.map { $0.0 } == [70, 85], "the blank min is untouched on each paragraph")
     #expect(after.map { $0.1 } == [90, 90], "the edited desired writes to both")
 }
+
+/// The Hyphenation dialog's twin of the Justification rule. Mirrors Rust
+/// `a_blank_hyphenation_field_at_ok_leaves_each_paragraph_its_own_value`.
+@Test func aBlankHyphenationFieldAtOkLeavesEachParagraphItsOwnValue() throws {
+    let here = URL(fileURLWithPath: #filePath)
+    let svgURL = here.deletingLastPathComponent().deletingLastPathComponent()
+        .deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("test_fixtures/svg/paragraph_hyphenated_mixed.svg")
+    let model = Model(document: svgToDocument(try String(contentsOf: svgURL, encoding: .utf8)))
+    Controller(model: model).selectAll()
+    func wrappers() -> [(Double?, Double?)] {
+        model.document.selection.compactMap { es -> (Double?, Double?)? in
+            guard case .text(let t) = model.document.getElement(es.path),
+                  let w = t.tspans.first(where: { $0.jasRole == "paragraph" }) else { return nil }
+            return (w.jasHyphenateMinWord, w.jasHyphenateMinBefore)
+        }
+    }
+    let before = wrappers()
+    #expect(before.count == 2 && before[0].1 == 4 && before[1].1 == 5, "the control: min-before differs")
+    let store = StateStore()
+    store.initPanel("paragraph_panel_content", defaults: ["hyphenate": false])
+    applyHyphenationDialogToSelection(HyphenationDialogValues(
+        hyphenate: true, minWord: 9, minBefore: nil, minAfter: 3,
+        limit: 0, zone: 0, bias: 0, capitalized: true),
+        controller: Controller(model: model), store: store)
+    let after = wrappers()
+    #expect(after.map { $0.1 } == [4, 5], "the blank min-before is untouched on each paragraph")
+    #expect(after.map { $0.0 } == [9, 9], "the edited min-word writes to both")
+}
