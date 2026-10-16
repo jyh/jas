@@ -166,6 +166,10 @@ each live app:
   An odd or fractional unit lands a fraction off at 1.5×: a drag asked as (37, 23) was delivered as (36.67, 22.67),
   and an exact comparison then fails for a reason that is not the app's.
 * **Key steps** use the key corpus's chord form (`test_fixtures/keys/`): `key` is the canonical token.
+  A key takes the engine's key order, `route_key` (Rust) and `routeKey` (Swift): an unclaimed Delete or Backspace
+  deletes the selection; Escape, Enter and a claimed Delete go to the active tool; a command chord acts only for undo
+  and redo; an unmodified tool letter selects that tool. `jas_key_event` and both level-1 runners call it, so a
+  script replays a key the way the app takes it. `meta` is refused: the engine's key route takes none.
 * **Panel steps** name a panel content id and a widget id, which are the ids the widget-tree pass emits, the Mac app
   exposes as accessibility identifiers, and WinUI exposes as `AutomationId`. `event` is `click` or `commit`, with
   `value` the text a person entered (the widget-event corpus's form).
@@ -178,7 +182,8 @@ each live app:
   A script without a `read` step asserts nothing and is refused.
 
 **Who replays it:**
-1. **Level 1:** each port's core, through the corpus runner. This is the EXPECTED read-back.
+1. **Level 1:** each port's core, through the corpus runner. This is the EXPECTED read-back. It replays pointer and
+   key steps and refuses a panel step by name.
 2. **Level 2 on the Mac:** `jas_gui_harness.py` for pointer and key steps; a panel step by accessibility identifier.
 3. **Level 2 on Windows:** `send_hand.ps1` and its key injector; a panel step by UI Automation.
 
