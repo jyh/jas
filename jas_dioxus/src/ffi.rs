@@ -4065,6 +4065,21 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// THE KEY HAS ONE DOOR (flask STATUS § 317, #465): the shell sends a key
+    /// as `jas_dispatch_action({"key"})`, so `jas_key_event` and its `KEY_*`
+    /// codes are no longer part of the C surface. A second door would let a
+    /// shell bypass the reply that names a key's dialog.
+    #[test]
+    fn the_header_exports_one_key_door() {
+        // No export is called; the guard is taken because the gate reads this
+        // body's string literals as calls (`check_ffi_counter_lock`).
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let header = include_str!("../include/jas_ffi.h");
+        assert!(!header.contains("jas_key_event("), "jas_key_event is not exported");
+        assert!(!header.contains("KEY_DELETE"), "nor its key codes");
+        assert!(header.contains("jas_dispatch_action("), "the control: the one door is");
+    }
+
     /// SELECT ALL FROM THE MENU (flask STATUS §242, 2026-10-13: Edit > Select
     /// All on Windows read `PlatformEffect`, `Logged:select_all`). Its
     /// `actions.yaml` entry is a `log` stub: the behaviour is the menu's own,

@@ -37,13 +37,13 @@ pub const MOD_DRAGGING: u32 = 1 << 2;
 /// menu chord is never mistaken for a bare tool letter; no chord acts yet.
 pub const MOD_CMD: u32 = 1 << 3;
 
-/// Named keys for [`jas_key_event`], as their ASCII control codes. Any other
+/// Named keys for [`jas_key_event`] (crate-private since #465), as their ASCII control codes. Any other
 /// `code` is a Unicode scalar: the CHARACTER the key produced, never a
 /// virtual-key number, so the shell need not know the core's key table.
-pub const KEY_BACKSPACE: u32 = 0x08;
-pub const KEY_ENTER: u32 = 0x0D;
-pub const KEY_ESCAPE: u32 = 0x1B;
-pub const KEY_DELETE: u32 = 0x7F;
+pub(crate) const KEY_BACKSPACE: u32 = 0x08;
+pub(crate) const KEY_ENTER: u32 = 0x0D;
+pub(crate) const KEY_ESCAPE: u32 = 0x1B;
+pub(crate) const KEY_DELETE: u32 = 0x7F;
 
 /// `select_tool` targets in `workspace/shortcuts.yaml` the shell CANNOT select,
 /// by declaration: `type` is the native Type tool, which `TOOL_IDS` does not
@@ -289,7 +289,9 @@ pub unsafe extern "C" fn jas_pointer_event(
     JasStatus::Ok
 }
 
-/// One key press (W5-3a). `code` is a [`KEY_ESCAPE`]-style named key or the
+/// One key press (W5-3a). ⛔ NOT EXPORTED since 2026-10-16 (#465): a shell sends
+/// a key as `jas_dispatch_action({"key"})`, which calls this and replies; this
+/// is the engine's key ORDER, kept in one place. `code` is a [`KEY_ESCAPE`]-style named key or the
 /// Unicode scalar of the character the key produced; `mods` is `MOD_SHIFT |
 /// MOD_ALT | MOD_CMD`. The order is the web keyboard path's
 /// (`workspace/keyboard.rs`):
@@ -304,8 +306,7 @@ pub unsafe extern "C" fn jas_pointer_event(
 ///
 /// # Safety
 /// `e` must be NULL or a pointer from `jas_engine_new` that is still live.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> JasStatus {
+pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> JasStatus {
     let Some(engine) = (unsafe { e.as_ref() }) else { return JasStatus::NullHandle };
     let km = crate::tools::tool::KeyMods {
         shift: mods & MOD_SHIFT != 0,
