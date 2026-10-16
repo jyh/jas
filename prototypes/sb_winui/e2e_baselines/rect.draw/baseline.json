@@ -2,9 +2,9 @@
     "item":  "rect.draw",
     "surface":  "2379x1333",
     "frame_hash":  "43ea406c759f92db8e8253739aad702b8a8c8beecb8fcbba2f872610812854d7",
-    "doc_sha":  "a4db9c5c4a576e88",
+    "doc_sha":  "908b899dc6903d95",
     "plan_panel":  "align_panel_content",
-    "plan_sha":  "8b1762b806b1b4da",
+    "plan_sha":  "b7227f4d30f7b39b",
     "tab":  "[0,0]=on:\"circle_basic.svg\"",
     "tab_sha":  "3d4a5b380473bf18",
     "selection_count":  1
