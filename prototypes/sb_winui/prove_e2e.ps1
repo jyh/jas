@@ -271,8 +271,14 @@ $build = (& git -C $repo rev-parse --short=8 HEAD).Trim()
 $os = [System.Environment]::OSVersion.Version
 $platform = "windows-winui-$($os.Major).$($os.Minor).$($os.Build)"
 $dirty = if ((& git -C $repo status --porcelain -- jas_dioxus/src prototypes/sb_winui | Measure-Object -Line).Lines -gt 0) { '+dirty' } else { '' }
+# No `doc_sha`: since #461 the open adds an artboard with a freshly minted id,
+# so the document's digest differs on every run (flask STATUS 325: ten runs,
+# ten values), and the read-back above already compares the same document,
+# byte for byte, against the corpus. A recorded field that moves on every
+# re-freeze and is compared nowhere only trains a reviewer to skim the diff.
+# `probe.json` is the shell's raw probe and still carries it.
 $reading = [ordered]@{
-    item = $item; surface = $r.surface; frame_hash = $r.frame_hash; doc_sha = $r.doc_sha
+    item = $item; surface = $r.surface; frame_hash = $r.frame_hash
     plan_panel = $r.plan_panel; plan_sha = $r.plan_sha; tab = $r.tab; tab_sha = $r.tab_sha; selection_count = $selCount
 }
 
@@ -292,7 +298,7 @@ if ($Freeze) {
     # of the person's screen (other windows, URLs) and the baseline is
     # committed to a public repo. It stays in bin/ (git-ignored); the
     # certificate carries its hash only.
-    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) doc-sha=$($r.doc_sha) plan-sha=$($r.plan_sha) tab-sha=$($r.tab_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
+    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) plan-sha=$($r.plan_sha) tab-sha=$($r.tab_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
     exit 0
 }
 
