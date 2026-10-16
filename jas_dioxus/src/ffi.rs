@@ -3157,6 +3157,42 @@ mod tests {
         assert_eq!(panel_selection(e), vec!["ab0000".to_string(), "ab0001".to_string(), "ab0002".to_string()],
             "the range runs from the row's anchor to the clicked artboard");
         unsafe { jas_engine_free(e) };
+
+        // 4. MULTI-SELECT MOVE (§Drag-to-move): with two artboards selected, a
+        //    plain drag on either moves BOTH. The click's selection write
+        //    resolves at MOUSEUP (§Click-to-activate), so a press on an
+        //    artboard already selected must not narrow the selection first.
+        let two = |e: *mut JasEngine| {
+            gesture(e, (1000.0, 400.0), (1000.0, 400.0), MOD_SHIFT); // anchor ab0000 (row 0) .. ab0001
+            assert_eq!(panel_selection(e), vec!["ab0000".to_string(), "ab0001".to_string()],
+                "the control: two artboards are selected");
+        };
+        let e = setup(Some(0));
+        two(e);
+        gesture(e, (1000.0, 400.0), (1050.0, 430.0), 0);
+        assert_eq!(bounds(e, 0), (50.0, 30.0, 612.0, 792.0), "the other selected artboard moves too");
+        assert_eq!(bounds(e, 1), (750.0, 30.0, 612.0, 792.0), "the grabbed artboard moves");
+        assert_eq!(bounds(e, 2), (1400.0, 0.0, 612.0, 792.0), "the control: an unselected artboard stays");
+        assert_eq!(panel_selection(e), vec!["ab0000".to_string(), "ab0001".to_string()],
+            "a drag keeps the selection it moved");
+        unsafe { jas_engine_free(e) };
+
+        // 5. A plain CLICK (no drag) on an artboard already selected narrows
+        //    the selection to it, at mouseup.
+        let e = setup(Some(0));
+        two(e);
+        gesture(e, (1000.0, 400.0), (1000.0, 400.0), 0);
+        assert_eq!(panel_selection(e), vec!["ab0001".to_string()], "a click narrows to the clicked artboard");
+        assert_eq!(bounds(e, 1), (700.0, 0.0, 612.0, 792.0), "a click moves nothing");
+        unsafe { jas_engine_free(e) };
+
+        // 6. A plain drag on an artboard NOT selected selects it and moves it alone.
+        let e = setup(Some(0));
+        gesture(e, (1700.0, 400.0), (1750.0, 400.0), 0);
+        assert_eq!(panel_selection(e), vec!["ab0002".to_string()], "the grabbed artboard becomes the selection");
+        assert_eq!(bounds(e, 2), (1450.0, 0.0, 612.0, 792.0), "it moves");
+        assert_eq!(bounds(e, 0), (0.0, 0.0, 612.0, 792.0), "the previously selected artboard stays");
+        unsafe { jas_engine_free(e) };
     }
 
     /// A PLAN ENTRY NAMES THE EVENTS ITS NODE ANSWERS (flask STATUS § 315):
