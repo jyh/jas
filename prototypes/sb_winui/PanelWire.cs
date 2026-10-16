@@ -1083,7 +1083,6 @@ internal static class DialogWire
     }
 }
 
-/// <summary>The keys an action reply carries for the shell to act on.</summary>
 /// <summary>
 /// jas §314: a key reaches the engine as `jas_dispatch_action({"key": <name>,
 /// "mods": {"shift", "alt", "ctrl"}})`. The ENGINE resolves it (the active
@@ -1121,6 +1120,7 @@ internal static class KeyWire
         c < 0x20 || c == 0x7F || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF) ? null : char.ConvertFromUtf32((int)c);
 }
 
+/// <summary>The keys an action reply carries for the shell to act on.</summary>
 internal static class ActWire
 {
     /// <summary>

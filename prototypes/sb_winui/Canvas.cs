@@ -1051,11 +1051,6 @@ internal sealed unsafe class Canvas : IDisposable
     }
 
     /// <summary>
-    /// jas §300: a reply that names `close_window: true` closes the window, as
-    /// `remove_tab` closes a tab: `quit` with nothing edited, or Save Changes'
-    /// Don't Save. Read beside <see cref="ApplyRemoveTab"/> on every act reply.
-    /// </summary>
-    /// <summary>
     /// jas §314: a key goes to the engine as a dispatch, `{"key", "mods"}`, and
     /// the ENGINE resolves it (the active tool's claim, then `shortcuts.yaml`).
     /// Its act reply is read as any act's: a dialog it names (Delete's orphan
@@ -1108,10 +1103,16 @@ internal sealed unsafe class Canvas : IDisposable
         }
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
+        ApplySaveAllThenClose(reply, head);
         _report($"KEY RAN {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog={DialogWire.Named(reply) ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
     }
 
+    /// <summary>
+    /// jas §300: a reply that names `close_window: true` closes the window, as
+    /// `remove_tab` closes a tab: `quit` with nothing edited, or Save Changes'
+    /// Don't Save. Read beside <see cref="ApplyRemoveTab"/> on every act reply.
+    /// </summary>
     private void ApplyCloseWindow(string reply, string head)
     {
         if (!ActWire.CloseWindow(reply)) { return; }
