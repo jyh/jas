@@ -3856,6 +3856,29 @@ mod tests {
         e
     }
 
+    /// BRUSH OPTIONS IN LIBRARY_EDIT LOADS THE BRUSH IT EDITS, in the engine.
+    /// Its inits find the brush by `filter(...brushes, fun b -> b.slug == ...)[0]`;
+    /// until 2026-10-15 they read a `brushes_by_slug` index no port builds, so
+    /// every edit-mode init was null. Create mode keeps the declared defaults.
+    #[test]
+    fn brush_options_library_edit_loads_the_brush_in_the_engine() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"action":"open_brush_options","params":{"mode":"library_edit","library":"default_brushes","brush_slug":"round_7pt"}}"#);
+        assert!(reply.contains("brush_options"), "the dialog opened: {reply} {err}");
+        let got: Vec<serde_json::Value> = ["brush_name", "brush_type", "angle", "roundness", "size"].iter()
+            .map(|k| engine_of(e).store.borrow().get_dialog(k).clone()).collect();
+        assert_eq!(serde_json::json!(got), serde_json::json!(["7 pt. Round", "calligraphic", 0, 100, 7]));
+        unsafe { jas_engine_free(e) };
+
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"open_brush_options","params":{"mode":"create"}}"#);
+        let got: Vec<serde_json::Value> = ["brush_name", "brush_type", "angle", "roundness", "size"].iter()
+            .map(|k| engine_of(e).store.borrow().get_dialog(k).clone()).collect();
+        assert_eq!(serde_json::json!(got), serde_json::json!(["", "calligraphic", 0, 100, 5]));
+        unsafe { jas_engine_free(e) };
+    }
+
     /// `delete_selection` BY ACTION, the route a tool's YAML takes (the
     /// Artboard tool's Delete dispatches it) and the action corpus runs. Its
     /// `actions.yaml` body is a `log`, the menu's own verb, so until 2026-10-15

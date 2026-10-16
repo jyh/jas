@@ -28311,11 +28311,11 @@
         }
       },
       "init": {
-        "brush_name": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].name else dialog.brush_name",
-        "brush_type": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].type else dialog.brush_type",
-        "angle": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].angle else dialog.angle",
-        "roundness": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].roundness else dialog.roundness",
-        "size": "if param.brush_slug != null then data.brush_libraries[param.library].brushes_by_slug[param.brush_slug].size else dialog.size"
+        "brush_name": "if param.brush_slug != null then filter(data.brush_libraries[param.library].brushes, fun b -> b.slug == param.brush_slug)[0].name else dialog.brush_name",
+        "brush_type": "if param.brush_slug != null then filter(data.brush_libraries[param.library].brushes, fun b -> b.slug == param.brush_slug)[0].type else dialog.brush_type",
+        "angle": "if param.brush_slug != null then filter(data.brush_libraries[param.library].brushes, fun b -> b.slug == param.brush_slug)[0].angle else dialog.angle",
+        "roundness": "if param.brush_slug != null then filter(data.brush_libraries[param.library].brushes, fun b -> b.slug == param.brush_slug)[0].roundness else dialog.roundness",
+        "size": "if param.brush_slug != null then filter(data.brush_libraries[param.library].brushes, fun b -> b.slug == param.brush_slug)[0].size else dialog.size"
       },
       "content": {
         "type": "container",
