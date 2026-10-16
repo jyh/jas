@@ -624,6 +624,26 @@ static class Program
             + ActWire.CloseWindow("""{"close_window":1}""").ToString());
         Eq("close_window: a refusal's empty reply keeps the window", "False", ActWire.CloseWindow("").ToString());
         Eq("close_window: unreadable bytes keep the window", "False", ActWire.CloseWindow("{").ToString());
+        // jas §305: Save All names `"save_all_then_close": <bool>`, never with
+        // `close_window`. The SHELL saves every modified document, then closes
+        // only if every save succeeded. Only a named true acts.
+        Eq("save_all_then_close: Save All names it", "True",
+            ActWire.SaveAllThenClose("""{"changed":[],"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":true}""").ToString());
+        Eq("save_all_then_close: a false, a missing key or a non-boolean names none", "False|False|False",
+            ActWire.SaveAllThenClose("""{"save_all_then_close":false}""").ToString() + "|"
+            + ActWire.SaveAllThenClose("""{"close_window":true}""").ToString() + "|"
+            + ActWire.SaveAllThenClose("""{"save_all_then_close":"true"}""").ToString());
+        Eq("save_all_then_close: a refusal or unreadable bytes name none", "False|False",
+            ActWire.SaveAllThenClose("").ToString() + "|" + ActWire.SaveAllThenClose("{").ToString());
+        Eq("save_all_then_close: close_window alone is not a save", "False",
+            ActWire.SaveAllThenClose("""{"close_window":true,"save_all_then_close":null}""").ToString());
+        // What Save All does with this shell's ONE document.
+        Eq("save all: no document open closes at once", "close", ActWire.SaveAllStep(documentOpen: false, modified: true));
+        Eq("save all: an unmodified document closes at once", "close", ActWire.SaveAllStep(documentOpen: true, modified: false));
+        Eq("save all: a modified document is saved first", "save", ActWire.SaveAllStep(documentOpen: true, modified: true));
+        // After the save: close only if it wrote the file.
+        Eq("save all: a written save closes", "close", ActWire.AfterSaveAll(saved: true));
+        Eq("save all: a failed save keeps the window", "keep", ActWire.AfterSaveAll(saved: false));
         Eq("close: any other byte is no answer, never a guess", "unknown(7)", ActWire.CloseReading(7));
         Eq("clickable: an icon_button with an id", "True",
             PanelWire.Clickable("icon_button", "tb_rect", null).ToString());
