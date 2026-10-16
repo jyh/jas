@@ -2589,24 +2589,8 @@ fn run_yaml_effect(
         return deferred;
     }
 
-    // doc.delete_selection — delete every currently-selected element
-    // (reference-aware delete OK path). Mirrors the inline delete the
-    // menu/keyboard run when no orphan would result: snapshot is a
-    // separate effect (the YAML action lists `snapshot` before this),
-    // then delete_selection produces the new document and set_document
-    // commits it. The selection is preserved across opening the confirm
-    // dialog, so this deletes exactly what the user was about to delete.
-    // Routes through the SHARED `op_apply` dispatcher (which calls
-    // `apply_delete_selection`) so the deletion JOURNALS as a real
-    // `delete_selection` op (replays byte-identically; targets carry the
-    // pre-deletion selection ids) — OP_LOG.md §9 Phase P4.
-    if eff.get("doc.delete_selection").is_some() {
-        let op = serde_json::json!({ "op": "delete_selection" });
-        if let Some(tab) = st.tabs.get_mut(st.active_tab) {
-            let _ = crate::document::op_apply::op_apply(&mut tab.model, &op);
-        }
-        return deferred;
-    }
+    // doc.delete_selection is the shared runner's (`effects::run_doc_effect`),
+    // reached through the `doc.*` fallback below, so the engine runs it too.
 
     // doc.clone_at: path_expr — PHASE3 §5.5
     // Deep-clones the element at path (without mutating the doc) and
