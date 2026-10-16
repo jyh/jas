@@ -1937,7 +1937,7 @@ fn run_doc_effect(
             // is silent.
             //
             // Snapshots before mutating so the delete is undoable.
-            artboard_delete_panel_selected(model, store);
+            artboard_delete_panel_selected(model, store, ctx);
         }
         "doc.artboard.duplicate_init" => {
             // Create the duplicate-in-progress at the source artboard's
@@ -4237,8 +4237,17 @@ fn artboard_delete_panel_selected_with_ids(model: &mut Model, target_ids: &[Stri
 /// Implementation of doc.artboard.delete_panel_selected. Removes
 /// every panel-selected artboard from document.artboards, subject
 /// to the at-least-one invariant. Snapshots for undo before mutating.
-fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore) {
-    let target_ids = read_artboard_panel_selection(store);
+fn artboard_delete_panel_selected(model: &mut Model, store: &mut StateStore, ctx: &serde_json::Value) {
+    // The CALL's `active_document` first: a tool runs on its own store, so
+    // its host hands it the panel selection in the dispatch context (the
+    // engine's key route, 2026-10-15). The store's own context is the
+    // fallback the other routes have always used.
+    let from_ctx: Option<Vec<String>> = ctx
+        .get("active_document")
+        .and_then(|d| d.get("artboards_panel_selection_ids"))
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+    let target_ids = from_ctx.unwrap_or_else(|| read_artboard_panel_selection(store));
     artboard_delete_panel_selected_with_ids(model, &target_ids);
 }
 

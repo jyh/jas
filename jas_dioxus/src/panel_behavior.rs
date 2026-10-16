@@ -313,18 +313,7 @@ impl EffectHost for EngineHost {
         // orphan opens `delete_orphan_confirm` through the dialog door with
         // its `count`, as the web's Delete does, and deletes nothing.
         if action == "delete_selection" {
-            use crate::workspace::menu_native::{delete_selection, DeleteOutcome};
-            let Some(model) = model else { return Some(Some(Unhandled::NoModel(action.into()))) };
-            if let DeleteOutcome::WouldOrphan(count) = delete_selection(model) {
-                const ID: &str = "delete_orphan_confirm";
-                let ws = crate::interpreter::workspace::Workspace::load();
-                let Some(def) = ws.as_ref().and_then(|w| w.dialog(ID)) else {
-                    return Some(Some(Unhandled::UnknownDialog(ID.into())));
-                };
-                let params = [("count".to_string(), Value::from(count))].into_iter().collect();
-                open_dialog_in(ID, def, Some(params), None, &Value::Null, store, Some(model));
-            }
-            return Some(None);
+            return Some(crate::workspace::menu_native::run_delete_selection(store, model));
         }
         if action == "save_all_then_close" {
             self.save_all_then_close = true;

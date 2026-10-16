@@ -71,6 +71,12 @@ protocol CanvasTool: AnyObject {
     func cursorOverride() -> String?
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool
+    /// True when the tool takes the named `key` BEFORE the app's shortcuts
+    /// (a YAML tool's `claims_keys`); its handler owns the fall-through.
+    func claimsKey(_ key: String) -> Bool
+    /// Hand the tool document facts its host knows and its own store does not
+    /// (the Artboards panel's `artboards_panel_selection_ids`).
+    func setDocumentFacts(_ facts: [String: Any])
 }
 
 /// Default implementations for optional protocol methods.
@@ -90,6 +96,8 @@ extension CanvasTool {
     func cursorOverride() -> String? { nil }
     func pasteText(_ ctx: ToolContext, _ text: String) -> Bool { false }
     func onKeyEvent(_ ctx: ToolContext, _ key: String, _ mods: KeyMods) -> Bool { false }
+    func claimsKey(_ key: String) -> Bool { false }
+    func setDocumentFacts(_ facts: [String: Any]) {}
 }
 
 // MARK: - Helpers

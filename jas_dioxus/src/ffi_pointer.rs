@@ -326,7 +326,20 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
     // once it declares `on_keydown`, so its answer cannot mean "fall through":
     // the capture test decides, as on the web.
     if matches!(code, KEY_DELETE | KEY_BACKSPACE) {
-        let captured = engine.tool_slot().as_ref().is_some_and(|(_, t)| t.captures_keyboard());
+        // A tool that CLAIMS the key (`claims_keys`, the Artboard tool's
+        // Delete) takes it too, and owns the fall-through.
+        let key = if code == KEY_DELETE { "Delete" } else { "Backspace" };
+        let captured = engine.tool_slot().as_ref()
+            .is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(key));
+        // A claimed key reaches a tool that runs on its own store, so hand it
+        // the Artboards panel's selection the engine's store holds (the
+        // Artboard tool's Delete reads `artboards_panel_selection_ids`).
+        if engine.tool_slot().as_ref().is_some_and(|(_, t)| t.claims_key(key)) {
+            let facts = engine.artboard_facts();
+            if let Some((_, t)) = engine.tool_slot().as_mut() {
+                t.set_document_facts(&facts);
+            }
+        }
         if !captured {
             return delete_selection_key(engine);
         }
@@ -335,6 +348,14 @@ pub unsafe extern "C" fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) 
         let mut slot = engine.tool_slot();
         let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
         let handled = engine.with_model_mut(|m| tool.on_key_event(m, key, km));
+        // A dialog the key opened in the tool (the Artboard tool's Delete
+        // falling through to an orphaning `delete_selection`) moves to the
+        // engine's store, as a pointer event's does.
+        let opened = tool.take_opened_dialog();
+        drop(slot);
+        if let Some((id, params)) = opened {
+            crate::ffi::open_tool_dialog(engine, &id, &params);
+        }
         return if handled { JasStatus::Ok } else { JasStatus::UnknownVerb };
     }
     let Some(ch) = char::from_u32(code) else { return JasStatus::BadParamType };
