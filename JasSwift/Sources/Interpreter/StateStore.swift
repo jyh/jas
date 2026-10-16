@@ -482,6 +482,12 @@ public class StateStore {
         // read as `tool.<id>.<key>`.
         ctx["tool"] = tools
 
+        // The data namespace (brush_libraries, swatch_libraries), so a dialog
+        // init or an action reads `data.*` from the store the library effects
+        // write, as `state_store.py` does. Until 2026-10-15 no port's context
+        // carried it, so Brush Options' edit-mode inits were null everywhere.
+        ctx["data"] = data
+
         if dialogId != nil {
             ctx["dialog"] = dialog
             if let params = dialogParams {
