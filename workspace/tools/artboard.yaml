@@ -7,8 +7,9 @@
 #   idle                  — waiting for input
 #   creating              — drag-to-create rectangle from empty canvas
 #   moving_pending        — pressed on artboard interior; below 4 px
-#                           threshold (sub-threshold mouseup is a click,
-#                           which the probe_hit already handled)
+#                           threshold (sub-threshold mouseup is a click:
+#                           on an artboard that was already selected it
+#                           narrows the selection to it, see below)
 #   moving                — translating panel-selected artboards
 #   resizing              — dragging a handle on the single panel-selected
 #                           artboard
@@ -20,7 +21,12 @@
 # hit-test per ARTBOARD_TOOL.md §Mousedown disambiguation order
 # (resize handle > artboard interior with topmost-in-list-wins on
 # overlap > empty canvas), writes panel-selection if the click was on
-# an interior, and sets tool.artboard.mode + hit_* state. Subsequent
+# an interior, and sets tool.artboard.mode + hit_* state. A plain press
+# on an artboard that is ALREADY panel-selected writes nothing, so a drag
+# moves every selected artboard together; it latches click_narrows, and a
+# release without a drag narrows the selection to that artboard
+# (doc.artboard.click_narrow; ARTBOARD_TOOL.md §Click-to-activate resolves
+# at mouseup). Subsequent
 # on_mousemove dispatches the in-flight effect for the active mode;
 # on_mouseup commits with integer-pt rounding.
 #
@@ -70,6 +76,12 @@ state:
   hit_artboard_id: { default: null }
   # One of "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w", or null.
   hit_handle_pos:  { default: null }
+  # The id a plain press landed on when that artboard was ALREADY one of
+  # the panel-selected artboards, else null. The press leaves the selection
+  # alone so a drag moves every selected artboard (ARTBOARD_TOOL.md
+  # §Drag-to-move, multi-select); a release without a drag then narrows the
+  # selection to this one (§Click-to-activate: the click resolves at mouseup).
+  click_narrows:   { default: null }
   # Hover classification updated on every mousemove by
   # doc.artboard.probe_hover. Drives the dynamic cursor in
   # cursor_css_override:
@@ -227,6 +239,13 @@ handlers:
             cursor_x: "event.doc_x"
             cursor_y: "event.doc_y"
         - "doc.preview.clear": {}
+    # A plain click (no drag) on an artboard that was already selected:
+    # the selection narrows to it now, at mouseup. A press on an unselected
+    # artboard selected it at mousedown, so click_narrows is null there.
+    - if: "tool.artboard.mode == 'moving_pending' && not tool.artboard.moved"
+      then:
+        - "doc.artboard.click_narrow": {}
+    - set: { tool.artboard.click_narrows: "null" }
     - set: { tool.artboard.mode:  "'idle'" }
     - set: { tool.artboard.moved: "false" }
 
