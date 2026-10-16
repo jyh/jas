@@ -3503,6 +3503,23 @@ class CanvasNSView: NSView {
                 return
             }
         }
+        // A tool that CLAIMS the key (`claims_keys`: the Artboard tool's
+        // Delete, ARTBOARD_TOOL.md §Delete behavior) takes it, and its handler
+        // owns the fall-through to `delete_selection`. It runs on its own
+        // store, so it is handed the Artboards panel's selection.
+        if let ctx = toolContext {
+            let key = canonicalKeyName(event)
+            if activeTool.claimsKey(key) {
+                activeTool.setDocumentFacts(["artboards_panel_selection_ids": artboardsPanelSelection])
+                let mods = KeyMods(
+                    shift: event.modifierFlags.contains(.shift),
+                    ctrl: event.modifierFlags.contains(.control),
+                    alt: event.modifierFlags.contains(.option),
+                    cmd: event.modifierFlags.contains(.command)
+                )
+                if activeTool.onKeyEvent(ctx, key, mods) { return }
+            }
+        }
         if let ctx = toolContext, activeTool.onKey(ctx, keyCode: event.keyCode) {
             return
         }
@@ -3977,14 +3994,8 @@ class CanvasNSView: NSView {
     /// guard — the canvas's single Delete path, shared by the keyboard Delete /
     /// Backspace and the context-menu Delete so they behave identically.
     private func performDeleteSelection() {
-        guard let model = controller?.model, !model.document.selection.isEmpty else { return }
-        let doc = model.document
-        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
-        if !orphaned.isEmpty && !JasCommands.confirmOrphaningDelete(orphaned.count) {
-            return
-        }
-        // Undoable: editDocument self-brackets one undo step.
-        model.editDocument(doc.deleteSelection())
+        guard let model = controller?.model else { return }
+        JasCommands.deleteSelectionReferenceAware(model)
     }
 
     /// Two-finger scroll → pan (SH-1). A thin AppKit adapter: read the event's

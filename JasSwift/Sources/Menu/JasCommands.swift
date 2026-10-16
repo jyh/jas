@@ -714,6 +714,22 @@ public struct JasCommands: Commands {
         }
     }
 
+    /// The reference-aware delete every Swift Delete route runs: nothing
+    /// selected changes nothing; a delete that would ORPHAN a live instance
+    /// asks first (`confirmOrphaningDelete`); otherwise ONE undo step. The
+    /// canvas's Delete key and a YAML tool's `dispatch: delete_selection` (the
+    /// Artboard tool's fall-through) both call it.
+    static func deleteSelectionReferenceAware(_ model: Model) {
+        let doc = model.document
+        guard !doc.selection.isEmpty else { return }
+        let orphaned = DependencyIndex.orphanedReferences(doc, doc.selection.map(\.path))
+        if !orphaned.isEmpty && !confirmOrphaningDelete(orphaned.count) {
+            return
+        }
+        // Undoable: editDocument self-brackets one undo step.
+        model.editDocument(doc.deleteSelection())
+    }
+
     /// Present the synchronous warn-then-orphan confirm (mirrors `revert()`'s
     /// `NSAlert` precedent). Returns `true` if the user confirmed the delete.
     /// "Cancel" is the default/escape button (the safe choice); "Delete" is the

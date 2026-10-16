@@ -1421,8 +1421,17 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
     // ARTBOARDS.md §At-least-one-artboard invariant. Snapshots for
     // undo. Silent no-op when selection spans every artboard
     // (tooltip surface deferred per spec).
-    effects["doc.artboard.delete_panel_selected"] = { _, _, store in
-        artboardDeletePanelSelected(model: model, store: store)
+    effects["doc.artboard.delete_panel_selected"] = { _, ctx, store in
+        artboardDeletePanelSelected(model: model, store: store, ctx: ctx)
+        return nil
+    }
+
+    // `dispatch: delete_selection` from a tool (the Artboard tool's Delete
+    // falls through to it): its YAML body is the menu's `log`, so the runner
+    // asks this `action:` entry first and the reference-aware delete RUNS
+    // (Rust `ToolHost::run_action`).
+    effects["action:delete_selection"] = { _, _, _ in
+        JasCommands.deleteSelectionReferenceAware(model)
         return nil
     }
 
@@ -4634,8 +4643,12 @@ private func artboardDuplicateInit(model: Model, store: StateStore) {
 
 /// doc.artboard.delete_panel_selected — at-least-one invariant
 /// per ARTBOARDS.md.
-private func artboardDeletePanelSelected(model: Model, store: StateStore) {
-    let targetIds = readArtboardPanelSelection(store)
+private func artboardDeletePanelSelected(model: Model, store: StateStore, ctx: [String: Any]) {
+    // The CALL's `active_document` first: a tool runs on its own store, so
+    // its host hands it the panel selection (Rust, the same order).
+    let fromCtx = ((ctx["active_document"] as? [String: Any])?["artboards_panel_selection_ids"] as? [Any])?
+        .compactMap { $0 as? String }
+    let targetIds = fromCtx ?? readArtboardPanelSelection(store)
     if targetIds.isEmpty { return }
     let total = model.document.artboards.count
     if targetIds.count >= total { return }  // invariant block
