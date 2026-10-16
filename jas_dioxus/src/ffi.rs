@@ -632,6 +632,23 @@ fn seed_panel(engine: &JasEngine, ws: &Workspace, panel_id: &str) {
     }
 }
 
+/// Apply the panel-state writes a tool queued during one event (the Artboard
+/// tool's click selection, `doc.artboard.probe_hit`) to the engine's store,
+/// seeding the panel's scope first, since `set_panel` drops a write to a panel
+/// with none. The web's canvas routing does the same after every event
+/// (`apply_pending_panel_writes`). Until 2026-10-16 the pointer route never
+/// drained them, so a canvas click never reached the Artboards panel.
+pub(crate) fn apply_tool_panel_writes(engine: &JasEngine, writes: Vec<(String, String, serde_json::Value)>) {
+    if writes.is_empty() {
+        return;
+    }
+    let Some(ws) = Workspace::load() else { return };
+    for (panel, key, value) in writes {
+        seed_panel(engine, &ws, &crate::interpreter::state_store::panel_content_id(&panel));
+        engine.store.borrow_mut().set_panel(&panel, &key, value);
+    }
+}
+
 /// The panel's resolved bind VALUES — the ninth materializer function.
 ///
 /// `jas_widget_tree` is **value-blind by design**: it records the sorted KEY

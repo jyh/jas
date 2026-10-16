@@ -447,7 +447,11 @@ fn engine_document_view(store: &StateStore, model: &Model) -> Value {
     let artboards: Vec<String> = read("artboards", "artboards_panel_selection")
         .and_then(|v| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()))
         .unwrap_or_default();
-    let anchor = read("artboards", "artboards_panel_anchor");
+    // The panel's own state key (`artboards.yaml` declares
+    // `panel_selection_anchor`); the view publishes it as
+    // `artboards_panel_anchor`. Until 2026-10-16 this read the view's name,
+    // which no store holds, so the anchor was always null.
+    let anchor = read("artboards", "panel_selection_anchor");
     crate::interpreter::document_views::active_document_view(
         model, &layers, &artboards, anchor.as_ref().and_then(Value::as_str))
 }
@@ -561,7 +565,8 @@ pub fn seed_library_data(store: &mut StateStore) {
 /// * `current_artboard` / `current_artboard_id`: the first SELECTED artboard in
 ///   DOCUMENT order, else the first artboard; `{}` and `null` when there is none,
 ///   so `current_artboard.width` does not null-deref;
-/// * `next_artboard_name`: the smallest unused "Artboard N".
+/// * `next_artboard_name`: the smallest unused "Artboard N";
+/// * `artboards_panel_anchor`: the store's `panel_selection_anchor`, else null.
 ///
 /// Before it the scope stated the selection as a hard-coded `[]` and carried no
 /// `current_artboard`, so `ap_new` created a default-sized artboard where the
@@ -580,6 +585,12 @@ pub(crate) fn artboard_facts(store: &StateStore, doc: &Document) -> Map<String, 
         .or_else(|| doc.artboards.first());
     let mut m = Map::new();
     m.insert("artboards_panel_selection_ids".into(), json!(selected));
+    // The shift-click range's anchor (the panel's `panel_selection_anchor`),
+    // under the view's name, as `document_views::active_document_view`
+    // publishes it: the Artboard tool's canvas Shift-click reads it.
+    let anchor = store.panel_scope("artboards").and_then(|p| p.get("panel_selection_anchor"))
+        .filter(|v| v.is_string()).cloned().unwrap_or(Value::Null);
+    m.insert("artboards_panel_anchor".into(), anchor);
     m.insert("current_artboard_id".into(), current.map_or(Value::Null, |a| json!(a.id)));
     m.insert(
         "current_artboard".into(),
