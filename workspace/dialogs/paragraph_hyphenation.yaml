@@ -114,6 +114,20 @@ paragraph_hyphenation:
   # attrs across the selection. A future patch extends the harness
   # to capture attr maps keyed by element path and wires each
   # dialog field's restore here.
+  # Each field opens on the value every selected paragraph agrees on, and
+  # null (a blank field) where they differ, as the Justification dialog does.
+  # An absent attribute reads as the default above; with no paragraph
+  # selected, every field is its default. OK leaves a still-blank field
+  # untouched on every paragraph.
+  init:
+    hyphenate: "active_document.paragraph_wrappers.hyphenate"
+    hyphenate_min_word: "active_document.paragraph_wrappers.hyphenate_min_word"
+    hyphenate_min_before: "active_document.paragraph_wrappers.hyphenate_min_before"
+    hyphenate_min_after: "active_document.paragraph_wrappers.hyphenate_min_after"
+    hyphenate_limit: "active_document.paragraph_wrappers.hyphenate_limit"
+    hyphenate_zone: "active_document.paragraph_wrappers.hyphenate_zone"
+    hyphenate_bias: "active_document.paragraph_wrappers.hyphenate_bias"
+    hyphenate_capitalized: "active_document.paragraph_wrappers.hyphenate_capitalized"
   preview_targets: {}
 
   content:

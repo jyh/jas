@@ -8954,7 +8954,7 @@
         },
         "paragraph_wrappers": {
           "type": "object",
-          "description": "The Justification dialog's eleven fields as the selected paragraphs hold them: the value every selected paragraph agrees on, null where they differ, and an absent attribute read as the dialog's declared default. With no paragraph selected every field is its default. The dialog's init reads it."
+          "description": "The Justification dialog's eleven fields and the Hyphenation dialog's eight as the selected paragraphs hold them: the value every selected paragraph agrees on, null where they differ, and an absent attribute read as its dialog's declared default. With no paragraph selected every field is its default. Both dialogs' init read it."
         },
         "has_selection": {
           "type": "bool",
@@ -31592,6 +31592,16 @@
           "default": false,
           "description": "Preview checkbox. When on, every edit live-applies to the selected paragraphs. Cancel always rolls back to the on-open snapshot via the Phase 0 preview snapshot/restore harness.\n"
         }
+      },
+      "init": {
+        "hyphenate": "active_document.paragraph_wrappers.hyphenate",
+        "hyphenate_min_word": "active_document.paragraph_wrappers.hyphenate_min_word",
+        "hyphenate_min_before": "active_document.paragraph_wrappers.hyphenate_min_before",
+        "hyphenate_min_after": "active_document.paragraph_wrappers.hyphenate_min_after",
+        "hyphenate_limit": "active_document.paragraph_wrappers.hyphenate_limit",
+        "hyphenate_zone": "active_document.paragraph_wrappers.hyphenate_zone",
+        "hyphenate_bias": "active_document.paragraph_wrappers.hyphenate_bias",
+        "hyphenate_capitalized": "active_document.paragraph_wrappers.hyphenate_capitalized"
       },
       "preview_targets": {},
       "content": {

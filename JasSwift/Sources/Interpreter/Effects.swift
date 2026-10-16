@@ -2106,6 +2106,21 @@ public func applyHyphenationDialogToSelection(
     let zone = optN(v.zone, default: 0)
     let bias = optN(v.bias, default: 0)
     let cap = optB(v.capitalized)
+    // A nil field was BLANK in the dialog (the paragraphs differ) and leaves
+    // each wrapper's own value; a given value writes, omitted at its identity.
+    func writeHyphenation(_ t: Tspan) -> Tspan {
+        func pick<T>(_ given: T?, _ written: T?, _ existing: T?) -> T? { given == nil ? existing : written }
+        return withHyphenationAttrs(
+            t,
+            hyphenate: pick(v.hyphenate, hyph, t.jasHyphenate),
+            minWord: pick(v.minWord, minWord, t.jasHyphenateMinWord),
+            minBefore: pick(v.minBefore, minBefore, t.jasHyphenateMinBefore),
+            minAfter: pick(v.minAfter, minAfter, t.jasHyphenateMinAfter),
+            limit: pick(v.limit, limit, t.jasHyphenateLimit),
+            zone: pick(v.zone, zone, t.jasHyphenateZone),
+            bias: pick(v.bias, bias, t.jasHyphenateBias),
+            capitalized: pick(v.capitalized, cap, t.jasHyphenateCapitalized))
+    }
 
     let model = controller.model
     let doc = model.document
@@ -2127,22 +2142,14 @@ public func applyHyphenationDialogToSelection(
             var tspans = t.tspans
             let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
-                tspans[i] = withHyphenationAttrs(
-                    tspans[i],
-                    hyphenate: hyph,
-                    minWord: minWord, minBefore: minBefore, minAfter: minAfter,
-                    limit: limit, zone: zone, bias: bias, capitalized: cap)
+                tspans[i] = writeHyphenation(tspans[i])
             }
             newElem = .text(t.withTspans(tspans))
         case .textPath(let tp):
             var tspans = tp.tspans
             let wrapperIdx = ensureParagraphWrapper(&tspans)
             for i in wrapperIdx {
-                tspans[i] = withHyphenationAttrs(
-                    tspans[i],
-                    hyphenate: hyph,
-                    minWord: minWord, minBefore: minBefore, minAfter: minAfter,
-                    limit: limit, zone: zone, bias: bias, capitalized: cap)
+                tspans[i] = writeHyphenation(tspans[i])
             }
             newElem = .textPath(tp.withTspans(tspans))
         default:
