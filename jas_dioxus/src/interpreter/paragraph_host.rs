@@ -1166,3 +1166,194 @@ mod tests {
         assert!(apply_field(&mut model, &store, "align_left"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// The Justification and Hyphenation dialogs' OK
+// ---------------------------------------------------------------------------
+//
+// Moved out of the web-gated `AppState` (2026-10-15) so the ENGINE's OK writes
+// the document too; the web app calls the same two functions. Each field is an
+// `Option`: `None` is a field the dialog left blank (the paragraphs differ,
+// PARAGRAPH.md "Mixed selection"), which leaves every paragraph's own
+// attribute. A value at its identity default omits the attribute.
+
+/// The 11 Justification-dialog field values. `None` leaves the wrappers' own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct JustificationDialogValues {
+    pub word_spacing_min: Option<f64>,
+    pub word_spacing_desired: Option<f64>,
+    pub word_spacing_max: Option<f64>,
+    pub letter_spacing_min: Option<f64>,
+    pub letter_spacing_desired: Option<f64>,
+    pub letter_spacing_max: Option<f64>,
+    pub glyph_scaling_min: Option<f64>,
+    pub glyph_scaling_desired: Option<f64>,
+    pub glyph_scaling_max: Option<f64>,
+    pub auto_leading: Option<f64>,
+    pub single_word_justify: Option<String>,
+}
+
+impl JustificationDialogValues {
+    /// Read the values from the open dialog's fields, by their dialog keys.
+    pub fn from_dialog(get: impl Fn(&str) -> Option<serde_json::Value>) -> Self {
+        let f = |k: &str| get(k).and_then(|v| v.as_f64());
+        Self {
+            word_spacing_min: f("word_spacing_min"),
+            word_spacing_desired: f("word_spacing_desired"),
+            word_spacing_max: f("word_spacing_max"),
+            letter_spacing_min: f("letter_spacing_min"),
+            letter_spacing_desired: f("letter_spacing_desired"),
+            letter_spacing_max: f("letter_spacing_max"),
+            glyph_scaling_min: f("glyph_scaling_min"),
+            glyph_scaling_desired: f("glyph_scaling_desired"),
+            glyph_scaling_max: f("glyph_scaling_max"),
+            auto_leading: f("auto_leading"),
+            single_word_justify: get("single_word_justify")
+                .and_then(|v| v.as_str().map(String::from)),
+        }
+    }
+}
+
+/// The 8 Hyphenation-dialog field values (the master and 7 details).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct HyphenationDialogValues {
+    pub hyphenate: Option<bool>,
+    pub min_word: Option<f64>,
+    pub min_before: Option<f64>,
+    pub min_after: Option<f64>,
+    pub limit: Option<f64>,
+    pub zone: Option<f64>,
+    pub bias: Option<f64>,
+    pub capitalized: Option<bool>,
+}
+
+impl HyphenationDialogValues {
+    /// Read the values from the open dialog's fields, by their dialog keys.
+    pub fn from_dialog(get: impl Fn(&str) -> Option<serde_json::Value>) -> Self {
+        let f = |k: &str| get(k).and_then(|v| v.as_f64());
+        let b = |k: &str| get(k).and_then(|v| v.as_bool());
+        Self {
+            hyphenate: b("hyphenate"),
+            min_word: f("hyphenate_min_word"),
+            min_before: f("hyphenate_min_before"),
+            min_after: f("hyphenate_min_after"),
+            limit: f("hyphenate_limit"),
+            zone: f("hyphenate_zone"),
+            bias: f("hyphenate_bias"),
+            capitalized: b("hyphenate_capitalized"),
+        }
+    }
+}
+
+/// `Some(None)` at the identity default (omit), `Some(Some(v))` otherwise,
+/// `None` for a blank field (leave the wrapper's own).
+fn opt_n(value: Option<f64>, default: f64) -> Option<Option<f64>> {
+    value.map(|v| if (v - default).abs() < 1e-6 { None } else { Some(v) })
+}
+
+/// A checkbox: off is the identity (omit).
+fn opt_b(value: Option<bool>) -> Option<Option<bool>> {
+    value.map(|v| if !v { None } else { Some(true) })
+}
+
+/// Write `write` onto every paragraph wrapper of every selected Text /
+/// TextPath, repairing the wrapper first. One `edit_document`, so the whole
+/// OK is ONE undo step. Returns whether anything was selected to write.
+fn write_selected_wrappers(
+    model: &mut crate::document::model::Model, write: impl Fn(&mut Tspan),
+) -> bool {
+    use crate::geometry::element::Element;
+    let mut doc = model.document().clone();
+    let paths: Vec<Vec<usize>> = doc.selection.iter()
+        .filter(|es| matches!(doc.get_element(&es.path),
+                              Some(Element::Text(_)) | Some(Element::TextPath(_))))
+        .map(|es| es.path.clone())
+        .collect();
+    if paths.is_empty() { return false; }
+    let rewrite = |tspans: &Vec<Tspan>| {
+        let mut tspans = tspans.clone();
+        for i in ensure_paragraph_wrapper(&mut tspans) {
+            write(&mut tspans[i]);
+        }
+        tspans
+    };
+    for path in paths {
+        let new_elem = match doc.get_element(&path) {
+            Some(Element::Text(t)) => {
+                let mut nt = t.clone();
+                nt.tspans = rewrite(&t.tspans);
+                Element::Text(nt)
+            }
+            Some(Element::TextPath(tp)) => {
+                let mut ntp = tp.clone();
+                ntp.tspans = rewrite(&tp.tspans);
+                Element::TextPath(ntp)
+            }
+            _ => continue,
+        };
+        doc = doc.replace_element(&path, new_elem);
+    }
+    model.edit_document(doc);
+    true
+}
+
+/// **Justification's OK**: the 11 values onto every selected paragraph
+/// wrapper. Identity defaults (PARAGRAPH.md §Justification Dialog): word
+/// spacing 80/100/133, letter spacing 0/0/0, glyph scaling 100/100/100,
+/// auto leading 120, single-word justify `justify`.
+pub fn apply_justification_dialog(
+    model: &mut crate::document::model::Model, v: &JustificationDialogValues,
+) -> bool {
+    let ws_min = opt_n(v.word_spacing_min, 80.0);
+    let ws_des = opt_n(v.word_spacing_desired, 100.0);
+    let ws_max = opt_n(v.word_spacing_max, 133.0);
+    let ls_min = opt_n(v.letter_spacing_min, 0.0);
+    let ls_des = opt_n(v.letter_spacing_desired, 0.0);
+    let ls_max = opt_n(v.letter_spacing_max, 0.0);
+    let gs_min = opt_n(v.glyph_scaling_min, 100.0);
+    let gs_des = opt_n(v.glyph_scaling_desired, 100.0);
+    let gs_max = opt_n(v.glyph_scaling_max, 100.0);
+    let auto_leading = opt_n(v.auto_leading, 120.0);
+    let single_word_justify = v.single_word_justify.clone()
+        .map(|s| (s != "justify").then_some(s));
+    write_selected_wrappers(model, |w| {
+        if let Some(x) = ws_min { w.jas_word_spacing_min = x; }
+        if let Some(x) = ws_des { w.jas_word_spacing_desired = x; }
+        if let Some(x) = ws_max { w.jas_word_spacing_max = x; }
+        if let Some(x) = ls_min { w.jas_letter_spacing_min = x; }
+        if let Some(x) = ls_des { w.jas_letter_spacing_desired = x; }
+        if let Some(x) = ls_max { w.jas_letter_spacing_max = x; }
+        if let Some(x) = gs_min { w.jas_glyph_scaling_min = x; }
+        if let Some(x) = gs_des { w.jas_glyph_scaling_desired = x; }
+        if let Some(x) = gs_max { w.jas_glyph_scaling_max = x; }
+        if let Some(x) = auto_leading { w.jas_auto_leading = x; }
+        if let Some(x) = &single_word_justify { w.jas_single_word_justify = x.clone(); }
+    })
+}
+
+/// **Hyphenation's OK**: the master and 7 details onto every selected
+/// paragraph wrapper. Identity defaults: master off, min word 6, min before 2,
+/// min after 2 (ruled 2026-10-15 (A2): what the layout reads an absent
+/// attribute as), limit 0, zone 0, bias 0, capitalized off.
+pub fn apply_hyphenation_dialog(
+    model: &mut crate::document::model::Model, v: &HyphenationDialogValues,
+) -> bool {
+    let hyph = opt_b(v.hyphenate);
+    let min_word = opt_n(v.min_word, 6.0);
+    let min_before = opt_n(v.min_before, 2.0);
+    let min_after = opt_n(v.min_after, 2.0);
+    let limit = opt_n(v.limit, 0.0);
+    let zone = opt_n(v.zone, 0.0);
+    let bias = opt_n(v.bias, 0.0);
+    let capitalized = opt_b(v.capitalized);
+    write_selected_wrappers(model, |w| {
+        if let Some(x) = hyph { w.jas_hyphenate = x; }
+        if let Some(x) = min_word { w.jas_hyphenate_min_word = x; }
+        if let Some(x) = min_before { w.jas_hyphenate_min_before = x; }
+        if let Some(x) = min_after { w.jas_hyphenate_min_after = x; }
+        if let Some(x) = limit { w.jas_hyphenate_limit = x; }
+        if let Some(x) = zone { w.jas_hyphenate_zone = x; }
+        if let Some(x) = bias { w.jas_hyphenate_bias = x; }
+        if let Some(x) = capitalized { w.jas_hyphenate_capitalized = x; }
+    })
+}
