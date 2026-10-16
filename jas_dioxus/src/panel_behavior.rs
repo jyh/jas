@@ -216,6 +216,11 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 /// * `close_window` is claimed and NAMED the same way: the engine owns no
 ///   window, so the host records it in [`EngineHost::closed_window`] and the
 ///   reply carries `"close_window": true` (flask STATUS # 298, jas # 299).
+/// * `save_all_then_close` is claimed and NAMED the same way: the engine can
+///   neither save nor close, so the host records it in
+///   [`EngineHost::save_all_then_close`] and the reply carries
+///   `"save_all_then_close": true` (jas STATUS # 303). It never sets
+///   `closed_window`: the shell closes only after its saves succeed.
 ///
 /// Everything else is declined, so the runner reports it.
 #[derive(Default)]
@@ -226,6 +231,8 @@ pub struct EngineHost {
     pub removed_tab: Option<i64>,
     /// A `close_window` asked the shell to close the application window.
     pub closed_window: bool,
+    /// A `save_all_then_close` asked the shell to save every document, then close.
+    pub save_all_then_close: bool,
 }
 
 impl EffectHost for EngineHost {
@@ -271,6 +278,10 @@ impl EffectHost for EngineHost {
         // its `remove_child` refuses by name rather than removing a guess.
         if action == "close_window" {
             self.closed_window = true;
+            return Some(None);
+        }
+        if action == "save_all_then_close" {
+            self.save_all_then_close = true;
             return Some(None);
         }
         if action == "remove_tab" {

@@ -697,9 +697,13 @@ struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
  * # The reply
  *
  * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
- * "remove_tab": <index> | null, "close_window": <bool>}` ([`act_reply`]).
+ * "remove_tab": <index> | null, "close_window": <bool>,
+ * "save_all_then_close": <bool>}` ([`act_reply`]).
  * `close_window` names a window close the shell must do (the engine owns no
- * window): `quit` with nothing edited, or Save Changes' Don't Save. `remove_tab` names a tab
+ * window): `quit` with nothing edited, or Save Changes' Don't Save.
+ * `save_all_then_close` (Save Changes' Save All) names "save every modified
+ * document, then close the window only if every save succeeded"; it never
+ * comes with `close_window`, so a shell cannot close before saving. `remove_tab` names a tab
  * the shell must remove (the engine owns no tabs): an unedited `close_tab`,
  * or Save Changes' Discard (design 2026-10-14 §10). Each row is a
  * [`jas_panel_event`] delta row, tagged with its `panel`, across every open
