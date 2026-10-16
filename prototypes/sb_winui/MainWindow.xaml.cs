@@ -1165,7 +1165,7 @@ public sealed partial class MainWindow : Window
         // reaches `OnCharacterReceived` as a letter (Ctrl+Z arrives there as the
         // control character 0x1A, which it skips), so a Ctrl+letter is sent from
         // HERE, as the lowercase letter with MOD_CMD. The core acts on undo and
-        // redo and leaves every other chord to the menu (`jas_key_event`).
+        // redo and leaves every other chord to the menu (`{"key"}` dispatch, jas §314).
         if (code == 0 && (mods & JasCore.ModCmd) != 0
             && e.Key >= Windows.System.VirtualKey.A && e.Key <= Windows.System.VirtualKey.Z)
         {

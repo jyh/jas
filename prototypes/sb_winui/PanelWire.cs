@@ -1116,6 +1116,43 @@ internal static class DialogWire
     }
 }
 
+/// <summary>
+/// jas §314: a key reaches the engine as `jas_dispatch_action({"key": <name>,
+/// "mods": {"shift", "alt", "ctrl"}})`. The ENGINE resolves it (the active
+/// tool's claim, then `shortcuts.yaml`) and answers with the act reply, so the
+/// shell holds no binding and reads a dialog or a close from a key as from any
+/// act.
+/// </summary>
+internal static class KeyWire
+{
+    /// <summary>The request for a key named <paramref name="name"/> (`Delete`,
+    /// `Backspace`, `Enter`, `Escape`, or one character), or null for no name.
+    /// Every flag is written; `ctrl` is the command modifier.</summary>
+    internal static string? Request(string name, bool shift, bool alt, bool ctrl)
+    {
+        if (name.Length == 0) { return null; }
+        using var buffer = new System.IO.MemoryStream();
+        using (var w = new System.Text.Json.Utf8JsonWriter(buffer, new System.Text.Json.JsonWriterOptions
+               { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            w.WriteStartObject();
+            w.WriteString("key", name);
+            w.WriteStartObject("mods");
+            w.WriteBoolean("shift", shift);
+            w.WriteBoolean("alt", alt);
+            w.WriteBoolean("ctrl", ctrl);
+            w.WriteEndObject();
+            w.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    /// <summary>A typed character's key name: the character itself, or null
+    /// for a control character (the named keys arrive by their own codes).</summary>
+    internal static string? CharName(uint c) =>
+        c < 0x20 || c == 0x7F || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF) ? null : char.ConvertFromUtf32((int)c);
+}
+
 /// <summary>The keys an action reply carries for the shell to act on.</summary>
 internal static class ActWire
 {
