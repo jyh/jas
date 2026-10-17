@@ -118,6 +118,9 @@ internal sealed class KeyCmd : Cmd
 {
     internal uint Code;
     internal uint Mods;
+    /// <summary>A resend after `NeedsClipboard`: the request carries <see cref="Clipboard"/>.</summary>
+    internal bool ClipboardCarried;
+    internal string? Clipboard;
 }
 
 internal sealed class PointerCmd : Cmd
@@ -288,6 +291,9 @@ internal sealed class MenuActionCmd : Cmd
 {
     internal string ItemId = "";
     internal string Action = "";
+    /// <summary>A resend after `NeedsClipboard`: the request carries <see cref="Clipboard"/>.</summary>
+    internal bool ClipboardCarried;
+    internal string? Clipboard;
 }
 
 /// <summary>
@@ -1047,6 +1053,7 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         ApplyCloseWindow(reply, $"item=quit action=quit {head}");
+        ApplyClipboardWrite(reply, $"item=quit action=quit {head}");
         ApplySaveAllThenClose(reply, $"item=quit action=quit {head}");
     }
 
@@ -1057,9 +1064,9 @@ internal sealed unsafe class Canvas : IDisposable
     /// confirm), a tab removal, a window close. A key nothing handled
     /// (`KeyUnhandled`) is no failure and writes no row; any other refusal does.
     /// </summary>
-    private void ApplyKey(KeyCmd k)
+    private bool ApplyKey(KeyCmd k)
     {
-        if (_engine == IntPtr.Zero) { return; }
+        if (_engine == IntPtr.Zero) { return false; }
         var name = k.Code switch
         {
             JasCore.KeyEscape => "Escape",
@@ -1071,23 +1078,30 @@ internal sealed unsafe class Canvas : IDisposable
         if (name is null)
         {
             _report($"RUSTFAIL KEY UNNAMED code=0x{k.Code:X} -- no key name to send {Tids()}");
-            return;
+            return false;
         }
         var request = KeyWire.Request(name, (k.Mods & JasCore.ModShift) != 0,
                                       (k.Mods & JasCore.ModAlt) != 0, (k.Mods & JasCore.ModCmd) != 0)!;
+        if (k.ClipboardCarried) { request = ActWire.WithClipboard(request, k.Clipboard); }
         var json = System.Text.Encoding.UTF8.GetBytes(request);
         var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
         var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
         var head = $"key={name} mods={k.Mods}";
         if (reply.Length == 0)
         {
+            var code = k.Code; var mods = k.Mods;
+            if (ClipboardAsked(channel, k.ClipboardCarried, head, text => _queue.Add(
+                    new KeyCmd { Code = code, Mods = mods, ClipboardCarried = true, Clipboard = text })))
+            {
+                return true;
+            }
             if (!channel.Contains("\"KeyUnhandled\"", StringComparison.Ordinal))
             {
                 _report(channel.Length == 0
                     ? $"RUSTFAIL KEY SILENT {head} -- an empty reply and an empty error channel {Tids()}"
                     : $"KEY REFUSED {head} channel={channel} {Tids()}");
             }
-            return;
+            return false;
         }
         bool docChanged;
         try
@@ -1099,13 +1113,15 @@ internal sealed unsafe class Canvas : IDisposable
         catch (Exception ex)
         {
             _report($"RUSTFAIL KEY REPLY UNREADABLE {head} {ex.GetType().Name} {Tids()}");
-            return;
+            return false;
         }
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
+        ApplyClipboardWrite(reply, head);
         ApplySaveAllThenClose(reply, head);
         _report($"KEY RAN {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog={DialogWire.Named(reply) ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
+        return false;
     }
 
     /// <summary>
@@ -1118,6 +1134,67 @@ internal sealed unsafe class Canvas : IDisposable
         if (!ActWire.CloseWindow(reply)) { return; }
         _report($"WINDOW CLOSE named {head} {Tids()}");
         PostToUi(() => CloseApproved?.Invoke());
+    }
+
+    /// <summary>
+    /// jas §364: a reply that names `clipboard_write: <text>` (Copy, Cut, Cut's
+    /// orphan confirm OK) puts that text on the system clipboard as plain
+    /// text, unchanged. The clipboard is the UI thread's, so the write is
+    /// posted there and its outcome written as a row. Read beside
+    /// <see cref="ApplyCloseWindow"/> on every act reply.
+    /// </summary>
+    private void ApplyClipboardWrite(string reply, string head)
+    {
+        var text = ActWire.ClipboardWrite(reply);
+        if (text is null) { return; }
+        PostToUi(() =>
+        {
+            try
+            {
+                ClipboardShell.Write(text);
+                _report($"CLIPBOARD WRITTEN {head} chars={text.Length} {Tids()}");
+            }
+            catch (Exception ex)
+            {
+                _report($"RUSTFAIL CLIPBOARD WRITE {head} {ex.GetType().Name}: {ex.Message} {Tids()}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// jas §364: a paste refused with `NeedsClipboard` has run nothing. Read the
+    /// clipboard's text on the UI thread (null when it holds none or the read
+    /// throws) and hand it to <paramref name="resend"/>, which queues THE SAME
+    /// command again carrying it. The pump never waits on the UI thread for it.
+    /// </summary>
+    private void ReadClipboardThenResend(string head, Action<string?> resend)
+    {
+        _report($"CLIPBOARD READ asked {head} {Tids()}");
+        PostToUi(() => ClipboardShell.Read((text, outcome) =>
+        {
+            _report($"CLIPBOARD READ {head} {outcome} {Tids()}");
+            resend(text);
+        }));
+    }
+
+    /// <summary>
+    /// What a refused dispatch asks of the clipboard. True when it was refused
+    /// for it and the read-and-resend is under way; a second refusal after the
+    /// request carried it is written as a failure, never retried.
+    /// </summary>
+    private bool ClipboardAsked(string channel, bool carried, string head, Action<string?> resend)
+    {
+        switch (ActWire.ClipboardStep(ActWire.NeedsClipboard(channel), carried))
+        {
+            case "read":
+                ReadClipboardThenResend(head, resend);
+                return true;
+            case "refused-again":
+                _report($"RUSTFAIL CLIPBOARD REFUSED AGAIN {head} channel={channel} -- the request carried it {Tids()}");
+                return true;
+            default:
+                return false;
+        }
     }
 
     /// <summary>The engine's Save All asks the shell to save. Raised on the UI thread.</summary>
@@ -1324,6 +1401,7 @@ internal sealed unsafe class Canvas : IDisposable
         var after = DialogWire.Named(reply);
         ApplyRemoveTab(reply, head);
         ApplyCloseWindow(reply, head);
+        ApplyClipboardWrite(reply, head);
         ApplySaveAllThenClose(reply, head);
         _report($"DIALOG EVENT {head} doc-changed={(docChanged ? "true" : "false")} "
               + $"dialog-after={after ?? "none"} channel={(channel.Length == 0 ? "(clear)" : channel)} {Tids()}");
@@ -1559,7 +1637,9 @@ internal sealed unsafe class Canvas : IDisposable
                 case KeyCmd k:
                     // IN ORDER with the pointer events around it: Escape between a
                     // press and its release is what cancels a marquee.
-                    ApplyKey(k);
+                    // A paste refused for the clipboard ran nothing; it is
+                    // probed when its resend lands, not now.
+                    var keyDeferred = ApplyKey(k);
                     DirtyFromModel();
                     dirty = true;
                     cause = "key";
@@ -1567,7 +1647,7 @@ internal sealed unsafe class Canvas : IDisposable
                     _panelStale = true;
                     // SB_PROBE: a key lands on the document as a release does
                     // (shortcut.delete, shortcut.undo), so it is read the same way.
-                    if (ProbePath is not null) { _probePending = true; }
+                    if (ProbePath is not null && !keyDeferred) { _probePending = true; }
                     break;
 
                 case PointerReportCmd pr:
@@ -4797,6 +4877,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, runHead);
             ApplyRemoveTab(reply, runHead);
             ApplyCloseWindow(reply, runHead);
+            ApplyClipboardWrite(reply, runHead);
             ApplySaveAllThenClose(reply, runHead);
         }
         catch (Exception ex)
@@ -4825,12 +4906,19 @@ internal sealed unsafe class Canvas : IDisposable
     {
         if (_engine == IntPtr.Zero) { return false; }
         var head = $"item={cmd.ItemId} action={cmd.Action}";
-        var json = System.Text.Encoding.UTF8.GetBytes(
-            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["menu_item"] = cmd.ItemId }));
+        var request = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["menu_item"] = cmd.ItemId });
+        if (cmd.ClipboardCarried) { request = ActWire.WithClipboard(request, cmd.Clipboard); }
+        var json = System.Text.Encoding.UTF8.GetBytes(request);
         var reply = JasCore.TakeString(JasCore.jas_dispatch_action(_engine, json, (nuint)json.Length));
         var channel = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
         if (reply.Length == 0)
         {
+            var itemId = cmd.ItemId; var action = cmd.Action;
+            if (ClipboardAsked(channel, cmd.ClipboardCarried, head, text => _queue.Add(
+                    new MenuActionCmd { ItemId = itemId, Action = action, ClipboardCarried = true, Clipboard = text })))
+            {
+                return false;
+            }
             _report(channel.Length == 0
                 ? $"RUSTFAIL MENU ACTION SILENT {head} -- an empty reply and an empty error channel {Tids()}"
                 : $"MENU ACTION REFUSED {head} channel={channel} {Tids()}");
@@ -4846,6 +4934,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
+            ApplyClipboardWrite(reply, head);
             ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
@@ -5065,6 +5154,7 @@ internal sealed unsafe class Canvas : IDisposable
             OpenNamedDialog(doc.RootElement, head);
             ApplyRemoveTab(reply, head);
             ApplyCloseWindow(reply, head);
+            ApplyClipboardWrite(reply, head);
             ApplySaveAllThenClose(reply, head);
         }
         catch (Exception ex)
