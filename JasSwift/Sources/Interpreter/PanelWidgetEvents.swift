@@ -50,6 +50,19 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// Click a button or icon button (WIDGET_EVENTS.md, "Clicking a button").
+    /// `modifiers` are the click's `shift`/`ctrl`/`meta`/`alt`.
+    @discardableResult
+    func click(_ widget: [String: Any], modifiers: [String: Any] = [:]) -> WidgetEvent.Result {
+        run { host, panel, ws in
+            WidgetEvent.click(widget: widget, event: "click", store: model.stateStore,
+                              panel: panel, modifiers: modifiers,
+                              actions: ws?.actions(), dialogs: ws?.dialogs(),
+                              platformEffects: alignPlatformEffects(model: model),
+                              host: host)
+        }
+    }
+
     /// Pick a dropdown item by its `value`: `toggle`, or with Alt held
     /// `alt_toggle` (WIDGET_EVENTS.md, "Picking a dropdown item").
     @discardableResult
