@@ -195,6 +195,37 @@ def plan(script, menubar, spec=None):
     return acts
 
 
+PERSON_TOLERANCE_S = 0.5  # HID idle clock and the driver's clock may differ by this
+
+
+def a_person_acted(idle_s, since_mine_s, tolerance=PERSON_TOLERANCE_S):
+    """True when the console saw input AFTER the driver's own last event.
+
+    `idle_s` is the HID system's seconds since ANY input; `since_mine_s` is
+    the seconds since the driver last posted one (None before its first). The
+    driver's own events reset the idle clock too, so input is a person's only
+    when the idle time is clearly shorter than the time since the driver's
+    last event. Checked before EVERY act: a person returning mid-run aborts
+    the run, never pauses it, because resuming would post into their work."""
+    if since_mine_s is None:
+        return False
+    return idle_s < since_mine_s - tolerance
+
+
+def run_guarded(acts, blocked, do_act):
+    """Run each act, asking `blocked()` BEFORE every one. It returns None to
+    go on, or the reason to stop (a person used the console, the screen is
+    locked). The first reason aborts with Refused naming the act; no later act
+    runs. Returns the last act's result (the read-back)."""
+    result = None
+    for i, act in enumerate(acts):
+        why = blocked()
+        if why:
+            raise Refused(f"{why} before act {i} ({act[0]}); the run is aborted, not paused")
+        result = do_act(act)
+    return result
+
+
 _VIEW = re.compile(r"^view (\S+) (\S+) (\S+)$")
 
 
@@ -330,6 +361,22 @@ def self_test():
           refused(lambda: plan(dict(base, steps=[dict(pan, panel="stk_content"), read]), mb), "not a panel content id"))
     check("an unknown step is refused", refused(lambda: plan(dict(base, steps=[{"wave": 1}, read]), mb), "wave"))
 
+    # A person returning mid-script: the driver posted at t=0, the person
+    # touched the mouse at t=3, the next check is at t=5, so idle 2 < 5.
+    check("a person's input after the driver's last event is seen", a_person_acted(2.0, 5.0))
+    check("the driver's own last event is not a person's", not a_person_acted(5.0, 5.0))
+    check("clock skew inside the tolerance is not a person", not a_person_acted(4.8, 5.0))
+    check("before the driver's first event nothing is a person's here", not a_person_acted(0.1, None))
+    # The fixture the helm ordered: idle drops mid-script, at the third check.
+    done = []
+    readings = iter([None, None, "a person used the console", None])
+    acts5 = [("open", "s"), ("tool", "t"), ("pointer", "press"), ("pointer", "release"), ("read", "document")]
+    check("a person mid-script aborts the run at that act",
+          refused(lambda: run_guarded(acts5, lambda: next(readings), done.append), "a person used the console before act 2 (pointer)"))
+    check("no act after the person runs", [a[0] for a in done] == ["open", "tool"])
+    ran2 = []
+    check("an unbroken run returns the last act's result",
+          run_guarded(acts5, lambda: None, lambda a: ran2.append(a) or a[0]) == "read" and len(ran2) == 5)
     check("view report parses", parse_view_report("view 1.0 0.0 0.0") == (1.0, 0.0, 0.0))
     check("view report with other text is None", parse_view_report("zoom 1") is None)
     check("view report with zoom 0 is None", parse_view_report("view 0 0 0") is None)

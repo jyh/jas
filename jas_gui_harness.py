@@ -109,12 +109,16 @@ def flags(mods):
         if m in FLAG: f|=FLAG[m]
     return f
 
+_LAST_MINE = [None]  # when this driver last posted an event (time.time())
+
 def mouse(etype, x, y, f=0):
+    _LAST_MINE[0] = time.time()
     e=Quartz.CGEventCreateMouseEvent(None, etype, (x,y), Quartz.kCGMouseButtonLeft)
     if f: Quartz.CGEventSetFlags(e, f)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.02)
 
 def keyev(code, down, f=0):
+    _LAST_MINE[0] = time.time()
     e=Quartz.CGEventCreateKeyboardEvent(None, code, down)
     if f: Quartz.CGEventSetFlags(e, f)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, e); time.sleep(0.02)
@@ -349,13 +353,28 @@ def _run_script(path, menubar):
     repo = os.path.dirname(os.path.abspath(__file__))
     want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
     app = _app_element()
-    view = origin = None
-    for act in acts:
+    st = {"view": None, "origin": None}
+
+    def blocked():
+        # Before EVERY act: a locked screen, or input after this driver's own
+        # last event (a person's), aborts the run (the helm's hardening,
+        # 2026-10-17). On a locked screen a key event types into the login
+        # window.
+        if _screen_locked():
+            return "the screen is locked"
+        idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+            Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType)
+        mine = None if _LAST_MINE[0] is None else time.time() - _LAST_MINE[0]
+        return "a person used the console" if _plan.a_person_acted(idle, mine) else None
+
+    def do_act(act):
+        view, origin = st["view"], st["origin"]
         k = act[0]
         if k == "open":
             _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
             _fifo("view 1 0 0"); time.sleep(0.4)
             view, origin = _canvas(app)
+            st["view"], st["origin"] = view, origin
             if view != (1.0, 0.0, 0.0):
                 raise _plan.Refused(f"the canvas reports view {view} after `view 1 0 0`")
         elif k == "tool":
@@ -449,6 +468,8 @@ def _run_script(path, menubar):
             got = _plan.set_aside_the_opens_artboard(got, want)
             return got == want, got, want
 
+    return _plan.run_guarded(acts, blocked, do_act)
+
 IDLE_FLOOR_S = 120  # a person's input this recent means the console is in use
 
 def _lastpost_file():
@@ -469,6 +490,10 @@ def _console_in_use():
         return False, idle  # the last input was the driver's own
     return idle < IDLE_FLOOR_S, idle
 
+def _screen_locked():
+    d = Quartz.CGSessionCopyCurrentDictionary()
+    return bool(d and d.get("CGSSessionScreenIsLocked"))
+
 def _front_is_jas():
     from AppKit import NSWorkspace
     app = NSWorkspace.sharedWorkspace().frontmostApplication()
@@ -477,6 +502,9 @@ def _front_is_jas():
 def do_script(paths):
     global _plan
     import mac_l2_plan as _plan
+    if _screen_locked():
+        print("REFUSED: the screen is locked; a key event would type into the login window")
+        return 3
     busy, idle = _console_in_use()
     if busy:
         print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s); a person may be using it")
@@ -486,8 +514,10 @@ def do_script(paths):
     for p in paths:
         name = os.path.basename(p)
         proc = None
-        clear_mods()  # a flag-carrying event leaks its modifier into the next script
         try:
+            if _screen_locked():
+                raise _plan.Refused("the screen is locked")
+            clear_mods()  # a flag-carrying event leaks its modifier into the next script
             if os.environ.get("JAS_APP"):
                 proc = _launch()
             ok, got, want = _run_script(p, menubar)
@@ -499,7 +529,8 @@ def do_script(paths):
             bad += 1
             print("REFUSED " + name + ": " + str(e))
         finally:
-            clear_mods()
+            if not _screen_locked():
+                clear_mods()
             if proc is not None:
                 proc.terminate()
                 try:
