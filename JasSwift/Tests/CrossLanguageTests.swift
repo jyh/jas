@@ -4331,6 +4331,9 @@ private func parseEdgeSideOp(_ s: String) -> EdgeSide {
 /// same press(10,20)->drag(110,70)->release(110,70) gesture as draw_rect.
 private let gestureFixtures = [
     "draw_rect.json",
+    // INVISIBLE (2026-10-17): every hit walker skips a hidden path, set up
+    // through `setup_test_json` because SVG cannot carry a hidden element.
+    "hidden_paths_are_not_hit.json",
     // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
     // (-100, -50)). Every other gesture vector runs at the identity view, where
     // the screen->doc conversion in pointerEventPayload is algebraically the
@@ -4545,8 +4548,15 @@ private func gestureToolContext(_ model: Model) -> ToolContext {
 /// it, then dispatches each event through the CanvasTool seam (onPress / onMove /
 /// onRelease). Mirrors Rust `run_gesture_model`.
 private func runGestureModel(_ tc: [String: Any]) -> Model {
-    let setupSvg = readFixture("svg/\(tc["setup_svg"] as! String)")
-    let model = Model(document: svgToDocument(setupSvg))
+    // `setup_test_json` is the door for a setup SVG cannot carry (a hidden
+    // element). Mirrors Rust `run_gesture_model`.
+    let setup: Document
+    if let name = tc["setup_test_json"] as? String {
+        setup = testJsonToDocument(readFixture("expected/\(name)"))
+    } else {
+        setup = svgToDocument(readFixture("svg/\(tc["setup_svg"] as! String)"))
+    }
+    let model = Model(document: setup)
 
     // The action runner's deterministic id source, for the same reason: a tool
     // that mints (the Artboard tool's drag) otherwise draws entropy, and no

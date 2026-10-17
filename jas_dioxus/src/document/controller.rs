@@ -3580,7 +3580,12 @@ fn select_flat(
                     };
                     if let Some(grandchildren) = child.children()
                         && grandchildren.iter().enumerate().any(|(gi, gc)| {
-                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc, group_frame)
+                            // A hidden member does not answer for its group
+                            // (INVISIBLE, 2026-10-17); the group's own and its
+                            // layer's visibility were read above.
+                            !doc.effective_locked(&vec![li, ci, gi])
+                                && std::cmp::min(child_vis, gc.visibility()) != Visibility::Invisible
+                                && predicate(gc, group_frame)
                         })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));

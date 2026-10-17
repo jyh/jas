@@ -1654,6 +1654,9 @@ pub(crate) mod tests {
     /// polygon / star).
     const GESTURE_FIXTURES: &[&str] = &[
         "draw_rect.json",
+        // INVISIBLE (2026-10-17): every hit walker skips a hidden path, set up
+        // through `setup_test_json` because SVG cannot carry a hidden element.
+        "hidden_paths_are_not_hit.json",
         // VIEWSEED: the same Rect drag at a NON-identity view (zoom 2, offset
         // (-100, -50)). Every other gesture vector runs at the identity view,
         // where the screen→doc conversion in pointer_event_payload is
@@ -1842,6 +1845,12 @@ pub(crate) mod tests {
     /// the `corpus_replay` bin run, so corpus replay and recording
     /// verification can never drift apart.
     fn run_gesture_model(tc: &serde_json::Value) -> Model {
+        // `setup_test_json` is the door for a setup SVG cannot carry (a hidden
+        // element), as the operations corpus's `setup_document` is.
+        if let Some(name) = tc.get("setup_test_json").and_then(|v| v.as_str()) {
+            let doc = test_json_to_document(&read_fixture(&format!("expected/{name}")));
+            return crate::recorder::replay::run_gesture_case_on(tc, doc);
+        }
         let setup_svg = read_fixture(&format!("svg/{}", tc["setup_svg"].as_str().unwrap()));
         crate::recorder::replay::run_gesture_case(tc, &setup_svg)
     }

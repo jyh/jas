@@ -1,0 +1,329 @@
+[
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A drag from its drawn corner must find nothing and change nothing.",
+  "name": "anchor_point_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "move",
+    "x": 150,
+    "y": 150,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 150,
+    "y": 150
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A click on its drawn corner must delete nothing.",
+  "name": "delete_anchor_point_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "delete_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A click on its drawn segment must add nothing.",
+  "name": "add_anchor_point_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "add_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 90,
+    "y": 75
+   },
+   {
+    "kind": "release",
+    "x": 90,
+    "y": 75
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A Partial Selection marquee around the drawn corner selects nothing. select_recursive already skipped hidden elements, so this case is the control.",
+  "name": "partial_selection_marquee_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "partial_selection",
+  "events": [
+   {
+    "kind": "press",
+    "x": 130,
+    "y": 130
+   },
+   {
+    "kind": "move",
+    "x": 110,
+    "y": 110,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 110,
+    "y": 110
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The PATH is hidden. A Selection marquee over the drawn corner selects nothing: a band asks about members, and a hidden member does not answer for its group.",
+  "name": "selection_marquee_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "selection",
+  "events": [
+   {
+    "kind": "press",
+    "x": 130,
+    "y": 130
+   },
+   {
+    "kind": "move",
+    "x": 110,
+    "y": 110,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 110,
+    "y": 110
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A drag from its drawn corner must find nothing and change nothing.",
+  "name": "anchor_point_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "move",
+    "x": 150,
+    "y": 150,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 150,
+    "y": 150
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A click on its drawn corner must delete nothing.",
+  "name": "delete_anchor_point_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "delete_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A click on its drawn segment must add nothing.",
+  "name": "add_anchor_point_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "add_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 90,
+    "y": 75
+   },
+   {
+    "kind": "release",
+    "x": 90,
+    "y": 75
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A Partial Selection marquee around the drawn corner selects nothing. select_recursive already skipped hidden elements, so this case is the control.",
+  "name": "partial_selection_marquee_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "partial_selection",
+  "events": [
+   {
+    "kind": "press",
+    "x": 130,
+    "y": 130
+   },
+   {
+    "kind": "move",
+    "x": 110,
+    "y": 110,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 110,
+    "y": 110
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path is visible and its GROUP is hidden, so the path is hidden by inheritance, as cp_recursive reads it. A Selection marquee over the drawn corner selects nothing: a band asks about members, and a hidden member does not answer for its group.",
+  "name": "selection_marquee_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "selection",
+  "events": [
+   {
+    "kind": "press",
+    "x": 130,
+    "y": 130
+   },
+   {
+    "kind": "move",
+    "x": 110,
+    "y": 110,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 110,
+    "y": 110
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A click on its drawn corner must delete nothing.",
+  "name": "delete_anchor_point_misses_path_in_scaled_group_in_hidden_layer",
+  "setup_test_json": "path_in_scaled_group_in_hidden_layer.json",
+  "tool": "delete_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A click on its drawn segment must add nothing.",
+  "name": "add_anchor_point_misses_path_in_scaled_group_in_hidden_layer",
+  "setup_test_json": "path_in_scaled_group_in_hidden_layer.json",
+  "tool": "add_anchor_point",
+  "events": [
+   {
+    "kind": "press",
+    "x": 90,
+    "y": 75
+   },
+   {
+    "kind": "release",
+    "x": 90,
+    "y": 75
+   }
+  ],
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120) and its first segment's midpoint (15,15) at (90,75). The path and its group are visible and their LAYER is hidden. A Selection marquee over the drawn corner selects nothing; the marquee already skipped a hidden layer, so this case is a control.",
+  "name": "selection_marquee_misses_path_in_scaled_group_in_hidden_layer",
+  "setup_test_json": "path_in_scaled_group_in_hidden_layer.json",
+  "tool": "selection",
+  "events": [
+   {
+    "kind": "press",
+    "x": 130,
+    "y": 130
+   },
+   {
+    "kind": "move",
+    "x": 110,
+    "y": 110,
+    "dragging": true
+   },
+   {
+    "kind": "release",
+    "x": 110,
+    "y": 110
+   }
+  ],
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The line (0,30) -> (120,30) in pt carries the matrix (2,0,0,3,60,30), so it is DRAWN along y = 120 from x 60 to 300 (the S5 witness's geometry). The LINE is hidden. A click at (150,120) must erase nothing.",
+  "name": "path_eraser_misses_hidden_transformed_line",
+  "setup_test_json": "hidden_transformed_line.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 150,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 150,
+    "y": 120
+   }
+  ],
+  "expected_json": "hidden_transformed_line_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE (every walker skips hidden paths, the helm's ruling of 2026-10-17). The line (0,30) -> (120,30) in pt carries the matrix (2,0,0,3,60,30), so it is DRAWN along y = 120 from x 60 to 300 (the S5 witness's geometry). The line is visible and its LAYER is hidden. A click at (150,120) must erase nothing.",
+  "name": "path_eraser_misses_transformed_line_in_hidden_layer",
+  "setup_test_json": "transformed_line_in_hidden_layer.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 150,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 150,
+    "y": 120
+   }
+  ],
+  "expected_json": "transformed_line_in_hidden_layer_unchanged_expected.json"
+ }
+]

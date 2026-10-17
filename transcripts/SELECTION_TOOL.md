@@ -84,7 +84,8 @@ translate.
   element under a transformed layer or group, the rectangle is
   mapped into the element's parent space and tested there (with
   the element's own transform applied as usual). A group is
-  selected whole when any unlocked member meets the band. An
+  selected whole when any unlocked, visible member meets the band;
+  a hidden member does not answer for its group. An
   element whose frame is singular is never selected.
 - **Drag on selected element** — translates the selection. The
   document is snapshotted once on press so the whole drag is a
