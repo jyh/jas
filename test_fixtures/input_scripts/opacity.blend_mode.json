@@ -1,0 +1,14 @@
+{
+  "item": "opacity.blend_mode",
+  "spec": "workspace/panels/opacity.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "opacity_panel_content", "widget": "op_mode", "event": "commit", "value": "multiply"},
+    {"read": "document"}
+  ],
+  "expected_json": "opacity.blend_mode.expected.json"
+}
