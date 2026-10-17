@@ -1947,7 +1947,7 @@ pub(crate) mod tests {
     /// cannot replay yet is REFUSED by name, never skipped; and the script must
     /// end on `{"read": "document"}`, or it asserts nothing.
     const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
-                                       "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json"];
+                                       "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json"];
 
     #[cfg(feature = "web")]
     fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {

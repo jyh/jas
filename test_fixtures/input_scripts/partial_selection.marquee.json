@@ -1,0 +1,14 @@
+{
+  "item": "partial_selection.marquee",
+  "spec": "workspace/tools/partial_selection.yaml",
+  "setup_svg": "three_rects.svg",
+  "tool": "partial_selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 64, "y": 46},
+    {"kind": "move", "x": 80, "y": 58, "dragging": true},
+    {"kind": "release", "x": 80, "y": 58},
+    {"read": "document"}
+  ],
+  "expected_json": "partial_selection.marquee.expected.json"
+}
