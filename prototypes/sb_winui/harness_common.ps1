@@ -3014,16 +3014,49 @@ function Read-SbInputScript([string]$Json) {
     $acts = New-Object System.Collections.Generic.List[object]
     $reads = New-Object System.Collections.Generic.List[string]
     $keys = New-Object System.Collections.Generic.List[string]
+    $panels = New-Object System.Collections.Generic.List[object]
     for ($i = 0; $i -lt $steps.Count; $i++) {
         $st = $steps[$i]
         $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
         if ($names -contains 'read') { $reads.Add("$($st.read)"); continue }
+        # PANEL STEPS (jas section 373), `panel` + `widget` + `event` (+ `value`
+        # for a commit). send_hand.ps1 delivers them LAST, through UI Automation,
+        # after the gesture and the keys (docs/TESTING.md section 6's order), so
+        # a panel step before the release, or anything but a read after one, is
+        # refused by name.
+        if ($names -contains 'panel' -or $names -contains 'widget') {
+            $pn = "$($st.panel)"; $wn = "$($st.widget)"
+            if ($pn.Length -eq 0 -or $wn.Length -eq 0) { return (& $no "step $i panel step names no panel or no widget") }
+            $tag = "$pn/$wn"
+            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                return (& $no "step $i panel $tag comes before the gesture ends: send_hand.ps1 delivers panel steps only after the release")
+            }
+            $ev = "$($st.event)"
+            if (@('click', 'commit') -cnotcontains $ev) {
+                return (& $no "step $i panel $tag event '$ev': this driver delivers click and commit")
+            }
+            $value = $null
+            if ($ev -eq 'commit') {
+                if ($names -notcontains 'value' -or $st.value -isnot [string]) {
+                    return (& $no "step $i panel $tag commit carries no string value")
+                }
+                $value = $st.value
+            }
+            elseif ($names -contains 'value' -and $null -ne $st.value) {
+                return (& $no "step $i panel $tag click carries a value: only a commit has one")
+            }
+            $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value })
+            continue
+        }
         # KEY STEPS (§333), the key corpus's chord form: `key` plus ctrl/shift/alt
         # booleans. send_hand.ps1 delivers them as real key events AFTER the
         # release, so a key inside the gesture cannot be delivered and is refused
         # by name; meta is refused as level 1 refuses it.
         if ($names -contains 'key') {
             $kn = "$($st.key)"
+            if ($panels.Count -gt 0) {
+                return (& $no "step $i key $kn comes after a panel step: send_hand.ps1 delivers keys, then panel steps")
+            }
             if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
                 return (& $no "step $i key $kn comes before the gesture ends: send_hand.ps1 delivers keys only after the release")
             }
@@ -3039,6 +3072,9 @@ function Read-SbInputScript([string]$Json) {
             $chord = @(@('ctrl', 'shift', 'alt') | Where-Object { $names -contains $_ -and $st.$_ }) + @($kn)
             $keys.Add($chord -join '+')
             continue
+        }
+        if ($panels.Count -gt 0) {
+            return (& $no "step $i is a pointer step after a panel step: send_hand.ps1 delivers panel steps only after the gesture")
         }
         if ($keys.Count -gt 0) {
             return (& $no "step $i is a pointer step after a key: send_hand.ps1 delivers keys only after the gesture")
@@ -3111,6 +3147,7 @@ function Read-SbInputScript([string]$Json) {
             DocX = $cx; DocY = $cy; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
             Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
             Keys = $keys.Count; KeyText = ($keys -join ';')
+            Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -3139,7 +3176,64 @@ function Read-SbInputScript([string]$Json) {
         DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
         Shift = $shift; Alt = $held['alt']
         Keys = $keys.Count; KeyText = ($keys -join ';')
+        Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
     }
+}
+
+# A script's panel steps cross `-File` as ONE base64 string of their JSON: a
+# commit's value is text a person typed, so any separator could be inside it
+# (`-File` already eats a comma list). Empty when there are none.
+function ConvertTo-SbPanelText($Panels) {
+    # Enumerated through the pipeline: `@()` around a generic List throws
+    # 'Argument types do not match' in Windows PowerShell 5.1.
+    $steps = [object[]]@($Panels | ForEach-Object { $_ })
+    if ($steps.Count -eq 0) { return '' }
+    $json = ConvertTo-Json -InputObject $steps -Compress -Depth 4
+    [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
+}
+
+function ConvertFrom-SbPanelText([string]$Text) {
+    if ([string]::IsNullOrEmpty($Text)) { return }
+    $a = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($Text)) | ConvertFrom-Json
+    foreach ($e in $a) { $e }
+}
+
+# What a certificate line and a receipt show: `panel/widget:event`, a commit's
+# value after `=`, steps joined by `;`.
+function Format-SbPanelSteps($Panels) {
+    @($Panels | ForEach-Object {
+        "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' })
+    }) -join ';'
+}
+
+# What send_hand.ps1 does with what UI Automation found for one panel step:
+# the panel element by AutomationId (the panel content id), the widget by
+# AutomationId inside it, and the patterns the widget's control exposes, by
+# their programmatic names (`InvokePatternIdentifiers.Pattern`). Returns the
+# action (`Invoke`, `Toggle`, `SelectionItem` for a click; `Value` for a
+# commit) or a refusal by name. Pure, so every refusal has a self-test arm.
+function Select-SbPanelAction {
+    param(
+        [string]$Panel, [string]$Widget, [string]$Event,
+        [int]$PanelCount, [int]$WidgetCount, [bool]$Enabled,
+        [string]$ControlType, [string[]]$Patterns
+    )
+    $no = { param($why) [pscustomobject]@{ Action = $null; Refusal = $why } }
+    if ($PanelCount -eq 0) { return (& $no "panel '$Panel' is not found: no element has that AutomationId (is it the panel the window shows?)") }
+    if ($PanelCount -gt 1) { return (& $no "panel '$Panel' is found $PanelCount times: this driver will not guess which one a person meant") }
+    if ($WidgetCount -eq 0) { return (& $no "widget '$Widget' is not found in panel '$Panel': no element there has that AutomationId") }
+    if ($WidgetCount -gt 1) { return (& $no "widget '$Widget' is found $WidgetCount times in panel '$Panel': this driver will not guess which one a person meant") }
+    if (-not $Enabled) { return (& $no "widget '$Widget' ($ControlType) is disabled: a person cannot $Event it") }
+    $short = @($Patterns | ForEach-Object { $_ -replace 'PatternIdentifiers\.Pattern$', '' })
+    $has = "[$($short -join ', ')]"
+    if ($Event -eq 'commit') {
+        if ($short -contains 'Value') { return [pscustomobject]@{ Action = 'Value'; Refusal = $null } }
+        return (& $no "widget '$Widget' ($ControlType) has no Value pattern for a commit: it has $has")
+    }
+    foreach ($a in @('Invoke', 'Toggle', 'SelectionItem')) {
+        if ($short -contains $a) { return [pscustomobject]@{ Action = $a; Refusal = $null } }
+    }
+    & $no "widget '$Widget' ($ControlType) has no Invoke, Toggle or SelectionItem pattern for a click: it has $has"
 }
 
 # The level-2 oracle: the core's document BYTES against the expected BYTES.

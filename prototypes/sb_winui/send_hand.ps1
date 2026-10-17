@@ -102,8 +102,19 @@ param(
     # caller forwards it, so the two sides can never drift apart without the row
     # saying so.
     [double]$TargetOffsetXDips = 0,
-    [double]$TargetOffsetYDips = 0
+    [double]$TargetOffsetYDips = 0,
+    # PANEL STEPS (jas section 373), delivered LAST through UI Automation: the
+    # script's panel steps as ONE base64 string of their JSON
+    # (`ConvertTo-SbPanelText`), because a commit's value is typed text and any
+    # separator could be inside it. The parsed count is echoed in the receipt.
+    [string]$Panels = '',
+    # How long a panel step re-reads a control the gesture is still enabling.
+    [int]$PanelWaitMs = 3000
 )
+
+# Select-SbPanelAction and ConvertFrom-SbPanelText: the panel steps' rules,
+# pure and self-tested beside the rest of the harness.
+. (Join-Path $PSScriptRoot 'harness_common.ps1')
 
 $ErrorActionPreference = 'Continue'
 $log = New-Object System.Collections.Generic.List[string]
@@ -477,6 +488,80 @@ foreach ($chord in $chords) {
     foreach ($m in $mods) { [SbHand]::Key($m, $false); $keyEvents++ }
 }
 $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
+
+# THE PANEL STEPS (jas section 373), last, through UI Automation. Each finds
+# the panel by AutomationId (the panel content id, `PanelHost`), the widget by
+# AutomationId inside it (`PaneView` sets the widget id on every leaf that has
+# one), and acts through the pattern its control exposes, as a screen reader
+# or a person would: Invoke/Toggle/SelectionItem for a click, Value for a
+# commit followed by Enter, which is how a person commits a text field here.
+# `Select-SbPanelAction` (harness_common.ps1) decides the action or the
+# refusal; every refusal has a self-test arm. A refusal ends the hand with
+# `PANEL REFUSED` in the receipt and exit 6, and nothing after it is sent.
+$panelSteps = @(ConvertFrom-SbPanelText $Panels)
+$log.Add("panels=$($panelSteps.Count) parsed-from-bytes=$($Panels.Length)")
+if ($panelSteps.Count -gt 0) {
+    Add-Type -AssemblyName UIAutomationClient
+    Add-Type -AssemblyName UIAutomationTypes
+    $AE = [System.Windows.Automation.AutomationElement]
+    $tree = [System.Windows.Automation.TreeScope]
+    $byPid = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $ProcessId)
+    $window = $AE::RootElement.FindFirst($tree::Children, $byPid)
+    if ($null -eq $window) {
+        $log.Add("PANEL REFUSED: no top-level UI Automation element for pid $ProcessId")
+        $log | Set-Content -Path $Out -Encoding utf8
+        exit 6
+    }
+    $n = 0
+    foreach ($ps in $panelSteps) {
+        $n++
+        $tag = "step $n $($ps.panel)/$($ps.widget):$($ps.event)"
+        # A pane redraws on the UI thread after the gesture lands, so a control
+        # the gesture enables (Align once two things are selected) may still
+        # read disabled for a moment. It is re-read for up to PanelWaitMs; the
+        # wait is written down, and a control still disabled then is refused.
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        do {
+            $panelHits = $window.FindAll($tree::Descendants,
+                (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "$($ps.panel)")))
+            $widgetHits = $null; $el = $null; $enabled = $false; $ctype = ''; $pats = @()
+            if ($panelHits.Count -eq 1) {
+                $widgetHits = $panelHits[0].FindAll($tree::Descendants,
+                    (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "$($ps.widget)")))
+                if ($widgetHits.Count -eq 1) {
+                    $el = $widgetHits[0]
+                    $enabled = $el.Current.IsEnabled
+                    $ctype = $el.Current.ControlType.ProgrammaticName
+                    $pats = @($el.GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName })
+                }
+            }
+            $pick = Select-SbPanelAction -Panel "$($ps.panel)" -Widget "$($ps.widget)" -Event "$($ps.event)" `
+                -PanelCount $panelHits.Count -WidgetCount $(if ($null -eq $widgetHits) { 0 } else { $widgetHits.Count }) `
+                -Enabled $enabled -ControlType $ctype -Patterns $pats
+            $settled = $null -eq $pick.Refusal -or $panelHits.Count -ne 1 -or $null -eq $widgetHits -or $widgetHits.Count -ne 1 -or $enabled
+            if (-not $settled) { Start-Sleep -Milliseconds 100 }
+        } while (-not $settled -and $sw.ElapsedMilliseconds -lt $PanelWaitMs)
+        $log.Add("$tag panel-hits=$($panelHits.Count) widget-hits=$(if ($null -eq $widgetHits) { 0 } else { $widgetHits.Count }) type=$ctype enabled=$enabled patterns=[$($pats -join ',')] waited-ms=$($sw.ElapsedMilliseconds)")
+        if ($null -ne $pick.Refusal) {
+            $log.Add("PANEL REFUSED: $tag -- $($pick.Refusal)")
+            $log | Set-Content -Path $Out -Encoding utf8
+            exit 6
+        }
+        Start-Sleep -Milliseconds $SettleMs
+        switch ($pick.Action) {
+            'Invoke' { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
+            'Toggle' { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
+            'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+            'Value' {
+                $el.SetFocus()
+                $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$($ps.value)")
+                Start-Sleep -Milliseconds $SettleMs
+                [SbHand]::Key(0x0D, $true); [SbHand]::Key(0x0D, $false)
+            }
+        }
+        $log.Add("PANEL SENT: $tag action=$($pick.Action)")
+    }
+}
 $log.Add("alt=$Alt alt-down=$(if ($Alt -eq 'none') { 'never' } else { "before-$Alt" }) alt-up=$(if ($altDown) { 'after-release' } else { 'never' })")
 $log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "before-$Shift" }) shift-up=$(if ($shiftDown) { 'after-release' } else { 'never' })")
 

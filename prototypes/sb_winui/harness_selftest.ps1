@@ -2086,7 +2086,7 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })$(if ($s.PanelShow) { " panels=$($s.PanelShow)" })"
 }
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
@@ -2231,6 +2231,97 @@ Test-Case 'is: a key modifier that is not a boolean is refused' {
     $k = [ordered]@{ key = 'Z'; ctrl = 'yes' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
 } 'REFUSED: step 3 key Z ctrl is not a boolean'
+# jas section 373 (node 7): PANEL steps, {"panel", "widget", "event", "value"},
+# delivered LAST by send_hand.ps1 through UI Automation (docs/TESTING.md
+# section 6 orders pointer, key, panel).
+$pAlign = [ordered]@{ panel = 'align_panel_content'; widget = 'align_left_button'; event = 'click' }
+$pCommit = [ordered]@{ panel = 'magic_wand_panel_content'; widget = 'fill_tolerance'; event = 'commit'; value = '40' }
+Test-Case 'is: a panel step after the gesture is accepted and carried' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json panels=align_panel_content/align_left_button:click'
+Test-Case 'is: a key then two panel steps are all carried, in order' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $pAlign, $pCommit, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=Delete panels=align_panel_content/align_left_button:click;magic_wand_panel_content/fill_tolerance:commit=40'
+Test-Case 'is: the panel steps cross -File as one base64 string that decodes to the steps' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pCommit, $sRead))
+    $back = ConvertFrom-SbPanelText $s.PanelText
+    "$($s.Panels) $(@($back).Count) $(@($back | ForEach-Object { "$($_.panel)|$($_.widget)|$($_.event)|$($_.value)" }) -join ';')"
+} '2 2 align_panel_content|align_left_button|click|;magic_wand_panel_content|fill_tolerance|commit|40'
+Test-Case 'is: a commit value with a quote and a semicolon survives the crossing' {
+    $v = [ordered]@{ panel = 'p'; widget = 'w'; event = 'commit'; value = 'a"b;c' }
+    (ConvertFrom-SbPanelText (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $v, $sRead))).PanelText).value
+} 'a"b;c'
+Test-Case 'is: a panel step BEFORE the gesture ends is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $pAlign, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 1 panel align_panel_content/align_left_button comes before the gesture ends: send_hand.ps1 delivers panel steps only after the release'
+Test-Case 'is: a key AFTER a panel step is refused by name: panel steps are delivered last' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $k, $sRead)))
+} 'REFUSED: step 4 key Delete comes after a panel step: send_hand.ps1 delivers keys, then panel steps'
+Test-Case 'is: a pointer step after a panel step is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $sPress, $sRead)))
+} 'REFUSED: step 4 is a pointer step after a panel step: send_hand.ps1 delivers panel steps only after the gesture'
+Test-Case 'is: a panel step with an event other than click or commit is refused' {
+    $p = [ordered]@{ panel = 'align_panel_content'; widget = 'align_left_button'; event = 'toggle' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
+} "REFUSED: step 3 panel align_panel_content/align_left_button event 'toggle': this driver delivers click and commit"
+Test-Case 'is: a commit with no value is refused, never committed empty' {
+    $p = [ordered]@{ panel = 'magic_wand_panel_content'; widget = 'fill_tolerance'; event = 'commit' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
+} 'REFUSED: step 3 panel magic_wand_panel_content/fill_tolerance commit carries no string value'
+Test-Case 'is: a click that carries a value is refused, never dropped' {
+    $p = [ordered]@{ panel = 'align_panel_content'; widget = 'align_left_button'; event = 'click'; value = '1' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
+} 'REFUSED: step 3 panel align_panel_content/align_left_button click carries a value: only a commit has one'
+Test-Case 'is: a panel step that names no widget is refused' {
+    $p = [ordered]@{ panel = 'align_panel_content'; widget = ''; event = 'click' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
+} 'REFUSED: step 3 panel step names no panel or no widget'
+
+# What send_hand.ps1 does with the elements UI Automation found. Each fixture's
+# pattern list is a ROW MEASURED ON THE BOX (2026-10-17, the align panel with
+# nothing selected): align_left_button is a Button exposing
+# [InvokePatternIdentifiers.Pattern, ScrollItemPatternIdentifiers.Pattern],
+# disabled; distribute_spacing_value a TextBox exposing
+# [ValuePatternIdentifiers.Pattern, TextPatternIdentifiers.Pattern,
+# ScrollItemPatternIdentifiers.Pattern]. A Toggle or SelectionItem control was
+# not measured; those two rows use the same programmatic-name form.
+$uiaButton = @('InvokePatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern')
+$uiaTextBox = @('ValuePatternIdentifiers.Pattern', 'TextPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern')
+function Show-SbPanelAction($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
+Test-Case 'pa: an enabled button is clicked through Invoke' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
+} 'Invoke'
+Test-Case 'pa: a text box is committed through Value' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'distribute_spacing_value' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Edit' -Patterns $uiaTextBox)
+} 'Value'
+Test-Case 'pa: a toggle is clicked through Toggle, a selection item through Select' {
+    $t = Select-SbPanelAction -Panel 'p' -Widget 't' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.CheckBox' -Patterns @('TogglePatternIdentifiers.Pattern')
+    $r = Select-SbPanelAction -Panel 'p' -Widget 'r' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.RadioButton' -Patterns @('SelectionItemPatternIdentifiers.Pattern')
+    "$(Show-SbPanelAction $t) $(Show-SbPanelAction $r)"
+} 'Toggle SelectionItem'
+Test-Case 'pa: a misspelt widget id is refused as not found' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_lefft_button' -Event 'click' -PanelCount 1 -WidgetCount 0 -Enabled $false -ControlType '' -Patterns @())
+} "REFUSED: widget 'align_lefft_button' is not found in panel 'align_panel_content': no element there has that AutomationId"
+Test-Case 'pa: a widget id found twice is refused, never guessed between' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'click' -PanelCount 1 -WidgetCount 2 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
+} "REFUSED: widget 'align_left_button' is found 2 times in panel 'align_panel_content': this driver will not guess which one a person meant"
+Test-Case 'pa: a panel that is not shown is refused as not found' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'magic_wand_panel_content' -Widget 'fill_tolerance' -Event 'commit' -PanelCount 0 -WidgetCount 0 -Enabled $false -ControlType '' -Patterns @())
+} "REFUSED: panel 'magic_wand_panel_content' is not found: no element has that AutomationId (is it the panel the window shows?)"
+Test-Case 'pa: a panel id found twice is refused' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'click' -PanelCount 2 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
+} "REFUSED: panel 'align_panel_content' is found 2 times: this driver will not guess which one a person meant"
+Test-Case 'pa: a disabled control is refused: a person cannot click it either' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $false -ControlType 'ControlType.Button' -Patterns $uiaButton)
+} "REFUSED: widget 'align_left_button' (ControlType.Button) is disabled: a person cannot click it"
+Test-Case 'pa: a click on a text box is refused: it has no pattern for a click' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'distribute_spacing_value' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Edit' -Patterns $uiaTextBox)
+} "REFUSED: widget 'distribute_spacing_value' (ControlType.Edit) has no Invoke, Toggle or SelectionItem pattern for a click: it has [Value, Text, ScrollItem]"
+Test-Case 'pa: a commit on a button is refused: it has no Value pattern' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
+} "REFUSED: widget 'align_left_button' (ControlType.Button) has no Value pattern for a commit: it has [Invoke, ScrollItem]"
 Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
 } 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
