@@ -81,6 +81,10 @@ private func dedupeIdsWalk(_ elem: Element, _ seen: inout Set<String>) -> Elemen
         case .compoundShape(var cs):
             cs.operands = cs.operands.map { dedupeIdsWalk($0, &seen) }
             return .live(.compoundShape(cs))
+        // The wrapped child is owned, so its ids are walked too.
+        case .transformed(var t):
+            t.child = dedupeIdsWalk(t.child, &seen)
+            return .live(.transformed(t))
         case .reference, .recorded, .generated:
             return out
         }
