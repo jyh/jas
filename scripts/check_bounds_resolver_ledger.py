@@ -115,6 +115,17 @@ LEDGER: dict[str, dict[str, str]] = {
             "format's boundary — not an accessor swap.",
     },
     "interpreter/effects.rs": {
+        "None => child.bounds(),":
+            "UNREACHABLE for an instance — the Path Eraser's fits-inside test "
+            "(`path_erase_at_rect`, transform-correct path verbs S5). The "
+            "receiver was matched as `Element::Path` a few lines above, so it "
+            "is never a symbol instance and the resolver-less box is exact. "
+            "Until S5 this site read `let bounds = child.bounds();` and was "
+            "covered only by that key's artboard verdict, by text.",
+        "Some(t) => crate::geometry::element::aabb_through(child.bounds(), &t),":
+            "UNREACHABLE for an instance — the same Path Eraser site, the "
+            "document-space box for a path with a frame. The receiver is an "
+            "`Element::Path`.",
         "let bounds = model.document().bounds();":
             "RESOLVED — `Document::bounds` resolves since FITPHANTOM.",
         "let b = model.document().bounds();":

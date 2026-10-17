@@ -5238,7 +5238,7 @@ fn path_erase_at_rect(
         // ports can agree on. Fragment ids are handed out in document order.
         let mut new_children: Vec<Rc<Element>> = Vec::with_capacity(children.len());
         let mut layer_changed = false;
-        for child in children.iter() {
+        for (ci, child) in children.iter().enumerate() {
             let path_elem = match child.as_ref() {
                 Element::Path(pe) => pe,
                 _ => {
@@ -5250,19 +5250,51 @@ fn path_erase_at_rect(
                 new_children.push(child.clone());
                 continue;
             }
-            let flat = flatten_path_commands(&path_elem.d);
+            // The eraser sweeps DOCUMENT space, so the path is tested where it
+            // is DRAWN (transform-correct path verbs S5): its flattened points
+            // go through its full frame (the layer's transform and its own).
+            // The hit's flat indices and `t` carry over unchanged, because an
+            // affine map preserves ratios along a line; its entry and exit
+            // POINTS are mapped back into the path's local space before the
+            // split uses them. A singular frame is left alone.
+            let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, &[li, ci], true);
+            let inv = match frame {
+                Some(t) => match t.inverse() {
+                    Some(i) => Some(i),
+                    None => {
+                        new_children.push(child.clone());
+                        continue;
+                    }
+                },
+                None => None,
+            };
+            let mut flat = flatten_path_commands(&path_elem.d);
+            if let Some(t) = frame {
+                for p in flat.iter_mut() {
+                    *p = t.apply_point(p.0, p.1);
+                }
+            }
             if flat.len() < 2 {
                 new_children.push(child.clone());
                 continue;
             }
-            let hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
+            let mut hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
                 Some(h) => h,
                 None => {
                     new_children.push(child.clone());
                     continue;
                 }
             };
-            let bounds = child.bounds();
+            if let Some(i) = inv {
+                hit.entry = i.apply_point(hit.entry.0, hit.entry.1);
+                hit.exit = i.apply_point(hit.exit.0, hit.exit.1);
+            }
+            // "Fits inside the eraser" is a DOCUMENT-space size: the local
+            // bounds boxed through the frame.
+            let bounds = match frame {
+                None => child.bounds(),
+                Some(t) => crate::geometry::element::aabb_through(child.bounds(), &t),
+            };
             if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
                 // bbox fits inside the eraser — drop entirely.
                 layer_changed = true;
@@ -11744,7 +11776,8 @@ mod tests {
             PathCommand::LineTo { x: 0.0, y: 100.0 },
             PathCommand::ClosePath,
         ]);
-        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0);
         let children = match model.document().layers[0].children() {
             Some(c) => c.len(),
             None => 0,
@@ -11768,7 +11801,8 @@ mod tests {
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
         with_corpus_id_counter(|| {
-            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+            // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+            path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0)
         });
         let n = model.document().layers[0].children().map_or(0, |c| c.len());
         assert_eq!(n, 2, "a severing erase of an open path yields two fragments");
@@ -11979,7 +12013,8 @@ mod tests {
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
         with_corpus_id_counter(|| {
-            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+            // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+            path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0)
         });
         assert_eq!(path_at(&model, &[0, 0]).common.id.as_deref(), Some("01234567"));
         assert_eq!(path_at(&model, &[0, 1]).common.id.as_deref(), Some("89abcdef"));
@@ -12209,8 +12244,10 @@ mod tests {
             PathCommand::LineTo { x: 0.0, y: 100.0 },
             PathCommand::ClosePath,
         ]);
-        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0);
         let fragment = path_at(&model, &[0, 0]);
+        assert_ne!(fragment.d, src.d, "the erase must cut the path, or the chain below tests an unerased path");
         assert_eq!(fragment.common.tool_origin.as_deref(), Some("blob_brush"),
             "the erased fragment keeps tool_origin — that is what makes it a \
              merge candidate");
@@ -13426,6 +13463,49 @@ mod tests {
         path_paintbrush_edit_commit(&mut model, &store, buffer, 2.0, 12.0);
         super::super::point_buffers::clear(buffer);
         assert_eq!(path_at(&model, &[0, 0, 0]).d, d);
+    }
+
+    // ── S5: the Path Eraser cuts where a path is DRAWN ────────────────────
+    // The golden path_eraser_cuts_transformed_line pins the hit and the split
+    // points; these two pin the size test and the singular skip. Twins:
+    // JasSwift `theEraser*`.
+
+    fn s5_erase(len: f64, transform: crate::geometry::element::Transform, x: f64, y: f64) -> Model {
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: len, y: 0.0 }],
+            common: CommonProps { transform: Some(transform), ..CommonProps::default() },
+            ..PathElem::default()
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(path)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        path_erase_at_rect(&mut model, x, y, x, y, 2.0);
+        model
+    }
+
+    /// "Fits inside the eraser" is a DOCUMENT-space size. The line is 3 long
+    /// locally and scaled by 10, so it is DRAWN 30 long; an erase at its drawn
+    /// middle SPLITS it in two. Judged by its local bounds (3 by 0, inside the
+    /// 4-by-4 eraser) the whole element would be deleted instead. (The other
+    /// direction cannot tell the two apart: an eraser that holds the whole
+    /// drawn line leaves no fragment either way.)
+    #[test]
+    fn the_eraser_judges_fit_by_the_drawn_bounds() {
+        let model = s5_erase(3.0, crate::geometry::element::Transform::scale(10.0, 10.0), 15.0, 0.0);
+        assert_eq!(model.document().layers[0].children().unwrap().len(), 2,
+            "the drawn line is wider than the eraser, so it splits: {:?}", model.document().layers[0].children());
+    }
+
+    /// Under a SINGULAR transform the eraser leaves the path alone; its drawn
+    /// box has zero width, so without the skip it would be deleted.
+    #[test]
+    fn the_eraser_skips_a_path_with_a_singular_frame() {
+        let model = s5_erase(30.0, crate::geometry::element::Transform::scale(0.0, 1.0), 0.0, 0.0);
+        let kids = model.document().layers[0].children().unwrap();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(path_at(&model, &[0, 0]).d.len(), 2);
     }
 
     #[test]

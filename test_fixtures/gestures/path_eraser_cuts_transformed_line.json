@@ -1,0 +1,13 @@
+[
+  {
+    "_doc": "The S5 frame witness for the Path Eraser (transform-correct path verbs). The line (0,30) -> (120,30) in pt carries its OWN transform, the non-uniform matrix (2,0,0,3,60,30) in pt, so it is DRAWN along y = 120 from x 60 to 300. A click at (150,120) erases the 4-by-4 square around it, which crosses the drawn line from x 148 to 152, that is local x 44 to 46. The line splits there into (0,30) -> (44,30) and (46,30) -> (120,30), each with a fresh id. The old eraser compared the local line (y = 30) to the document-space square and erased nothing. The eraser does not yet descend into groups (fork F3), so this witness puts the transform on the path itself.",
+    "name": "path_eraser_cuts_transformed_line",
+    "setup_svg": "transformed_line.svg",
+    "tool": "path_eraser",
+    "events": [
+      {"kind": "press", "x": 150, "y": 120},
+      {"kind": "release", "x": 150, "y": 120}
+    ],
+    "expected_json": "path_eraser_cuts_transformed_line_expected.json"
+  }
+]

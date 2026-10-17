@@ -1828,6 +1828,7 @@ pub(crate) mod tests {
         "smooth_zigzag.json",
         "smooth_zigzag_in_scaled_group.json",
         "path_eraser_cuts_line.json",
+        "path_eraser_cuts_transformed_line.json",
         "hand_drag_pans.json",
         "zoom_click_zooms_in.json",
     ];
