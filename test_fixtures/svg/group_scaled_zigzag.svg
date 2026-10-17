@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 640 400" width="640" height="400">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <g transform="matrix(2,0,0,3,300,200)">
+      <path d="M0,40 L10,32 L20,40 L30,32 L40,40 L50,32 L60,40 L70,32 L80,40 L90,32 L100,40 L110,32 L120,40 L130,32 L140,40 L150,32 L160,40" fill="none" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
+    </g>
+  </g>
+</svg>

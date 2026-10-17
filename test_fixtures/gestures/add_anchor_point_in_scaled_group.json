@@ -1,0 +1,13 @@
+[
+ {
+  "_doc": "The S2 frame witness for Add Anchor Point (transform-correct path verbs). The open path (0,0) -> (30,30) -> (60,0) sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30) in pt, so its first segment is DRAWN from (60,30) to (120,120). A click on it at the drawn midpoint (90,75) inserts one anchor at t = 0.5, local (15,15); the old walker searched the local segment for the document-space click and missed it.",
+  "name": "add_anchor_point_in_scaled_group",
+  "setup_svg": "group_scaled_path.svg",
+  "tool": "add_anchor_point",
+  "events": [
+   {"kind": "press", "x": 90, "y": 75},
+   {"kind": "release", "x": 90, "y": 75}
+  ],
+  "expected_json": "add_anchor_point_in_scaled_group_expected.json"
+ }
+]

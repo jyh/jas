@@ -29,7 +29,12 @@ For each selected unlocked Path element:
 
 1. Flatten the path's commands into a polyline with
    `flatten_with_cmd_map` — one flat point per LineTo,
-   `FLATTEN_STEPS` (20) samples per CurveTo / QuadTo.
+   `FLATTEN_STEPS` (20) samples per CurveTo / QuadTo — and map
+   every flat point through the path's full frame (every
+   ancestor's transform and its own), so steps 2–5 run in
+   document space, where the path is drawn. The samples are
+   uniform in `t`, so the command map carries over unchanged. A
+   path whose frame is singular is skipped.
 2. Find the contiguous range of flat points within
    `SMOOTH_SIZE` (default 100 px) of the cursor.
 3. Map the first / last flat indices back to command indices
@@ -44,13 +49,18 @@ For each selected unlocked Path element:
 5. Run `fit_curve(points, SMOOTH_ERROR)`. SMOOTH_ERROR is 8.0
    (twice the Pencil default — Smooth is about simplification,
    not faithful reproduction).
-6. Replace the affected range of commands with the CurveTo
-   chain the fit produced. Abort the per-element update if the
+6. Map every control point the fit produced back through the
+   frame's inverse (a Bezier's image under an affine map is the
+   Bezier of the mapped control points), and replace the
+   affected range of commands with that CurveTo chain. Abort the per-element update if the
    refit didn't actually reduce the command count (avoids
    infinite "smoothing" loops on already-smooth paths).
 
 The smooth radius and fit error are both exposed as YAML
-parameters so a future panel could wire them to sliders.
+parameters so a future panel could wire them to sliders. Both
+are document-space distances: a path inside a scaled group is
+smoothed with the same tolerance as one at the top level, not
+with a tolerance stretched by the group's scale.
 
 ## Selection requirement
 

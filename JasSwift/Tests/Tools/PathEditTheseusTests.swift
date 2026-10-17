@@ -156,7 +156,10 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
     let (model, src) = modelWithTheseus([
         .moveTo(0, 0), .lineTo(50, 0), .lineTo(100, 0),
     ])
-    runEffects([["doc.path.delete_anchor_near": ["x": 50, "y": 0, "hit_radius": 8]]],
+    // The fixture's own transform is translate(40, 70), so (50, 0) is DRAWN
+    // at (90, 70): the tools hit where a path is drawn (transform-correct
+    // path verbs S2). Until S2 this clicked (50, 0).
+    runEffects([["doc.path.delete_anchor_near": ["x": 90, "y": 70, "hit_radius": 8]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
     expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
@@ -165,8 +168,11 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
 
 @Test func theseusInsertAnchorPreservesEverythingButD() throws {
     let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
+    // The fixture's own transform is translate(40, 70), so (50, 0) is DRAWN
+    // at (90, 70): the tools hit where a path is drawn (transform-correct
+    // path verbs S2). Until S2 this clicked (50, 0).
     runEffects([["doc.path.insert_anchor_on_segment_near":
-                    ["x": 50, "y": 0, "hit_radius": 8]]],
+                    ["x": 90, "y": 70, "hit_radius": 8]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
     expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
@@ -180,8 +186,11 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
     let model = Model(document: Document(
         layers: [Layer(children: [.path(src)])], selectedLayer: 0,
         selection: [ElementSelection.all([0, 0])]))
+    // The fixture's own transform is translate(40, 70): (15, 0) in the path's
+    // space is DRAWN at (55, 70), where Smooth now hits (transform-correct
+    // path verbs S4). Until S4 this pressed (15, 0).
     runEffects([["doc.path.smooth_at_cursor":
-                    ["x": 15, "y": 0, "radius": 50, "fit_error": 3]]],
+                    ["x": 55, "y": 70, "radius": 50, "fit_error": 3]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
     expectOnlyDChanged(src, try #require(pathAt(model, [0, 0])),
@@ -255,9 +264,13 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
     ])
     let buffer = "theseus_paintbrush_edit_swift"
     pointBuffersClear(buffer)
-    pointBuffersPush(buffer, 50, 10)
-    pointBuffersPush(buffer, 75, 20)
-    pointBuffersPush(buffer, 100, 0)
+    // The drag is in DOCUMENT space and the fixture's own transform is
+    // translate(40, 70), so the drag runs where the path is DRAWN: the local
+    // drag shifted by (40, 70) (transform-correct path verbs S4b). Until S4b
+    // the drag was local.
+    pointBuffersPush(buffer, 90, 80)
+    pointBuffersPush(buffer, 115, 90)
+    pointBuffersPush(buffer, 140, 70)
     let store = StateStore()
     store.setTool("paintbrush", "edit_target_path", ["__path__": [0, 0]])
     store.setTool("paintbrush", "edit_entry_idx", 1)

@@ -1,0 +1,14 @@
+[
+  {
+    "_doc": "The S3 frame witness for the Partial Selection marquee (transform-correct path verbs). The rect (0,0,30,30) in pt sits inside a group with matrix (2,0,0,2,60,30), so its corner 2 (local 30,30) is DRAWN at (120,90). A marquee from (130,100) to (115,85) encloses that drawn corner and nothing else of the rect, so it selects the rect partially with corner 2. The old marquee compared raw local points and selected nothing.",
+    "name": "partial_selection_marquee_in_scaled_group",
+    "setup_svg": "group_scaled_rect.svg",
+    "tool": "partial_selection",
+    "events": [
+      {"kind": "press", "x": 130, "y": 100},
+      {"kind": "move", "x": 115, "y": 85, "dragging": true},
+      {"kind": "release", "x": 115, "y": 85}
+    ],
+    "expected_json": "partial_selection_marquee_in_scaled_group_expected.json"
+  }
+]

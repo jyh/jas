@@ -1674,35 +1674,23 @@ private func resolveStrokeField(
 
 // MARK: - Path-editing helpers (doc.path.* effects)
 
-/// Walk layers (one level of group nesting) looking for a Path whose
-/// command list has an anchor within `radius` of (x, y). Returns
-/// `(element path, command index)`.
+/// Find a Path with an anchor within `radius` of (x, y), comparing each
+/// anchor where it is DRAWN (see `findInEditablePaths`, which also skips a
+/// locked Path at any depth). Returns `(element path, command index)`. Twin
+/// of Rust `find_path_anchor_near`.
 private func findPathAnchorNear(
-    _ doc: Document, x: Double, y: Double, radius: Double
+    _ doc: Document, isolated: [Int]?, x: Double, y: Double, radius: Double
 ) -> (ElementPath, Int)? {
-    for (li, layer) in doc.layers.enumerated() {
-        for (ci, child) in layer.children.enumerated() {
-            if case .path(let pe) = child, !pe.locked,
-               let idx = anchorIndexNear(pe.d, x: x, y: y, radius: radius) {
-                return ([li, ci], idx)
-            }
-            if case .group(let g) = child, !g.locked {
-                for (gi, gc) in g.children.enumerated() {
-                    if case .path(let pe) = gc, !pe.locked,
-                       let idx = anchorIndexNear(pe.d, x: x, y: y, radius: radius) {
-                        return ([li, ci, gi], idx)
-                    }
-                }
-            }
-        }
+    findInEditablePaths(doc, isolated: isolated) { path, pe, frame in
+        anchorIndexNear(pe.d, frame: frame, x: x, y: y, radius: radius).map { (path, $0) }
     }
-    return nil
 }
 
-/// Return the command index of the anchor on `d` closest to (x, y)
-/// within `radius`. Only MoveTo / LineTo / CurveTo count as anchors.
+/// Return the command index of the anchor on `d` within `radius` of (x, y),
+/// each anchor compared where `frame` draws it. Only MoveTo / LineTo /
+/// CurveTo count as anchors.
 private func anchorIndexNear(
-    _ d: [PathCommand], x: Double, y: Double, radius: Double
+    _ d: [PathCommand], frame: Transform?, x: Double, y: Double, radius: Double
 ) -> Int? {
     for (i, cmd) in d.enumerated() {
         let pt: (Double, Double)
@@ -1712,7 +1700,8 @@ private func anchorIndexNear(
         case .curveTo(_, _, _, _, let px, let py): pt = (px, py)
         default: continue
         }
-        let dx = x - pt.0, dy = y - pt.1
+        let a = drawnPoint(frame, pt)
+        let dx = x - a.0, dy = y - a.1
         if (dx * dx + dy * dy).squareRoot() <= radius {
             return i
         }
@@ -1848,7 +1837,7 @@ private func pathDeleteAnchorNear(
     model: Model, x: Double, y: Double, radius: Double
 ) {
     guard let (path, anchorIdx) = findPathAnchorNear(
-        model.document, x: x, y: y, radius: radius
+        model.document, isolated: model.layersIsolationStack.last, x: x, y: y, radius: radius
     ) else { return }
     guard case .path(let pe) = model.document.getElement(path) else { return }
     // Undoable edit: editDocument self-brackets one undo step (joins the
@@ -1874,25 +1863,23 @@ private func pathInsertAnchorOnSegmentNear(
     model: Model, x: Double, y: Double, radius: Double
 ) {
     var best: (ElementPath, Int, Double, Double)? = nil
-    func tryPath(_ pe: Path, at path: ElementPath) {
-        guard let (segIdx, t) = closestSegmentAndT(pe.d, x, y) else { return }
-        let dist = projectionDistance(pe.d, segIdx: segIdx, x: x, y: y)
+    // `d` is the path's commands mapped to DOCUMENT space, so the closest
+    // segment, its `t` and the distance are measured where the path is drawn.
+    // The `t` carries back to the local commands exactly (an affine map takes
+    // a segment's point at `t` to its image's point at `t`). Mapping the
+    // cursor into local space instead is wrong under a non-uniform scale.
+    // Twin of Rust `path_insert_anchor_on_segment_near`.
+    func tryPath(_ d: [PathCommand], at path: ElementPath) {
+        guard let (segIdx, t) = closestSegmentAndT(d, x, y) else { return }
+        let dist = projectionDistance(d, segIdx: segIdx, x: x, y: y)
         if let cur = best, cur.3 <= dist { return }
         best = (path, segIdx, t, dist)
     }
-    for (li, layer) in model.document.layers.enumerated() {
-        for (ci, child) in layer.children.enumerated() {
-            if case .path(let pe) = child, !pe.locked {
-                tryPath(pe, at: [li, ci])
-            }
-            if case .group(let g) = child, !g.locked {
-                for (gi, gc) in g.children.enumerated() {
-                    if case .path(let pe) = gc, !pe.locked {
-                        tryPath(pe, at: [li, ci, gi])
-                    }
-                }
-            }
-        }
+    // Every editable Path at any depth; the visitor never stops the walk, so
+    // the globally closest segment wins.
+    let _: Bool? = findInEditablePaths(model.document, isolated: model.layersIsolationStack.last) { path, pe, frame in
+        tryPath(frame.map { mapPathCommands(pe.d, $0) } ?? pe.d, at: path)
+        return nil
     }
     guard let hit = best, hit.3 <= radius else { return }
     guard case .path(let pe) = model.document.getElement(hit.0) else { return }
@@ -2408,9 +2395,15 @@ private func paintbrushEditStart(
     for es in model.document.selection {
         guard case .path(let pe) = model.document.getElement(es.path),
               !pe.locked, pe.d.count >= 2 else { continue }
+        // Compared where the path is DRAWN (transform-correct path verbs
+        // S4b): each flat point through the path's full frame; a singular
+        // frame is skipped. Twin of Rust `path_paintbrush_edit_start`.
+        let frame = accumulatedTransform(model.document, es.path, includeOwn: true)
+        if let f = frame, f.inverse() == nil { continue }
         let (flat, _) = flattenWithCmdMap(pe.d)
         guard !flat.isEmpty else { continue }
-        for (i, pt) in flat.enumerated() {
+        for (i, local) in flat.enumerated() {
+            let pt = frame.map { $0.applyPoint(local.0, local.1) } ?? local
             let dx = pt.0 - x, dy = pt.1 - y
             let dsq = dx * dx + dy * dy
             if dsq > withinSq { continue }
@@ -2446,7 +2439,19 @@ private func paintbrushEditCommit(
 
     guard case .path(let targetPe) = model.document.getElement(targetPath),
           !targetPe.locked, targetPe.d.count >= 2 else { return }
-    let (flat, cmdMap) = flattenWithCmdMap(targetPe.d)
+    // The drag buffer is in DOCUMENT space, so the exit search and the fit run
+    // there too (transform-correct path verbs S4b, fork F4): flat points and
+    // the splice's start point go through the path's full frame, and the
+    // fitted control points come back through its inverse. A singular frame
+    // is skipped. Twin of Rust `path_paintbrush_edit_commit`.
+    let frame = accumulatedTransform(model.document, targetPath, includeOwn: true)
+    var inv: Transform? = nil
+    if let f = frame {
+        guard let i = f.inverse() else { return }
+        inv = i
+    }
+    let (localFlat, cmdMap) = flattenWithCmdMap(targetPe.d)
+    let flat = frame.map { f in localFlat.map { f.applyPoint($0.0, $0.1) } } ?? localFlat
     guard !flat.isEmpty, entryIdx < flat.count else { return }
 
     let last = dragPoints.last!
@@ -2470,7 +2475,8 @@ private func paintbrushEditCommit(
     // the path's flow.
     let orderedDrag: [(Double, Double)] =
         exitIdx < entryIdx ? dragPoints.reversed() : dragPoints
-    let startPt = cmdStartPoint(targetPe.d, c0)
+    let localStart = cmdStartPoint(targetPe.d, c0)
+    let startPt = frame.map { $0.applyPoint(localStart.0, localStart.1) } ?? localStart
     var pointsToFit: [(Double, Double)] = [startPt]
     pointsToFit.append(contentsOf: orderedDrag)
     guard pointsToFit.count >= 2 else { return }
@@ -2480,11 +2486,13 @@ private func paintbrushEditCommit(
 
     var newCmds: [PathCommand] = []
     newCmds.append(contentsOf: targetPe.d[..<c0])
+    func back(_ x: Double, _ y: Double) -> (Double, Double) { inv.map { $0.applyPoint(x, y) } ?? (x, y) }
     for seg in segments {
+        let p1 = back(seg.c1x, seg.c1y), p2 = back(seg.c2x, seg.c2y), p3 = back(seg.p2x, seg.p2y)
         newCmds.append(.curveTo(
-            x1: seg.c1x, y1: seg.c1y,
-            x2: seg.c2x, y2: seg.c2y,
-            x: seg.p2x, y: seg.p2y))
+            x1: p1.0, y1: p1.1,
+            x2: p2.0, y2: p2.1,
+            x: p3.0, y: p3.1))
     }
     newCmds.append(contentsOf: targetPe.d[(c1 + 1)...])
 
@@ -2504,7 +2512,21 @@ private func pathSmoothAtCursor(
         let path = es.path
         guard case .path(let pe) = model.document.getElement(path),
               !pe.locked, pe.d.count >= 2 else { continue }
-        let (flat, cmdMap) = flattenWithCmdMap(pe.d)
+        // Hit and fit where the path is DRAWN (transform-correct path verbs
+        // S4, fork F4): the flattened points are mapped through the path's
+        // full frame, so the radius and `fitError` are document-space
+        // tolerances, and the fitted control points are mapped back through
+        // the inverse. `cmdMap` carries over (uniform flattening). A singular
+        // frame is skipped; with no frame nothing is mapped. Twin of Rust
+        // `path_smooth_at_cursor`.
+        let frame = accumulatedTransform(model.document, path, includeOwn: true)
+        var inv: Transform? = nil
+        if let f = frame {
+            guard let i = f.inverse() else { continue }
+            inv = i
+        }
+        let (localFlat, cmdMap) = flattenWithCmdMap(pe.d)
+        let flat = frame.map { f in localFlat.map { f.applyPoint($0.0, $0.1) } } ?? localFlat
         guard flat.count >= 2 else { continue }
         var firstHit: Int? = nil
         var lastHit: Int? = nil
@@ -2533,7 +2555,8 @@ private func pathSmoothAtCursor(
         let rangeFlat: [(Double, Double)] = flat.enumerated()
             .filter { (i, _) in cmdMap[i] >= firstCmd && cmdMap[i] <= lastCmd }
             .map { $0.1 }
-        let startPt = cmdStartPoint(pe.d, firstCmd)
+        let localStart = cmdStartPoint(pe.d, firstCmd)
+        let startPt = frame.map { $0.applyPoint(localStart.0, localStart.1) } ?? localStart
         var pointsToFit = [startPt]
         pointsToFit.append(contentsOf: rangeFlat)
         guard pointsToFit.count >= 2 else { continue }
@@ -2541,11 +2564,13 @@ private func pathSmoothAtCursor(
         guard !segments.isEmpty else { continue }
         var newCmds: [PathCommand] = []
         newCmds.append(contentsOf: pe.d[..<firstCmd])
+        func back(_ x: Double, _ y: Double) -> (Double, Double) { inv.map { $0.applyPoint(x, y) } ?? (x, y) }
         for seg in segments {
+            let c1 = back(seg.c1x, seg.c1y), c2 = back(seg.c2x, seg.c2y), p2 = back(seg.p2x, seg.p2y)
             newCmds.append(.curveTo(
-                x1: seg.c1x, y1: seg.c1y,
-                x2: seg.c2x, y2: seg.c2y,
-                x: seg.p2x, y: seg.p2y))
+                x1: c1.0, y1: c1.1,
+                x2: c2.0, y2: c2.1,
+                x: p2.0, y: p2.1))
         }
         newCmds.append(contentsOf: pe.d[(lastCmd + 1)...])
         guard newCmds.count < pe.d.count else { continue }

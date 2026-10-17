@@ -399,12 +399,25 @@ Full pass: ~65 min.
 
 **P2**
 
-- [ ] **APT-160** [wired] Add / Delete / Convert walk one level of
+- [ ] **APT-160** [wired] Add / Delete / Convert walk every depth of
   group nesting.
-      Setup: Group fixture with a path inside; relevant tool active.
+      Setup: Group fixture with a path inside, and a second fixture
+             with that group inside another group; relevant tool
+             active.
       Do: Click a segment / anchor of the grouped path.
       Expect: The tool operates on the inner path, same as on a
-              top-level path.
+              top-level path, at both depths.
+      — last: —
+
+- [ ] **APT-160b** [wired] Add / Delete / Convert hit a path in a
+  transformed group where it is drawn.
+      Setup: A path inside a group that is scaled non-uniformly (for
+             example 2x wide, 3x tall) and moved; relevant tool active.
+      Do: Click an anchor or segment where it appears on the canvas.
+          Then click where it would be without the group's transform.
+      Expect: The first click edits the path; the inserted anchor or
+              the converted handle lands under the cursor. The second
+              click does nothing.
       — last: —
 
 - [ ] **APT-161** [wired] Among overlapping paths, the closest hit

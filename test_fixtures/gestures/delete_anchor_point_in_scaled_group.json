@@ -1,0 +1,13 @@
+[
+ {
+  "_doc": "The S2 frame witness for Delete Anchor Point (transform-correct path verbs). The open path (0,0) -> (30,30) -> (60,0) sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30) in pt, so its corner (30,30) is DRAWN at (120,120). A click there must delete it; the old walker compared raw local endpoints and found nothing. The path keeps its two outer anchors and its one segment runs (0,0) -> (60,0) in local space.",
+  "name": "delete_anchor_point_in_scaled_group",
+  "setup_svg": "group_scaled_path.svg",
+  "tool": "delete_anchor_point",
+  "events": [
+   {"kind": "press", "x": 120, "y": 120},
+   {"kind": "release", "x": 120, "y": 120}
+  ],
+  "expected_json": "delete_anchor_point_in_scaled_group_expected.json"
+ }
+]
