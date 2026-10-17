@@ -113,6 +113,9 @@ jobs:
       - run: bash scripts/check_intent_map.sh
       - run: python scripts/check_preservation_corpus.py
       - run: python scripts/check_corpus_manifest.py --self-test && python scripts/check_corpus_manifest.py
+      # The Mac level-2 driver's pure half: plans every shipped input script
+      # against the real menubar, with no window (docs/TESTING.md section 6).
+      - run: python scripts/mac_l2_plan.py --self-test
       - run: python scripts/check_swift_copy_sites.py --self-test && python scripts/check_swift_copy_sites.py
       # Asserts every check_*.py runs on BOTH platform families. The list of
       # steps in each lane is hand-maintained, so a gate added after a lane was
@@ -989,6 +992,7 @@ jobs:
           python scripts/check_preservation_corpus.py
           python scripts/check_corpus_manifest.py --self-test
           python scripts/check_corpus_manifest.py
+          python scripts/mac_l2_plan.py --self-test
           # The reference's own corpus harness at HEAD, per case, against a
           # ratcheted baseline (POLICY.md section 1). It runs here as well as
           # in the reference lane because the harness opens its fixtures with
