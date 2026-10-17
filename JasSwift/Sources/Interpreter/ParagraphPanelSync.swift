@@ -153,12 +153,17 @@ public func ensureParagraphWrapper(_ tspans: inout [Tspan]) -> [Int] {
     let bad: [Int] = tspans.indices.filter {
         tspans[$0].jasRole == "paragraph" && !tspans[$0].content.isEmpty
     }
+    // TSPAN.md invariants 6 and 7: a new tspan's id is strictly greater than
+    // every id in the Text. The default id is 0, which the first body tspan
+    // already holds, so each new wrapper takes `max + 1` instead.
+    func fresh() -> UInt32 { (tspans.map(\.id).max()).map { $0 + 1 } ?? 0 }
     for i in bad.reversed() {
         let src = tspans[i]
         // New wrapper inherits paragraph-attr fields from the corrupted
         // tspan; the corrupted tspan keeps its content + character
         // overrides but loses its wrapper role and paragraph attrs.
         let newWrapper = Tspan(
+            id: fresh(),
             jasRole: "paragraph",
             jasLeftIndent: src.jasLeftIndent,
             jasRightIndent: src.jasRightIndent,
@@ -225,7 +230,7 @@ public func ensureParagraphWrapper(_ tspans: inout [Tspan]) -> [Int] {
     let existing = tspans.indices.filter { tspans[$0].jasRole == "paragraph" }
     if !existing.isEmpty { return existing }
     // No wrapper anywhere: prepend an empty one.
-    tspans.insert(Tspan(jasRole: "paragraph"), at: 0)
+    tspans.insert(Tspan(id: fresh(), jasRole: "paragraph"), at: 0)
     return [0]
 }
 
