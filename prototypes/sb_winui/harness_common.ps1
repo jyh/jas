@@ -3236,12 +3236,32 @@ function Select-SbPanelAction {
     $has = "[$($short -join ', ')]"
     if ($Event -eq 'commit') {
         if ($short -contains 'Value') { return [pscustomobject]@{ Action = 'Value'; Refusal = $null } }
+        # A select (jas section 381): a WinUI ComboBox has no Value pattern, and
+        # a person commits it by opening the list and choosing an item, which
+        # `Select-SbChoiceItem` finds by the option's VALUE.
+        if ($short -contains 'ExpandCollapse' -and $short -contains 'Selection') {
+            return [pscustomobject]@{ Action = 'Choose'; Refusal = $null }
+        }
         return (& $no "widget '$Widget' ($ControlType) has no Value pattern for a commit: it has $has")
     }
     foreach ($a in @('Invoke', 'Toggle', 'SelectionItem')) {
         if ($short -contains $a) { return [pscustomobject]@{ Action = $a; Refusal = $null } }
     }
     & $no "widget '$Widget' ($ControlType) has no Invoke, Toggle or SelectionItem pattern for a click: it has $has"
+}
+
+# A Choose's second step: the items of the opened list whose AutomationId is
+# the commit's value (the shell sets each item's AutomationId to its option's
+# VALUE, never its label), and the patterns of the one found. Pure, so each
+# refusal has a self-test arm.
+function Select-SbChoiceItem {
+    param([string]$Widget, [string]$Value, [int]$ItemCount, [string[]]$Patterns)
+    $no = { param($why) [pscustomobject]@{ Action = $null; Refusal = $why } }
+    if ($ItemCount -eq 0) { return (& $no "value '$Value' is not an option of widget '$Widget': no item in its list has that AutomationId") }
+    if ($ItemCount -gt 1) { return (& $no "value '$Value' is carried by $ItemCount items of widget '$Widget': this driver will not guess which one a person meant") }
+    $short = @($Patterns | ForEach-Object { $_ -replace 'PatternIdentifiers\.Pattern$', '' })
+    if ($short -contains 'SelectionItem') { return [pscustomobject]@{ Action = 'Select'; Refusal = $null } }
+    & $no "the item '$Value' of widget '$Widget' has no SelectionItem pattern: it has [$($short -join ', ')]"
 }
 
 # The level-2 oracle: the core's document BYTES against the expected BYTES.
