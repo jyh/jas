@@ -3045,6 +3045,12 @@ function Read-SbInputScript([string]$Json) {
             elseif ($names -contains 'value' -and $null -ne $st.value) {
                 return (& $no "step $i panel $tag click carries a value: only a commit has one")
             }
+            # The window shows ONE panel, which prove_e2e.ps1 opens at launch
+            # (SB_PANEL, jas section 378), so every step must name that panel.
+            if ($panels.Count -gt 0 -and $panels[0].panel -cne $pn) {
+                return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($panels[0].panel)): the window shows one panel, which this driver opens at launch")
+            }
+            if ($panels.Count -eq 0) { $firstPanelStep = $i }
             $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value })
             continue
         }
@@ -3148,6 +3154,7 @@ function Read-SbInputScript([string]$Json) {
             Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
             Keys = $keys.Count; KeyText = ($keys -join ';')
             Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+            Panel = $(if ($panels.Count -gt 0) { $panels[0].panel } else { '' })
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -3177,6 +3184,7 @@ function Read-SbInputScript([string]$Json) {
         Shift = $shift; Alt = $held['alt']
         Keys = $keys.Count; KeyText = ($keys -join ';')
         Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+        Panel = $(if ($panels.Count -gt 0) { $panels[0].panel } else { '' })
     }
 }
 
