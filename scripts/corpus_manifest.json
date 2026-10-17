@@ -193,6 +193,21 @@
       },
       "notes": "conformance.json compiled from workspace/tests/expressions.yaml. The reference gates the SOURCE yaml directly (test_expr.py), not this compiled artifact — so 'reference' is intentionally not required here but IS required on the workspace/tests/expressions.yaml row."
     },
+    "test_fixtures/clipboard": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "None needed: each port reads the cases and compares its own payload with the golden, so the law is the golden.",
+      "claim_style": {
+        "rust": "path reference (clipboard/copy_payload.json) + data references",
+        "swift": "path reference (clipboard/copy_payload.json) + data references"
+      },
+      "notes": "The copy payload (Edit > Copy): the bytes every app puts on the system clipboard. Rust writes the goldens and matches them byte for byte; Swift matches their content and carries byte equality as a known issue until the SVG writers agree."
+    },
     "test_fixtures/input_scripts": {
       "kind": "fixtures",
       "required_consumers": [

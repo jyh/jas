@@ -15,7 +15,6 @@ use super::theme::*;
 use crate::document::controller::Controller;
 use crate::geometry::svg::document_to_svg;
 use crate::panels::panel_menu_state::{MenuBarState, PanelMenuState};
-use crate::tools::tool::PASTE_OFFSET;
 
 #[component]
 pub(crate) fn MenuBarView(
@@ -165,23 +164,18 @@ pub(crate) fn MenuBarView(
                         }
                     }));
                 }
-                "paste" => {
-                    // R2: plain Paste FLATTENS into the active layer.
-                    clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET, false,
-                    );
-                }
-                "paste_in_place" => {
-                    clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, 0.0, false,
-                    );
-                }
-                // R3: the separate, explicit command. Differs from plain Paste
-                // in layer TARGETING only — same 24pt offset.
-                "paste_preserving_layers" => {
-                    clipboard_read_and_paste(
-                        app_for_menu.clone(), revision_for_menu, PASTE_OFFSET, true,
-                    );
+                // The offsets and the layer targeting are the clipboard table
+                // the engine's menu and key routes read (`menu_native`). R2:
+                // plain Paste FLATTENS into the active layer; R3: Paste
+                // Preserving Layers differs in layer TARGETING only.
+                "paste" | "paste_in_place" | "paste_preserving_layers" => {
+                    if let Some(super::menu_native::ClipVerb::Paste { offset, preserve_layers }) =
+                        super::menu_native::clipboard_verb(cmd)
+                    {
+                        clipboard_read_and_paste(
+                            app_for_menu.clone(), revision_for_menu, offset, preserve_layers,
+                        );
+                    }
                 }
                 // The menu's model-pure verbs: one table, shared with the
                 // action corpus and the engine's menu dispatch

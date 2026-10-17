@@ -1965,6 +1965,49 @@ pub(crate) mod tests {
         }
     }
 
+    /// THE COPY PAYLOAD (Edit > Copy, Ctrl+C): the selection's elements, in
+    /// selection order, in one unnamed layer with no artboard, as SVG. Every
+    /// app puts these bytes on the system clipboard, so the cases pin them
+    /// byte for byte across the ports (`test_fixtures/clipboard/`). An empty
+    /// selection has no payload (`expected_svg: null`).
+    fn copy_payload_of(case: &serde_json::Value) -> Option<String> {
+        use crate::document::document::ElementSelection;
+        let mut doc = crate::geometry::svg::svg_to_document(
+            &read_fixture(&format!("svg/{}", case["setup_svg"].as_str().unwrap())));
+        doc.selection = case["select"].as_array().unwrap().iter()
+            .map(|p| ElementSelection::all(p.as_array().unwrap().iter()
+                .map(|i| i.as_u64().unwrap() as usize).collect()))
+            .collect();
+        crate::document::op_apply::selection_clipboard_svg(&doc)
+    }
+
+    #[test]
+    fn copy_payload_corpus() {
+        let cases: serde_json::Value =
+            serde_json::from_str(&read_fixture("clipboard/copy_payload.json")).unwrap();
+        let cases = cases.as_array().unwrap();
+        assert!(cases.len() >= 3, "the copy-payload corpus lost cases: {}", cases.len());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let expected = case["expected_svg"].as_str()
+                .map(|f| read_fixture(&format!("clipboard/{f}")));
+            assert_eq!(copy_payload_of(case), expected, "copy payload {name}");
+        }
+    }
+
+    /// Bootstrap: cargo test generate_copy_payload_expected -- --ignored
+    #[test]
+    #[ignore]
+    fn generate_copy_payload_expected() {
+        let cases: serde_json::Value =
+            serde_json::from_str(&read_fixture("clipboard/copy_payload.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            if let Some(f) = case["expected_svg"].as_str() {
+                std::fs::write(format!("{FIXTURES}/clipboard/{f}"), copy_payload_of(case).unwrap()).unwrap();
+            }
+        }
+    }
+
     /// THE INPUT SCRIPTS (docs/TESTING.md section 6): one per spec item, shared
     /// by level 1 (each port's core, here) and level 2 (each live app). Level 1
     /// supplies the EXPECTED read-back. A script is a gesture case with `steps`:

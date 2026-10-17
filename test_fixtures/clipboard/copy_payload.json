@@ -1,0 +1,8 @@
+[
+  {"name": "one_rect", "setup_svg": "three_rects.svg", "select": [[0, 1]],
+   "expected_svg": "one_rect.svg"},
+  {"name": "across_layers_in_selection_order", "setup_svg": "complex_document.svg",
+   "select": [[1, 0], [0, 0], [0, 2]], "expected_svg": "across_layers_in_selection_order.svg"},
+  {"name": "nothing_selected", "setup_svg": "three_rects.svg", "select": [],
+   "expected_svg": null}
+]
