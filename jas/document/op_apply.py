@@ -973,11 +973,7 @@ def _compose_matrix_over_paths(doc, paths, matrix, stroke_factor, corners):
         current = getattr(elem, "transform", None) or Transform()
         elem = dataclasses.replace(elem, transform=matrix.multiply(current))
         if stroke_factor is not None:
-            stroke = getattr(elem, "stroke", None)
-            if stroke is not None:
-                elem = dataclasses.replace(
-                    elem, stroke=dataclasses.replace(
-                        stroke, width=stroke.width * stroke_factor))
+            elem = _scale_stroke_width(elem, stroke_factor)
         if corners is not None and isinstance(elem, RectElem):
             sx_abs, sy_abs = corners
             elem = dataclasses.replace(
@@ -986,18 +982,44 @@ def _compose_matrix_over_paths(doc, paths, matrix, stroke_factor, corners):
     return new_doc
 
 
+def _scale_stroke_width(elem, factor):
+    """Multiply ``elem``'s stroke width by ``factor``. A container has no stroke
+    of its own: the factor reaches every leaf under it, since the container's
+    transform scales them all. Mirrors the Rust ``scale_elem_stroke_width``."""
+    import dataclasses
+    from geometry.element import Group
+    if isinstance(elem, Group):
+        return dataclasses.replace(
+            elem, children=tuple(_scale_stroke_width(c, factor) for c in elem.children))
+    stroke = getattr(elem, "stroke", None)
+    if stroke is None:
+        return elem
+    return dataclasses.replace(elem, stroke=dataclasses.replace(stroke, width=stroke.width * factor))
+
+
+def stroke_compensation(sx: float, sy: float, scale_strokes: bool) -> float | None:
+    """The factor the STORED stroke width is multiplied by, so the DRAWN width is
+    what SCALE_TOOL.md § Apply behavior says. The scale is stored as a transform,
+    which already scales the drawn stroke by sqrt|sx*sy|: Scale Strokes ON leaves
+    the width (None), OFF divides it. Mirrors the Rust ``stroke_compensation``."""
+    from jas.algorithms.transform_apply import stroke_width_factor
+    f = stroke_width_factor(sx, sy)
+    # A degenerate (zero) factor collapses the shape: nothing to compensate.
+    return None if scale_strokes or f == 0 else 1.0 / f
+
+
 def _selection_paths(doc) -> list[tuple[int, ...]]:
     return [es.path for es in sorted(doc.selection, key=lambda e: e.path)]
 
 
 def apply_scale(model: Model, sx: float, sy: float, rx: float, ry: float,
                 scale_strokes: bool, scale_corners: bool) -> tuple[bool, list[str]]:
-    from jas.algorithms.transform_apply import scale_matrix, stroke_width_factor
+    from jas.algorithms.transform_apply import scale_matrix
     if abs(sx - 1.0) < 1e-9 and abs(sy - 1.0) < 1e-9:
         return (False, [])
     targets = selection_to_ids(model.document)
     matrix = scale_matrix(sx, sy, rx, ry)
-    stroke_factor = stroke_width_factor(sx, sy) if scale_strokes else None
+    stroke_factor = stroke_compensation(sx, sy, scale_strokes)
     corners = (abs(sx), abs(sy)) if scale_corners else None
     model.document = _compose_matrix_over_paths(
         model.document, _selection_paths(model.document), matrix,

@@ -215,6 +215,11 @@
       "kind": "debt",
       "reason": "The bootstrap that writes the input scripts' expected read-backs, through the same gesture runner.",
       "blocked_by": "crate::recorder::replay::run_gesture_case, as gesture_corpus: it drives tools::tool::CanvasTool and comes home with the `tools` split."
+    },
+    "jas_dioxus/src/cross_language_test.rs::a_scaled_strokes_drawn_width_follows_scale_strokes": {
+      "kind": "debt",
+      "reason": "Scale's DRAWN stroke width (SCALE_TOOL.md § Apply behavior): drives the real scale_options_confirm, then paints the result through emit_document into a RecordingPainter. The painting half is native; the action half is not.",
+      "blocked_by": "crate::workspace::app_state, via run_action_case, as action_corpus."
     }
   }
 }

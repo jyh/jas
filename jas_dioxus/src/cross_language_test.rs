@@ -1994,6 +1994,68 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "web")]
+    /// The width a scaled element's stroke is DRAWN at: the recorded stroke
+    /// width times sqrt|det| of the transform stack around it (both backends
+    /// stroke in the transformed space). One rect, one stroke.
+    fn drawn_stroke_width(doc: &crate::document::document::Document) -> f64 {
+        use crate::geometry::element::Transform;
+        use crate::painter::recording::{Command, RecordingPainter};
+        let mut rec = RecordingPainter::new();
+        crate::document::paint::emit_document(&mut rec, doc, crate::geometry::live::DEFAULT_PRECISION);
+        let mut stack: Vec<Transform> = vec![Transform::IDENTITY];
+        let mut drawn = vec![];
+        for c in rec.commands() {
+            match c {
+                Command::PushState { transform } => {
+                    let top = *stack.last().unwrap();
+                    stack.push(top.multiply(transform));
+                }
+                Command::PopState => { stack.pop(); }
+                Command::StrokeRect { stroke, .. } | Command::StrokePath { stroke, .. } => {
+                    let m = stack.last().unwrap();
+                    drawn.push(stroke.width * (m.a * m.d - m.b * m.c).abs().sqrt());
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(drawn.len(), 1, "one stroke expected: {:?}", rec.commands());
+        drawn[0]
+    }
+
+    #[cfg(feature = "web")]
+    /// SCALE_TOOL.md § Apply behavior: with Scale Strokes the stroke width is
+    /// multiplied by sqrt|sx*sy|, and without it the width is preserved. So a
+    /// 150 % scale of a 2-unit stroke is DRAWN at 3 with the option and at 2
+    /// without, whatever representation the document stores.
+    #[test]
+    fn a_scaled_strokes_drawn_width_follows_scale_strokes() {
+        // The same rect bare, and inside a group that is what is selected: a
+        // group has no stroke, so the factor must reach its leaves.
+        let bare = read_fixture("svg/rect_with_stroke.svg");
+        let grouped = bare.replace("<rect ", "<g><rect ").replace("/>\n  </g>", "/></g>\n  </g>");
+        assert!(grouped.contains("<g><rect ") && grouped.contains("/></g>"), "the grouped setup: {grouped}");
+        let mut wrong = vec![];
+        for (setup, svg) in [("bare", &bare), ("grouped", &grouped)] {
+        for (scale_strokes, want) in [(true, 3.0), (false, 2.0)] {
+            let tc = serde_json::json!({
+                "name": "drawn", "setup_svg": "rect_with_stroke.svg", "selection": [[0, 0]],
+                "actions": [{"action": "scale_options_confirm", "params": {
+                    "uniform": true, "uniform_pct": 150, "horizontal_pct": 100, "vertical_pct": 100,
+                    "scale_strokes": scale_strokes, "scale_corners": false, "preview": false, "copy": false}}],
+            });
+            let st = crate::recorder::replay::run_action_case(&tc, svg);
+            let doc = st.tabs[st.active_tab].model.document().clone();
+            // The setup's width is 2.6667 px = 2.000025 pt.
+            let got = drawn_stroke_width(&doc) / 2.000025 * 2.0;
+            if (got - want).abs() >= 1e-3 {
+                wrong.push(format!("{setup} scale_strokes={scale_strokes}: drawn at {got}, want {want}"));
+            }
+        }
+        }
+        assert!(wrong.is_empty(), "a 2-unit stroke scaled 150 %: {wrong:?}");
+    }
+
+    #[cfg(feature = "web")]
     /// Bootstrap: cargo test generate_script_expected -- --ignored
     #[test]
     #[ignore]
@@ -8824,13 +8886,6 @@ pub(crate) mod tests {
         // Removing a row here still requires either a fix or a recorded ruling.
         const KNOWN: &[&str] = &[
             "make_compound_shape.json::make_compound_shape_two_rects",
-            // SCALE STROKES REACHES THE SELECTED ELEMENT, NOT A GROUP'S LEAVES
-            // (2026-10-16, measured): `compose_matrix_over_paths` multiplies the
-            // selected element's own stroke width, so a bare rect goes 2 -> 3
-            // while the rect inside a selected group keeps 2 (a group has no
-            // stroke). Both carry the same composed transform. Raised for a
-            // ruling: the spec maps coordinates, the ports store a transform.
-            "transform_options_actions.json::scale_options_confirm_uniform_150",
             // The four Alt+click compound-creating variants are make_compound_shape
             // with another operation: the wrappers survive as the LIVE element's
             // operands, which `unwrap_seeds` cannot reach (`children_mut` is None
