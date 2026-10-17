@@ -41,8 +41,8 @@ optimization.
 ## Hit-test semantics
 
 `Controller.select_polygon` walks the document's layer children
-and, for a Group, its direct members. A member that meets the
-polygon selects its GROUP whole (LAYER_STRUCTURE.md §16.4); the
+and, for a Group, its direct members, skipping anything locked or
+hidden. A member that meets the polygon selects its GROUP whole (LAYER_STRUCTURE.md §16.4); the
 member itself is never selected. The polygon is compared where
 each element is DRAWN: under a transformed layer or group it is
 mapped into the element's parent space first, and an element whose

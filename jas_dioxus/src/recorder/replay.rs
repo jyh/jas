@@ -114,9 +114,16 @@ fn seed_case_selection(model: &mut Model, tc: &Value) {
 /// verbatim (`cross_language_test.rs` calls this after resolving the
 /// fixture's `setup_svg` file reference).
 pub fn run_gesture_case(tc: &Value, setup_svg: &str) -> Model {
+    run_gesture_case_on(tc, svg_to_document(setup_svg))
+}
+
+#[cfg(feature = "web")]
+/// [`run_gesture_case`] from a setup DOCUMENT, for a case whose setup the SVG
+/// codec cannot express (a hidden element: the reader sets every visibility to
+/// the default). The corpus resolves a case's `setup_test_json` to this.
+pub fn run_gesture_case_on(tc: &Value, doc: crate::document::document::Document) -> Model {
     use crate::tools::tool::CanvasTool;
 
-    let doc = svg_to_document(setup_svg);
     let mut model = Model::new(doc, None);
     // Before `activate`: a tool's on_enter may snapshot the view.
     seed_case_view(&mut model, tc);

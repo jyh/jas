@@ -1950,7 +1950,10 @@ private func pathEraseAtRect(
         var newChildren: [Element] = []
         var layerChanged = false
         for (ci, child) in layer.children.enumerated() {
-            guard case .path(let pe) = child, !pe.locked else {
+            // INVISIBLE (2026-10-17): a hidden path, or one in a hidden
+            // layer, is not erased. Twin of Rust `path_erase_at_rect`.
+            guard case .path(let pe) = child, !pe.locked,
+                  min(layer.visibility, child.visibility) != .invisible else {
                 newChildren.append(child)
                 continue
             }
@@ -2093,7 +2096,8 @@ private func decodePath(_ v: Any?) -> ElementPath? {
 /// the visitor returns stops the walk and is returned.
 ///
 /// The walk is the Partial Selection probe's (`findElementCpNear`): any group
-/// depth, anything locked skipped, and a Transformed wrapper entered only when
+/// depth, anything locked or hidden skipped (a hidden ancestor hides it too:
+/// INVISIBLE, 2026-10-17), and a Transformed wrapper entered only when
 /// it IS `isolated` (the innermost isolation entry), under the frame `W·M` it
 /// gives its child. The order stays FORWARD (the first hit is the bottom-most
 /// path), as these tools have always done; a path whose frame is SINGULAR is
@@ -2110,6 +2114,10 @@ private func findInEditablePaths<R>(
     }
     func walk(_ elem: Element, _ path: ElementPath, _ frame: Transform?) -> R? {
         if elem.isLocked { return nil }
+        // INVISIBLE (the helm's ruling, 2026-10-17): a hidden element is not
+        // hit, and returning here hides its whole subtree, as in
+        // `findElementCpNear`.
+        if elem.visibility == .invisible { return nil }
         if case .live(.transformed(let t)) = elem, isolated == path {
             return walk(t.child, path + [0], compose(frame, elem.childFrameTransform))
         }
@@ -2127,7 +2135,7 @@ private func findInEditablePaths<R>(
         }
         return nil
     }
-    for (li, layer) in doc.layers.enumerated() {
+    for (li, layer) in doc.layers.enumerated() where layer.visibility != .invisible {
         for (ci, child) in layer.children.enumerated() {
             if let r = walk(child, [li, ci], layer.transform) { return r }
         }

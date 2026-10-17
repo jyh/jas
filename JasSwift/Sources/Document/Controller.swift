@@ -861,8 +861,12 @@ public class Controller {
                         case let (l, t): return l ?? t
                         }
                     }()
+                    // A hidden member does not answer for its group
+                    // (INVISIBLE, 2026-10-17). Twin of Rust `select_flat`.
                     let anyHit = g.children.enumerated().contains {
-                        !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element, groupFrame)
+                        !doc.effectiveLocked([li, ci, $0.offset])
+                            && min(childVis, $0.element.visibility) != .invisible
+                            && predicate($0.element, groupFrame)
                     }
                     if anyHit {
                         selection.append(ElementSelection.all([li, ci]))
