@@ -2461,6 +2461,11 @@ pub fn clear_ids(elem: &mut Element) {
             clear_ids(Rc::make_mut(operand));
         }
     }
+    // The live transform operation OWNS its child (`children_mut` is `None`
+    // until editing through the wrapper lands), so it is walked here too.
+    if let Element::Live(super::live::LiveVariant::Transformed(t)) = elem {
+        clear_ids(Rc::make_mut(&mut t.child));
+    }
 }
 
 pub fn move_control_points(
