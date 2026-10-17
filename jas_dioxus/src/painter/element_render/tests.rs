@@ -2269,6 +2269,76 @@ fn a_type_on_path_scale_the_walk_does_not_draw_stays_legacy() {
             "a scaled type-on-path element stays legacy");
 }
 
+/// The stroked decoration lines a recording holds, as `(y, x0, x1, width)`.
+fn decoration_lines(cmds: &[Command]) -> Vec<(f64, f64, f64, f64)> {
+    cmds.iter().filter_map(|c| match c {
+        Command::StrokePath { path, stroke, .. } => match path.as_slice() {
+            [PathCommand::MoveTo { x: x0, y: y0 }, PathCommand::LineTo { x: x1, y: y1 }] if (y0 - y1).abs() < 1e-9 =>
+                Some((*y0, *x0, *x1, stroke.width)),
+            _ => None,
+        },
+        _ => None,
+    }).collect()
+}
+
+/// ⭐ NODE 20 (jas section 414): a flat POINT text's underline and line-through
+/// lower, where a real measurer gives the line its length. Still legacy, by
+/// name: decoration with no real measurer, on AREA text (legacy draws one per
+/// wrapped line), with letter spacing or a glyph rotation (whether legacy's
+/// measured width includes them is not measured here).
+#[test]
+fn flat_decoration_lowers_only_where_its_length_is_measured() {
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    let mut u = flat_text(20.0);
+    u.text_decoration = "underline".into();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&u), !has_real,
+               "an underlined flat point text lowers exactly where a real measurer exists");
+    let mut spaced = u.clone();
+    spaced.letter_spacing = "0.1em".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&spaced), "decoration with spacing stays legacy");
+    let mut rotated = u.clone();
+    rotated.rotate = "30".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&rotated), "decoration with rotation stays legacy");
+    let mut area = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "Hello", "Arial", 20.0, "normal", "normal", "underline", 10.0, 12.0, None, None, common(),
+    );
+    area.fill = fill(Color::BLACK);
+    assert!(area.is_area_text(), "control: the fixture is area text");
+    assert!(crate::painter::element_render::text_needs_legacy(&area), "decorated AREA text stays legacy");
+}
+
+/// ⭐ NODE 20: the lines, as `canvas/render.rs::draw_text_decorations` draws
+/// them -- an underline at `baseline + 0.12 x size`, a line-through at
+/// `baseline - 0.3 x size`, each from the run's x across its measured width, a
+/// line `max(0.07 x size, 1)` wide in the fill. Gated on the real measurer.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn flat_decoration_draws_the_legacy_lines() {
+    let mut t = flat_text(20.0);
+    t.text_decoration = "underline line-through".into();
+    let (x, baseline) = (t.x, t.y + 0.8 * 20.0);
+    let width = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).unwrap()("Hello");
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    let lines = decoration_lines(rec.commands());
+    assert_eq!(lines.len(), 2, "an underline and a line-through: {:?}", rec.commands());
+    let ys: Vec<f64> = lines.iter().map(|l| l.0).collect();
+    assert!(ys.iter().any(|y| (y - (baseline + 0.12 * 20.0)).abs() < 1e-9), "the underline at baseline + 0.12 x size: {ys:?}");
+    assert!(ys.iter().any(|y| (y - (baseline - 0.3 * 20.0)).abs() < 1e-9), "the line-through at baseline - 0.3 x size: {ys:?}");
+    for (_, x0, x1, w) in &lines {
+        assert!((x0 - x).abs() < 1e-9 && (x1 - (x + width)).abs() < 1e-9, "from x across the measured width");
+        assert!((w - (0.07f64 * 20.0).max(1.0)).abs() < 1e-9, "the legacy thickness");
+    }
+}
+
+/// CONTROL: undecorated flat text strokes no line.
+#[test]
+fn undecorated_flat_text_strokes_no_line() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(flat_text(20.0)), 1.0);
+    assert!(decoration_lines(rec.commands()).is_empty(), "{:?}", rec.commands());
+}
+
 /// What node 15 did NOT take stays legacy, by name: a tracking the legacy
 /// renderer cannot read (it would draw it as 0, the seam must not guess), and
 /// anchored tracked text (the anchor shifts by a measured width, and whether
