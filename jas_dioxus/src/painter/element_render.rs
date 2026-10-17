@@ -82,7 +82,7 @@ use crate::geometry::element::{
 
 use super::capability::{Capability, Caps};
 use super::{
-    Brush, ColorStop, EllipseArc, LinearGradient, Painter, RadialGradient, Rect, StrokeStyle,
+    BlendMode, Brush, ColorStop, EllipseArc, LinearGradient, Mask, Painter, RadialGradient, Rect, StrokeStyle,
     TextRun,
 };
 
@@ -1281,6 +1281,12 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         // the Group arm so a group still recurses (its children each outline
         // themselves) and before every leaf arm so no leaf can paint its normal
         // fill and stroke.
+        // ⭐ THE LIVE TRANSFORM OPERATION (council 2026-10-16, ruling 4). Before
+        // the outline arm, like a group: the child outlines itself, under the
+        // same mapping its normal drawing gets.
+        Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) => {
+            emit_transformed(p, t, eff, vis)
+        }
         _ if vis == Visibility::Outline => emit_outline_body(p, elem, eff),
         Element::Line(e) => {
             if let Some(s) = e.stroke.as_ref() {
@@ -1522,6 +1528,11 @@ fn live_paint(
             ge.fill.clone(),
             ge.stroke.clone(),
         ),
+        // Reached only by a caller that asks for a wrapper's REGION (the
+        // outline-geometry arm below); `emit_element_body` draws a wrapper
+        // through [`emit_transformed`] and never paints these rings. No paint:
+        // a wrapper's paint is its child's.
+        LiveVariant::Transformed(t) => (t.evaluate_with(precision, &resolver, &mut visiting), None, None),
     }
 }
 
@@ -1544,6 +1555,264 @@ fn live_rings_path(rings: &crate::algorithms::boolean::PolygonSet) -> Vec<PathCo
         path.push(PathCommand::ClosePath);
     }
     path
+}
+
+// ---------------------------------------------------------------------------
+// The live transform operation (council 2026-10-16, ruling 4)
+// ---------------------------------------------------------------------------
+
+/// Draw a [`TransformedElem`](crate::geometry::live::TransformedElem).
+///
+/// * **Scale Strokes ON** draws the child UNDER the matrix: the backend
+///   strokes in the transformed space, which is "converting the stroke to
+///   outlines, then scaling", exactly, for any matrix.
+/// * **Scale Strokes OFF** draws the child through [`MappedGeometry`]: every
+///   coordinate the child emits is mapped through the matrix and drawn under
+///   the CURRENT CTM, so the stroke keeps its own width on the mapped geometry
+///   ("the stroke should stay 1pt", on every edge, under any matrix).
+pub(crate) fn emit_transformed(
+    p: &mut dyn Painter,
+    t: &crate::geometry::live::TransformedElem,
+    eff: f64,
+    vis: Visibility,
+) {
+    if t.scale_strokes {
+        p.push_state(t.matrix);
+        emit_element_with_vis(p, &t.child, eff, vis);
+        p.pop_state();
+    } else {
+        let mut mapped = MappedGeometry::new(p, t.matrix);
+        emit_element_with_vis(&mut mapped, &t.child, eff, vis);
+    }
+}
+
+/// A painter that maps every coordinate its caller draws through a matrix and
+/// forwards the MAPPED geometry to the inner painter, leaving stroke widths as
+/// the caller authored them: the Scale Strokes OFF half of [`emit_transformed`].
+///
+/// ⭐ A `push_state(t)` inside (the child's own transform, a stroke-align clip
+/// bracket) composes `t` into the mapping and forwards `push_state(IDENTITY)`,
+/// so the inner painter still saves and restores clip and alpha state at the
+/// same points while its CTM never sees the matrix.
+///
+/// ⚠️ LIMITS, stated where the behaviour is:
+/// * A transform the CHILD carries itself scales its own stroke by
+///   √|det| of that transform alone, which is exact only when that transform
+///   is uniform. (The wrapper's matrix never scales the stroke, which is the
+///   point; the child's own stored transform is the old ON representation.)
+/// * Dashes, caps and miters stay in authored units, as the width does.
+/// * A text run is drawn under the full mapping (glyphs have no stroke on
+///   this seam, so there is nothing to keep).
+/// * A mask layer's artwork is forwarded unmapped; no slice puts a masked
+///   child in a wrapper yet.
+struct MappedGeometry<'a> {
+    inner: &'a mut dyn Painter,
+    /// The full mapping (wrapper matrix · pushes inside), top of stack last.
+    map: Vec<super::Transform>,
+    /// The pushes inside the wrapper alone, for the child's own stroke scale.
+    local: Vec<super::Transform>,
+}
+
+impl<'a> MappedGeometry<'a> {
+    fn new(inner: &'a mut dyn Painter, matrix: super::Transform) -> Self {
+        Self { inner, map: vec![matrix], local: vec![super::Transform::IDENTITY] }
+    }
+
+    fn top(&self) -> super::Transform {
+        *self.map.last().expect("MappedGeometry: unbalanced pop_state")
+    }
+
+    fn map_path(&self, path: &[PathCommand]) -> Vec<PathCommand> {
+        let m = self.top();
+        let pt = |x: f64, y: f64| m.apply_point(x, y);
+        path.iter()
+            .map(|c| match *c {
+                PathCommand::MoveTo { x, y } => {
+                    let (x, y) = pt(x, y);
+                    PathCommand::MoveTo { x, y }
+                }
+                PathCommand::LineTo { x, y } => {
+                    let (x, y) = pt(x, y);
+                    PathCommand::LineTo { x, y }
+                }
+                PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                    let ((x1, y1), (x2, y2), (x, y)) = (pt(x1, y1), pt(x2, y2), pt(x, y));
+                    PathCommand::CurveTo { x1, y1, x2, y2, x, y }
+                }
+                PathCommand::QuadTo { x1, y1, x, y } => {
+                    let ((x1, y1), (x, y)) = (pt(x1, y1), pt(x, y));
+                    PathCommand::QuadTo { x1, y1, x, y }
+                }
+                // A smooth segment's implied control point is a reflection,
+                // and an affine map preserves reflections, so mapping the
+                // stated points is exact.
+                PathCommand::SmoothCurveTo { x2, y2, x, y } => {
+                    let ((x2, y2), (x, y)) = (pt(x2, y2), pt(x, y));
+                    PathCommand::SmoothCurveTo { x2, y2, x, y }
+                }
+                PathCommand::SmoothQuadTo { x, y } => {
+                    let (x, y) = pt(x, y);
+                    PathCommand::SmoothQuadTo { x, y }
+                }
+                // An elliptical arc's image is an elliptical arc: new axes
+                // from the SVD, the same large-arc choice, and the sweep
+                // flipped by a mirror.
+                PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, x, y } => {
+                    let (rx, ry, rot, _, mirrored) =
+                        ellipse_axes_through(&m, rx, ry, x_rotation.to_radians());
+                    let (x, y) = pt(x, y);
+                    PathCommand::ArcTo {
+                        rx, ry, x_rotation: rot.to_degrees(), large_arc, sweep: sweep != mirrored, x, y,
+                    }
+                }
+                PathCommand::ClosePath => PathCommand::ClosePath,
+            })
+            .collect()
+    }
+
+    /// The authored style with the child's OWN pushes' scale applied (see the
+    /// type's limits), never the wrapper's.
+    fn style(&self, stroke: &StrokeStyle) -> StrokeStyle {
+        let l = *self.local.last().expect("MappedGeometry: unbalanced pop_state");
+        let k = (l.a * l.d - l.b * l.c).abs().sqrt();
+        if k == 1.0 {
+            return stroke.clone();
+        }
+        StrokeStyle {
+            width: stroke.width * k,
+            dash: stroke.dash.iter().map(|d| d * k).collect(),
+            ..stroke.clone()
+        }
+    }
+}
+
+fn rect_as_path(r: &Rect) -> [PathCommand; 5] {
+    [
+        PathCommand::MoveTo { x: r.x, y: r.y },
+        PathCommand::LineTo { x: r.x + r.w, y: r.y },
+        PathCommand::LineTo { x: r.x + r.w, y: r.y + r.h },
+        PathCommand::LineTo { x: r.x, y: r.y + r.h },
+        PathCommand::ClosePath,
+    ]
+}
+
+/// The axes of an ellipse's image under the linear part of `m`.
+///
+/// The ellipse is `A·(cos t, sin t)` with `A = L·R(rotation)·diag(rx, ry)`. A
+/// mirroring `L` (det < 0) is first made rotation-only by
+/// `A·(cos t, sin t) = (A·F)·(cos −t, sin −t)` with `F = diag(1, −1)`, which
+/// negates the angles and flips the sweep. Then `A = R(φ)·diag(s1, s2)·R(θ)`
+/// (the closed-form 2×2 SVD), so the image has radii `s1 ≥ s2`, rotation `φ`,
+/// and a point at angle `t` lands at angle `t + θ` (after the negation, when
+/// mirrored). Returns `(s1, s2, φ, θ, mirrored)`.
+fn ellipse_axes_through(m: &super::Transform, rx: f64, ry: f64, rotation: f64) -> (f64, f64, f64, f64, bool) {
+    let (cr, sr) = (rotation.cos(), rotation.sin());
+    // A = L · R(rot) · diag(rx, ry), as [[a, b], [c, d]] (row-major).
+    let (a, mut b, c, mut d) = (
+        (m.a * cr + m.c * sr) * rx,
+        (-m.a * sr + m.c * cr) * ry,
+        (m.b * cr + m.d * sr) * rx,
+        (-m.b * sr + m.d * cr) * ry,
+    );
+    let mirrored = a * d - b * c < 0.0;
+    if mirrored {
+        // A·F negates A's second column.
+        b = -b;
+        d = -d;
+    }
+    let (e, f, g, h) = ((a + d) / 2.0, (a - d) / 2.0, (c + b) / 2.0, (c - b) / 2.0);
+    let (q, r) = ((e * e + h * h).sqrt(), (f * f + g * g).sqrt());
+    let (a1, a2) = (g.atan2(f), h.atan2(e));
+    ((q + r), (q - r).max(0.0), (a2 + a1) / 2.0, (a2 - a1) / 2.0, mirrored)
+}
+
+/// The image of an ellipse arc under an affine map, as an ellipse arc: an
+/// affine image of an ellipse IS an ellipse, so this is exact (no bezier ring,
+/// no new R4 exception), and the backend keeps its stroke align. See
+/// [`ellipse_axes_through`] for the derivation.
+fn map_ellipse_arc(m: &super::Transform, arc: &EllipseArc) -> EllipseArc {
+    let (rx, ry, rotation, theta, mirrored) = ellipse_axes_through(m, arc.rx, arc.ry, arc.rotation);
+    let sign = if mirrored { -1.0 } else { 1.0 };
+    let (cx, cy) = m.apply_point(arc.cx, arc.cy);
+    EllipseArc {
+        cx,
+        cy,
+        rx,
+        ry,
+        rotation,
+        start: sign * arc.start + theta,
+        end: sign * arc.end + theta,
+        ccw: arc.ccw != mirrored,
+    }
+}
+
+impl Painter for MappedGeometry<'_> {
+    fn supports(&self, cap: crate::painter::capability::Capability) -> bool {
+        self.inner.supports(cap)
+    }
+    fn fill_path(&mut self, path: &[PathCommand], winding: FillRule, brush: &Brush, paint_alpha: f64) {
+        let mapped = self.map_path(path);
+        self.inner.fill_path(&mapped, winding, brush, paint_alpha);
+    }
+    fn stroke_path(&mut self, path: &[PathCommand], brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+        let (mapped, style) = (self.map_path(path), self.style(stroke));
+        self.inner.stroke_path(&mapped, brush, &style, paint_alpha);
+    }
+    /// A mapped rectangle is not axis-aligned in general, so it goes as a path.
+    fn fill_rect(&mut self, rect: Rect, brush: &Brush, paint_alpha: f64) {
+        self.fill_path(&rect_as_path(&rect), FillRule::NonZero, brush, paint_alpha);
+    }
+    fn stroke_rect(&mut self, rect: Rect, brush: &Brush, stroke: &StrokeStyle, paint_alpha: f64) {
+        self.stroke_path(&rect_as_path(&rect), brush, stroke, paint_alpha);
+    }
+    fn fill_ellipse_arc(&mut self, arc: &EllipseArc, winding: FillRule, brush: &Brush, paint_alpha: f64) {
+        let mapped = map_ellipse_arc(&self.top(), arc);
+        self.inner.fill_ellipse_arc(&mapped, winding, brush, paint_alpha);
+    }
+    fn stroke_ellipse_arc(&mut self, arc: &EllipseArc, brush: &Brush, stroke: &StrokeStyle, align: StrokeAlign, paint_alpha: f64) {
+        let (mapped, style) = (map_ellipse_arc(&self.top(), arc), self.style(stroke));
+        self.inner.stroke_ellipse_arc(&mapped, brush, &style, align, paint_alpha);
+    }
+    fn clip(&mut self, path: &[PathCommand], winding: FillRule) {
+        let mapped = self.map_path(path);
+        self.inner.clip(&mapped, winding);
+    }
+    fn push_state(&mut self, transform: super::Transform) {
+        let (m, l) = (self.top(), *self.local.last().expect("MappedGeometry: unbalanced"));
+        self.map.push(m.multiply(&transform));
+        self.local.push(l.multiply(&transform));
+        self.inner.push_state(super::Transform::IDENTITY);
+    }
+    fn pop_state(&mut self) {
+        assert!(self.map.len() > 1, "MappedGeometry: pop_state below the wrapper");
+        self.map.pop();
+        self.local.pop();
+        self.inner.pop_state();
+    }
+    fn push_group(&mut self, alpha: f64, blend: BlendMode) {
+        self.inner.push_group(alpha, blend);
+    }
+    fn pop_group(&mut self) {
+        self.inner.pop_group();
+    }
+    fn push_mask_layer(&mut self, mask: Mask) {
+        self.inner.push_mask_layer(mask);
+    }
+    fn pop_mask_layer(&mut self) {
+        self.inner.pop_mask_layer();
+    }
+    fn push_isolated_layer(&mut self, alpha: f64, blend: BlendMode) {
+        self.inner.push_isolated_layer(alpha, blend);
+    }
+    fn pop_isolated_layer(&mut self) {
+        self.inner.pop_isolated_layer();
+    }
+    fn draw_text_run(&mut self, run: &TextRun, brush: &Brush, paint_alpha: f64) {
+        let m = self.top();
+        self.inner.push_state(m);
+        self.inner.draw_text_run(run, brush, paint_alpha);
+        self.inner.pop_state();
+    }
 }
 
 // ---------------------------------------------------------------------------

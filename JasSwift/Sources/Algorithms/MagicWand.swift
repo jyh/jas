@@ -123,6 +123,7 @@ public func mwElementOpacity(_ e: Element) -> Double {
         case .reference(let r): return r.opacity
         case .recorded(let rec): return rec.opacity
         case .generated(let gen): return gen.opacity
+        case .transformed(let t): return t.opacity
         }
     }
 }
