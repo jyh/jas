@@ -13,8 +13,10 @@ anchors.
 | Anchor Point (Convert)| C        | Click / drag to toggle corner ↔ smooth |
 
 All three operate only on Path elements (not on Line / Rect /
-Polygon / Star). They walk the document one level of Group
-nesting, so an anchor inside an unlocked Group is reachable.
+Polygon / Star). Add and Delete walk the document one level of
+Group nesting, so an anchor inside an unlocked Group is
+reachable. The Anchor Point tool walks every depth and hits a
+path where it is drawn (see its section below).
 
 ## Add Anchor Point tool
 
@@ -90,6 +92,26 @@ handle independently.
    anchor. A sub-1-pixel drag is treated as a no-op (a plain
    click on a corner anchor is intentionally unchanged).
 4. **Miss** → `idle`, mouseup is a no-op.
+
+**Where a path is drawn.** The probe visits every unlocked Path at
+any Group depth, in document order (the first hit is the bottom-most
+path), and compares each handle and anchor where it is DRAWN: through
+the path's full frame, every ancestor's transform and its own. So a
+path inside a scaled or rotated Group is hit at the anchor the user
+sees, and nowhere else. A Transformed live element is one element,
+and the probe reaches its child only while that element is the
+innermost isolation entry, under the frame the element gives its
+child. A path whose frame is singular (collapsed to a line or a
+point) is skipped, since a drawn point on it cannot be mapped back.
+
+The commit speaks document space and edits local space. The
+corner's release point is mapped back through the inverse frame
+before the smooth handles are placed, which is exact because the
+mirrored in-handle commutes with any affine map. The handle's drag
+is a document-space delta, mapped through the inverse frame's
+linear part, as the Partial Selection tool's handle move does. The
+no-op thresholds (1 px for a corner, 0.5 px for a handle) stay
+document-space distances.
 
 **No live preview.** The final document state is computed on
 mouseup; the user doesn't see the rearranged handles while

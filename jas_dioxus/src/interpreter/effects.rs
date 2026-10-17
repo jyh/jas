@@ -3608,107 +3608,124 @@ fn anchor_index_near(
     None
 }
 
-/// Hit-test a bezier control handle on any Path element in the
-/// document. Returns (element path, PathElem clone, anchor index,
-/// "in" | "out").
-fn find_path_handle_near(
+/// Visit every Path the anchor tools may edit, in document order, with the
+/// FRAME that maps its LOCAL space to DOCUMENT space (every ancestor's frame
+/// and its own transform; `None` is the identity). The first `Some` the
+/// visitor returns stops the walk and is returned.
+///
+/// The walk is the Partial Selection probe's (`cp_recursive`): it descends
+/// through groups and layers at any depth, skips anything locked, and enters
+/// a Transformed wrapper only when the wrapper IS `isolated` (the innermost
+/// isolation entry), under the frame `W·M` it gives its child. So the anchor
+/// tools reach whatever that probe can.
+///
+/// Two choices, stated because they are choices: the order stays FORWARD
+/// (the first hit is the bottom-most path), which is what these tools have
+/// always done and what their goldens pin; and a path whose frame is SINGULAR
+/// is skipped, as `element_intersects_rect_with` does, because a point drawn
+/// on a collapsed path cannot be mapped back to one local point.
+fn find_in_editable_paths<R>(
     doc: &crate::document::document::Document,
-    x: f64, y: f64, radius: f64,
-) -> Option<(ElementPath, crate::geometry::element::PathElem, usize, &'static str)> {
-    use crate::geometry::element::{path_handle_positions, control_points};
-    fn check(
-        pe: &crate::geometry::element::PathElem,
-        path: &[usize],
-        x: f64, y: f64, radius: f64,
-    ) -> Option<(ElementPath, crate::geometry::element::PathElem, usize, &'static str)> {
-        let anchors = control_points(&Element::Path(pe.clone()));
-        for (ai, _) in anchors.iter().enumerate() {
-            let (h_in, h_out) = path_handle_positions(&pe.d, ai);
-            if let Some((hx, hy)) = h_in {
-                if (x - hx).hypot(y - hy) < radius {
-                    return Some((path.to_vec(), pe.clone(), ai, "in"));
+    isolated: Option<&[usize]>,
+    visit: &mut dyn FnMut(&[usize], &PathElem, Option<crate::geometry::element::Transform>) -> Option<R>,
+) -> Option<R> {
+    use crate::geometry::element::Transform;
+    fn compose(outer: Option<Transform>, inner: Option<Transform>) -> Option<Transform> {
+        match (outer, inner) {
+            (Some(o), Some(i)) => Some(o.multiply(&i)),
+            (o, i) => o.or(i),
+        }
+    }
+    fn walk<R>(
+        elem: &Element, path: &[usize], frame: Option<Transform>, isolated: Option<&[usize]>,
+        visit: &mut dyn FnMut(&[usize], &PathElem, Option<Transform>) -> Option<R>,
+    ) -> Option<R> {
+        if elem.locked() { return None; }
+        if let Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) = elem
+            && isolated == Some(path)
+        {
+            let mut child_path = path.to_vec();
+            child_path.push(0);
+            return walk(&t.child, &child_path, compose(frame, elem.child_frame_transform()), isolated, visit);
+        }
+        if elem.is_group_or_layer() {
+            let child_frame = compose(frame, elem.transform().copied());
+            for (i, child) in elem.children().into_iter().flatten().enumerate() {
+                let mut child_path = path.to_vec();
+                child_path.push(i);
+                if let Some(r) = walk(child, &child_path, child_frame, isolated, visit) {
+                    return Some(r);
                 }
             }
-            if let Some((hx, hy)) = h_out {
-                if (x - hx).hypot(y - hy) < radius {
-                    return Some((path.to_vec(), pe.clone(), ai, "out"));
-                }
-            }
+            return None;
+        }
+        if let Element::Path(pe) = elem {
+            let full = compose(frame, elem.transform().copied());
+            if full.is_some_and(|t| t.inverse().is_none()) { return None; }
+            return visit(path, pe, full);
         }
         None
     }
-    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
     for (li, layer) in doc.layers.iter().enumerate() {
-        if let Some(children) = layer.children() {
-            for (ci, child) in children.iter().enumerate() {
-                if let Element::Path(pe) = &**child {
-                    if pe.common.locked { continue; }
-                    if let Some(r) = check(pe, &[li, ci], x, y, radius) {
-                        return Some(r);
-                    }
-                }
-                if let Element::Group(g) = &**child {
-                    if child.common().locked { continue; }
-                    for (gi, gc) in g.children.iter().enumerate() {
-                        if let Element::Path(pe) = &**gc {
-                            if pe.common.locked { continue; }
-                            if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
-                                return Some(r);
-                            }
-                        }
-                    }
-                }
+        for (ci, child) in layer.children().into_iter().flatten().enumerate() {
+            if let Some(r) = walk(child, &[li, ci], layer.transform().copied(), isolated, visit) {
+                return Some(r);
             }
         }
     }
     None
 }
 
-/// Hit-test a path anchor using the control_points() enumeration.
-/// Returns (element path, PathElem clone, anchor index).
+/// Where a path-local point is DRAWN, through the path's frame.
+fn drawn_point(frame: Option<crate::geometry::element::Transform>, p: (f64, f64)) -> (f64, f64) {
+    frame.map_or(p, |t| t.apply_point(p.0, p.1))
+}
+
+/// Hit-test a bezier control handle on any editable Path, comparing each
+/// handle where it is DRAWN (see `find_in_editable_paths`). Returns
+/// (element path, PathElem clone, anchor index, "in" | "out").
+fn find_path_handle_near(
+    doc: &crate::document::document::Document,
+    isolated: Option<&[usize]>,
+    x: f64, y: f64, radius: f64,
+) -> Option<(ElementPath, PathElem, usize, &'static str)> {
+    use crate::geometry::element::{path_handle_positions, control_points};
+    find_in_editable_paths(doc, isolated, &mut |path, pe, frame| {
+        let anchors = control_points(&Element::Path(pe.clone()));
+        for ai in 0..anchors.len() {
+            let (h_in, h_out) = path_handle_positions(&pe.d, ai);
+            for (h, kind) in [(h_in, "in"), (h_out, "out")] {
+                if let Some(h) = h {
+                    let (hx, hy) = drawn_point(frame, h);
+                    if (x - hx).hypot(y - hy) < radius {
+                        return Some((path.to_vec(), pe.clone(), ai, kind));
+                    }
+                }
+            }
+        }
+        None
+    })
+}
+
+/// Hit-test a path anchor using the control_points() enumeration, comparing
+/// each anchor where it is DRAWN (see `find_in_editable_paths`). Returns
+/// (element path, PathElem clone, anchor index).
 fn find_path_anchor_by_cp_index(
     doc: &crate::document::document::Document,
+    isolated: Option<&[usize]>,
     x: f64, y: f64, radius: f64,
-) -> Option<(ElementPath, crate::geometry::element::PathElem, usize)> {
+) -> Option<(ElementPath, PathElem, usize)> {
     use crate::geometry::element::control_points;
-    fn check(
-        pe: &crate::geometry::element::PathElem,
-        path: &[usize],
-        x: f64, y: f64, radius: f64,
-    ) -> Option<(ElementPath, crate::geometry::element::PathElem, usize)> {
+    find_in_editable_paths(doc, isolated, &mut |path, pe, frame| {
         let anchors = control_points(&Element::Path(pe.clone()));
-        for (i, &(ax, ay)) in anchors.iter().enumerate() {
+        for (i, &a) in anchors.iter().enumerate() {
+            let (ax, ay) = drawn_point(frame, a);
             if (x - ax).hypot(y - ay) < radius {
                 return Some((path.to_vec(), pe.clone(), i));
             }
         }
         None
-    }
-    // Locked Paths are skipped in both positions — see `find_path_anchor_near`.
-    for (li, layer) in doc.layers.iter().enumerate() {
-        if let Some(children) = layer.children() {
-            for (ci, child) in children.iter().enumerate() {
-                if let Element::Path(pe) = &**child {
-                    if pe.common.locked { continue; }
-                    if let Some(r) = check(pe, &[li, ci], x, y, radius) {
-                        return Some(r);
-                    }
-                }
-                if let Element::Group(g) = &**child {
-                    if child.common().locked { continue; }
-                    for (gi, gc) in g.children.iter().enumerate() {
-                        if let Element::Path(pe) = &**gc {
-                            if pe.common.locked { continue; }
-                            if let Some(r) = check(pe, &[li, ci, gi], x, y, radius) {
-                                return Some(r);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    })
 }
 
 /// Write a serialized Path into a tool-scope field under the
@@ -3751,7 +3768,7 @@ fn path_probe_anchor_hit(
     use crate::geometry::element::is_smooth_point;
     // 1. handle hit
     if let Some((path, _pe, anchor_idx, handle_type)) =
-        find_path_handle_near(model.document(), x, y, radius)
+        find_path_handle_near(model.document(), model.isolation_stack.last().map(|p| p.as_slice()), x, y, radius)
     {
         store.set_tool("anchor_point", "mode",
             serde_json::json!("pressed_handle"));
@@ -3764,7 +3781,7 @@ fn path_probe_anchor_hit(
     }
     // 2. anchor hit — branch on smooth vs corner
     if let Some((path, pe, anchor_idx)) =
-        find_path_anchor_by_cp_index(model.document(), x, y, radius)
+        find_path_anchor_by_cp_index(model.document(), model.isolation_stack.last().map(|p| p.as_slice()), x, y, radius)
     {
         let mode = if is_smooth_point(&pe.d, anchor_idx) {
             "pressed_smooth"
@@ -3825,9 +3842,14 @@ fn path_commit_anchor_edit(
             if moved <= 1.0 {
                 return;
             }
+            // The release point is in DOCUMENT space; the handle it places
+            // lives in the path's LOCAL space. The mirrored handle `2a - h`
+            // commutes with any affine map, so mapping the one point is exact.
+            let (hx, hy) = crate::document::evaluated_bounds::document_point_to_path_local(
+                model.document(), &path, target_x, target_y);
             model.begin_txn();
             let new_pe = convert_corner_to_smooth(
-                &pe, anchor_idx, target_x, target_y);
+                &pe, anchor_idx, hx, hy);
             let doc = model.document().replace_element(
                 &path, Element::Path(new_pe));
             model.set_document(doc);
@@ -3841,9 +3863,14 @@ fn path_commit_anchor_edit(
             if dx.abs() <= 0.5 && dy.abs() <= 0.5 {
                 return;
             }
+            // The drag is a DOCUMENT-space delta; the handle moves in the
+            // path's LOCAL space (the mapping `Controller::move_path_handle`
+            // uses). The threshold above stays a screen-space distance.
+            let (ldx, ldy) = crate::document::evaluated_bounds::document_delta_to_path_local(
+                model.document(), &path, dx, dy);
             model.begin_txn();
             let new_pe = move_path_handle_independent(
-                &pe, anchor_idx, &handle_type, dx, dy);
+                &pe, anchor_idx, &handle_type, ldx, ldy);
             let doc = model.document().replace_element(
                 &path, Element::Path(new_pe));
             model.set_document(doc);
@@ -12886,6 +12913,131 @@ mod tests {
         run_effects(&vec![serde_json::json!({"doc.path.probe_partial_hit": {"x": 25.0, "y": 15.0, "hit_radius": 4}})],
             &serde_json::json!({}), &mut miss, Some(&mut m2), None, None, None);
         assert_ne!(*miss.get_tool("partial_selection", "mode"), serde_json::json!("handle"), "the local position draws nothing");
+    }
+
+    // ── the Anchor Point tool hits and edits a path WHERE IT IS DRAWN ──
+    //
+    // Transform-correct path verbs, S1. `find_path_handle_near` and
+    // `find_path_anchor_by_cp_index` compared LOCAL points to the DOCUMENT
+    // click and walked one group level; now both walk every depth on
+    // `find_in_editable_paths` and compare through the path's frame, and
+    // `commit_anchor_edit` maps its release point (corner) and its drag
+    // (handle) back into local space. Twin: JasSwift `findInEditablePaths`.
+
+    /// The open path (0,0) -> (30,30) -> (60,0): a CORNER at (30,30).
+    fn s1_corner_path() -> Element {
+        Element::Path(PathElem {
+            d: vec![
+                PathCommand::MoveTo { x: 0.0, y: 0.0 },
+                PathCommand::LineTo { x: 30.0, y: 30.0 },
+                PathCommand::LineTo { x: 60.0, y: 0.0 },
+            ],
+            ..PathElem::default()
+        })
+    }
+
+    /// `elem` inside an identity Group inside a Group rotated 90 degrees about
+    /// the origin and moved to (100, 50): local (x, y) is drawn at
+    /// (100 - y, 50 + x). Two group levels, so the old one-level walk could
+    /// not reach it even untransformed.
+    fn s1_rotated_model(elem: Element) -> Model {
+        let inner = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(elem)],
+            common: CommonProps::default(), isolated_blending: false, knockout_group: false,
+        });
+        let outer = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(inner)],
+            common: CommonProps {
+                transform: Some(crate::geometry::element::Transform { a: 0.0, b: 1.0, c: -1.0, d: 0.0, e: 100.0, f: 50.0 }),
+                ..CommonProps::default()
+            },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(outer)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
+    }
+
+    /// Press at `from`, release at `to`: the Anchor Point tool's probe then
+    /// its commit. Returns the mode the probe chose.
+    fn s1_anchor_drag(model: &mut Model, from: (f64, f64), to: (f64, f64)) -> String {
+        let mut store = StateStore::new();
+        run_effects(&vec![
+            serde_json::json!({"doc.path.probe_anchor_hit": {"x": from.0, "y": from.1, "hit_radius": 5}}),
+        ], &serde_json::json!({}), &mut store, Some(model), None, None, None);
+        let mode = store.get_tool("anchor_point", "mode").as_str().unwrap_or("").to_string();
+        run_effects(&vec![
+            serde_json::json!({"doc.path.commit_anchor_edit": {
+                "origin_x": from.0, "origin_y": from.1, "target_x": to.0, "target_y": to.1}}),
+        ], &serde_json::json!({}), &mut store, Some(model), None, None, None);
+        mode
+    }
+
+    /// The corner (30,30) is drawn at (70,80). A release at (70,90) is local
+    /// (90-50, 100-70) = (40,30), so the out-handle lands there and the
+    /// in-handle mirrors to (20,30).
+    #[test]
+    fn the_anchor_point_tool_converts_a_corner_where_it_is_drawn_under_rotation() {
+        let mut model = s1_rotated_model(s1_corner_path());
+        assert_eq!(s1_anchor_drag(&mut model.clone(), (30.0, 30.0), (40.0, 30.0)), "idle",
+            "the local position draws nothing");
+        assert_eq!(s1_anchor_drag(&mut model, (70.0, 80.0), (70.0, 90.0)), "pressed_corner");
+        let d = path_at(&model, &[0, 0, 0, 0]).d;
+        assert!(matches!(d[1], PathCommand::CurveTo { x2, y2, x, y, .. } if (x2, y2, x, y) == (20.0, 30.0, 30.0, 30.0)),
+            "in-handle mirrored to local (20,30): {:?}", d[1]);
+        assert!(matches!(d[2], PathCommand::CurveTo { x1, y1, .. } if (x1, y1) == (40.0, 30.0)),
+            "out-handle at the release point's local image (40,30): {:?}", d[2]);
+    }
+
+    /// Anchor 1 (30,0) of `s7_curve` has its in-handle at local (20,10), drawn
+    /// at (90,70). A (0,10) document drag is the local delta (10,0) under the
+    /// inverse rotation, so the handle moves to (30,10); an unmapped drag
+    /// would give (20,20) and a transposed one (10,10).
+    #[test]
+    fn the_anchor_point_tool_drags_a_handle_in_document_space_under_rotation() {
+        let mut model = s1_rotated_model(Element::Path(PathElem { d: s7_curve(0.0), ..PathElem::default() }));
+        assert_eq!(s1_anchor_drag(&mut model, (90.0, 70.0), (90.0, 80.0)), "pressed_handle");
+        let d = path_at(&model, &[0, 0, 0, 0]).d;
+        assert!(matches!(d[1], PathCommand::CurveTo { x2, y2, .. } if (x2, y2) == (30.0, 10.0)),
+            "the in-handle moved (10,0) locally: {:?}", d[1]);
+    }
+
+    /// The Anchor Point tool reaches a Transformed wrapper's child only while
+    /// the wrapper is the innermost isolation entry (the `cp_recursive` rule),
+    /// under the frame W·M. The wrapper scales the corner path by (2,3), so
+    /// the corner (30,30) is drawn at (60,90).
+    #[test]
+    fn the_anchor_point_tool_reaches_a_wrapped_path_only_while_isolated() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let w = TransformedElem::new(std::rc::Rc::new(s1_corner_path()), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        assert_eq!(s7_probe_mode(&model, 60.0, 90.0), "idle", "not isolated: a wrapper is one element");
+        model.isolation_stack.push(vec![0, 0]);
+        assert_eq!(s7_probe_mode(&model, 60.0, 90.0), "pressed_corner", "isolated: the drawn corner");
+        assert_eq!(s7_probe_mode(&model, 30.0, 30.0), "idle", "isolated: the local corner draws nothing");
+    }
+
+    /// A path whose frame is SINGULAR (a group scaled to zero width) is
+    /// skipped: its corner collapses onto (0,30) and cannot be mapped back.
+    #[test]
+    fn the_anchor_point_tool_skips_a_path_with_a_singular_frame() {
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(s1_corner_path())],
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::scale(0.0, 1.0)), ..CommonProps::default() },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        assert_eq!(s7_probe_mode(&model, 0.0, 30.0), "idle");
     }
 
     #[test]
