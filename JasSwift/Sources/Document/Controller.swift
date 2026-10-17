@@ -1763,6 +1763,33 @@ public class Controller {
         makeCompoundShape(operation: op)
     }
 
+    /// RELEASE TRANSFORM (council 2026-10-16, ruling 4; route 4 slice 3):
+    /// every selected Transformed wrapper, through groups and layers, is
+    /// replaced IN PLACE by `TransformedElem.released()`. 1 -> 1, so the
+    /// selection is kept. One undo step; nothing to release is a no-op with
+    /// no step. Mirrors jas_dioxus `Controller::release_transform`.
+    public func releaseTransform() {
+        let doc = model.document
+        func wrappers(_ elem: Element, _ path: ElementPath, _ out: inout [ElementPath]) {
+            switch elem {
+            case .live(.transformed): out.append(path)
+            case .group(let g): for (i, c) in g.children.enumerated() { wrappers(c, path + [i], &out) }
+            case .layer(let l): for (i, c) in l.children.enumerated() { wrappers(c, path + [i], &out) }
+            default: break
+            }
+        }
+        var paths: [ElementPath] = []
+        for es in doc.selection { wrappers(doc.getElement(es.path), es.path, &paths) }
+        guard !paths.isEmpty else { return }
+        var newDoc = doc
+        for path in Set(paths) {
+            if case .live(.transformed(let t)) = newDoc.getElement(path) {
+                newDoc = newDoc.replaceElement(path, with: t.released())
+            }
+        }
+        model.editDocument(newDoc)
+    }
+
     /// Release every selected compound shape. Each is replaced with
     /// its operand children; operands keep their own paint. Released
     /// operands become the new selection.
