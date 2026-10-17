@@ -2102,6 +2102,48 @@ impl Controller {
         model.edit_document(new_doc);
     }
 
+    /// RELEASE TRANSFORM (council 2026-10-16, ruling 4; route 4 slice 3): every
+    /// selected Transformed wrapper, through groups and layers as Release
+    /// Compound Shape reaches compounds, is replaced IN PLACE by
+    /// [`TransformedElem::released`](crate::geometry::live::TransformedElem::released)
+    /// — its child with the operation composed in, so the picture is unchanged.
+    /// 1 -> 1, so every selection path stays valid and the selection is kept.
+    /// One undo step; nothing to release is a no-op with no step.
+    pub fn release_transform(model: &mut Model) {
+        use crate::geometry::live::LiveVariant;
+        let doc = model.document();
+        fn wrappers(elem: &Element, path: &ElementPath, out: &mut Vec<ElementPath>) {
+            match elem {
+                Element::Live(LiveVariant::Transformed(_)) => out.push(path.clone()),
+                Element::Group(g) => for (i, c) in g.children.iter().enumerate() {
+                    let mut p = path.clone(); p.push(i); wrappers(c, &p, out);
+                },
+                Element::Layer(l) => for (i, c) in l.children.iter().enumerate() {
+                    let mut p = path.clone(); p.push(i); wrappers(c, &p, out);
+                },
+                _ => {}
+            }
+        }
+        let mut paths: Vec<ElementPath> = Vec::new();
+        for es in &doc.selection {
+            if let Some(elem) = doc.get_element(&es.path) {
+                wrappers(elem, &es.path, &mut paths);
+            }
+        }
+        if paths.is_empty() {
+            return;
+        }
+        paths.sort();
+        paths.dedup();
+        let mut new_doc = doc.clone();
+        for path in &paths {
+            if let Some(Element::Live(LiveVariant::Transformed(t))) = new_doc.get_element(path).cloned() {
+                new_doc = new_doc.replace_element(path, t.released());
+            }
+        }
+        model.edit_document(new_doc);
+    }
+
     /// Expand every selected compound shape into static Polygon
     /// elements derived from its evaluated geometry. The expanded
     /// polygons carry the compound shape's own paint. Operand tree
@@ -5395,6 +5437,84 @@ mod tests {
             _ => panic!("expected Live(CompoundShape)"),
         };
         assert_eq!(operation, CompoundOperation::Union);
+    }
+
+    /// A model holding ONE Transformed wrapper (OFF, 200 % x 300 %) of a
+    /// filled 1 pt rect at (2, 2, 10 x 10), so it covers 4..24 x 6..36.
+    fn transformed_model() -> Model {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let mut rect = make_rect(2.0, 2.0, 10.0, 10.0);
+        rect.common_mut().id = Some("child".into());
+        let w = TransformedElem::new(Rc::new(rect), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Transformed(w)))],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        Model::new(Document { layers: vec![layer], ..Document::default() }, None)
+    }
+
+    /// SELECT: a click selects the wrapper as a unit, on its MAPPED region: a
+    /// point the scale covers and the child alone does not is a hit, and a
+    /// point the child alone covers and the scale moved away from is a miss.
+    #[test]
+    fn a_click_selects_a_transformed_wrapper_where_it_is_drawn() {
+        use crate::interpreter::doc_primitives::{hit_test, register_document};
+        use crate::interpreter::expr_types::Value;
+        let model = transformed_model();
+        let _guard = register_document(model.document().clone());
+        assert_eq!(hit_test(20.0, 30.0), Value::Path(vec![0, 0]), "inside the scaled rect");
+        assert_eq!(hit_test(3.0, 3.0), Value::Null, "inside the unscaled child only");
+    }
+
+    /// MOVE rides the wrapper's own transform and leaves the matrix and the
+    /// child alone; UNDO restores it.
+    #[test]
+    fn moving_a_transformed_wrapper_moves_the_wrapper_and_undo_restores_it() {
+        use crate::geometry::live::LiveVariant;
+        let mut model = transformed_model();
+        let before = model.document().clone();
+        Controller::set_selection(&mut model, vec![ElementSelection::all(vec![0, 0])]);
+        Controller::move_selection(&mut model, 5.0, 7.0);
+        let Some(Element::Live(LiveVariant::Transformed(t))) = model.document().get_element(&vec![0, 0]).cloned() else {
+            panic!("still a wrapper");
+        };
+        assert_eq!(t.common.transform, Some(crate::geometry::element::Transform::translate(5.0, 7.0)));
+        assert_eq!(t.matrix, crate::geometry::element::Transform::scale(2.0, 3.0));
+        let Some(Element::Live(LiveVariant::Transformed(t0))) = before.get_element(&vec![0, 0]).cloned() else { unreachable!() };
+        assert_eq!(t.child, t0.child, "the child is untouched");
+        model.undo();
+        assert_eq!(model.document().layers, before.layers, "undo restores the wrapper");
+    }
+
+    /// RELEASE TRANSFORM replaces each selected wrapper IN PLACE by its
+    /// released child (the picture-preserving form, pinned in
+    /// `painter::element_render` tests), keeps the selection on it, and is one
+    /// undo step. Anything else selected is left alone.
+    #[test]
+    fn release_transform_replaces_the_wrapper_in_place_and_undo_restores_it() {
+        use crate::geometry::live::LiveVariant;
+        let mut model = transformed_model();
+        let before = model.document().clone();
+        Controller::set_selection(&mut model, vec![ElementSelection::all(vec![0, 0])]);
+        Controller::release_transform(&mut model);
+        let doc = model.document();
+        let Some(Element::Rect(r)) = doc.get_element(&vec![0, 0]) else {
+            panic!("released to a rect: {:?}", doc.get_element(&vec![0, 0]));
+        };
+        assert_eq!((r.x, r.y, r.width, r.height), (4.0, 6.0, 20.0, 30.0));
+        assert_eq!(r.common.id.as_deref(), Some("child"));
+        assert_eq!(doc.layers[0].children().unwrap().len(), 1);
+        assert_eq!(doc.selection, vec![ElementSelection::all(vec![0, 0])]);
+        assert!(!matches!(doc.get_element(&vec![0, 0]), Some(Element::Live(LiveVariant::Transformed(_)))));
+        model.undo();
+        assert_eq!(model.document().layers, before.layers, "undo restores the wrapper");
+        // Nothing selected that is a wrapper: no change, and no undo step.
+        let mut plain = setup_model();
+        Controller::set_selection(&mut plain, vec![ElementSelection::all(vec![0, 0])]);
+        let layers = plain.document().layers.clone();
+        Controller::release_transform(&mut plain);
+        assert_eq!(plain.document().layers, layers);
+        assert!(!plain.can_undo(), "a no-op release leaves no undo step");
     }
 
     #[test]

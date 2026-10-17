@@ -124,6 +124,8 @@ private func rectXAt(_ model: Model, path: ElementPath) -> Double {
         "boolean_divide", "boolean_trim", "boolean_merge",
         "make_compound_shape", "release_compound_shape",
         "expand_compound_shape",
+        // Route 4 slice 3a: end a live transform operation.
+        "release_transform",
         // Alt+click compound-creating variants (phase 9f).
         "boolean_union_compound", "boolean_subtract_front_compound",
         "boolean_intersection_compound", "boolean_exclude_compound",

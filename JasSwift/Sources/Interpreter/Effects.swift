@@ -2907,6 +2907,10 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         Controller(model: model).releaseCompoundShape()
         return nil
     }
+    effects["release_transform"] = { _, _, _ in
+        Controller(model: model).releaseTransform()
+        return nil
+    }
     effects["expand_compound_shape"] = { _, _, _ in
         Controller(model: model).expandCompoundShape()
         return nil

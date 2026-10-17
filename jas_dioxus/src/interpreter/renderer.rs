@@ -2316,6 +2316,10 @@ fn run_yaml_effect(
         st.apply_release_compound_shape();
         return deferred;
     }
+    if eff.get("release_transform").is_some() {
+        st.apply_release_transform();
+        return deferred;
+    }
     if eff.get("expand_compound_shape").is_some() {
         st.apply_expand_compound_shape();
         return deferred;
