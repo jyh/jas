@@ -912,6 +912,38 @@ private func recordedCanonicalDocument() -> Document {
     return Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
 }
 
+/// The canonical TRANSFORMED document (council 2026-10-16, ruling 4): an OFF
+/// 200 % x 300 % wrapper of a named, stroked, rotated rect, inside an ON shear
+/// wrapper with its own id, name, opacity and transform. Mirrors Rust
+/// `transformed_canonical_document`.
+private func transformedCanonicalDocument() -> Document {
+    let rect: Element = .rect(Rect(x: 1, y: 2, width: 10, height: 5,
+                                   fill: Fill(color: Color(r: 1, g: 0, b: 0)),
+                                   stroke: Stroke(color: Color(r: 0, g: 0, b: 0), width: 1),
+                                   transform: .rotate(30), name: "box", id: "r"))
+    let off = TransformedElem(child: rect, matrix: .scale(2, 3), scaleStrokes: false)
+    let on = TransformedElem(child: .live(.transformed(off)), matrix: .shear(0.25, 0), scaleStrokes: true,
+                             name: "scaled", id: "w", transform: .translate(5, 7), opacity: 0.5)
+    let layer = Layer(children: [.live(.transformed(on))])
+    return Document(layers: [layer], selectedLayer: 0, selection: [], artboards: [])
+}
+
+/// Cross-language pin: a nested Transformed wrapper serializes byte-identically
+/// in both active ports, through test JSON. Mirrors Rust
+/// `transformed_cross_language`.
+@Test func transformedCrossLanguage() {
+    let actual = documentToTestJson(transformedCanonicalDocument())
+    let expected = readFixture("operations/transformed_nested.json")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if actual != expected {
+        print("=== EXPECTED (transformed_nested) ===")
+        print(expected)
+        print("=== ACTUAL (transformed_nested) ===")
+        print(actual)
+    }
+    #expect(actual == expected, "transformed cross-language serialization mismatch")
+}
+
 /// Cross-language pin (RECORDED_ELEMENTS.md §8): a recorded element's recipe +
 /// inputs serialize byte-identically across the four native apps. Mirrors Rust
 /// `recorded_cross_language`.

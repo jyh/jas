@@ -5228,6 +5228,58 @@ pub(crate) mod tests {
         }
     }
 
+    /// The canonical TRANSFORMED document (council 2026-10-16, ruling 4): an
+    /// OFF 200 % x 300 % wrapper of a named, stroked, rotated rect, inside an ON
+    /// shear wrapper that carries its own id, name, opacity and transform. Built
+    /// identically in each port's harness. Mirrors JasSwift
+    /// `transformedCanonicalDocument`.
+    fn transformed_canonical_document() -> crate::document::document::Document {
+        use crate::geometry::element::{
+            Color, CommonProps, Element, Fill, LayerElem, RectElem, Stroke, Transform,
+        };
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        use std::rc::Rc;
+        let rect = Element::Rect(RectElem {
+            x: 1.0, y: 2.0, width: 10.0, height: 5.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: Some(Stroke::new(Color::rgb(0.0, 0.0, 0.0), 1.0)),
+            common: CommonProps {
+                id: Some("r".into()), name: Some("box".into()),
+                transform: Some(Transform::rotate(30.0)), ..CommonProps::default()
+            },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let off = TransformedElem::new(Rc::new(rect), Transform::scale(2.0, 3.0), false);
+        let mut on = TransformedElem::new(
+            Rc::new(Element::Live(LiveVariant::Transformed(off))), Transform::shear(0.25, 0.0), true);
+        on.common = CommonProps {
+            id: Some("w".into()), name: Some("scaled".into()), opacity: 0.5,
+            transform: Some(Transform::translate(5.0, 7.0)), ..CommonProps::default()
+        };
+        let layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Transformed(on)))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        crate::document::document::Document {
+            layers: vec![layer], artboards: vec![], ..Default::default()
+        }
+    }
+
+    /// Cross-language pin: a nested Transformed wrapper serializes
+    /// byte-identically in both active ports, through test JSON.
+    #[test]
+    fn transformed_cross_language() {
+        let actual = document_to_test_json(&transformed_canonical_document());
+        let expected = read_fixture("operations/transformed_nested.json");
+        let expected = expected.trim();
+        if actual != expected {
+            eprintln!("=== EXPECTED ===\n{expected}\n=== ACTUAL ===\n{actual}");
+            panic!("transformed cross-language serialization mismatch");
+        }
+    }
+
     /// Cross-language pin (RECORDED_ELEMENTS.md §8): a recorded element's recipe
     /// + inputs serialize byte-identically across the four native apps.
     #[test]
