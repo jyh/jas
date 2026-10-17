@@ -651,6 +651,10 @@
       "class": "ui-state",
       "doc_verbs": []
     },
+    "release_transform": {
+      "class": "ui-state",
+      "doc_verbs": []
+    },
     "remove_brush_from_selection": {
       "class": "journaling",
       "doc_verbs": [
@@ -1179,7 +1183,7 @@
       "native-intercept": 1,
       "preview": 3,
       "tool-lifecycle": 1,
-      "ui-state": 204,
+      "ui-state": 205,
       "view": 6
     },
     "doc_verbs_outside_action_seam": [
@@ -1234,7 +1238,7 @@
     "native_intercepts": [
       "export_to_pdf"
     ],
-    "total_actions": 242,
+    "total_actions": 243,
     "verb_table": {
       "always": [
         "doc.copy_selection",

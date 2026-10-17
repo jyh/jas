@@ -126,3 +126,120 @@ func scaledStroke(_ stroke: Stroke?, _ k: Double) -> Stroke? {
 
 /// √|det| of a transform: the uniform stroke scale it applies.
 func uniformScale(_ t: Transform) -> Double { abs(t.a * t.d - t.b * t.c).squareRoot() }
+
+/// A rect's outline as the path the renderer strokes for it, corner radii as
+/// QUADRATIC corners — command for command the same as jas_dioxus
+/// `rect_geometry_path` (`rounded_rect_path`), so a released rect that becomes
+/// a path serializes identically in both ports.
+public func rectGeometryPathCommands(_ r: Rect) -> [PathCommand] {
+    let (x, y, w, h) = (r.x, r.y, r.width, r.height)
+    if r.rx <= 0 && r.ry <= 0 {
+        return [.moveTo(x, y), .lineTo(x + w, y), .lineTo(x + w, y + h), .lineTo(x, y + h), .closePath]
+    }
+    let rx = min(max(r.rx, 0), w / 2), ry = min(max(r.ry, 0), h / 2)
+    return [
+        .moveTo(x + rx, y),
+        .lineTo(x + w - rx, y),
+        .quadTo(x1: x + w, y1: y, x: x + w, y: y + ry),
+        .lineTo(x + w, y + h - ry),
+        .quadTo(x1: x + w, y1: y + h, x: x + w - rx, y: y + h),
+        .lineTo(x + rx, y + h),
+        .quadTo(x1: x, y1: y + h, x: x, y: y + h - ry),
+        .lineTo(x, y + ry),
+        .quadTo(x1: x, y1: y, x: x + rx, y: y),
+        .closePath,
+    ]
+}
+
+/// `elem` with `m` BAKED INTO ITS COORDINATES and its stroke left at the
+/// authored width: the Scale Strokes OFF drawing as a static element. Kind by
+/// kind the same as jas_dioxus `map_element_geometry`:
+///
+/// * a rect under an AXIS-ALIGNED matrix stays a rect (corner radii per axis);
+///   under a rotation or shear it becomes a path;
+/// * an ellipse stays an ellipse under ANY matrix (axes from
+///   `ellipseAxesThrough`, the rotation on its transform, which scales no
+///   stroke);
+/// * lines, polylines, polygons and paths map their points; a group maps its
+///   children;
+/// * text, and any live kind but a wrapper, take the matrix on their transform.
+///
+/// The element's own transform folds into the mapping and scales the stroke by
+/// its √|det|, as the renderer does: exact when that transform is uniform.
+public func mapElementGeometry(_ elem: Element, _ m: Transform) -> Element {
+    mapGeometry(elem, m, 1)
+}
+
+private func mapGeometry(_ elem: Element, _ mIn: Transform, _ kIn: Double) -> Element {
+    var m = mIn, k = kIn
+    if let t = elem.transform {
+        m = mIn.multiply(t)
+        k = kIn * uniformScale(t)
+    }
+    let axisAligned = m.b == 0 && m.c == 0
+    switch elem {
+    case .rect(var r) where axisAligned:
+        let p0 = m.applyPoint(r.x, r.y), p1 = m.applyPoint(r.x + r.width, r.y + r.height)
+        (r.rx, r.ry) = (r.rx * abs(m.a), r.ry * abs(m.d))
+        (r.x, r.y, r.width, r.height) = (min(p0.0, p1.0), min(p0.1, p1.1), abs(p1.0 - p0.0), abs(p1.1 - p0.1))
+        r.stroke = scaledStroke(r.stroke, k)
+        r.transform = nil
+        return .rect(r)
+    case .rect(let r):
+        return .path(Path(d: mapPathCommands(rectGeometryPathCommands(r), m), fill: r.fill,
+                          stroke: scaledStroke(r.stroke, k), widthPoints: [], opacity: r.opacity,
+                          transform: nil, locked: r.locked, visibility: r.visibility,
+                          blendMode: r.blendMode, mask: r.mask, fillGradient: r.fillGradient,
+                          strokeGradient: r.strokeGradient, strokeBrush: nil, strokeBrushOverrides: nil,
+                          toolOrigin: nil, name: r.name, id: r.id, fillRule: .nonzero))
+    case .ellipse(var e):
+        let ax = ellipseAxesThrough(m, rx: e.rx, ry: e.ry, rotation: 0)
+        let c = m.applyPoint(e.cx, e.cy)
+        (e.cx, e.cy, e.rx, e.ry) = (c.0, c.1, ax.rx, ax.ry)
+        e.stroke = scaledStroke(e.stroke, k)
+        e.transform = ax.rotation == 0 ? nil
+            : Transform.rotate(ax.rotation * (180 / Double.pi)).aroundPoint(c.0, c.1)
+        return .ellipse(e)
+    case .line(var v):
+        let a = m.applyPoint(v.x1, v.y1), b = m.applyPoint(v.x2, v.y2)
+        (v.x1, v.y1, v.x2, v.y2) = (a.0, a.1, b.0, b.1)
+        v.stroke = scaledStroke(v.stroke, k)
+        v.transform = nil
+        return .line(v)
+    case .polyline(var v):
+        v.points = v.points.map { p in m.applyPoint(p.0, p.1) }
+        v.stroke = scaledStroke(v.stroke, k)
+        v.transform = nil
+        return .polyline(v)
+    case .polygon(var v):
+        v.points = v.points.map { p in m.applyPoint(p.0, p.1) }
+        v.stroke = scaledStroke(v.stroke, k)
+        v.transform = nil
+        return .polygon(v)
+    case .path(var v):
+        v.d = mapPathCommands(v.d, m)
+        v.stroke = scaledStroke(v.stroke, k)
+        v.transform = nil
+        return .path(v)
+    case .group(var g):
+        g.children = g.children.map { mapGeometry($0, m, k) }
+        g.transform = nil
+        return .group(g)
+    case .layer(var l):
+        l.children = l.children.map { mapGeometry($0, m, k) }
+        l.transform = nil
+        return .layer(l)
+    case .live(.transformed(var t)):
+        // An OFF wrapper inside composes into one OFF wrapper (exact); an ON
+        // one scales what it holds by its √|det|, the renderer's rule.
+        if t.scaleStrokes {
+            return mapGeometry(t.child, m.multiply(t.matrix), k * uniformScale(t.matrix))
+        }
+        t.matrix = m.multiply(t.matrix)
+        t.transform = nil
+        return .live(.transformed(t))
+    default:
+        // ⚠️ LIMIT: a stroke there is then scaled by the matrix.
+        return elem.withTransformSet(m)
+    }
+}

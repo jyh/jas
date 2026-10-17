@@ -1596,6 +1596,26 @@ public struct TransformedElem: Equatable {
 
     /// The child's bounds, boxed through the matrix.
     public var bounds: BBox { aabbThrough(child.bounds, matrix) }
+
+    /// RELEASE TRANSFORM: the child alone, with the operation composed in so
+    /// the picture is unchanged (EDIT_SEMANTICS_FREEZE §3.4). ON composes the
+    /// matrix into the child's transform; OFF bakes it into the child's
+    /// coordinates with the width kept (`mapElementGeometry`). The wrapper's
+    /// own transform composes on top and its opacity multiplies into the
+    /// child's; its id and name end with it. Mirrors jas_dioxus
+    /// `TransformedElem::released`.
+    public func released() -> Element {
+        var out: Element
+        if scaleStrokes {
+            out = child.withTransformSet(child.transform.map { matrix.multiply($0) } ?? matrix)
+        } else {
+            out = mapElementGeometry(child, matrix)
+        }
+        if let w = transform {
+            out = out.withTransformSet(out.transform.map { w.multiply($0) } ?? w)
+        }
+        return out.withCommon(opacity: out.opacity * opacity)
+    }
 }
 
 // MARK: - LiveVariant

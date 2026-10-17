@@ -1928,7 +1928,7 @@ public enum Element: Equatable {
     /// full-field rebuild it replaced was enumerated as complete — but it was
     /// the same shape as five arms that were not, and no battery watched it.
     /// `TransformAndStrokeTheseusTests.swift` watches it now.
-    private func withTransformSet(_ t: Transform) -> Element {
+    func withTransformSet(_ t: Transform) -> Element {
         switch self {
         case .line(var v): v.transform = t; return .line(v)
         case .rect(var v): v.transform = t; return .rect(v)
