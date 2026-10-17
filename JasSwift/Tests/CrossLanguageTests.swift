@@ -4811,7 +4811,7 @@ private func payloadContent(_ svg: String) -> String {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["object.group.json", "align.left.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["object.group.json", "align.left.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
 
 /// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
@@ -4847,8 +4847,12 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
         store.initPanel(panelId, defaults: WorkspaceData.load()?.panelStateDefaults(panelId) ?? [:])
     }
     store.setActivePanel(panelId)
+    // `state` is the dock's live map (`buildLiveStateMap`): the defaults with
+    // the active fill and stroke overlaid, which a `disabled` bind reads
+    // (`cp_hex` is disabled while the active colour is none).
+    let ws = WorkspaceData.load()!
     let route = PanelWidgetEvents(model: model, panelId: panelId, scope: [
-        "panel": store.getPanelState(panelId), "state": store.getAll(),
+        "panel": store.getPanelState(panelId), "state": buildLiveStateMap(ws: ws, model: model),
         "active_document": buildActiveDocumentView(model: model)])
     let result: WidgetEvent.Result
     switch event {

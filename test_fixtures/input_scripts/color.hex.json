@@ -1,0 +1,14 @@
+{
+  "item": "color.hex",
+  "spec": "workspace/panels/color.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "color_panel_content", "widget": "cp_hex", "event": "commit", "value": "ff0000"},
+    {"read": "document"}
+  ],
+  "expected_json": "color.hex.expected.json"
+}
