@@ -344,6 +344,24 @@ fn stroke_json(stroke: &Option<Stroke>) -> String {
             if s.miter_limit != 10.0 {
                 o.num("miter_limit", s.miter_limit);
             }
+            // The five arrowhead fields, under the same identity-omission
+            // convention (codec_field_survival's test_json column closed
+            // 2026-10-17). Defaults: no arrow, 100 %, tip at the end.
+            if s.start_arrow != Arrowhead::None {
+                o.str_val("start_arrow", s.start_arrow.as_str());
+            }
+            if s.end_arrow != Arrowhead::None {
+                o.str_val("end_arrow", s.end_arrow.as_str());
+            }
+            if s.start_arrow_scale != 100.0 {
+                o.num("start_arrow_scale", s.start_arrow_scale);
+            }
+            if s.end_arrow_scale != 100.0 {
+                o.num("end_arrow_scale", s.end_arrow_scale);
+            }
+            if s.arrow_align != ArrowAlign::TipAtEnd {
+                o.str_val("arrow_align", "center_at_end");
+            }
             o.build()
         }
     }
@@ -1440,19 +1458,19 @@ fn parse_stroke(v: &serde_json::Value) -> Option<Stroke> {
         dash_pattern,
         dash_len,
         dash_align_anchors: v["dash_align_anchors"].as_bool().unwrap_or(false),
-        // ARROWHEADS ARE STILL DROPPED. `start_arrow`, `end_arrow`, the two
-        // scales and `arrow_align` are the same shape of blindness this wave
-        // closed for the four fields above, and they are NOT in the shipped
-        // matrix's `fields` list, so nothing measures them in any codec.
-        // Carrying them here without measuring the binary and SVG columns
-        // would be a claim wider than the evidence, so they are BANKED, named:
-        // add the five rows to test_fixtures/expected/codec_field_survival.json
-        // and close whichever codecs then read DROPPED.
-        start_arrow: Arrowhead::None,
-        end_arrow: Arrowhead::None,
-        start_arrow_scale: 100.0,
-        end_arrow_scale: 100.0,
-        arrow_align: ArrowAlign::TipAtEnd,
+        // The five arrowhead fields, absent when default (the writer's
+        // identity omission). Measured in all three codecs by
+        // codec_field_survival (rows added 2026-10-17); binary and SVG already
+        // carried them, and this reader and its writer close test_json.
+        start_arrow: Arrowhead::from_str(v["start_arrow"].as_str().unwrap_or("none")),
+        end_arrow: Arrowhead::from_str(v["end_arrow"].as_str().unwrap_or("none")),
+        start_arrow_scale: v["start_arrow_scale"].as_f64().unwrap_or(100.0),
+        end_arrow_scale: v["end_arrow_scale"].as_f64().unwrap_or(100.0),
+        arrow_align: if v["arrow_align"].as_str() == Some("center_at_end") {
+            ArrowAlign::CenterAtEnd
+        } else {
+            ArrowAlign::TipAtEnd
+        },
         opacity: v["opacity"].as_f64().unwrap_or(1.0),
     })
 }

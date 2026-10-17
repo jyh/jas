@@ -215,6 +215,14 @@ private func strokeJson(_ stroke: Stroke?) -> String {
     if s.miterLimit != 10.0 {
         o.num("miter_limit", s.miterLimit)
     }
+    // The five arrowhead fields, under the same identity-omission convention
+    // (codec_field_survival's test_json column closed 2026-10-17). Defaults:
+    // no arrow, 100 %, tip at the end. Mirrors Rust `stroke_json`.
+    if s.startArrow != .none { o.str("start_arrow", s.startArrow.rawValue) }
+    if s.endArrow != .none { o.str("end_arrow", s.endArrow.rawValue) }
+    if s.startArrowScale != 100.0 { o.num("start_arrow_scale", s.startArrowScale) }
+    if s.endArrowScale != 100.0 { o.num("end_arrow_scale", s.endArrowScale) }
+    if s.arrowAlign != .tipAtEnd { o.str("arrow_align", "center_at_end") }
     return o.build()
 }
 
@@ -1036,20 +1044,21 @@ private func parseStroke(_ v: Any?) -> Stroke? {
     default: align = .center
     }
     let dashes = (d["dash_pattern"] as? [Any] ?? []).prefix(6).map { parseF($0) }
-    // ARROWHEADS ARE STILL DROPPED. `startArrow`, `endArrow`, the two scales
-    // and `arrowAlign` are the same shape of blindness this wave closed for
-    // the four fields above, and they are NOT in the shipped matrix's
-    // `fields` list, so nothing measures them in any codec. Carrying them
-    // here without measuring the binary and SVG columns would be a claim
-    // wider than the evidence, so they are BANKED, named: add the five rows
-    // to test_fixtures/expected/codec_field_survival.json and close whichever
-    // codecs then read DROPPED.
+    // The five arrowhead fields, absent when default (the writer's identity
+    // omission). Measured in all three codecs by codec_field_survival (rows
+    // added 2026-10-17); binary and SVG already carried them, and this reader
+    // and its writer close test_json. Mirrors Rust `test_json_to_stroke`.
     return Stroke(color: parseColor(d["color"]), width: parseF(d["width"]),
                   linecap: lc, linejoin: lj,
                   miterLimit: (d["miter_limit"] as? NSNumber)?.doubleValue ?? 10.0,
                   align: align,
                   dashPattern: Array(dashes),
                   dashAlignAnchors: d["dash_align_anchors"] as? Bool ?? false,
+                  startArrow: Arrowhead(rawValue: d["start_arrow"] as? String ?? "none") ?? .none,
+                  endArrow: Arrowhead(rawValue: d["end_arrow"] as? String ?? "none") ?? .none,
+                  startArrowScale: (d["start_arrow_scale"] as? NSNumber)?.doubleValue ?? 100.0,
+                  endArrowScale: (d["end_arrow_scale"] as? NSNumber)?.doubleValue ?? 100.0,
+                  arrowAlign: d["arrow_align"] as? String == "center_at_end" ? .centerAtEnd : .tipAtEnd,
                   opacity: opacity)
 }
 
