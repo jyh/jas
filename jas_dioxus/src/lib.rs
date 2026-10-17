@@ -47,6 +47,10 @@ pub mod panel_plan;
 // A6). Same gate as the boundary it serves.
 #[cfg(feature = "ffi")]
 pub mod panel_behavior;
+// The input scripts replayed through the engine's ABI: Rust's level 1 for a
+// panel step (docs/TESTING.md section 6).
+#[cfg(all(test, feature = "ffi"))]
+mod ffi_script_replay;
 
 // S-B SPIKE SEAM, not ratified ABI. Needs BOTH features: the paint entry
 // point is meaningless without the Direct2D backend, and it is kept out of

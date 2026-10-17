@@ -140,6 +140,57 @@ enum WidgetEvent {
                       value: parsed.value, bindWritten: target != nil, behaviorsRun: ran)
     }
 
+    /// The click's modifiers (the reference's `CLICK_MODIFIERS`).
+    static let clickModifiers = ["shift", "ctrl", "meta", "alt"]
+
+    /// Click a CLICK kind (`button`, `icon_button`): the reference's `click`
+    /// (widget_event.py, WIDGET_EVENTS.md "Clicking a button").
+    ///
+    /// Refuse a wrong kind, an event other than `click` (`WrongEvent`) and a
+    /// disabled widget. `event.*` is the four modifiers, each `false` when
+    /// absent, and no value. A declared `click` behavior IS the click: those
+    /// run in order and the node-level `action` does not, even when every
+    /// condition is false. Otherwise the node-level `action` is dispatched
+    /// with its `params`, as a behavior's `action` is. A click that runs
+    /// nothing is `inert`. A click writes no bind.
+    @discardableResult
+    static func click(
+        widget: [String: Any], event: String, store: StateStore,
+        panel: [String: Any]?, modifiers: [String: Any] = [:],
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        _ = panel  // no bind write: accepted for the procedures' common signature
+        guard let kind = widget["type"] as? String, clickKinds.contains(kind) else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        guard clickEvents.contains(event) else {
+            return Result(outcome: "refused", reason: wrongEvent)
+        }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        var mods: [String: Any] = [:]
+        for k in clickModifiers { mods[k] = (modifiers[k] as? Bool) ?? false }
+        let owners = declared(widget, events: clickEvents)
+        if !owners.isEmpty {
+            let ran = runBehaviors(owners, value: nil, store: store, actions: actions,
+                                   dialogs: dialogs, platformEffects: platformEffects,
+                                   model: model, host: host, event: mods)
+            return Result(outcome: ran > 0 ? "committed" : "inert", behaviorsRun: ran)
+        }
+        guard let action = widget["action"] as? String else {
+            return Result(outcome: "inert")
+        }
+        var node: [String: Any] = ["action": action]
+        if let params = widget["params"] { node["params"] = params }
+        let ran = runBehaviors([node], value: nil, store: store, actions: actions,
+                               dialogs: dialogs, platformEffects: platformEffects,
+                               model: model, host: host, event: mods)
+        return Result(outcome: "committed", behaviorsRun: ran)
+    }
+
     static func press(
         widget: [String: Any], store: StateStore, panel: [String: Any]?,
         actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
@@ -588,13 +639,14 @@ enum WidgetEvent {
         _ behaviors: [[String: Any]], value: Any?, store: StateStore,
         actions: [String: Any]?, dialogs: [String: Any]?,
         platformEffects: [String: PlatformEffect], model: Model?, host: Host,
-        extra: [String: Any] = [:]
+        extra: [String: Any] = [:], event: [String: Any]? = nil
     ) -> Int {
         let locals = scopeLocals(host.scope, store: store).merging(extra) { _, new in new }
         var ran = 0
         for b in behaviors {
             var ctx = locals
-            ctx["event"] = ["value": value ?? NSNull()] as [String: Any]
+            // A click's event is its modifiers and carries no value.
+            ctx["event"] = event ?? (["value": value ?? NSNull()] as [String: Any])
             if let condition = b["condition"] as? String,
                !evaluate(condition, context: store.evalContext(extra: ctx)).toBool() {
                 continue
