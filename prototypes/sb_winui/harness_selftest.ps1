@@ -2086,7 +2086,7 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })"
 }
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
@@ -2177,6 +2177,33 @@ Test-Case 'is: a key or panel step is refused by name' {
     $k = [ordered]@{ kind = 'key'; chord = 'Ctrl+Z' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
 } "REFUSED: step 3 kind 'key': this driver delivers only press, move, release"
+# §333 node 6: KEY steps, the key corpus's chord form ({"key": "Z", "ctrl": true}),
+# delivered AFTER the gesture by send_hand.ps1's key injector.
+Test-Case 'is: a key step after the gesture is accepted and carried' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=Delete'
+Test-Case 'is: a chord carries its modifiers in order, and two keys are both carried' {
+    $k1 = [ordered]@{ key = 'Delete' }
+    $k2 = [ordered]@{ key = 'Z'; ctrl = $true; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k1, $k2, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=Delete;ctrl+shift+Z'
+Test-Case 'is: a key with meta is refused, as level 1 refuses it' {
+    $k = [ordered]@{ key = 'Z'; meta = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} 'REFUSED: step 3 key Z carries meta: level 1 refuses meta, and so does this driver'
+Test-Case 'is: a key step BEFORE the gesture ends is refused by name: the driver cannot interleave' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $k, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 1 key Delete comes before the gesture ends: send_hand.ps1 delivers keys only after the release'
+Test-Case 'is: a key the injector has no virtual key for is refused by name' {
+    $k = [ordered]@{ key = 'F13' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} 'REFUSED: step 3 key F13: the key injector has no virtual key for it'
+Test-Case 'is: a key modifier that is not a boolean is refused' {
+    $k = [ordered]@{ key = 'Z'; ctrl = 'yes' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} 'REFUSED: step 3 key Z ctrl is not a boolean'
 Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
 } 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'

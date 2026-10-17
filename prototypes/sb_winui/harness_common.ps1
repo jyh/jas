@@ -3013,10 +3013,36 @@ function Read-SbInputScript([string]$Json) {
     $steps = @($s.steps)
     $acts = New-Object System.Collections.Generic.List[object]
     $reads = New-Object System.Collections.Generic.List[string]
+    $keys = New-Object System.Collections.Generic.List[string]
     for ($i = 0; $i -lt $steps.Count; $i++) {
         $st = $steps[$i]
         $names = @($st.PSObject.Properties | ForEach-Object { $_.Name })
         if ($names -contains 'read') { $reads.Add("$($st.read)"); continue }
+        # KEY STEPS (§333), the key corpus's chord form: `key` plus ctrl/shift/alt
+        # booleans. send_hand.ps1 delivers them as real key events AFTER the
+        # release, so a key inside the gesture cannot be delivered and is refused
+        # by name; meta is refused as level 1 refuses it.
+        if ($names -contains 'key') {
+            $kn = "$($st.key)"
+            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                return (& $no "step $i key $kn comes before the gesture ends: send_hand.ps1 delivers keys only after the release")
+            }
+            foreach ($mod in @('ctrl', 'shift', 'alt', 'meta')) {
+                if ($names -contains $mod -and $st.$mod -isnot [bool]) { return (& $no "step $i key $kn $mod is not a boolean") }
+            }
+            if ($names -contains 'meta' -and $st.meta) {
+                return (& $no "step $i key $kn carries meta: level 1 refuses meta, and so does this driver")
+            }
+            if ($kn -cnotmatch '^(Delete|Backspace|Enter|Escape|Tab|[A-Za-z0-9])$') {
+                return (& $no "step $i key ${kn}: the key injector has no virtual key for it")
+            }
+            $chord = @(@('ctrl', 'shift', 'alt') | Where-Object { $names -contains $_ -and $st.$_ }) + @($kn)
+            $keys.Add($chord -join '+')
+            continue
+        }
+        if ($keys.Count -gt 0) {
+            return (& $no "step $i is a pointer step after a key: send_hand.ps1 delivers keys only after the gesture")
+        }
         if (@('press', 'move', 'release') -notcontains "$($st.kind)") {
             return (& $no "step $i kind '$($st.kind)': this driver delivers only press, move, release")
         }
@@ -3084,6 +3110,7 @@ function Read-SbInputScript([string]$Json) {
         Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
         DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
         Shift = $shift
+        Keys = $keys.Count; KeyText = ($keys -join ';')
     }
 }
 

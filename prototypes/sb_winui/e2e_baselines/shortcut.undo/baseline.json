@@ -1,0 +1,10 @@
+{
+    "item":  "shortcut.undo",
+    "surface":  "2379x1333",
+    "frame_hash":  "87ccde0879121e77093c46b9dbc2e654a9c9f17cfc09efb8919eaf65a3d31669",
+    "plan_panel":  "align_panel_content",
+    "plan_sha":  "b7227f4d30f7b39b",
+    "tab":  "[0,0]=on:\"complex_document.svg\"",
+    "tab_sha":  "e02fcd7de0fa4128",
+    "selection_count":  1
+}

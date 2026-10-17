@@ -95,6 +95,7 @@ if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item
 $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves
 # Captured here for the same reason as `$tool`: `$sc` is reused for the scale.
 $shiftMode = if ($sc.Shift) { $sc.Shift } else { 'none' }
+$keyText = "$($sc.KeyText)"; $keyCount = [int]$sc.Keys
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -162,7 +163,7 @@ try {
 
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
-                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode" +
+                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Keys `"$keyText`"" +
                 " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
@@ -170,13 +171,16 @@ try {
     Start-ScheduledTask -TaskName $tasks[0]
 
     # ---- the shell's own reading, written after the release lands -----------
-    $pr = Wait-SbRow -Log $log -Mark $mark -Patterns @('PROBE seq=', 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
+    # The shell probes after the release AND after each key (flask section 333), so the
+    # reading that describes the script's end is probe 1 + the number of keys.
+    $wantSeq = 1 + $keyCount
+    $pr = Wait-SbRow -Log $log -Mark $mark -Patterns @("PROBE seq=$wantSeq ", 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
     if ($null -ne $pr.Row -and $pr.Row -match 'RUSTFAIL ') {
         Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the shell failed during the drive: $($pr.Row.Trim())"
         exit 4
     }
     if ($null -eq $pr.Row -or -not (Test-Path $probe)) {
-        Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- no PROBE row within $($pr.Waited)s (did the hand press? receipt: $(if (Test-Path $receipt) { Get-Content $receipt -Raw } else { 'none' }))"
+        Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- no PROBE seq=$wantSeq row within $($pr.Waited)s (did the hand press$(if ($keyCount -gt 0) { ', and did the shell see its keys' })? receipt: $(if (Test-Path $receipt) { Get-Content $receipt -Raw } else { 'none' }))"
         exit 4
     }
     $r = Get-Content $probe -Raw | ConvertFrom-Json
@@ -264,7 +268,12 @@ if ($drive -notlike 'PASS*') { $ddx = [double]::NaN; $ddy = [double]::NaN }
 $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # The moved-by-delta arm is a SECOND METHOD for a selection drag only: another
 # tool's gesture draws or edits, and its whole claim is the read-back below.
+# KEYS AFTER THE DRAG (flask section 333) change what the drag left (Delete
+# removes it, Ctrl+Z puts it back), so the arm describes a moment the script
+# has moved past: with keys, the read-back is the whole claim.
+$dragOnly = $isSelection -and $keyCount -eq 0
 if (-not $isSelection) { $moved = "NOT APPLICABLE(tool=$($tool): the moved-by-delta arm is the selection tool's)" }
+elseif ($keyCount -gt 0) { $moved = "NOT APPLICABLE(keys=$($keyText): the moved-by-delta arm describes the drag, and the keys after it change the document)" }
 elseif ($selCount -eq 1 -and (Test-Path $openDoc)) {
     $selPath = @($r.selection)[0].path
     $before = @{}; $after = @{}
@@ -301,7 +310,7 @@ $reading = [ordered]@{
 }
 
 if ($Freeze) {
-    if ($drive -notlike 'PASS*' -or ($isSelection -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*') {
+    if ($drive -notlike 'PASS*' -or ($dragOnly -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*') {
         Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
         exit 7
     }
@@ -325,7 +334,7 @@ if (-not (Test-Path $bfile)) { Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN 
 $b = Get-Content $bfile -Raw | ConvertFrom-Json
 
 # The spec's own observable, independent of any baseline: one element selected.
-$core = if ($isSelection) {
+$core = if ($dragOnly) {
     if ($moved -like 'PASS*' -and $selCount -eq 1 -and $readback -like 'PASS*') { 'PASS' } else { "FAIL(selection=$selCount readback=$readback)" }
 } else {
     if ($readback -like 'PASS*') { 'PASS' } else { "FAIL(readback=$readback)" }
@@ -342,7 +351,7 @@ $tree = if ($planOk -and $tabOk) { 'PASS' }
 $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) baseline=$($b.surface))" }
         elseif ($r.frame_hash -eq $b.frame_hash) { 'PASS' } else { "FAIL(frame=$($r.frame_hash) want=$($b.frame_hash))" }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
-$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag):$drive " +
+$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })):$drive " +
         "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
