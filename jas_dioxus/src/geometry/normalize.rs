@@ -80,8 +80,8 @@ fn dedupe_ids_walk(elem: &mut Element, seen: &mut std::collections::HashSet<Stri
     // `children_mut()` deliberately does NOT report a compound shape's
     // operands — they are not path-addressable tree children — so this walk
     // matches the live payload itself, exactly as `Document::element_ids`
-    // does. Of the four `LiveVariant` arms only `CompoundShape` owns child
-    // `Element`s; `Reference`, `Recorded` and `Generated` name their inputs
+    // does. Of the five `LiveVariant` arms `CompoundShape` and `Transformed` own
+    // child `Element`s; `Reference`, `Recorded` and `Generated` name their inputs
     // by id and own none. The match is exhaustive so a future payload that
     // gains owned children forces this decision to be made again rather than
     // silently going unwalked.
@@ -91,6 +91,10 @@ fn dedupe_ids_walk(elem: &mut Element, seen: &mut std::collections::HashSet<Stri
                 for operand in cs.operands.iter_mut() {
                     dedupe_ids_walk(Rc::make_mut(operand), seen);
                 }
+            }
+            // Transformed OWNS its child, so the child's id is walked too.
+            crate::geometry::live::LiveVariant::Transformed(t) => {
+                dedupe_ids_walk(Rc::make_mut(&mut t.child), seen);
             }
             crate::geometry::live::LiveVariant::Reference(_)
             | crate::geometry::live::LiveVariant::Recorded(_)
@@ -195,6 +199,12 @@ fn normalize_element(elem: &Element) -> Element {
                     fill: ge.fill.as_ref().map(normalize_fill),
                     stroke: ge.stroke.as_ref().map(normalize_stroke),
                     ..ge.clone()
+                }),
+            ),
+            crate::geometry::live::LiveVariant::Transformed(t) => Element::Live(
+                crate::geometry::live::LiveVariant::Transformed(crate::geometry::live::TransformedElem {
+                    child: Rc::new(normalize_element(&t.child)),
+                    ..t.clone()
                 }),
             ),
         },

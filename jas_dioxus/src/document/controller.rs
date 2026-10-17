@@ -9248,6 +9248,34 @@ mod preservation_law_tests {
     /// over the owners THIS FIXTURE contains. A future non-`children`
     /// owner added to `element_ids` and not to `clear_ids` is caught by the
     /// document-level invariant gate (freeze §4 tier 1), not by this test.
+    /// The live transform operation OWNS its child, so `clear_ids` must reach
+    /// it, as `element_ids` does (a duplicate that kept the child's id would
+    /// collide with its source). JasSwift's `clearingIds` walks the same child.
+    #[test]
+    fn clear_ids_reaches_a_transformed_wrappers_child() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let child = Element::Rect(crate::geometry::element::RectElem {
+            x: 0.0, y: 0.0, width: 1.0, height: 1.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps { id: Some("inner".into()), ..Default::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut t = TransformedElem::new(Rc::new(child), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        t.common.id = Some("outer".into());
+        let mut layer = Element::Layer(LayerElem {
+            children: vec![Rc::new(Element::Live(LiveVariant::Transformed(t)))],
+            isolated_blending: false,
+            knockout_group: false,
+            common: CommonProps::default(),
+        });
+        let doc_of = |l: &Element| Document { layers: vec![l.clone()], ..Document::default() };
+        let before = doc_of(&layer).element_ids();
+        assert_eq!(before.len(), 2, "the fixture must carry both ids, got {before:?}");
+        crate::geometry::element::clear_ids(&mut layer);
+        let after = doc_of(&layer).element_ids();
+        assert!(after.is_empty(), "clear_ids left {after:?}");
+    }
+
     #[test]
     fn clear_ids_leaves_document_element_ids_empty_over_a_nested_compound() {
         let model = rich_compound(crate::geometry::live::CompoundOperation::Union);

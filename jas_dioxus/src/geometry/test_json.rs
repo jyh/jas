@@ -954,6 +954,14 @@ fn element_json(elem: &Element) -> String {
                 // across apps (sorted keys, fixed floats).
                 o.raw("params", canonical_value(&ge.params));
             }
+            crate::geometry::live::LiveVariant::Transformed(t) => {
+                o.str_val("type", "live");
+                o.str_val("kind", "transformed");
+                common_fields(&mut o, &t.common);
+                o.raw("child", element_json(&t.child));
+                o.raw("matrix", transform_json(&Some(t.matrix)));
+                o.bool_val("scale_strokes", t.scale_strokes);
+            }
         },
     }
     extended_element_fields(&mut o, elem);
@@ -1860,6 +1868,18 @@ fn parse_element_base(v: &serde_json::Value) -> Element {
                         crate::geometry::live::GeneratedElem::new(concept_id, params, common),
                     ))
                 }
+                "transformed" => {
+                    // Strict, like every reader here: a wrapper with no matrix
+                    // or no Scale Strokes choice is refused, never defaulted.
+                    let matrix = parse_transform_opt(&v["matrix"])
+                        .unwrap_or_else(|| panic!("transformed: no matrix in {v}"));
+                    let scale_strokes = v["scale_strokes"].as_bool()
+                        .unwrap_or_else(|| panic!("transformed: no scale_strokes in {v}"));
+                    let child = std::rc::Rc::new(parse_element(&v["child"]));
+                    let mut t = crate::geometry::live::TransformedElem::new(child, matrix, scale_strokes);
+                    t.common = common;
+                    Element::Live(crate::geometry::live::LiveVariant::Transformed(t))
+                }
                 other => panic!("Unknown live kind: {}", other),
             }
         }
@@ -2259,6 +2279,49 @@ mod tests {
     /// changes) survives, the evidence did not: `expected/` holds the
     /// SVG-parse goldens, which is the one family that has no fill_rule in
     /// it. Grep all of `test_fixtures/`, not one subdirectory.
+    #[test]
+    fn a_transformed_wrapper_round_trips_through_test_json() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let rect = Element::Rect(RectElem {
+            x: 1.0, y: 2.0, width: 10.0, height: 5.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.5)),
+            common: CommonProps { transform: Some(Transform::rotate(30.0)), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        for scale_strokes in [false, true] {
+            let inner = TransformedElem::new(std::rc::Rc::new(rect.clone()), Transform::scale(2.0, 3.0), scale_strokes);
+            let outer = TransformedElem::new(
+                std::rc::Rc::new(Element::Live(LiveVariant::Transformed(inner))),
+                Transform::shear(0.25, 0.0),
+                !scale_strokes,
+            );
+            let elem = Element::Live(LiveVariant::Transformed(outer));
+            let json = element_json(&elem);
+            assert!(json.contains("\"kind\":\"transformed\""), "{json}");
+            // Byte-stable: the parse of the serialization serializes the same.
+            let back = parse_element(&serde_json::from_str(&json).unwrap());
+            assert_eq!(element_json(&back), json, "scale_strokes={scale_strokes}");
+            let Element::Live(LiveVariant::Transformed(t)) = &back else { panic!("{back:?}") };
+            assert_eq!(t.scale_strokes, !scale_strokes);
+            let Element::Live(LiveVariant::Transformed(i)) = &*t.child else { panic!("{back:?}") };
+            assert_eq!(i.scale_strokes, scale_strokes);
+            assert_eq!(i.matrix, Transform::scale(2.0, 3.0));
+        }
+    }
+
+    /// A wrapper with no Scale Strokes choice is refused, never defaulted.
+    #[test]
+    #[should_panic(expected = "transformed: no scale_strokes")]
+    fn a_transformed_wrapper_without_scale_strokes_is_refused() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"type":"live","kind":"transformed","opacity":1,"transform":null,"locked":false,"visibility":"preview",
+                "matrix":{"a":1,"b":0,"c":0,"d":1,"e":0,"f":0},
+                "child":{"type":"group","children":[],"opacity":1,"transform":null,"locked":false,"visibility":"preview"}}"#,
+        ).unwrap();
+        parse_element(&v);
+    }
+
     #[test]
     fn fill_rule_round_trips_through_test_json() {
         use crate::geometry::element::FillRule;
