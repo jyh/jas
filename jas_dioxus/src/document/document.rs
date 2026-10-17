@@ -582,6 +582,7 @@ impl Document {
         if path.is_empty() {
             return doc;
         }
+        let path = &self.deletion_target(path);
         if path.len() == 1 {
             doc.layers.remove(path[0]);
         } else {
@@ -590,11 +591,30 @@ impl Document {
         doc
     }
 
+    /// What deleting `path` removes: the path itself, except that a
+    /// Transformed wrapper never loses its child, so deleting a wrapped child
+    /// (`[.., w, 0]`) deletes the wrapper, at every depth of nesting (route 4
+    /// slice 3b). Twin: JasSwift `Document.deletionTarget`.
+    pub fn deletion_target(&self, path: &ElementPath) -> ElementPath {
+        let mut p = path.clone();
+        while p.len() > 2 {
+            let parent = p[..p.len() - 1].to_vec();
+            if matches!(self.get_element(&parent),
+                        Some(Element::Live(crate::geometry::live::LiveVariant::Transformed(_)))) {
+                p = parent;
+            } else {
+                break;
+            }
+        }
+        p
+    }
+
     /// Return a new Document with all selected elements removed.
     pub fn delete_selection(&self) -> Self {
         let mut doc = self.clone();
-        let mut paths: Vec<ElementPath> = doc.selection.iter().map(|es| es.path.clone()).collect();
+        let mut paths: Vec<ElementPath> = doc.selection.iter().map(|es| doc.deletion_target(&es.path)).collect();
         paths.sort();
+        paths.dedup();
         paths.reverse();
         for path in paths {
             doc = doc.delete_element(&path);

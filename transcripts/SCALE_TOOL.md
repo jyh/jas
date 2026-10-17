@@ -215,19 +215,36 @@ identity per `project_element_identity_paths.md`):
    override (or, in its absence, the brush's nominal size) follows
    the same rule.
 
-   **Status, 2026-10-16:** ON holds in both ports: the scale is
-   stored as the element's transform, and a stroke drawn under a
-   transform is drawn outlined-then-scaled (MEASURED at the display
-   list for a uniform scale; for a non-uniform one it rests on the
-   renderers' stroke model, not yet measured). OFF holds for a
-   UNIFORM scale only
-   (the stored width is divided by `|s|`); for a non-uniform scale
-   it does not yet, and the route is being costed (a non-scaling
-   stroke, or a live scale operation).
+   **Status, 2026-10-16 (route 4 slice 5):** the Scale dialog, its
+   Preview and the Scale tool no longer store the scale in the
+   element's transform. Each selected element becomes the CHILD of
+   a live **Transformed** element (`matrix` = the scale about the
+   reference point, `scale_strokes` = this option). The child is
+   untouched and keeps its id; the wrapper has none. The wrapper
+   draws the child under the matrix: ON strokes it outlined-then-
+   scaled, OFF maps the geometry and keeps the authored width, so
+   OFF now holds for a non-uniform scale too. Release Transform
+   hands the child back with the operation applied.
+   * Scaling an existing wrapper with the same Scale Strokes value,
+     whose own transform is at most a translation, folds into it
+     (one wrapper, matrix `S·W·M`). Any other wrapper is wrapped
+     again. The rule is the same for ON and OFF.
+   * A partial (control-point) selection scales the whole element,
+     as before, and the selection entry becomes the whole wrapper.
+   * A layer is never wrapped; its children are.
+   * Rotate and Shear are unchanged: they still store a transform.
+     Rotation is rigid, so both stroke laws agree, and Shear has no
+     Scale Strokes option.
+   * Earlier recorded `scale_transform` operations carry no `wrap`
+     argument and replay as the stored-transform scale they were.
 3. **Rounded corners.** When `state.scale_corners` is true and the
    element is a `rounded_rect`: `rx ← rx · |sx|` and
    `ry ← ry · |sy|`. Other element types: no-op. When
    `state.scale_corners` is false: `rx` / `ry` are preserved.
+   Inside the wrapper the radii are mapped by the matrix, so when
+   `state.scale_corners` is false the child's `rx` / `ry` are
+   divided by `|sx|` / `|sy|` before wrapping, which keeps the drawn
+   radius.
 
 When `copy` is true, a duplicate of the selection is created in
 the same parent (immediately above the original in z-order); the
@@ -237,10 +254,15 @@ unmodified. The active selection moves to the duplicate.
 ### LiveElement / CompoundShape
 
 A CompoundShape (the first conformer of the LiveElement framework
-per `project_live_element_framework.md`) is scaled by recursing
-into its source operands and applying the transform there. The
-boolean op then re-evaluates on the new operands; live-ness is
-preserved.
+per `project_live_element_framework.md`) is scaled like any other
+element: it becomes the child of a Transformed wrapper (route 4
+slice 5), so its operands are untouched and live-ness is
+preserved. ⚠️ Known limit: Release Transform with Scale Strokes OFF
+on a compound or a symbol reference stores the matrix as a
+transform rather than mapping the operands, so the stroke is then
+drawn scaled. (This section said the scale recursed into the
+operands. Neither port did that: the scale was a stored transform
+on the compound.)
 
 If the user's selection contains both a CompoundShape and one of
 its operands, the deduplication pass (above) collapses them so the

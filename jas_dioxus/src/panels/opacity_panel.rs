@@ -116,7 +116,6 @@ mod tests {
             layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
-            layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
             layers_type_filter: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,

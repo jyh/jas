@@ -594,6 +594,7 @@ public struct Document: Equatable {
     /// Return a new document with the element at path removed.
     public func deleteElement(_ path: ElementPath) -> Document {
         guard !path.isEmpty else { fatalError("Path must be non-empty") }
+        let path = deletionTarget(path)
         var newLayers = layers
         if path.count == 1 {
             newLayers.remove(at: path[0])
@@ -607,8 +608,21 @@ public struct Document: Equatable {
     }
 
     /// Return a new document with all selected elements removed and selection cleared.
+    /// What deleting `path` removes: the path itself, except that a
+    /// Transformed wrapper never loses its child, so deleting a wrapped child
+    /// (`[.., w, 0]`) deletes the wrapper, at every depth of nesting (route 4
+    /// slice 3b). Twin of Rust `Document::deletion_target`.
+    public func deletionTarget(_ path: ElementPath) -> ElementPath {
+        var p = path
+        while p.count > 2, case .live(.transformed)? = tryGetElement(Array(p.dropLast())) {
+            p = Array(p.dropLast())
+        }
+        return p
+    }
+
     public func deleteSelection() -> Document {
-        let sortedPaths = selection.map(\.path).sorted { $0.lexicographicallyPrecedes($1) }.reversed()
+        let sortedPaths = Set(selection.map { deletionTarget($0.path) })
+            .sorted { $0.lexicographicallyPrecedes($1) }.reversed()
         var doc = self
         for path in sortedPaths {
             doc = doc.deleteElement(path)

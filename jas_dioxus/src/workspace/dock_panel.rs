@@ -700,7 +700,7 @@ pub(crate) fn build_live_state_map(st: &AppState) -> serde_json::Map<String, ser
         m.insert("_layers_context_menu".into(), serde_json::Value::Bool(true));
     }
     m.insert("_layers_search_query".into(), serde_json::Value::String(st.layers_search_query.clone()));
-    m.insert("_layers_isolation_depth".into(), serde_json::Value::Number(st.layers_isolation_stack.len().into()));
+    m.insert("_layers_isolation_depth".into(), serde_json::Value::Number(st.isolation_stack().len().into()));
     m.insert("_layers_type_filter_count".into(), serde_json::Value::Number(st.layers_type_filter.len().into()));
     m.insert("_layers_filter_open".into(), serde_json::Value::Bool(st.layers_filter_dropdown_open));
 

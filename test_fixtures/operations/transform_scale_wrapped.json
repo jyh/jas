@@ -1,0 +1,137 @@
+[
+  {
+    "name": "scale_wrapped_off_wraps_the_untouched_rect",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 96,
+        "extend": false
+      },
+      {
+        "op": "scale_transform",
+        "sx": 2.0,
+        "sy": 2.0,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": false,
+        "scale_corners": false,
+        "wrap": true
+      }
+    ],
+    "expected_json": "transform_scale_wrapped_off_wraps_the_untouched_rect_expected.json"
+  },
+  {
+    "name": "scale_wrapped_twice_same_flag_absorbs",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 96,
+        "extend": false
+      },
+      {
+        "op": "scale_transform",
+        "sx": 2.0,
+        "sy": 2.0,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": true,
+        "scale_corners": false,
+        "wrap": true
+      },
+      {
+        "op": "scale_transform",
+        "sx": 1.5,
+        "sy": 1.5,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": true,
+        "scale_corners": false,
+        "wrap": true
+      }
+    ],
+    "expected_json": "transform_scale_wrapped_twice_same_flag_absorbs_expected.json"
+  },
+  {
+    "name": "scale_wrapped_twice_other_flag_nests",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 96,
+        "extend": false
+      },
+      {
+        "op": "scale_transform",
+        "sx": 2.0,
+        "sy": 2.0,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": true,
+        "scale_corners": false,
+        "wrap": true
+      },
+      {
+        "op": "scale_transform",
+        "sx": 1.5,
+        "sy": 1.5,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": false,
+        "scale_corners": false,
+        "wrap": true
+      }
+    ],
+    "expected_json": "transform_scale_wrapped_twice_other_flag_nests_expected.json"
+  },
+  {
+    "name": "scale_wrapped_after_a_move_absorbs_the_translation",
+    "setup_svg": "rect_with_id.svg",
+    "ops": [
+      {
+        "op": "select_rect",
+        "x": 0,
+        "y": 0,
+        "width": 96,
+        "height": 96,
+        "extend": false
+      },
+      {
+        "op": "scale_transform",
+        "sx": 2.0,
+        "sy": 2.0,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": false,
+        "scale_corners": false,
+        "wrap": true
+      },
+      {
+        "op": "move_selection",
+        "dx": 10.0,
+        "dy": 0.0
+      },
+      {
+        "op": "scale_transform",
+        "sx": 1.5,
+        "sy": 1.5,
+        "rx": 0.0,
+        "ry": 0.0,
+        "scale_strokes": false,
+        "scale_corners": false,
+        "wrap": true
+      }
+    ],
+    "expected_json": "transform_scale_wrapped_after_a_move_absorbs_the_translation_expected.json"
+  }
+]

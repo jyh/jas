@@ -1336,21 +1336,29 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                 // `transform`, so a foreign viewer draws Scale Strokes ON
                 // exactly. ⚠️ NOT YET FOR OFF: a foreign viewer scales the
                 // stroke under `transform`, so OFF draws scaled there until the
-                // export slice writes mapped geometry. The SVG READER for this
-                // kind is not built either; nothing produces the kind outside
-                // tests until the Scale dialog switches to it.
+                // export slice writes mapped geometry.
                 // One `transform` attribute: the wrapper's own transform
-                // (outside) composed with the operation's matrix (inside).
+                // (outside) composed with the operation's matrix (inside). The
+                // reader cannot split W·M back, and under OFF the split is the
+                // picture (W scales the stroke, M does not), so the two ride
+                // exactly beside it: `data-jas-matrix` (M, always) and
+                // `data-jas-own-transform` (W, when there is one).
                 let child_indent = format!("{}  ", indent);
                 let outer = match t.common.transform {
                     Some(c) => c.multiply(&t.matrix),
                     None => t.matrix,
                 };
+                let own = match &t.common.transform {
+                    Some(w) => format!(" data-jas-own-transform=\"{}\"", matrix_value(w)),
+                    None => String::new(),
+                };
                 let common = CommonProps { transform: Some(outer), ..t.common.clone() };
                 format!(
-                    "{}<g data-jas-live=\"transformed\" data-jas-scale-strokes=\"{}\"{}>\n{}\n{}</g>",
+                    "{}<g data-jas-live=\"transformed\" data-jas-scale-strokes=\"{}\" data-jas-matrix=\"{}\"{}{}>\n{}\n{}</g>",
                     indent,
                     t.scale_strokes,
+                    matrix_value(&t.matrix),
+                    own,
                     common_attrs(&common),
                     element_svg(&t.child, &child_indent),
                     indent,
@@ -2715,6 +2723,25 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
                         operation, operands: children, fill: None, stroke: None, common,
                     },
                 )));
+            }
+            // A Transformed wrapper is <g data-jas-live="transformed"> around
+            // exactly ONE child (route 4). Its `transform` is W·M; the split
+            // rides `data-jas-matrix` (M) and `data-jas-own-transform` (W).
+            // Without the split (a hand-written file) the whole `transform`
+            // is the matrix and there is no wrapper transform: the same
+            // picture. Any other child count is not a wrapper and falls
+            // through to a plain group.
+            if node.attrs.get("data-jas-live").map(|s| s.as_str()) == Some("transformed")
+                && children.len() == 1
+            {
+                let (matrix, own) = match parse_matrix_attr(node, "data-jas-matrix") {
+                    Some(m) => (m, parse_matrix_attr(node, "data-jas-own-transform")),
+                    None => (common.transform.unwrap_or(Transform::IDENTITY), None),
+                };
+                let scale_strokes = node.attrs.get("data-jas-scale-strokes").map(|v| v == "true").unwrap_or(false);
+                let mut t = crate::geometry::live::TransformedElem::new(children.remove(0), matrix, scale_strokes);
+                t.common = CommonProps { transform: own, ..common };
+                return Some(Element::Live(crate::geometry::live::LiveVariant::Transformed(t)));
             }
             // Layer detection: only inkscape:groupmode="layer"
             // promotes a <g> to a Layer. inkscape:label alone is a
@@ -4909,6 +4936,57 @@ mod tests {
         } else {
             panic!("expected Path");
         }
+    }
+
+    /// A Transformed wrapper ROUND-TRIPS through SVG, both Scale Strokes
+    /// values, with its own transform W and its matrix M kept apart. The
+    /// standard `transform` stays W·M, so a foreign viewer draws Scale Strokes
+    /// ON exactly; `data-jas-matrix` (M) and `data-jas-own-transform` (W) carry
+    /// the split, which a reader cannot recover from W·M alone and which the
+    /// picture depends on under OFF (W scales the stroke, M does not).
+    /// Coordinates are multiples of 3 pt, so the px wire values are exact.
+    #[test]
+    fn a_transformed_wrapper_round_trips_through_svg() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        for (own, scale_strokes) in [(Some(Transform::translate(6.0, 9.0)), false), (None, true)] {
+            let child = Element::Rect(RectElem {
+                x: 3.0, y: 3.0, width: 12.0, height: 12.0, rx: 0.0, ry: 0.0,
+                fill: None, stroke: Some(Stroke::new(Color::rgb(0.0, 0.0, 0.0), 3.0)),
+                common: CommonProps { id: Some("c".into()), ..CommonProps::default() },
+                fill_gradient: None, stroke_gradient: None,
+            });
+            let mut w = TransformedElem::new(Rc::new(child), Transform::scale(2.0, 3.0), scale_strokes);
+            w.common.transform = own;
+            w.common.id = Some("w".into());
+            let doc = make_doc(vec![Element::Live(LiveVariant::Transformed(w))]);
+            let svg = document_to_svg(&doc);
+            let outer = own.map_or(Transform::scale(2.0, 3.0), |o| o.multiply(&Transform::scale(2.0, 3.0)));
+            assert!(svg.contains(&format!(" transform=\"{}\"", matrix_value(&outer))), "W·M for foreign viewers: {svg}");
+            assert_eq!(svg_to_document(&svg).layers, doc.layers, "round trip, own={own:?}: {svg}");
+        }
+    }
+
+    /// A transformed group with NO split attributes (hand-written, or from an
+    /// older writer) reads its `transform` as the operation's matrix, with no
+    /// wrapper transform: the same picture.
+    #[test]
+    fn a_transformed_group_without_the_split_reads_its_transform_as_the_matrix() {
+        use crate::geometry::live::LiveVariant;
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+  <g inkscape:groupmode="layer" inkscape:label="L">
+    <g data-jas-live="transformed" data-jas-scale-strokes="false" transform="matrix(2,0,0,3,0,0)">
+      <rect x="4" y="4" width="16" height="16"/>
+    </g>
+  </g>
+</svg>"#;
+        let doc = svg_to_document(svg);
+        let Some(Element::Live(LiveVariant::Transformed(t))) = doc.get_element(&vec![0, 0]) else {
+            panic!("a wrapper: {:?}", doc.get_element(&vec![0, 0]));
+        };
+        assert_eq!(t.matrix, Transform::scale(2.0, 3.0));
+        assert_eq!(t.common.transform, None);
+        assert!(!t.scale_strokes);
+        assert!(matches!(&*t.child, Element::Rect(r) if (r.x, r.width) == (3.0, 12.0)));
     }
 
     #[test]

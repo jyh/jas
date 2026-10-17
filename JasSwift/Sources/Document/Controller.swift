@@ -1068,6 +1068,13 @@ public class Controller {
         var doc = model.document
         let elem = doc.getElement(path)
         if case .path(let v) = elem {
+            // The drag arrives in DOCUMENT space; handles live in the path's
+            // LOCAL space (the S-3 mapping `moveSelection` uses). Twin of Rust
+            // `Controller::move_path_handle`.
+            var dx = dx, dy = dy
+            if let inv = accumulatedTransform(doc, path, includeOwn: true)?.inverse() {
+                (dx, dy) = (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy)
+            }
             let newD = JasLib.movePathHandle(v.d, anchorIdx: anchorIdx, handleType: handleType, dx: dx, dy: dy)
             // Rust's twin is `PathElem { d: new_cmds, ..elem.clone() }`
             // (geometry/element.rs, move_path_handle) and so preserves

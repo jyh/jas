@@ -2196,7 +2196,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 85, "the fixture corpus changed size");
+        assert_eq!(total, 87, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2287,6 +2287,17 @@ mod tests {
         // filled, no stroke). A plain rect, so it presents. Both pins bumped in
         // the same edit.
         //
+        // ⛔ 85 → 86 (jas, 2026-10-16, the control-point probe's gesture pin):
+        // `group_scaled_rect.svg`, one filled rect in a group carrying
+        // matrix(2,0,0,2,80,40). A plain rect in a transformed group, so it
+        // presents. Both pins bumped in the same edit.
+        //
+        // ⛔ 86 → 87 (jas, 2026-10-16, the Release Transform corpus case):
+        // `transformed_wrapper.svg`, one Transformed wrapper (scale(2,3), Scale
+        // Strokes OFF) around a filled, stroked rect. The native seam draws a
+        // wrapper (route 4 slice 1) and the rect needs no legacy path, so it
+        // presents. Both pins bumped in the same edit.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2297,6 +2308,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 85, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 87, "the whole corpus presents");
     }
 }

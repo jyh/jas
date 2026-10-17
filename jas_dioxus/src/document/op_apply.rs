@@ -1476,6 +1476,79 @@ pub fn compose_matrix_over_paths(
     new_doc
 }
 
+/// ROUTE 4 SLICE 5 (the helm, 2026-10-16 20:27): apply a scale by WRAPPING
+/// each element at `paths` in a Transformed wrapper (`matrix`, `scale_strokes`)
+/// instead of composing it into a stored transform. The wrapper draws the
+/// stroke by its own flag, so neither stored-transform stroke law is reached
+/// and no stroke compensation is written. Pure, so preview and confirm run the
+/// identical compose (as `compose_matrix_over_paths` does for rotate/shear).
+///
+/// - A leaf or group: the element, untouched, becomes the child. Scale
+///   Corners OFF (`corners` is `Some`) divides the child's radii first, since
+///   the wrapper maps them by the matrix. The wrapper carries no id; the child
+///   keeps its own (Release Transform hands it back).
+/// - An existing wrapper with the SAME flag whose own transform is at most a
+///   translation ABSORBS the scale: matrix `S·W·M`, own transform cleared.
+///   Any other wrapper is wrapped again. The test is the same for ON and OFF.
+/// - A layer path (length 1) is never wrapped (a document's top level holds
+///   layers); its children are.
+/// - Each selection entry naming a wrapped path becomes `All` (a partial
+///   entry's indices would otherwise name the wrapper's points).
+/// Twin: JasSwift `wrapScaleOverPaths`.
+pub fn wrap_scale_over_paths(
+    doc: &crate::document::document::Document,
+    paths: &[ElementPath],
+    matrix: &crate::geometry::element::Transform,
+    scale_strokes: bool,
+    corners: Option<(f64, f64)>,
+) -> crate::document::document::Document {
+    use crate::document::document::{ElementSelection, SelectionKind};
+    use crate::geometry::element::Element;
+    use crate::geometry::live::{LiveVariant, TransformedElem};
+    let mut targets: Vec<ElementPath> = Vec::new();
+    for path in paths {
+        if path.len() == 1 {
+            let n = doc.get_element(path).and_then(|l| l.children()).map_or(0, |c| c.len());
+            targets.extend((0..n).map(|i| vec![path[0], i]));
+        } else {
+            targets.push(path.clone());
+        }
+    }
+    let mut new_doc = doc.clone();
+    for path in &targets {
+        let Some(elem) = new_doc.get_element(path).cloned() else { continue };
+        let wrapped = match elem {
+            Element::Live(LiveVariant::Transformed(mut t))
+                if t.scale_strokes == scale_strokes
+                    && t.common.transform.is_none_or(|w| w.a == 1.0 && w.b == 0.0 && w.c == 0.0 && w.d == 1.0) =>
+            {
+                let w = t.common.transform.take().unwrap_or_default();
+                t.matrix = matrix.multiply(&w).multiply(&t.matrix);
+                if let Some((sx_abs, sy_abs)) = corners {
+                    scale_elem_corners(std::rc::Rc::make_mut(&mut t.child), sx_abs, sy_abs);
+                }
+                Element::Live(LiveVariant::Transformed(t))
+            }
+            mut child => {
+                if let Some((sx_abs, sy_abs)) = corners {
+                    scale_elem_corners(&mut child, sx_abs, sy_abs);
+                }
+                Element::Live(LiveVariant::Transformed(TransformedElem::new(
+                    std::rc::Rc::new(child), *matrix, scale_strokes)))
+            }
+        };
+        new_doc = new_doc.replace_element(path, wrapped);
+    }
+    new_doc.selection = new_doc.selection.iter().map(|es| {
+        if targets.contains(&es.path) {
+            ElementSelection { path: es.path.clone(), kind: SelectionKind::All }
+        } else {
+            es.clone()
+        }
+    }).collect();
+    new_doc
+}
+
 /// The factor the STORED stroke width is multiplied by, so the DRAWN width is
 /// what SCALE_TOOL.md § Apply behavior says. The scale is stored as a transform,
 /// and a stroke is drawn in the transformed space (drawn = stored ×
@@ -1570,6 +1643,7 @@ pub fn apply_scale(
     ry: f64,
     scale_strokes: bool,
     scale_corners: bool,
+    wrap: bool,
 ) -> (bool, Vec<String>) {
     use crate::algorithms::transform_apply;
     if is_scale_identity(sx, sy) {
@@ -1580,13 +1654,13 @@ pub fn apply_scale(
     let stroke_factor = stroke_compensation(sx, sy, scale_strokes);
     let corners = corner_compensation(sx, sy, scale_corners);
     let paths = selection_paths(model.document());
-    let new_doc = compose_matrix_over_paths(
-        model.document(),
-        &paths,
-        &matrix,
-        stroke_factor,
-        corners,
-    );
+    // `wrap` (route 4 slice 5, opt-in on the op so recorded ops without it
+    // replay as they always did): a wrapper, and no stroke compensation.
+    let new_doc = if wrap {
+        wrap_scale_over_paths(model.document(), &paths, &matrix, scale_strokes, corners)
+    } else {
+        compose_matrix_over_paths(model.document(), &paths, &matrix, stroke_factor, corners)
+    };
     model.edit_document(new_doc);
     (true, targets)
 }
@@ -2494,7 +2568,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             // on, scale_corners off) — but the op always carries them resolved.
             let scale_strokes = op.get("scale_strokes").and_then(|v| v.as_bool()).unwrap_or(true);
             let scale_corners = op.get("scale_corners").and_then(|v| v.as_bool()).unwrap_or(false);
-            let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners);
+            // `wrap` absent is the stored-transform scale every recorded op
+            // before route 4 slice 5 meant; present and true, the wrapper.
+            let wrap = op.get("wrap").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners, wrap);
             if !changed {
                 // Benign no-op: an identity transform is Ok by the S3 taxonomy.
                 return Ok(());
@@ -3359,5 +3436,103 @@ mod stroke_compensation_tests {
         // A 0 % scale collapses the shape; 1/0 would write an infinite width.
         assert_eq!(stroke_compensation(0.0, 2.0, false), None);
         assert_eq!(stroke_compensation(2.0, 0.0, false), None);
+    }
+}
+
+/// ROUTE 4 SLICE 5: the Scale dialog emits a Transformed WRAPPER (the helm's
+/// 20:27 ruling) instead of baking the scale into a stored transform, so the
+/// two stored-transform stroke laws never meet a scaled element. These pin
+/// `wrap_scale_over_paths`, the pure compose both preview and confirm run.
+#[cfg(test)]
+mod wrap_scale_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{Color, CommonProps, Element, LayerElem, RectElem, Stroke, Transform};
+    use crate::geometry::live::{LiveVariant, TransformedElem};
+    use std::rc::Rc;
+
+    fn rounded(id: &str) -> Element {
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 2.0, ry: 2.0, fill: None,
+            stroke: Some(Stroke::new(Color::BLACK, 1.0)),
+            common: CommonProps { id: Some(id.into()), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    fn doc_of(children: Vec<Element>, selection: Vec<ElementSelection>) -> Document {
+        Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: children.into_iter().map(Rc::new).collect(),
+                isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+            })],
+            selection,
+            ..Document::default()
+        }
+    }
+
+    fn wrapper_at(doc: &Document, path: &[usize]) -> TransformedElem {
+        match doc.get_element(&path.to_vec()) {
+            Some(Element::Live(LiveVariant::Transformed(t))) => t.clone(),
+            other => panic!("a wrapper at {path:?}: {other:?}"),
+        }
+    }
+
+    /// A plain leaf is replaced by a wrapper around the UNTOUCHED element: the
+    /// matrix is the scale, the flag is the dialog's, the stroke keeps its
+    /// authored width under both flags (the wrapper draws it), and the
+    /// selection now names the wrapper whole.
+    #[test]
+    fn a_scaled_leaf_becomes_a_wrapper_around_the_untouched_element() {
+        for flag in [false, true] {
+            let doc = doc_of(vec![rounded("r")], vec![ElementSelection::partial(vec![0, 0], [1usize])]);
+            let s = Transform::scale(1.5, 1.5);
+            let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &s, flag, None);
+            let w = wrapper_at(&out, &[0, 0]);
+            assert_eq!(*w.child, rounded("r"), "the child is the element, untouched");
+            assert_eq!((w.matrix, w.scale_strokes, w.common.transform, w.common.id.clone()), (s, flag, None, None));
+            assert_eq!(out.selection, vec![ElementSelection::all(vec![0, 0])], "a partial entry becomes the whole wrapper");
+        }
+    }
+
+    /// Scale Corners OFF keeps the DRAWN radius: the wrapper maps the radii by
+    /// the matrix, so the child's radii are divided by |sx|, |sy| first.
+    #[test]
+    fn corners_off_divides_the_childs_radii() {
+        let doc = doc_of(vec![rounded("r")], vec![ElementSelection::all(vec![0, 0])]);
+        let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &Transform::scale(2.0, 4.0), false,
+                                        corner_compensation(2.0, 4.0, false));
+        let Element::Rect(r) = &*wrapper_at(&out, &[0, 0]).child else { panic!("a rect child") };
+        assert_eq!((r.rx, r.ry), (1.0, 0.5));
+    }
+
+    /// An existing wrapper with the SAME flag whose own transform is at most a
+    /// translation ABSORBS the scale (one wrapper, matrix S·W·M, no own
+    /// transform); a different flag, or a non-translation own transform, wraps
+    /// AGAIN. The test is the same for both flags (the re-price guard).
+    #[test]
+    fn a_wrapper_absorbs_a_matching_scale_and_otherwise_is_wrapped_again() {
+        let m = Transform::scale(2.0, 3.0);
+        let s = Transform::scale(1.5, 1.5);
+        for flag in [false, true] {
+            let mut w = TransformedElem::new(Rc::new(rounded("r")), m, flag);
+            w.common.transform = Some(Transform::translate(5.0, 7.0));
+            let doc = doc_of(vec![Element::Live(LiveVariant::Transformed(w))], vec![ElementSelection::all(vec![0, 0])]);
+            let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &s, flag, None);
+            let a = wrapper_at(&out, &[0, 0]);
+            assert_eq!(*a.child, rounded("r"), "absorbed: still ONE wrapper, flag={flag}");
+            assert_eq!(a.matrix, s.multiply(&Transform::translate(5.0, 7.0)).multiply(&m));
+            assert_eq!(a.common.transform, None);
+            let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &s, !flag, None);
+            let outer = wrapper_at(&out, &[0, 0]);
+            assert_eq!((outer.matrix, outer.scale_strokes), (s, !flag));
+            assert!(matches!(&*outer.child, Element::Live(LiveVariant::Transformed(_))), "a different flag nests");
+        }
+        let mut rot = TransformedElem::new(Rc::new(rounded("r")), m, false);
+        rot.common.transform = Some(Transform::rotate(30.0));
+        let doc = doc_of(vec![Element::Live(LiveVariant::Transformed(rot))], vec![ElementSelection::all(vec![0, 0])]);
+        let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &s, false, None);
+        assert!(matches!(&*wrapper_at(&out, &[0, 0]).child, Element::Live(LiveVariant::Transformed(_))),
+                "a rotated own transform is wrapped again");
     }
 }

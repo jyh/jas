@@ -3744,6 +3744,10 @@ actions:
           # (2026-10-16).
           scale_strokes: "param.scale_strokes"
           scale_corners: "param.scale_corners"
+          # Route 4 slice 5 (ruled 2026-10-16): the scale is a live Transformed
+          # wrapper around each selected element, which draws the stroke by its
+          # own Scale Strokes flag, never a stored transform.
+          wrap: "true"
           # OP_LOG.md §9 Phase P7: the CONFIRM apply journals one scale_transform
           # op (a bracketed edit recording the resolved matrix params). Only the
           # confirm path sets journal:true; the preview path below omits it so it
@@ -3768,6 +3772,10 @@ actions:
           copy: "false"
           scale_strokes: "dialog.scale_strokes"
           scale_corners: "dialog.scale_corners"
+          # Route 4 slice 5 (ruled 2026-10-16): the scale is a live Transformed
+          # wrapper around each selected element, which draws the stroke by its
+          # own Scale Strokes flag, never a stored transform.
+          wrap: "true"
 
   scale_options_reset:
     description: >

@@ -1600,6 +1600,9 @@ private func preservationPinReport(
 
 // P7 — transforms (scale / rotate / shear / copy).
 @Test func operationTransformScale() throws { try runOperationFixture("transform_scale.json") }
+/// Route 4 slice 5: `scale_transform` with `wrap: true` wraps, absorbs a same-flag
+/// scale over a translation, and nests under a different flag.
+@Test func operationTransformScaleWrapped() throws { try runOperationFixture("transform_scale_wrapped.json") }
 @Test func operationTransformRotate() throws { try runOperationFixture("transform_rotate.json") }
 @Test func operationTransformShear() throws { try runOperationFixture("transform_shear.json") }
 @Test func operationTransformCopy() throws { try runOperationFixture("transform_copy.json") }
@@ -2670,6 +2673,13 @@ private func runTransformAction(_ model: Model, _ action: String, _ params: [Str
 }
 
 /// True iff the element at `path` carries a non-nil transform.
+/// Route 4 slice 5: a scale leaves a Transformed wrapper at the path. Twin of
+/// Rust `wrapped_at`.
+private func wrappedAt(_ model: Model, _ path: ElementPath) -> Bool {
+    if case .live(.transformed)? = model.document.tryGetElement(path) { return true }
+    return false
+}
+
 private func transformedAt(_ model: Model, _ path: ElementPath) -> Bool {
     guard let el = model.document.tryGetElement(path) else { return false }
     return el.transform != nil
@@ -2711,8 +2721,9 @@ private func assertConfirmReplayEquivalent(_ model: Model) {
         #expect((p["ry"] as? NSNumber)?.doubleValue == 36.0, "ry = selection-bounds center")
         #expect((p["scale_strokes"] as? NSNumber)?.boolValue == true)
         #expect((p["scale_corners"] as? NSNumber)?.boolValue == false)
+        #expect((p["wrap"] as? NSNumber)?.boolValue == true, "route 4 slice 5: the op records that it wraps")
         #expect(txn.ops[0].targets == ["rect-1"], "targets = pre-mutation selection id")
-        #expect(transformedAt(model, [0, 0]), "the rect carries a transform after confirm")
+        #expect(wrappedAt(model, [0, 0]), "the rect is wrapped in a Transformed after confirm")
         assertConfirmReplayEquivalent(model)
     }
     // (rotate) 30° around the bounds center.
@@ -2767,8 +2778,8 @@ private func assertConfirmReplayEquivalent(_ model: Model) {
     #expect(txn.ops.map { $0.op } == ["copy_selection", "scale_transform"],
         "copy=true journals [copy_selection, scale_transform] in ONE transaction")
     #expect(txn.ops[0].targets == ["rect-1"], "copy_selection.targets = pre-mutation source id")
-    #expect(!transformedAt(model, [0, 0]), "the original is untouched by a copy-transform")
-    #expect(transformedAt(model, [0, 1]), "the duplicate carries the composed matrix")
+    #expect(!transformedAt(model, [0, 0]) && !wrappedAt(model, [0, 0]), "the original is untouched by a copy-transform")
+    #expect(wrappedAt(model, [0, 1]), "the duplicate is wrapped (route 4 slice 5)")
     assertConfirmReplayEquivalent(model)
 }
 
@@ -4443,6 +4454,9 @@ private let gestureFixtures = [
     "magic_wand_click.json",
     "partial_selection_marquee_corner.json",
     "partial_selection_drag_corner_anchor.json",
+    // A corner hit WHERE IT IS DRAWN, through a scaled group (2026-10-16);
+    // see the Rust list's comment on the same entry.
+    "partial_selection_drag_corner_in_scaled_group.json",
     "artboard_drag.json",
     // YAML coverage census, NOT_YET_BUILT tools (2026-10-12): the first
     // gesture case for the last twelve tools. Most act on a selection, which
@@ -6034,6 +6048,14 @@ private let seedKnown: Set<String> = [
     // selected inside the wrapper, and the unwrap does not remap selection
     // paths). Mirrors Rust's KNOWN.
     "compound_layer_actions.json::release_compound_shape_restores_its_operands",
+    // Route 4 slice 5 (2026-10-16): Scale wraps whatever is selected, so the
+    // seeded version is wrapper{group{rect}} around the same rect the plain one
+    // wraps. The seed group sits inside a LIVE element, which the unwrap cannot
+    // reach. Mirrors Rust's KNOWN (measured there, both documents printed).
+    "transform_options_actions.json::scale_options_confirm_uniform_150",
+    "transform_options_actions.json::scale_options_confirm_uniform_150_strokes_off",
+    "transform_options_actions.json::scale_options_confirm_uniform_150_corners_off_named",
+    "transform_options_actions.json::scale_options_confirm_copy_nonuniform",
 ]
 
 /// Anti-vacuity floor: the number of cases the corpus can actually seed today

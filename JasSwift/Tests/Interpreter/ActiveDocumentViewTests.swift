@@ -240,3 +240,19 @@ import Foundation
     #expect(none["has_filename"] as? Bool == false)
     #expect(none["is_modified"] as? Bool == false)
 }
+
+/// A Transformed wrapper is a container one can ENTER (route 4 slice 3b), and
+/// it is not a group. Twin of Rust
+/// `a_transformed_wrapper_is_a_container_and_not_a_group`.
+@Test func aTransformedWrapperIsAContainerAndNotAGroup() {
+    let w = TransformedElem(child: .rect(Rect(x: 0, y: 0, width: 10, height: 10)),
+                            matrix: .scale(2, 2), scaleStrokes: false)
+    let model = Model(document: Document(
+        layers: [Layer(name: "L", children: [.live(.transformed(w)), .rect(Rect(x: 0, y: 0, width: 5, height: 5))])],
+        selectedLayer: 0, selection: []))
+    let v = buildActiveDocumentView(model: model, layersPanelSelection: [[0, 0]])
+    #expect(v["layers_panel_selection_is_container"] as? Bool == true)
+    #expect(v["layers_panel_selection_has_group"] as? Bool == false)
+    let r = buildActiveDocumentView(model: model, layersPanelSelection: [[0, 1]])
+    #expect(r["layers_panel_selection_is_container"] as? Bool == false, "control: a rect")
+}

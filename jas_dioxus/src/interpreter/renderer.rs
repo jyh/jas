@@ -2861,7 +2861,7 @@ fn run_yaml_effect(
     // pop: panel.field_name
     if let Some(target) = eff.get("pop").and_then(|v| v.as_str()) {
         if target == "panel.isolation_stack" {
-            st.layers_isolation_stack.pop();
+            if let Some(s) = st.isolation_stack_mut() { s.pop(); }
         }
         return deferred;
     }
@@ -2907,7 +2907,7 @@ fn run_yaml_effect(
             let value_expr = lp.get("value").and_then(|v| v.as_str()).unwrap_or("null");
             let val = super::expr::eval(value_expr, eval_ctx);
             if let super::expr_types::Value::Path(indices) = val {
-                st.layers_isolation_stack.push(indices);
+                if let Some(s) = st.isolation_stack_mut() { s.push(indices); }
             }
         }
         return deferred;
@@ -7855,12 +7855,12 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
     // Read isolation stack — if non-empty, only show rows that are descendants
     // of the deepest isolated container.
     let isolation_root: Option<Vec<usize>> = rctx.app.borrow()
-        .layers_isolation_stack.last().cloned();
+        .isolation_stack().last().cloned();
 
     // Build breadcrumb data for the isolation header
     let breadcrumb: Vec<(Vec<usize>, String)> = {
         let st = rctx.app.borrow();
-        let stack = st.layers_isolation_stack.clone();
+        let stack = st.isolation_stack().to_vec();
         let doc = st.tab().map(|t| t.model.document().clone());
         let mut out = Vec::new();
         if let Some(doc) = doc {
@@ -8158,8 +8158,8 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                     if drag_active {
                         st.layers_drag_source = None;
                         st.layers_drag_target = None;
-                    } else if !st.layers_isolation_stack.is_empty() {
-                        st.layers_isolation_stack.pop();
+                    } else if let Some(s) = st.isolation_stack_mut() {
+                        s.pop();
                     }
                     kb_rev += 1;
                 });
@@ -8238,7 +8238,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                 onclick: move |_: Event<MouseData>| {
                                     let a = home_app.clone();
                                     spawn(async move {
-                                        a.borrow_mut().layers_isolation_stack.clear();
+                                        if let Some(s) = a.borrow_mut().isolation_stack_mut() { s.clear(); }
                                         home_rev += 1;
                                     });
                                 },
@@ -8261,7 +8261,7 @@ fn render_tree_view(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &Rend
                                                 let target = exit_to;
                                                 spawn(async move {
                                                     let mut st = a.borrow_mut();
-                                                    st.layers_isolation_stack.truncate(target);
+                                                    if let Some(s) = st.isolation_stack_mut() { s.truncate(target); }
                                                     b_rev += 1;
                                                 });
                                             },
@@ -11943,12 +11943,34 @@ mod tests {
         let mut st = make_state_with_layers(vec![
             ("A".into(), Visibility::Preview, false),
         ]);
-        assert!(st.layers_isolation_stack.is_empty());
+        assert!(st.isolation_stack().is_empty());
         let mut params = serde_json::Map::new();
         params.insert("container_id".into(), serde_json::Value::String("0".into()));
         dispatch_action("enter_isolation_mode", &params, &mut st);
-        assert_eq!(st.layers_isolation_stack.len(), 1);
-        assert_eq!(st.layers_isolation_stack[0], vec![0]);
+        assert_eq!(st.isolation_stack().len(), 1);
+        assert_eq!(st.isolation_stack()[0], vec![0]);
+    }
+
+    /// Isolation belongs to the DOCUMENT, so it lives on each tab's `Model`
+    /// (route 4 slice 3b, fork 1; JasSwift already keeps it on `Model`):
+    /// isolating a group in one tab does not isolate anything in another, and
+    /// switching back finds it still isolated. Before, one stack on
+    /// `AppState` served every tab.
+    #[test]
+    fn isolation_is_per_tab_and_does_not_leak_across_tabs() {
+        let mut st = make_state_with_layers(vec![
+            ("A".into(), Visibility::Preview, false),
+        ]);
+        let mut params = serde_json::Map::new();
+        params.insert("container_id".into(), serde_json::Value::String("0".into()));
+        dispatch_action("enter_isolation_mode", &params, &mut st);
+        assert_eq!(st.isolation_stack(), &[vec![0]]);
+        st.tabs.push(crate::workspace::app_state::TabState::new());
+        st.active_tab = 1;
+        assert!(st.isolation_stack().is_empty(), "the second tab is not isolated");
+        st.active_tab = 0;
+        assert_eq!(st.isolation_stack(), &[vec![0]], "the first tab still is");
+        assert_eq!(st.tabs[0].model.isolation_stack, vec![vec![0]]);
     }
 
     #[test]
@@ -11960,8 +11982,8 @@ mod tests {
         st.layers_panel_selection = vec![vec![1]];
         let params = serde_json::Map::new();
         dispatch_action("enter_isolation_mode", &params, &mut st);
-        assert_eq!(st.layers_isolation_stack.len(), 1);
-        assert_eq!(st.layers_isolation_stack[0], vec![1]);
+        assert_eq!(st.isolation_stack().len(), 1);
+        assert_eq!(st.isolation_stack()[0], vec![1]);
     }
 
     #[test]
