@@ -1499,6 +1499,45 @@ impl Element {
         }
     }
 
+    /// The children a PATH can address: a Group's or Layer's children, and a
+    /// Transformed wrapper's single child (`[.., w, 0]`, route 4 slice 3b).
+    ///
+    /// Deliberately NOT [`Self::children`]: generic walks (translate, scale,
+    /// render, the Layers tree) treat a wrapper as one leaf and must not
+    /// descend into its child, while path resolution must. Compound-shape
+    /// operands stay unaddressable, as before.
+    pub fn path_children(&self) -> Option<&[Rc<Element>]> {
+        match self {
+            Element::Live(super::live::LiveVariant::Transformed(t)) => Some(std::slice::from_ref(&t.child)),
+            _ => self.children(),
+        }
+    }
+
+    /// The mutable slot at `idx` of [`Self::path_children`]. A wrapper's slot
+    /// can be REPLACED through this and never inserted into or removed from:
+    /// insertion and removal stay on [`Self::children_mut`], which a wrapper
+    /// does not offer, so a wrapper never gains or loses its child.
+    pub fn path_child_mut(&mut self, idx: usize) -> Option<&mut Rc<Element>> {
+        match self {
+            Element::Live(super::live::LiveVariant::Transformed(t)) => (idx == 0).then_some(&mut t.child),
+            _ => self.children_mut()?.get_mut(idx),
+        }
+    }
+
+    /// The frame this element gives its path children: its own transform,
+    /// and for a Transformed wrapper its transform times its matrix (`W·M`:
+    /// the child is drawn at `W·M·C·p` under BOTH Scale Strokes values).
+    /// `None` is the identity.
+    pub fn child_frame_transform(&self) -> Option<Transform> {
+        match self {
+            Element::Live(super::live::LiveVariant::Transformed(t)) => Some(match t.common.transform {
+                Some(w) => w.multiply(&t.matrix),
+                None => t.matrix,
+            }),
+            _ => self.transform().copied(),
+        }
+    }
+
     pub fn is_group(&self) -> bool {
         matches!(self, Element::Group(_))
     }
