@@ -99,6 +99,10 @@ SWIFT_DISPATCH = [
     # The panel action dispatcher (`dispatchPanelAction`) moved here out of
     # the view; its native arms (set_concept_param, ...) are the view's.
     REPO / "JasSwift" / "Sources" / "Interpreter" / "PanelWidgetEvents.swift",
+    # The model-pure menu verbs by name (`MenuActions.run`, Rust's
+    # `menu_native::run`): JasCommands routes them here, as Rust's menu_bar.rs
+    # routes them to menu_native.
+    REPO / "JasSwift" / "Sources" / "Menu" / "MenuActions.swift",
 ] + sorted((REPO / "JasSwift" / "Sources" / "Panels").glob("*.swift"))
 
 # THE THIRD RUST DISPATCH TABLE, and the one that made this gate report four
