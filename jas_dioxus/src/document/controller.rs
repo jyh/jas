@@ -5486,6 +5486,58 @@ mod tests {
         assert_eq!(model.document().layers, before.layers, "undo restores the wrapper");
     }
 
+    /// EDIT THROUGH THE WRAPPER (route 4 slice 3b): a wrapper is a container
+    /// with exactly one slot, so `[layer, w, 0]` addresses its child. A
+    /// document-space drag of one corner reaches the child in the child's OWN
+    /// space (the frame the wrapper gives it is `W·M`, here scale(2,3)), the
+    /// wrapper's matrix, flag and own props are untouched, and one undo
+    /// restores it. Before 3b the write was dropped without an error.
+    #[test]
+    fn moving_a_wrapped_childs_corner_edits_the_child_in_its_own_space() {
+        use crate::geometry::element::control_points;
+        use crate::geometry::live::LiveVariant;
+        let mut model = transformed_model();
+        let before = model.document().clone();
+        let Some(Element::Live(LiveVariant::Transformed(t0))) = before.get_element(&vec![0, 0]).cloned() else {
+            unreachable!()
+        };
+        let corner0 = control_points(&t0.child)[2];
+        Controller::set_selection(&mut model, vec![ElementSelection::partial(vec![0, 0, 0], [2usize])]);
+        Controller::move_selection(&mut model, 4.0, 3.0);
+        let Some(Element::Live(LiveVariant::Transformed(t))) = model.document().get_element(&vec![0, 0]).cloned() else {
+            panic!("still a wrapper");
+        };
+        let corner = control_points(&t.child)[2];
+        assert_eq!((corner.0 - corner0.0, corner.1 - corner0.1), (2.0, 1.0), "moved (4,3)/(2,3) locally");
+        let others: Vec<_> = control_points(&t.child).iter().enumerate()
+            .filter(|(i, _)| *i != 2).map(|(_, p)| *p).collect();
+        let others0: Vec<_> = control_points(&t0.child).iter().enumerate()
+            .filter(|(i, _)| *i != 2).map(|(_, p)| *p).collect();
+        assert_eq!(others, others0, "only the selected corner moves");
+        assert_eq!(t.matrix, t0.matrix);
+        assert_eq!(t.scale_strokes, t0.scale_strokes);
+        assert_eq!(t.common, t0.common);
+        model.undo();
+        assert_eq!(model.document().layers, before.layers, "one undo restores it");
+    }
+
+    /// The frame a wrapper gives its child is its own transform times its
+    /// matrix, so the accumulated transform of `[0, 0, 0]` is `W·M`.
+    #[test]
+    fn the_accumulated_transform_of_a_wrapped_child_includes_the_matrix() {
+        use crate::document::evaluated_bounds::accumulated_transform;
+        use crate::geometry::element::Transform;
+        let model = transformed_model();
+        assert_eq!(accumulated_transform(model.document(), &[0, 0, 0], true), Some(Transform::scale(2.0, 3.0)));
+        // With a wrapper transform the order is W·M: M first, then W.
+        let mut doc = model.document().clone();
+        let mut w = doc.get_element(&vec![0, 0]).unwrap().clone();
+        w.common_mut().transform = Some(Transform::translate(5.0, 7.0));
+        doc = doc.replace_element(&vec![0, 0], w);
+        let t = accumulated_transform(&doc, &[0, 0, 0], true).unwrap();
+        assert_eq!(t.apply_point(1.0, 1.0), (7.0, 10.0), "scale first, then translate");
+    }
+
     /// RELEASE TRANSFORM replaces each selected wrapper IN PLACE by its
     /// released child (the picture-preserving form, pinned in
     /// `painter::element_render` tests), keeps the selection on it, and is one

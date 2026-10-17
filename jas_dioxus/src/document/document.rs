@@ -378,7 +378,7 @@ impl Document {
         }
         let mut node = self.layers.get(path[0])?;
         for &idx in &path[1..] {
-            node = node.children()?.get(idx)?;
+            node = node.path_children()?.get(idx)?;
         }
         Some(node)
     }
@@ -390,8 +390,7 @@ impl Document {
         }
         let mut node: &mut Element = self.layers.get_mut(path[0])?;
         for &idx in &path[1..] {
-            let children = node.children_mut()?;
-            node = Rc::make_mut(children.get_mut(idx)?);
+            node = Rc::make_mut(node.path_child_mut(idx)?);
         }
         Some(node)
     }
@@ -413,7 +412,7 @@ impl Document {
         };
         let mut effective = node.visibility();
         for &idx in &path[1..] {
-            node = match node.children().and_then(|c| c.get(idx)) {
+            node = match node.path_children().and_then(|c| c.get(idx)) {
                 Some(n) => n,
                 None => return effective,
             };
@@ -451,7 +450,7 @@ impl Document {
         };
         let mut locked = node.locked();
         for &idx in &path[1..] {
-            node = match node.children().and_then(|c| c.get(idx)) {
+            node = match node.path_children().and_then(|c| c.get(idx)) {
                 Some(n) => n,
                 None => return locked,
             };
@@ -605,12 +604,15 @@ impl Document {
     }
 }
 
+/// Replace through [`Element::path_child_mut`], so a Transformed wrapper's
+/// child is reachable (`[.., w, 0]`); insert and remove below stay on
+/// `children_mut`, so a wrapper never gains or loses its child.
 fn replace_in_children(node: &mut Element, rest: &[usize], new_elem: Element) {
-    if let Some(children) = node.children_mut() {
+    if let Some(slot) = node.path_child_mut(rest[0]) {
         if rest.len() == 1 {
-            children[rest[0]] = Rc::new(new_elem);
+            *slot = Rc::new(new_elem);
         } else {
-            replace_in_children(Rc::make_mut(&mut children[rest[0]]), &rest[1..], new_elem);
+            replace_in_children(Rc::make_mut(slot), &rest[1..], new_elem);
         }
     }
 }
