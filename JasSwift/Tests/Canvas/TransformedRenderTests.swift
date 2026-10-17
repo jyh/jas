@@ -316,3 +316,17 @@ private func wrappedChildModel() -> Model {
     #expect(centres.map { [$0.0, $0.1] } == [[4, 6], [4, 36], [24, 6], [24, 36]], "\(centres)")
     #expect(selectionOutlineScale(doc, [0, 0, 0]) == 6.0.squareRoot(), "the pen counter-scales W·M")
 }
+
+/// DELETING A WRAPPED CHILD DELETES ITS WRAPPER: a wrapper never loses its
+/// child. Selecting the wrapper AND its child is one deletion. Twin of Rust
+/// `deleting_a_wrapped_child_deletes_its_wrapper`.
+@Test func deletingAWrappedChildDeletesItsWrapper() {
+    let doc = wrappedChildModel().document
+    let sel = Document(layers: doc.layers, selectedLayer: 0,
+                       selection: [ElementSelection.partial([0, 0, 0], [2])])
+    #expect(sel.deleteSelection().layers[0].children.isEmpty, "the wrapper is gone")
+    let grown = doc.insertElementAfter([0, 0], element: .rect(Rect(x: 50, y: 50, width: 5, height: 5)))
+    let two = Document(layers: grown.layers, selectedLayer: 0,
+                       selection: [ElementSelection.all([0, 0]), ElementSelection.all([0, 0, 0])])
+    #expect(two.deleteSelection().layers[0].children.count == 1, "only the wrapper went; the rect stays")
+}
