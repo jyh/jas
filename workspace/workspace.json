@@ -5559,6 +5559,7 @@
             "copy": "param.copy",
             "scale_strokes": "param.scale_strokes",
             "scale_corners": "param.scale_corners",
+            "wrap": "true",
             "journal": true
           }
         },
@@ -5583,7 +5584,8 @@
             "sy": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0",
             "copy": "false",
             "scale_strokes": "dialog.scale_strokes",
-            "scale_corners": "dialog.scale_corners"
+            "scale_corners": "dialog.scale_corners",
+            "wrap": "true"
           }
         }
       ]
@@ -25069,6 +25071,7 @@
                       "cursor_y": "event.doc_y",
                       "shift": "event.modifiers.shift",
                       "copy": "false",
+                      "wrap": "true",
                       "journal": true
                     }
                   }

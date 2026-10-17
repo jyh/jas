@@ -5659,14 +5659,16 @@ mod tests {
         tool.on_move(&mut model, 410.0, 420.0, false, false, true);
         tool.on_release(&mut model, 410.0, 420.0, false, false);
 
-        // The committed scale lives in the ELEMENT TRANSFORM matrix
-        // (compose_matrix_over_paths writes common.transform); the rect's
-        // local x/y/w/h stay unchanged.
+        // The committed scale lives in a Transformed WRAPPER around the rect
+        // (route 4 slice 5); the frame it gives the rect is the scale, and the
+        // rect's local x/y/w/h stay unchanged.
         let elem = model
             .document()
             .get_element(&vec![0, 0])
             .expect("selected rect must exist after the gesture");
-        let t = elem.transform().copied().unwrap_or_default();
+        assert!(matches!(elem, crate::geometry::element::Element::Live(
+            crate::geometry::live::LiveVariant::Transformed(_))), "a wrapper: {elem:?}");
+        let t = elem.child_frame_transform().unwrap_or_default();
 
         let tol = 1e-6;
         // The reference (doc (0,0)) is the FIXED point of the scale.
