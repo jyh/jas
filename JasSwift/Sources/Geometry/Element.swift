@@ -1677,6 +1677,10 @@ public enum Element: Equatable {
             case .compoundShape(var cs):
                 cs.operands = cs.operands.map { $0.clearingIds() }
                 return .live(.compoundShape(cs))
+            // The wrapped child is owned, so its ids are cleared too.
+            case .transformed(var t):
+                t.child = t.child.clearingIds()
+                return .live(.transformed(t))
             case .reference, .recorded, .generated:
                 return .live(cleared)
             }

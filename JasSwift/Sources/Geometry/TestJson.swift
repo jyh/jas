@@ -733,6 +733,14 @@ package func elementJson(_ elem: Element) -> String {
             commonFields(o, gen.opacity, gen.transform, gen.locked, gen.visibility, gen.name, gen.id)
             o.str("concept", gen.conceptId)
             o.raw("params", canonicalRecordedValue(gen.params))
+        case .transformed(let t):
+            // The live transform operation (council 2026-10-16, ruling 4):
+            // its common props, the child whole, the matrix and the Scale
+            // Strokes choice. Mirrors jas_dioxus test_json.rs.
+            commonFields(o, t.opacity, t.transform, t.locked, t.visibility, t.name, t.id)
+            o.raw("child", elementJson(t.child))
+            o.raw("matrix", transformJson(t.matrix))
+            o.bool("scale_strokes", t.scaleStrokes)
         }
     }
     extendedElementFields(o, elem)
@@ -1479,6 +1487,19 @@ private func parseElementBase(_ d: [String: Any]) -> Element {
             return .live(.generated(GeneratedElem(
                 conceptId: conceptId, params: params, name: name, id: id,
                 transform: transform, opacity: opacity,
+                locked: locked, visibility: visibility)))
+        case "transformed":
+            // Strict, like jas_dioxus: a wrapper with no matrix or no Scale
+            // Strokes choice is refused, never defaulted.
+            guard let matrix = parseTransform(d["matrix"]) else {
+                fatalError("transformed: no matrix in \(d)")
+            }
+            guard let scaleStrokes = d["scale_strokes"] as? Bool else {
+                fatalError("transformed: no scale_strokes in \(d)")
+            }
+            return .live(.transformed(TransformedElem(
+                child: parseElement(d["child"]), matrix: matrix, scaleStrokes: scaleStrokes,
+                name: name, id: id, transform: transform, opacity: opacity,
                 locked: locked, visibility: visibility)))
         default:
             fatalError("Unknown live kind: \(kind)")
