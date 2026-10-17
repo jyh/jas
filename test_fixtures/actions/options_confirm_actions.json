@@ -1,0 +1,61 @@
+[
+  {
+    "name": "layer_options_confirm_creates_a_hidden_locked_layer",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {
+        "action": "layer_options_confirm",
+        "params": {
+          "layer_id": null,
+          "name": "Notes",
+          "lock": true,
+          "show": false,
+          "preview": true
+        }
+      }
+    ],
+    "expected_json": "layer_options_confirm_creates_a_hidden_locked_layer_expected.json"
+  },
+  {
+    "name": "layer_options_confirm_creates_an_outline_layer",
+    "setup_svg": "multi_layer.svg",
+    "actions": [
+      {
+        "action": "layer_options_confirm",
+        "params": {
+          "layer_id": null,
+          "name": "Guides",
+          "lock": false,
+          "show": true,
+          "preview": false
+        }
+      }
+    ],
+    "expected_json": "layer_options_confirm_creates_an_outline_layer_expected.json"
+  },
+  {
+    "name": "artboard_options_confirm_edits_the_second_board",
+    "setup_svg": "two_artboards.svg",
+    "actions": [
+      {
+        "action": "artboard_options_confirm",
+        "params": {
+          "artboard_id": "ab2",
+          "name": "Renamed",
+          "x": 130,
+          "y": 10,
+          "width": 50,
+          "height": 60,
+          "fill": "transparent",
+          "show_center_mark": true,
+          "show_cross_hairs": false,
+          "show_video_safe_areas": false,
+          "video_ruler_pixel_aspect_ratio": 1.0,
+          "fade_region_outside_artboard": true,
+          "update_while_dragging": true
+        }
+      }
+    ],
+    "expected_json": "artboard_options_confirm_edits_the_second_board_expected.json"
+  }
+]
