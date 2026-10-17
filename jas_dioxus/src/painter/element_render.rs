@@ -330,8 +330,7 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
 /// | excluded | why it is out today | what opens it |
 /// |---|---|---|
 /// | not `render_is_flat()` (tspans) | the seam emits ONE run; segmented text needs per-tspan font, decoration and a shared baseline | a segmented lowering + its own pixel arm |
-/// | `letter_spacing` | `FastRun` carries the field, but the seam hardcodes `0.0`; production computes tracking + kerning together | thread the computed advance + an advance-width arm |
-/// | `kerning` | same computation as above — `render.rs` folds both into ONE uniform advance | as above; they open together because they are one number |
+/// | `letter_spacing` / `kerning` on SEGMENTED, AREA or ANCHORED text, or a value `render.rs` cannot read | flat, unanchored point text with readable values lowers (node 15, jas section 397, [`flat_spacing`]); segmented text spaces per run, area text wraps by measured widths the spacing changes, and an anchor shifts by a measured width that would have to include the spacing | a per-run spacing, a wrap arm, an anchored-width arm |
 /// | `baseline_shift` | super/sub re-scale the size AND offset the baseline (`0.7×`, `∓`) | a baseline arm proving the offset and the scale |
 /// | `text_decoration` | underline/strike are extra primitives, not glyph state | a decoration lowering + a pixel arm |
 ///
@@ -391,10 +390,31 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     {
         return true;
     }
-    !t.letter_spacing.is_empty()
-        || !t.kerning.is_empty()
-        || !t.baseline_shift.is_empty()
-        || draws_decoration(t)
+    // ⭐ NODE 15 (jas section 397): tracking and numeric kerning lower on FLAT,
+    // UNANCHORED text whose values `render.rs` can read, carried as the run's
+    // uniform spacing (`flat_spacing`). Everything else that carries them stays
+    // legacy, by name.
+    let spaced = !t.letter_spacing.is_empty() || !t.kerning.is_empty();
+    if spaced
+        && (!t.render_is_flat() || t.is_area_text() || t.anchor_shift(1.0) != 0.0 || flat_spacing(t).is_none())
+    {
+        return true;
+    }
+    !t.baseline_shift.is_empty() || draws_decoration(t)
+}
+
+/// ⭐ NODE 15: a flat text's uniform per-glyph spacing, the number the legacy
+/// renderer gives the canvas `letterSpacing` (`canvas/render.rs`): tracking
+/// plus numeric kerning, each in em-thousandths, times the font size over 1000.
+/// Canvas 2D has no per-pair kerning, so the two fold into one number there and
+/// here. `None` when either is set and does not read as a number (a kerning
+/// MODE word such as `auto` included): the router then keeps the element on
+/// legacy rather than guess.
+pub fn flat_spacing(t: &crate::geometry::element::TextElem) -> Option<f64> {
+    let read = |v: &str| -> Option<f64> {
+        if v.is_empty() { Some(0.0) } else { crate::geometry::tspan::parse_em_as_thousandths(v) }
+    };
+    Some((read(&t.letter_spacing)? + read(&t.kerning)?) * t.font_size / 1000.0)
 }
 
 /// Does this text carry a decoration that would draw an extra primitive?
@@ -1413,7 +1433,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                     font,
                     size: e.font_size,
                     text: e.content(),
-                    letter_spacing: 0.0,
+                    // Node 15: the router admits a tracked flat text only when
+                    // its spacing reads, so `None` here means none was set.
+                    letter_spacing: flat_spacing(e).unwrap_or(0.0),
                     x: e.x + dx,
                     y: e.y,
                 };

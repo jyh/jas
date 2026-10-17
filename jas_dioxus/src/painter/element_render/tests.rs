@@ -2063,15 +2063,106 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
          narrowed, it did not vanish"
     );
 
-    let mut tracked = match flat {
-        Element::Text(t) => t,
-        _ => unreachable!(),
-    };
+    let _ = flat;
+    // POINT text: tracked AREA text stays legacy (it wraps by widths the
+    // spacing changes; `unreadable_or_anchored_tracking_stays_legacy`).
+    let mut tracked = flat_text(12.0);
     tracked.letter_spacing = "0.025em".into();
+    // ⭐ NODE 15 (jas section 397) NARROWS IT AGAIN: flat text with a tracking
+    // the legacy renderer can read lowers, its spacing carried on the run.
     assert!(
-        element_needs_legacy(&Element::Text(tracked), caps),
-        "tracking is one of the four features DA explicitly did NOT take"
+        !element_needs_legacy(&Element::Text(tracked), caps),
+        "flat tracked text lowers on the seam now (node 15); routing it to legacy \
+         leaves the native walk refusing the whole document"
     );
+}
+
+/// POINT text (no wrap box): `from_string`'s width and height of 0.
+fn flat_text(size: f64) -> crate::geometry::element::TextElem {
+    let mut t = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "Hello", "Arial", size, "normal", "normal", "none", 0.0, 0.0, None, None,
+        common(),
+    );
+    t.fill = fill(Color::BLACK);
+    t
+}
+
+/// The letter spacing of each recorded FastRun, in order.
+fn run_spacings(cmds: &[Command]) -> Vec<f64> {
+    cmds.iter()
+        .filter_map(|c| match c {
+            Command::DrawTextRun {
+                run: crate::painter::TextRun::FastRun { letter_spacing, .. }, ..
+            } => Some(*letter_spacing),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ⭐ NODE 15: the run carries the legacy renderer's spacing, not 0.0. The
+/// legacy renderer (`canvas/render.rs`) sets the canvas `letterSpacing` to
+/// `(tracking + kerning) em-thousandths × font size / 1000` px; `0.1em` at 20
+/// is 2.0 per glyph.
+#[test]
+fn flat_tracked_text_carries_its_spacing_on_the_run() {
+    let mut t = flat_text(20.0);
+    t.letter_spacing = "0.1em".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    let got = run_spacings(rec.commands());
+    assert_eq!(got.len(), 1, "one run: {:?}", rec.commands());
+    assert!((got[0] - 2.0).abs() < 1e-9, "0.1em at size 20 is 2.0 per glyph, got {}", got[0]);
+}
+
+/// Numeric kerning folds into the same uniform advance, as the legacy renderer
+/// folds it (Canvas 2D has no per-pair kerning): they open together because
+/// they are one number.
+#[test]
+fn numeric_kerning_folds_into_the_same_spacing() {
+    let mut t = flat_text(20.0);
+    t.letter_spacing = "0.1em".into();
+    t.kerning = "0.025em".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    let got = run_spacings(rec.commands());
+    assert!((got[0] - 2.5).abs() < 1e-9, "(100 + 25)/1000 em at 20 is 2.5, got {got:?}");
+}
+
+/// CONTROL: untracked flat text still draws with no spacing.
+#[test]
+fn untracked_flat_text_still_draws_with_no_spacing() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(flat_text(20.0)), 1.0);
+    assert_eq!(run_spacings(rec.commands()), vec![0.0]);
+}
+
+/// What node 15 did NOT take stays legacy, by name: a tracking the legacy
+/// renderer cannot read (it would draw it as 0, the seam must not guess), and
+/// anchored tracked text (the anchor shifts by a measured width, and whether
+/// that width includes the spacing is not measured here).
+#[test]
+fn unreadable_or_anchored_tracking_stays_legacy() {
+    let mut bad = flat_text(20.0);
+    bad.letter_spacing = "wide".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&bad),
+            "an unreadable tracking stays legacy");
+    let mut anchored = flat_text(20.0);
+    anchored.letter_spacing = "0.1em".into();
+    anchored.text_anchor = "middle".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&anchored),
+            "anchored tracked text stays legacy");
+    let mut area = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "Hello", "Arial", 20.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        common(),
+    );
+    area.letter_spacing = "0.1em".into();
+    assert!(area.is_area_text(), "control: the fixture is area text");
+    assert!(crate::painter::element_render::text_needs_legacy(&area),
+            "tracked AREA text stays legacy: it wraps by widths the spacing changes");
+    let mut kern_word = flat_text(20.0);
+    kern_word.kerning = "auto".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&kern_word),
+            "a kerning mode word is not a number and stays legacy");
 }
 
 /// ⭐ THE EVALUATED OUTPUT, NOT THE OPERANDS. The union of two overlapping

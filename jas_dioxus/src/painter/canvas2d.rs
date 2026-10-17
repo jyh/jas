@@ -574,11 +574,18 @@ impl Painter for Canvas2dPainter<'_> {
         match run {
             TextRun::FastRun { font, size, text, letter_spacing, x, y } => {
                 self.target().set_font(&format!("{size}px {font}"));
-                // native letterSpacing is set via a CSS property on the ctx (a
-                // Reflect set in today's code); elided in the stub — the point
-                // proven here is the single fill_text at the baseline anchor.
-                let _ = *letter_spacing;
-                let _ = self.target().fill_text(text, *x, *y);
+                // Node 15: the spacing is the canvas `letterSpacing`, set as the
+                // legacy renderer sets it (a Reflect set: the property is newer
+                // than the web-sys binding), and put back to 0 after the draw so
+                // it never leaks into a later run.
+                if *letter_spacing != 0.0 {
+                    let ctx: &wasm_bindgen::JsValue = self.target().as_ref();
+                    let _ = js_sys::Reflect::set(ctx, &"letterSpacing".into(), &format!("{letter_spacing}px").into());
+                    let _ = self.target().fill_text(text, *x, *y);
+                    let _ = js_sys::Reflect::set(ctx, &"letterSpacing".into(), &"0px".into());
+                } else {
+                    let _ = self.target().fill_text(text, *x, *y);
+                }
             }
             TextRun::PlacedGlyphs { .. } => {
                 // DEFERRED — placed-glyph shaping (skrifa cmap) is PH3 net-new
