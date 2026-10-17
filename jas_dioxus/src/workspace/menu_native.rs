@@ -114,6 +114,23 @@ mod tests {
     use super::*;
     use crate::document::document::Document;
 
+    /// The web app's paste sites take their offsets from [`clipboard_verb`],
+    /// the table the engine's menu and key routes read, so the three apps
+    /// cannot drift on a paste offset. Neither site names `PASTE_OFFSET`
+    /// itself (the bank's §1 item 4, 2026-10-17).
+    #[test]
+    fn the_web_paste_sites_read_the_clipboard_table() {
+        let sites = [("menu_bar.rs", include_str!("menu_bar.rs")),
+                     ("keyboard.rs", include_str!("keyboard.rs"))];
+        for (name, src) in sites {
+            let code: String = src.lines()
+                .filter(|l| !l.trim_start().starts_with("//"))
+                .collect::<Vec<_>>().join("\n");
+            assert!(!code.contains("PASTE_OFFSET"), "{name} names PASTE_OFFSET; read clipboard_verb");
+            assert!(code.contains("clipboard_verb("), "{name} does not read clipboard_verb");
+        }
+    }
+
     /// [`VERBS`] is the list the routes and their tests read; [`run`] is what
     /// runs. Each verb in the list must be one `run` handles, and nothing
     /// else is, or a route reads a verb as run that ran nothing.
