@@ -2186,6 +2186,16 @@ Test-Case 'is: ctrl held on every pointer step is still refused: only shift and 
     $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; ctrl = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $m2, $r2, $sRead)))
 } 'REFUSED: step 1 carries modifiers (ctrl): send_hand.ps1 injects none'
+# flask section 348 node 8: a CLICK is press + release at one point with no move (k=0),
+# the gesture the user makes; SendInput delivers no motion for a zero-length move.
+# A DRAG sent without moves must refuse: a click form must never certify a drag.
+Test-Case 'is: a click, press and release at one point with no move, is k=0' {
+    $r2 = [ordered]@{ kind = 'release'; x = 36; y = 36 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $r2, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(0,0) k=0 read=document expected=selection.drag.expected.json'
+Test-Case 'is: a DRAG sent as a click (released elsewhere, no move) is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sRelease, $sRead)))
+} 'REFUSED: a press at (36,36) and a release at (72,60) with no move is a drag, not a click: a drag needs at least one move'
 Test-Case 'is: CONTROL -- a named modifier set false is no modifier and passes' {
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $false; alt = $false; ctrl = $false; meta = $false }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))

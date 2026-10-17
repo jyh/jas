@@ -4747,7 +4747,7 @@ private func assertGestureTest(_ tc: [String: Any]) {
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
 private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
-                                     "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json"]
+                                     "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
 
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)

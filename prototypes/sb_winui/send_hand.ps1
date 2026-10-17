@@ -379,7 +379,10 @@ $sent = 0
 # as moves after the press -- so a `move != k` reading now belongs to the app or
 # to the window manager and cannot be blamed on the instrument. The receipt below
 # carries the counts needed to tell those apart.
-if ($Moves -lt 1) { $Moves = 1 }
+# k = 0 is a CLICK (flask section 348): press and release at one point, no
+# move, because SendInput emits no motion for a move that does not move.
+# The reader admits k = 0 only when press == release.
+if ($Moves -lt 0) { $Moves = 0 }
 
 $n = ConvertTo-Normalized $px0 $py0
 $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
