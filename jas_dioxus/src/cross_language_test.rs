@@ -1800,6 +1800,13 @@ pub(crate) mod tests {
         "magic_wand_click.json",
         "partial_selection_marquee_corner.json",
         "partial_selection_drag_corner_anchor.json",
+        // The control-point probe hits a corner WHERE IT IS DRAWN, through its
+        // group's transform (2026-10-16): a rect (0,0,30,30 pt) in a group
+        // scaled 2x and translated (60,30) pt draws its corner 2 at (120,90).
+        // The press there grabs it and the (10,10) drag lands as (5,5) in
+        // the rect's own space. Before the fix the press missed and the drag
+        // was a marquee that changed nothing.
+        "partial_selection_drag_corner_in_scaled_group.json",
         "artboard_drag.json",
         // YAML coverage census, NOT_YET_BUILT tools (2026-10-12): the first
         // gesture case for the last twelve tools. Most act on a selection, which

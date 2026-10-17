@@ -669,6 +669,31 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(model.document.selection.contains { $0.path == [0, 0] })
 }
 
+/// The control-point probe hits a corner WHERE IT IS DRAWN: through the
+/// group's transform and the element's own, which is where the handle square
+/// is drawn (`selectionHandleRects`). A Group translated (100, 0) holds a rect
+/// (0, 0, 10 x 10) scaled 2x by its own transform, so corner 2 (local 10, 10)
+/// is drawn at (120, 20), and (10, 10) draws nothing. Twin of Rust
+/// `the_control_point_probe_hits_a_corner_where_it_is_drawn`.
+@Test func theControlPointProbeHitsACornerWhereItIsDrawn() {
+    func probe(_ x: Double, _ y: Double) -> (String?, [ElementSelection]) {
+        let rect: Element = .rect(Rect(x: 0, y: 0, width: 10, height: 10, transform: .scale(2, 2)))
+        let group: Element = .group(Group(children: [rect], transform: .translate(100, 0)))
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [group])],
+                                             selectedLayer: 0, selection: []))
+        let store = StateStore()
+        runEffects([["doc.path.probe_partial_hit": ["x": x, "y": y, "hit_radius": 4]]],
+                   ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+        return (store.getTool("partial_selection", "mode") as? String, model.document.selection)
+    }
+    let (hitMode, hitSel) = probe(120, 20)
+    #expect(hitMode == "moving_pending", "the drawn corner is a hit")
+    #expect(hitSel == [ElementSelection.partial([0, 0, 0], [2])])
+    let (missMode, missSel) = probe(10, 10)
+    #expect(missMode == "marquee", "the untransformed position draws nothing")
+    #expect(missSel.isEmpty)
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()
