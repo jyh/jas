@@ -641,6 +641,53 @@ static class Program
             + ActWire.CloseWindow("""{"close_window":1}""").ToString());
         Eq("close_window: a refusal's empty reply keeps the window", "False", ActWire.CloseWindow("").ToString());
         Eq("close_window: unreadable bytes keep the window", "False", ActWire.CloseWindow("{").ToString());
+        // jas §364 (plan § 5 slice 8): every act reply carries
+        // `"clipboard_write": <text> | null`. A string goes on the system
+        // clipboard UNCHANGED; anything else writes nothing.
+        Eq("clipboard_write: Copy's text is read unchanged", "{\"a\":1}\n\u00e9",
+            ActWire.ClipboardWrite("{\"changed\":[],\"clipboard_write\":\"{\\\"a\\\":1}\\n\u00e9\",\"doc_changed\":false}") ?? "(null)");
+        Eq("clipboard_write: a null writes nothing", "(null)",
+            ActWire.ClipboardWrite("""{"changed":[],"clipboard_write":null,"doc_changed":false}""") ?? "(null)");
+        Eq("clipboard_write: an older engine with no key writes nothing", "(null)",
+            ActWire.ClipboardWrite("""{"changed":[],"doc_changed":false}""") ?? "(null)");
+        Eq("clipboard_write: a non-string writes nothing", "(null)|(null)",
+            (ActWire.ClipboardWrite("""{"clipboard_write":1}""") ?? "(null)") + "|"
+            + (ActWire.ClipboardWrite("""{"clipboard_write":{"text":"x"}}""") ?? "(null)"));
+        Eq("clipboard_write: an empty reply or unreadable bytes write nothing", "(null)|(null)",
+            (ActWire.ClipboardWrite("") ?? "(null)") + "|" + (ActWire.ClipboardWrite("{") ?? "(null)"));
+        Eq("clipboard_write: an empty string is a string, written as it is", "",
+            ActWire.ClipboardWrite("""{"clipboard_write":""}""") ?? "(null)");
+        // A paste with no `clipboard` field is refused, nothing run, with
+        // `{"panel_event":"NeedsClipboard","detail":"<action>"}` on the error
+        // channel. The reader names the action, or null for any other channel.
+        Eq("needs clipboard: the refusal names its action", "menu_paste",
+            ActWire.NeedsClipboard("""{"panel_event":"NeedsClipboard","detail":"menu_paste"}""") ?? "(null)");
+        Eq("needs clipboard: another refusal is not it", "(null)|(null)",
+            (ActWire.NeedsClipboard("""{"panel_event":"KeyUnhandled","detail":"v"}""") ?? "(null)") + "|"
+            + (ActWire.NeedsClipboard("""{"panel_event":"Unchanged","detail":"NeedsClipboard"}""") ?? "(null)"));
+        Eq("needs clipboard: a clear or unreadable channel is not it", "(null)|(null)",
+            (ActWire.NeedsClipboard("") ?? "(null)") + "|" + (ActWire.NeedsClipboard("{") ?? "(null)"));
+        Eq("needs clipboard: a refusal with no detail still asks, unnamed", "",
+            ActWire.NeedsClipboard("""{"panel_event":"NeedsClipboard"}""") ?? "(null)");
+        // The resend is THE SAME request with `clipboard` added: the text, or
+        // a JSON null when the clipboard holds none or the read threw.
+        Eq("with clipboard: the text is added to the same request",
+            """{"menu_item":"paste","clipboard":"a\"b\n"}""",
+            ActWire.WithClipboard("""{"menu_item":"paste"}""", "a\"b\n"));
+        Eq("with clipboard: no text is a JSON null",
+            """{"key":"v","mods":{"shift":false,"alt":false,"ctrl":true},"clipboard":null}""",
+            ActWire.WithClipboard("""{"key":"v","mods":{"shift":false,"alt":false,"ctrl":true}}""", null));
+        Eq("with clipboard: a second read replaces the first, never two keys",
+            """{"menu_item":"paste","clipboard":"new"}""",
+            ActWire.WithClipboard("""{"menu_item":"paste","clipboard":"old"}""", "new"));
+        // Never retry silently, and never twice: a request that already
+        // carried the clipboard and is refused for it again is a failure.
+        Eq("clipboard step: a refusal for the clipboard reads it", "read",
+            ActWire.ClipboardStep("menu_paste", carried: false));
+        Eq("clipboard step: refused again after carrying it is a failure", "refused-again",
+            ActWire.ClipboardStep("menu_paste", carried: true));
+        Eq("clipboard step: any other refusal reads nothing", "none|none",
+            ActWire.ClipboardStep(null, carried: false) + "|" + ActWire.ClipboardStep(null, carried: true));
         // jas §314: a key goes to the engine as `{"key": <name>, "mods": {...}}`
         // through `jas_dispatch_action`; the engine resolves it, the shell holds
         // no binding. Every flag is written, true or false.

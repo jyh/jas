@@ -1135,8 +1135,9 @@ public sealed partial class MainWindow : Window
     /// W5-3b: the four NAMED keys go to the core as their control codes; the core
     /// routes them to the active tool (Escape cancels a marquee). A key typed into
     /// a text field is that field's, as on the web (`keyboard.rs`). The core's
-    /// answer arrives on the render thread, so the event is never marked handled
-    /// here: XAML's own handling proceeds either way.
+    /// answer arrives on the render thread, so the event is not marked handled
+    /// here and XAML's own handling proceeds, except for a Ctrl+letter chord,
+    /// which the engine resolves and the menu's accelerator must not repeat.
     /// </summary>
     private void OnKeyDown(object sender, KeyRoutedEventArgs e)
     {
@@ -1170,6 +1171,13 @@ public sealed partial class MainWindow : Window
             && e.Key >= Windows.System.VirtualKey.A && e.Key <= Windows.System.VirtualKey.Z)
         {
             code = (uint)'a' + (uint)(e.Key - Windows.System.VirtualKey.A);
+            // jas §364: the ENGINE resolves this chord (`shortcuts.yaml` binds
+            // every Ctrl+letter the menu shows), so the menu item's accelerator
+            // must not run it a second time. Measured before this line: one
+            // Ctrl+V pasted twice, by `{"key"}` and by `menu_paste`. A chord
+            // this route does not send (Ctrl+2, Ctrl+=, any chord with no
+            // document shown) stays the accelerator's.
+            e.Handled = true;
         }
         if (code != 0) { _canvas.Key(code, mods); }
     }
