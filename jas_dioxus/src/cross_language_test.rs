@@ -6526,11 +6526,12 @@ pub(crate) mod tests {
             assert_eq!(p["ry"], 36.0, "ry resolved to the selection-bounds center literal");
             assert_eq!(p["scale_strokes"], true, "resolved scale_strokes flag literal");
             assert_eq!(p["scale_corners"], false, "resolved scale_corners flag literal");
+            assert_eq!(p["wrap"], true, "route 4 slice 5: the op records that it wraps");
             assert_eq!(txn.ops[0].targets, vec!["rect-1".to_string()],
                 "targets carry the pre-mutation selection id");
-            // (c) the live document is transformed.
-            assert!(transformed_at(&model, &[0, 0]),
-                "the selected rect carries a transform after confirm");
+            // (c) the live document is scaled: route 4 slice 5 wraps the rect.
+            assert!(wrapped_at(&model, &[0, 0]),
+                "the selected rect is wrapped in a Transformed after confirm");
             // (d) checkpoint_equivalence.
             assert_confirm_replay_equivalent(&model);
         }
@@ -6620,7 +6621,9 @@ pub(crate) mod tests {
             run_effects(&effects, &serde_json::json!({}), &mut store,
                 Some(&mut model), None, None, Some(action));
             // The live document IS mutated (the preview is visible) ...
-            assert!(transformed_at(&model, &[0, 0]),
+            // Scale wraps (route 4 slice 5); rotate and shear store a transform.
+            let changed = if action.starts_with("scale") { wrapped_at(&model, &[0, 0]) } else { transformed_at(&model, &[0, 0]) };
+            assert!(changed,
                 "{action}: the preview re-apply does mutate the live document");
             // ... but NO transform op is journaled — the preview is out-of-band.
             let has_transform_op = model.journal().iter()
@@ -6657,14 +6660,21 @@ pub(crate) mod tests {
             "copy_selection.targets = pre-mutation source id");
         // The original rect (now at [0,0]) is untouched; the copy (at [0,1])
         // carries the transform.
-        assert!(!transformed_at(&model, &[0, 0]),
+        assert!(!transformed_at(&model, &[0, 0]) && !wrapped_at(&model, &[0, 0]),
             "the original is untouched by a copy-transform");
-        assert!(transformed_at(&model, &[0, 1]),
-            "the duplicate carries the composed matrix");
+        assert!(wrapped_at(&model, &[0, 1]),
+            "the duplicate is wrapped (route 4 slice 5)");
         assert_confirm_replay_equivalent(&model);
     }
 
     /// True iff the element at `path` carries a (non-None) common transform.
+    /// Route 4 slice 5: a scale leaves a Transformed wrapper at the path.
+    fn wrapped_at(model: &Model, path: &[usize]) -> bool {
+        matches!(model.document().get_element(&path.to_vec()),
+                 Some(crate::geometry::element::Element::Live(
+                     crate::geometry::live::LiveVariant::Transformed(_))))
+    }
+
     fn transformed_at(model: &Model, path: &[usize]) -> bool {
         model.document().get_element(&path.to_vec())
             .map(|e| e.common().transform.is_some())
@@ -6723,7 +6733,7 @@ pub(crate) mod tests {
         });
         run_effects(&handler("on_mousemove"), &move_ctx, &mut store,
             Some(&mut model), None, None, Some("scale_tool.on_mousemove"));
-        assert!(!transformed_at(&model, &[0, 0]),
+        assert!(!transformed_at(&model, &[0, 0]) && !wrapped_at(&model, &[0, 0]),
             "on_mousemove must NOT mutate the document (the preview is the overlay)");
         assert_eq!(model.journal().len(), journal_len_after_down,
             "on_mousemove journals NOTHING (out-of-band preview, OP_LOG.md §8)");
@@ -6733,8 +6743,8 @@ pub(crate) mod tests {
         let up_ctx = move_ctx.clone();
         run_effects(&handler("on_mouseup"), &up_ctx, &mut store,
             Some(&mut model), None, None, Some("scale_tool.on_mouseup"));
-        assert!(transformed_at(&model, &[0, 0]),
-            "the drag-release commit transforms the selected rect");
+        assert!(wrapped_at(&model, &[0, 0]),
+            "the drag-release commit wraps the selected rect (route 4 slice 5)");
         assert!(model.journal().len() > journal_len_before,
             "the drag release committed a transaction");
         let txn = model.journal().last().expect("the drag-release transaction");
@@ -9038,6 +9048,15 @@ pub(crate) mod tests {
             // [0,1,0],[0,1,1] inside the wrapper, and `unwrap_seeds` remaps
             // layers but not selection paths. Mirrors Swift's `seedKnown`.
             "compound_layer_actions.json::release_compound_shape_restores_its_operands",
+            // Route 4 slice 5 (2026-10-16): Scale wraps WHATEVER is selected, so
+            // the seeded version is wrapper{group{rect}} where the plain one is
+            // wrapper{rect}, around a byte-identical rect (MEASURED, both JSONs
+            // printed). The seed group sits inside a LIVE element, which
+            // `unwrap_seeds` cannot reach: the make_compound_shape mechanism.
+            "transform_options_actions.json::scale_options_confirm_uniform_150",
+            "transform_options_actions.json::scale_options_confirm_uniform_150_strokes_off",
+            "transform_options_actions.json::scale_options_confirm_uniform_150_corners_off_named",
+            "transform_options_actions.json::scale_options_confirm_copy_nonuniform",
         ];
 
         let mut checked = 0usize;

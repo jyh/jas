@@ -2273,10 +2273,14 @@ fn run_doc_effect(
                     if args.contains_key("scale_strokes") { eval_bool(args.get("scale_strokes"), store, ctx) } else { st_strokes },
                     if args.contains_key("scale_corners") { eval_bool(args.get("scale_corners"), store, ctx) } else { st_corners },
                 );
+                // `wrap` (route 4 slice 5): emit a Transformed wrapper instead of
+                // a stored transform. Opt-in, so a caller that omits it keeps the
+                // stored-transform scale.
+                let wrap = eval_bool(args.get("wrap"), store, ctx);
                 if eval_bool(args.get("journal"), store, ctx) {
-                    scale_apply_journaled(model, store, ctx, sx, sy, copy, flags);
+                    scale_apply_journaled(model, store, ctx, sx, sy, copy, flags, wrap);
                 } else {
-                    scale_apply(model, store, ctx, sx, sy, copy, flags);
+                    scale_apply(model, store, ctx, sx, sy, copy, flags, wrap);
                 }
             }
         }
@@ -6910,6 +6914,7 @@ fn scale_apply(
     sy: f64,
     copy: bool,
     (scale_strokes, scale_corners): (bool, bool),
+    wrap: bool,
 ) {
     use crate::algorithms::transform_apply;
     use crate::document::controller::Controller;
@@ -6925,8 +6930,12 @@ fn scale_apply(
     let stroke_factor = crate::document::op_apply::stroke_compensation(sx, sy, scale_strokes);
     let corners = crate::document::op_apply::corner_compensation(sx, sy, scale_corners);
     let paths = op_apply_selection_paths(model);
-    let new_doc = compose_matrix_over_paths(
-        model.document(), &paths, &matrix, stroke_factor, corners);
+    // The SAME compose the journaled confirm runs (`op_apply::apply_scale`).
+    let new_doc = if wrap {
+        crate::document::op_apply::wrap_scale_over_paths(model.document(), &paths, &matrix, scale_strokes, corners)
+    } else {
+        compose_matrix_over_paths(model.document(), &paths, &matrix, stroke_factor, corners)
+    };
     model.set_document_unbracketed(new_doc, NonUndoableIntent::PreviewReapply);
 }
 
@@ -6946,6 +6955,7 @@ fn scale_apply_journaled(
     sy: f64,
     copy: bool,
     (scale_strokes, scale_corners): (bool, bool),
+    wrap: bool,
 ) {
     if (sx - 1.0).abs() < 1e-9 && (sy - 1.0).abs() < 1e-9 {
         return; // Identity — nothing to do (no copy, no op).
@@ -6958,11 +6968,16 @@ fn scale_apply_journaled(
     // resolves against the now-selected duplicates, matching the preview path,
     // which also resolves the ref point post-copy).
     let (rx, ry) = resolve_reference_point(model, store, ctx);
-    let op = serde_json::json!({
+    let mut op = serde_json::json!({
         "op": "scale_transform",
         "sx": sx, "sy": sy, "rx": rx, "ry": ry,
         "scale_strokes": scale_strokes, "scale_corners": scale_corners,
     });
+    // Recorded only when set, so a stored-transform scale journals the bytes it
+    // always did.
+    if wrap {
+        op["wrap"] = serde_json::json!(true);
+    }
     let _ = crate::document::op_apply::op_apply(model, &op);
 }
 

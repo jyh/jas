@@ -1643,6 +1643,7 @@ pub fn apply_scale(
     ry: f64,
     scale_strokes: bool,
     scale_corners: bool,
+    wrap: bool,
 ) -> (bool, Vec<String>) {
     use crate::algorithms::transform_apply;
     if is_scale_identity(sx, sy) {
@@ -1653,13 +1654,13 @@ pub fn apply_scale(
     let stroke_factor = stroke_compensation(sx, sy, scale_strokes);
     let corners = corner_compensation(sx, sy, scale_corners);
     let paths = selection_paths(model.document());
-    let new_doc = compose_matrix_over_paths(
-        model.document(),
-        &paths,
-        &matrix,
-        stroke_factor,
-        corners,
-    );
+    // `wrap` (route 4 slice 5, opt-in on the op so recorded ops without it
+    // replay as they always did): a wrapper, and no stroke compensation.
+    let new_doc = if wrap {
+        wrap_scale_over_paths(model.document(), &paths, &matrix, scale_strokes, corners)
+    } else {
+        compose_matrix_over_paths(model.document(), &paths, &matrix, stroke_factor, corners)
+    };
     model.edit_document(new_doc);
     (true, targets)
 }
@@ -2567,7 +2568,10 @@ pub fn op_apply(model: &mut Model, op: &serde_json::Value) -> Result<(), OpError
             // on, scale_corners off) — but the op always carries them resolved.
             let scale_strokes = op.get("scale_strokes").and_then(|v| v.as_bool()).unwrap_or(true);
             let scale_corners = op.get("scale_corners").and_then(|v| v.as_bool()).unwrap_or(false);
-            let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners);
+            // `wrap` absent is the stored-transform scale every recorded op
+            // before route 4 slice 5 meant; present and true, the wrapper.
+            let wrap = op.get("wrap").and_then(|v| v.as_bool()).unwrap_or(false);
+            let (changed, t) = apply_scale(model, sx, sy, rx, ry, scale_strokes, scale_corners, wrap);
             if !changed {
                 // Benign no-op: an identity transform is Ok by the S3 taxonomy.
                 return Ok(());
