@@ -95,6 +95,7 @@ if ($Baseline -eq '') { $Baseline = Join-Path $PSScriptRoot "e2e_baselines\$item
 $docX = $sc.DocX; $docY = $sc.DocY; $dx = $sc.Dx; $dy = $sc.Dy; $moves = $sc.Moves
 # Captured here for the same reason as `$tool`: `$sc` is reused for the scale.
 $shiftMode = if ($sc.Shift) { $sc.Shift } else { 'none' }
+$altMode = if ($sc.Alt) { $sc.Alt } else { 'none' }
 $keyText = "$($sc.KeyText)"; $keyCount = [int]$sc.Keys
 
 function Out-Line([string]$s) { Write-Host $s }
@@ -163,7 +164,7 @@ try {
 
     # ---- drive: a real SendInput drag, in session 1 -------------------------
     $handArg = ('-NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $PSScriptRoot 'send_hand.ps1') + '"' +
-                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Keys `"$keyText`"" +
+                " -ProcessId $appPid -DocX $docX -DocY $docY -DocDx $dx -DocDy $dy -Moves $moves -Shift $shiftMode -Alt $altMode -Keys `"$keyText`"" +
                 " -Out `"$receipt`" -TargetOffsetXDips $offX -TargetOffsetYDips $offY")
     $principal = New-ScheduledTaskPrincipal -UserId (Get-SbUid) -LogonType Interactive -RunLevel Limited
     Register-ScheduledTask -TaskName $tasks[0] -Principal $principal -Force `
@@ -264,6 +265,16 @@ if ($shiftMode -ne 'none') {
     $shiftTag = ",shift=$shiftMode"
     if (-not $hr.Contains($want) -and $drive -like 'PASS*') { $drive = "FAIL(the hand's receipt lacks '$want')" }
 }
+if ($altMode -ne 'none') {
+    $hr = ''
+    for ($w = 0; $w -lt 50 -and -not $hr.Contains('alt-up='); $w++) {
+        if (Test-Path $receipt) { $hr = [string](Get-Content $receipt -Raw -Encoding UTF8) }
+        if (-not $hr.Contains('alt-up=')) { Start-Sleep -Milliseconds 100 }
+    }
+    $want = "alt=$altMode alt-down=before-$altMode alt-up=after-release"
+    $shiftTag += ",alt=$altMode"
+    if (-not $hr.Contains($want) -and $drive -like 'PASS*') { $drive = "FAIL(the hand's receipt lacks '$want')" }
+}
 if ($drive -notlike 'PASS*') { $ddx = [double]::NaN; $ddy = [double]::NaN }
 $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # The moved-by-delta arm is a SECOND METHOD for a selection drag only: another
@@ -271,8 +282,12 @@ $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # KEYS AFTER THE DRAG (flask section 333) change what the drag left (Delete
 # removes it, Ctrl+Z puts it back), so the arm describes a moment the script
 # has moved past: with keys, the read-back is the whole claim.
-$dragOnly = $isSelection -and $keyCount -eq 0
+# An ALT drag copies (selection.yaml: alt_held at mousedown copies on the
+# first move), so the selected path names the COPY, not the element that was
+# under the press: the arm's before/after pairing does not hold either.
+$dragOnly = $isSelection -and $keyCount -eq 0 -and $altMode -eq 'none'
 if (-not $isSelection) { $moved = "NOT APPLICABLE(tool=$($tool): the moved-by-delta arm is the selection tool's)" }
+elseif ($altMode -ne 'none') { $moved = "NOT APPLICABLE(alt=$($altMode): an alt drag copies, so the selection names the copy and the read-back is the claim)" }
 elseif ($keyCount -gt 0) { $moved = "NOT APPLICABLE(keys=$($keyText): the moved-by-delta arm describes the drag, and the keys after it change the document)" }
 elseif ($selCount -eq 1 -and (Test-Path $openDoc)) {
     $selPath = @($r.selection)[0].path
