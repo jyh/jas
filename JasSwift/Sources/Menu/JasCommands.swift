@@ -326,25 +326,10 @@ public struct JasCommands: Commands {
         // design — see workspace/shortcuts.yaml for why it takes no chord.
         case "paste_preserving_layers":
             pasteClipboard(offset: pasteOffset, preserveLayers: true)
-        case "select_all":
-            selectAll()
-        // Object
-        case "group":
-            groupSelection()
-        case "ungroup":
-            ungroupSelection()
-        case "ungroup_all":
-            ungroupAll()
-        case "lock":
-            lockSelection()
-        case "unlock_all":
-            unlockAll()
-        case "hide_selection":
-            hideSelection()
-        case "show_all":
-            showAll()
-        case "make_instance":
-            makeInstance()
+        // The model-pure Edit / Object verbs: one table (``MenuActions/run``,
+        // Rust `menu_native::run`), shared with the level-1 script runner.
+        case _ where MenuActions.verbs.contains(action):
+            if let model = model { MenuActions.run(action, model) }
         case "promote_to_concept":
             // CONCEPTS.md §10 — the fitter / promote. New menu route to the
             // existing ConceptsPanel intercept (was only reachable from the
@@ -644,52 +629,6 @@ public struct JasCommands: Commands {
         EditClipboard.pasteClipboard(model, offset: offset, preserveLayers: preserveLayers)
     }
 
-    // The model-pure Object / Edit menu verbs delegate to the shared
-    // ``MenuActions`` handlers (extracted so the cross-language ACTION corpus
-    // drives the SAME implementation, not a reimplementation). Each wrapper only
-    // unwraps the focused, optional ``Model``; the behavior — `withTxn`
-    // bracketing, Controller calls, id minting — lives in ``MenuActions``.
-
-    private func groupSelection() {
-        guard let model = model else { return }
-        MenuActions.groupSelection(model)
-    }
-
-    private func makeInstance() {
-        guard let model = model else { return }
-        MenuActions.makeInstance(model)
-    }
-
-    private func ungroupSelection() {
-        guard let model = model else { return }
-        MenuActions.ungroupSelection(model)
-    }
-
-    private func ungroupAll() {
-        guard let model = model else { return }
-        MenuActions.ungroupAll(model)
-    }
-
-    private func lockSelection() {
-        guard let model = model else { return }
-        MenuActions.lockSelection(model)
-    }
-
-    private func unlockAll() {
-        guard let model = model else { return }
-        MenuActions.unlockAll(model)
-    }
-
-    private func hideSelection() {
-        guard let model = model else { return }
-        MenuActions.hideSelection(model)
-    }
-
-    private func showAll() {
-        guard let model = model else { return }
-        MenuActions.showAll(model)
-    }
-
     private func deleteSelection() {
         guard let model = model else { return }
         let doc = model.document
@@ -764,11 +703,6 @@ public struct JasCommands: Commands {
         confirmButton.keyEquivalent = ""
         cancelButton.keyEquivalent = "\r"
         return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    private func selectAll() {
-        guard let model = model else { return }
-        MenuActions.selectAll(model)
     }
 
     private func cutSelection() {

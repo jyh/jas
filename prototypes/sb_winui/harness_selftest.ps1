@@ -2273,10 +2273,10 @@ Test-Case 'is: a panel step BEFORE the gesture ends is refused by name' {
 Test-Case 'is: a key AFTER a panel step is refused by name: panel steps are delivered last' {
     $k = [ordered]@{ key = 'Delete' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $k, $sRead)))
-} 'REFUSED: step 4 key Delete comes after a panel step: send_hand.ps1 delivers keys, then panel steps'
+} 'REFUSED: step 4 key Delete comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps'
 Test-Case 'is: a pointer step after a panel step is refused by name' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $sPress, $sRead)))
-} 'REFUSED: step 4 is a pointer step after a panel step: send_hand.ps1 delivers panel steps only after the gesture'
+} 'REFUSED: step 4 is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture'
 Test-Case 'is: a panel step with an event other than click or commit is refused' {
     $p = [ordered]@{ panel = 'align_panel_content'; widget = 'align_left_button'; event = 'toggle' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
@@ -2293,6 +2293,56 @@ Test-Case 'is: a panel step that names no widget is refused' {
     $p = [ordered]@{ panel = 'align_panel_content'; widget = ''; event = 'click' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
 } 'REFUSED: step 3 panel step names no panel or no widget'
+# jas sections 389/392 (node 13): MENU steps, {"menu": "<node id>"}, after the
+# pointer and key steps and in script order with any panel steps
+# (docs/TESTING.md section 6). The hand runs each through the WinUI menubar by
+# UI Automation.
+$mGroup = [ordered]@{ menu = 'menu_group' }
+Test-Case 'is: a menu step after the gesture is accepted and carried' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $mGroup, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json panels=menu:menu_group'
+Test-Case 'is: menu and panel steps keep their script order, and each kind is counted' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $mGroup, $pAlign, $sRead))
+    "$($s.Menus) $($s.Panels) $($s.PanelShow) [$($s.Panel)]"
+} '1 1 menu:menu_group;align_panel_content/align_left_button:click [align_panel_content]'
+Test-Case 'is: a menu step crosses -File in the same string as the panel steps' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $mGroup, $sRead))
+    @(ConvertFrom-SbPanelText $s.PanelText | ForEach-Object { if ($_.menu) { "menu=$($_.menu)" } else { "panel=$($_.panel)" } }) -join ';'
+} 'panel=align_panel_content;menu=menu_group'
+Test-Case 'is: a menu step BEFORE the gesture ends is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $mGroup, $sMove, $sRelease, $sRead)))
+} 'REFUSED: step 1 menu menu_group comes before the gesture ends: send_hand.ps1 delivers menu steps only after the release'
+Test-Case 'is: a key AFTER a menu step is refused by name' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $mGroup, $k, $sRead)))
+} 'REFUSED: step 4 key Delete comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps'
+Test-Case 'is: a pointer step after a menu step is refused by name' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $mGroup, $sPress, $sRead)))
+} 'REFUSED: step 4 is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture'
+Test-Case 'is: a menu step that names no item is refused' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, [ordered]@{ menu = '' }, $sRead)))
+} 'REFUSED: step 3 menu step names no item'
+
+# What the hand does with what UI Automation found for one menu step, after
+# opening each top menu in turn. The fixture rows are the shapes measured on
+# the box: a top item is a MenuBarItem exposing [Invoke, ExpandCollapse,
+# ScrollItem]; a flyout item a MenuFlyoutItem exposing Invoke.
+function Show-SbMenu($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
+Test-Case 'mi: an enabled item found once is Invoked' {
+    Show-SbMenu (Select-SbMenuItem -Item 'menu_group' -Found 1 -Enabled $true -Patterns @('InvokePatternIdentifiers.Pattern'))
+} 'Invoke'
+Test-Case 'mi: an item no menu holds is refused by name' {
+    Show-SbMenu (Select-SbMenuItem -Item 'menu_grup' -Found 0 -Enabled $false -Patterns @())
+} "REFUSED: menu item 'menu_grup' is not found in any menu of the menubar: no item has that AutomationId"
+Test-Case 'mi: an item found twice is refused, never guessed between' {
+    Show-SbMenu (Select-SbMenuItem -Item 'menu_group' -Found 2 -Enabled $true -Patterns @('InvokePatternIdentifiers.Pattern'))
+} "REFUSED: menu item 'menu_group' is found 2 times: this driver will not guess which one a person meant"
+Test-Case 'mi: a disabled item is refused: a person cannot choose it either' {
+    Show-SbMenu (Select-SbMenuItem -Item 'menu_group' -Found 1 -Enabled $false -Patterns @('InvokePatternIdentifiers.Pattern'))
+} "REFUSED: menu item 'menu_group' is disabled: a person cannot choose it"
+Test-Case 'mi: an item with no Invoke pattern is refused' {
+    Show-SbMenu (Select-SbMenuItem -Item 'menu_group' -Found 1 -Enabled $true -Patterns @('ScrollItemPatternIdentifiers.Pattern'))
+} "REFUSED: menu item 'menu_group' has no Invoke pattern: it has [ScrollItem]"
 
 # What send_hand.ps1 does with the elements UI Automation found. Each fixture's
 # pattern list is a ROW MEASURED ON THE BOX (2026-10-17, the align panel with
