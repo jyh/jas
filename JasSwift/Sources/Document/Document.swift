@@ -471,7 +471,9 @@ public struct Document: Equatable {
         guard first >= 0, first < layers.count else { return nil }
         var node: Element = .layer(layers[first])
         for idx in path.dropFirst() {
-            let children = childrenOf(node)
+            // `pathChildren`, not `childrenOf`: a leaf has none, so a path
+            // walking THROUGH one is dangling (nil), never a trap.
+            let children = node.pathChildren
             guard idx >= 0, idx < children.count else { return nil }
             node = children[idx]
         }
@@ -490,8 +492,10 @@ public struct Document: Equatable {
         var node: Element = .layer(layers[path[0]])
         var effective = node.visibility
         for idx in path.dropFirst() {
-            let children = childrenOf(node)
-            guard idx < children.count else { return effective }
+            // A leaf has no children: a path through one stops here, as
+            // Rust's `effective_visibility` does.
+            let children = node.pathChildren
+            guard idx >= 0, idx < children.count else { return effective }
             node = children[idx]
             if node.visibility < effective { effective = node.visibility }
         }

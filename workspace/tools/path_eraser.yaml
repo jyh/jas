@@ -4,8 +4,11 @@
 # path that intersects the eraser is split into sub-paths that hug
 # the eraser boundary (curves preserved via De Casteljau);
 # whole-path erase when the bounds are smaller than the eraser.
-# Locked and hidden paths, and the paths of a hidden layer, are
-# never erased.
+# Paths are reached at any Group depth and hit where they are DRAWN;
+# the fragments of a cut path take its place in the same group, in
+# order, under the group's transform. Locked and hidden paths, and
+# everything inside a locked or hidden group or layer, are never
+# erased.
 #
 # The eraser kernel (split_path_at_eraser etc.) lives in
 # geometry/path_ops.rs — L2 per NATIVE_BOUNDARY.md §5.

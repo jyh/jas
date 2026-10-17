@@ -325,5 +325,81 @@
    }
   ],
   "expected_json": "transformed_line_in_hidden_layer_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). The PATH is hidden. A click on the drawn corner must erase nothing.",
+  "name": "path_eraser_misses_hidden_path_in_scaled_group",
+  "setup_test_json": "hidden_path_in_scaled_group.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "hidden_path_in_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). Its GROUP is hidden. A click on the drawn corner must erase nothing.",
+  "name": "path_eraser_misses_path_in_hidden_scaled_group",
+  "setup_test_json": "path_in_hidden_scaled_group.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_in_hidden_scaled_group_unchanged_expected.json"
+ },
+ {
+  "_doc": "INVISIBLE meets F3 (the Path Eraser descends into groups, 2026-10-17). The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). Its LAYER is hidden. A click on the drawn corner must erase nothing.",
+  "name": "path_eraser_misses_path_in_scaled_group_in_hidden_layer",
+  "setup_test_json": "path_in_scaled_group_in_hidden_layer.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_in_scaled_group_in_hidden_layer_unchanged_expected.json"
+ },
+ {
+  "_doc": "F3's lock clause (2026-10-17): the eraser descends into a group only as the anchor tools do, so a LOCKED group's paths are never erased. The open path (0,0) -> (30,30) -> (60,0) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), so its corner (30,30) is DRAWN at (120,120). The path is visible and its group is locked. A click on the drawn corner must erase nothing.",
+  "name": "path_eraser_misses_path_in_locked_scaled_group",
+  "setup_test_json": "path_in_locked_scaled_group.json",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 120,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 120,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_in_locked_scaled_group_unchanged_expected.json"
  }
 ]

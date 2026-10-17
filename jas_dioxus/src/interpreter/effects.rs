@@ -5211,11 +5211,6 @@ fn path_erase_at_rect(
     x: f64, y: f64,
     eraser_size: f64,
 ) {
-    use std::rc::Rc;
-    use crate::document::artboard::{generate_element_id, mint_unique_ids};
-    use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem, Visibility};
-    use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
-
     let doc = model.document().clone();
     let mut new_doc = doc.clone();
     let half = eraser_size;
@@ -5231,160 +5226,27 @@ fn path_erase_at_rect(
     // avoiding them is merely conservative, never wrong.
     let mut existing_ids = doc.element_ids();
 
+    // F3 (the helm's ruling, 2026-10-17): the eraser DESCENDS into groups,
+    // by the anchor tools' rule: any group depth, anything locked or hidden
+    // skipped (with all it holds). The fragments of an erased path are
+    // spliced into the SAME parent at the erased path's index, under the
+    // parent's transform, and nothing is hoisted. A Transformed live element
+    // is ONE element and is not entered, even as the isolation entry: its
+    // child slot holds exactly one element, so a split could not be spliced
+    // there. The walk is FORWARD, so fragment ids are minted in document
+    // order, as Swift's `pathEraseAtRect` mints them.
+    let rect = (min_x, min_y, max_x, max_y);
     let mut changed = false;
     for (li, layer) in doc.layers.iter().enumerate() {
-        let children = match layer.children() {
-            Some(c) => c,
-            None => continue,
-        };
-        // Rebuild the child list FRONT-TO-BACK rather than editing it in
-        // place back-to-front. Both orders produce the same document, but the
-        // mint order is observable in the ids, and Swift's pathEraseAtRect
-        // rebuilds forward — so document order is the only order the two
-        // ports can agree on. Fragment ids are handed out in document order.
-        let mut new_children: Vec<Rc<Element>> = Vec::with_capacity(children.len());
-        let mut layer_changed = false;
-        for (ci, child) in children.iter().enumerate() {
-            let path_elem = match child.as_ref() {
-                Element::Path(pe) => pe,
-                _ => {
-                    new_children.push(child.clone());
-                    continue;
+        let Some(children) = layer.children() else { continue };
+        match erase_in_children(&doc, children, &[li], layer.visibility(), rect, eraser_size, &mut existing_ids) {
+            Err(()) => return,
+            Ok(None) => {}
+            Ok(Some(rebuilt)) => {
+                if let Some(layer_children) = new_doc.layers[li].children_mut() {
+                    *layer_children = rebuilt;
+                    changed = true;
                 }
-            };
-            // INVISIBLE (2026-10-17): a hidden path, or one in a hidden
-            // layer, is not erased.
-            if child.locked()
-                || std::cmp::min(layer.visibility(), child.visibility()) == Visibility::Invisible
-            {
-                new_children.push(child.clone());
-                continue;
-            }
-            // The eraser sweeps DOCUMENT space, so the path is tested where it
-            // is DRAWN (transform-correct path verbs S5): its flattened points
-            // go through its full frame (the layer's transform and its own).
-            // The hit's flat indices and `t` carry over unchanged, because an
-            // affine map preserves ratios along a line; its entry and exit
-            // POINTS are mapped back into the path's local space before the
-            // split uses them. A singular frame is left alone.
-            let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, &[li, ci], true);
-            let inv = match frame {
-                Some(t) => match t.inverse() {
-                    Some(i) => Some(i),
-                    None => {
-                        new_children.push(child.clone());
-                        continue;
-                    }
-                },
-                None => None,
-            };
-            let mut flat = flatten_path_commands(&path_elem.d);
-            if let Some(t) = frame {
-                for p in flat.iter_mut() {
-                    *p = t.apply_point(p.0, p.1);
-                }
-            }
-            if flat.len() < 2 {
-                new_children.push(child.clone());
-                continue;
-            }
-            let mut hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
-                Some(h) => h,
-                None => {
-                    new_children.push(child.clone());
-                    continue;
-                }
-            };
-            if let Some(i) = inv {
-                hit.entry = i.apply_point(hit.entry.0, hit.entry.1);
-                hit.exit = i.apply_point(hit.exit.0, hit.exit.1);
-            }
-            // "Fits inside the eraser" is a DOCUMENT-space size: the local
-            // bounds boxed through the frame.
-            let bounds = match frame {
-                None => child.bounds(),
-                Some(t) => crate::geometry::element::aabb_through(child.bounds(), &t),
-            };
-            if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
-                // bbox fits inside the eraser — drop entirely.
-                layer_changed = true;
-                continue;
-            }
-            let is_closed = path_elem
-                .d
-                .iter()
-                .any(|c| matches!(c, PathCommand::ClosePath));
-            let results: Vec<Vec<PathCommand>> =
-                split_path_at_eraser(&path_elem.d, &hit, is_closed)
-                    .into_iter()
-                    // Redundant by construction, kept only as a guard:
-                    // `split_path_at_eraser` already gates EVERY fragment it
-                    // emits at len >= 2 (both branches, every push), so this
-                    // filter provably never removes anything. Do not cite it
-                    // as the reason a short fragment disappears.
-                    .filter(|cmds| cmds.len() >= 2)
-                    .collect();
-            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".
-            // Branch on the surviving-fragment count; Swift's pathEraseAtRect
-            // branches identically so the two ports agree in both arms.
-            //
-            // One fragment -> the one-element case: everything but `d`
-            // survives, `id` included. Several fragments -> each gets a FRESH
-            // id, minted HERE (the effect is where the document is in hand for
-            // the collision check; the initiator cannot mint, because the
-            // fragment count falls out of the geometry and is unknown until
-            // now). Copying the source's id instead would leave N live
-            // elements sharing one id and break the unique-id invariant of
-            // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
-            // never a half-identified split.
-            //
-            // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2, ruled
-            // 2026-07-26). A gradient carries no position — linear resolves
-            // angle + stops against the element's OWN bbox centre and
-            // half-diagonal — so a fragment that inherited the parent's stops
-            // verbatim re-fitted the whole ramp to its own smaller box. Each
-            // fragment's stops are re-expressed on its own extent below; see
-            // algorithms::gradient_remap.
-            //
-            // RADIAL is deliberately left alone: its centre is forced to the
-            // bbox centre and the model has nowhere to record an anchor, so a
-            // fragment necessarily re-centres. JYH accepted that; "gradient
-            // anchor" is a separate stone. FREEFORM paints nothing
-            // (resolve_gradient returns None), so there is nothing to preserve.
-            let severed = results.len() > 1;
-            let fragment_ids: Vec<Option<String>> = if severed {
-                let Some(ids) = mint_unique_ids(
-                    results.len(),
-                    &mut existing_ids,
-                    &mut || generate_element_id(None),
-                ) else {
-                    return;
-                };
-                ids.into_iter().map(Some).collect()
-            } else {
-                vec![path_elem.common.id.clone()]
-            };
-            for (cmds, id) in results.into_iter().zip(fragment_ids) {
-                let mut frag = PathElem { d: cmds, ..path_elem.clone() };
-                frag.common.id = id;
-                if severed {
-                    // Only the severing arm needs this. A single surviving
-                    // fragment is the 1 -> 1 case, and even there the bbox
-                    // shrinks — but that arm is the Theseus law's, which
-                    // preserves everything but `d`, and re-fitting a ramp to a
-                    // trimmed outline is what a non-severing erase has always
-                    // done. Changing it is a separate ruling.
-                    let frag_bbox = Element::Path(frag.clone()).bounds();
-                    remap_linear_gradients(&mut frag, bounds, frag_bbox);
-                }
-                new_children.push(Rc::new(Element::Path(frag)));
-            }
-            layer_changed = true;
-        }
-        if layer_changed {
-            if let Some(layer_children) = new_doc.layers[li].children_mut() {
-                *layer_children = new_children;
-                changed = true;
             }
         }
     }
@@ -5392,6 +5254,181 @@ fn path_erase_at_rect(
         new_doc.selection.clear();
         model.edit_document(new_doc);
     }
+}
+
+/// The Path Eraser over one child list, whose parent's address is `prefix`:
+/// `Ok(Some(list))` when anything in it (at any group depth) was erased, the
+/// list rebuilt front to back; `Ok(None)` when nothing was; `Err` when an id
+/// could not be minted, which aborts the whole erase.
+fn erase_in_children(
+    doc: &crate::document::document::Document,
+    children: &[std::rc::Rc<Element>],
+    prefix: &[usize],
+    parent_vis: crate::geometry::element::Visibility,
+    rect: (f64, f64, f64, f64),
+    eraser_size: f64,
+    existing_ids: &mut std::collections::HashSet<String>,
+) -> Result<Option<Vec<std::rc::Rc<Element>>>, ()> {
+    use crate::geometry::element::Visibility;
+    let mut out: Vec<std::rc::Rc<Element>> = Vec::with_capacity(children.len());
+    let mut changed = false;
+    for (ci, child) in children.iter().enumerate() {
+        let mut path = prefix.to_vec();
+        path.push(ci);
+        // INVISIBLE (2026-10-17): a hidden element, or one under a hidden
+        // ancestor or layer, is not erased; nor is a locked one.
+        let vis = std::cmp::min(parent_vis, child.visibility());
+        if child.locked() || vis == Visibility::Invisible {
+            out.push(child.clone());
+            continue;
+        }
+        let replaced = match child.as_ref() {
+            Element::Group(_) => match child.children() {
+                Some(kids) => erase_in_children(doc, kids, &path, vis, rect, eraser_size, existing_ids)?
+                    .map(|rebuilt| {
+                        let mut group = child.as_ref().clone();
+                        if let Some(slot) = group.children_mut() {
+                            *slot = rebuilt;
+                        }
+                        vec![std::rc::Rc::new(group)]
+                    }),
+                None => None,
+            },
+            Element::Path(pe) => erase_one_path(doc, child, pe, &path, rect, eraser_size, existing_ids)?,
+            _ => None,
+        };
+        match replaced {
+            Some(items) => {
+                out.extend(items);
+                changed = true;
+            }
+            None => out.push(child.clone()),
+        }
+    }
+    Ok(changed.then_some(out))
+}
+
+/// Erase the eraser rectangle out of one path at `path`: `Ok(None)` when it
+/// is not hit, `Ok(Some(fragments))` when it is (empty when the whole path
+/// fits inside the eraser), `Err` when a fragment id could not be minted.
+fn erase_one_path(
+    doc: &crate::document::document::Document,
+    child: &Element,
+    path_elem: &PathElem,
+    path: &[usize],
+    rect: (f64, f64, f64, f64),
+    eraser_size: f64,
+    existing_ids: &mut std::collections::HashSet<String>,
+) -> Result<Option<Vec<std::rc::Rc<Element>>>, ()> {
+    use std::rc::Rc;
+    use crate::document::artboard::{generate_element_id, mint_unique_ids};
+    use crate::geometry::element::{flatten_path_commands, PathCommand};
+    use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
+    let frame = crate::document::evaluated_bounds::accumulated_transform(doc, path, true);
+    let inv = match frame {
+        Some(t) => match t.inverse() {
+            Some(i) => Some(i),
+            None => return Ok(None),
+        },
+        None => None,
+    };
+    let mut flat = flatten_path_commands(&path_elem.d);
+    if let Some(t) = frame {
+        for p in flat.iter_mut() {
+            *p = t.apply_point(p.0, p.1);
+        }
+    }
+    if flat.len() < 2 {
+        return Ok(None);
+    }
+    let Some(mut hit) = find_eraser_hit(&flat, rect.0, rect.1, rect.2, rect.3) else {
+        return Ok(None);
+    };
+    if let Some(i) = inv {
+        hit.entry = i.apply_point(hit.entry.0, hit.entry.1);
+        hit.exit = i.apply_point(hit.exit.0, hit.exit.1);
+    }
+    // "Fits inside the eraser" is a DOCUMENT-space size: the local
+    // bounds boxed through the frame.
+    let bounds = match frame {
+        None => child.bounds(),
+        Some(t) => crate::geometry::element::aabb_through(child.bounds(), &t),
+    };
+    if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
+        // bbox fits inside the eraser — drop entirely.
+        return Ok(Some(Vec::new()));
+    }
+    let is_closed = path_elem
+        .d
+        .iter()
+        .any(|c| matches!(c, PathCommand::ClosePath));
+    let results: Vec<Vec<PathCommand>> =
+        split_path_at_eraser(&path_elem.d, &hit, is_closed)
+            .into_iter()
+            // Redundant by construction, kept only as a guard:
+            // `split_path_at_eraser` already gates EVERY fragment it
+            // emits at len >= 2 (both branches, every push), so this
+            // filter provably never removes anything. Do not cite it
+            // as the reason a short fragment disappears.
+            .filter(|cmds| cmds.len() >= 2)
+            .collect();
+    // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object".
+    // Branch on the surviving-fragment count; Swift's pathEraseAtRect
+    // branches identically so the two ports agree in both arms.
+    //
+    // One fragment -> the one-element case: everything but `d`
+    // survives, `id` included. Several fragments -> each gets a FRESH
+    // id, minted HERE (the effect is where the document is in hand for
+    // the collision check; the initiator cannot mint, because the
+    // fragment count falls out of the geometry and is unknown until
+    // now). Copying the source's id instead would leave N live
+    // elements sharing one id and break the unique-id invariant of
+    // REFERENCE_GRAPH.md §2.5. A failed mint aborts the whole erase —
+    // never a half-identified split.
+    //
+    // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2, ruled
+    // 2026-07-26). A gradient carries no position — linear resolves
+    // angle + stops against the element's OWN bbox centre and
+    // half-diagonal — so a fragment that inherited the parent's stops
+    // verbatim re-fitted the whole ramp to its own smaller box. Each
+    // fragment's stops are re-expressed on its own extent below; see
+    // algorithms::gradient_remap.
+    //
+    // RADIAL is deliberately left alone: its centre is forced to the
+    // bbox centre and the model has nowhere to record an anchor, so a
+    // fragment necessarily re-centres. JYH accepted that; "gradient
+    // anchor" is a separate stone. FREEFORM paints nothing
+    // (resolve_gradient returns None), so there is nothing to preserve.
+    let severed = results.len() > 1;
+    let mut out: Vec<Rc<Element>> = Vec::with_capacity(results.len());
+    let fragment_ids: Vec<Option<String>> = if severed {
+        let Some(ids) = mint_unique_ids(
+            results.len(),
+            existing_ids,
+            &mut || generate_element_id(None),
+        ) else {
+            return Err(());
+        };
+        ids.into_iter().map(Some).collect()
+    } else {
+        vec![path_elem.common.id.clone()]
+    };
+    for (cmds, id) in results.into_iter().zip(fragment_ids) {
+        let mut frag = PathElem { d: cmds, ..path_elem.clone() };
+        frag.common.id = id;
+        if severed {
+            // Only the severing arm needs this. A single surviving
+            // fragment is the 1 -> 1 case, and even there the bbox
+            // shrinks — but that arm is the Theseus law's, which
+            // preserves everything but `d`, and re-fitting a ramp to a
+            // trimmed outline is what a non-severing erase has always
+            // done. Changing it is a separate ruling.
+            let frag_bbox = Element::Path(frag.clone()).bounds();
+            remap_linear_gradients(&mut frag, bounds, frag_bbox);
+        }
+        out.push(Rc::new(Element::Path(frag)));
+    }
+    Ok(Some(out))
 }
 
 /// Store a document element-path in a tool scope under `key`.

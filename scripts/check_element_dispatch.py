@@ -144,6 +144,17 @@ def _strip_noise(src):
                 if out[k] != "\n":
                     out[k] = " "
             i = j + 1
+        elif c == "'" and i + 2 < n and (src[i + 1] == "\\" or src[i + 2] == "'"):
+            # A Rust CHAR LITERAL ('"', 'x', '\'', '\u{22}'): blank it, so a
+            # quote inside it never opens a string. A LIFETIME ('a) has no
+            # closing quote two characters on and is left alone. Swift has
+            # no single-quoted literals.
+            j = src.find("'", i + 3) if src[i + 1] == "\\" else i + 2
+            j = n - 1 if j == -1 else j
+            for k in range(i, j + 1):
+                if out[k] != "\n":
+                    out[k] = " "
+            i = j + 1
         elif c == "/" and i + 1 < n and src[i + 1] == "/":
             j = src.find("\n", i)
             j = n if j == -1 else j
@@ -403,6 +414,20 @@ def self_test():
             '    let _ = "a } brace in a string";\n'
             f"    match e {{ {rect} {circ} {elli} _ => 0.0 }}\n"
             "}\n",
+        # (o) A RUST CHAR LITERAL holding a double quote. `'"'` is not the
+        #     start of a string, and reading it as one blanked the rest of the
+        #     file, so every function below it vanished from the scan (found
+        #     2026-10-17: a test helper's `find('"')` hid what followed it).
+        #     The blind function after it must still be FOUND; so must one
+        #     after an escaped `'\''`.
+        "jas_dioxus/src/o.rs":
+            "fn quote(s: &str) -> Option<usize> { s.find('\"') }\n"
+            "fn tick(s: &str) -> Option<usize> { s.find('\\'') }\n"
+            f"fn after_quote(e: &Element) -> f64 {{ match e {{ {rect} {circ} {elli} _ => 0.0 }} }}\n",
+        # (p) …and a LIFETIME is not a char literal: `'a` has no closing
+        #     quote, so treating it as one would blank code instead.
+        "jas_dioxus/src/p.rs":
+            f"fn life<'a>(e: &'a Element) -> f64 {{ match e {{ {rect} {circ} {elli} _ => 0.0 }} }}\n",
     }
     found = {key(s) for s in scan(corpus)}
     expected = {
@@ -414,6 +439,8 @@ def self_test():
         "rust:jas_dioxus/src/k.rs::wide",
         "rust:jas_dioxus/src/l.rs::after",
         "swift:JasSwift/Sources/n.swift::area",
+        "rust:jas_dioxus/src/o.rs::after_quote",
+        "rust:jas_dioxus/src/p.rs::life",
     }
     silent = {
         "rust:jas_dioxus/src/b.rs::paint",
