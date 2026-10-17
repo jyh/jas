@@ -717,6 +717,8 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(sel == [ElementSelection.partial([0, 0, 0], [2])], "isolated: the drawn corner")
     #expect(probe([[0, 0]], 12, 12).0 == "marquee", "isolated: the untransformed corner draws nothing")
     #expect(probe([[0]], 24, 36).1.allSatisfy { $0.path != [0, 0, 0] }, "isolated into the LAYER only")
+}
+
 /// A Bezier HANDLE is grabbed where it is DRAWN and dragged in DOCUMENT space,
 /// as a pair. A curve whose middle anchor (30, 0) has its in-handle at (20, 10),
 /// inside a group at matrix(2,0,0,2,100,0): drawn at (140, 20); a (10, 10) drag

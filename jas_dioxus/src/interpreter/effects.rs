@@ -12843,6 +12843,8 @@ mod tests {
         model.isolation_stack = vec![vec![0]];
         let (_, sel) = cp_probe(&model, 24.0, 36.0);
         assert!(sel.iter().all(|es| es.path != vec![0, 0, 0]), "isolated into the LAYER only: {sel:?}");
+    }
+
     /// A Bezier HANDLE is grabbed where it is DRAWN and dragged in DOCUMENT
     /// space, as a pair: the probe maps each handle through the path's full
     /// frame and the move maps the drag back through it. A curve whose middle
