@@ -1726,6 +1726,9 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case PanelClickCmd pc:
                     if (ApplyPanelClick(pc)) { dirty = true; cause = "panel"; }
+                    // SB_PROBE (jas §373): a panel step lands on the document as a
+                    // key does, so it is read the same way, run or refused.
+                    if (ProbePath is not null) { _probePending = true; }
                     break;
 
                 case DialogEventCmd de:

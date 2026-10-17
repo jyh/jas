@@ -275,12 +275,16 @@ public sealed partial class MainWindow
             _panePreviewsSvg = 0;
             _panePreviewsFailed = 0;
 
-            var host = new Microsoft.UI.Xaml.Controls.Canvas
+            var host = new PanelHost
             {
                 Width = _availW,
                 Height = height,
                 Margin = new Thickness(_pad),
             };
+            // jas §373: the panel content id, so a UI Automation driver finds
+            // the panel first and a widget id inside it (a widget id is unique
+            // within its panel, not across panels).
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(host, _paneDrawnPanel);
             // §255: a row's box goes in first, so its leaves draw over it. The
             // active one takes the checked look a toggle has; another is outlined.
             foreach (var box in boxes)
@@ -1652,6 +1656,17 @@ internal sealed partial class SwatchTile : Grid
 /// bar's AutomationId reaches the rendered tree.
 /// </summary>
 internal sealed partial class ColorBarSurface : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// jas §373: a panel's control surface. A `Canvas` has no automation peer, so
+/// the panel content id set on it reached no reader, as a `Border`'s did
+/// (<see cref="SwatchTile"/>); the plain element peer is the only addition.
+/// </summary>
+internal sealed partial class PanelHost : Microsoft.UI.Xaml.Controls.Canvas
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
