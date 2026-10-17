@@ -248,3 +248,20 @@ private func lockToggleDoc() -> Document {
     #expect(layerLocked.effectiveLocked([0, 9]),
             "an out-of-range CHILD index still inherits what the walk already saw")
 }
+
+/// A path that walks THROUGH a leaf (a rect has no children) is a dangling
+/// path: `tryGetElement` answers nil and `effectiveVisibility` answers the
+/// visibility reached so far, as Rust's `get_element` and
+/// `effective_visibility` do. Both used to trap in `childrenOf`, against
+/// `tryGetElement`'s own contract ("instead of trapping like getElement").
+@Test func aPathThroughALeafIsDanglingNotATrap() {
+    var hidden = Layer(name: "L", children: [.rect(Rect(x: 0, y: 0, width: 10, height: 10))])
+    let doc = Document(layers: [hidden])
+    #expect(doc.tryGetElement([0, 0]) != nil, "the control: the rect itself resolves")
+    #expect(doc.tryGetElement([0, 0, 0]) == nil)
+    #expect(doc.tryGetElement([0, 0, 0, 3]) == nil)
+    hidden = Layer(name: "L", children: hidden.children, visibility: .invisible)
+    #expect(Document(layers: [hidden]).effectiveVisibility([0, 0, 0]) == .invisible,
+            "the visibility reached before the dangling step")
+    #expect(doc.effectiveVisibility([0, 0, 0]) == .preview)
+}

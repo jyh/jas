@@ -1202,6 +1202,10 @@ pub fn selection_clipboard_svg(doc: &crate::document::document::Document) -> Opt
         })],
         selected_layer: 0,
         selection: Vec::new(),
+        // NO artboard: `Document::default()` mints one with a fresh id, which
+        // made two copies of one selection differ and restarted the paste
+        // run on a re-copy. JasSwift's `copySelection` carries none either.
+        artboards: Vec::new(),
         ..crate::document::document::Document::default()
     };
     Some(crate::geometry::svg::document_to_svg(&temp))
@@ -3591,6 +3595,23 @@ mod clipboard_payload_tests {
             })],
             selected_layer: 0, selection, ..Document::default()
         }
+    }
+
+    /// The payload is a function of the SELECTION: two copies of one selection
+    /// are byte-identical. The paste run is keyed to the payload ("the Nth
+    /// paste of the same clipboard content", `actions.yaml` §paste), so a
+    /// payload that minted a fresh artboard id per copy made a re-copy of the
+    /// same selection a DIFFERENT clipboard and restarted the run at +24. It
+    /// carries no artboard, as JasSwift's `copySelection` writes it (its
+    /// temporary `Document(layers:)` has none).
+    #[test]
+    fn two_copies_of_one_selection_are_byte_identical() {
+        let doc = doc_with(vec![ElementSelection::all(vec![0, 1])]);
+        let a = selection_clipboard_svg(&doc).expect("a payload");
+        let b = selection_clipboard_svg(&doc).expect("a payload");
+        assert_eq!(a, b, "two copies of one selection differ");
+        assert!(!a.contains("inkscape:page"), "the payload carries an artboard: {a}");
+        assert!(a.contains("<rect"), "the control: the selected rect is there: {a}");
     }
 
     /// The payload is ONE unnamed layer holding the selected elements in
