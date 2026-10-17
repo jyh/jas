@@ -2550,7 +2550,11 @@ public sealed partial class MainWindow : Window
         {
             foreach (var (id, label) in list.Rows)
             {
-                PanePicker.Items.Add(new ComboBoxItem { Content = label, Tag = id });
+                var item = new ComboBoxItem { Content = label, Tag = id };
+                // jas §383: the panel content id, so a UI Automation driver opens
+                // a script's panel here by its id, as a person does by its label.
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, id);
+                PanePicker.Items.Add(item);
             }
         }
         finally

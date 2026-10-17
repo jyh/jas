@@ -3045,10 +3045,11 @@ function Read-SbInputScript([string]$Json) {
             elseif ($names -contains 'value' -and $null -ne $st.value) {
                 return (& $no "step $i panel $tag click carries a value: only a commit has one")
             }
-            # The window shows ONE panel, which prove_e2e.ps1 opens at launch
-            # (SB_PANEL, jas section 378), so every step must name that panel.
+            # The pane shows ONE panel, which the hand opens through the pane's
+            # selector before the first panel step (jas section 383), so every
+            # step must name that panel.
             if ($panels.Count -gt 0 -and $panels[0].panel -cne $pn) {
-                return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($panels[0].panel)): the window shows one panel, which this driver opens at launch")
+                return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($panels[0].panel)): the hand opens one panel, through the pane's selector")
             }
             if ($panels.Count -eq 0) { $firstPanelStep = $i }
             $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value })
@@ -3248,6 +3249,22 @@ function Select-SbPanelAction {
         if ($short -contains $a) { return [pscustomobject]@{ Action = $a; Refusal = $null } }
     }
     & $no "widget '$Widget' ($ControlType) has no Invoke, Toggle or SelectionItem pattern for a click: it has $has"
+}
+
+# Before a script's panel steps the hand OPENS their panel as a person does
+# (jas section 383): nothing when the panel (AutomationId = its content id)
+# is already shown, else a Choose in the pane's selector, `PanePicker`, whose
+# items carry the panel content ids. Pure, so each refusal has an arm.
+function Select-SbPanelOpen {
+    param([string]$Panel, [int]$PanelCount, [int]$PickerCount, [string[]]$PickerPatterns)
+    $no = { param($why) [pscustomobject]@{ Action = $null; Refusal = $why } }
+    if ($PanelCount -eq 1) { return [pscustomobject]@{ Action = 'Shown'; Refusal = $null } }
+    if ($PanelCount -gt 1) { return (& $no "panel '$Panel' is found $PanelCount times: this driver will not guess which one a person meant") }
+    if ($PickerCount -eq 0) { return (& $no "panel '$Panel' is not shown, and no PanePicker is found to open it") }
+    if ($PickerCount -gt 1) { return (& $no "panel '$Panel' is not shown, and PanePicker is found $PickerCount times: this driver will not guess which one a person meant") }
+    $short = @($PickerPatterns | ForEach-Object { $_ -replace 'PatternIdentifiers[.]Pattern$', '' })
+    if ($short -contains 'ExpandCollapse' -and $short -contains 'Selection') { return [pscustomobject]@{ Action = 'Choose'; Refusal = $null } }
+    & $no "panel '$Panel' is not shown, and PanePicker has no ExpandCollapse and Selection patterns to choose it: it has [$($short -join ', ')]"
 }
 
 # A Choose's second step: the items of the opened list whose AutomationId is
