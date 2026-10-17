@@ -1,0 +1,13 @@
+[
+  {
+    "name": "partial_selection_drag_corner_in_scaled_group",
+    "setup_svg": "group_scaled_rect.svg",
+    "tool": "partial_selection",
+    "events": [
+      {"kind": "press", "x": 120, "y": 90},
+      {"kind": "move", "x": 130, "y": 100, "dragging": true},
+      {"kind": "release", "x": 130, "y": 100}
+    ],
+    "expected_json": "partial_selection_drag_corner_in_scaled_group_expected.json"
+  }
+]

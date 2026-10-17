@@ -88,6 +88,8 @@ handlers:
                 cursor_y: "event.doc_y"
                 shift:   "event.modifiers.shift"
                 copy:    "false"
+                # Route 4 slice 5: a live Transformed wrapper, as the dialog emits.
+                wrap:    "true"
                 # OP_LOG.md §9 Phase P7: the drag-release commit is a CONFIRM —
                 # it journals one scale_transform op (joining the doc.snapshot
                 # transaction opened on mousedown). on_mousemove never mutates the

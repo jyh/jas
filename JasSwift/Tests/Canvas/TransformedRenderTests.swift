@@ -260,6 +260,53 @@ private func measure(_ buf: [UInt8]) -> (vertical: [Double], horizontal: [Double
     #expect(plain.document.layers == layers && !plain.canUndo, "a no-op release leaves no undo step")
 }
 
+// MARK: - SVG round trip (twins of Rust svg.rs)
+
+/// A Transformed wrapper ROUND-TRIPS through SVG, both Scale Strokes values,
+/// with its own transform W and its matrix M kept apart. The standard
+/// `transform` stays W·M for foreign viewers; `data-jas-matrix` (M) and
+/// `data-jas-own-transform` (W) carry the split. Coordinates are multiples of
+/// 3 pt so the px wire values are exact. Twin of Rust
+/// `a_transformed_wrapper_round_trips_through_svg`.
+@Test func aTransformedWrapperRoundTripsThroughSvg() {
+    for (own, scaleStrokes) in [(Transform?.some(.translate(6, 9)), false), (nil, true)] {
+        let child: Element = .rect(Rect(x: 3, y: 3, width: 12, height: 12,
+                                        stroke: Stroke(color: black, width: 3), id: "c"))
+        let w = TransformedElem(child: child, matrix: .scale(2, 3), scaleStrokes: scaleStrokes,
+                                id: "w", transform: own)
+        let doc = Document(layers: [Layer(name: "Layer", children: [.live(.transformed(w))])],
+                           selectedLayer: 0, selection: [])
+        let svg = documentToSvg(doc)
+        #expect(svg.contains(" data-jas-matrix=\""), "\(svg)")
+        #expect(svg.contains("data-jas-own-transform") == (own != nil), "\(svg)")
+        let back = svgToDocument(svg)
+        #expect(back.layers[0].children == doc.layers[0].children, "round trip, own=\(String(describing: own)): \(svg)")
+    }
+}
+
+/// Without the split attributes the whole `transform` is the matrix and there
+/// is no wrapper transform: the same picture. Twin of Rust
+/// `a_transformed_group_without_the_split_reads_its_transform_as_the_matrix`.
+@Test func aTransformedGroupWithoutTheSplitReadsItsTransformAsTheMatrix() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+      <g inkscape:groupmode="layer" inkscape:label="L">
+        <g data-jas-live="transformed" data-jas-scale-strokes="false" transform="matrix(2,0,0,3,0,0)">
+          <rect x="4" y="4" width="16" height="16"/>
+        </g>
+      </g>
+    </svg>
+    """
+    guard case .live(.transformed(let t)) = svgToDocument(svg).getElement([0, 0]) else {
+        Issue.record("a wrapper"); return
+    }
+    #expect(t.matrix == .scale(2, 3))
+    #expect(t.transform == nil)
+    #expect(!t.scaleStrokes)
+    guard case .rect(let r) = t.child else { Issue.record("a rect child"); return }
+    #expect(r.x == 3 && r.width == 12)
+}
+
 // MARK: - Route 4 slice 3b: editing a wrapped child through a path
 
 private func wrappedChildModel() -> Model {
@@ -315,4 +362,69 @@ private func wrappedChildModel() -> Model {
         .sorted { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
     #expect(centres.map { [$0.0, $0.1] } == [[4, 6], [4, 36], [24, 6], [24, 36]], "\(centres)")
     #expect(selectionOutlineScale(doc, [0, 0, 0]) == 6.0.squareRoot(), "the pen counter-scales W·M")
+}
+
+/// DELETING A WRAPPED CHILD DELETES ITS WRAPPER: a wrapper never loses its
+/// child. Selecting the wrapper AND its child is one deletion. Twin of Rust
+/// `deleting_a_wrapped_child_deletes_its_wrapper`.
+@Test func deletingAWrappedChildDeletesItsWrapper() {
+    let doc = wrappedChildModel().document
+    let sel = Document(layers: doc.layers, selectedLayer: 0,
+                       selection: [ElementSelection.partial([0, 0, 0], [2])])
+    #expect(sel.deleteSelection().layers[0].children.isEmpty, "the wrapper is gone")
+    let grown = doc.insertElementAfter([0, 0], element: .rect(Rect(x: 50, y: 50, width: 5, height: 5)))
+    let two = Document(layers: grown.layers, selectedLayer: 0,
+                       selection: [ElementSelection.all([0, 0]), ElementSelection.all([0, 0, 0])])
+    #expect(two.deleteSelection().layers[0].children.count == 1, "only the wrapper went; the rect stays")
+}
+
+// MARK: - Route 4 slice 5: Scale wraps (twins of Rust `wrap_scale_tests`)
+
+private func strokedRounded(_ id: String) -> Element {
+    .rect(Rect(x: 0, y: 0, width: 10, height: 10, rx: 2, ry: 2,
+               stroke: Stroke(color: black, width: 1), id: id))
+}
+
+private func docOf(_ children: [Element], _ selection: [ElementSelection]) -> Document {
+    Document(layers: [Layer(name: "L", children: children)], selectedLayer: 0, selection: selection)
+}
+
+@Test func aScaledLeafBecomesAWrapperAroundTheUntouchedElement() {
+    for flag in [false, true] {
+        let doc = docOf([strokedRounded("r")], [ElementSelection.partial([0, 0], [1])])
+        let out = wrapScaleOverPaths(doc, [[0, 0]], .scale(1.5, 1.5), scaleStrokes: flag, corners: nil)
+        guard case .live(.transformed(let w)) = out.getElement([0, 0]) else { Issue.record("a wrapper"); return }
+        #expect(w.child == strokedRounded("r"))
+        #expect(w.matrix == .scale(1.5, 1.5) && w.scaleStrokes == flag && w.transform == nil && w.id == nil)
+        #expect(out.selection == [ElementSelection.all([0, 0])], "a partial entry becomes the whole wrapper")
+    }
+}
+
+@Test func cornersOffDividesTheChildsRadii() {
+    let doc = docOf([strokedRounded("r")], [ElementSelection.all([0, 0])])
+    let out = wrapScaleOverPaths(doc, [[0, 0]], .scale(2, 4), scaleStrokes: false,
+                                 corners: cornerCompensation(sx: 2, sy: 4, scaleCorners: false))
+    guard case .live(.transformed(let w)) = out.getElement([0, 0]), case .rect(let r) = w.child else {
+        Issue.record("a wrapped rect"); return
+    }
+    #expect(r.rx == 1 && r.ry == 0.5)
+}
+
+@Test func aWrapperAbsorbsAMatchingScaleAndOtherwiseIsWrappedAgain() {
+    let m = Transform.scale(2, 3), s = Transform.scale(1.5, 1.5)
+    for flag in [false, true] {
+        let w = TransformedElem(child: strokedRounded("r"), matrix: m, scaleStrokes: flag, transform: .translate(5, 7))
+        let doc = docOf([.live(.transformed(w))], [ElementSelection.all([0, 0])])
+        guard case .live(.transformed(let a)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: flag, corners: nil).getElement([0, 0])
+        else { Issue.record("a wrapper"); return }
+        #expect(a.child == strokedRounded("r"), "absorbed: still ONE wrapper, flag=\(flag)")
+        #expect(a.matrix == s.multiply(.translate(5, 7)).multiply(m) && a.transform == nil)
+        guard case .live(.transformed(let outer)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: !flag, corners: nil).getElement([0, 0]),
+              case .live(.transformed) = outer.child else { Issue.record("a different flag nests"); return }
+        #expect(outer.matrix == s && outer.scaleStrokes == !flag)
+    }
+    let rot = TransformedElem(child: strokedRounded("r"), matrix: m, scaleStrokes: false, transform: .rotate(30))
+    let doc = docOf([.live(.transformed(rot))], [ElementSelection.all([0, 0])])
+    guard case .live(.transformed(let o)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: false, corners: nil).getElement([0, 0]),
+          case .live(.transformed) = o.child else { Issue.record("a rotated own transform is wrapped again"); return }
 }

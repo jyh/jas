@@ -240,6 +240,9 @@
       ],
       "sy": [
         "number"
+      ],
+      "wrap": [
+        "boolean"
       ]
     },
     "select_all": {},
@@ -560,7 +563,8 @@
       "scale_corners": "inert",
       "scale_strokes": "witnessed",
       "sx": "witnessed",
-      "sy": "witnessed"
+      "sy": "witnessed",
+      "wrap": "witnessed"
     },
     "select_all": {},
     "select_by_ids": {

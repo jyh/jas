@@ -163,5 +163,22 @@
       }
     ],
     "expected_json": "flatten_artwork_group_nested_expected.json"
+  },
+  {
+    "name": "release_transform_replaces_the_wrapper_by_its_released_child",
+    "setup_svg": "transformed_wrapper.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "release_transform",
+        "params": {}
+      }
+    ],
+    "expected_json": "release_transform_transformed_wrapper_expected.json"
   }
 ]

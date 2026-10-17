@@ -566,7 +566,7 @@ fn live_panel_state(
                 (
                     "isolation_stack",
                     J::Array(
-                        st.layers_isolation_stack
+                        st.isolation_stack()
                             .iter()
                             .map(|p| J::Array(p.iter().map(|&i| J::from(i)).collect()))
                             .collect(),

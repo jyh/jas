@@ -544,7 +544,6 @@ mod tests {
             layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
-            layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
             layers_type_filter: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
@@ -645,7 +644,12 @@ mod tests {
 
         // layers.yaml: "Exit Isolation Mode" reads `panel.isolation_stack.length`.
         assert!(!panel_is_enabled(PanelKind::Layers, "exit_isolation_mode", &st));
-        st.layers_isolation_stack.push(vec![0]);
+        // Isolation lives on the active tab's Model, so it needs a document.
+        if st.tabs.is_empty() {
+            st.tabs.push(crate::workspace::app_state::TabState::new());
+            st.active_tab = 0;
+        }
+        st.isolation_stack_mut().expect("a tab").push(vec![0]);
         assert!(panel_is_enabled(PanelKind::Layers, "exit_isolation_mode", &st));
 
         // artboards.yaml: `active_document.artboards_panel_selection_ids.length`.
@@ -686,10 +690,10 @@ mod tests {
         assert!(!panel_is_enabled(PanelKind::Layers, "flatten_artwork", &sel),
                 "a layer is not a group");
         assert!(panel_is_enabled(PanelKind::Layers, "collect_in_new_layer", &sel));
-        sel.layers_isolation_stack.push(vec![0]);
+        sel.isolation_stack_mut().expect("a tab").push(vec![0]);
         assert!(!panel_is_enabled(PanelKind::Layers, "collect_in_new_layer", &sel),
                 "not while isolated: the conjunction's second half");
-        sel.layers_isolation_stack.clear();
+        sel.isolation_stack_mut().expect("a tab").clear();
         sel.layers_panel_selection = vec![vec![0, 0]];
         assert!(!panel_is_enabled(PanelKind::Layers, "enter_isolation_mode", &sel),
                 "a rect is not a container");
