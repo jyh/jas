@@ -14,7 +14,7 @@ use super::clipboard::{
 };
 use crate::document::controller::Controller;
 use crate::geometry::svg::document_to_svg;
-use crate::tools::tool::{ToolKind, PASTE_OFFSET};
+use crate::tools::tool::ToolKind;
 
 /// Check if the keyboard event originated from a text input element.
 /// When true, non-modifier keys (Backspace, Delete, letters) should
@@ -381,10 +381,13 @@ pub(crate) fn make_keydown_handler(
             }
             Key::Character(ref c) if (c == "v" || c == "V") && cmd => {
                 evt.prevent_default();
-                let offset = if mods.shift() { 0.0 } else { PASTE_OFFSET };
-                // Try async clipboard read first, fall back to internal
+                // Ctrl+Shift+V is Paste in Place; the offset is the clipboard
+                // table's (`menu_native`), as the engine's key route reads it.
                 // R2: the keyboard paste is always the FLATTENING one. R3 is
                 // menu-only by design (see workspace/shortcuts.yaml).
+                let action = if mods.shift() { "paste_in_place" } else { "paste" };
+                let Some(super::menu_native::ClipVerb::Paste { offset, .. }) =
+                    super::menu_native::clipboard_verb(action) else { return };
                 clipboard_read_and_paste(
                     app_for_keys.clone(),
                     revision_for_keys,

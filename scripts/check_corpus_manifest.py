@@ -175,6 +175,8 @@ DATA_REF_FIELDS = {
     "expected_journal_json": "SELF",
     "expected_document_json": "SELF",
     "expected_output_json": "SELF",
+    # The copy-payload corpus's goldens (test_fixtures/clipboard).
+    "expected_svg": "SELF",
 }
 
 
