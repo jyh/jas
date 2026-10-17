@@ -226,6 +226,10 @@ pub fn parse_event(v: &Value) -> Result<UserEvent, Refusal> {
 ///   are INTERCEPTED, never claimed: the host writes the dialog's values to
 ///   the selection through `paragraph_host`, then declines, so their YAML
 ///   (clear the snapshot, close the dialog) runs as always.
+/// * `doc.copy_selection_to_clipboard` (Cut's orphan-confirm OK) is claimed
+///   and NAMED: the host records the selection's payload in
+///   [`EngineHost::clipboard_write`] and the reply carries it for the shell
+///   to write to the system clipboard.
 /// * `delete_selection` is claimed and RUN by the Delete key's law
 ///   (`menu_native::delete_selection`): an orphan opens
 ///   `delete_orphan_confirm`; its own YAML is the menu's `log`.
@@ -241,6 +245,9 @@ pub struct EngineHost {
     pub closed_window: bool,
     /// A `save_all_then_close` asked the shell to save every document, then close.
     pub save_all_then_close: bool,
+    /// The payload a `doc.copy_selection_to_clipboard` asked the shell to put
+    /// on the system clipboard. Set, never appended, as `removed_tab` is.
+    pub clipboard_write: Option<String>,
 }
 
 impl EffectHost for EngineHost {
@@ -254,6 +261,12 @@ impl EffectHost for EngineHost {
         let Some(model) = model else { return false };
         if key == "snapshot" {
             model.begin_txn();
+            return true;
+        }
+        // `cut_orphan_confirm_ok`'s copy: the engine owns no system clipboard,
+        // so the payload is NAMED for the shell, as `close_window` is.
+        if key == "doc.copy_selection_to_clipboard" {
+            self.clipboard_write = crate::document::op_apply::selection_clipboard_svg(model.document());
             return true;
         }
         if align_host::hosts(key) {

@@ -40,6 +40,36 @@ pub fn run(action: &str, model: &mut Model) -> bool {
     true
 }
 
+/// One Edit menu clipboard verb, as every route runs it. The offsets live
+/// HERE: Paste and Paste, Preserving Layers land [`PASTE_OFFSET`] down and
+/// right (the paste run stacks from there); Paste in Place lands at 0.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClipVerb {
+    /// Copy the selection's payload (`op_apply::selection_clipboard_svg`).
+    Copy,
+    /// Copy, then the reference-aware delete (one undo step), or ask first.
+    Cut,
+    /// Paste the clipboard text through `op_apply::apply_paste_clipboard_text`.
+    Paste { offset: f64, preserve_layers: bool },
+}
+
+/// The clipboard actions, in menu order: what [`clipboard_verb`] knows.
+pub const CLIPBOARD_VERBS: [&str; 5] = ["cut", "copy", "paste", "paste_in_place", "paste_preserving_layers"];
+
+/// The clipboard verb `action` names, or `None`. Their `actions.yaml` bodies
+/// are `log` stubs; the platform half (the system clipboard) is the shell's,
+/// and the engine's half (the payload, the paste law) is this.
+pub fn clipboard_verb(action: &str) -> Option<ClipVerb> {
+    Some(match action {
+        "copy" => ClipVerb::Copy,
+        "cut" => ClipVerb::Cut,
+        "paste" => ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: false },
+        "paste_in_place" => ClipVerb::Paste { offset: 0.0, preserve_layers: false },
+        "paste_preserving_layers" => ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: true },
+        _ => return None,
+    })
+}
+
 /// Object > Make Instance, as a headless mutation on a [`Model`].
 ///
 /// Replaces the single whole-element selection with a by-id reference to it,
@@ -87,6 +117,22 @@ mod tests {
     /// [`VERBS`] is the list the routes and their tests read; [`run`] is what
     /// runs. Each verb in the list must be one `run` handles, and nothing
     /// else is, or a route reads a verb as run that ran nothing.
+    /// [`CLIPBOARD_VERBS`] is exactly what [`clipboard_verb`] knows, and no
+    /// clipboard verb is also a model verb (one route each).
+    #[test]
+    fn every_clipboard_verb_is_known_and_nothing_else_is() {
+        for verb in CLIPBOARD_VERBS {
+            assert!(clipboard_verb(verb).is_some(), "{verb}");
+            assert!(!VERBS.contains(&verb), "{verb} is not a model verb");
+        }
+        for other in ["select_all", "undo", "copy ", "paste_text", ""] {
+            assert_eq!(clipboard_verb(other), None, "{other:?}");
+        }
+        assert_eq!(clipboard_verb("paste"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: false }));
+        assert_eq!(clipboard_verb("paste_in_place"), Some(ClipVerb::Paste { offset: 0.0, preserve_layers: false }));
+        assert_eq!(clipboard_verb("paste_preserving_layers"), Some(ClipVerb::Paste { offset: PASTE_OFFSET, preserve_layers: true }));
+    }
+
     #[test]
     fn every_verb_is_run_and_nothing_else_is() {
         for verb in VERBS {
