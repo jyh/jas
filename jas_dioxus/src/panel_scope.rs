@@ -512,6 +512,12 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
         if panel_id == crate::interpreter::paragraph_host::PARAGRAPH_PANEL {
             panel.extend(crate::interpreter::paragraph_host::live_values(model.document()));
         }
+        // The Stroke panel's cap, join, weight and arrowheads describe the
+        // selection too (both docks overlay them), so a `disabled` bind reads
+        // the selected join: `stk_miter_limit` is disabled at a bevel join.
+        if panel_id == crate::interpreter::stroke_host::STROKE_PANEL {
+            panel.extend(crate::interpreter::stroke_host::live_values(model.document()));
+        }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         // The web's whole `active_document` view first (`document_views`), so

@@ -192,6 +192,30 @@ fn the_opens_artboard_is_set_aside_only_in_the_one_shape_the_open_makes() {
     assert!(set_aside_the_opens_artboard(&upper, &want).unwrap_err().contains("not the one the open adds"));
 }
 
+/// **The engine evaluates a Stroke widget's `disabled` against the SELECTION.**
+/// `stk_miter_limit` declares `disabled: panel.join != "miter"`. The engine's
+/// Stroke scope was its stored panel state, whose `join` default is "miter",
+/// so it applied a miter-limit commit at a bevel join, which the Mac app, the
+/// web dock and the Swift runner all refuse: their scopes overlay the
+/// selection's stroke. The control is the same commit after Miter is chosen.
+#[test]
+fn a_stroke_commit_on_a_widget_the_selection_disables_is_refused() {
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let script = |steps: Value| serde_json::json!({
+        "item": "t", "setup_svg": "rect_with_stroke.svg", "tool": "selection", "app_state": {},
+        "steps": steps, "expected_json": "-"});
+    let press = serde_json::json!([{"kind": "press", "x": 36, "y": 18}, {"kind": "release", "x": 36, "y": 18}]);
+    let commit = serde_json::json!({"panel": "stroke_panel_content", "widget": "stk_miter_limit", "event": "commit", "value": "4"});
+    let miter = serde_json::json!({"panel": "stroke_panel_content", "widget": "stk_join_miter", "event": "click"});
+    let read = serde_json::json!({"read": "document"});
+    let at_bevel = replay(&script(serde_json::json!([press[0], press[1], commit, read])));
+    assert!(at_bevel.as_ref().is_err_and(|e| e.contains("Disabled")),
+        "a commit at a bevel join must be refused as Disabled, got {at_bevel:?}");
+    let at_miter = replay(&script(serde_json::json!([press[0], press[1], miter, commit, read])));
+    assert!(at_miter.as_ref().is_ok_and(|d| d.contains(r#""miter_limit":4.0"#)),
+        "the commit after Miter must run, got {at_miter:?}");
+}
+
 #[test]
 fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     // The ABI's counters are process-wide; the tests that read them serialise

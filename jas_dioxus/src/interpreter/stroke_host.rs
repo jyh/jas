@@ -20,6 +20,33 @@ use crate::interpreter::state_store::StateStore;
 /// The Stroke panel's id: the store scope its fields live in.
 pub const STROKE_PANEL: &str = "stroke_panel_content";
 
+/// The Stroke panel's fields that describe the SELECTION, read from it: the
+/// web dock's overlay (`dock_panel::build_live_panel_overrides`, the stroke
+/// block) and Swift's `strokePanelLiveOverrides`, key for key. With no stroke
+/// to read it is empty, and the panel keeps its stored state, as both docks
+/// do. The engine's scope (`panel_scope::engine_scope_open`) overlays it, so a
+/// `disabled` bind reads the selection's join and a display reads its weight.
+pub fn live_values(doc: &crate::document::document::Document) -> serde_json::Map<String, serde_json::Value> {
+    use serde_json::{json, Value};
+    let mut m = serde_json::Map::new();
+    let Some(s) = crate::document::controller::selection_stroke_for_panel(doc) else { return m };
+    m.insert("weight".into(), json!(s.width));
+    m.insert("cap".into(), Value::String(match s.linecap {
+        LineCap::Butt => "butt", LineCap::Round => "round", LineCap::Square => "square",
+    }.into()));
+    m.insert("join".into(), Value::String(match s.linejoin {
+        LineJoin::Miter => "miter", LineJoin::Round => "round", LineJoin::Bevel => "bevel",
+    }.into()));
+    m.insert("start_arrowhead".into(), Value::String(s.start_arrow.as_str().into()));
+    m.insert("end_arrowhead".into(), Value::String(s.end_arrow.as_str().into()));
+    m.insert("start_arrowhead_scale".into(), json!(s.start_arrow_scale));
+    m.insert("end_arrowhead_scale".into(), json!(s.end_arrow_scale));
+    m.insert("arrow_align".into(), Value::String(match s.arrow_align {
+        ArrowAlign::CenterAtEnd => "center_at_end", ArrowAlign::TipAtEnd => "tip_at_end",
+    }.into()));
+    m
+}
+
 /// The global `state.*` keys whose write reaches the selection (A11): the
 /// reference's `STROKE_RENDER_KEYS` (`workspace_interpreter/effects.py`), in
 /// its order. Swift keeps the same list. A test reads the reference's literal
