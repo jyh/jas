@@ -1924,6 +1924,48 @@ mod tests {
                     presents the back buffer either way");
     }
 
+    /// ⭐ NODE 15 (jas section 397): tracked flat text reaches the surface WITH
+    /// its spacing. The same `text_basic.svg` painted untracked and at `0.1em`
+    /// must differ in pixels; "returned OK" would pass a walk that dropped the
+    /// spacing, which is exactly what the WinUI certificate measured.
+    #[test]
+    fn tracked_text_paints_differently_from_untracked_text() {
+        let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+        let paint = |spacing: &str| {
+            let mut doc = crate::geometry::svg::svg_to_document(&svg);
+            fn track(e: &mut Element, spacing: &str) {
+                match e {
+                    // RED: the fixture's black text on a cleared surface reads as
+                    // the background, so the control below could not see it.
+                    Element::Text(t) => {
+                        t.letter_spacing = spacing.into();
+                        t.fill = Some(crate::geometry::element::Fill {
+                            color: crate::geometry::element::Color::rgb(1.0, 0.0, 0.0), opacity: 1.0,
+                        });
+                    }
+                    Element::Layer(l) => for c in l.children.iter_mut() { track(std::rc::Rc::make_mut(c), spacing) },
+                    _ => {}
+                }
+            }
+            for l in doc.layers.iter_mut() { track(l, spacing); }
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            let surface: IDXGISurface = t.cast().expect("surface");
+            let rc = unsafe { jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32) };
+            assert_eq!(rc, JAS_PAINT_OK, "tracked flat text must paint, not refuse (spacing {spacing:?})");
+            read(&dev, &ctx, &t)
+        };
+        let blank = {
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            read(&dev, &ctx, &t)
+        };
+        let plain = paint("");
+        assert_ne!(blank, plain, "control: the untracked text must reach the surface at all");
+        let tracked = paint("0.1em");
+        assert_ne!(plain, tracked, "the spacing must move the glyphs");
+    }
+
     /// An EMPTY document is complete, not incomplete. Nothing to draw is a
     /// legitimate state (a new file), and refusing it would make the app unable
     /// to open one.
