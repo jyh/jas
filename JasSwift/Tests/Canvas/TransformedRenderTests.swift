@@ -306,3 +306,60 @@ private func measure(_ buf: [UInt8]) -> (vertical: [Double], horizontal: [Double
     guard case .rect(let r) = t.child else { Issue.record("a rect child"); return }
     #expect(r.x == 3 && r.width == 12)
 }
+
+// MARK: - Route 4 slice 3b: editing a wrapped child through a path
+
+private func wrappedChildModel() -> Model {
+    let child: Element = .rect(Rect(x: 2, y: 2, width: 10, height: 10,
+                                    fill: Fill(color: black), stroke: Stroke(color: black, width: 1), id: "child"))
+    let w = TransformedElem(child: child, matrix: .scale(2, 3), scaleStrokes: false)
+    return Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                    selectedLayer: 0, selection: []))
+}
+
+/// A wrapper is a container with exactly one slot, so `[layer, w, 0]` addresses
+/// its child. A document-space drag of one corner reaches the child in its OWN
+/// space (the wrapper's frame is `W·M`, here scale(2,3)); the matrix, flag and
+/// own props are untouched; one undo restores it. Twin of Rust
+/// `moving_a_wrapped_childs_corner_edits_the_child_in_its_own_space`. Before
+/// slice 3b the path trapped in `childrenOf`.
+@Test func movingAWrappedChildsCornerEditsTheChildInItsOwnSpace() {
+    let model = wrappedChildModel()
+    let before = model.document
+    guard case .live(.transformed(let t0)) = before.getElement([0, 0]) else { Issue.record("a wrapper"); return }
+    let ctl = Controller(model: model)
+    ctl.setSelection([ElementSelection.partial([0, 0, 0], [2])])
+    ctl.moveSelection(dx: 4, dy: 3)
+    guard case .live(.transformed(let t)) = model.document.getElement([0, 0]) else {
+        Issue.record("still a wrapper"); return
+    }
+    let p0 = t0.child.controlPointPositions, p = t.child.controlPointPositions
+    #expect(p[2].0 - p0[2].0 == 2 && p[2].1 - p0[2].1 == 1, "moved (4,3)/(2,3) locally: \(p)")
+    for i in p.indices where i != 2 { #expect(p[i] == p0[i], "only the selected corner moves") }
+    #expect(t.matrix == t0.matrix && t.scaleStrokes == t0.scaleStrokes && t.transform == t0.transform)
+    model.undo()
+    #expect(model.document.layers == before.layers, "one undo restores it")
+}
+
+/// The frame a wrapper gives its child is its transform after its matrix, `W·M`.
+@Test func theAccumulatedTransformOfAWrappedChildIncludesTheMatrix() {
+    let model = wrappedChildModel()
+    #expect(accumulatedTransform(model.document, [0, 0, 0], includeOwn: true) == .scale(2, 3))
+    guard case .live(.transformed(var w)) = model.document.getElement([0, 0]) else { return }
+    w.transform = .translate(5, 7)
+    let doc = model.document.replaceElement([0, 0], with: .live(.transformed(w)))
+    let t = accumulatedTransform(doc, [0, 0, 0], includeOwn: true)!
+    let (x, y) = t.applyPoint(1, 1)
+    #expect(x == 7 && y == 10, "scale first, then translate")
+}
+
+/// A wrapped child's handles sit on its DRAWN corners. Twin of Rust
+/// `a_wrapped_childs_highlight_sits_where_the_child_is_drawn` (its squares).
+@Test func aWrappedChildsHandlesSitWhereTheChildIsDrawn() {
+    let doc = wrappedChildModel().document
+    let half = handleDrawSize / 2
+    let centres = selectionHandleRects(doc, [0, 0, 0]).map { ($0.minX + half, $0.minY + half) }
+        .sorted { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
+    #expect(centres.map { [$0.0, $0.1] } == [[4, 6], [4, 36], [24, 6], [24, 36]], "\(centres)")
+    #expect(selectionOutlineScale(doc, [0, 0, 0]) == 6.0.squareRoot(), "the pen counter-scales W·M")
+}
