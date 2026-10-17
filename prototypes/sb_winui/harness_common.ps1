@@ -3090,6 +3090,29 @@ function Read-SbInputScript([string]$Json) {
     foreach ($r in $reads) {
         if ($r -ne 'document') { return (& $no "read '$r': this driver compares only read=document") }
     }
+    # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
+    # SendInput delivers no motion for a zero-length move, so a click is sent
+    # as the user makes it. A press and release at DIFFERENT points with no
+    # move is a drag, and is refused here by name: the click form must never
+    # let a drag certify with the moves it never sent.
+    if ($acts.Count -eq 2 -and "$($acts[0].kind)" -eq 'press' -and "$($acts[1].kind)" -eq 'release') {
+        $cx = [double]$acts[0].x; $cy = [double]$acts[0].y
+        if ([double]$acts[1].x -ne $cx -or [double]$acts[1].y -ne $cy) {
+            return (& $no "a press at ($($acts[0].x),$($acts[0].y)) and a release at ($($acts[1].x),$($acts[1].y)) with no move is a drag, not a click: a drag needs at least one move")
+        }
+        $acts = @($acts[0]) + @($acts[1])
+        $clickHeld = @{}
+        foreach ($mod in @('shift', 'alt')) {
+            $on = @($acts | Where-Object { @($_.PSObject.Properties | ForEach-Object { $_.Name }) -contains $mod -and $_.$mod })
+            $clickHeld[$mod] = if ($on.Count -eq 0) { 'none' } elseif ($on.Count -eq 2) { 'press' } else { return (& $no "$mod on one step of a click is not held to the release") }
+        }
+        return [pscustomobject]@{
+            Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
+            DocX = $cx; DocY = $cy; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
+            Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
+            Keys = $keys.Count; KeyText = ($keys -join ';')
+        }
+    }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
         return (& $no 'the gesture is not one press, at least one move, one release')
     }
