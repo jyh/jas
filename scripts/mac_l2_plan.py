@@ -11,7 +11,6 @@ window lives here, so it runs (and self-tests) on any machine:
                               the canvas reports and the canvas's screen frame
   parse_view_report(text)     the canvas's accessibility value, `view z x y`
   menu_paths(menubar)         menu item id -> its title path in the Mac menubar
-  panel_menu_paths(menubar)   panel name -> the Window item that shows it
   set_aside_the_opens_artboard(got, want)
                               the Windows oracle's rule, and the Rust engine
                               replay's (`ffi_script_replay.rs`), here in Python
@@ -19,8 +18,9 @@ window lives here, so it runs (and self-tests) on any machine:
 The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a pointer or
 key step after a panel or menu step; a script with no `read`; and, for this
 channel, a `read` other than `document` (the tree and pixel reads are not built
-here). A menu id or a panel with no unique path in the menubar is refused by
-name, never guessed.
+here). A menu id with no unique path in the menubar is refused by name, never
+guessed. A panel is shown the way a person shows it on the Mac, by its dock tab,
+whose accessibility identifier is `<panel content id>_tab`.
 
 Usage:  python3 scripts/mac_l2_plan.py --self-test
         python3 scripts/mac_l2_plan.py --plan test_fixtures/input_scripts/X.json
@@ -64,8 +64,22 @@ def menu_paths(menubar):
     return paths
 
 
+def live_title(text):
+    """A live Mac menu title as the spec writes it. The Mac menubar draws a
+    checkable item's state INTO its title (`✓ Stroke`, `    Paragraph`), so
+    the mark and the indent are stripped before comparing."""
+    t = text or ""
+    if t.startswith("\u2713"):
+        t = t[1:]
+    return t.strip()
+
+
+TAB_SUFFIX = "_tab"
+
+
 def panel_menu_paths(menubar):
-    """Panel name -> the title path of the menu item that toggles it."""
+    """Panel name -> the title path of the Window item that toggles it. A
+    panel in no dock group has no tab; a person opens it from this item."""
     out = {}
 
     def walk(items, prefix):
@@ -93,10 +107,37 @@ def _even(v):
     return isinstance(v, (int, float)) and float(v).is_integer() and int(v) % 2 == 0
 
 
-def plan(script, menubar):
+def find_widget(spec, wid):
+    """The element with `id: wid` anywhere in a panel spec, or None."""
+    if isinstance(spec, dict):
+        if spec.get("id") == wid:
+            return spec
+        for v in spec.values():
+            hit = find_widget(v, wid)
+            if hit is not None:
+                return hit
+    elif isinstance(spec, list):
+        for v in spec:
+            hit = find_widget(v, wid)
+            if hit is not None:
+                return hit
+    return None
+
+
+def select_label(widget, value):
+    """A select's option label for `value`: the title its popup shows."""
+    for o in widget.get("options") or []:
+        if isinstance(o, dict) and str(o.get("value")) == str(value):
+            return o.get("label")
+    return None
+
+
+def plan(script, menubar, spec=None):
     """The script as acts: ("open", svg) ("tool", id) ("pointer", kind, x, y,
-    dragging, mods) ("key", key, mods) ("panel", panel_id, menu_path, widget,
-    event, value) ("menu", path) ("read", "document"). Raises Refused."""
+    dragging, mods) ("key", key, mods) ("panel", panel_id, tab_id,
+    window_path, widget, event, value, option_label) ("menu", path)
+    ("read", "document"). `spec` is the script's panel spec, parsed; a select
+    commit needs it for the option's label. Raises Refused."""
     item = script.get("item", "?")
     steps = script.get("steps") or []
     if not any(isinstance(s, dict) and "read" in s for s in steps):
@@ -129,13 +170,18 @@ def plan(script, menubar):
             pid = st["panel"]
             if not pid.endswith(PANEL_SUFFIX):
                 raise Refused(f"{item}: step {i} names panel {pid!r}, not a panel content id")
-            name = pid[: -len(PANEL_SUFFIX)]
-            path = panels.get(name)
-            if not path:
-                raise Refused(f"{item}: step {i}: no unique Window item shows panel {name!r}")
             if st.get("event") not in ("click", "commit"):
                 raise Refused(f"{item}: step {i} has panel event {st.get('event')!r}")
-            acts.append(("panel", pid, path, st["widget"], st["event"], st.get("value")))
+            # The Window item may be None (no unique item); the driver refuses
+            # only if it needs it, when the panel has no dock tab either.
+            label = None
+            w = find_widget(spec, st["widget"]) if spec is not None else None
+            if w is not None and w.get("type") == "select" and st["event"] == "commit":
+                label = select_label(w, st.get("value"))
+                if label is None:
+                    raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of select {st['widget']!r}")
+            acts.append(("panel", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]),
+                         st["widget"], st["event"], st.get("value"), label))
             late = late or "panel"
             continue
         if "menu" in st:
@@ -199,6 +245,15 @@ def set_aside_the_opens_artboard(got, want):
     return "{" + got[end + 2:]
 
 
+def load_spec(script):
+    import yaml
+    path = os.path.join(REPO, script.get("spec", ""))
+    if not script.get("spec", "").startswith("workspace/panels/") or not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
 def load_menubar():
     import yaml
     with open(os.path.join(REPO, "workspace", "menubar.yaml"), encoding="utf-8") as f:
@@ -235,7 +290,9 @@ def self_test():
     check("menu path strips the mnemonic", mp["menu_group"] == ["Object", "Group"])
     check("menu path walks a submenu", mp["menu_front"] == ["Object", "Arrange", "Bring to Front"])
     check("a twice-used id has no path", mp["menu_dup"] is None)
-    check("panel path", panel_menu_paths(mb) == {"stroke": ["Window", "Stroke"]})
+    check("a checked live title reads as its label", live_title("\u2713 Stroke") == "Stroke")
+    check("an unchecked live title reads as its label", live_title("    Paragraph") == "Paragraph")
+    check("a plain live title is unchanged", live_title("Group") == "Group")
 
     base = {"item": "t", "setup_svg": "s.svg", "tool": "selection"}
     press = {"kind": "press", "x": 36, "y": 18}
@@ -245,7 +302,18 @@ def self_test():
     acts = plan(dict(base, steps=[press, rel, pan, {"menu": "menu_group"}, read]), mb)
     check("plan opens, picks the tool, then the steps in order",
           [a[0] for a in acts] == ["open", "tool", "pointer", "pointer", "panel", "menu", "read"])
-    check("a panel act carries the Window path", acts[4][2] == ["Window", "Stroke"])
+    check("a panel act carries its dock tab's id", acts[4][2] == "stroke_panel_content_tab")
+    check("a panel act carries its Window item", acts[4][3] == ["Window", "Stroke"])
+    check("panel paths", panel_menu_paths(mb) == {"stroke": ["Window", "Stroke"]})
+    sel = {"content": [{"id": "op_mode", "type": "select",
+                        "options": [{"value": "normal", "label": "Normal"}, "separator",
+                                    {"value": "multiply", "label": "Multiply"}]}]}
+    sstep = {"panel": "opacity_panel_content", "widget": "op_mode", "event": "commit", "value": "multiply"}
+    check("a select commit carries its option label",
+          plan(dict(base, steps=[sstep, read]), mb, sel)[2][7] == "Multiply")
+    check("a select value that is not an option is refused",
+          refused(lambda: plan(dict(base, steps=[dict(sstep, value="nope"), read]), mb, sel), "not an option"))
+    check("a click carries no label", acts[4][7] is None)
     check("modifiers are carried", plan(dict(base, steps=[dict(press, shift=True), read]), mb)[2][5] == ("shift",))
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))
     check("a tree read is refused", refused(lambda: plan(dict(base, steps=[{"read": "tree"}]), mb), "document only"))
@@ -258,8 +326,8 @@ def self_test():
     check("a fractional unit is refused", refused(lambda: plan(dict(base, steps=[dict(press, y=18.5), read]), mb), "even"))
     check("an unknown menu id is refused", refused(lambda: plan(dict(base, steps=[{"menu": "nope"}, read]), mb), "'nope'"))
     check("a duplicate menu id is refused", refused(lambda: plan(dict(base, steps=[{"menu": "menu_dup"}, read]), mb), "menu_dup"))
-    check("a panel with no Window item is refused",
-          refused(lambda: plan(dict(base, steps=[dict(pan, panel="layers_panel_content"), read]), mb), "'layers'"))
+    check("a panel id that is not a content id is refused",
+          refused(lambda: plan(dict(base, steps=[dict(pan, panel="stk_content"), read]), mb), "not a panel content id"))
     check("an unknown step is refused", refused(lambda: plan(dict(base, steps=[{"wave": 1}, read]), mb), "wave"))
 
     check("view report parses", parse_view_report("view 1.0 0.0 0.0") == (1.0, 0.0, 0.0))
@@ -294,7 +362,8 @@ def self_test():
     for f in names:
         with open(os.path.join(d, f), encoding="utf-8") as fh:
             try:
-                plan(json.load(fh), real)
+                sc = json.load(fh)
+                plan(sc, real, load_spec(sc))
                 planned += 1
             except Refused as e:
                 fails.append(f"shipped script refused: {e}")
@@ -316,7 +385,8 @@ def main(argv):
         return self_test()
     if len(argv) == 3 and argv[1] == "--plan":
         with open(argv[2], encoding="utf-8") as f:
-            for act in plan(json.load(f), load_menubar()):
+            sc = json.load(f)
+            for act in plan(sc, load_menubar(), load_spec(sc)):
                 print(act)
         return 0
     print(__doc__)

@@ -189,8 +189,20 @@ struct YamlElementView: View {
     /// Anonymous widgets get `""`, which is the default anyway — the id is the
     /// YAML's own, so it is exactly the name a scenario file would use.
     var body: some View {
-        bodyContent
-            .accessibilityIdentifier((element["id"] as? String) ?? "")
+        if element["children"] != nil {
+            // A container is its own accessibility element CONTAINING its
+            // children, so each child keeps its own identifier. Without this
+            // the container's identifier spread down onto every descendant on
+            // the flex path: in the Color panel all 32 elements read
+            // `cp_content` and `cp_hex` could not be found (level-2 script
+            // `color.hex`, docs/TESTING.md section 6).
+            bodyContent
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier((element["id"] as? String) ?? "")
+        } else {
+            bodyContent
+                .accessibilityIdentifier((element["id"] as? String) ?? "")
+        }
     }
 
     @ViewBuilder
@@ -1481,13 +1493,20 @@ struct YamlElementView: View {
         let keyValue = ptValue.map { String(format: "%.6f", $0) } ?? "null"
         let stableId = "\(element["id"] as? String ?? "")-\(keyValue)"
 
-        TextField(placeholder, text: Binding<String>(
-            get: { displayValue },
-            // A blank entry clears a nullable field and is refused otherwise;
-            // a refused entry writes nothing, and the remount on the next
-            // write redisplays the prior value.
-            set: { newVal in widgetEvents?.commit(element, text: newVal) }
-        ))
+        // Buffered: the text commits on Enter or blur, never per keystroke.
+        // A `Binding.set` here committed EVERY keystroke, and the commit's new
+        // value changed `stableId`, so the remount took focus away after one
+        // character: typing "50" into X committed 5 (found by the level-2
+        // script `properties.x`, docs/TESTING.md section 6). number_input
+        // buffers for the same reason.
+        // A blank entry clears a nullable field and is refused otherwise;
+        // a refused entry writes nothing, and the remount on the next
+        // write redisplays the prior value.
+        BufferedTextField(
+            placeholder: placeholder,
+            externalValue: displayValue,
+            commit: { newVal in widgetEvents?.commit(element, text: newVal) }
+        )
             .id(stableId)
             .textFieldStyle(.roundedBorder)
             // Text follows the window color scheme (see renderNumberInput):

@@ -122,9 +122,9 @@ What exists:
 
 What level 2 needs, in the order the census prices it:
 1. An input script driven through the **live** app, with the document read back. On Windows it runs:
-   `prove_e2e.ps1 -Script` replays `selection.drag` and reads it back byte for byte. On the Mac the driver is built
-   (`jas_gui_harness.py script`, below) and self-tested without a window; it has not yet been run against the live
-   app, so no Mac level-2 result exists.
+   `prove_e2e.ps1 -Script` replays `selection.drag` and reads it back byte for byte. On the Mac,
+   `jas_gui_harness.py script` (below) drives every shipped script through the live app: on 2026-10-17 all 41 read
+   back byte for byte equal to their level-1 expected files.
 2. A reader of the **rendered** widget tree: accessibility identifiers on macOS, UI Automation on Windows. (Dialogs
    are in the widget-tree pass.)
 3. **Pixel baselines** for panels, dialogs and icons. The tool that refuses a baseline change with no spec change
@@ -208,15 +208,24 @@ each live app:
      Its value is the view it has (`view z x y`), so the driver reads the mapping back instead of assuming it.
    * Pointer and key steps are real Quartz events at the canvas's screen frame plus the document point. A script's
      `ctrl` is posted as Cmd, the Mac's command modifier.
-   * A panel step finds AXIdentifier = widget id inside AXIdentifier = panel content id. If the panel is not
-     shown, the driver first chooses its Window menu item, as a person does. A click is AXPress. A commit sets AXValue
-     and then presses Return.
-   * A menu step presses the menubar item at its title path, derived from the spec's labels.
+   * A panel step finds AXIdentifier = widget id inside AXIdentifier = panel content id (the dock wraps each
+     panel body in one containing element with that id). If the panel is not shown, the driver first presses its
+     dock tab, AXIdentifier `<panel content id>_tab`, as a person clicks it, or, for a panel in no dock group, its
+     Window menu item. A click is AXPress. A commit focuses the field and types the text, then Return. (Setting
+     AXValue on a SwiftUI text field does not reach its binding.) A select's commit opens its popup and chooses the
+     item titled with the option's label, which the planner reads from the panel spec.
+   * A menu step presses the menubar item at its title path, derived from the spec's labels. The Mac draws a
+     checkable item's state into its title (`✓ Stroke`), so titles are compared without it.
    * Refused by name: `meta`, a pointer or key step after a panel or menu step, a read other than `document`, a menu
      id or panel with no unique path, a widget that is not found, found twice or disabled, and an odd or fractional
      unit.
    * The driver also refuses to run while the console has seen input in the last 120 s, and refuses a pointer or key
      act unless Jas is frontmost. Real events land wherever the pointer is.
+   * Modifiers are released before and after every script. A flag-carrying event leaks its modifier into later
+     input, and a stuck Shift or Alt turned later drags into constrained or copying drags.
+   * With `JAS_APP` set, each script gets a fresh app, as each level-1 runner starts from a fresh store. A
+     `--test-fifo` launch neither restores nor saves the app's session (its open tabs), so a run never overwrites a
+     developer's tabs or hands one script's edited document to the next.
 3. **Level 2 on Windows:** `send_hand.ps1` replays pointer steps (shift held from the press or the first move), then
    key steps, which it delivers after the release as real key events (`keybd_event`), so the shell's own key route
    runs. Panel steps come last, by UI Automation. The hand first opens the script's panel as a person does, choosing

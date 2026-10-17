@@ -146,3 +146,16 @@ public enum FifoRead {
             .write(to: URL(fileURLWithPath: path), options: .atomic)
     }
 }
+
+/// What a `--test-fifo` launch changes beyond the FIFO itself.
+public enum TestHarness {
+    /// A harness launch neither restores nor saves the session
+    /// (`~/Library/Application Support/Jas/session`). A level-2 run launches
+    /// and quits the app once per script, so saving would overwrite the
+    /// developer's open tabs, and restoring would hand one script's edited
+    /// documents to the next. Read from the arguments, so launch order
+    /// cannot matter.
+    public static func isolatesSession(_ args: [String] = CommandLine.arguments) -> Bool {
+        args.contains("--test-fifo")
+    }
+}

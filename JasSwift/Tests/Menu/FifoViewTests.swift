@@ -100,3 +100,13 @@ private func viewModel() -> Model {
     try FifoRead.write(m, to: path)
     #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == bytes)
 }
+
+@Test func aTestFifoLaunchNeverTouchesTheSession() {
+    // A level-2 harness launches and quits the app once per script. The app
+    // saves its open tabs on quit and restores them on launch, so a harness
+    // run used to overwrite the developer's session and then replay one
+    // script's edits into the next. Under `--test-fifo` neither happens.
+    #expect(TestHarness.isolatesSession(["Jas", "--title", "T", "--test-fifo", "/tmp/f"]))
+    #expect(!TestHarness.isolatesSession(["Jas", "--title", "T"]))
+    #expect(!TestHarness.isolatesSession(["Jas", "--mcp-socket", "/tmp/s"]))
+}
