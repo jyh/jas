@@ -187,15 +187,43 @@ overlay) and `doc.scale.apply` (mutates the document) consume:
 For each element in the selection (deduplicated by tree-path
 identity per `project_element_identity_paths.md`):
 
-1. **Geometry.** Every coordinate in the element's path commands
-   or shape parameters is mapped via the affine transform centered
-   at the reference point with factors `(sx, sy)`.
-2. **Stroke width.** When `state.scale_strokes` is true, the
-   element's `stroke-width` is multiplied by the unsigned
-   geometric mean `√(|sx · sy|)`. When false, `stroke-width` is
-   preserved. For elements with `jas:stroke-brush` set, the
-   per-instance `size` override (or, in its absence, the brush's
-   nominal size) is scaled by the same factor.
+1. **Geometry.** The element is scaled by the affine transform
+   centered at the reference point with factors `(sx, sy)`. Its
+   rendered geometry is every coordinate mapped by that transform;
+   the scale itself stays in the element tree (see 2), so the
+   element keeps its kind (a rectangle stays a rectangle).
+2. **Stroke width.** Ruled by the owner, council 2026-10-16 (ask 4),
+   in his words, for a non-uniform scale (the uniform case agrees
+   with both):
+   * **Scale Strokes OFF:** *"the stroke should stay 1pt."* A
+     1 pt stroke reads 1 pt on every edge after the scale, at any
+     `(sx, sy)`. A 200 % × 300 % scale of a 1 pt rectangle is the
+     witness: 1 pt on all four edges.
+   * **Scale Strokes ON:** *"the result should be identical to
+     converting the stroke to outlines, then scaling."* So under a
+     non-uniform scale the stroke is uneven: 2 pt on the edges
+     scaled by 200 % and 3 pt on those scaled by 300 %, for a 1 pt
+     stroke. (This replaces the geometric mean `√(|sx · sy|)` this
+     clause stated before; the two agree only when `sx = sy`.)
+   * **And the operation is LIVE:** *"the transform remains in the
+     element tree, and the rectangle stays a rectangle."* Under his
+     principle (*"the artist is never afraid because nothing is
+     ever destroyed … every operation is live"*), pushing the
+     scale down into the coordinates is an exception that must be
+     stated where it is taken, never the method.
+   For elements with `jas:stroke-brush` set, the per-instance `size`
+   override (or, in its absence, the brush's nominal size) follows
+   the same rule.
+
+   **Status, 2026-10-16:** ON holds in both ports: the scale is
+   stored as the element's transform, and a stroke drawn under a
+   transform is drawn outlined-then-scaled (MEASURED at the display
+   list for a uniform scale; for a non-uniform one it rests on the
+   renderers' stroke model, not yet measured). OFF holds for a
+   UNIFORM scale only
+   (the stored width is divided by `|s|`); for a non-uniform scale
+   it does not yet, and the route is being costed (a non-scaling
+   stroke, or a live scale operation).
 3. **Rounded corners.** When `state.scale_corners` is true and the
    element is a `rounded_rect`: `rx ← rx · |sx|` and
    `ry ← ry · |sy|`. Other element types: no-op. When
