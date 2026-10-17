@@ -694,6 +694,32 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(missSel.isEmpty)
 }
 
+/// A Bezier HANDLE is grabbed where it is DRAWN and dragged in DOCUMENT space,
+/// as a pair. A curve whose middle anchor (30, 0) has its in-handle at (20, 10),
+/// inside a group at matrix(2,0,0,2,100,0): drawn at (140, 20); a (10, 10) drag
+/// moves it (5, 5) locally. Twin of Rust
+/// `a_bezier_handle_is_grabbed_where_drawn_and_dragged_in_document_space`.
+@Test func aBezierHandleIsGrabbedWhereDrawnAndDraggedInDocumentSpace() {
+    let curve: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 10, y1: 10, x2: 20, y2: 10, x: 30, y: 0),
+        .curveTo(x1: 40, y1: -10, x2: 50, y2: -10, x: 60, y: 0),
+    ]
+    let group: Element = .group(Group(children: [.path(Path(d: curve, fillRule: .nonzero))],
+                                      transform: Transform(a: 2, b: 0, c: 0, d: 2, e: 100, f: 0)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])],
+                                         selectedLayer: 0, selection: [ElementSelection.all([0, 0, 0])]))
+    let store = StateStore()
+    let fx = buildYamlToolEffects(model: model)
+    runEffects([["doc.path.probe_partial_hit": ["x": 140, "y": 20, "hit_radius": 4]]], ctx: [:], store: store, platformEffects: fx)
+    #expect(store.getTool("partial_selection", "mode") as? String == "handle", "the drawn handle is a hit")
+    #expect(store.getTool("partial_selection", "handle_type") as? String == "in")
+    runEffects([["doc.move_path_handle": ["dx": 10, "dy": 10]]], ctx: [:], store: store, platformEffects: fx)
+    guard case .path(let p) = model.document.getElement([0, 0, 0]),
+          case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] else { Issue.record("a curve"); return }
+    #expect(x2 == 25 && y2 == 15, "moved (5,5) locally: \(p.d[1])")
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()
