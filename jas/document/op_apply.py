@@ -974,10 +974,8 @@ def _compose_matrix_over_paths(doc, paths, matrix, stroke_factor, corners):
         elem = dataclasses.replace(elem, transform=matrix.multiply(current))
         if stroke_factor is not None:
             elem = _scale_stroke_width(elem, stroke_factor)
-        if corners is not None and isinstance(elem, RectElem):
-            sx_abs, sy_abs = corners
-            elem = dataclasses.replace(
-                elem, rx=elem.rx * sx_abs, ry=elem.ry * sy_abs)
+        if corners is not None:
+            elem = _scale_corners(elem, *corners)
         new_doc = new_doc.replace_element(path, elem)
     return new_doc
 
@@ -995,6 +993,27 @@ def _scale_stroke_width(elem, factor):
     if stroke is None:
         return elem
     return dataclasses.replace(elem, stroke=dataclasses.replace(stroke, width=stroke.width * factor))
+
+
+def _scale_corners(elem, sx_abs, sy_abs):
+    """Scale a rounded rect's rx/ry; a container passes the factors to every
+    rect under it. Mirrors the Rust ``scale_elem_corners``."""
+    import dataclasses
+    from geometry.element import Group, Rect as RectElem
+    if isinstance(elem, Group):
+        return dataclasses.replace(
+            elem, children=tuple(_scale_corners(c, sx_abs, sy_abs) for c in elem.children))
+    if isinstance(elem, RectElem):
+        return dataclasses.replace(elem, rx=elem.rx * sx_abs, ry=elem.ry * sy_abs)
+    return elem
+
+
+def corner_compensation(sx: float, sy: float, scale_corners: bool):
+    """Under the stored transform the radii already draw x|sx|, x|sy|: Scale
+    Corners ON leaves them (None), OFF divides. Mirrors the Rust
+    ``corner_compensation``."""
+    # A degenerate (zero) factor collapses the shape: nothing to compensate.
+    return None if scale_corners or sx == 0 or sy == 0 else (1.0 / abs(sx), 1.0 / abs(sy))
 
 
 def stroke_compensation(sx: float, sy: float, scale_strokes: bool) -> float | None:
@@ -1020,7 +1039,7 @@ def apply_scale(model: Model, sx: float, sy: float, rx: float, ry: float,
     targets = selection_to_ids(model.document)
     matrix = scale_matrix(sx, sy, rx, ry)
     stroke_factor = stroke_compensation(sx, sy, scale_strokes)
-    corners = (abs(sx), abs(sy)) if scale_corners else None
+    corners = corner_compensation(sx, sy, scale_corners)
     model.document = _compose_matrix_over_paths(
         model.document, _selection_paths(model.document), matrix,
         stroke_factor, corners)

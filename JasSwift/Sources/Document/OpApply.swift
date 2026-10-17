@@ -1440,6 +1440,13 @@ func composeMatrixOverPaths(
 /// the width (nil), OFF divides it. Exact for a uniform scale; the non-uniform
 /// residue is a spec question (10-17 pack ask 4). Mirrors Rust
 /// `op_apply::stroke_compensation`.
+func cornerCompensation(sx: Double, sy: Double, scaleCorners: Bool) -> (Double, Double)? {
+    // Mirrors Rust `op_apply::corner_compensation`: under the stored transform
+    // the radii already draw ×|sx|, ×|sy|; ON leaves them, OFF divides.
+    // A degenerate (zero) factor collapses the shape: nothing to compensate.
+    scaleCorners || sx == 0 || sy == 0 ? nil : (1.0 / abs(sx), 1.0 / abs(sy))
+}
+
 func strokeCompensation(sx: Double, sy: Double, scaleStrokes: Bool) -> Double? {
     let f = TransformApply.strokeWidthFactor(sx: sx, sy: sy)
     // A degenerate (zero) factor collapses the shape: nothing to compensate.
@@ -1469,14 +1476,19 @@ func scaleElemStrokeWidth(_ elem: Element, _ factor: Double) -> Element {
 
 /// Scale a rounded-rect's rx/ry (no-op on other element types).
 private func scaleElemCorners(_ elem: Element, _ sxAbs: Double, _ syAbs: Double) -> Element {
-    if case .rect(let r) = elem {
-        return .rect(Rect(
-            x: r.x, y: r.y, width: r.width, height: r.height,
-            rx: r.rx * sxAbs, ry: r.ry * syAbs,
-            fill: r.fill, stroke: r.stroke, opacity: r.opacity,
-            transform: r.transform, locked: r.locked, visibility: r.visibility))
+    switch elem {
+    // A container's transform scales the rects under it. Mirrors Rust.
+    case .group(let g): return .group(g.withChildren(g.children.map { scaleElemCorners($0, sxAbs, syAbs) }))
+    case .layer(let l): return .layer(l.withChildren(l.children.map { scaleElemCorners($0, sxAbs, syAbs) }))
+    case .rect(let r):
+        // Clone, then mutate: the field-by-field rebuild this replaced dropped
+        // id, name, both gradients, mask and blend mode (2026-10-16).
+        var v = r
+        v.rx = r.rx * sxAbs
+        v.ry = r.ry * syAbs
+        return .rect(v)
+    default: return elem
     }
-    return elem
 }
 
 /// The resolved selection path list (in selection order).
@@ -1494,7 +1506,7 @@ func applyScale(
     let targets = selectionToIds(model.document)
     let matrix = TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
     let strokeFactor = strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes)
-    let corners = scaleCorners ? (abs(sx), abs(sy)) : nil
+    let corners = cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners)
     let paths = selectionPaths(model.document)
     model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners))
     return (true, targets)

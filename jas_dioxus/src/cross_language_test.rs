@@ -2056,6 +2056,87 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "web")]
+    /// Every point of every filled path, through the transform stack around
+    /// it: the geometry as DRAWN.
+    fn drawn_fill_points(doc: &crate::document::document::Document) -> Vec<(f64, f64)> {
+        use crate::geometry::element::{PathCommand, Transform};
+        use crate::painter::recording::{Command, RecordingPainter};
+        let mut rec = RecordingPainter::new();
+        crate::document::paint::emit_document(&mut rec, doc, crate::geometry::live::DEFAULT_PRECISION);
+        let mut stack: Vec<Transform> = vec![Transform::IDENTITY];
+        let mut pts = vec![];
+        for c in rec.commands() {
+            match c {
+                Command::PushState { transform } => { let top = *stack.last().unwrap(); stack.push(top.multiply(transform)); }
+                Command::PopState => { stack.pop(); }
+                Command::FillPath { path, .. } => {
+                    let m = *stack.last().unwrap();
+                    for pc in path {
+                        match *pc {
+                            PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => pts.push(m.apply_point(x, y)),
+                            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
+                                pts.push(m.apply_point(x1, y1)); pts.push(m.apply_point(x2, y2)); pts.push(m.apply_point(x, y));
+                            }
+                            PathCommand::QuadTo { x1, y1, x, y } => {
+                                pts.push(m.apply_point(x1, y1)); pts.push(m.apply_point(x, y));
+                            }
+                            PathCommand::ClosePath => {}
+                            // An arc's radii are local: under an axis-aligned
+                            // transform (b = c = 0, asserted) they draw at
+                            // rx·|a| and ry·|d|, carried as a pseudo-point.
+                            PathCommand::ArcTo { rx, ry, x, y, .. } => {
+                                assert!(m.b.abs() < 1e-12 && m.c.abs() < 1e-12, "axis-aligned only: {m:?}");
+                                pts.push(m.apply_point(x, y)); pts.push((rx * m.a.abs(), ry * m.d.abs()));
+                            }
+                            other => panic!("drawn_fill_points does not read {other:?}"),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        pts
+    }
+
+    #[cfg(feature = "web")]
+    /// SCALE_TOOL.md § Apply behavior, Scale Corners: ON scales a rounded
+    /// rect's radii with it (rx ← rx·|sx|), OFF keeps them. So a 150 % scale of
+    /// a 72 × 36 rect with radius 6 about its centre is DRAWN as the 108 × 54
+    /// rect at (-18, -9) with radius 9 (ON) or 6 (OFF), whatever the document
+    /// stores.
+    #[test]
+    fn a_scaled_rounded_rects_drawn_radius_follows_scale_corners() {
+        let svg = |x: f64, y: f64, w: f64, h: f64, r: f64| format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="0 0 96 48" width="96" height="48">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{r}" ry="{r}" fill="rgb(0,0,255)" stroke="none"/>
+  </g>
+</svg>"#);
+        // SVG px; the codec reads 0.75 pt per px, so build both from one unit.
+        let setup = svg(0.0, 0.0, 96.0, 48.0, 8.0);
+        let mut wrong = vec![];
+        for (scale_corners, r) in [(true, 12.0), (false, 8.0)] {
+            let tc = serde_json::json!({
+                "name": "drawn", "setup_svg": "inline", "selection": [[0, 0]],
+                "actions": [{"action": "scale_options_confirm", "params": {
+                    "uniform": true, "uniform_pct": 150, "horizontal_pct": 100, "vertical_pct": 100,
+                    "scale_strokes": true, "scale_corners": scale_corners, "preview": false, "copy": false}}],
+            });
+            let st = crate::recorder::replay::run_action_case(&tc, &setup);
+            let got = drawn_fill_points(st.tabs[st.active_tab].model.document());
+            let want_doc = crate::geometry::svg::svg_to_document(&svg(-24.0, -12.0, 144.0, 72.0, r));
+            let want = drawn_fill_points(&want_doc);
+            let far = got.len() != want.len() || got.iter().zip(&want)
+                .any(|(a, b)| (a.0 - b.0).abs() > 1e-3 || (a.1 - b.1).abs() > 1e-3);
+            if far || got.is_empty() {
+                wrong.push(format!("scale_corners={scale_corners}: drawn {got:?}\n  want {want:?}"));
+            }
+        }
+        assert!(wrong.is_empty(), "a radius-8 px rect scaled 150 %: {}", wrong.join("\n"));
+    }
+
+    #[cfg(feature = "web")]
     /// Bootstrap: cargo test generate_script_expected -- --ignored
     #[test]
     #[ignore]
