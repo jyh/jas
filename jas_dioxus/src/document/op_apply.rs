@@ -1485,11 +1485,10 @@ pub fn compose_matrix_over_paths(
 /// transform draws the stroke anisotropically, which only mapping the
 /// coordinates could avoid (a spec question, his: 10-17 pack ask 4).
 pub fn stroke_compensation(sx: f64, sy: f64, scale_strokes: bool) -> Option<f64> {
-    if scale_strokes {
-        None
-    } else {
-        Some(1.0 / crate::algorithms::transform_apply::stroke_width_factor(sx, sy))
-    }
+    let f = crate::algorithms::transform_apply::stroke_width_factor(sx, sy);
+    // A degenerate scale (a zero factor) collapses the shape: nothing to
+    // compensate, and 1/0 would write an infinite width.
+    if scale_strokes || f == 0.0 { None } else { Some(1.0 / f) }
 }
 
 /// Multiply an element's stroke-width by `factor` in place (no-op without a
@@ -3327,5 +3326,19 @@ mod paste_stacking_tests {
             vec![24.0, 24.0, 24.0],
             "single-slot run: A's count did not survive B"
         );
+    }
+}
+
+#[cfg(test)]
+mod stroke_compensation_tests {
+    use super::stroke_compensation;
+
+    #[test]
+    fn on_leaves_the_width_off_divides_and_a_zero_scale_compensates_nothing() {
+        assert_eq!(stroke_compensation(1.5, 1.5, true), None);
+        assert!((stroke_compensation(1.5, 1.5, false).unwrap() - 1.0 / 1.5).abs() < 1e-12);
+        // A 0 % scale collapses the shape; 1/0 would write an infinite width.
+        assert_eq!(stroke_compensation(0.0, 2.0, false), None);
+        assert_eq!(stroke_compensation(2.0, 0.0, false), None);
     }
 }

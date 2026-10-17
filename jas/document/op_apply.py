@@ -1003,7 +1003,9 @@ def stroke_compensation(sx: float, sy: float, scale_strokes: bool) -> float | No
     which already scales the drawn stroke by sqrt|sx*sy|: Scale Strokes ON leaves
     the width (None), OFF divides it. Mirrors the Rust ``stroke_compensation``."""
     from jas.algorithms.transform_apply import stroke_width_factor
-    return None if scale_strokes else 1.0 / stroke_width_factor(sx, sy)
+    f = stroke_width_factor(sx, sy)
+    # A degenerate (zero) factor collapses the shape: nothing to compensate.
+    return None if scale_strokes or f == 0 else 1.0 / f
 
 
 def _selection_paths(doc) -> list[tuple[int, ...]]:

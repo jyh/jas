@@ -1441,7 +1441,9 @@ func composeMatrixOverPaths(
 /// residue is a spec question (10-17 pack ask 4). Mirrors Rust
 /// `op_apply::stroke_compensation`.
 func strokeCompensation(sx: Double, sy: Double, scaleStrokes: Bool) -> Double? {
-    scaleStrokes ? nil : 1.0 / TransformApply.strokeWidthFactor(sx: sx, sy: sy)
+    let f = TransformApply.strokeWidthFactor(sx: sx, sy: sy)
+    // A degenerate (zero) factor collapses the shape: nothing to compensate.
+    return scaleStrokes || f == 0 ? nil : 1.0 / f
 }
 
 /// Multiply an element's stroke-width by `factor` (no-op without a stroke). A

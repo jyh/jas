@@ -1892,3 +1892,13 @@ private func num(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue ?? (v as?
     #expect(num(b?["roundness"]) == 50.5)
     #expect(num(b?["size"]) == 12.5)
 }
+
+// MARK: - strokeCompensation (Scale Strokes under a stored transform)
+
+@Test func strokeCompensationOnLeavesOffDividesAndAZeroScaleCompensatesNothing() {
+    #expect(strokeCompensation(sx: 1.5, sy: 1.5, scaleStrokes: true) == nil)
+    #expect(abs(strokeCompensation(sx: 1.5, sy: 1.5, scaleStrokes: false)! - 1.0 / 1.5) < 1e-12)
+    // A 0 % scale collapses the shape; 1/0 would write an infinite width.
+    #expect(strokeCompensation(sx: 0, sy: 2, scaleStrokes: false) == nil)
+    #expect(strokeCompensation(sx: 2, sy: 0, scaleStrokes: false) == nil)
+}
