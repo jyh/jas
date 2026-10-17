@@ -2734,7 +2734,11 @@ fn draw_selection_overlays(ctx: &CanvasRenderingContext2d, doc: &Document) {
         // restore() stood (see CtxSaveGuard).
         {
             let _ctx_guard = CtxSaveGuard::new(ctx);
-            apply_transform(ctx, elem.transform());
+            // The FULL local-to-document frame (ancestors included), as
+            // the native overlay does, so a wrapped child or a grouped
+            // child's outline sits where it is drawn.
+            let frame = crate::document::evaluated_bounds::accumulated_transform(doc, &es.path, true);
+            apply_transform(ctx, frame.as_ref());
 
             // Counter-scale the fixed outline pen width by the element
             // transform's scale (selection_outline_scale) so the outline trace

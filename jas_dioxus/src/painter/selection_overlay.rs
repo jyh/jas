@@ -45,7 +45,11 @@ pub fn draw_selection_overlays(ctx: &mut OverlayCtx, doc: &Document) {
         // The outline is traced UNDER the element transform, with the pen
         // counter-scaled so it stays 1 px; the squares below are drawn after
         // the transform is undone.
-        let transformed = if let Some(t) = elem.transform() {
+        // The FULL local-to-document frame, not only the element's own
+        // transform: a child of a transformed group or wrapper is drawn under
+        // its ancestors' frames too (route 4 slice 3b).
+        let frame = crate::document::evaluated_bounds::accumulated_transform(doc, &es.path, true);
+        let transformed = if let Some(t) = frame.as_ref() {
             ctx.transform(t);
             true
         } else {
@@ -241,6 +245,32 @@ mod tests {
         let white = Color::new(1.0, 1.0, 1.0, 1.0);
         assert_eq!(f.iter().filter(|q| q.4 == blue()).count(), 1, "{f:?}");
         assert_eq!(f.iter().filter(|q| q.4 == white).count(), 3, "{f:?}");
+    }
+
+    /// A WRAPPED CHILD (`[0, 0, 0]` inside a scale(2,3) Transformed wrapper)
+    /// is highlighted where it is DRAWN: its squares sit on the mapped corners,
+    /// and its outline is traced under the frame `W·M` the wrapper gives it.
+    /// Before route 4 slice 3b the path did not resolve and nothing was drawn.
+    #[test]
+    fn a_wrapped_childs_highlight_sits_where_the_child_is_drawn() {
+        use crate::geometry::element::Transform;
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let w = TransformedElem::new(std::rc::Rc::new(rect(2.0, 2.0, 10.0, 10.0)), Transform::scale(2.0, 3.0), false);
+        let mut m = model_with(vec![Element::Live(LiveVariant::Transformed(w))], &[]);
+        let mut doc = m.document().clone();
+        doc.selection = vec![ElementSelection::partial(vec![0, 0, 0], [2])];
+        m.set_document_for_test(doc);
+        let cmds = drawn(m.document());
+        let h = HANDLE_DRAW_SIZE / 2.0;
+        let mut centres: Vec<(f64, f64)> = fills(&cmds).iter().map(|q| (q.0 + h, q.1 + h)).collect();
+        centres.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(centres, vec![(4.0, 6.0), (4.0, 36.0), (24.0, 6.0), (24.0, 36.0)], "{cmds:?}");
+        let pushed: Vec<Transform> = cmds.iter().filter_map(|c| match c {
+            Command::PushState { transform } => Some(*transform),
+            _ => None,
+        }).collect();
+        assert_eq!(pushed, vec![Transform::scale(2.0, 3.0)], "the outline is traced under W·M");
+        assert!(cmds.iter().any(|c| matches!(c, Command::StrokePath { .. })));
     }
 
     /// A selected GROUP is one box around its contents, with no squares.
