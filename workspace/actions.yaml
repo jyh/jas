@@ -3715,6 +3715,13 @@ actions:
           sx:   "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0"
           sy:   "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0"
           copy: "param.copy"
+          # The flags are PASSED, never read back from state: the confirm's own
+          # `set` above writes state.scale_strokes, but an action's evaluation
+          # context carries its own `state` map, which shadows the store, so
+          # the apply read the default and ignored Scale Strokes OFF
+          # (2026-10-16).
+          scale_strokes: "param.scale_strokes"
+          scale_corners: "param.scale_corners"
           # OP_LOG.md §9 Phase P7: the CONFIRM apply journals one scale_transform
           # op (a bracketed edit recording the resolved matrix params). Only the
           # confirm path sets journal:true; the preview path below omits it so it
@@ -3737,6 +3744,8 @@ actions:
           sx:   "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.horizontal_pct / 100.0"
           sy:   "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0"
           copy: "false"
+          scale_strokes: "dialog.scale_strokes"
+          scale_corners: "dialog.scale_corners"
 
   scale_options_reset:
     description: >

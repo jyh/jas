@@ -1434,8 +1434,27 @@ func composeMatrixOverPaths(
     return newDoc
 }
 
-/// Multiply an element's stroke-width by `factor` (no-op without a stroke).
-private func scaleElemStrokeWidth(_ elem: Element, _ factor: Double) -> Element {
+/// The factor the STORED stroke width is multiplied by, so the DRAWN width is
+/// what SCALE_TOOL.md § Apply behavior says. The scale is stored as a transform,
+/// which already scales the drawn stroke by √|sx·sy|: Scale Strokes ON leaves
+/// the width (nil), OFF divides it. Exact for a uniform scale; the non-uniform
+/// residue is a spec question (10-17 pack ask 4). Mirrors Rust
+/// `op_apply::stroke_compensation`.
+func strokeCompensation(sx: Double, sy: Double, scaleStrokes: Bool) -> Double? {
+    let f = TransformApply.strokeWidthFactor(sx: sx, sy: sy)
+    // A degenerate (zero) factor collapses the shape: nothing to compensate.
+    return scaleStrokes || f == 0 ? nil : 1.0 / f
+}
+
+/// Multiply an element's stroke-width by `factor` (no-op without a stroke). A
+/// container has no stroke of its own: the factor reaches every leaf under it,
+/// since the container's transform scales them all. Mirrors Rust.
+func scaleElemStrokeWidth(_ elem: Element, _ factor: Double) -> Element {
+    switch elem {
+    case .group(let g): return .group(g.withChildren(g.children.map { scaleElemStrokeWidth($0, factor) }))
+    case .layer(let l): return .layer(l.withChildren(l.children.map { scaleElemStrokeWidth($0, factor) }))
+    default: break
+    }
     guard let stroke = elem.stroke else { return elem }
     let newStroke = Stroke(
         color: stroke.color, width: stroke.width * factor,
@@ -1474,7 +1493,7 @@ func applyScale(
     if isScaleIdentity(sx, sy) { return (false, []) }
     let targets = selectionToIds(model.document)
     let matrix = TransformApply.scaleMatrix(sx: sx, sy: sy, rx: rx, ry: ry)
-    let strokeFactor = scaleStrokes ? TransformApply.strokeWidthFactor(sx: sx, sy: sy) : nil
+    let strokeFactor = strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes)
     let corners = scaleCorners ? (abs(sx), abs(sy)) : nil
     let paths = selectionPaths(model.document)
     model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners))

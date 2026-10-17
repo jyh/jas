@@ -205,17 +205,6 @@
         "visibility",
         "xmlLang"
       ]
-    },
-    "JasSwift/Sources/Tools/YamlToolEffects.swift::Rect": {
-      "sites": 1,
-      "missing": [
-        "blendMode",
-        "fillGradient",
-        "id",
-        "mask",
-        "name",
-        "strokeGradient"
-      ]
     }
   }
 }

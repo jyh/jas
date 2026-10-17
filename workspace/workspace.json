@@ -5547,6 +5547,8 @@
             "sx": "if param.uniform then param.uniform_pct / 100.0 else param.horizontal_pct / 100.0",
             "sy": "if param.uniform then param.uniform_pct / 100.0 else param.vertical_pct / 100.0",
             "copy": "param.copy",
+            "scale_strokes": "param.scale_strokes",
+            "scale_corners": "param.scale_corners",
             "journal": true
           }
         },
@@ -5569,7 +5571,9 @@
           "doc.scale.apply": {
             "sx": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.horizontal_pct / 100.0",
             "sy": "if dialog.uniform then dialog.uniform_pct / 100.0 else dialog.vertical_pct / 100.0",
-            "copy": "false"
+            "copy": "false",
+            "scale_strokes": "dialog.scale_strokes",
+            "scale_corners": "dialog.scale_corners"
           }
         }
       ]
