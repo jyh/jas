@@ -185,7 +185,10 @@ each live app:
 1. **Level 1:** each port's core, through the corpus runner. This is the EXPECTED read-back. It replays pointer and
    key steps and refuses a panel step by name.
 2. **Level 2 on the Mac:** `jas_gui_harness.py` for pointer and key steps; a panel step by accessibility identifier.
-3. **Level 2 on Windows:** `send_hand.ps1` and its key injector; a panel step by UI Automation.
+3. **Level 2 on Windows:** `send_hand.ps1` replays pointer steps (shift held from the press or the first move), then
+   key steps, which it delivers after the release as real key events (`keybd_event`), so the shell's own key route
+   runs. A key step inside the gesture, `meta`, and a panel step are refused by name; panel steps by UI Automation
+   are not built yet.
 
 A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
 comparison, with the Mac's live read-back as the other side.

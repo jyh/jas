@@ -80,6 +80,10 @@ param(
     # either way it comes up after the release. The reader refuses any other
     # shape, so this never fakes a per-step modifier.
     [ValidateSet('none', 'press', 'move')][string]$Shift = 'none',
+    # KEYS (§333), delivered AFTER the release as real key events, so the
+    # shell's own key route runs. One string, chords split by ';' and keys by
+    # '+' (`Delete;ctrl+Z`): a comma list does not survive `-File`.
+    [string]$Keys = '',
     # ⛔⛔ THE HIT TARGET'S INSET FROM THE WINDOW CLIENT, IN DIP, MEASURED BY THE
     # SHELL AND PASSED IN -- NEVER GUESSED HERE.
     #
@@ -101,7 +105,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $log = New-Object System.Collections.Generic.List[string]
-$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift")
+$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift keys=$Keys")
 
 $source = @'
 using System;
@@ -191,7 +195,12 @@ public static class SbHand
 
     public static void Shift(bool down)
     {
-        keybd_event(VK_SHIFT, 0, down ? 0u : KEYEVENTF_KEYUP, UIntPtr.Zero);
+        Key(VK_SHIFT, down);
+    }
+
+    public static void Key(byte vk, bool down)
+    {
+        keybd_event(vk, 0, down ? 0u : KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
 
     public const uint MOVE = 0x0001;
@@ -436,6 +445,29 @@ $heldSw.Stop()
 } finally {
     if ($shiftDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Shift($false) }
 }
+# THE KEYS, after the gesture: each chord's modifiers down, the key down and
+# up, the modifiers up in reverse. The reader admits only the names mapped here.
+$keyEvents = 0
+$chords = @($Keys -split ';' | Where-Object { $_ -ne '' })
+foreach ($chord in $chords) {
+    $parts = @($chord -split '\+')
+    $mods = @($parts | Select-Object -First ($parts.Count - 1) | ForEach-Object {
+        switch ($_) { 'ctrl' { [byte]0x11 } 'shift' { [byte]0x10 } 'alt' { [byte]0x12 } default { throw "unknown modifier $_" } }
+    })
+    $name = $parts[$parts.Count - 1]
+    $vk = switch -CaseSensitive -Regex ($name) {
+        '^Delete$' { [byte]0x2E } '^Backspace$' { [byte]0x08 } '^Enter$' { [byte]0x0D }
+        '^Escape$' { [byte]0x1B } '^Tab$' { [byte]0x09 }
+        '^[A-Za-z0-9]$' { [byte][char]$name.ToUpperInvariant() }
+        default { throw "no virtual key for $name" }
+    }
+    Start-Sleep -Milliseconds $SettleMs
+    foreach ($m in $mods) { [SbHand]::Key($m, $true); $keyEvents++ }
+    [SbHand]::Key($vk, $true); [SbHand]::Key($vk, $false); $keyEvents += 2
+    [array]::Reverse($mods)
+    foreach ($m in $mods) { [SbHand]::Key($m, $false); $keyEvents++ }
+}
+$log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
 $log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "before-$Shift" }) shift-up=$(if ($shiftDown) { 'after-release' } else { 'never' })")
 
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")

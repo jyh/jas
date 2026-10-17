@@ -638,7 +638,7 @@ internal sealed unsafe class Canvas : IDisposable
 
     // =======================================================================
     // SB_PROBE (2026-10-10): THE UNATTENDED END-TO-END READING. After each
-    // pointer release the render thread writes ONE file holding what the
+    // pointer release, and after each key, the render thread writes ONE file holding what the
     // gesture produced at every level a harness can judge without a person:
     // the core's document (and its selection), the open panel's resolved plan
     // (the widget tree as the core resolved it), and the hash of the frame now
@@ -1565,6 +1565,9 @@ internal sealed unsafe class Canvas : IDisposable
                     cause = "key";
                     // A shortcut may have switched the tool, so an open panel is re-read.
                     _panelStale = true;
+                    // SB_PROBE: a key lands on the document as a release does
+                    // (shortcut.delete, shortcut.undo), so it is read the same way.
+                    if (ProbePath is not null) { _probePending = true; }
                     break;
 
                 case PointerReportCmd pr:
