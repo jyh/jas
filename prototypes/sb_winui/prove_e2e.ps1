@@ -100,6 +100,8 @@ $keyText = "$($sc.KeyText)"; $keyCount = [int]$sc.Keys
 # PANEL STEPS (jas section 373): delivered last by the hand through UI
 # Automation, carried across -File as one base64 string.
 $panelText = "$($sc.PanelText)"; $panelCount = [int]$sc.Panels; $panelShow = "$($sc.PanelShow)"
+# MENU STEPS (jas sections 389/392) ride in the same list, in script order.
+$menuCount = [int]$sc.Menus; $lateCount = $panelCount + $menuCount
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -178,7 +180,7 @@ try {
     # The shell probes after the release, after each key (flask section 333) and
     # after each panel step (jas section 373), so the reading that describes the
     # script's end is probe 1 + keys + panel steps.
-    $wantSeq = 1 + $keyCount + $panelCount
+    $wantSeq = 1 + $keyCount + $lateCount
     # A panel step the hand REFUSES (an id not found, found twice, a disabled
     # control, no pattern for the event) is written to its receipt and nothing
     # more is sent, so no probe will come: the wait ends on the receipt too.
@@ -190,7 +192,7 @@ try {
         }
     } while ($null -eq $pr.Row -and $null -eq $handRefused -and $handSw.Elapsed.TotalSeconds -lt $TimeoutSeconds)
     if ($null -ne $handRefused) {
-        Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the hand refused a panel step: $($handRefused.Trim())"
+        Out-Line "E2E-CERT v1 item=$item verdict=NOT RUN -- the hand refused a panel or menu step: $($handRefused.Trim())"
         exit 4
     }
     if ($null -ne $pr.Row -and $pr.Row -match 'RUSTFAIL ') {
@@ -302,11 +304,11 @@ $openDoc = Join-Path $exeDir 'sb-doc-open.json'
 # An ALT drag copies (selection.yaml: alt_held at mousedown copies on the
 # first move), so the selected path names the COPY, not the element that was
 # under the press: the arm's before/after pairing does not hold either.
-$dragOnly = $isSelection -and $keyCount -eq 0 -and $panelCount -eq 0 -and $altMode -eq 'none'
+$dragOnly = $isSelection -and $keyCount -eq 0 -and $lateCount -eq 0 -and $altMode -eq 'none'
 if (-not $isSelection) { $moved = "NOT APPLICABLE(tool=$($tool): the moved-by-delta arm is the selection tool's)" }
 elseif ($altMode -ne 'none') { $moved = "NOT APPLICABLE(alt=$($altMode): an alt drag copies, so the selection names the copy and the read-back is the claim)" }
 elseif ($keyCount -gt 0) { $moved = "NOT APPLICABLE(keys=$($keyText): the moved-by-delta arm describes the drag, and the keys after it change the document)" }
-elseif ($panelCount -gt 0) { $moved = "NOT APPLICABLE(panels=$($panelShow): the moved-by-delta arm describes the drag, and the panel steps after it change the document)" }
+elseif ($lateCount -gt 0) { $moved = "NOT APPLICABLE(panels=$($panelShow): the moved-by-delta arm describes the drag, and the panel or menu steps after it change the document)" }
 elseif ($selCount -eq 1 -and (Test-Path $openDoc)) {
     $selPath = @($r.selection)[0].path
     $before = @{}; $after = @{}
@@ -387,15 +389,20 @@ $pix  = if ($r.surface -ne $b.surface) { "NOT COMPARABLE(surface=$($r.surface) b
 # `PANEL CLICK panel=<p> widget=<w> via=hand event=<e>` row per step, which only
 # the control's own handler writes. The hand's `PANEL SENT` is evidence of
 # sending, never of arrival.
-if ($panelCount -gt 0 -and $drive -like 'PASS*') {
+if ($lateCount -gt 0 -and $drive -like 'PASS*') {
     $clickRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'PANEL CLICK panel=\S+ widget=\S+ via=hand ' -and $_ -notmatch 'PANEL CLICK (DROPPED|REFUSED)' })
+    # A menu step's arrival is the shell's `MENU ACTION RAN item=<id>` row.
+    $menuRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'MENU ACTION RAN item=' })
     $missing = @(ConvertFrom-SbPanelText $panelText | Where-Object {
-        $want = "PANEL CLICK panel=$($_.panel) widget=$($_.widget) via=hand event=$($_.event) "
-        @($clickRows | Where-Object { $_.Contains($want) }).Count -eq 0 } | ForEach-Object { "$($_.panel)/$($_.widget)" })
-    if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK row for $($missing -join ','))" }
+        if ($_.menu) { $want = "MENU ACTION RAN item=$($_.menu) "; @($menuRows | Where-Object { $_.Contains($want) }).Count -eq 0 }
+        else {
+            $want = "PANEL CLICK panel=$($_.panel) widget=$($_.widget) via=hand event=$($_.event) "
+            @($clickRows | Where-Object { $_.Contains($want) }).Count -eq 0 } } |
+        ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } else { "$($_.panel)/$($_.widget)" } })
+    if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK or MENU ACTION RAN row for $($missing -join ','))" }
 }
 $verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
-$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($panelCount -gt 0) { ",panels=$panelShow" })):$drive " +
+$line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +
         "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line

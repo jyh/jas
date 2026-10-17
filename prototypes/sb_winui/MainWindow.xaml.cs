@@ -2190,6 +2190,10 @@ public sealed partial class MainWindow : Window
             {
                 var (topText, topKey) = MenuWire.Label(label);
                 top = new MenuBarItem { Title = topText, AccessKey = topKey };
+                // jas §392: the group's node id, so a UI Automation driver can
+                // name the menu it opens.
+                var topId = Str(node, "id") ?? "";
+                if (topId.Length > 0) { Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(top, topId); }
                 Menu.Items.Add(top);
                 sub = null;
                 continue;
@@ -2240,7 +2244,12 @@ public sealed partial class MainWindow : Window
                     var accel = Accelerator(Str(node, "shortcut"));
                     if (accel is not null) { item.KeyboardAccelerators.Add(accel); }
                     var itemId = Str(node, "id") ?? "";
-                    if (itemId.Length > 0) { _menuActions[itemId] = action; }
+                    if (itemId.Length > 0)
+                    {
+                        _menuActions[itemId] = action;
+                        // jas §392: a menu step names the item by this node id.
+                        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, itemId);
+                    }
                     item.Click += (_, _) => Invoke(action, itemId);
                     AddTo(top, sub, item);
                     break;

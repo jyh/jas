@@ -3024,6 +3024,18 @@ function Read-SbInputScript([string]$Json) {
         # after the gesture and the keys (docs/TESTING.md section 6's order), so
         # a panel step before the release, or anything but a read after one, is
         # refused by name.
+        # MENU STEPS (jas sections 389/392), `{"menu": <node id>}`: after the
+        # gesture and the keys, in script order with the panel steps, so they
+        # share the panel steps' list and its crossing.
+        if ($names -contains 'menu') {
+            $mn = "$($st.menu)"
+            if ($mn.Length -eq 0) { return (& $no "step $i menu step names no item") }
+            if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
+                return (& $no "step $i menu $mn comes before the gesture ends: send_hand.ps1 delivers menu steps only after the release")
+            }
+            $panels.Add([ordered]@{ menu = $mn })
+            continue
+        }
         if ($names -contains 'panel' -or $names -contains 'widget') {
             $pn = "$($st.panel)"; $wn = "$($st.widget)"
             if ($pn.Length -eq 0 -or $wn.Length -eq 0) { return (& $no "step $i panel step names no panel or no widget") }
@@ -3048,10 +3060,11 @@ function Read-SbInputScript([string]$Json) {
             # The pane shows ONE panel, which the hand opens through the pane's
             # selector before the first panel step (jas section 383), so every
             # step must name that panel.
-            if ($panels.Count -gt 0 -and $panels[0].panel -cne $pn) {
-                return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($panels[0].panel)): the hand opens one panel, through the pane's selector")
+            $firstPanel = @($panels | Where-Object { $_.panel }) | Select-Object -First 1
+            if ($null -ne $firstPanel -and $firstPanel.panel -cne $pn) {
+                return (& $no "step $i panel $tag names a second panel (step $firstPanelStep named $($firstPanel.panel)): the hand opens one panel, through the pane's selector")
             }
-            if ($panels.Count -eq 0) { $firstPanelStep = $i }
+            if ($null -eq $firstPanel) { $firstPanelStep = $i }
             $panels.Add([ordered]@{ panel = $pn; widget = $wn; event = $ev; value = $value })
             continue
         }
@@ -3062,7 +3075,7 @@ function Read-SbInputScript([string]$Json) {
         if ($names -contains 'key') {
             $kn = "$($st.key)"
             if ($panels.Count -gt 0) {
-                return (& $no "step $i key $kn comes after a panel step: send_hand.ps1 delivers keys, then panel steps")
+                return (& $no "step $i key $kn comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps")
             }
             if ($acts.Count -eq 0 -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
                 return (& $no "step $i key $kn comes before the gesture ends: send_hand.ps1 delivers keys only after the release")
@@ -3081,7 +3094,7 @@ function Read-SbInputScript([string]$Json) {
             continue
         }
         if ($panels.Count -gt 0) {
-            return (& $no "step $i is a pointer step after a panel step: send_hand.ps1 delivers panel steps only after the gesture")
+            return (& $no "step $i is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture")
         }
         if ($keys.Count -gt 0) {
             return (& $no "step $i is a pointer step after a key: send_hand.ps1 delivers keys only after the gesture")
@@ -3154,8 +3167,9 @@ function Read-SbInputScript([string]$Json) {
             DocX = $cx; DocY = $cy; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
             Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
             Keys = $keys.Count; KeyText = ($keys -join ';')
-            Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
-            Panel = $(if ($panels.Count -gt 0) { $panels[0].panel } else { '' })
+            Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+            PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+            Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
         }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
@@ -3184,8 +3198,9 @@ function Read-SbInputScript([string]$Json) {
         DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
         Shift = $shift; Alt = $held['alt']
         Keys = $keys.Count; KeyText = ($keys -join ';')
-        Panels = $panels.Count; PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
-        Panel = $(if ($panels.Count -gt 0) { $panels[0].panel } else { '' })
+        Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+            PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
+        Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
     }
 }
 
@@ -3211,7 +3226,8 @@ function ConvertFrom-SbPanelText([string]$Text) {
 # value after `=`, steps joined by `;`.
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
-        "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' })
+        if ($_.menu) { "menu:$($_.menu)" }
+        else { "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
 }
 
@@ -3265,6 +3281,21 @@ function Select-SbPanelOpen {
     $short = @($PickerPatterns | ForEach-Object { $_ -replace 'PatternIdentifiers[.]Pattern$', '' })
     if ($short -contains 'ExpandCollapse' -and $short -contains 'Selection') { return [pscustomobject]@{ Action = 'Choose'; Refusal = $null } }
     & $no "panel '$Panel' is not shown, and PanePicker has no ExpandCollapse and Selection patterns to choose it: it has [$($short -join ', ')]"
+}
+
+# What the hand does with what UI Automation found for one MENU step (jas
+# sections 389/392), after opening each top menu in turn: the flyout items
+# whose AutomationId is the step's node id, whether the one found is enabled,
+# and its patterns. Pure, so each refusal has a self-test arm.
+function Select-SbMenuItem {
+    param([string]$Item, [int]$Found, [bool]$Enabled, [string[]]$Patterns)
+    $no = { param($why) [pscustomobject]@{ Action = $null; Refusal = $why } }
+    if ($Found -eq 0) { return (& $no "menu item '$Item' is not found in any menu of the menubar: no item has that AutomationId") }
+    if ($Found -gt 1) { return (& $no "menu item '$Item' is found $Found times: this driver will not guess which one a person meant") }
+    if (-not $Enabled) { return (& $no "menu item '$Item' is disabled: a person cannot choose it") }
+    $short = @($Patterns | ForEach-Object { $_ -replace 'PatternIdentifiers[.]Pattern$', '' })
+    if ($short -contains 'Invoke') { return [pscustomobject]@{ Action = 'Invoke'; Refusal = $null } }
+    & $no "menu item '$Item' has no Invoke pattern: it has [$($short -join ', ')]"
 }
 
 # A Choose's second step: the items of the opened list whose AutomationId is

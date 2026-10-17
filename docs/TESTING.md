@@ -203,9 +203,12 @@ each live app:
    it in the pane's selector (`PanePicker`, whose items carry the panel content ids) unless it is already shown. The
    widget is found by `AutomationId` = widget id, inside the panel's `AutomationId` = panel content id, and a click
    goes through its Invoke, Toggle or SelectionItem pattern, a commit through its Value pattern and then Enter, and a
-   select's commit by choosing the item whose `AutomationId` is the option's value. A key step inside the gesture, `meta`, a key or pointer step after
-   a panel step, and a panel step whose widget is not found, is found twice, is disabled, or has no pattern for its
-   event are refused by name. The first panel script is `align.left`.
+   select's commit by choosing the item whose `AutomationId` is the option's value. Menu steps ride with the panel
+   steps, in script order: the hand opens each top menu of the menubar in turn until one shows the item whose
+   `AutomationId` is the step's node id, and Invokes it. A key step inside the gesture, `meta`, a key or pointer step
+   after a panel or menu step, a panel step whose widget is not found, is found twice, is disabled, or has no pattern
+   for its event, and a menu item no menu holds, found twice, or disabled are refused by name. The first panel script
+   is `align.left`, the first menu script `object.group`.
 
 A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
 comparison, with the Mac's live read-back as the other side.
