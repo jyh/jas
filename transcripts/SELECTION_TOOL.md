@@ -80,7 +80,12 @@ translate.
   is held).
 - **Drag from empty space** — rubber-band marquee that selects
   any element whose bounding box intersects the rectangle on
-  release.
+  release. The test is made where the element is DRAWN: for an
+  element under a transformed layer or group, the rectangle is
+  mapped into the element's parent space and tested there (with
+  the element's own transform applied as usual). A group is
+  selected whole when any unlocked member meets the band. An
+  element whose frame is singular is never selected.
 - **Drag on selected element** — translates the selection. The
   document is snapshotted once on press so the whole drag is a
   single undoable step.

@@ -13465,6 +13465,69 @@ mod tests {
         assert_eq!(path_at(&model, &[0, 0, 0]).d, d);
     }
 
+    // ── S6: the Selection marquee and lasso select where a thing is DRAWN ──
+    // `select_flat` now hands its predicate the parent frame (the layer's for
+    // a layer child, layer·group for a member). Twin: JasSwift `theSelection*`.
+
+    fn s6_filled_rect() -> Element {
+        Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 30.0, height: 30.0, rx: 0.0, ry: 0.0,
+            fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None, common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    fn s6_model(layer_t: Option<crate::geometry::element::Transform>, group_t: Option<crate::geometry::element::Transform>) -> Model {
+        let child = match group_t {
+            Some(g) => Element::Group(crate::geometry::element::GroupElem {
+                children: vec![std::rc::Rc::new(s6_filled_rect())],
+                common: CommonProps { transform: Some(g), ..CommonProps::default() },
+                isolated_blending: false, knockout_group: false,
+            }),
+            None => s6_filled_rect(),
+        };
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(child)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps { transform: layer_t, ..CommonProps::default() },
+        });
+        Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
+    }
+
+    /// The lasso: a rect (0,0,30,30) in a group scaled 2 and moved (60,30) is
+    /// drawn over (60..120, 30..90). A triangle inside the drawn body and far
+    /// from the local one selects the group.
+    #[test]
+    fn the_selection_lasso_selects_a_member_where_it_is_drawn() {
+        let g = crate::geometry::element::Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 60.0, f: 30.0 };
+        let mut model = s6_model(None, Some(g));
+        Controller::select_polygon(&mut model, &[(80.0, 50.0), (100.0, 50.0), (90.0, 70.0)], false);
+        assert_eq!(model.document().selection, vec![ElementSelection::all(vec![0, 0])]);
+        Controller::select_polygon(&mut model, &[(5.0, 5.0), (25.0, 5.0), (15.0, 25.0)], false);
+        assert!(model.document().selection.is_empty(), "the local body draws nothing");
+    }
+
+    /// A LAYER's transform counts too: a rect directly in a layer moved
+    /// (200, 0) is drawn at (200..230, 0..30).
+    #[test]
+    fn the_selection_marquee_honours_the_layers_transform() {
+        let mut model = s6_model(Some(crate::geometry::element::Transform::translate(200.0, 0.0)), None);
+        Controller::select_rect(&mut model, 210.0, 10.0, 5.0, 5.0, false);
+        assert_eq!(model.document().selection, vec![ElementSelection::all(vec![0, 0])]);
+        Controller::select_rect(&mut model, 10.0, 10.0, 5.0, 5.0, false);
+        assert!(model.document().selection.is_empty(), "the untranslated position draws nothing");
+    }
+
+    /// Under a SINGULAR group frame neither the marquee nor the lasso selects.
+    #[test]
+    fn the_selection_marquee_skips_a_member_with_a_singular_frame() {
+        let mut model = s6_model(None, Some(crate::geometry::element::Transform::scale(0.0, 1.0)));
+        Controller::select_rect(&mut model, -5.0, -5.0, 10.0, 40.0, false);
+        assert!(model.document().selection.is_empty());
+        Controller::select_polygon(&mut model, &[(-5.0, -5.0), (5.0, -5.0), (0.0, 40.0)], false);
+        assert!(model.document().selection.is_empty());
+    }
+
     // ── S5: the Path Eraser cuts where a path is DRAWN ────────────────────
     // The golden path_eraser_cuts_transformed_line pins the hit and the split
     // points; these two pin the size test and the singular skip. Twins:

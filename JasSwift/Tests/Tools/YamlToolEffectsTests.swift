@@ -1052,6 +1052,40 @@ private func s4bEdit(_ d: [PathCommand], frame: Transform?, press: (Double, Doub
     #expect(s1Commands(model, [0, 0, 0]) == d)
 }
 
+// MARK: - S6: the Selection marquee and lasso select where a thing is DRAWN
+// Twins of the Rust `the_selection_*` tests.
+
+private func s6Model(layer layerT: Transform?, group groupT: Transform?) -> Model {
+    let rect: Element = .rect(Rect(x: 0, y: 0, width: 30, height: 30, fill: Fill(color: Color(r: 1, g: 0, b: 0))))
+    let child: Element = groupT.map { .group(Group(children: [rect], transform: $0)) } ?? rect
+    return Model(document: Document(layers: [Layer(name: "L", children: [child], transform: layerT)],
+                                    selectedLayer: 0, selection: []))
+}
+
+@Test func theSelectionLassoSelectsAMemberWhereItIsDrawn() {
+    let model = s6Model(layer: nil, group: Transform(a: 2, b: 0, c: 0, d: 2, e: 60, f: 30))
+    Controller(model: model).selectPolygon(polygon: [(80, 50), (100, 50), (90, 70)])
+    #expect(model.document.selection == [ElementSelection.all([0, 0])])
+    Controller(model: model).selectPolygon(polygon: [(5, 5), (25, 5), (15, 25)])
+    #expect(model.document.selection.isEmpty, "the local body draws nothing")
+}
+
+@Test func theSelectionMarqueeHonoursTheLayersTransform() {
+    let model = s6Model(layer: .translate(200, 0), group: nil)
+    Controller(model: model).selectRect(x: 210, y: 10, width: 5, height: 5)
+    #expect(model.document.selection == [ElementSelection.all([0, 0])])
+    Controller(model: model).selectRect(x: 10, y: 10, width: 5, height: 5)
+    #expect(model.document.selection.isEmpty, "the untranslated position draws nothing")
+}
+
+@Test func theSelectionMarqueeSkipsAMemberWithASingularFrame() {
+    let model = s6Model(layer: nil, group: .scale(0, 1))
+    Controller(model: model).selectRect(x: -5, y: -5, width: 10, height: 40)
+    #expect(model.document.selection.isEmpty)
+    Controller(model: model).selectPolygon(polygon: [(-5, -5), (5, -5), (0, 40)])
+    #expect(model.document.selection.isEmpty)
+}
+
 // MARK: - S5: the Path Eraser cuts where a path is DRAWN
 // Twins of the Rust `the_eraser_*` tests.
 

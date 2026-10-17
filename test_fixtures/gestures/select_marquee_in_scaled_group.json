@@ -1,0 +1,14 @@
+[
+  {
+    "_doc": "The S6 frame witness for the Selection marquee (transform-correct path verbs). The filled rect (0,0,30,30) in pt sits inside a group with matrix (2,0,0,2,60,30), so it is DRAWN over (60..120, 30..90). The marquee from (130,100) to (110,80) overlaps the drawn corner and selects the GROUP whole (a band asks about members and answers with the group, LAYER_STRUCTURE.md 16.4). The old marquee tested the member's local box (0..30) and selected nothing.",
+    "name": "select_marquee_in_scaled_group",
+    "setup_svg": "group_scaled_rect.svg",
+    "tool": "selection",
+    "events": [
+      { "kind": "press", "x": 130, "y": 100 },
+      { "kind": "move", "x": 110, "y": 80, "dragging": true },
+      { "kind": "release", "x": 110, "y": 80 }
+    ],
+    "expected_json": "select_marquee_in_scaled_group_expected.json"
+  }
+]

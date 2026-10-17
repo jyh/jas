@@ -4379,6 +4379,7 @@ private let gestureFixtures = [
     // marquee mode; mouseup commits doc.select_in_rect over the normalized
     // marquee bounds. Drag encloses both rects -> [0,0]+[0,1].
     "select_marquee.json",
+    "select_marquee_in_scaled_group.json",
     // Blob Brush paint with an app-level fill precondition (the
     // hollow-blob regression gate). The case sets `app_state`:
     // {fill_color:#ff0000, blob_brush_size:10}, which the runner routes

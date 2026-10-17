@@ -893,9 +893,18 @@ impl Controller {
         // resolver borrow while `select_flat` takes `&mut Model`.
         let index = hit_index(model);
         let resolver = IndexResolver(&index);
+        // Compared where each element is DRAWN (transform-correct path verbs
+        // S6): with a parent frame, the rect's corners are mapped into the
+        // parent space and tested as a polygon (which applies the element's
+        // own transform). With none this is exactly the old call.
+        let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)];
         select_flat(
             model,
-            |elem| element_intersects_rect_with(elem, x, y, width, height, &resolver),
+            |elem, parent| match parent {
+                None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
+                Some(p) => polygon_in_parent_space(&corners, p)
+                    .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
+            },
             extend,
         );
     }
@@ -908,9 +917,14 @@ impl Controller {
     ) {
         let index = hit_index(model);
         let resolver = IndexResolver(&index);
+        // Where each element is DRAWN (S6), as `select_rect` above.
         select_flat(
             model,
-            |elem| element_intersects_polygon_with(elem, polygon, &resolver),
+            |elem, parent| match parent {
+                None => element_intersects_polygon_with(elem, polygon, &resolver),
+                Some(p) => polygon_in_parent_space(polygon, p)
+                    .is_some_and(|poly| element_intersects_polygon_with(elem, &poly, &resolver)),
+            },
             extend,
         );
     }
@@ -3493,9 +3507,25 @@ fn unlock_element(elem: &Element) -> Element {
 /// The `predicate` tests whether a leaf element should be selected.
 /// Groups are expanded: if any grandchild matches, the group and all
 /// its children are selected.
+/// A DOCUMENT-space polygon mapped into the space a `parent` frame maps to
+/// document space. `None` when the frame is singular: an element under a
+/// collapsed frame is never selected by a marquee or lasso.
+fn polygon_in_parent_space(
+    poly: &[(f64, f64)],
+    parent: crate::geometry::element::Transform,
+) -> Option<Vec<(f64, f64)>> {
+    let inv = parent.inverse()?;
+    Some(poly.iter().map(|&(x, y)| inv.apply_point(x, y)).collect())
+}
+
+/// The predicate's second argument is the element's PARENT frame: the
+/// transform mapping its parent's space to document space (`None` is the
+/// identity) — the layer's transform for a layer child, and the layer's
+/// composed with the group's for a group member (transform-correct path verbs
+/// S6). Twin of JasSwift `selectFlat`.
 fn select_flat(
     model: &mut Model,
-    predicate: impl Fn(&Element) -> bool,
+    predicate: impl Fn(&Element, Option<crate::geometry::element::Transform>) -> bool,
     extend: bool,
 ) {
     use crate::geometry::element::Visibility;
@@ -3519,6 +3549,7 @@ fn select_flat(
         if doc.effective_locked(&vec![li]) || layer_vis == Visibility::Invisible {
             continue;
         }
+        let layer_frame = layer.transform().copied();
         if let Some(children) = layer.children() {
             for (ci, child) in children.iter().enumerate() {
                 if doc.effective_locked(&vec![li, ci]) {
@@ -3543,14 +3574,18 @@ fn select_flat(
                     // each member INTO the source group, so marquee-then-
                     // duplicate left the SOURCE holding four children instead
                     // of two. Move and delete survived it only by accident.
+                    let group_frame = match (layer_frame, child.transform()) {
+                        (Some(l), Some(g)) => Some(l.multiply(g)),
+                        (l, g) => l.or(g.copied()),
+                    };
                     if let Some(grandchildren) = child.children()
                         && grandchildren.iter().enumerate().any(|(gi, gc)| {
-                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc)
+                            !doc.effective_locked(&vec![li, ci, gi]) && predicate(gc, group_frame)
                         })
                     {
                         entries.push(ElementSelection::all(vec![li, ci]));
                     }
-                } else if predicate(child) {
+                } else if predicate(child, layer_frame) {
                     entries.push(ElementSelection::all(vec![li, ci]));
                 }
             }
