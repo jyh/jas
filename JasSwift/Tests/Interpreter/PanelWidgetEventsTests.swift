@@ -437,3 +437,21 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     #expect(WidgetEvent.itemChecked(widget: ["type": "dropdown"], value: "path", scope: scope) == nil)
     #expect(WidgetEvent.itemChecked(widget: widget, value: "path", scope: ["panel": [:]]) == nil)
 }
+
+// MARK: - Opacity: its two inputs run the Properties law (W2b-8's mapping)
+
+@Test func anOpacityCommitSetsTheSelectionsOpacityFromPercent() {
+    let model = modelWithSelectedRect()
+    let r = events(model, "opacity_panel_content")
+        .commit(shipped("opacity_panel_content", "op_opacity"), text: "50")
+    #expect(r.outcome == "committed")
+    #expect(model.document.getElement([0, 0]).opacity == 0.5, "the panel is percent; the element is 0-1")
+}
+
+@Test func aBlendModePickSetsTheSelectionsBlendMode() {
+    let model = modelWithSelectedRect()
+    let r = events(model, "opacity_panel_content")
+        .commit(shipped("opacity_panel_content", "op_mode"), text: "screen")
+    #expect(r.outcome == "committed")
+    #expect(model.document.getElement([0, 0]).blendMode == .screen)
+}
