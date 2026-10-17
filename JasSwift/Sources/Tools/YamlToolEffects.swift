@@ -2295,20 +2295,32 @@ private func findElementCpNear(
     _ doc: Document, x: Double, y: Double, radius: Double
 ) -> (ElementPath, Int)? {
     let cpResolver = IdIndexResolver(index: rebuildIdIndex(doc))
-    func recurse(_ elem: Element, _ path: ElementPath) -> (ElementPath, Int)? {
+    // `frame` maps the element's PARENT space to DOCUMENT space (`nil` is the
+    // identity). A control point is compared where it is DRAWN, through the
+    // parent frame and the element's own transform, which is where
+    // `selectionHandleRects` draws its square. Twin of Rust `cp_recursive`.
+    func compose(_ outer: Transform?, _ inner: Transform?) -> Transform? {
+        guard let o = outer else { return inner }
+        guard let i = inner else { return o }
+        return o.multiply(i)
+    }
+    func recurse(_ elem: Element, _ path: ElementPath, _ frame: Transform?) -> (ElementPath, Int)? {
         if elem.visibility == .invisible { return nil }
         if case .group(let g) = elem {
+            let childFrame = compose(frame, g.transform)
             for (i, child) in g.children.enumerated().reversed() {
                 if child.isLocked { continue }
-                if let r = recurse(child, path + [i]) { return r }
+                if let r = recurse(child, path + [i], childFrame) { return r }
             }
             return nil
         }
+        let full = compose(frame, elem.transform)
         // RESOLVED: the resolver-less form collapses a symbol instance's four
         // corners onto the document ORIGIN, so a click near (0,0) grabbed a
         // "handle" of an instance drawn somewhere else entirely.
         let cps = elem.controlPointPositions(resolvedBy: cpResolver)
-        for (i, pt) in cps.enumerated() {
+        for (i, local) in cps.enumerated() {
+            let pt = full.map { $0.applyPoint(local.0, local.1) } ?? local
             if hypot(x - pt.0, y - pt.1) < radius {
                 return (path, i)
             }
@@ -2320,7 +2332,7 @@ private func findElementCpNear(
         for (ci, child) in layer.children.enumerated().reversed() {
             if child.isLocked { continue }
             if child.visibility == .invisible { continue }
-            if let r = recurse(child, [li, ci]) { return r }
+            if let r = recurse(child, [li, ci], layer.transform) { return r }
         }
     }
     return nil

@@ -4962,7 +4962,7 @@ fn path_probe_partial_hit(
 ) {
     use crate::geometry::element::{
         control_point_count, control_points, path_handle_positions,
-        PathElem, Visibility,
+        PathElem, Transform, Visibility,
     };
     // 1. Handle hit on a selected Path element.
     {
@@ -5011,31 +5011,43 @@ fn path_probe_partial_hit(
     }
 
     // 2. Control-point hit on any unlocked element (recurses into groups).
+    // `frame` maps the element's PARENT space to DOCUMENT space (`None` is
+    // the identity). A control point is compared where it is DRAWN, through
+    // the parent frame and the element's own transform, which is where
+    // `selection_handle_rects` draws its square.
     fn cp_recursive(
         elem: &Element, path: &[usize], ancestor_vis: Visibility,
+        frame: Option<Transform>,
         x: f64, y: f64, radius: f64,
         resolver: &dyn crate::geometry::live::ElementResolver,
     ) -> Option<(Vec<usize>, usize)> {
+        let compose = |outer: Option<Transform>, inner: Option<Transform>| match (outer, inner) {
+            (Some(o), Some(i)) => Some(o.multiply(&i)),
+            (o, i) => o.or(i),
+        };
         let eff = std::cmp::min(ancestor_vis, elem.visibility());
         if eff == Visibility::Invisible { return None; }
         if elem.is_group_or_layer() {
+            let child_frame = compose(frame, elem.transform().copied());
             if let Some(children) = elem.children() {
                 for (i, child) in children.iter().enumerate().rev() {
                     if child.locked() { continue; }
                     let mut child_path = path.to_vec();
                     child_path.push(i);
-                    if let Some(r) = cp_recursive(child, &child_path, eff, x, y, radius, resolver) {
+                    if let Some(r) = cp_recursive(child, &child_path, eff, child_frame, x, y, radius, resolver) {
                         return Some(r);
                     }
                 }
             }
             return None;
         }
+        let full = compose(frame, elem.transform().copied());
         // RESOLVED: the resolver-less form collapses a symbol instance's four
         // corners onto the document ORIGIN, so a click near (0,0) grabbed a
         // "handle" of an instance drawn somewhere else entirely.
         let cps = crate::geometry::element::control_points_with(elem, resolver);
-        for (i, &(px, py)) in cps.iter().enumerate() {
+        for (i, &(lx, ly)) in cps.iter().enumerate() {
+            let (px, py) = full.map_or((lx, ly), |t| t.apply_point(lx, ly));
             if (x - px).hypot(y - py) < radius {
                 return Some((path.to_vec(), i));
             }
@@ -5055,7 +5067,7 @@ fn path_probe_partial_hit(
                     if child.locked() { continue; }
                     let child_vis = std::cmp::min(layer_vis, child.visibility());
                     if child_vis == Visibility::Invisible { continue; }
-                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, x, y, radius, &resolver) {
+                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, layer.transform().copied(), x, y, radius, &resolver) {
                         hit = Some(r);
                         break 'outer;
                     }
@@ -12717,6 +12729,64 @@ mod tests {
             &serde_json::json!({}), &mut store,
             Some(&mut m), None, None, None);
         store.get_tool("anchor_point", "mode").as_str().unwrap_or("").to_string()
+    }
+
+    // ── the control-point probe hits a point WHERE IT IS DRAWN ─────────
+    //
+    // `doc.path.probe_partial_hit` compared each element's LOCAL control
+    // points to the DOCUMENT-space click, so inside a transformed group (or
+    // on a transformed element) a corner was grabbed at its untransformed
+    // position, where nothing is drawn, and missed where it is drawn. The
+    // handle squares are drawn through the full frame
+    // (`selection_handle_rects`), so the probe now maps through the same one.
+    // Twin: JasSwift `findElementCpNear`.
+
+    /// A layer holding a Group translated by (100, 0) whose child is a
+    /// rect (0, 0, 10 x 10) scaled 2x by its OWN transform: its corner
+    /// index 2, local (10, 10), is drawn at (120, 20).
+    fn cp_frame_model() -> Model {
+        let rect = Element::Rect(crate::geometry::element::RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0,
+            rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::scale(2.0, 2.0)), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(rect)],
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::translate(100.0, 0.0)), ..CommonProps::default() },
+            isolated_blending: false,
+            knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false,
+            common: CommonProps::default(),
+        });
+        Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None)
+    }
+
+    fn cp_probe(model: &Model, x: f64, y: f64) -> (String, Vec<ElementSelection>) {
+        let mut store = StateStore::new();
+        let mut m = model.clone();
+        run_effects(
+            &vec![serde_json::json!({
+                "doc.path.probe_partial_hit": { "x": x, "y": y, "hit_radius": 4 }
+            })],
+            &serde_json::json!({}), &mut store,
+            Some(&mut m), None, None, None);
+        let mode = store.get_tool("partial_selection", "mode").as_str().unwrap_or("").to_string();
+        (mode, m.document().selection.clone())
+    }
+
+    #[test]
+    fn the_control_point_probe_hits_a_corner_where_it_is_drawn() {
+        let model = cp_frame_model();
+        let (mode, sel) = cp_probe(&model, 120.0, 20.0);
+        assert_eq!(mode, "moving_pending", "the drawn corner is a hit");
+        assert_eq!(sel, vec![ElementSelection::partial(vec![0, 0, 0], [2usize])]);
+        let (mode, sel) = cp_probe(&model, 10.0, 10.0);
+        assert_eq!(mode, "marquee", "the untransformed position draws nothing: {sel:?}");
+        assert!(sel.is_empty());
     }
 
     /// Positive control for the whole family: with NOTHING locked, all four

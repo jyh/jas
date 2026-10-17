@@ -362,6 +362,11 @@ pub struct Model {
     /// Alt/Option-clicking MASK_PREVIEW. OPACITY.md §Preview
     /// interactions.
     pub mask_isolation_path: Option<Vec<usize>>,
+    /// The Layers-panel isolation stack, innermost last: each entry is the
+    /// path of a container (a group, a layer, or a Transformed wrapper) the
+    /// user entered. It belongs to the DOCUMENT, so each tab has its own
+    /// (route 4 slice 3b, fork 1). Twin: JasSwift `Model.isolationStack`.
+    pub isolation_stack: Vec<Vec<usize>>,
     /// Out-of-band document snapshot used by dialog Preview flows
     /// (Scale Options, Rotate Options, Shear Options) — captured at
     /// dialog open, restored on Cancel, cleared on OK. Distinct from
@@ -417,6 +422,7 @@ impl Default for Model {
             recent_colors: Vec::new(),
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
+            isolation_stack: Vec::new(),
             preview_doc_snapshot: None,
             live_baseline: None,
             pending_proposal: None,
@@ -456,6 +462,7 @@ impl Model {
             recent_colors: Vec::new(),
             editing_target: EditingTarget::Content,
             mask_isolation_path: None,
+            isolation_stack: Vec::new(),
             preview_doc_snapshot: None,
             live_baseline: None,
             pending_proposal: None,
