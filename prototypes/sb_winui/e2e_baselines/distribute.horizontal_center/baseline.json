@@ -1,0 +1,10 @@
+{
+    "item":  "distribute.horizontal_center",
+    "surface":  "2379x1333",
+    "frame_hash":  "a87d4dac33341fddf21c6df64cee65384391e422fb1e66842df749940c69d1a7",
+    "plan_panel":  "align_panel_content",
+    "plan_sha":  "6c5486e7ec783aeb",
+    "tab":  "[0,0]=on:\"three_rects.svg\"",
+    "tab_sha":  "b3eb2ebc4fb09b4e",
+    "selection_count":  3
+}
