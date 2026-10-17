@@ -4811,8 +4811,27 @@ private func payloadContent(_ svg: String) -> String {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["align.left.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
+
+/// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
+/// live menu runs it (``MenuActions/run``, Rust `menu_native::run`). True when
+/// the item exists and its action is one of the model-pure verbs; an item this
+/// runner cannot run (a dialog, the clipboard) is refused, never skipped.
+private func runScriptMenuStep(_ itemId: String, model: Model) -> Bool {
+    func find(_ node: Any?) -> [String: Any]? {
+        if let d = node as? [String: Any] {
+            if d["id"] as? String == itemId { return d }
+            for k in d.keys.sorted() { if let f = find(d[k]) { return f } }
+        } else if let l = node as? [Any] {
+            for v in l { if let f = find(v) { return f } }
+        }
+        return nil
+    }
+    guard let entry = find(WorkspaceData.load()?.menubar()),
+          let action = entry["action"] as? String else { return false }
+    return MenuActions.run(action, model)
+}
 
 /// One panel step, `{"panel", "widget", "event", "value"?}`, run as the app
 /// runs it: the panel opened the way the dock opens it (its `state:` defaults,
@@ -4863,7 +4882,7 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
         // every pointer and key step; one before them is refused by name.
         var panelSteps: [(Int, [String: Any])] = []
         for (i, st) in steps.dropLast().enumerated() {
-            if st["panel"] != nil {
+            if st["panel"] != nil || st["menu"] != nil {
                 panelSteps.append((i, st))
             } else if !panelSteps.isEmpty {
                 Issue.record("script \(item): step \(i) follows a panel step, which level 1 cannot replay yet")
@@ -4889,6 +4908,13 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let model = runGestureModel(tc)
         for (i, st) in panelSteps {
+            if let menuId = st["menu"] as? String {
+                guard runScriptMenuStep(menuId, model: model) else {
+                    Issue.record("script \(item): step \(i) \(st): the menu item did not run")
+                    continue
+                }
+                continue
+            }
             guard runScriptPanelStep(st, model: model) else {
                 Issue.record("script \(item): step \(i) \(st): the panel act did not run")
                 continue

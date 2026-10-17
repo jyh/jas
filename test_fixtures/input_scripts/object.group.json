@@ -1,0 +1,15 @@
+{
+  "item": "object.group",
+  "spec": "workspace/menubar.yaml",
+  "setup_svg": "three_rects.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 118, "y": 88},
+    {"kind": "move", "x": 20, "y": 6, "dragging": true},
+    {"kind": "release", "x": 20, "y": 6},
+    {"menu": "menu_group"},
+    {"read": "document"}
+  ],
+  "expected_json": "object.group.expected.json"
+}

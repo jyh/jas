@@ -3,7 +3,8 @@
 //! Every script in `test_fixtures/input_scripts/` is replayed here through the
 //! same calls a native shell makes: `jas_load_svg`, `jas_set_tool`,
 //! `jas_pointer_event` for a pointer step, `jas_dispatch_action({"key"})` for a
-//! key step, `jas_panel_behavior` for a panel step, and `jas_document_json` for
+//! key step, `jas_dispatch_action({"menu_item"})` for a menu step,
+//! `jas_panel_behavior` for a panel step, and `jas_document_json` for
 //! the read-back. The read-back must equal the script's expected file.
 //!
 //! This is Rust's level 1 for a PANEL step. The gesture runner
@@ -114,6 +115,14 @@ fn replay(script: &Value) -> Result<String, String> {
                 if take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) }).is_none() {
                     return Err(format!("script {item}: step {i} {st}: refused {}", last_error(e)));
                 }
+            } else if let Some(menu_id) = st.get("menu").and_then(Value::as_str) {
+                // A MENU step: the menubar item by its id, as a shell sends it.
+                let req = serde_json::json!({"menu_item": menu_id}).to_string();
+                let reply = take(unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) });
+                let err = last_error(e);
+                if reply.is_none() || err.contains("Unchanged") {
+                    return Err(format!("script {item}: step {i} {st}: the menu item did not run: {err}"));
+                }
             } else if let Some(panel) = st.get("panel").and_then(Value::as_str) {
                 let mut ev = serde_json::json!({
                     "widget": st["widget"].as_str().ok_or_else(|| format!("script {item}: step {i} names no widget"))?,
@@ -129,7 +138,7 @@ fn replay(script: &Value) -> Result<String, String> {
                     return Err(format!("script {item}: step {i} {st}: the panel act did not run: {err}"));
                 }
             } else {
-                return Err(format!("script {item}: step {i} {st} is not a pointer, key or panel step"));
+                return Err(format!("script {item}: step {i} {st} is not a pointer, key, menu or panel step"));
             }
         }
         take(unsafe { jas_document_json(e) }).ok_or_else(|| format!("script {item}: no read-back"))
