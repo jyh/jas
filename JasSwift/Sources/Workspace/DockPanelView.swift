@@ -229,130 +229,8 @@ public struct PanelGroupView: View {
     /// resolves here. When no model is present (unit tests) falls
     /// back to fresh yaml defaults.
     private func buildPanelCtx(ws: WorkspaceData, contentId: String) -> [String: Any] {
-        // The `state` scope is the workspace defaults with the LIVE app-level
-        // facts overlaid — the active fill / stroke colour (with an explicit
-        // null for "none") and which of the two is on top. Every panel gets
-        // them, exactly as the Rust dock's `build_live_state_map` does: the
-        // Color panel's `disabled` / `enabled_when` guards are the loudest
-        // readers, but any panel may test `state.fill_color`. Before this the
-        // scope was the static defaults alone, so `state.fill_color` was
-        // always `"#ffffff"` and `state.fill_color == null` could never be
-        // true no matter what the user had chosen (CPTRIAGE).
-        var stateMap = buildLiveStateMap(ws: ws, model: model)
-        let icons = ws.icons()
-        // The MUTABLE tier, falling back to the shipped bundle only when there
-        // is no model. Reading `ws.swatchLibraries()` here is what made every
-        // swatch mutation invisible: the verbs would edit app state and the
-        // panel would keep rendering the 216 shipped colours forever.
-        let swatchLibs = model?.swatchLibraries.libs ?? ws.swatchLibraries()
-        var panelMap: [String: Any]
-        if let store = model?.stateStore {
-            if !store.hasPanel(contentId) {
-                store.initPanel(contentId, defaults: ws.panelStateDefaults(contentId))
-            }
-            store.setActivePanel(contentId)
-            panelMap = store.getPanelState(contentId)
-        } else {
-            panelMap = ws.panelStateDefaults(contentId)
-        }
-        // Selection-driven overrides: when a Text / TextPath is
-        // selected, the Character panel reflects its attributes rather
-        // than the stored panel defaults. Mirrors the Rust dock
-        // `build_live_panel_overrides` block.
-        if contentId == "character_panel_content", let m = model,
-           let overrides = characterPanelLiveOverrides(model: m) {
-            for (k, v) in overrides { panelMap[k] = v }
-        }
-        // Paragraph panel — Phase 3a text-kind gating. Always emits
-        // text_selected / area_text_selected (even false / false for
-        // an empty selection) so the bind.disabled expressions in
-        // paragraph.yaml resolve to the live values rather than the
-        // YAML defaults of true.
-        if contentId == "paragraph_panel_content", let m = model {
-            let overrides = paragraphPanelLiveOverrides(model: m)
-            for (k, v) in overrides { panelMap[k] = v }
-        }
-        // Color panel — sliders / hex must reflect the active color
-        // (selection's fill/stroke or tab default), not the stored
-        // panel state. Without this, switching to a differently-
-        // coloured selection leaves the sliders stuck on the YAML
-        // init values from first open. Mirrors the Rust dock's
-        // build_live_panel_overrides color block.
-        if contentId == "color_panel_content", let m = model,
-           let overrides = colorPanelLiveOverrides(model: m) {
-            for (k, v) in overrides { panelMap[k] = v }
-        }
-        // Stroke panel — the Weight field must reflect the selection's
-        // stroke width (its baked / effective width after the scale
-        // counter-scale work), not the stored panel default. Mirrors the
-        // color block above and the Rust dock build_live_panel_overrides
-        // stroke block. Display-only: merged into the render scope, never
-        // written to the selection, so it can't clobber other stroke props.
-        if contentId == "stroke_panel_content", let m = model {
-            let overrides = strokePanelLiveOverrides(model: m)
-            for (k, v) in overrides { panelMap[k] = v }
-            // Overlay the live `state.stroke_*` toggle values so the
-            // Dashed-Line / Link-scales / Flip-profile toggles'
-            // `set: { stroke_X: "not state.stroke_X" }` effects read the
-            // current value rather than the static workspace default —
-            // otherwise the box latches checked (DASHFIX). Must land after
-            // the panel is initialised (above) so the panel scope exists.
-            for (k, v) in strokePanelStateOverrides(store: m.stateStore) {
-                stateMap[k] = v
-            }
-        }
-        // Properties panel — X/Y/W/H reflect the selection's evaluated
-        // bounding box (document space, post-transform), decision-5 Part B.1.
-        // Display-only merge into the render scope; never written to the
-        // selection. prop_-prefixed keys match properties.yaml.
-        if contentId == "properties_panel_content", let m = model {
-            let overrides = propertiesPanelLiveOverrides(model: m)
-            for (k, v) in overrides { panelMap[k] = v }
-        }
-        // Render-time layers-panel selection, through the ONE reader the
-        // panel-menu context uses (`layersPanelSelection(model:)`): the store
-        // key layers.yaml declares, mirrored from the tree view's selection.
-        // This used to read `"layers" / "layers_panel_selection"`, a scope
-        // and key nothing in this app ever wrote, so
-        // `active_document.layers_panel_selection_count` was 0 in every body
-        // context regardless of what the artist had selected.
-        let layersPanelSelection: [[Int]] = JasLib.layersPanelSelection(model: model)
-        // theme.colors namespace — the active theme's colors map.
-        // YAML expressions like `style: { color: "{{theme.colors.text}}" }`
-        // resolve through this. Without it, panel labels have no
-        // explicit foreground color and SwiftUI's default Text color
-        // washes out against the dark pane background.
-        let themeColors: [String: Any] = {
-            guard let theme = ws.theme(),
-                  let base = theme["base"] as? [String: Any],
-                  let colors = base["colors"] as? [String: Any] else {
-                return [:]
-            }
-            return colors
-        }()
-        var ctx: [String: Any] = [
-            "state": stateMap,
-            "panel": panelMap,
-            "icons": icons,
-            "data": ["swatch_libraries": swatchLibs, "brush_libraries": ws.brushLibraries(), "concepts": ws.conceptsList()] as [String: Any],
-            "active_document": buildActiveDocumentView(
-                model: model,
-                layersPanelSelection: layersPanelSelection
-            ),
-            "theme": ["colors": themeColors] as [String: Any]
-        ]
-        // OPACITY.md § States predicates at top level so yaml
-        // expressions like `bind.disabled: "!selection_has_mask"` and
-        // `bind.checked: "selection_mask_clip"` resolve uniformly.
-        // Mirrors `build_selection_predicates` in jas_dioxus.
-        for (k, v) in buildSelectionPredicates(model: model) { ctx[k] = v }
-        // Expose the Opacity panel's new-mask preferences so the
-        // op_make_mask button can read them at click time (they live
-        // on WorkspaceLayout.opacityPanel, not in the shared panel
-        // store).
-        ctx["_opacity_new_masks_clipping"] = workspaceLayout.opacityPanel.newMasksClipping
-        ctx["_opacity_new_masks_inverted"] = workspaceLayout.opacityPanel.newMasksInverted
-        return ctx
+        buildPanelBodyContext(ws: ws, model: model, contentId: contentId,
+                              opacityPanel: workspaceLayout.opacityPanel)
     }
 
     private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
@@ -755,4 +633,141 @@ struct DockDetachDropDelegate: DropDelegate {
         }
         return true
     }
+}
+
+/// The evaluation context a docked panel body renders and acts with: the
+/// stored panel state with the selection's live values merged in, the live
+/// `state` map, and the active document. The dock builds every panel body's
+/// context here, and the level-1 script runner builds its panel steps' scope
+/// here too, so a widget's `disabled` is the one the app evaluates. (The
+/// runner used the stored state alone, and applied a commit the app refuses.)
+/// Ensures the StateStore has a scope for this panel (seeded from yaml
+/// defaults on first render) and marks it active so `panel.X` resolves here.
+/// When no model is present (unit tests) falls back to fresh yaml defaults.
+func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
+                       opacityPanel: OpacityPanelState) -> [String: Any] {
+    // The `state` scope is the workspace defaults with the LIVE app-level
+    // facts overlaid — the active fill / stroke colour (with an explicit
+    // null for "none") and which of the two is on top. Every panel gets
+    // them, exactly as the Rust dock's `build_live_state_map` does: the
+    // Color panel's `disabled` / `enabled_when` guards are the loudest
+    // readers, but any panel may test `state.fill_color`. Before this the
+    // scope was the static defaults alone, so `state.fill_color` was
+    // always `"#ffffff"` and `state.fill_color == null` could never be
+    // true no matter what the user had chosen (CPTRIAGE).
+    var stateMap = buildLiveStateMap(ws: ws, model: model)
+    let icons = ws.icons()
+    // The MUTABLE tier, falling back to the shipped bundle only when there
+    // is no model. Reading `ws.swatchLibraries()` here is what made every
+    // swatch mutation invisible: the verbs would edit app state and the
+    // panel would keep rendering the 216 shipped colours forever.
+    let swatchLibs = model?.swatchLibraries.libs ?? ws.swatchLibraries()
+    var panelMap: [String: Any]
+    if let store = model?.stateStore {
+        if !store.hasPanel(contentId) {
+            store.initPanel(contentId, defaults: ws.panelStateDefaults(contentId))
+        }
+        store.setActivePanel(contentId)
+        panelMap = store.getPanelState(contentId)
+    } else {
+        panelMap = ws.panelStateDefaults(contentId)
+    }
+    // Selection-driven overrides: when a Text / TextPath is
+    // selected, the Character panel reflects its attributes rather
+    // than the stored panel defaults. Mirrors the Rust dock
+    // `build_live_panel_overrides` block.
+    if contentId == "character_panel_content", let m = model,
+       let overrides = characterPanelLiveOverrides(model: m) {
+        for (k, v) in overrides { panelMap[k] = v }
+    }
+    // Paragraph panel — Phase 3a text-kind gating. Always emits
+    // text_selected / area_text_selected (even false / false for
+    // an empty selection) so the bind.disabled expressions in
+    // paragraph.yaml resolve to the live values rather than the
+    // YAML defaults of true.
+    if contentId == "paragraph_panel_content", let m = model {
+        let overrides = paragraphPanelLiveOverrides(model: m)
+        for (k, v) in overrides { panelMap[k] = v }
+    }
+    // Color panel — sliders / hex must reflect the active color
+    // (selection's fill/stroke or tab default), not the stored
+    // panel state. Without this, switching to a differently-
+    // coloured selection leaves the sliders stuck on the YAML
+    // init values from first open. Mirrors the Rust dock's
+    // build_live_panel_overrides color block.
+    if contentId == "color_panel_content", let m = model,
+       let overrides = colorPanelLiveOverrides(model: m) {
+        for (k, v) in overrides { panelMap[k] = v }
+    }
+    // Stroke panel — the Weight field must reflect the selection's
+    // stroke width (its baked / effective width after the scale
+    // counter-scale work), not the stored panel default. Mirrors the
+    // color block above and the Rust dock build_live_panel_overrides
+    // stroke block. Display-only: merged into the render scope, never
+    // written to the selection, so it can't clobber other stroke props.
+    if contentId == "stroke_panel_content", let m = model {
+        let overrides = strokePanelLiveOverrides(model: m)
+        for (k, v) in overrides { panelMap[k] = v }
+        // Overlay the live `state.stroke_*` toggle values so the
+        // Dashed-Line / Link-scales / Flip-profile toggles'
+        // `set: { stroke_X: "not state.stroke_X" }` effects read the
+        // current value rather than the static workspace default —
+        // otherwise the box latches checked (DASHFIX). Must land after
+        // the panel is initialised (above) so the panel scope exists.
+        for (k, v) in strokePanelStateOverrides(store: m.stateStore) {
+            stateMap[k] = v
+        }
+    }
+    // Properties panel — X/Y/W/H reflect the selection's evaluated
+    // bounding box (document space, post-transform), decision-5 Part B.1.
+    // Display-only merge into the render scope; never written to the
+    // selection. prop_-prefixed keys match properties.yaml.
+    if contentId == "properties_panel_content", let m = model {
+        let overrides = propertiesPanelLiveOverrides(model: m)
+        for (k, v) in overrides { panelMap[k] = v }
+    }
+    // Render-time layers-panel selection, through the ONE reader the
+    // panel-menu context uses (`layersPanelSelection(model:)`): the store
+    // key layers.yaml declares, mirrored from the tree view's selection.
+    // This used to read `"layers" / "layers_panel_selection"`, a scope
+    // and key nothing in this app ever wrote, so
+    // `active_document.layers_panel_selection_count` was 0 in every body
+    // context regardless of what the artist had selected.
+    let layersPanelSelection: [[Int]] = JasLib.layersPanelSelection(model: model)
+    // theme.colors namespace — the active theme's colors map.
+    // YAML expressions like `style: { color: "{{theme.colors.text}}" }`
+    // resolve through this. Without it, panel labels have no
+    // explicit foreground color and SwiftUI's default Text color
+    // washes out against the dark pane background.
+    let themeColors: [String: Any] = {
+        guard let theme = ws.theme(),
+              let base = theme["base"] as? [String: Any],
+              let colors = base["colors"] as? [String: Any] else {
+            return [:]
+        }
+        return colors
+    }()
+    var ctx: [String: Any] = [
+        "state": stateMap,
+        "panel": panelMap,
+        "icons": icons,
+        "data": ["swatch_libraries": swatchLibs, "brush_libraries": ws.brushLibraries(), "concepts": ws.conceptsList()] as [String: Any],
+        "active_document": buildActiveDocumentView(
+            model: model,
+            layersPanelSelection: layersPanelSelection
+        ),
+        "theme": ["colors": themeColors] as [String: Any]
+    ]
+    // OPACITY.md § States predicates at top level so yaml
+    // expressions like `bind.disabled: "!selection_has_mask"` and
+    // `bind.checked: "selection_mask_clip"` resolve uniformly.
+    // Mirrors `build_selection_predicates` in jas_dioxus.
+    for (k, v) in buildSelectionPredicates(model: model) { ctx[k] = v }
+    // Expose the Opacity panel's new-mask preferences so the
+    // op_make_mask button can read them at click time (they live
+    // on WorkspaceLayout.opacityPanel, not in the shared panel
+    // store).
+    ctx["_opacity_new_masks_clipping"] = opacityPanel.newMasksClipping
+    ctx["_opacity_new_masks_inverted"] = opacityPanel.newMasksInverted
+    return ctx
 }

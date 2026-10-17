@@ -4842,18 +4842,14 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
           let event = st["event"] as? String,
           let panel = WorkspaceData.load()?.panel(panelId),
           let widget = WidgetEvent.findWidget(in: panel["content"], id: widgetId) else { return false }
-    let store = model.stateStore
-    if !store.hasPanel(panelId) {
-        store.initPanel(panelId, defaults: WorkspaceData.load()?.panelStateDefaults(panelId) ?? [:])
-    }
-    store.setActivePanel(panelId)
-    // `state` is the dock's live map (`buildLiveStateMap`): the defaults with
-    // the active fill and stroke overlaid, which a `disabled` bind reads
-    // (`cp_hex` is disabled while the active colour is none).
+    // The scope is the one the dock renders and acts with
+    // (`buildPanelBodyContext`): the stored panel state with the selection's
+    // live values merged in, and the live `state` map. A `disabled` bind is
+    // evaluated there, so a step the app refuses is refused here too
+    // (`stk_miter_limit` at a bevel join).
     let ws = WorkspaceData.load()!
-    let route = PanelWidgetEvents(model: model, panelId: panelId, scope: [
-        "panel": store.getPanelState(panelId), "state": buildLiveStateMap(ws: ws, model: model),
-        "active_document": buildActiveDocumentView(model: model)])
+    let route = PanelWidgetEvents(model: model, panelId: panelId, scope: buildPanelBodyContext(
+        ws: ws, model: model, contentId: panelId, opacityPanel: OpacityPanelState()))
     let result: WidgetEvent.Result
     switch event {
     case "click" where WidgetEvent.clickKinds.contains(widget["type"] as? String ?? ""):
@@ -4863,6 +4859,23 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
     default: return false
     }
     return result.outcome == "committed"
+}
+
+/// The level-1 runner evaluates a widget's `disabled` in the scope the APP
+/// renders the panel with: the stored panel state with the selection's live
+/// values merged in. It used the stored state alone, whose `join` default is
+/// "miter", so it applied a miter-limit commit at a bevel join that the live
+/// app refuses (`stk_miter_limit` declares `disabled: panel.join != "miter"`).
+@Test func aScriptPanelStepOnADisabledWidgetIsRefusedAsTheAppRefusesIt() {
+    let model = runGestureModel(["name": "disabled", "setup_svg": "rect_with_stroke.svg", "tool": "selection",
+                                 "app_state": [:] as [String: Any],
+                                 "events": [["kind": "press", "x": 36, "y": 18], ["kind": "release", "x": 36, "y": 18]]])
+    let commit: [String: Any] = ["panel": "stroke_panel_content", "widget": "stk_miter_limit",
+                                 "event": "commit", "value": "4"]
+    #expect(!runScriptPanelStep(commit, model: model), "a commit on a disabled widget ran")
+    // Control: once the join is miter the same commit runs.
+    #expect(runScriptPanelStep(["panel": "stroke_panel_content", "widget": "stk_join_miter", "event": "click"], model: model))
+    #expect(runScriptPanelStep(commit, model: model), "the enabled commit did not run")
 }
 
 @Test func scriptCorpus() throws {
