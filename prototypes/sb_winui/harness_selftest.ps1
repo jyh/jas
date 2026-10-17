@@ -2239,15 +2239,30 @@ $pCommit = [ordered]@{ panel = 'magic_wand_panel_content'; widget = 'fill_tolera
 Test-Case 'is: a panel step after the gesture is accepted and carried' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json panels=align_panel_content/align_left_button:click'
-Test-Case 'is: a key then two panel steps are all carried, in order' {
+Test-Case 'is: a key then two panel steps on one panel are all carried, in order' {
     $k = [ordered]@{ key = 'Delete' }
-    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $pAlign, $pCommit, $sRead)))
-} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=Delete panels=align_panel_content/align_left_button:click;magic_wand_panel_content/fill_tolerance:commit=40'
+    $pSpacing = [ordered]@{ panel = 'align_panel_content'; widget = 'distribute_spacing_value'; event = 'commit'; value = '40' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $pAlign, $pSpacing, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=Delete panels=align_panel_content/align_left_button:click;align_panel_content/distribute_spacing_value:commit=40'
+# The window shows ONE panel, and the certificate opens it at launch
+# (SB_PANEL, jas section 378): the script's panel is carried, and a script
+# whose panel steps name two panels is refused by name.
+Test-Case 'is: the panel the steps name is carried, for the launch to open (SB_PANEL)' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pCommit, $sRead))
+    "[$($s.Panel)]"
+} '[magic_wand_panel_content]'
+Test-Case 'is: a script with no panel step names no panel, and the shell keeps its default' {
+    "[$((Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead))).Panel)]"
+} '[]'
+Test-Case 'is: panel steps on two panels are refused by name: the window shows one, opened at launch' {
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pCommit, $sRead)))
+} 'REFUSED: step 4 panel magic_wand_panel_content/fill_tolerance names a second panel (step 3 named align_panel_content): the window shows one panel, which this driver opens at launch'
 Test-Case 'is: the panel steps cross -File as one base64 string that decodes to the steps' {
-    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pCommit, $sRead))
+    $pSpacing = [ordered]@{ panel = 'align_panel_content'; widget = 'distribute_spacing_value'; event = 'commit'; value = '40' }
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pSpacing, $sRead))
     $back = ConvertFrom-SbPanelText $s.PanelText
     "$($s.Panels) $(@($back).Count) $(@($back | ForEach-Object { "$($_.panel)|$($_.widget)|$($_.event)|$($_.value)" }) -join ';')"
-} '2 2 align_panel_content|align_left_button|click|;magic_wand_panel_content|fill_tolerance|commit|40'
+} '2 2 align_panel_content|align_left_button|click|;align_panel_content|distribute_spacing_value|commit|40'
 Test-Case 'is: a commit value with a quote and a semicolon survives the crossing' {
     $v = [ordered]@{ panel = 'p'; widget = 'w'; event = 'commit'; value = 'a"b;c' }
     (ConvertFrom-SbPanelText (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $v, $sRead))).PanelText).value
@@ -2285,10 +2300,13 @@ Test-Case 'is: a panel step that names no widget is refused' {
 # [InvokePatternIdentifiers.Pattern, ScrollItemPatternIdentifiers.Pattern],
 # disabled; distribute_spacing_value a TextBox exposing
 # [ValuePatternIdentifiers.Pattern, TextPatternIdentifiers.Pattern,
-# ScrollItemPatternIdentifiers.Pattern]. A Toggle or SelectionItem control was
-# not measured; those two rows use the same programmatic-name form.
+# ScrollItemPatternIdentifiers.Pattern]; and (2026-10-17, the stroke panel)
+# stk_dashed a CheckBox exposing [TogglePatternIdentifiers.Pattern,
+# ScrollItemPatternIdentifiers.Pattern]. A SelectionItem control was not
+# measured; its row uses the same programmatic-name form.
 $uiaButton = @('InvokePatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern')
 $uiaTextBox = @('ValuePatternIdentifiers.Pattern', 'TextPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern')
+$uiaCheckBox = @('TogglePatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern')
 function Show-SbPanelAction($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
 Test-Case 'pa: an enabled button is clicked through Invoke' {
     Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
@@ -2297,7 +2315,7 @@ Test-Case 'pa: a text box is committed through Value' {
     Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'distribute_spacing_value' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Edit' -Patterns $uiaTextBox)
 } 'Value'
 Test-Case 'pa: a toggle is clicked through Toggle, a selection item through Select' {
-    $t = Select-SbPanelAction -Panel 'p' -Widget 't' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.CheckBox' -Patterns @('TogglePatternIdentifiers.Pattern')
+    $t = Select-SbPanelAction -Panel 'stroke_panel_content' -Widget 'stk_dashed' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.CheckBox' -Patterns $uiaCheckBox
     $r = Select-SbPanelAction -Panel 'p' -Widget 'r' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.RadioButton' -Patterns @('SelectionItemPatternIdentifiers.Pattern')
     "$(Show-SbPanelAction $t) $(Show-SbPanelAction $r)"
 } 'Toggle SelectionItem'
