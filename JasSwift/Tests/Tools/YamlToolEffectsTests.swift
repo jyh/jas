@@ -1052,6 +1052,31 @@ private func s4bEdit(_ d: [PathCommand], frame: Transform?, press: (Double, Doub
     #expect(s1Commands(model, [0, 0, 0]) == d)
 }
 
+// MARK: - S5: the Path Eraser cuts where a path is DRAWN
+// Twins of the Rust `the_eraser_*` tests.
+
+private func s5Erase(_ len: Double, _ t: Transform, _ x: Double, _ y: Double) -> Model {
+    let path: Element = .path(Path(d: [.moveTo(0, 0), .lineTo(len, 0)], transform: t, fillRule: .nonzero))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [path])], selectedLayer: 0, selection: []))
+    runEffects([["doc.path.erase_at_rect": ["last_x": x, "last_y": y, "x": x, "y": y, "eraser_size": 2]]],
+               ctx: [:], store: StateStore(), platformEffects: buildYamlToolEffects(model: model))
+    return model
+}
+
+/// The line is 3 long locally and drawn 30 long (scaled 10), so an erase at
+/// its drawn middle splits it in two; judged by its local bounds it would be
+/// deleted. Twin of Rust `the_eraser_judges_fit_by_the_drawn_bounds`.
+@Test func theEraserJudgesFitByTheDrawnBounds() {
+    #expect(s5Erase(3, .scale(10, 10), 15, 0).document.layers[0].children.count == 2)
+}
+
+/// Under a SINGULAR transform the eraser leaves the path alone.
+@Test func theEraserSkipsAPathWithASingularFrame() {
+    let model = s5Erase(30, .scale(0, 1), 0, 0)
+    #expect(model.document.layers[0].children.count == 1)
+    #expect(s1Commands(model, [0, 0]).count == 2)
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()

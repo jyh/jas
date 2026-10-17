@@ -294,8 +294,9 @@ private func pathAt(_ model: Model, _ p: ElementPath) -> Path? {
         .moveTo(0, 0), .lineTo(100, 0), .lineTo(100, 100), .lineTo(0, 100),
         .closePath,
     ])
+    // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
     runEffects([["doc.path.erase_at_rect":
-                    ["last_x": 50, "last_y": 0, "x": 50, "y": 0,
+                    ["last_x": 90, "last_y": 70, "x": 90, "y": 70,
                      "eraser_size": 2]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
@@ -341,7 +342,8 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
 @Test func theseusEraseSplitKeepsAppearanceAndNameWithFreshIds() throws {
     let (model, src) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
     withCorpusIdCounter {
-        eraseAtRect(model, lastX: 50, lastY: 0, x: 50, y: 0, eraserSize: 2)
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        eraseAtRect(model, lastX: 90, lastY: 70, x: 90, y: 70, eraserSize: 2)
     }
     let n = model.document.layers[0].children.count
     #expect(n == 2, "a severing erase of an open path yields two fragments")
@@ -468,7 +470,8 @@ private func eraseAtRect(_ model: Model, lastX: Double, lastY: Double,
 @Test func eraseSplitMintsIdsInDocumentOrder() throws {
     let (model, _) = modelWithTheseus([.moveTo(0, 0), .lineTo(100, 0)])
     withCorpusIdCounter {
-        eraseAtRect(model, lastX: 50, lastY: 0, x: 50, y: 0, eraserSize: 2)
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        eraseAtRect(model, lastX: 90, lastY: 70, x: 90, y: 70, eraserSize: 2)
     }
     #expect(try #require(pathAt(model, [0, 0])).id == "01234567")
     #expect(try #require(pathAt(model, [0, 1])).id == "89abcdef")
@@ -673,12 +676,14 @@ private let theseusSquare: [PathCommand] = [
 /// append a SECOND element instead.
 @Test func theseusEraseThenBlobMergePreservesEverythingButD() throws {
     let (model, src) = modelWithTheseus(theseusSquare)
+    // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
     runEffects([["doc.path.erase_at_rect":
-                    ["last_x": 50, "last_y": 0, "x": 50, "y": 0,
+                    ["last_x": 90, "last_y": 70, "x": 90, "y": 70,
                      "eraser_size": 2]]],
                ctx: [:], store: StateStore(),
                platformEffects: buildYamlToolEffects(model: model))
     let fragment = try #require(pathAt(model, [0, 0]))
+    #expect(fragment.d != src.d, "the erase must cut the path, or the chain below tests an unerased path")
     #expect(fragment.toolOrigin == "blob_brush",
             "the erased fragment keeps toolOrigin — that is what makes it a merge candidate")
     let store = StateStore()

@@ -2196,7 +2196,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 89, "the fixture corpus changed size");
+        assert_eq!(total, 90, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2308,6 +2308,11 @@ mod tests {
         // carrying matrix(2,0,0,3,300,200). A plain path in a transformed
         // group, so it presents. Both pins bumped in the same edit.
         //
+        // ⛔ 89 → 90 (jas, 2026-10-17, the Path Eraser's frame pin):
+        // `transformed_line.svg`, one stroked line carrying its own
+        // matrix(2,0,0,3,80,40). A plain path with a transform, so it presents.
+        // Both pins bumped in the same edit.
+        //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
         // pushed one document back out would otherwise read as "69, close
@@ -2318,6 +2323,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 89, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 90, "the whole corpus presents");
     }
 }

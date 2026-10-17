@@ -1949,23 +1949,45 @@ private func pathEraseAtRect(
         let layer = newLayers[li]
         var newChildren: [Element] = []
         var layerChanged = false
-        for child in layer.children {
+        for (ci, child) in layer.children.enumerated() {
             guard case .path(let pe) = child, !pe.locked else {
                 newChildren.append(child)
                 continue
             }
-            let flat = flattenPathCommands(pe.d)
+            // The eraser sweeps DOCUMENT space, so the path is tested where it
+            // is DRAWN (transform-correct path verbs S5): flattened points go
+            // through its full frame. The hit's flat indices and t carry over
+            // (an affine map preserves ratios along a line); its entry and exit
+            // POINTS are mapped back to local space before the split. A
+            // singular frame is left alone. Twin of Rust `path_erase_at_rect`.
+            let frame = accumulatedTransform(model.document, [li, ci], includeOwn: true)
+            var inv: Transform? = nil
+            if let f = frame {
+                guard let i = f.inverse() else {
+                    newChildren.append(child)
+                    continue
+                }
+                inv = i
+            }
+            let localFlat = flattenPathCommands(pe.d)
+            let flat = frame.map { f in localFlat.map { f.applyPoint($0.0, $0.1) } } ?? localFlat
             guard flat.count >= 2 else {
                 newChildren.append(child)
                 continue
             }
-            guard let hit = findEraserHit(
+            guard let docHit = findEraserHit(
                 flat, minX, minY, maxX, maxY
             ) else {
                 newChildren.append(child)
                 continue
             }
-            let bounds = pe.bounds
+            let hit = inv.map { i in
+                EraserHit(firstFlatIdx: docHit.firstFlatIdx, lastFlatIdx: docHit.lastFlatIdx,
+                          entryTSeg: docHit.entryTSeg, entry: i.applyPoint(docHit.entry.0, docHit.entry.1),
+                          exitTSeg: docHit.exitTSeg, exitPt: i.applyPoint(docHit.exitPt.0, docHit.exitPt.1))
+            } ?? docHit
+            // "Fits inside the eraser" is a DOCUMENT-space size.
+            let bounds = frame.map { aabbThrough(pe.bounds, $0) } ?? pe.bounds
             if bounds.width <= eraserSize * 2 && bounds.height <= eraserSize * 2 {
                 // bbox fits inside the eraser — drop entirely.
                 layerChanged = true
