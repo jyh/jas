@@ -32,6 +32,7 @@ shortcuts. With another Chrome already open, prefer a focus-click over
 `activate` (the AppleScript target is ambiguous across Chrome instances).
 
 Verbs:
+  script FILE...   (level 2: an input script through the live app; see below)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -232,6 +233,197 @@ def do_presshold(fx, fy, ms=400):
 def do_shot(path):
     subprocess.run(f"screencapture -o -l{WIN['id']} {path}", shell=True)
 
+# ── `script FILE...`: level 2 on the Mac (docs/TESTING.md section 6) ──────
+# Drives an input script through the LIVE app and compares the read-back with
+# the script's level-1 expected file, byte for byte. Every decision (the act
+# list, the refusals, the document -> screen mapping, the open's artboard) is
+# made by scripts/mac_l2_plan.py, which self-tests without a window; this part
+# only posts events and walks the accessibility tree.
+#   Launch:  (cd JasSwift && swift run Jas --title JasHarness --test-fifo /tmp/jas.fifo)
+#   Run:     JAS_TITLE=JasHarness JAS_FIFO=/tmp/jas.fifo python3 jas_gui_harness.py script test_fixtures/input_scripts/*.json
+# A script's `ctrl` is the engine's command modifier, which a person presses
+# as Cmd on the Mac, so it is posted as Cmd.
+import json as _json
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+
+def _ax():
+    import ApplicationServices as AX
+    return AX
+
+def _attr(el, name):
+    AX = _ax()
+    err, v = AX.AXUIElementCopyAttributeValue(el, name, None)
+    return v if err == 0 else None
+
+def _children(el):
+    return list(_attr(el, "AXChildren") or [])
+
+def _find_all(root, pred, limit=40000):
+    out, stack, seen = [], [root], 0
+    while stack and seen < limit:
+        el = stack.pop(); seen += 1
+        if pred(el): out.append(el)
+        stack.extend(_children(el))
+    return out
+
+def _by_id(root, ident):
+    return _find_all(root, lambda e: _attr(e, "AXIdentifier") == ident)
+
+def _app_element():
+    wl = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+    for w in wl:
+        if w.get(Quartz.kCGWindowNumber) == WIN["id"]:
+            return _ax().AXUIElementCreateApplication(w[Quartz.kCGWindowOwnerPID])
+    raise _plan.Refused("the harness window has no owning process")
+
+def _fifo(cmd):
+    with open(os.environ["JAS_FIFO"], "w", encoding="utf-8", newline="") as f:
+        f.write(cmd + "\n")
+
+def _press(el):
+    if _ax().AXUIElementPerformAction(el, "AXPress") != 0:
+        raise _plan.Refused(f"AXPress failed on {_attr(el, 'AXRole')} {_attr(el, 'AXIdentifier')!r}")
+
+def _menu_item(app, path):
+    bar = _attr(app, "AXMenuBar")
+    level = [c for c in _children(bar)] if bar else []
+    el = None
+    for depth, title in enumerate(path):
+        hits = [c for c in level if _attr(c, "AXTitle") == title]
+        if len(hits) != 1:
+            raise _plan.Refused(f"menu path {path}: {len(hits)} items titled {title!r} at depth {depth}")
+        el = hits[0]
+        kids = _children(el)
+        level = _children(kids[0]) if kids and _attr(kids[0], "AXRole") == "AXMenu" else kids
+    return el
+
+def _canvas(app):
+    hits = _by_id(app, "jas_canvas")
+    if len(hits) != 1:
+        raise _plan.Refused(f"{len(hits)} canvases carry AXIdentifier jas_canvas; the run needs exactly one")
+    c = hits[0]
+    view = _plan.parse_view_report(_attr(c, "AXValue"))
+    pos, size = _attr(c, "AXPosition"), _attr(c, "AXSize")
+    if view is None or pos is None:
+        raise _plan.Refused(f"the canvas does not report its view ({_attr(c, 'AXValue')!r}); was the app launched with --test-fifo?")
+    import ApplicationServices as AX
+    ok, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+    return view, (p.x, p.y)
+
+KEYNAME = {"Delete": "delete", "Backspace": "delete", "Escape": "escape", "Enter": "return"}
+
+def _run_script(path, menubar):
+    with open(path, encoding="utf-8") as f:
+        script = _json.load(f)
+    acts = _plan.plan(script, menubar)
+    repo = os.path.dirname(os.path.abspath(__file__))
+    want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
+    app = _app_element()
+    view = origin = None
+    for act in acts:
+        k = act[0]
+        if k == "open":
+            _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
+            _fifo("view 1 0 0"); time.sleep(0.4)
+            view, origin = _canvas(app)
+            if view != (1.0, 0.0, 0.0):
+                raise _plan.Refused(f"the canvas reports view {view} after `view 1 0 0`")
+        elif k == "tool":
+            _fifo("tool " + act[1]); time.sleep(0.3)
+        elif k in ("pointer", "key") and not _front_is_jas():
+            raise _plan.Refused("Jas is not the frontmost app; a real event would land elsewhere")
+        elif k == "pointer":
+            _, kind, x, y, dragging, mods = act
+            sx, sy = _plan.doc_to_screen(view, origin, x, y)
+            f = flags(mods)
+            if kind == "press":
+                mouse(Quartz.kCGEventMouseMoved, sx, sy, f); mouse(Quartz.kCGEventLeftMouseDown, sx, sy, f)
+            elif kind == "move":
+                mouse(Quartz.kCGEventLeftMouseDragged if dragging else Quartz.kCGEventMouseMoved, sx, sy, f)
+            else:
+                mouse(Quartz.kCGEventLeftMouseUp, sx, sy, f)
+            time.sleep(0.05)
+        elif k == "key":
+            _, key, mods = act
+            ch = KEYNAME.get(key, key.lower())
+            if ch not in KEYCODE:
+                raise _plan.Refused(f"key {key!r} has no keycode in this harness")
+            do_key(ch, ["cmd" if m == "ctrl" else m for m in mods]); time.sleep(0.2)
+        elif k == "panel":
+            _, pid, mpath, widget, event, value = act
+            panels = _by_id(app, pid)
+            if not panels:
+                _press(_menu_item(app, mpath)); time.sleep(0.6)
+                panels = _by_id(app, pid)
+            if len(panels) != 1:
+                raise _plan.Refused(f"{len(panels)} panels carry AXIdentifier {pid!r}")
+            ws = _by_id(panels[0], widget)
+            if len(ws) != 1:
+                raise _plan.Refused(f"{len(ws)} widgets carry AXIdentifier {widget!r} in {pid!r}")
+            w = ws[0]
+            if _attr(w, "AXEnabled") is False:
+                raise _plan.Refused(f"widget {widget!r} is disabled")
+            if event == "click":
+                _press(w)
+            else:
+                AX = _ax()
+                AX.AXUIElementSetAttributeValue(w, "AXFocused", True)
+                if AX.AXUIElementSetAttributeValue(w, "AXValue", str(value)) != 0:
+                    raise _plan.Refused(f"widget {widget!r} ({_attr(w, 'AXRole')}) takes no AXValue")
+                do_key("return", [])
+            time.sleep(0.3)
+        elif k == "menu":
+            _press(_menu_item(app, act[1])); time.sleep(0.4)
+        elif k == "read":
+            out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "jas-l2-read.json")
+            if os.path.exists(out): os.remove(out)
+            _fifo("read " + out)
+            for _ in range(30):
+                if os.path.exists(out): break
+                time.sleep(0.1)
+            else:
+                raise _plan.Refused("the app wrote no read-back (is --test-fifo the same path as JAS_FIFO?)")
+            got = open(out, encoding="utf-8").read().strip()
+            got = _plan.set_aside_the_opens_artboard(got, want)
+            return got == want, got, want
+
+IDLE_FLOOR_S = 120  # a person's input this recent means the console is in use
+
+def _console_in_use():
+    # Real Quartz events go to whatever is under the pointer, so the driver
+    # never runs while a person is using the console.
+    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType)
+    return idle < IDLE_FLOOR_S, idle
+
+def _front_is_jas():
+    from AppKit import NSWorkspace
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return app is not None and app.localizedName() == PROC
+
+def do_script(paths):
+    global _plan
+    import mac_l2_plan as _plan
+    busy, idle = _console_in_use()
+    if busy:
+        print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s); a person may be using it")
+        return 3
+    menubar = _plan.load_menubar()
+    bad = 0
+    for p in paths:
+        name = os.path.basename(p)
+        try:
+            ok, got, want = _run_script(p, menubar)
+            print(("PASS " if ok else "FAIL ") + name)
+            if not ok:
+                bad += 1
+                print("  got  ", got); print("  want ", want)
+        except _plan.Refused as e:
+            bad += 1
+            print("REFUSED " + name + ": " + str(e))
+    print(f"{len(paths) - bad} of {len(paths)} scripts passed")
+    return 1 if bad else 0
+
 if __name__=="__main__":
     v=sys.argv[1]
     if v=="activate":
@@ -268,6 +460,9 @@ if __name__=="__main__":
         do_dragpath(points); print("dragpath",points)
     elif v=="move":
         do_move(float(sys.argv[2]),float(sys.argv[3])); print("move",sys.argv[2],sys.argv[3])
+    elif v=="script":
+        paths=[a for a in sys.argv[2:] if not a.endswith(".expected.json")]
+        sys.exit(do_script(paths))
     elif v=="presshold":
         ms=int(sys.argv[4]) if len(sys.argv)>4 else 400
         do_presshold(float(sys.argv[2]),float(sys.argv[3]),ms); print("presshold",sys.argv[2:4],ms)
