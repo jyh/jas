@@ -3895,7 +3895,16 @@ struct TreeViewContent: View {
         Set((model.stateStore.getPanel("layers_panel_content", "type_filter")
              as? [String]) ?? [])
     }
-    @State private var isolationStack: [ElementPath] = []
+    /// The Layers isolation stack is the DOCUMENT's (`Model.layersIsolationStack`),
+    /// the same one the panel-menu actions write and the Partial Selection
+    /// probe reads. It was a view-private `@State` until route 4 slice 3b, so
+    /// entering isolation from this tree's context menu never reached the
+    /// canvas, and entering from the panel menu never scoped this tree. Rust
+    /// keeps one stack per tab's `Model` likewise.
+    private var isolationStack: [ElementPath] {
+        get { model.layersIsolationStack }
+        nonmutating set { model.layersIsolationStack = newValue }
+    }
     @State private var soloState: (path: ElementPath, saved: [ElementPath: Visibility])? = nil
     @State private var showLayerOptionsFor: ElementPath? = nil
     @FocusState private var treeFocused: Bool

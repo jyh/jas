@@ -669,6 +669,179 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(model.document.selection.contains { $0.path == [0, 0] })
 }
 
+/// The control-point probe hits a corner WHERE IT IS DRAWN: through the
+/// group's transform and the element's own, which is where the handle square
+/// is drawn (`selectionHandleRects`). A Group translated (100, 0) holds a rect
+/// (0, 0, 10 x 10) scaled 2x by its own transform, so corner 2 (local 10, 10)
+/// is drawn at (120, 20), and (10, 10) draws nothing. Twin of Rust
+/// `the_control_point_probe_hits_a_corner_where_it_is_drawn`.
+@Test func theControlPointProbeHitsACornerWhereItIsDrawn() {
+    func probe(_ x: Double, _ y: Double) -> (String?, [ElementSelection]) {
+        let rect: Element = .rect(Rect(x: 0, y: 0, width: 10, height: 10, transform: .scale(2, 2)))
+        let group: Element = .group(Group(children: [rect], transform: .translate(100, 0)))
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [group])],
+                                             selectedLayer: 0, selection: []))
+        let store = StateStore()
+        runEffects([["doc.path.probe_partial_hit": ["x": x, "y": y, "hit_radius": 4]]],
+                   ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+        return (store.getTool("partial_selection", "mode") as? String, model.document.selection)
+    }
+    let (hitMode, hitSel) = probe(120, 20)
+    #expect(hitMode == "moving_pending", "the drawn corner is a hit")
+    #expect(hitSel == [ElementSelection.partial([0, 0, 0], [2])])
+    let (missMode, missSel) = probe(10, 10)
+    #expect(missMode == "marquee", "the untransformed position draws nothing")
+    #expect(missSel.isEmpty)
+}
+
+/// ROUTE 4 SLICE 3b: the probe reaches a Transformed wrapper's CHILD only while
+/// that wrapper is the innermost isolation entry, and hits the child's points
+/// where they are drawn (frame `W·M`). The wrapper scales a rect (2, 2, 10 x 10)
+/// by (2, 3), so corner 2 (local 12, 12) is drawn at (24, 36). Twin of Rust
+/// `the_probe_reaches_a_wrapped_childs_corner_only_while_isolated`.
+@Test func theProbeReachesAWrappedChildsCornerOnlyWhileIsolated() {
+    func probe(_ stack: [[Int]], _ x: Double, _ y: Double) -> (String?, [ElementSelection]) {
+        let w = TransformedElem(child: .rect(Rect(x: 2, y: 2, width: 10, height: 10)),
+                                matrix: .scale(2, 3), scaleStrokes: false)
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                             selectedLayer: 0, selection: []))
+        model.layersIsolationStack = stack
+        let store = StateStore()
+        runEffects([["doc.path.probe_partial_hit": ["x": x, "y": y, "hit_radius": 4]]],
+                   ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+        return (store.getTool("partial_selection", "mode") as? String, model.document.selection)
+    }
+    #expect(probe([], 24, 36).1.allSatisfy { $0.path != [0, 0, 0] }, "not isolated: the child is unreachable")
+    let (mode, sel) = probe([[0, 0]], 24, 36)
+    #expect(mode == "moving_pending")
+    #expect(sel == [ElementSelection.partial([0, 0, 0], [2])], "isolated: the drawn corner")
+    #expect(probe([[0, 0]], 12, 12).0 == "marquee", "isolated: the untransformed corner draws nothing")
+    #expect(probe([[0]], 24, 36).1.allSatisfy { $0.path != [0, 0, 0] }, "isolated into the LAYER only")
+}
+
+/// A Bezier HANDLE is grabbed where it is DRAWN and dragged in DOCUMENT space,
+/// as a pair. A curve whose middle anchor (30, 0) has its in-handle at (20, 10),
+/// inside a group at matrix(2,0,0,2,100,0): drawn at (140, 20); a (10, 10) drag
+/// moves it (5, 5) locally. Twin of Rust
+/// `a_bezier_handle_is_grabbed_where_drawn_and_dragged_in_document_space`.
+@Test func aBezierHandleIsGrabbedWhereDrawnAndDraggedInDocumentSpace() {
+    let curve: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 10, y1: 10, x2: 20, y2: 10, x: 30, y: 0),
+        .curveTo(x1: 40, y1: -10, x2: 50, y2: -10, x: 60, y: 0),
+    ]
+    let group: Element = .group(Group(children: [.path(Path(d: curve, fillRule: .nonzero))],
+                                      transform: Transform(a: 2, b: 0, c: 0, d: 2, e: 100, f: 0)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])],
+                                         selectedLayer: 0, selection: [ElementSelection.all([0, 0, 0])]))
+    let store = StateStore()
+    let fx = buildYamlToolEffects(model: model)
+    runEffects([["doc.path.probe_partial_hit": ["x": 140, "y": 20, "hit_radius": 4]]], ctx: [:], store: store, platformEffects: fx)
+    #expect(store.getTool("partial_selection", "mode") as? String == "handle", "the drawn handle is a hit")
+    #expect(store.getTool("partial_selection", "handle_type") as? String == "in")
+    runEffects([["doc.move_path_handle": ["dx": 10, "dy": 10]]], ctx: [:], store: store, platformEffects: fx)
+    guard case .path(let p) = model.document.getElement([0, 0, 0]),
+          case .curveTo(_, _, let x2, let y2, _, _) = p.d[1] else { Issue.record("a curve"); return }
+    #expect(x2 == 25 && y2 == 15, "moved (5,5) locally: \(p.d[1])")
+}
+
+// MARK: - the Anchor Point tool hits and edits a path WHERE IT IS DRAWN
+//
+// Transform-correct path verbs, S1: both anchor probes walk every depth on
+// `findInEditablePaths` and compare through the path's frame, and
+// `commit_anchor_edit` maps its release point (corner) and its drag (handle)
+// back into local space. Twins of the Rust `the_anchor_point_tool_*` tests.
+
+/// The open path (0,0) -> (30,30) -> (60,0): a CORNER at (30,30).
+private let s1CornerPath: Element = .path(Path(d: [.moveTo(0, 0), .lineTo(30, 30), .lineTo(60, 0)], fillRule: .nonzero))
+
+/// `elem` inside an identity Group inside a Group rotated 90 degrees and moved
+/// to (100, 50): local (x, y) is drawn at (100 - y, 50 + x).
+private func s1RotatedModel(_ elem: Element) -> Model {
+    let inner: Element = .group(Group(children: [elem]))
+    let outer: Element = .group(Group(children: [inner], transform: Transform(a: 0, b: 1, c: -1, d: 0, e: 100, f: 50)))
+    return Model(document: Document(layers: [Layer(name: "L", children: [outer])], selectedLayer: 0, selection: []))
+}
+
+/// Press at `from`, release at `to`: the probe then the commit. Returns the
+/// mode the probe chose.
+@discardableResult
+private func s1AnchorDrag(_ model: Model, _ from: (Double, Double), _ to: (Double, Double)) -> String? {
+    let store = StateStore()
+    let fx = buildYamlToolEffects(model: model)
+    runEffects([["doc.path.probe_anchor_hit": ["x": from.0, "y": from.1, "hit_radius": 5]]],
+               ctx: [:], store: store, platformEffects: fx)
+    let mode = store.getTool("anchor_point", "mode") as? String
+    runEffects([["doc.path.commit_anchor_edit": ["origin_x": from.0, "origin_y": from.1,
+                                                 "target_x": to.0, "target_y": to.1]]],
+               ctx: [:], store: store, platformEffects: fx)
+    return mode
+}
+
+private func s1Commands(_ model: Model, _ path: ElementPath) -> [PathCommand] {
+    guard case .path(let p) = model.document.getElement(path) else { return [] }
+    return p.d
+}
+
+/// The corner (30,30) is drawn at (70,80); a release at (70,90) is local
+/// (40,30), so the out-handle lands there and the in-handle mirrors to (20,30).
+@Test func theAnchorPointToolConvertsACornerWhereItIsDrawnUnderRotation() {
+    #expect(s1AnchorDrag(s1RotatedModel(s1CornerPath), (30, 30), (40, 30)) == "idle", "the local position draws nothing")
+    let model = s1RotatedModel(s1CornerPath)
+    #expect(s1AnchorDrag(model, (70, 80), (70, 90)) == "pressed_corner")
+    let d = s1Commands(model, [0, 0, 0, 0])
+    guard d.count == 3, case .curveTo(_, _, let x2, let y2, let x, let y) = d[1],
+          case .curveTo(let x1, let y1, _, _, _, _) = d[2] else { Issue.record("two curves: \(d)"); return }
+    #expect((x2, y2, x, y) == (20, 30, 30, 30), "in-handle mirrored to local (20,30): \(d[1])")
+    #expect((x1, y1) == (40, 30), "out-handle at the release point's local image (40,30): \(d[2])")
+}
+
+/// Anchor 1 (30,0) has its in-handle at local (20,10), drawn at (90,70). A
+/// (0,10) document drag is the local delta (10,0), so the handle moves to
+/// (30,10); an unmapped drag gives (20,20) and a transposed one (10,10).
+@Test func theAnchorPointToolDragsAHandleInDocumentSpaceUnderRotation() {
+    let curve: [PathCommand] = [
+        .moveTo(0, 0),
+        .curveTo(x1: 10, y1: 10, x2: 20, y2: 10, x: 30, y: 0),
+        .curveTo(x1: 40, y1: -10, x2: 50, y2: -10, x: 60, y: 0),
+    ]
+    let model = s1RotatedModel(.path(Path(d: curve, fillRule: .nonzero)))
+    #expect(s1AnchorDrag(model, (90, 70), (90, 80)) == "pressed_handle")
+    let d = s1Commands(model, [0, 0, 0, 0])
+    guard d.count == 3, case .curveTo(_, _, let x2, let y2, _, _) = d[1] else { Issue.record("a curve: \(d)"); return }
+    #expect((x2, y2) == (30, 10), "the in-handle moved (10,0) locally: \(d[1])")
+}
+
+/// The tool reaches a Transformed wrapper's child only while the wrapper is
+/// the innermost isolation entry, under W·M. The wrapper scales the corner
+/// path by (2,3), so the corner (30,30) is drawn at (60,90).
+@Test func theAnchorPointToolReachesAWrappedPathOnlyWhileIsolated() {
+    func probe(_ stack: [[Int]], _ x: Double, _ y: Double) -> String? {
+        let w = TransformedElem(child: s1CornerPath, matrix: .scale(2, 3), scaleStrokes: false)
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                             selectedLayer: 0, selection: []))
+        model.layersIsolationStack = stack
+        let store = StateStore()
+        runEffects([["doc.path.probe_anchor_hit": ["x": x, "y": y, "hit_radius": 5]]],
+                   ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+        return store.getTool("anchor_point", "mode") as? String
+    }
+    #expect(probe([], 60, 90) == "idle", "not isolated: a wrapper is one element")
+    #expect(probe([[0, 0]], 60, 90) == "pressed_corner", "isolated: the drawn corner")
+    #expect(probe([[0, 0]], 30, 30) == "idle", "isolated: the local corner draws nothing")
+}
+
+/// A path whose frame is SINGULAR (a group scaled to zero width) is skipped:
+/// its corner collapses onto (0,30) and cannot be mapped back.
+@Test func theAnchorPointToolSkipsAPathWithASingularFrame() {
+    let group: Element = .group(Group(children: [s1CornerPath], transform: .scale(0, 1)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])], selectedLayer: 0, selection: []))
+    let store = StateStore()
+    runEffects([["doc.path.probe_anchor_hit": ["x": 0, "y": 30, "hit_radius": 5]]],
+               ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+    #expect(store.getTool("anchor_point", "mode") as? String == "idle")
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()

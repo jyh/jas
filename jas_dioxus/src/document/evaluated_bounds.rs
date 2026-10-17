@@ -129,6 +129,31 @@ pub fn accumulated_transform(
     combined
 }
 
+/// Map a DOCUMENT-space delta into the LOCAL space of the element at `path`,
+/// through the inverse of its full frame (ancestors and its own transform).
+/// Only the linear part takes part: a translation moves points, never the
+/// vectors between them. Returns the delta unchanged when nothing on the path
+/// carries a transform, and when the frame is SINGULAR (no local delta can
+/// produce an arbitrary document displacement there). Twin: JasSwift
+/// `documentDeltaToPathLocal`.
+pub fn document_delta_to_path_local(doc: &Document, path: &[usize], dx: f64, dy: f64) -> (f64, f64) {
+    match accumulated_transform(doc, path, true).and_then(|t| t.inverse()) {
+        Some(inv) => (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy),
+        None => (dx, dy),
+    }
+}
+
+/// Map a DOCUMENT-space point into the LOCAL space of the element at `path`,
+/// through the full affine inverse of its frame. Unchanged when nothing on
+/// the path carries a transform or the frame is singular. Twin: JasSwift
+/// `documentPointToPathLocal`.
+pub fn document_point_to_path_local(doc: &Document, path: &[usize], x: f64, y: f64) -> (f64, f64) {
+    match accumulated_transform(doc, path, true).and_then(|t| t.inverse()) {
+        Some(inv) => inv.apply_point(x, y),
+        None => (x, y),
+    }
+}
+
 /// Union `(x, y, w, h)` of every selected element's evaluated geometric bbox
 /// (see [`element_evaluated_bbox`]) in DOCUMENT space — the post-transform
 /// values the Properties panel shows. `(0, 0, 0, 0)` when the selection is empty

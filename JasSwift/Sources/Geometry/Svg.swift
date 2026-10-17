@@ -1065,10 +1065,14 @@ private func elementSvgBody(_ elem: Element, indent: String) -> String {
             // A data-jas-live group around the child, with ONE `transform`
             // attribute: the wrapper's own transform (outside) composed with
             // the operation's matrix (inside). A foreign viewer draws Scale
-            // Strokes ON exactly. ⚠️ NOT YET OFF (it scales the stroke there),
-            // and the SVG reader for this kind is not built. Mirrors Rust.
+            // Strokes ON exactly. ⚠️ NOT YET OFF (it scales the stroke there).
+            // The reader cannot split W·M back, and under OFF the split is the
+            // picture, so it rides exactly beside it: `data-jas-matrix` (M,
+            // always) and `data-jas-own-transform` (W, when set). Mirrors Rust.
             let outer = t.transform.map { $0.multiply(t.matrix) } ?? t.matrix
+            let own = t.transform.map { " data-jas-own-transform=\"\(matrixValue($0))\"" } ?? ""
             return "\(indent)<g data-jas-live=\"transformed\" data-jas-scale-strokes=\"\(t.scaleStrokes)\"" +
+                " data-jas-matrix=\"\(matrixValue(t.matrix))\"\(own)" +
                 "\(opacityAttr(t.opacity))\(transformAttr(outer))\(idLockAttrs(t.id, locked: t.locked))\(nameAttr(t.name))>\n" +
                 elementSvg(t.child, indent: indent + "  ") + "\n\(indent)</g>"
         }
@@ -2285,6 +2289,27 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             return .live(.compoundShape(CompoundShape(
                 operation: operation, operands: children, name: name, id: id,
                 opacity: opacity, transform: transform)))
+        }
+        // A Transformed wrapper is <g data-jas-live="transformed"> around
+        // exactly ONE child (route 4). Its `transform` is W·M; the split rides
+        // `data-jas-matrix` (M) and `data-jas-own-transform` (W). Without the
+        // split (a hand-written file) the whole `transform` is the matrix and
+        // there is no wrapper transform: the same picture. Any other child
+        // count falls through to a plain group. Mirrors Rust's reader.
+        if liveKind == "transformed", children.count == 1 {
+            let matrix: Transform
+            let own: Transform?
+            if let m = parseMatrixAttr(elem, "data-jas-matrix") {
+                matrix = m
+                own = parseMatrixAttr(elem, "data-jas-own-transform")
+            } else {
+                matrix = transform ?? .identity
+                own = nil
+            }
+            let scaleStrokes = elem.attribute(forName: "data-jas-scale-strokes")?.stringValue == "true"
+            return .live(.transformed(TransformedElem(
+                child: children[0], matrix: matrix, scaleStrokes: scaleStrokes,
+                name: name, id: id, transform: own, opacity: opacity)))
         }
         // Layer detection: only explicit inkscape:groupmode="layer"
         // marks a Layer. Plain naming (inkscape:label) on a <g> means

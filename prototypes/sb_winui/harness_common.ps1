@@ -3053,37 +3053,65 @@ function Read-SbInputScript([string]$Json) {
         # (`"shift": true`, TESTING.md section 6), so a reader that looked only
         # at `mods` DROPPED it and the gesture ran unmodified. A value that is
         # not a boolean is refused; alt, ctrl and meta set true are modifiers
-        # this driver cannot inject. Shift is delivered (below).
+        # this driver cannot inject. Shift and alt are delivered (below).
         foreach ($mod in @('shift', 'alt', 'ctrl', 'meta')) {
             if ($names -contains $mod -and $st.$mod -isnot [bool]) {
                 return (& $no "step $i $mod is not a boolean")
             }
         }
-        $named = @(@('alt', 'ctrl', 'meta') | Where-Object { $names -contains $_ -and $st.$_ })
+        $named = @(@('ctrl', 'meta') | Where-Object { $names -contains $_ -and $st.$_ })
         if ($named.Count -gt 0) {
             return (& $no "step $i carries modifiers ($($named -join ',')): send_hand.ps1 injects none")
         }
         $acts.Add($st)
     }
-    # SHIFT IS HELD, NOT PRESSED PER STEP: send_hand.ps1 puts it down before the
-    # press or before the first move and lifts it after the release. So the only
-    # scripts it can deliver faithfully carry shift on every step, or on every
-    # step after the press (the corpus form, draw_rect_shift.json). Any other
-    # shape is refused by name, never delivered as something it is not.
-    $shiftAt = @(for ($j = 0; $j -lt $acts.Count; $j++) {
-        if (@($acts[$j].PSObject.Properties | ForEach-Object { $_.Name }) -contains 'shift' -and $acts[$j].shift) { $j }
-    })
-    $shift = 'none'
-    if ($shiftAt.Count -gt 0) {
-        if ($shiftAt.Count -eq $acts.Count) { $shift = 'press' }
-        elseif ($shiftAt.Count -eq $acts.Count - 1 -and $shiftAt[0] -eq 1) { $shift = 'move' }
-        else {
-            return (& $no "shift on step(s) $($shiftAt -join ',') is not held to the release: send_hand.ps1 holds shift from the press or from the first move, through the release")
+    # SHIFT AND ALT ARE HELD, NOT PRESSED PER STEP: send_hand.ps1 puts each
+    # down before the press or before the first move and lifts it after the
+    # release. So the only scripts it can deliver faithfully carry the modifier
+    # on every step, or on every step after the press (the corpus form,
+    # draw_rect_shift.json). Any other shape is refused by name, never
+    # delivered as something it is not.
+    $held = @{}
+    foreach ($mod in @('shift', 'alt')) {
+        $at = @(for ($j = 0; $j -lt $acts.Count; $j++) {
+            if (@($acts[$j].PSObject.Properties | ForEach-Object { $_.Name }) -contains $mod -and $acts[$j].$mod) { $j }
+        })
+        $held[$mod] = 'none'
+        if ($at.Count -gt 0) {
+            if ($at.Count -eq $acts.Count) { $held[$mod] = 'press' }
+            elseif ($at.Count -eq $acts.Count - 1 -and $at[0] -eq 1) { $held[$mod] = 'move' }
+            else {
+                return (& $no "$mod on step(s) $($at -join ',') is not held to the release: send_hand.ps1 holds $mod from the press or from the first move, through the release")
+            }
         }
     }
+    $shift = $held['shift']
     if ($reads.Count -eq 0) { return (& $no 'no read step: a script that reads nothing proves nothing') }
     foreach ($r in $reads) {
         if ($r -ne 'document') { return (& $no "read '$r': this driver compares only read=document") }
+    }
+    # A CLICK (flask section 348): press + release at ONE point, no move, k=0.
+    # SendInput delivers no motion for a zero-length move, so a click is sent
+    # as the user makes it. A press and release at DIFFERENT points with no
+    # move is a drag, and is refused here by name: the click form must never
+    # let a drag certify with the moves it never sent.
+    if ($acts.Count -eq 2 -and "$($acts[0].kind)" -eq 'press' -and "$($acts[1].kind)" -eq 'release') {
+        $cx = [double]$acts[0].x; $cy = [double]$acts[0].y
+        if ([double]$acts[1].x -ne $cx -or [double]$acts[1].y -ne $cy) {
+            return (& $no "a press at ($($acts[0].x),$($acts[0].y)) and a release at ($($acts[1].x),$($acts[1].y)) with no move is a drag, not a click: a drag needs at least one move")
+        }
+        $acts = @($acts[0]) + @($acts[1])
+        $clickHeld = @{}
+        foreach ($mod in @('shift', 'alt')) {
+            $on = @($acts | Where-Object { @($_.PSObject.Properties | ForEach-Object { $_.Name }) -contains $mod -and $_.$mod })
+            $clickHeld[$mod] = if ($on.Count -eq 0) { 'none' } elseif ($on.Count -eq 2) { 'press' } else { return (& $no "$mod on one step of a click is not held to the release") }
+        }
+        return [pscustomobject]@{
+            Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
+            DocX = $cx; DocY = $cy; Dx = 0.0; Dy = 0.0; Moves = 0; Read = 'document'; Expected = "$($s.expected_json)"
+            Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
+            Keys = $keys.Count; KeyText = ($keys -join ';')
+        }
     }
     if ($acts.Count -lt 3 -or "$($acts[0].kind)" -ne 'press' -or "$($acts[$acts.Count - 1].kind)" -ne 'release') {
         return (& $no 'the gesture is not one press, at least one move, one release')
@@ -3109,7 +3137,7 @@ function Read-SbInputScript([string]$Json) {
     [pscustomobject]@{
         Refusal = $null; Item = "$($s.item)"; Svg = "$($s.setup_svg)"; Tool = "$($s.tool)"
         DocX = $px; DocY = $py; Dx = $dx; Dy = $dy; Moves = $k; Read = 'document'; Expected = "$($s.expected_json)"
-        Shift = $shift
+        Shift = $shift; Alt = $held['alt']
         Keys = $keys.Count; KeyText = ($keys -join ';')
     }
 }

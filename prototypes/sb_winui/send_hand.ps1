@@ -80,6 +80,8 @@ param(
     # either way it comes up after the release. The reader refuses any other
     # shape, so this never fakes a per-step modifier.
     [ValidateSet('none', 'press', 'move')][string]$Shift = 'none',
+    # ALT, HELD (flask section 338 node 11), exactly as shift is.
+    [ValidateSet('none', 'press', 'move')][string]$Alt = 'none',
     # KEYS (§333), delivered AFTER the release as real key events, so the
     # shell's own key route runs. One string, chords split by ';' and keys by
     # '+' (`Delete;ctrl+Z`): a comma list does not survive `-File`.
@@ -105,7 +107,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $log = New-Object System.Collections.Generic.List[string]
-$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift keys=$Keys")
+$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift alt=$Alt keys=$Keys")
 
 $source = @'
 using System;
@@ -377,7 +379,10 @@ $sent = 0
 # as moves after the press -- so a `move != k` reading now belongs to the app or
 # to the window manager and cannot be blamed on the instrument. The receipt below
 # carries the counts needed to tell those apart.
-if ($Moves -lt 1) { $Moves = 1 }
+# k = 0 is a CLICK (flask section 348): press and release at one point, no
+# move, because SendInput emits no motion for a move that does not move.
+# The reader admits k = 0 only when press == release.
+if ($Moves -lt 0) { $Moves = 0 }
 
 $n = ConvertTo-Normalized $px0 $py0
 $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
@@ -386,14 +391,17 @@ Start-Sleep -Milliseconds $SettleMs
 # ⛔ A SHIFT LEFT DOWN WOULD MODIFY EVERY LATER INPUT ON THE DESKTOP, so the
 # key-up is in a `finally` that runs whatever happens between.
 $shiftDown = $false
+$altDown = $false
 try {
 if ($Shift -eq 'press') { [SbHand]::Shift($true); $shiftDown = $true; Start-Sleep -Milliseconds $SettleMs }
+if ($Alt -eq 'press') { [SbHand]::Key(0x12, $true); $altDown = $true; Start-Sleep -Milliseconds $SettleMs }
 
 # The press, AT THE CURSOR. No MOVE, no ABSOLUTE: dx/dy are ignored for motion.
 $heldSw = [System.Diagnostics.Stopwatch]::StartNew()
 $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
 Start-Sleep -Milliseconds $SettleMs
 if ($Shift -eq 'move') { [SbHand]::Shift($true); $shiftDown = $true; Start-Sleep -Milliseconds $SettleMs }
+if ($Alt -eq 'move') { [SbHand]::Key(0x12, $true); $altDown = $true; Start-Sleep -Milliseconds $SettleMs }
 
 # ⭐ THE DRAG'S DURATION IS A RECEIPT FIELD NOW, BECAUSE IT IS THE VARIABLE THE
 # `move != k` DEFECT TURNED OUT TO BE ABOUT. Measured on kenai 2026-09-04 across
@@ -443,6 +451,7 @@ $dragSw.Stop()
 $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
 $heldSw.Stop()
 } finally {
+    if ($altDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Key(0x12, $false) }
     if ($shiftDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Shift($false) }
 }
 # THE KEYS, after the gesture: each chord's modifiers down, the key down and
@@ -468,6 +477,7 @@ foreach ($chord in $chords) {
     foreach ($m in $mods) { [SbHand]::Key($m, $false); $keyEvents++ }
 }
 $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
+$log.Add("alt=$Alt alt-down=$(if ($Alt -eq 'none') { 'never' } else { "before-$Alt" }) alt-up=$(if ($altDown) { 'after-release' } else { 'never' })")
 $log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "before-$Shift" }) shift-up=$(if ($shiftDown) { 'after-release' } else { 'never' })")
 
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")

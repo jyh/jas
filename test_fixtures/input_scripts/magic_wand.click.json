@@ -1,0 +1,13 @@
+{
+  "item": "magic_wand.click",
+  "spec": "workspace/tools/magic_wand.yaml",
+  "setup_svg": "three_rects.svg",
+  "tool": "magic_wand",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 90, "y": 66},
+    {"kind": "release", "x": 90, "y": 66},
+    {"read": "document"}
+  ],
+  "expected_json": "magic_wand.click.expected.json"
+}

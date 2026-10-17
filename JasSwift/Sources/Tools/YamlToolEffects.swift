@@ -679,12 +679,14 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let flags = (
             args["scale_strokes"] != nil ? evalBool(args["scale_strokes"], store: store, ctx: ctx) : stStrokes,
             args["scale_corners"] != nil ? evalBool(args["scale_corners"], store: store, ctx: ctx) : stCorners)
+        // `wrap` (route 4 slice 5): emit a Transformed wrapper, opt-in.
+        let wrap = evalBool(args["wrap"], store: store, ctx: ctx)
         if evalBool(args["journal"], store: store, ctx: ctx) {
             scaleApplyJournaled(model: model, store: store, ctx: ctx,
-                                sx: sx, sy: sy, copy: copy, flags: flags)
+                                sx: sx, sy: sy, copy: copy, flags: flags, wrap: wrap)
         } else {
             scaleApply(model: model, store: store, ctx: ctx,
-                       sx: sx, sy: sy, copy: copy, flags: flags)
+                       sx: sx, sy: sy, copy: copy, flags: flags, wrap: wrap)
         }
         return nil
     }
@@ -2076,74 +2078,91 @@ private func decodePath(_ v: Any?) -> ElementPath? {
     return out
 }
 
-/// Find a path-handle hit: (element path, anchor index, "in"|"out").
-private func findPathHandleNear(
-    _ doc: Document, x: Double, y: Double, radius: Double
-) -> (ElementPath, Int, String)? {
-    func check(_ pe: Path, at path: ElementPath)
-        -> (ElementPath, Int, String)?
-    {
-        let anchors = Element.path(pe).controlPointPositions
-        for ai in anchors.indices {
-            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
-            if let h = hIn {
-                let dx = x - h.0, dy = y - h.1
-                if (dx * dx + dy * dy).squareRoot() < radius {
-                    return (path, ai, "in")
-                }
+/// Visit every Path the anchor tools may edit, in document order, with the
+/// FRAME that maps its LOCAL space to DOCUMENT space (every ancestor's frame
+/// and its own transform; `nil` is the identity). The first non-nil result
+/// the visitor returns stops the walk and is returned.
+///
+/// The walk is the Partial Selection probe's (`findElementCpNear`): any group
+/// depth, anything locked skipped, and a Transformed wrapper entered only when
+/// it IS `isolated` (the innermost isolation entry), under the frame `W·M` it
+/// gives its child. The order stays FORWARD (the first hit is the bottom-most
+/// path), as these tools have always done; a path whose frame is SINGULAR is
+/// skipped, because a point drawn on a collapsed path cannot be mapped back.
+/// Twin of Rust `find_in_editable_paths`.
+private func findInEditablePaths<R>(
+    _ doc: Document, isolated: [Int]?,
+    _ visit: (ElementPath, Path, Transform?) -> R?
+) -> R? {
+    func compose(_ outer: Transform?, _ inner: Transform?) -> Transform? {
+        guard let o = outer else { return inner }
+        guard let i = inner else { return o }
+        return o.multiply(i)
+    }
+    func walk(_ elem: Element, _ path: ElementPath, _ frame: Transform?) -> R? {
+        if elem.isLocked { return nil }
+        if case .live(.transformed(let t)) = elem, isolated == path {
+            return walk(t.child, path + [0], compose(frame, elem.childFrameTransform))
+        }
+        if case .group(let g) = elem {
+            let childFrame = compose(frame, g.transform)
+            for (i, child) in g.children.enumerated() {
+                if let r = walk(child, path + [i], childFrame) { return r }
             }
-            if let h = hOut {
-                let dx = x - h.0, dy = y - h.1
-                if (dx * dx + dy * dy).squareRoot() < radius {
-                    return (path, ai, "out")
-                }
-            }
+            return nil
+        }
+        if case .path(let pe) = elem {
+            let full = compose(frame, elem.transform)
+            if let f = full, f.inverse() == nil { return nil }
+            return visit(path, pe, full)
         }
         return nil
     }
     for (li, layer) in doc.layers.enumerated() {
         for (ci, child) in layer.children.enumerated() {
-            if case .path(let pe) = child, !pe.locked,
-               let r = check(pe, at: [li, ci]) { return r }
-            if case .group(let g) = child, !g.locked {
-                for (gi, gc) in g.children.enumerated() {
-                    if case .path(let pe) = gc, !pe.locked,
-                       let r = check(pe, at: [li, ci, gi]) { return r }
-                }
-            }
+            if let r = walk(child, [li, ci], layer.transform) { return r }
         }
     }
     return nil
 }
 
-/// Find a path-anchor hit using the control-point enumeration.
-/// Returns (element path, anchor index within controlPointPositions).
-private func findPathAnchorByCp(
-    _ doc: Document, x: Double, y: Double, radius: Double
-) -> (ElementPath, Int)? {
-    func check(_ pe: Path, at path: ElementPath) -> (ElementPath, Int)? {
+/// Where a path-local point is DRAWN, through the path's frame.
+private func drawnPoint(_ frame: Transform?, _ p: (Double, Double)) -> (Double, Double) {
+    frame.map { $0.applyPoint(p.0, p.1) } ?? p
+}
+
+/// Find a path-handle hit, comparing each handle where it is DRAWN (see
+/// `findInEditablePaths`): (element path, anchor index, "in"|"out").
+private func findPathHandleNear(
+    _ doc: Document, isolated: [Int]?, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int, String)? {
+    findInEditablePaths(doc, isolated: isolated) { path, pe, frame in
         let anchors = Element.path(pe).controlPointPositions
-        for (i, pt) in anchors.enumerated() {
-            let dx = x - pt.0, dy = y - pt.1
-            if (dx * dx + dy * dy).squareRoot() < radius {
-                return (path, i)
+        for ai in anchors.indices {
+            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            for (h, kind) in [(hIn, "in"), (hOut, "out")] {
+                guard let h = h else { continue }
+                let d = drawnPoint(frame, h)
+                if hypot(x - d.0, y - d.1) < radius { return (path, ai, kind) }
             }
         }
         return nil
     }
-    for (li, layer) in doc.layers.enumerated() {
-        for (ci, child) in layer.children.enumerated() {
-            if case .path(let pe) = child, !pe.locked,
-               let r = check(pe, at: [li, ci]) { return r }
-            if case .group(let g) = child, !g.locked {
-                for (gi, gc) in g.children.enumerated() {
-                    if case .path(let pe) = gc, !pe.locked,
-                       let r = check(pe, at: [li, ci, gi]) { return r }
-                }
-            }
+}
+
+/// Find a path-anchor hit using the control-point enumeration, comparing each
+/// anchor where it is DRAWN (see `findInEditablePaths`). Returns (element
+/// path, anchor index within controlPointPositions).
+private func findPathAnchorByCp(
+    _ doc: Document, isolated: [Int]?, x: Double, y: Double, radius: Double
+) -> (ElementPath, Int)? {
+    findInEditablePaths(doc, isolated: isolated) { path, pe, frame in
+        for (i, a) in Element.path(pe).controlPointPositions.enumerated() {
+            let d = drawnPoint(frame, a)
+            if hypot(x - d.0, y - d.1) < radius { return (path, i) }
         }
+        return nil
     }
-    return nil
 }
 
 /// Implementation of doc.path.probe_anchor_hit. Writes state into the
@@ -2153,7 +2172,7 @@ private func pathProbeAnchorHit(
     x: Double, y: Double, radius: Double
 ) {
     if let (path, anchorIdx, handleType) = findPathHandleNear(
-        model.document, x: x, y: y, radius: radius
+        model.document, isolated: model.layersIsolationStack.last, x: x, y: y, radius: radius
     ) {
         store.setTool("anchor_point", "mode", "pressed_handle")
         store.setTool("anchor_point", "handle_type", handleType)
@@ -2162,7 +2181,7 @@ private func pathProbeAnchorHit(
         return
     }
     if let (path, anchorIdx) = findPathAnchorByCp(
-        model.document, x: x, y: y, radius: radius
+        model.document, isolated: model.layersIsolationStack.last, x: x, y: y, radius: radius
     ) {
         guard case .path(let pe) = model.document.getElement(path) else { return }
         let mode = isSmoothPoint(pe.d, anchorIdx: anchorIdx)
@@ -2203,17 +2222,25 @@ private func pathCommitAnchorEdit(
     case "pressed_corner":
         let moved = hypot(targetX - originX, targetY - originY)
         if moved <= 1.0 { return }
+        // The release point is in DOCUMENT space; the handle it places lives
+        // in the path's LOCAL space. The mirrored handle `2a - h` commutes
+        // with any affine map, so mapping the one point is exact.
+        let (hx, hy) = documentPointToPathLocal(model.document, path, targetX, targetY)
         let newCmds = convertCornerToSmooth(
-            pe.d, anchorIdx: anchorIdx, hx: targetX, hy: targetY)
+            pe.d, anchorIdx: anchorIdx, hx: hx, hy: hy)
         model.editDocument(model.document.replaceElement(
             path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     case "pressed_handle":
         let handleType = (store.getTool("anchor_point", "handle_type") as? String) ?? ""
         let dx = targetX - originX, dy = targetY - originY
         if abs(dx) <= 0.5 && abs(dy) <= 0.5 { return }
+        // The drag is a DOCUMENT-space delta; the handle moves in the path's
+        // LOCAL space (the mapping `Controller.movePathHandle` uses). The
+        // threshold above stays a screen-space distance.
+        let (ldx, ldy) = documentDeltaToPathLocal(model.document, path, dx, dy)
         let newCmds = movePathHandleIndependent(
             pe.d, anchorIdx: anchorIdx,
-            handleType: handleType, dx: dx, dy: dy)
+            handleType: handleType, dx: ldx, dy: ldy)
         model.editDocument(model.document.replaceElement(
             path, with: .path(pathWithCommands(pe, newCmds, identity: .sameElement, rings: .preserved))))
     default: break
@@ -2228,9 +2255,17 @@ private func pathProbePartialHit(
     // 1. Handle hit on a selected Path.
     for es in model.document.selection {
         guard case .path(let pe) = model.document.getElement(es.path) else { continue }
+        // A handle is compared where it is DRAWN, through the path's full
+        // frame; `Controller.movePathHandle` maps the drag back through it.
+        let frame = accumulatedTransform(model.document, es.path, includeOwn: true)
+        func drawn(_ h: (Double, Double)?) -> (Double, Double)? {
+            guard let h = h else { return nil }
+            return frame.map { $0.applyPoint(h.0, h.1) } ?? h
+        }
         let anchors = Element.path(pe).controlPointPositions
         for ai in anchors.indices {
-            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            let (localIn, localOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            let (hIn, hOut) = (drawn(localIn), drawn(localOut))
             func matches(_ h: (Double, Double)?) -> Bool {
                 guard let h = h else { return false }
                 return hypot(x - h.0, y - h.1) < radius
@@ -2253,7 +2288,7 @@ private func pathProbePartialHit(
     }
     // 2. Control-point hit on any unlocked element (recurses into groups).
     if let (path, cpIdx) = findElementCpNear(
-        model.document, x: x, y: y, radius: radius
+        model.document, isolated: model.layersIsolationStack.last, x: x, y: y, radius: radius
     ) {
         let alreadySelected = model.document.selection.contains { es in
             es.path == path && es.kind.contains(cpIdx)
@@ -2292,23 +2327,42 @@ private func pathProbePartialHit(
 /// Recurse through layer / group children looking for a control-point
 /// hit on an unlocked, visible element.
 private func findElementCpNear(
-    _ doc: Document, x: Double, y: Double, radius: Double
+    _ doc: Document, isolated: [Int]? = nil, x: Double, y: Double, radius: Double
 ) -> (ElementPath, Int)? {
     let cpResolver = IdIndexResolver(index: rebuildIdIndex(doc))
-    func recurse(_ elem: Element, _ path: ElementPath) -> (ElementPath, Int)? {
+    // `frame` maps the element's PARENT space to DOCUMENT space (`nil` is the
+    // identity). A control point is compared where it is DRAWN, through the
+    // parent frame and the element's own transform, which is where
+    // `selectionHandleRects` draws its square. Twin of Rust `cp_recursive`.
+    func compose(_ outer: Transform?, _ inner: Transform?) -> Transform? {
+        guard let o = outer else { return inner }
+        guard let i = inner else { return o }
+        return o.multiply(i)
+    }
+    // `isolated` is the innermost isolation entry. A Transformed wrapper is
+    // ONE element unless it IS that entry; then the probe reaches its child
+    // under the frame `W·M` (route 4 slice 3b). Twin of Rust `cp_recursive`.
+    func recurse(_ elem: Element, _ path: ElementPath, _ frame: Transform?) -> (ElementPath, Int)? {
         if elem.visibility == .invisible { return nil }
+        if case .live(.transformed(let t)) = elem, isolated == path {
+            if t.child.isLocked { return nil }
+            return recurse(t.child, path + [0], compose(frame, elem.childFrameTransform))
+        }
         if case .group(let g) = elem {
+            let childFrame = compose(frame, g.transform)
             for (i, child) in g.children.enumerated().reversed() {
                 if child.isLocked { continue }
-                if let r = recurse(child, path + [i]) { return r }
+                if let r = recurse(child, path + [i], childFrame) { return r }
             }
             return nil
         }
+        let full = compose(frame, elem.transform)
         // RESOLVED: the resolver-less form collapses a symbol instance's four
         // corners onto the document ORIGIN, so a click near (0,0) grabbed a
         // "handle" of an instance drawn somewhere else entirely.
         let cps = elem.controlPointPositions(resolvedBy: cpResolver)
-        for (i, pt) in cps.enumerated() {
+        for (i, local) in cps.enumerated() {
+            let pt = full.map { $0.applyPoint(local.0, local.1) } ?? local
             if hypot(x - pt.0, y - pt.1) < radius {
                 return (path, i)
             }
@@ -2320,7 +2374,7 @@ private func findElementCpNear(
         for (ci, child) in layer.children.enumerated().reversed() {
             if child.isLocked { continue }
             if child.visibility == .invisible { continue }
-            if let r = recurse(child, [li, ci]) { return r }
+            if let r = recurse(child, [li, ci], layer.transform) { return r }
         }
     }
     return nil
@@ -3285,7 +3339,7 @@ private func resolveScaleFlags(store: StateStore, ctx: [String: Any]) -> (Bool, 
 /// the live mutation byte-identical to replay. Mirrors Rust `scale_apply_journaled`.
 private func scaleApplyJournaled(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool), wrap: Bool
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     let controller = Controller(model: model)
@@ -3296,10 +3350,13 @@ private func scaleApplyJournaled(
     // path, which resolves the ref point post-copy against the duplicates).
     let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
     let (scaleStrokes, scaleCorners) = flags
-    opApply(model, controller, [
+    var op: [String: Any] = [
         "op": "scale_transform", "sx": sx, "sy": sy, "rx": rx, "ry": ry,
         "scale_strokes": scaleStrokes, "scale_corners": scaleCorners,
-    ])
+    ]
+    // Recorded only when set, as Rust does.
+    if wrap { op["wrap"] = true }
+    opApply(model, controller, op)
 }
 
 /// Rotate apply — JOURNALED (CONFIRM) path. Resolves angle + reference point to
@@ -3347,7 +3404,7 @@ private func shearApplyJournaled(
 /// the matrix to the duplicates.
 private func scaleApply(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool), wrap: Bool
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
@@ -3357,10 +3414,14 @@ private func scaleApply(
     // The SHARED compose, as the confirm path and Rust's preview use, so the
     // preview draws what OK will commit (2026-10-16).
     let (scaleStrokes, scaleCorners) = flags
-    let newDoc = composeMatrixOverPaths(
-        model.document, model.document.selection.map { $0.path }, matrix,
-        strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
-        corners: cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners))
+    let paths = model.document.selection.map { $0.path }
+    let corners = cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners)
+    let newDoc = wrap
+        ? wrapScaleOverPaths(model.document, paths, matrix, scaleStrokes: scaleStrokes, corners: corners)
+        : composeMatrixOverPaths(
+            model.document, paths, matrix,
+            strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
+            corners: corners)
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
     model.setDocumentUnbracketed(newDoc, intent: .previewReapply)

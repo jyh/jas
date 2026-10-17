@@ -1434,6 +1434,51 @@ func composeMatrixOverPaths(
     return newDoc
 }
 
+/// ROUTE 4 SLICE 5: apply a scale by WRAPPING each element at `paths` in a
+/// Transformed wrapper instead of composing a stored transform. Twin of Rust
+/// `op_apply::wrap_scale_over_paths`, rule for rule: a leaf or group becomes the
+/// untouched child (Scale Corners OFF divides its radii first; the wrapper has
+/// no id); an existing wrapper with the SAME flag and an own transform that is
+/// at most a translation ABSORBS the scale (matrix S·W·M, own transform
+/// cleared), any other wrapper is wrapped again; a layer path wraps its
+/// children; a wrapped path's selection entry becomes `.all`.
+func wrapScaleOverPaths(
+    _ doc: Document, _ paths: [ElementPath], _ matrix: Transform,
+    scaleStrokes: Bool, corners: (Double, Double)?
+) -> Document {
+    var targets: [ElementPath] = []
+    for path in paths {
+        if path.count == 1 {
+            let n = path[0] < doc.layers.count ? doc.layers[path[0]].children.count : 0
+            targets += (0..<n).map { [path[0], $0] }
+        } else {
+            targets.append(path)
+        }
+    }
+    var newDoc = doc
+    for path in targets {
+        guard let elem = newDoc.tryGetElement(path) else { continue }
+        let wrapped: Element
+        if case .live(.transformed(var t)) = elem, t.scaleStrokes == scaleStrokes,
+           t.transform.map({ $0.a == 1 && $0.b == 0 && $0.c == 0 && $0.d == 1 }) ?? true {
+            let w = t.transform ?? Transform()
+            t.transform = nil
+            t.matrix = matrix.multiply(w).multiply(t.matrix)
+            if let (sxAbs, syAbs) = corners { t.child = scaleElemCorners(t.child, sxAbs, syAbs) }
+            wrapped = .live(.transformed(t))
+        } else {
+            var child = elem
+            if let (sxAbs, syAbs) = corners { child = scaleElemCorners(child, sxAbs, syAbs) }
+            wrapped = .live(.transformed(TransformedElem(child: child, matrix: matrix, scaleStrokes: scaleStrokes)))
+        }
+        newDoc = newDoc.replaceElement(path, with: wrapped)
+    }
+    let selection = newDoc.selection.map { es in
+        targets.contains(es.path) ? ElementSelection.all(es.path) : es
+    }
+    return newDoc.replacing(selection: selection)
+}
+
 /// The factor the STORED stroke width is multiplied by, so the DRAWN width is
 /// what SCALE_TOOL.md § Apply behavior says. The scale is stored as a transform,
 /// which already scales the drawn stroke by √|sx·sy|: Scale Strokes ON leaves
@@ -1500,7 +1545,7 @@ private func selectionPaths(_ doc: Document) -> [ElementPath] {
 /// (changed, targets); false (no-op) for an IDENTITY scale. Mirrors Rust `apply_scale`.
 func applyScale(
     _ model: Model, sx: Double, sy: Double, rx: Double, ry: Double,
-    scaleStrokes: Bool, scaleCorners: Bool
+    scaleStrokes: Bool, scaleCorners: Bool, wrap: Bool = false
 ) -> (Bool, [String]) {
     if isScaleIdentity(sx, sy) { return (false, []) }
     let targets = selectionToIds(model.document)
@@ -1508,7 +1553,10 @@ func applyScale(
     let strokeFactor = strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes)
     let corners = cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners)
     let paths = selectionPaths(model.document)
-    model.setDocument(composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners))
+    // `wrap` (route 4 slice 5, opt-in on the op): a wrapper, no stroke compensation.
+    model.setDocument(wrap
+        ? wrapScaleOverPaths(model.document, paths, matrix, scaleStrokes: scaleStrokes, corners: corners)
+        : composeMatrixOverPaths(model.document, paths, matrix, strokeFactor: strokeFactor, corners: corners))
     return (true, targets)
 }
 
@@ -2045,7 +2093,9 @@ public func opApply(
             model, sx: numField(op, "sx"), sy: numField(op, "sy"),
             rx: numField(op, "rx"), ry: numField(op, "ry"),
             scaleStrokes: boolField(op, "scale_strokes", true),
-            scaleCorners: boolField(op, "scale_corners", false))
+            scaleCorners: boolField(op, "scale_corners", false),
+            // Absent: the stored-transform scale every earlier op meant.
+            wrap: boolField(op, "wrap", false))
         if !changed {
             // Benign no-op: an identity transform succeeds by the S3 taxonomy.
             return nil

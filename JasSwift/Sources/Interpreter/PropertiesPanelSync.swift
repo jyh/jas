@@ -114,6 +114,29 @@ public func accumulatedTransform(
     return combined
 }
 
+/// Map a DOCUMENT-space delta into the LOCAL space of the element at `path`,
+/// through the inverse of its full frame. Only the linear part takes part (a
+/// translation moves points, never the vectors between them). Unchanged when
+/// nothing on the path carries a transform or the frame is singular. Twin of
+/// Rust `document_delta_to_path_local`.
+public func documentDeltaToPathLocal(
+    _ doc: Document, _ path: ElementPath, _ dx: Double, _ dy: Double
+) -> (Double, Double) {
+    guard let inv = accumulatedTransform(doc, path, includeOwn: true)?.inverse() else { return (dx, dy) }
+    return (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy)
+}
+
+/// Map a DOCUMENT-space point into the LOCAL space of the element at `path`,
+/// through the full affine inverse of its frame. Unchanged when nothing on the
+/// path carries a transform or the frame is singular. Twin of Rust
+/// `document_point_to_path_local`.
+public func documentPointToPathLocal(
+    _ doc: Document, _ path: ElementPath, _ x: Double, _ y: Double
+) -> (Double, Double) {
+    guard let inv = accumulatedTransform(doc, path, includeOwn: true)?.inverse() else { return (x, y) }
+    return inv.applyPoint(x, y)
+}
+
 /// Union AABB of every selected element's evaluated bbox, document space.
 /// `(0, 0, 0, 0)` when the selection is empty or nothing resolves.
 func selectionEvaluatedBounds(_ doc: Document) -> BBox {

@@ -3150,6 +3150,9 @@ impl Controller {
     ) {
         let doc = model.document().clone();
         if let Some(Element::Path(pe)) = doc.get_element(path) {
+            // The drag arrives in DOCUMENT space; handles live in the path's
+            // LOCAL space (the S-3 mapping `move_selection` uses).
+            let (dx, dy) = crate::document::evaluated_bounds::document_delta_to_path_local(&doc, path, dx, dy);
             let new_pe = move_path_handle(pe, anchor_idx, handle_type, dx, dy);
             let new_doc = doc.replace_element(path, Element::Path(new_pe));
             model.edit_document(new_doc);
@@ -5519,6 +5522,30 @@ mod tests {
         assert_eq!(t.common, t0.common);
         model.undo();
         assert_eq!(model.document().layers, before.layers, "one undo restores it");
+    }
+
+    /// DELETING A WRAPPED CHILD DELETES ITS WRAPPER (route 4 slice 3b): a
+    /// wrapper never loses its child, and the artwork the user pointed at is
+    /// the wrapper's whole picture. Before, the delete silently did nothing
+    /// to the document while clearing the selection. One undo restores it.
+    #[test]
+    fn deleting_a_wrapped_child_deletes_its_wrapper() {
+        let mut model = transformed_model();
+        let before = model.document().clone();
+        Controller::set_selection(&mut model, vec![ElementSelection::partial(vec![0, 0, 0], [2usize])]);
+        model.edit_document(model.document().delete_selection());
+        assert_eq!(model.document().layers[0].children().unwrap().len(), 0, "the wrapper is gone");
+        assert!(model.document().selection.is_empty());
+        model.undo();
+        assert_eq!(model.document().layers, before.layers);
+        // The wrapper and its child both selected: one deletion, not two.
+        let mut two = transformed_model();
+        let rect = make_rect(50.0, 50.0, 5.0, 5.0);
+        let d = two.document().insert_element_after(&vec![0, 0], rect);
+        two.edit_document(d);
+        Controller::set_selection(&mut two, vec![ElementSelection::all(vec![0, 0]), ElementSelection::all(vec![0, 0, 0])]);
+        two.edit_document(two.document().delete_selection());
+        assert_eq!(two.document().layers[0].children().unwrap().len(), 1, "only the wrapper went; the rect stays");
     }
 
     /// The frame a wrapper gives its child is its own transform times its
