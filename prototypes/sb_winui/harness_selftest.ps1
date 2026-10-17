@@ -2086,7 +2086,7 @@ $sRelease = [ordered]@{ kind = 'release'; x = 72; y = 60 }
 $sRead = [ordered]@{ read = 'document' }
 function Show-SbScript($s) {
     if ($null -ne $s.Refusal) { return "REFUSED: $($s.Refusal)" }
-    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })"
+    "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })"
 }
 
 Test-Case 'is: the first script maps onto one drag, k=1' {
@@ -2122,10 +2122,10 @@ Test-Case 'is: shift on the press ALONE is refused by name: it is not held to th
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
 } 'REFUSED: shift on step(s) 0 is not held to the release: send_hand.ps1 holds shift from the press or from the first move, through the release'
-Test-Case 'is: a named alt = true on a press is refused, never dropped' {
+Test-Case 'is: alt on the press ALONE is refused by name: it is not held to the release' {
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; alt = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
-} 'REFUSED: step 0 carries modifiers (alt): send_hand.ps1 injects none'
+} 'REFUSED: alt on step(s) 0 is not held to the release: send_hand.ps1 holds alt from the press or from the first move, through the release'
 Test-Case 'is: a named ctrl = true on a press is refused, never dropped' {
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; ctrl = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
@@ -2164,11 +2164,28 @@ Test-Case 'is: shift with a gap is refused by name, never delivered as held' {
     $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; shift = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $r2, $sRead)))
 } 'REFUSED: shift on step(s) 0,2 is not held to the release: send_hand.ps1 holds shift from the press or from the first move, through the release'
-Test-Case 'is: alt held the same way is still refused: only shift is delivered' {
+Test-Case 'is: alt held from the first move through the release is delivered (§338 node 11)' {
     $m2 = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true; alt = $true }
     $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; alt = $true }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $m2, $r2, $sRead)))
-} 'REFUSED: step 1 carries modifiers (alt): send_hand.ps1 injects none'
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json alt=move'
+Test-Case 'is: alt on every step is delivered from the press, the drag-to-copy form' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; alt = $true }
+    $m2 = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true; alt = $true }
+    $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; alt = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $m2, $r2, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json alt=press'
+Test-Case 'is: shift and alt held together are both delivered' {
+    $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; alt = $true; shift = $true }
+    $m2 = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true; alt = $true; shift = $true }
+    $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; alt = $true; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $m2, $r2, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json shift=press alt=press'
+Test-Case 'is: ctrl held on every pointer step is still refused: only shift and alt are delivered' {
+    $m2 = [ordered]@{ kind = 'move'; x = 72; y = 60; dragging = $true; ctrl = $true }
+    $r2 = [ordered]@{ kind = 'release'; x = 72; y = 60; ctrl = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $m2, $r2, $sRead)))
+} 'REFUSED: step 1 carries modifiers (ctrl): send_hand.ps1 injects none'
 Test-Case 'is: CONTROL -- a named modifier set false is no modifier and passes' {
     $p2 = [ordered]@{ kind = 'press'; x = 36; y = 36; shift = $false; alt = $false; ctrl = $false; meta = $false }
     Show-SbScript (Read-SbInputScript (New-SbScript @($p2, $sMove, $sRelease, $sRead)))
