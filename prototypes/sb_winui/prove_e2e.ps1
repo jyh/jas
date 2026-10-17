@@ -100,6 +100,7 @@ $keyText = "$($sc.KeyText)"; $keyCount = [int]$sc.Keys
 # PANEL STEPS (jas section 373): delivered last by the hand through UI
 # Automation, carried across -File as one base64 string.
 $panelText = "$($sc.PanelText)"; $panelCount = [int]$sc.Panels; $panelShow = "$($sc.PanelShow)"
+$scriptPanel = "$($sc.Panel)"
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -129,6 +130,10 @@ $env:SB_PROBE = 'sb-probe.json'
 # default, so the selection script launches exactly as it always has.
 $isSelection = $tool -eq 'selection'
 if (-not $isSelection) { $env:SB_TOOL = $tool }
+# The panel a script's steps name is opened at launch, as its document is
+# (jas section 378): the window shows one panel, and a person opens it before
+# using it. Unset, the shell keeps its default (align_panel_content).
+if ($scriptPanel) { $env:SB_PANEL = $scriptPanel }
 # The launcher runs in the BACKGROUND and the log is watched HERE: its own wait
 # is 90 s whatever happens, and a dead window must fail in seconds, not then.
 $stayOut = Join-Path $exeDir 'sb-e2e-stay.txt'
@@ -143,6 +148,7 @@ function Stop-OurApps {
 $up = Wait-SbRow -Log $log -Mark $mark -Patterns @('RUSTOK APP pid=', 'RUSTFAIL ') -TimeoutSeconds $TimeoutSeconds
 Remove-Item Env:\SB_PROBE
 Remove-Item Env:\SB_TOOL -ErrorAction SilentlyContinue
+Remove-Item Env:\SB_PANEL -ErrorAction SilentlyContinue
 if ($null -eq $up.Row -or $up.Row -match 'RUSTFAIL ') {
     Stop-OurApps
     if (-not $launcher.HasExited) { $launcher | Stop-Process -Force -ErrorAction SilentlyContinue }
