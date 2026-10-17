@@ -862,30 +862,49 @@ public class Controller {
     /// Recursive selection with customizable leaf handling. Used by
     /// `groupSelectRect` and `directSelectRect` — they differ only in
     /// what happens when a leaf element is reached.
+    ///
+    /// The handler's third argument is the element's PARENT frame: the
+    /// transform mapping its parent's space to DOCUMENT space (`nil` is the
+    /// identity), composed from every ancestor. When `isolated` is given, a
+    /// Transformed wrapper that IS that entry is entered and its child is the
+    /// leaf, under the frame `W·M` (the `findElementCpNear` rule); otherwise a
+    /// wrapper is one leaf. Twin of Rust `select_recursive`.
     private func selectRecursive(_ model: Model,
-                                 leafHandler: ([Int], Element) -> ElementSelection?,
+                                 isolated: [Int]? = nil,
+                                 leafHandler: ([Int], Element, Transform?) -> ElementSelection?,
                                  extend: Bool) {
         let doc = model.document
         var selection: Selection = []
 
-        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility) {
+        func compose(_ outer: Transform?, _ inner: Transform?) -> Transform? {
+            guard let o = outer else { return inner }
+            guard let i = inner else { return o }
+            return o.multiply(i)
+        }
+        func check(_ path: [Int], _ elem: Element, _ ancestorVis: Visibility, _ frame: Transform?) {
             if elem.isLocked { return }
             let effective = min(ancestorVis, elem.visibility)
             if effective == .invisible { return }
+            if case .live(.transformed(let t)) = elem, let iso = isolated, iso == path {
+                check(path + [0], t.child, effective, compose(frame, elem.childFrameTransform))
+                return
+            }
             switch elem {
             case .layer(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
+                let childFrame = compose(frame, v.transform)
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective, childFrame) }
             case .group(let v):
-                for (i, child) in v.children.enumerated() { check(path + [i], child, effective) }
+                let childFrame = compose(frame, v.transform)
+                for (i, child) in v.children.enumerated() { check(path + [i], child, effective, childFrame) }
             default:
-                if let es = leafHandler(path, elem) {
+                if let es = leafHandler(path, elem, frame) {
                     selection.append(es)
                 }
             }
         }
 
         for (li, layer) in doc.layers.enumerated() {
-            check([li], .layer(layer), .preview)
+            check([li], .layer(layer), .preview, nil)
         }
         let finalSel = extend ? toggleSelection(doc.selection, selection) : selection
         // Selection-only: a non-undoable write (OP_LOG.md §7/§8).
@@ -929,7 +948,7 @@ public class Controller {
 
     public func groupSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let resolver = hitResolver
-        selectRecursive(model, leafHandler: { path, elem in
+        selectRecursive(model, leafHandler: { path, elem, _ in
             elementIntersectsRectWith(elem, x, y, width, height, resolver)
                 ? ElementSelection.all(path) : nil
         }, extend: extend)
@@ -937,18 +956,42 @@ public class Controller {
 
     public func directSelectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let resolver = hitResolver
-        selectRecursive(model, leafHandler: { path, elem in
+        selectRecursive(model, isolated: model.layersIsolationStack.last, leafHandler: { path, elem, parent in
+            // The marquee is in DOCUMENT space and is compared where the
+            // element is DRAWN (transform-correct path verbs S3): each control
+            // point through the full frame (`parent` · own), the body by mapping
+            // the rect's corners into the PARENT space, where
+            // `elementIntersectsPolygonWith` applies the element's own
+            // transform. With no parent frame this is exactly the old call. A
+            // singular frame selects nothing. Twin of Rust `partial_select_rect`.
+            let full: Transform? = {
+                switch (parent, elem.transform) {
+                case let (p?, o?): return p.multiply(o)
+                case let (p, o): return p ?? o
+                }
+            }()
+            if let f = full, f.inverse() == nil { return nil }
             // RESOLVED: the resolver-less form collapses a symbol instance's
             // four corners onto the document ORIGIN, so a direct-select
             // marquee dropped anywhere near (0,0) partially-selected every
             // instance in the document.
             let cps = elem.controlPointPositions(resolvedBy: resolver)
-            let hitCPs: [Int] = cps.enumerated().compactMap { (i, pt) in
-                pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
+            let hitCPs: [Int] = cps.enumerated().compactMap { (i, local) in
+                let pt = full.map { $0.applyPoint(local.0, local.1) } ?? local
+                return pointInRect(pt.0, pt.1, x, y, width, height) ? i : nil
             }
+            let bodyHit: Bool = {
+                guard let p = parent else {
+                    return elementIntersectsRectWith(elem, x, y, width, height, resolver)
+                }
+                guard let inv = p.inverse() else { return false }
+                let poly = [inv.applyPoint(x, y), inv.applyPoint(x + width, y),
+                            inv.applyPoint(x + width, y + height), inv.applyPoint(x, y + height)]
+                return elementIntersectsPolygonWith(elem, poly, resolver)
+            }()
             if !hitCPs.isEmpty {
                 return ElementSelection.partial(path, hitCPs)
-            } else if elementIntersectsRectWith(elem, x, y, width, height, resolver) {
+            } else if bodyHit {
                 // Marquee covers the body but no CPs. Select the
                 // element with an empty CP set — the Direct
                 // Selection tool must not promote "body

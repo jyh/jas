@@ -21,20 +21,28 @@ workspace YAML is authoritative for resolving the conflict).
 
 ## Algorithm (per-frame)
 
-For each unlocked Path in the document:
+For each unlocked Path that is a direct child of a layer (paths
+inside a Group are not reached yet; see Limitations):
 
 1. Compute the eraser AABB:
    `[min(last_x, x) − eraser_size,
      min(last_y, y) − eraser_size,
      max(last_x, x) + eraser_size,
      max(last_y, y) + eraser_size]`.
-2. Flatten the path commands to a polyline.
+2. Flatten the path commands to a polyline, and map every flat
+   point through the path's full frame (the layer's transform and
+   the path's own), so steps 3–5 run in document space, where the
+   path is drawn. A path whose frame is singular is left alone.
 3. Run `find_eraser_hit(flat, rect)` — returns the first
    contiguous run of flat segments that intersect the
    rectangle, plus the exact entry and exit points on the
    first / last hit segments (via Liang-Barsky clipping).
-4. If no hit, leave the path alone.
-5. If the path's bounding box fits inside the eraser
+4. If no hit, leave the path alone. Otherwise map the hit's entry
+   and exit POINTS back through the frame's inverse. Its flat
+   indices and segment parameters need no mapping: an affine map
+   preserves ratios along a line.
+5. If the path's document-space bounding box (its bounds boxed
+   through the frame) fits inside the eraser
    (`bw ≤ eraser_size * 2` *and* `bh ≤ eraser_size * 2`),
    delete the whole element.
 6. Otherwise, run `split_path_at_eraser`:
@@ -158,6 +166,11 @@ since the circle-at-cursor shape is already well-known.
   commands, not the rendered stroke. For very thick strokes,
   cursor positions near the stroke's outer edge but inside
   the stroked extent don't trigger erasure.
+- **Paths inside Groups are not reached.** Erasing into a group
+  would splice the fragments into the group rather than the
+  layer, which is a structural change of its own (transform-correct
+  path verbs, fork F3). A path's own transform and its layer's are
+  honoured.
 - **No eraser-shape variants** — the sweep is always an
   axis-aligned rectangle. Circular erasers, pressure-varying
   shapes, etc., are out of scope today.

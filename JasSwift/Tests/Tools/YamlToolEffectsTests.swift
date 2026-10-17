@@ -842,6 +842,241 @@ private func s1Commands(_ model: Model, _ path: ElementPath) -> [PathCommand] {
     #expect(store.getTool("anchor_point", "mode") as? String == "idle")
 }
 
+// MARK: - S2: Delete and Add Anchor Point hit a path WHERE IT IS DRAWN
+// Twins of the Rust `the_delete_anchor_point_tool_*` / `the_add_anchor_point_tool_*` tests.
+
+private func s2Click(_ model: Model, _ effect: String, _ x: Double, _ y: Double) {
+    runEffects([[effect: ["x": x, "y": y, "hit_radius": 5]]],
+               ctx: [:], store: StateStore(), platformEffects: buildYamlToolEffects(model: model))
+}
+
+/// The corner (30,30) is drawn at (70,80) under the rotated frame; a click
+/// there deletes it, a click at the local position deletes nothing.
+@Test func theDeleteAnchorPointToolDeletesACornerWhereItIsDrawnUnderRotation() {
+    let model = s1RotatedModel(s1CornerPath)
+    s2Click(model, "doc.path.delete_anchor_near", 30, 30)
+    #expect(s1Commands(model, [0, 0, 0, 0]).count == 3, "the local position draws nothing")
+    s2Click(model, "doc.path.delete_anchor_near", 70, 80)
+    #expect(s1Commands(model, [0, 0, 0, 0]) == [.moveTo(0, 0), .lineTo(60, 0)])
+}
+
+/// Delete reaches a Transformed wrapper's child only while isolated into it.
+/// The wrapper scales the corner path by (2,3): corner drawn at (60,90).
+@Test func theDeleteAnchorPointToolReachesAWrappedPathOnlyWhileIsolated() {
+    let w = TransformedElem(child: s1CornerPath, matrix: .scale(2, 3), scaleStrokes: false)
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                         selectedLayer: 0, selection: []))
+    s2Click(model, "doc.path.delete_anchor_near", 60, 90)
+    #expect(s1Commands(model, [0, 0, 0]).count == 3, "not isolated: a wrapper is one element")
+    model.layersIsolationStack = [[0, 0]]
+    s2Click(model, "doc.path.delete_anchor_near", 60, 90)
+    #expect(s1Commands(model, [0, 0, 0]).count == 2, "isolated: the drawn corner is deleted")
+}
+
+/// Add measures in DOCUMENT space. The segment (0,0)-(10,10) in a group scaled
+/// (1,4) is drawn to (10,40); a click at (4,4) is closest at t = 2/17, so the
+/// new anchor is local (20/17, 20/17). Mapping the click to local first, (4,1),
+/// would pick t = 0.25 and put it at (2.5, 2.5).
+@Test func theAddAnchorPointToolMeasuresTheDrawnSegmentUnderNonUniformScale() {
+    let group: Element = .group(Group(children: [.path(Path(d: [.moveTo(0, 0), .lineTo(10, 10)], fillRule: .nonzero))],
+                                      transform: .scale(1, 4)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])], selectedLayer: 0, selection: []))
+    s2Click(model, "doc.path.insert_anchor_on_segment_near", 4, 4)
+    let d = s1Commands(model, [0, 0, 0])
+    guard d.count == 3, case .lineTo(let x, let y) = d[1] else { Issue.record("one anchor inserted: \(d)"); return }
+    let want = 20.0 / 17.0
+    #expect(abs(x - want) < 1e-12 && abs(y - want) < 1e-12, "inserted at local (\(x), \(y)), want (\(want), \(want))")
+}
+
+// MARK: - S3: the Partial Selection marquee selects where a thing is DRAWN
+// Twins of the Rust `the_marquee_*` tests.
+
+private func s3Marquee(_ model: Model, _ x1: Double, _ y1: Double, _ x2: Double, _ y2: Double) -> [ElementSelection] {
+    runEffects([["doc.partial_select_in_rect": ["x1": x1, "y1": y1, "x2": x2, "y2": y2, "additive": false]]],
+               ctx: [:], store: StateStore(), platformEffects: buildYamlToolEffects(model: model))
+    return model.document.selection
+}
+
+/// Under the rotated frame the corner anchor 1, local (30,30), is drawn at
+/// (70,80); the other two anchors are drawn at (100,50) and (100,110).
+@Test func theMarqueeSelectsAControlPointWhereItIsDrawnUnderRotation() {
+    let model = s1RotatedModel(s1CornerPath)
+    #expect(s3Marquee(model, 65, 75, 75, 85) == [ElementSelection.partial([0, 0, 0, 0], [1])])
+    #expect(s3Marquee(model, 25, 25, 35, 35).isEmpty, "the local position draws nothing")
+}
+
+/// A filled rect (0,0,30,30) in a group scaled 2 and moved (60,30) is drawn
+/// over (60..120, 30..90). A marquee inside it holds no corner and still
+/// touches the body: the element is selected with no control points.
+@Test func theMarqueeHitsABodyWhereItIsDrawnInAScaledGroup() {
+    let rect: Element = .rect(Rect(x: 0, y: 0, width: 30, height: 30, fill: Fill(color: Color(r: 1, g: 0, b: 0))))
+    let group: Element = .group(Group(children: [rect], transform: Transform(a: 2, b: 0, c: 0, d: 2, e: 60, f: 30)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])], selectedLayer: 0, selection: []))
+    #expect(s3Marquee(model, 80, 50, 90, 60) == [ElementSelection.partial([0, 0, 0], [])])
+    #expect(s3Marquee(model, 130, 100, 140, 110).isEmpty, "outside the drawn body")
+    #expect(s3Marquee(model, 10, 10, 20, 20).isEmpty, "the local body draws nothing")
+}
+
+/// The marquee reaches a Transformed wrapper's child only while isolated into
+/// it. The wrapper scales a rect (2,2,10x10) by (2,3): corner 2 drawn at (24,36).
+@Test func theMarqueeReachesAWrappedChildsCornerOnlyWhileIsolated() {
+    let w = TransformedElem(child: .rect(Rect(x: 2, y: 2, width: 10, height: 10)), matrix: .scale(2, 3), scaleStrokes: false)
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                         selectedLayer: 0, selection: []))
+    #expect(s3Marquee(model, 22, 34, 26, 38).allSatisfy { $0.path != [0, 0, 0] }, "not isolated: the child is unreachable")
+    model.layersIsolationStack = [[0, 0]]
+    #expect(s3Marquee(model, 22, 34, 26, 38) == [ElementSelection.partial([0, 0, 0], [2])], "isolated: the drawn corner")
+}
+
+/// Under a SINGULAR frame (a group scaled to zero width) the marquee selects
+/// nothing: the path's corner collapses onto (0,30).
+@Test func theMarqueeSkipsAnElementWithASingularFrame() {
+    let group: Element = .group(Group(children: [s1CornerPath], transform: .scale(0, 1)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])], selectedLayer: 0, selection: []))
+    #expect(s3Marquee(model, -5, 25, 5, 35).isEmpty)
+}
+
+// MARK: - S4a: Smooth hits and fits where a path is DRAWN
+// The ORACLE: smoothing P inside a frame F, then mapping through F, equals
+// smoothing F(P) at the top level. Twin of Rust `the_smooth_tool_fits_in_document_space`.
+
+private func s4Zigzag() -> [PathCommand] {
+    [.moveTo(0, 0)] + (1...12).map { i in .lineTo(5 * Double(i), i % 2 == 1 ? 3 : 0) }
+}
+
+private func s4Smooth(_ d: [PathCommand], frame: Transform?, _ x: Double, _ y: Double) -> [PathCommand] {
+    let pathElem: Element = .path(Path(d: d, fillRule: .nonzero))
+    let child: Element = frame.map { .group(Group(children: [pathElem], transform: $0)) } ?? pathElem
+    let path: ElementPath = frame == nil ? [0, 0] : [0, 0, 0]
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [child])], selectedLayer: 0,
+                                         selection: [ElementSelection.all(path)]))
+    runEffects([["doc.path.smooth_at_cursor": ["x": x, "y": y, "radius": 40, "fit_error": 2]]],
+               ctx: [:], store: StateStore(), platformEffects: buildYamlToolEffects(model: model))
+    return s1Commands(model, path)
+}
+
+private func s4Points(_ c: PathCommand) -> [Double] {
+    switch c {
+    case .moveTo(let x, let y), .lineTo(let x, let y): return [x, y]
+    case .curveTo(let x1, let y1, let x2, let y2, let x, let y): return [x1, y1, x2, y2, x, y]
+    default: return [.nan]
+    }
+}
+
+@Test func theSmoothToolFitsInDocumentSpace() {
+    let f = Transform(a: 2, b: 0, c: 0, d: 3, e: 100, f: 50)
+    // The cursor is local (30, 1.5), drawn at (160, 54.5).
+    let top = s4Smooth(mapPathCommands(s4Zigzag(), f), frame: nil, 160, 54.5)
+    let grouped = s4Smooth(s4Zigzag(), frame: f, 160, 54.5)
+    #expect(top.count < 13, "the oracle must smooth something: \(top.count) commands")
+    let mapped = mapPathCommands(grouped, f)
+    #expect(mapped.count == top.count)
+    for (a, b) in zip(mapped, top) {
+        let (pa, pb) = (s4Points(a), s4Points(b))
+        #expect(pa.count == pb.count && zip(pa, pb).allSatisfy { abs($0 - $1) < 1e-9 }, "\(a) vs \(b)")
+    }
+    #expect(s4Smooth(s4Zigzag(), frame: f, 30, 1.5) == s4Zigzag(), "the local position draws nothing")
+}
+
+/// Under a SINGULAR frame Smooth leaves the path alone. Twin of Rust
+/// `the_smooth_tool_skips_a_path_with_a_singular_frame`.
+@Test func theSmoothToolSkipsAPathWithASingularFrame() {
+    #expect(s4Smooth(s4Zigzag(), frame: .scale(1, 0), 30, 0) == s4Zigzag())
+}
+
+// MARK: - S4b: the Paintbrush edit hits and fits where a path is DRAWN
+// Twins of the Rust `the_paintbrush_*` tests.
+
+private func s4bEdit(_ d: [PathCommand], frame: Transform?, press: (Double, Double),
+                     drag: [(Double, Double)]) -> (String?, [PathCommand]) {
+    let pathElem: Element = .path(Path(d: d, fillRule: .nonzero))
+    let child: Element = frame.map { .group(Group(children: [pathElem], transform: $0)) } ?? pathElem
+    let path: ElementPath = frame == nil ? [0, 0] : [0, 0, 0]
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [child])], selectedLayer: 0,
+                                         selection: [ElementSelection.all(path)]))
+    let store = StateStore()
+    let fx = buildYamlToolEffects(model: model)
+    runEffects([["doc.paintbrush.edit_start": ["x": press.0, "y": press.1, "within": 12]]],
+               ctx: [:], store: store, platformEffects: fx)
+    let mode = store.getTool("paintbrush", "mode") as? String
+    let buffer = frame == nil ? "s4b_top_swift" : "s4b_grouped_swift"
+    pointBuffersClear(buffer)
+    for p in drag { pointBuffersPush(buffer, p.0, p.1) }
+    runEffects([["doc.paintbrush.edit_commit": ["buffer": buffer, "fit_error": 2, "within": 12]]],
+               ctx: [:], store: store, platformEffects: fx)
+    pointBuffersClear(buffer)
+    return (mode, s1Commands(model, path))
+}
+
+@Test func thePaintbrushEditFitsInDocumentSpace() {
+    let f = Transform(a: 2, b: 0, c: 0, d: 3, e: 100, f: 50)
+    let d: [PathCommand] = [.moveTo(0, 0), .lineTo(20, 0), .lineTo(40, 0), .lineTo(60, 0)]
+    let drag: [(Double, Double)] = [(140, 52), (150, 60), (160, 64), (170, 60), (180, 51)]
+    let (topMode, top) = s4bEdit(mapPathCommands(d, f), frame: nil, press: (140, 50), drag: drag)
+    let (mode, grouped) = s4bEdit(d, frame: f, press: (140, 50), drag: drag)
+    #expect(topMode == "edit", "the oracle must enter edit mode")
+    #expect(mode == "edit", "the drawn point is a hit")
+    #expect(top != mapPathCommands(d, f), "the oracle must edit something")
+    let mapped = mapPathCommands(grouped, f)
+    #expect(mapped.count == top.count)
+    for (a, b) in zip(mapped, top) {
+        let (pa, pb) = (s4Points(a), s4Points(b))
+        #expect(pa.count == pb.count && zip(pa, pb).allSatisfy { abs($0 - $1) < 1e-9 }, "\(a) vs \(b)")
+    }
+    #expect(s4bEdit(d, frame: f, press: (20, 0), drag: drag).0 != "edit", "the local position draws nothing")
+}
+
+@Test func thePaintbrushEditSkipsAPathWithASingularFrame() {
+    let d: [PathCommand] = [.moveTo(0, 0), .lineTo(20, 0), .lineTo(40, 0)]
+    let (mode, out) = s4bEdit(d, frame: .scale(0, 1), press: (0, 0), drag: [(0, 0), (0, 5), (0, 0)])
+    #expect(mode != "edit")
+    #expect(out == d)
+}
+
+/// The COMMIT refuses a singular frame on its own: the edit state is primed by
+/// hand, at entry 2, because the collapsed points all tie and the exit search
+/// returns index 0 (an entry of 0 would end as a degenerate range first).
+@Test func thePaintbrushCommitSkipsAPathWithASingularFrame() {
+    let d: [PathCommand] = [.moveTo(0, 0), .lineTo(20, 0), .lineTo(40, 0)]
+    let group: Element = .group(Group(children: [.path(Path(d: d, fillRule: .nonzero))], transform: .scale(0, 1)))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [group])], selectedLayer: 0, selection: []))
+    let store = StateStore()
+    store.setTool("paintbrush", "edit_target_path", ["__path__": [0, 0, 0]])
+    store.setTool("paintbrush", "edit_entry_idx", 2)
+    let buffer = "s4b_singular_swift"
+    pointBuffersClear(buffer)
+    for p in [(0.0, 0.0), (0.0, 5.0), (0.0, 10.0), (0.0, 0.0)] { pointBuffersPush(buffer, p.0, p.1) }
+    runEffects([["doc.paintbrush.edit_commit": ["buffer": buffer, "fit_error": 2, "within": 12]]],
+               ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+    pointBuffersClear(buffer)
+    #expect(s1Commands(model, [0, 0, 0]) == d)
+}
+
+// MARK: - S5: the Path Eraser cuts where a path is DRAWN
+// Twins of the Rust `the_eraser_*` tests.
+
+private func s5Erase(_ len: Double, _ t: Transform, _ x: Double, _ y: Double) -> Model {
+    let path: Element = .path(Path(d: [.moveTo(0, 0), .lineTo(len, 0)], transform: t, fillRule: .nonzero))
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [path])], selectedLayer: 0, selection: []))
+    runEffects([["doc.path.erase_at_rect": ["last_x": x, "last_y": y, "x": x, "y": y, "eraser_size": 2]]],
+               ctx: [:], store: StateStore(), platformEffects: buildYamlToolEffects(model: model))
+    return model
+}
+
+/// The line is 3 long locally and drawn 30 long (scaled 10), so an erase at
+/// its drawn middle splits it in two; judged by its local bounds it would be
+/// deleted. Twin of Rust `the_eraser_judges_fit_by_the_drawn_bounds`.
+@Test func theEraserJudgesFitByTheDrawnBounds() {
+    #expect(s5Erase(3, .scale(10, 10), 15, 0).document.layers[0].children.count == 2)
+}
+
+/// Under a SINGULAR transform the eraser leaves the path alone.
+@Test func theEraserSkipsAPathWithASingularFrame() {
+    let model = s5Erase(30, .scale(0, 1), 0, 0)
+    #expect(model.document.layers[0].children.count == 1)
+    #expect(s1Commands(model, [0, 0]).count == 2)
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()

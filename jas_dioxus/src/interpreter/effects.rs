@@ -2647,8 +2647,9 @@ fn run_doc_effect(
         }
         "doc.path.insert_anchor_on_segment_near" => {
             // Mirrors the native AddAnchorPointTool's click-to-insert
-            // case. Walks all unlocked Path elements in the document,
-            // finds the closest (segment, t) to the cursor, and inserts
+            // case. Walks all unlocked Path elements in the document at
+            // any depth, finds the closest (segment, t) to the cursor
+            // where each path is drawn, and inserts
             // a new anchor there if within hit_radius of any segment.
             //
             // MVP scope: just click-to-insert. Native also supported
@@ -2664,8 +2665,8 @@ fn run_doc_effect(
         }
         "doc.path.delete_anchor_near" => {
             // Find the anchor under (x, y) within hit_radius on any
-            // unlocked Path in the document (searches layers +
-            // one level of Group nesting). If found, snapshot the
+            // unlocked Path in the document, at any Group depth, each
+            // anchor compared where it is drawn. If found, snapshot the
             // document, delete the anchor via
             // geometry::path_ops::delete_anchor_from_path, and
             // either replace the path element or (if the resulting
@@ -3540,67 +3541,36 @@ fn evaluate_field_value(
     }
 }
 
-/// Walk the document layer by layer (including one level of Group
-/// nesting) looking for a Path whose command list has an anchor
-/// within `radius` of `(x, y)`. Returns (element path, command index).
-///
-/// A locked Path is skipped in BOTH positions — as a direct layer child
-/// and as a member of a group. Before S7 (SCOPE-effective-locked.md §4)
-/// only the group's own lock was consulted here, so an anchor could be
-/// dragged out of an element the artist had locked; JasSwift
-/// `findPathAnchorNear` guarded all three positions, and every other
-/// interactive probe in this file and in `doc_primitives` already did
-/// the same.
+/// Find a Path with an anchor within `radius` of `(x, y)`, comparing each
+/// anchor where it is DRAWN (see `find_in_editable_paths`, which also skips
+/// a locked Path at any depth). Returns (element path, command index).
 fn find_path_anchor_near(
     doc: &crate::document::document::Document,
+    isolated: Option<&[usize]>,
     x: f64, y: f64, radius: f64,
 ) -> Option<(ElementPath, usize)> {
-    for (li, layer) in doc.layers.iter().enumerate() {
-        if let Some(children) = layer.children() {
-            for (ci, child) in children.iter().enumerate() {
-                if let Element::Path(pe) = &**child {
-                    if pe.common.locked {
-                        continue;
-                    }
-                    if let Some(idx) = anchor_index_near(pe, x, y, radius) {
-                        return Some((vec![li, ci], idx));
-                    }
-                }
-                if let Element::Group(g) = &**child {
-                    if child.common().locked {
-                        continue;
-                    }
-                    for (gi, gc) in g.children.iter().enumerate() {
-                        if let Element::Path(pe) = &**gc {
-                            if pe.common.locked {
-                                continue;
-                            }
-                            if let Some(idx) = anchor_index_near(pe, x, y, radius) {
-                                return Some((vec![li, ci, gi], idx));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
+    find_in_editable_paths(doc, isolated, &mut |path, pe, frame| {
+        anchor_index_near(pe, frame, x, y, radius).map(|idx| (path.to_vec(), idx))
+    })
 }
 
-/// Find the command-index of the anchor on `pe` closest to `(x, y)`
-/// within `radius`. Only MoveTo/LineTo/CurveTo count as anchors.
+/// Find the command-index of the anchor on `pe` within `radius` of `(x, y)`,
+/// each anchor compared where `frame` draws it. Only MoveTo/LineTo/CurveTo
+/// count as anchors.
 fn anchor_index_near(
     pe: &crate::geometry::element::PathElem,
+    frame: Option<crate::geometry::element::Transform>,
     x: f64, y: f64, radius: f64,
 ) -> Option<usize> {
     use crate::geometry::element::PathCommand;
     for (i, cmd) in pe.d.iter().enumerate() {
-        let (ax, ay) = match cmd {
+        let p = match cmd {
             PathCommand::MoveTo { x, y } => (*x, *y),
             PathCommand::LineTo { x, y } => (*x, *y),
             PathCommand::CurveTo { x, y, .. } => (*x, *y),
             _ => continue,
         };
+        let (ax, ay) = drawn_point(frame, p);
         if (x - ax).hypot(y - ay) <= radius {
             return Some(i);
         }
@@ -5268,7 +5238,7 @@ fn path_erase_at_rect(
         // ports can agree on. Fragment ids are handed out in document order.
         let mut new_children: Vec<Rc<Element>> = Vec::with_capacity(children.len());
         let mut layer_changed = false;
-        for child in children.iter() {
+        for (ci, child) in children.iter().enumerate() {
             let path_elem = match child.as_ref() {
                 Element::Path(pe) => pe,
                 _ => {
@@ -5280,19 +5250,51 @@ fn path_erase_at_rect(
                 new_children.push(child.clone());
                 continue;
             }
-            let flat = flatten_path_commands(&path_elem.d);
+            // The eraser sweeps DOCUMENT space, so the path is tested where it
+            // is DRAWN (transform-correct path verbs S5): its flattened points
+            // go through its full frame (the layer's transform and its own).
+            // The hit's flat indices and `t` carry over unchanged, because an
+            // affine map preserves ratios along a line; its entry and exit
+            // POINTS are mapped back into the path's local space before the
+            // split uses them. A singular frame is left alone.
+            let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, &[li, ci], true);
+            let inv = match frame {
+                Some(t) => match t.inverse() {
+                    Some(i) => Some(i),
+                    None => {
+                        new_children.push(child.clone());
+                        continue;
+                    }
+                },
+                None => None,
+            };
+            let mut flat = flatten_path_commands(&path_elem.d);
+            if let Some(t) = frame {
+                for p in flat.iter_mut() {
+                    *p = t.apply_point(p.0, p.1);
+                }
+            }
             if flat.len() < 2 {
                 new_children.push(child.clone());
                 continue;
             }
-            let hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
+            let mut hit = match find_eraser_hit(&flat, min_x, min_y, max_x, max_y) {
                 Some(h) => h,
                 None => {
                     new_children.push(child.clone());
                     continue;
                 }
             };
-            let bounds = child.bounds();
+            if let Some(i) = inv {
+                hit.entry = i.apply_point(hit.entry.0, hit.entry.1);
+                hit.exit = i.apply_point(hit.exit.0, hit.exit.1);
+            }
+            // "Fits inside the eraser" is a DOCUMENT-space size: the local
+            // bounds boxed through the frame.
+            let bounds = match frame {
+                None => child.bounds(),
+                Some(t) => crate::geometry::element::aabb_through(child.bounds(), &t),
+            };
             if bounds.2 <= eraser_size * 2.0 && bounds.3 <= eraser_size * 2.0 {
                 // bbox fits inside the eraser — drop entirely.
                 layer_changed = true;
@@ -5450,11 +5452,19 @@ fn path_paintbrush_edit_start(
         if path_elem.d.len() < 2 {
             continue;
         }
+        // Compared where the path is DRAWN (transform-correct path verbs
+        // S4b): each flat point through the path's full frame. A singular
+        // frame is skipped. Twin of JasSwift `paintbrushEditStart`.
+        let frame = crate::document::evaluated_bounds::accumulated_transform(model.document(), &es.path, true);
+        if frame.is_some_and(|t| t.inverse().is_none()) {
+            continue;
+        }
         let (flat, _cmd_map) = flatten_with_cmd_map(&path_elem.d);
         if flat.is_empty() {
             continue;
         }
-        for (i, &(fx, fy)) in flat.iter().enumerate() {
+        for (i, &p) in flat.iter().enumerate() {
+            let (fx, fy) = frame.map_or(p, |t| t.apply_point(p.0, p.1));
             let dx = fx - x;
             let dy = fy - y;
             let dsq = dx * dx + dy * dy;
@@ -5529,7 +5539,27 @@ fn path_paintbrush_edit_commit(
         return;
     }
 
-    let (flat, cmd_map) = flatten_with_cmd_map(&target_path_elem.d);
+    // The drag buffer is in DOCUMENT space, so the exit search and the fit
+    // run there too (transform-correct path verbs S4b, fork F4): the flat
+    // points and the splice's start point are mapped through the path's full
+    // frame, and the fitted control points are mapped back through its
+    // inverse. Before S4b the fit mixed a LOCAL start point with DOCUMENT
+    // drag points. A singular frame is skipped; with no frame nothing is
+    // mapped. Twin of JasSwift `paintbrushEditCommit`.
+    let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, &target_path, true);
+    let inv = match frame {
+        Some(t) => match t.inverse() {
+            Some(i) => Some(i),
+            None => return,
+        },
+        None => None,
+    };
+    let (mut flat, cmd_map) = flatten_with_cmd_map(&target_path_elem.d);
+    if let Some(t) = frame {
+        for p in flat.iter_mut() {
+            *p = t.apply_point(p.0, p.1);
+        }
+    }
     if flat.is_empty() || entry_idx >= flat.len() {
         return;
     }
@@ -5570,6 +5600,7 @@ fn path_paintbrush_edit_commit(
     // direction when the user dragged back-to-front so the splice
     // matches the path's flow.
     let start_point = cmd_start_point(&target_path_elem.d, c0);
+    let start_point = frame.map_or(start_point, |t| t.apply_point(start_point.0, start_point.1));
     let drag_iter: Vec<(f64, f64)> = if exit_idx < entry_idx {
         drag_points.iter().rev().cloned().collect()
     } else {
@@ -5591,12 +5622,10 @@ fn path_paintbrush_edit_commit(
     for cmd in &target_path_elem.d[..c0] {
         new_cmds.push(*cmd);
     }
+    let back = |x: f64, y: f64| inv.map_or((x, y), |i| i.apply_point(x, y));
     for seg in &segments {
-        new_cmds.push(PathCommand::CurveTo {
-            x1: seg.2, y1: seg.3,
-            x2: seg.4, y2: seg.5,
-            x: seg.6, y: seg.7,
-        });
+        let ((x1, y1), (x2, y2), (ex, ey)) = (back(seg.2, seg.3), back(seg.4, seg.5), back(seg.6, seg.7));
+        new_cmds.push(PathCommand::CurveTo { x1, y1, x2, y2, x: ex, y: ey });
     }
     for cmd in &target_path_elem.d[c1 + 1..] {
         new_cmds.push(*cmd);
@@ -6556,7 +6585,28 @@ fn path_smooth_at_cursor(
         if path_elem.d.len() < 2 {
             continue;
         }
-        let (flat, cmd_map) = flatten_with_cmd_map(&path_elem.d);
+        // Hit and fit where the path is DRAWN (transform-correct path verbs
+        // S4, fork F4): the flattened points are mapped through the path's
+        // full frame, so the radius and `fit_error` are document-space
+        // tolerances, and the fitted control points are mapped back through
+        // the frame's inverse (a Bezier's image under an affine map is the
+        // Bezier of the mapped control points). The flattening's `t` is
+        // uniform, so `cmd_map` carries over unchanged. A singular frame is
+        // skipped. With no frame nothing is mapped, bit-for-bit as before.
+        let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, path, true);
+        let inv = match frame {
+            Some(t) => match t.inverse() {
+                Some(i) => Some(i),
+                None => continue,
+            },
+            None => None,
+        };
+        let (mut flat, cmd_map) = flatten_with_cmd_map(&path_elem.d);
+        if let Some(t) = frame {
+            for p in flat.iter_mut() {
+                *p = t.apply_point(p.0, p.1);
+            }
+        }
         if flat.len() < 2 {
             continue;
         }
@@ -6602,6 +6652,7 @@ fn path_smooth_at_cursor(
             .map(|(_, &p)| p)
             .collect();
         let start_point = cmd_start_point(&path_elem.d, first_cmd);
+        let start_point = frame.map_or(start_point, |t| t.apply_point(start_point.0, start_point.1));
         let mut points_to_fit = vec![start_point];
         points_to_fit.extend_from_slice(&range_flat);
         if points_to_fit.len() < 2 {
@@ -6615,12 +6666,10 @@ fn path_smooth_at_cursor(
         for cmd in &path_elem.d[..first_cmd] {
             new_cmds.push(*cmd);
         }
+        let back = |x: f64, y: f64| inv.map_or((x, y), |i| i.apply_point(x, y));
         for seg in &segments {
-            new_cmds.push(PathCommand::CurveTo {
-                x1: seg.2, y1: seg.3,
-                x2: seg.4, y2: seg.5,
-                x: seg.6, y: seg.7,
-            });
+            let ((x1, y1), (x2, y2), (ex, ey)) = (back(seg.2, seg.3), back(seg.4, seg.5), back(seg.6, seg.7));
+            new_cmds.push(PathCommand::CurveTo { x1, y1, x2, y2, x: ex, y: ey });
         }
         for cmd in &path_elem.d[last_cmd + 1..] {
             new_cmds.push(*cmd);
@@ -6651,24 +6700,29 @@ fn path_insert_anchor_on_segment_near(
     model: &mut Model, x: f64, y: f64, radius: f64,
 ) {
     use crate::geometry::path_ops::{closest_segment_and_t, insert_point_in_path};
-    use crate::geometry::element::PathElem;
 
     // Scan all paths, keep the best (element-path, seg_idx, t, distance).
     let mut best: Option<(ElementPath, usize, f64, f64)> = None;
+    // `d` is the path's commands mapped to DOCUMENT space, so the closest
+    // segment, its `t` and the distance are all measured where the path is
+    // drawn. The `t` carries back to the local commands exactly: an affine
+    // map takes a segment's point at `t` to the image segment's point at `t`.
+    // Mapping the cursor into local space instead would be wrong under a
+    // non-uniform scale: both the closest `t` and the radius would change.
     fn try_path(
         best: &mut Option<(ElementPath, usize, f64, f64)>,
-        pe: &PathElem,
+        d: &[crate::geometry::element::PathCommand],
         doc_path: &[usize],
         x: f64, y: f64,
     ) {
-        if let Some((seg_idx, t)) = closest_segment_and_t(&pe.d, x, y) {
+        if let Some((seg_idx, t)) = closest_segment_and_t(d, x, y) {
             // Reproject to compute the actual distance for comparison.
             // closest_segment_and_t returned the best, but we need the
             // distance value to compare across paths — re-eval once.
             let mut cx = 0.0_f64;
             let mut cy = 0.0_f64;
             let mut dist = f64::INFINITY;
-            for (i, cmd) in pe.d.iter().enumerate() {
+            for (i, cmd) in d.iter().enumerate() {
                 use crate::geometry::element::PathCommand;
                 match cmd {
                     PathCommand::MoveTo { x: mx, y: my } => { cx = *mx; cy = *my; }
@@ -6706,29 +6760,18 @@ fn path_insert_anchor_on_segment_near(
     }
 
     {
-        // Locked Paths are skipped in both positions — see
-        // `find_path_anchor_near`. This is the fourth walker of the S7
-        // family and carried the identical asymmetry.
+        // Every editable Path at any depth (`find_in_editable_paths`, which
+        // skips anything locked). The visitor never stops the walk: the
+        // globally closest segment wins.
+        let isolated = model.isolation_stack.last().cloned();
         let doc = model.document();
-        for (li, layer) in doc.layers.iter().enumerate() {
-            if let Some(children) = layer.children() {
-                for (ci, child) in children.iter().enumerate() {
-                    if let Element::Path(pe) = &**child {
-                        if pe.common.locked { continue; }
-                        try_path(&mut best, pe, &[li, ci], x, y);
-                    }
-                    if let Element::Group(g) = &**child {
-                        if child.common().locked { continue; }
-                        for (gi, gc) in g.children.iter().enumerate() {
-                            if let Element::Path(pe) = &**gc {
-                                if pe.common.locked { continue; }
-                                try_path(&mut best, pe, &[li, ci, gi], x, y);
-                            }
-                        }
-                    }
-                }
+        find_in_editable_paths::<()>(doc, isolated.as_deref(), &mut |path, pe, frame| {
+            match frame {
+                Some(t) => try_path(&mut best, &crate::geometry::transformed::map_path_commands(&pe.d, &t), path, x, y),
+                None => try_path(&mut best, &pe.d, path, x, y),
             }
-        }
+            None
+        });
     }
 
     let (path, seg_idx, t, dist) = match best {
@@ -6757,7 +6800,8 @@ fn path_insert_anchor_on_segment_near(
 /// Implementation of doc.path.delete_anchor_near.
 fn path_delete_anchor_near(model: &mut Model, x: f64, y: f64, radius: f64) {
     use crate::geometry::path_ops::delete_anchor_from_path;
-    let (path, anchor_idx) = match find_path_anchor_near(model.document(), x, y, radius) {
+    let isolated = model.isolation_stack.last().cloned();
+    let (path, anchor_idx) = match find_path_anchor_near(model.document(), isolated.as_deref(), x, y, radius) {
         Some(hit) => hit,
         None => return,
     };
@@ -11653,7 +11697,10 @@ mod tests {
             PathCommand::LineTo { x: 50.0, y: 0.0 },
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
-        path_delete_anchor_near(&mut model, 50.0, 0.0, 8.0);
+        // The fixture's own transform is translate(40, 70), so the anchor
+        // (50, 0) is DRAWN at (90, 70): the tools hit where a path is drawn
+        // (transform-correct path verbs S2). Until S2 this clicked (50, 0).
+        path_delete_anchor_near(&mut model, 90.0, 70.0, 8.0);
         assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "delete_anchor_near");
     }
 
@@ -11663,7 +11710,10 @@ mod tests {
             PathCommand::MoveTo { x: 0.0, y: 0.0 },
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
-        path_insert_anchor_on_segment_near(&mut model, 50.0, 0.0, 8.0);
+        // The fixture's own transform is translate(40, 70), so the segment
+        // point (50, 0) is DRAWN at (90, 70): the tools hit where a path is drawn
+        // (transform-correct path verbs S2). Until S2 this clicked (50, 0).
+        path_insert_anchor_on_segment_near(&mut model, 90.0, 70.0, 8.0);
         assert_only_d_changed(
             &src, &path_at(&model, &[0, 0]), "insert_anchor_on_segment_near");
     }
@@ -11680,7 +11730,10 @@ mod tests {
         doc.selection.push(
             crate::document::document::ElementSelection::all(vec![0, 0]));
         model.set_document_unbracketed(doc, NonUndoableIntent::Selection);
-        path_smooth_at_cursor(&mut model, 15.0, 0.0, 50.0, 3.0);
+        // The fixture's own transform is translate(40, 70): the cursor (15, 0)
+        // in the path's space is DRAWN at (55, 70), where Smooth now hits
+        // (transform-correct path verbs S4). Until S4 this pressed (15, 0).
+        path_smooth_at_cursor(&mut model, 55.0, 70.0, 50.0, 3.0);
         assert_only_d_changed(&src, &path_at(&model, &[0, 0]), "smooth_at_cursor");
     }
 
@@ -11694,9 +11747,13 @@ mod tests {
         ]);
         let buffer = "theseus_paintbrush_edit";
         super::super::point_buffers::clear(buffer);
-        super::super::point_buffers::push(buffer, 50.0, 10.0);
-        super::super::point_buffers::push(buffer, 75.0, 20.0);
-        super::super::point_buffers::push(buffer, 100.0, 0.0);
+        // The drag is in DOCUMENT space and the fixture's own transform is
+        // translate(40, 70), so the drag runs where the path is DRAWN: the
+        // local drag (50,10) (75,20) (100,0) shifted by (40, 70)
+        // (transform-correct path verbs S4b). Until S4b the drag was local.
+        super::super::point_buffers::push(buffer, 90.0, 80.0);
+        super::super::point_buffers::push(buffer, 115.0, 90.0);
+        super::super::point_buffers::push(buffer, 140.0, 70.0);
         let mut store = StateStore::new();
         set_tool_path_generic(&mut store, "paintbrush", "edit_target_path", &vec![0, 0]);
         store.set_tool("paintbrush", "edit_entry_idx", serde_json::json!(1));
@@ -11719,7 +11776,8 @@ mod tests {
             PathCommand::LineTo { x: 0.0, y: 100.0 },
             PathCommand::ClosePath,
         ]);
-        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0);
         let children = match model.document().layers[0].children() {
             Some(c) => c.len(),
             None => 0,
@@ -11743,7 +11801,8 @@ mod tests {
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
         with_corpus_id_counter(|| {
-            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+            // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+            path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0)
         });
         let n = model.document().layers[0].children().map_or(0, |c| c.len());
         assert_eq!(n, 2, "a severing erase of an open path yields two fragments");
@@ -11954,7 +12013,8 @@ mod tests {
             PathCommand::LineTo { x: 100.0, y: 0.0 },
         ]);
         with_corpus_id_counter(|| {
-            path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0)
+            // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+            path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0)
         });
         assert_eq!(path_at(&model, &[0, 0]).common.id.as_deref(), Some("01234567"));
         assert_eq!(path_at(&model, &[0, 1]).common.id.as_deref(), Some("89abcdef"));
@@ -12184,8 +12244,10 @@ mod tests {
             PathCommand::LineTo { x: 0.0, y: 100.0 },
             PathCommand::ClosePath,
         ]);
-        path_erase_at_rect(&mut model, 50.0, 0.0, 50.0, 0.0, 2.0);
+        // (90, 70) is local (50, 0) drawn through the fixture's translate(40, 70): the eraser hits where the path is DRAWN (transform-correct path verbs S5).
+        path_erase_at_rect(&mut model, 90.0, 70.0, 90.0, 70.0, 2.0);
         let fragment = path_at(&model, &[0, 0]);
+        assert_ne!(fragment.d, src.d, "the erase must cut the path, or the chain below tests an unerased path");
         assert_eq!(fragment.common.tool_origin.as_deref(), Some("blob_brush"),
             "the erased fragment keeps tool_origin — that is what makes it a \
              merge candidate");
@@ -13038,6 +13100,412 @@ mod tests {
         });
         let model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
         assert_eq!(s7_probe_mode(&model, 0.0, 30.0), "idle");
+    }
+
+    // ── S2: Delete and Add Anchor Point hit a path WHERE IT IS DRAWN ───
+    //
+    // `find_path_anchor_near` and the insert walk now run on
+    // `find_in_editable_paths`. Delete compares each anchor through the
+    // path's frame. Add measures the closest segment, its `t` and the
+    // distance on the commands mapped to document space, then inserts at
+    // that `t` in the local commands. Twins: JasSwift
+    // `theDeleteAnchorPointTool*` / `theAddAnchorPointTool*`.
+
+    fn s2_click(model: &mut Model, effect: &str, x: f64, y: f64) {
+        let mut store = StateStore::new();
+        run_effects(&vec![serde_json::json!({ effect: {"x": x, "y": y, "hit_radius": 5} })],
+            &serde_json::json!({}), &mut store, Some(model), None, None, None);
+    }
+
+    /// The corner (30,30) of `s1_corner_path` is drawn at (70,80) in
+    /// `s1_rotated_model`; a click there deletes it, a click at the local
+    /// position deletes nothing.
+    #[test]
+    fn the_delete_anchor_point_tool_deletes_a_corner_where_it_is_drawn_under_rotation() {
+        let mut model = s1_rotated_model(s1_corner_path());
+        let before = model.document().clone();
+        s2_click(&mut model, "doc.path.delete_anchor_near", 30.0, 30.0);
+        assert_eq!(model.document().layers, before.layers, "the local position draws nothing");
+        s2_click(&mut model, "doc.path.delete_anchor_near", 70.0, 80.0);
+        let d = path_at(&model, &[0, 0, 0, 0]).d;
+        assert_eq!(d, vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: 60.0, y: 0.0 }]);
+    }
+
+    /// Delete reaches a Transformed wrapper's child only while isolated into
+    /// it. The wrapper scales the corner path by (2,3): corner drawn at (60,90).
+    #[test]
+    fn the_delete_anchor_point_tool_reaches_a_wrapped_path_only_while_isolated() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let w = TransformedElem::new(std::rc::Rc::new(s1_corner_path()), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        let before = model.document().clone();
+        s2_click(&mut model, "doc.path.delete_anchor_near", 60.0, 90.0);
+        assert_eq!(model.document().layers, before.layers, "not isolated: a wrapper is one element");
+        model.isolation_stack.push(vec![0, 0]);
+        s2_click(&mut model, "doc.path.delete_anchor_near", 60.0, 90.0);
+        assert_eq!(path_at(&model, &[0, 0, 0]).d.len(), 2, "isolated: the drawn corner is deleted");
+    }
+
+    /// Add Anchor Point measures in DOCUMENT space. The segment (0,0)-(10,10)
+    /// sits in a group scaled (1,4), so it is drawn from (0,0) to (10,40). A
+    /// click at (4,4) is closest to the drawn segment at t = 200/1700 = 2/17,
+    /// distance about 2.9, so the new anchor is local (20/17, 20/17). Mapping
+    /// the click into local space first, (4,1), would pick t = 0.25 and put the
+    /// anchor at (2.5, 2.5).
+    #[test]
+    fn the_add_anchor_point_tool_measures_the_drawn_segment_under_non_uniform_scale() {
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: 10.0, y: 10.0 }],
+            ..PathElem::default()
+        });
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(path)],
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::scale(1.0, 4.0)), ..CommonProps::default() },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        s2_click(&mut model, "doc.path.insert_anchor_on_segment_near", 4.0, 4.0);
+        let d = path_at(&model, &[0, 0, 0]).d;
+        assert_eq!(d.len(), 3, "one anchor inserted: {d:?}");
+        let PathCommand::LineTo { x, y } = d[1] else { panic!("a line split by a line: {:?}", d[1]) };
+        let want = 20.0 / 17.0;
+        assert!((x - want).abs() < 1e-12 && (y - want).abs() < 1e-12, "inserted at local ({x}, {y}), want ({want}, {want})");
+    }
+
+    // ── S3: the Partial Selection marquee selects where a thing is DRAWN ──
+    //
+    // `Controller::partial_select_rect` compared LOCAL control points to the
+    // DOCUMENT-space rect and dropped every ancestor's transform from its body
+    // test. `select_recursive` now carries the parent frame (and enters an
+    // isolated Transformed wrapper), and the marquee compares through it.
+    // Twin: JasSwift `theMarquee*`.
+
+    fn s3_marquee(model: &mut Model, x1: f64, y1: f64, x2: f64, y2: f64) -> Vec<ElementSelection> {
+        let mut store = StateStore::new();
+        run_effects(&vec![serde_json::json!({"doc.partial_select_in_rect": {
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2, "additive": false}})],
+            &serde_json::json!({}), &mut store, Some(model), None, None, None);
+        model.document().selection.clone()
+    }
+
+    /// In `s1_rotated_model` the corner anchor 1, local (30,30), is drawn at
+    /// (70,80); the other two anchors are drawn at (100,50) and (100,110).
+    #[test]
+    fn the_marquee_selects_a_control_point_where_it_is_drawn_under_rotation() {
+        let mut model = s1_rotated_model(s1_corner_path());
+        assert_eq!(s3_marquee(&mut model, 65.0, 75.0, 75.0, 85.0),
+            vec![ElementSelection::partial(vec![0, 0, 0, 0], [1usize])]);
+        assert!(s3_marquee(&mut model, 25.0, 25.0, 35.0, 35.0).is_empty(), "the local position draws nothing");
+    }
+
+    /// A filled rect (0,0,30,30) in a group scaled 2 and moved (60,30) is drawn
+    /// over (60..120, 30..90). A marquee inside it, (80..90, 50..60), holds no
+    /// corner and still touches the body: the element is selected with no
+    /// control points.
+    #[test]
+    fn the_marquee_hits_a_body_where_it_is_drawn_in_a_scaled_group() {
+        let rect = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 30.0, height: 30.0, rx: 0.0, ry: 0.0,
+            fill: Some(crate::geometry::element::Fill::new(crate::geometry::element::Color::rgb(1.0, 0.0, 0.0))),
+            stroke: None, common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(rect)],
+            common: CommonProps {
+                transform: Some(crate::geometry::element::Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 60.0, f: 30.0 }),
+                ..CommonProps::default()
+            },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        assert_eq!(s3_marquee(&mut model, 80.0, 50.0, 90.0, 60.0),
+            vec![ElementSelection::partial(vec![0, 0, 0], std::iter::empty::<usize>())]);
+        assert!(s3_marquee(&mut model, 130.0, 100.0, 140.0, 110.0).is_empty(), "outside the drawn body");
+        assert!(s3_marquee(&mut model, 10.0, 10.0, 20.0, 20.0).is_empty(), "the local body draws nothing");
+    }
+
+    /// The marquee reaches a Transformed wrapper's child only while isolated
+    /// into it. The wrapper scales a rect (2,2,10x10) by (2,3), so its corner 2
+    /// (local 12,12) is drawn at (24,36).
+    #[test]
+    fn the_marquee_reaches_a_wrapped_childs_corner_only_while_isolated() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let rect = Element::Rect(RectElem {
+            x: 2.0, y: 2.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let w = TransformedElem::new(std::rc::Rc::new(rect), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        let sel = s3_marquee(&mut model, 22.0, 34.0, 26.0, 38.0);
+        assert!(sel.iter().all(|es| es.path != vec![0, 0, 0]), "not isolated: the child is unreachable: {sel:?}");
+        model.isolation_stack.push(vec![0, 0]);
+        assert_eq!(s3_marquee(&mut model, 22.0, 34.0, 26.0, 38.0),
+            vec![ElementSelection::partial(vec![0, 0, 0], [2usize])], "isolated: the drawn corner");
+    }
+
+    /// Under a SINGULAR frame (a group scaled to zero width) the marquee
+    /// selects nothing: the path's corner collapses onto (0,30).
+    #[test]
+    fn the_marquee_skips_an_element_with_a_singular_frame() {
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(s1_corner_path())],
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::scale(0.0, 1.0)), ..CommonProps::default() },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        assert!(s3_marquee(&mut model, -5.0, 25.0, 5.0, 35.0).is_empty());
+    }
+
+    // ── S4a: Smooth hits and fits where a path is DRAWN ────────────────────
+    //
+    // The ORACLE, which needs no hand-predicted fit: smoothing a path P inside
+    // a frame F and mapping the result through F must equal smoothing F(P) at
+    // the top level. Exact up to rounding, because both fits run on the same
+    // document-space points (a line's flattening commutes with an affine map).
+    // Twin: JasSwift `theSmoothToolFitsInDocumentSpace`.
+
+    fn s4_zigzag() -> Vec<PathCommand> {
+        let mut d = vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }];
+        for i in 1..=12 {
+            d.push(PathCommand::LineTo { x: 5.0 * i as f64, y: if i % 2 == 1 { 3.0 } else { 0.0 } });
+        }
+        d
+    }
+
+    fn s4_points(c: &PathCommand) -> Vec<(f64, f64)> {
+        match *c {
+            PathCommand::MoveTo { x, y } | PathCommand::LineTo { x, y } => vec![(x, y)],
+            PathCommand::CurveTo { x1, y1, x2, y2, x, y } => vec![(x1, y1), (x2, y2), (x, y)],
+            ref other => panic!("unexpected command in a smoothed zigzag: {other:?}"),
+        }
+    }
+
+    fn s4_smooth(elem: Element, frame: Option<crate::geometry::element::Transform>, x: f64, y: f64) -> Model {
+        let path = if frame.is_some() { vec![0, 0, 0] } else { vec![0, 0] };
+        let child = match frame {
+            Some(t) => Element::Group(crate::geometry::element::GroupElem {
+                children: vec![std::rc::Rc::new(elem)],
+                common: CommonProps { transform: Some(t), ..CommonProps::default() },
+                isolated_blending: false, knockout_group: false,
+            }),
+            None => elem,
+        };
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(child)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(path)], ..Document::default()
+        }, None);
+        path_smooth_at_cursor(&mut model, x, y, 40.0, 2.0);
+        model
+    }
+
+    #[test]
+    fn the_smooth_tool_fits_in_document_space() {
+        let f = crate::geometry::element::Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 100.0, f: 50.0 };
+        let p = Element::Path(PathElem { d: s4_zigzag(), ..PathElem::default() });
+        let fp = Element::Path(PathElem { d: crate::geometry::transformed::map_path_commands(&s4_zigzag(), &f), ..PathElem::default() });
+        // The cursor is local (30, 1.5), drawn at (160, 54.5).
+        let top = path_at(&s4_smooth(fp, None, 160.0, 54.5), &[0, 0]).d;
+        let grouped = path_at(&s4_smooth(p, Some(f), 160.0, 54.5), &[0, 0, 0]).d;
+        assert!(top.len() < 13, "the oracle must smooth something: {} commands", top.len());
+        let mapped = crate::geometry::transformed::map_path_commands(&grouped, &f);
+        assert_eq!(mapped.len(), top.len(), "grouped {mapped:?} vs top {top:?}");
+        for (a, b) in mapped.iter().zip(top.iter()) {
+            let (pa, pb) = (s4_points(a), s4_points(b));
+            assert_eq!(pa.len(), pb.len(), "{a:?} vs {b:?}");
+            for ((ax, ay), (bx, by)) in pa.iter().zip(pb.iter()) {
+                assert!((ax - bx).abs() < 1e-9 && (ay - by).abs() < 1e-9, "{a:?} vs {b:?}");
+            }
+        }
+        // And the cursor at the LOCAL position draws nothing within the radius.
+        let untouched = path_at(&s4_smooth(Element::Path(PathElem { d: s4_zigzag(), ..PathElem::default() }), Some(f), 30.0, 1.5), &[0, 0, 0]).d;
+        assert_eq!(untouched, s4_zigzag());
+    }
+
+    /// Under a SINGULAR frame (a group scaled to zero height) Smooth leaves the
+    /// path alone: every point collapses onto y = 0, so a refit could not be
+    /// mapped back. Twin: JasSwift `theSmoothToolSkipsAPathWithASingularFrame`.
+    #[test]
+    fn the_smooth_tool_skips_a_path_with_a_singular_frame() {
+        let p = Element::Path(PathElem { d: s4_zigzag(), ..PathElem::default() });
+        let out = path_at(&s4_smooth(p, Some(crate::geometry::element::Transform::scale(1.0, 0.0)), 30.0, 0.0), &[0, 0, 0]).d;
+        assert_eq!(out, s4_zigzag());
+    }
+
+    // ── S4b: the Paintbrush edit hits and fits where a path is DRAWN ───────
+    //
+    // The same ORACLE as Smooth: an edit of P inside a frame F, mapped through
+    // F, equals the same document-space edit of F(P) at the top level. Twin:
+    // JasSwift `thePaintbrushEditFitsInDocumentSpace`.
+
+    fn s4b_edit(d: Vec<PathCommand>, frame: Option<crate::geometry::element::Transform>,
+                press: (f64, f64), drag: &[(f64, f64)]) -> (Option<String>, Vec<PathCommand>) {
+        let path = if frame.is_some() { vec![0, 0, 0] } else { vec![0, 0] };
+        let elem = Element::Path(PathElem { d, ..PathElem::default() });
+        let child = match frame {
+            Some(t) => Element::Group(crate::geometry::element::GroupElem {
+                children: vec![std::rc::Rc::new(elem)],
+                common: CommonProps { transform: Some(t), ..CommonProps::default() },
+                isolated_blending: false, knockout_group: false,
+            }),
+            None => elem,
+        };
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(child)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(path.clone())], ..Document::default()
+        }, None);
+        let mut store = StateStore::new();
+        path_paintbrush_edit_start(&model, &mut store, press.0, press.1, 12.0);
+        let mode = store.get_tool("paintbrush", "mode").as_str().map(str::to_string);
+        let buffer = if frame.is_some() { "s4b_grouped" } else { "s4b_top" };
+        super::super::point_buffers::clear(buffer);
+        for &(x, y) in drag {
+            super::super::point_buffers::push(buffer, x, y);
+        }
+        path_paintbrush_edit_commit(&mut model, &store, buffer, 2.0, 12.0);
+        super::super::point_buffers::clear(buffer);
+        (mode, path_at(&model, &path).d)
+    }
+
+    #[test]
+    fn the_paintbrush_edit_fits_in_document_space() {
+        let f = crate::geometry::element::Transform { a: 2.0, b: 0.0, c: 0.0, d: 3.0, e: 100.0, f: 50.0 };
+        let d = vec![
+            PathCommand::MoveTo { x: 0.0, y: 0.0 },
+            PathCommand::LineTo { x: 20.0, y: 0.0 },
+            PathCommand::LineTo { x: 40.0, y: 0.0 },
+            PathCommand::LineTo { x: 60.0, y: 0.0 },
+        ];
+        // Local (20,0) is drawn at (140,50) and local (40,0) at (180,50); the
+        // drag bows below the drawn line between them.
+        let drag = [(140.0, 52.0), (150.0, 60.0), (160.0, 64.0), (170.0, 60.0), (180.0, 51.0)];
+        let (top_mode, top) = s4b_edit(crate::geometry::transformed::map_path_commands(&d, &f), None, (140.0, 50.0), &drag);
+        let (mode, grouped) = s4b_edit(d.clone(), Some(f), (140.0, 50.0), &drag);
+        assert_eq!(top_mode.as_deref(), Some("edit"), "the oracle must enter edit mode");
+        assert_eq!(mode.as_deref(), Some("edit"), "the drawn point is a hit");
+        assert_ne!(top, crate::geometry::transformed::map_path_commands(&d, &f), "the oracle must edit something");
+        let mapped = crate::geometry::transformed::map_path_commands(&grouped, &f);
+        assert_eq!(mapped.len(), top.len(), "grouped {mapped:?} vs top {top:?}");
+        for (a, b) in mapped.iter().zip(top.iter()) {
+            let (pa, pb) = (s4_points(a), s4_points(b));
+            assert_eq!(pa.len(), pb.len(), "{a:?} vs {b:?}");
+            for ((ax, ay), (bx, by)) in pa.iter().zip(pb.iter()) {
+                assert!((ax - bx).abs() < 1e-9 && (ay - by).abs() < 1e-9, "{a:?} vs {b:?}");
+            }
+        }
+        // The press at the LOCAL position draws nothing.
+        let (miss, _) = s4b_edit(d, Some(f), (20.0, 0.0), &drag);
+        assert_ne!(miss.as_deref(), Some("edit"));
+    }
+
+    /// Under a SINGULAR frame the Paintbrush edit neither starts nor commits.
+    #[test]
+    fn the_paintbrush_edit_skips_a_path_with_a_singular_frame() {
+        let d = vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: 20.0, y: 0.0 }, PathCommand::LineTo { x: 40.0, y: 0.0 }];
+        let (mode, out) = s4b_edit(d.clone(), Some(crate::geometry::element::Transform::scale(0.0, 1.0)), (0.0, 0.0), &[(0.0, 0.0), (0.0, 5.0), (0.0, 0.0)]);
+        assert_ne!(mode.as_deref(), Some("edit"));
+        assert_eq!(out, d);
+    }
+
+    /// The COMMIT refuses a singular frame on its own, not only because the
+    /// start would not have latched: the edit state is primed by hand here.
+    #[test]
+    fn the_paintbrush_commit_skips_a_path_with_a_singular_frame() {
+        let d = vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: 20.0, y: 0.0 }, PathCommand::LineTo { x: 40.0, y: 0.0 }];
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(Element::Path(PathElem { d: d.clone(), ..PathElem::default() }))],
+            common: CommonProps { transform: Some(crate::geometry::element::Transform::scale(0.0, 1.0)), ..CommonProps::default() },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        let mut store = StateStore::new();
+        set_tool_path_generic(&mut store, "paintbrush", "edit_target_path", &vec![0, 0, 0]);
+        // Entry 2, not 0: the collapsed points are all equal, so the exit
+        // search returns index 0, and an entry of 0 would end the commit as a
+        // degenerate range before the frame was ever consulted.
+        store.set_tool("paintbrush", "edit_entry_idx", serde_json::json!(2));
+        let buffer = "s4b_singular";
+        super::super::point_buffers::clear(buffer);
+        for &(x, y) in &[(0.0, 0.0), (0.0, 5.0), (0.0, 10.0), (0.0, 0.0)] {
+            super::super::point_buffers::push(buffer, x, y);
+        }
+        path_paintbrush_edit_commit(&mut model, &store, buffer, 2.0, 12.0);
+        super::super::point_buffers::clear(buffer);
+        assert_eq!(path_at(&model, &[0, 0, 0]).d, d);
+    }
+
+    // ── S5: the Path Eraser cuts where a path is DRAWN ────────────────────
+    // The golden path_eraser_cuts_transformed_line pins the hit and the split
+    // points; these two pin the size test and the singular skip. Twins:
+    // JasSwift `theEraser*`.
+
+    fn s5_erase(len: f64, transform: crate::geometry::element::Transform, x: f64, y: f64) -> Model {
+        let path = Element::Path(PathElem {
+            d: vec![PathCommand::MoveTo { x: 0.0, y: 0.0 }, PathCommand::LineTo { x: len, y: 0.0 }],
+            common: CommonProps { transform: Some(transform), ..CommonProps::default() },
+            ..PathElem::default()
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(path)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        path_erase_at_rect(&mut model, x, y, x, y, 2.0);
+        model
+    }
+
+    /// "Fits inside the eraser" is a DOCUMENT-space size. The line is 3 long
+    /// locally and scaled by 10, so it is DRAWN 30 long; an erase at its drawn
+    /// middle SPLITS it in two. Judged by its local bounds (3 by 0, inside the
+    /// 4-by-4 eraser) the whole element would be deleted instead. (The other
+    /// direction cannot tell the two apart: an eraser that holds the whole
+    /// drawn line leaves no fragment either way.)
+    #[test]
+    fn the_eraser_judges_fit_by_the_drawn_bounds() {
+        let model = s5_erase(3.0, crate::geometry::element::Transform::scale(10.0, 10.0), 15.0, 0.0);
+        assert_eq!(model.document().layers[0].children().unwrap().len(), 2,
+            "the drawn line is wider than the eraser, so it splits: {:?}", model.document().layers[0].children());
+    }
+
+    /// Under a SINGULAR transform the eraser leaves the path alone; its drawn
+    /// box has zero width, so without the skip it would be deleted.
+    #[test]
+    fn the_eraser_skips_a_path_with_a_singular_frame() {
+        let model = s5_erase(30.0, crate::geometry::element::Transform::scale(0.0, 1.0), 0.0, 0.0);
+        let kids = model.document().layers[0].children().unwrap();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(path_at(&model, &[0, 0]).d.len(), 2);
     }
 
     #[test]
