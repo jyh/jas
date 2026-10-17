@@ -18,7 +18,7 @@ from geometry.element import (
     Path, Text, TextPath, Group, Layer,
     Color, RgbColor, HsbColor, CmykColor,
     Fill, Stroke, Transform, Visibility,
-    LineCap, LineJoin,
+    LineCap, LineJoin, Arrowhead, ArrowAlign,
     MoveTo, LineTo as LineToCmd, CurveTo, SmoothCurveTo,
     QuadTo, SmoothQuadTo, ArcTo, ClosePath,
     CompoundOperation, CompoundShape, RecordedElem, ReferenceElem,
@@ -179,6 +179,19 @@ def _stroke_json(stroke: Stroke | None) -> str:
         o.bool_("dash_align_anchors", True)
     if stroke.miter_limit != 10.0:
         o.num("miter_limit", stroke.miter_limit)
+    # The five arrowhead fields, under the same convention (the ports'
+    # codec_field_survival test_json column closed 2026-10-17). Mirrors the
+    # Rust `stroke_json` key for key.
+    if stroke.start_arrow != Arrowhead.NONE:
+        o.str("start_arrow", stroke.start_arrow.value)
+    if stroke.end_arrow != Arrowhead.NONE:
+        o.str("end_arrow", stroke.end_arrow.value)
+    if stroke.start_arrow_scale != 100.0:
+        o.num("start_arrow_scale", stroke.start_arrow_scale)
+    if stroke.end_arrow_scale != 100.0:
+        o.num("end_arrow_scale", stroke.end_arrow_scale)
+    if stroke.arrow_align != ArrowAlign.TIP_AT_END:
+        o.str("arrow_align", stroke.arrow_align.value)
     return o.build()
 
 
@@ -947,6 +960,13 @@ def _parse_stroke(d) -> Stroke | None:
         align=_enum_or(StrokeAlign, d.get("align"), StrokeAlign.CENTER),
         dash_pattern=tuple(float(x) for x in (d.get("dash_pattern") or [])[:6]),
         dash_align_anchors=bool(d.get("dash_align_anchors", False)),
+        # The five arrowhead keys, absent when default (the writer's
+        # identity omission). Mirrors the Rust `parse_stroke`.
+        start_arrow=_enum_or(Arrowhead, d.get("start_arrow"), Arrowhead.NONE),
+        end_arrow=_enum_or(Arrowhead, d.get("end_arrow"), Arrowhead.NONE),
+        start_arrow_scale=float(d.get("start_arrow_scale", 100.0)),
+        end_arrow_scale=float(d.get("end_arrow_scale", 100.0)),
+        arrow_align=_enum_or(ArrowAlign, d.get("arrow_align"), ArrowAlign.TIP_AT_END),
     )
 
 

@@ -4811,7 +4811,7 @@ private func payloadContent(_ svg: String) -> String {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["align.right.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["stroke.end_arrowhead.json", "align.right.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
 
 /// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
@@ -6619,12 +6619,17 @@ private func survivalRow(_ beforeDoc: Document, _ afterDoc: Document) -> [(Strin
         ("layer.knockout_group", s(al.knockoutGroup == bl.knockoutGroup)),
         ("line.width_points", s(an.widthPoints == bn.widthPoints)),
         ("stroke.align", s(a.stroke?.align == before.stroke?.align)),
+        ("stroke.arrow_align", s(a.stroke?.arrowAlign == before.stroke?.arrowAlign)),
         ("stroke.dash_align_anchors", s(a.stroke?.dashAlignAnchors == before.stroke?.dashAlignAnchors)),
         // The ACTIVE slice, not the fixed six-slot array: the two ports store
         // the pattern differently (Rust [f64; 6] + dash_len, Swift a Vec), and
         // `dash_array()` / `dashPattern` is the shape they share.
         ("stroke.dash_pattern", s(a.stroke?.dashPattern == before.stroke?.dashPattern)),
         ("stroke.miter_limit", s(a.stroke?.miterLimit == before.stroke?.miterLimit)),
+        ("stroke.end_arrow", s(a.stroke?.endArrow == before.stroke?.endArrow)),
+        ("stroke.end_arrow_scale", s(a.stroke?.endArrowScale == before.stroke?.endArrowScale)),
+        ("stroke.start_arrow", s(a.stroke?.startArrow == before.stroke?.startArrow)),
+        ("stroke.start_arrow_scale", s(a.stroke?.startArrowScale == before.stroke?.startArrowScale)),
         ("stroke_brush", s(a.strokeBrush == before.strokeBrush)),
         ("stroke_brush_overrides", s(a.strokeBrushOverrides == before.strokeBrushOverrides)),
         ("stroke_gradient", s(a.strokeGradient == before.strokeGradient)),
