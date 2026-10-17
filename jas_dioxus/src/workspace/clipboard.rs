@@ -531,33 +531,10 @@ pub(crate) fn clipboard_read_and_paste(
     });
 }
 
-/// Build SVG string from selected elements for clipboard export.
+/// Build SVG string from selected elements for clipboard export. The payload
+/// itself is `op_apply::selection_clipboard_svg`, shared with the engine build.
 pub(crate) fn selection_to_svg(st: &AppState) -> Option<String> {
-    let tab = st.tab()?;
-    let doc = tab.model.document();
-    if doc.selection.is_empty() {
-        return None;
-    }
-    let mut elements = Vec::new();
-    for es in &doc.selection {
-        if let Some(elem) = doc.get_element(&es.path) {
-            elements.push(elem.clone());
-        }
-    }
-    if elements.is_empty() {
-        return None;
-    }
-    let temp_doc = Document {
-        layers: vec![GeoElement::Layer(LayerElem {
-            children: elements.into_iter().map(Rc::new).collect(),
-            common: CommonProps::default(),
-            isolated_blending: false,
-            knockout_group: false,
-        })],
-        selected_layer: 0,
-        selection: Vec::new(),
-     ..Document::default()};
-    Some(document_to_svg(&temp_doc))
+    crate::document::op_apply::selection_clipboard_svg(st.tab()?.model.document())
 }
 
 /// Save a string to a user-chosen file path via the File System Access

@@ -1179,6 +1179,34 @@ pub fn apply_paste(
 // paste_clipboard_text.json` drives these two functions through the `paste`
 // verb's `text` param in both ports.
 
+/// The clipboard COPY payload: the selected elements, in SELECTION order, as
+/// the children of ONE unnamed layer, serialised as SVG. `None` when nothing
+/// is selected (or nothing selected resolves). This is the one definition the
+/// web app's `selection_to_svg` and the engine's copy reply both use, and it
+/// is the shape JasSwift's `copySelection` writes. Not web-gated, so the
+/// engine build (the Windows shell's clipboard channel) has it.
+pub fn selection_clipboard_svg(doc: &crate::document::document::Document) -> Option<String> {
+    use crate::geometry::element::{CommonProps, Element, LayerElem};
+    let elements: Vec<std::rc::Rc<Element>> = doc.selection.iter()
+        .filter_map(|es| doc.get_element(&es.path).map(|e| std::rc::Rc::new(e.clone())))
+        .collect();
+    if elements.is_empty() {
+        return None;
+    }
+    let temp = crate::document::document::Document {
+        layers: vec![Element::Layer(LayerElem {
+            children: elements,
+            common: CommonProps::default(),
+            isolated_blending: false,
+            knockout_group: false,
+        })],
+        selected_layer: 0,
+        selection: Vec::new(),
+        ..crate::document::document::Document::default()
+    };
+    Some(crate::geometry::svg::document_to_svg(&temp))
+}
+
 /// Does this clipboard payload announce itself as SVG?
 ///
 /// Deliberately a PREFIX test on the trimmed payload rather than a parse
@@ -3534,5 +3562,60 @@ mod wrap_scale_tests {
         let out = wrap_scale_over_paths(&doc, &[vec![0, 0]], &s, false, None);
         assert!(matches!(&*wrapper_at(&out, &[0, 0]).child, Element::Live(LiveVariant::Transformed(_))),
                 "a rotated own transform is wrapped again");
+    }
+}
+
+/// The clipboard COPY payload, outside the web build (Windows clipboard
+/// parity, slice 1): the engine and the web app must write the same bytes.
+#[cfg(test)]
+mod clipboard_payload_tests {
+    use super::*;
+    use crate::document::document::{Document, ElementSelection};
+    use crate::geometry::element::{Color, CommonProps, Element, Fill, LayerElem, RectElem};
+    use std::rc::Rc;
+
+    fn rect(x: f64) -> Element {
+        Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)), stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        })
+    }
+
+    fn doc_with(selection: Vec<ElementSelection>) -> Document {
+        Document {
+            layers: vec![Element::Layer(LayerElem {
+                children: vec![Rc::new(rect(0.0)), Rc::new(rect(50.0)), Rc::new(rect(100.0))],
+                common: CommonProps { name: Some("L".to_string()), ..CommonProps::default() },
+                isolated_blending: false, knockout_group: false,
+            })],
+            selected_layer: 0, selection, ..Document::default()
+        }
+    }
+
+    /// The payload is ONE unnamed layer holding the selected elements in
+    /// SELECTION order (not document order), as the web app and JasSwift's
+    /// `copySelection` write it. Selected: [0,2] then [0,0], so the payload's
+    /// children are the rects at x 100 then x 0.
+    #[test]
+    fn the_copy_payload_is_one_layer_of_the_selection_in_selection_order() {
+        let doc = doc_with(vec![ElementSelection::all(vec![0, 2]), ElementSelection::all(vec![0, 0])]);
+        let svg = selection_clipboard_svg(&doc).expect("a selection copies");
+        assert!(clipboard_text_is_svg(&svg), "the payload pastes as artwork: {svg}");
+        let back = crate::geometry::svg::svg_to_document(&svg);
+        assert_eq!(back.layers.len(), 1, "{svg}");
+        let kids = back.layers[0].children().unwrap();
+        assert_eq!(kids.len(), 2, "{svg}");
+        let xs: Vec<f64> = kids.iter().map(|k| match &**k { Element::Rect(r) => r.x, other => panic!("{other:?}") }).collect();
+        // 1e-3, not exact: the SVG round trip converts pt to px and back at the
+        // writer's precision (100 comes back as 99.999975, the same factor as the
+        // corpus's stroke width 0.999975). The ORDER is the claim here.
+        assert!((xs[0] - 100.0).abs() < 1e-3 && xs[1].abs() < 1e-3, "selection order: {xs:?}");
+        assert_eq!(back.layers[0].common().name, None, "the payload's layer is unnamed: {svg}");
+    }
+
+    #[test]
+    fn an_empty_selection_copies_nothing() {
+        assert_eq!(selection_clipboard_svg(&doc_with(vec![])), None);
     }
 }
