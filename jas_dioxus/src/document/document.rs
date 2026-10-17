@@ -317,6 +317,8 @@ impl Document {
                             walk(operand, out);
                         }
                     }
+                    // The wrapped child is owned and keeps its own id.
+                    crate::geometry::live::LiveVariant::Transformed(t) => walk(&t.child, out),
                     crate::geometry::live::LiveVariant::Reference(_)
                     | crate::geometry::live::LiveVariant::Recorded(_)
                     | crate::geometry::live::LiveVariant::Generated(_) => {}

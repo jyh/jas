@@ -20,7 +20,7 @@ use crate::algorithms::boolean::{
     self, canonicalize, PolygonSet, RuledPolygonSet,
 };
 
-use super::element::{translate_element, Bounds, CommonProps, Element, Fill, Stroke};
+use super::element::{translate_element, Bounds, CommonProps, Element, Fill, Stroke, Transform};
 // RECORDED_ELEMENTS.md: the recipe is a normalized op-segment from the journal.
 use crate::document::op_log::PrimitiveOp;
 
@@ -79,6 +79,9 @@ pub fn resolved_rings(
         }
         LiveVariant::Generated(g) => {
             Some(g.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
+        }
+        LiveVariant::Transformed(t) => {
+            Some(t.evaluate_with(DEFAULT_PRECISION, resolver, &mut visiting))
         }
         LiveVariant::CompoundShape(_) => None,
     }
@@ -1042,6 +1045,94 @@ pub fn capture_recipe(segment: &[PrimitiveOp]) -> (Vec<PrimitiveOp>, Vec<String>
 }
 
 // ---------------------------------------------------------------------------
+// Transformed — a live transform OPERATION over one child
+// ---------------------------------------------------------------------------
+
+/// A `Transformed` live element: one child drawn under an affine `matrix`,
+/// with the operation's own Scale Strokes choice (council 2026-10-16, ruling
+/// 4: *"the transform remains in the element tree, and the rectangle stays a
+/// rectangle"*). The child is never rewritten, so nothing is destroyed and an
+/// unwrap returns it exactly.
+///
+/// ⚖️ THE TWO CASES ARE TWO DRAWINGS, NOT TWO WIDTHS:
+/// * `scale_strokes == true` draws the child UNDER the matrix, so its stroke
+///   is scaled with everything else — "identical to converting the stroke to
+///   outlines, then scaling".
+/// * `scale_strokes == false` maps the child's GEOMETRY through the matrix and
+///   draws the stroke at its own width over the mapped geometry — "the stroke
+///   should stay 1pt", on every edge, under ANY matrix (a stored transform
+///   with a divided width is right only for a uniform scale).
+///
+/// Wrappers stack: a wrapper's child may itself be a wrapper, and each applies
+/// its own choice to what is inside it, which is how the stack order decides
+/// the case. The renderer half lives in `painter::element_render`.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TransformedElem {
+    /// The element the operation applies to.
+    pub child: Rc<Element>,
+    /// The operation's matrix, applied in the wrapper's own coordinates (a
+    /// wrapper's `common.transform`, if any, applies outside it).
+    pub matrix: Transform,
+    /// The operation's Scale Strokes choice; see the type docs.
+    pub scale_strokes: bool,
+    pub common: CommonProps,
+}
+
+impl TransformedElem {
+    pub fn new(child: Rc<Element>, matrix: Transform, scale_strokes: bool) -> Self {
+        Self { child, matrix, scale_strokes, common: CommonProps::default() }
+    }
+
+    /// The operation's whole matrix over the child's LOCAL geometry: the
+    /// child's own transform first, then the wrapper's `matrix`.
+    pub fn child_to_wrapper(&self) -> Transform {
+        match self.child.transform() {
+            Some(t) => self.matrix.multiply(t),
+            None => self.matrix,
+        }
+    }
+
+    /// The child's region, mapped into the wrapper's coordinates. Geometry
+    /// only: Scale Strokes is a property of how the stroke is DRAWN, and a
+    /// region has no stroke.
+    pub fn evaluate_with(
+        &self,
+        precision: f64,
+        resolver: &dyn ElementResolver,
+        visiting: &mut VisitSet,
+    ) -> PolygonSet {
+        let local = element_to_polygon_set_with(&self.child, precision, resolver, visiting);
+        crate::geometry::path_ops::transform_polygon_set(&local, &self.child_to_wrapper())
+    }
+}
+
+impl LiveElement for TransformedElem {
+    fn kind(&self) -> &'static str { "transformed" }
+    fn kind_schema_version(&self) -> u32 { 1 }
+    fn common(&self) -> &CommonProps { &self.common }
+    fn common_mut(&mut self) -> &mut CommonProps { &mut self.common }
+    /// The paint is the child's: the wrapper is an operation, not a shape.
+    fn fill(&self) -> Option<&Fill> { None }
+    fn stroke(&self) -> Option<&Stroke> { None }
+    fn children(&self) -> &[Rc<Element>] { std::slice::from_ref(&self.child) }
+    /// ⚠️ NOT YET EDITABLE THROUGH: editing a child through the wrapper is its
+    /// own slice (route 4, slice 3), with its own arms in both ports.
+    fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> { None }
+    /// The child's bounds, boxed through the matrix (the stroke is not in
+    /// `bounds`, as for every other element).
+    fn bounds(&self) -> Bounds {
+        crate::geometry::element::aabb_through(self.child.bounds(), &self.matrix)
+    }
+    /// Expanding a wrapper is the child with the matrix written into its own
+    /// transform: the Scale Strokes choice is the renderer's, so an expand that
+    /// must preserve the drawn stroke under OFF needs a mapped-geometry child,
+    /// which no slice has built yet. Empty, like the other kinds, until then.
+    fn expand(&self, _precision: f64) -> Vec<Rc<Element>> { Vec::new() }
+    /// Releasing the operation returns the child unchanged.
+    fn release(&self) -> Vec<Rc<Element>> { vec![self.child.clone()] }
+}
+
+// ---------------------------------------------------------------------------
 // LiveVariant — closed-world enum over the known LiveKinds
 // ---------------------------------------------------------------------------
 
@@ -1055,6 +1146,7 @@ pub enum LiveVariant {
     Reference(ReferenceElem),
     Recorded(RecordedElem),
     Generated(GeneratedElem),
+    Transformed(TransformedElem),
 }
 
 impl LiveElement for LiveVariant {
@@ -1064,6 +1156,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.kind(),
             LiveVariant::Recorded(rec) => rec.kind(),
             LiveVariant::Generated(ge) => ge.kind(),
+            LiveVariant::Transformed(t) => t.kind(),
         }
     }
     fn kind_schema_version(&self) -> u32 {
@@ -1072,6 +1165,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.kind_schema_version(),
             LiveVariant::Recorded(rec) => rec.kind_schema_version(),
             LiveVariant::Generated(ge) => ge.kind_schema_version(),
+            LiveVariant::Transformed(t) => t.kind_schema_version(),
         }
     }
     fn common(&self) -> &CommonProps {
@@ -1080,6 +1174,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.common(),
             LiveVariant::Recorded(rec) => rec.common(),
             LiveVariant::Generated(ge) => ge.common(),
+            LiveVariant::Transformed(t) => t.common(),
         }
     }
     fn common_mut(&mut self) -> &mut CommonProps {
@@ -1088,6 +1183,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.common_mut(),
             LiveVariant::Recorded(rec) => rec.common_mut(),
             LiveVariant::Generated(ge) => ge.common_mut(),
+            LiveVariant::Transformed(t) => t.common_mut(),
         }
     }
     fn fill(&self) -> Option<&Fill> {
@@ -1096,6 +1192,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.fill(),
             LiveVariant::Recorded(rec) => rec.fill(),
             LiveVariant::Generated(ge) => ge.fill(),
+            LiveVariant::Transformed(t) => t.fill(),
         }
     }
     fn stroke(&self) -> Option<&Stroke> {
@@ -1104,6 +1201,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.stroke(),
             LiveVariant::Recorded(rec) => rec.stroke(),
             LiveVariant::Generated(ge) => ge.stroke(),
+            LiveVariant::Transformed(t) => t.stroke(),
         }
     }
     fn children(&self) -> &[Rc<Element>] {
@@ -1112,6 +1210,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.children(),
             LiveVariant::Recorded(rec) => rec.children(),
             LiveVariant::Generated(ge) => ge.children(),
+            LiveVariant::Transformed(t) => t.children(),
         }
     }
     fn children_mut(&mut self) -> Option<&mut Vec<Rc<Element>>> {
@@ -1120,6 +1219,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.children_mut(),
             LiveVariant::Recorded(rec) => rec.children_mut(),
             LiveVariant::Generated(ge) => ge.children_mut(),
+            LiveVariant::Transformed(t) => t.children_mut(),
         }
     }
     fn dependencies(&self) -> Vec<ElementRef> {
@@ -1128,6 +1228,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.dependencies(),
             LiveVariant::Recorded(rec) => rec.dependencies(),
             LiveVariant::Generated(ge) => ge.dependencies(),
+            LiveVariant::Transformed(t) => t.dependencies(),
         }
     }
     fn bounds(&self) -> Bounds {
@@ -1136,6 +1237,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.bounds(),
             LiveVariant::Recorded(rec) => rec.bounds(),
             LiveVariant::Generated(ge) => ge.bounds(),
+            LiveVariant::Transformed(t) => t.bounds(),
         }
     }
     fn invalidate(&mut self) {
@@ -1144,6 +1246,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.invalidate(),
             LiveVariant::Recorded(rec) => rec.invalidate(),
             LiveVariant::Generated(ge) => ge.invalidate(),
+            LiveVariant::Transformed(t) => t.invalidate(),
         }
     }
     fn expand(&self, precision: f64) -> Vec<Rc<Element>> {
@@ -1152,6 +1255,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.expand(precision),
             LiveVariant::Recorded(rec) => rec.expand(precision),
             LiveVariant::Generated(ge) => ge.expand(precision),
+            LiveVariant::Transformed(t) => t.expand(precision),
         }
     }
     fn release(&self) -> Vec<Rc<Element>> {
@@ -1160,6 +1264,7 @@ impl LiveElement for LiveVariant {
             LiveVariant::Reference(r) => r.release(),
             LiveVariant::Recorded(rec) => rec.release(),
             LiveVariant::Generated(ge) => ge.release(),
+            LiveVariant::Transformed(t) => t.release(),
         }
     }
 }
@@ -1226,6 +1331,7 @@ pub(crate) fn element_to_polygon_set_with(
             LiveVariant::Reference(r) => r.evaluate_with(precision, resolver, visiting),
             LiveVariant::Recorded(rec) => rec.evaluate_with(precision, resolver, visiting),
             LiveVariant::Generated(ge) => ge.evaluate_with(precision, resolver, visiting),
+            LiveVariant::Transformed(t) => t.evaluate_with(precision, resolver, visiting),
         },
         // THE CARRIED RULE CROSSES HERE (transcripts/BOOLEAN.md,
         // "Fill rule: the polygon set carries it"). A path's subpaths

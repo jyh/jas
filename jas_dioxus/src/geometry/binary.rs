@@ -751,6 +751,16 @@ fn pack_element_base(elem: &Element) -> Vec<Value> {
                 vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
                                   vstr("generated"), vstr(&ge.concept_id), vstr(&params_json)]
             }
+            crate::geometry::live::LiveVariant::Transformed(t) => {
+                let (locked, opacity, vis, xform, name, id) = pack_common(&t.common);
+                // [tag, common(1..6), kind(7), child(8), [matrix, scale_strokes](9)].
+                // ⛔ TAG_LIVE's base arity is ONE number for every live kind
+                // (`tag_base_arity`), and the common extension starts right
+                // after it, so the operation's two fields share slot 9.
+                vec![vint(TAG_LIVE), locked, opacity, vis, xform, name, id,
+                                  vstr("transformed"), pack_element(&t.child),
+                                  Value::Array(vec![pack_transform(&Some(t.matrix)), vbool(t.scale_strokes)])]
+            }
         },
     }
 }
@@ -1259,6 +1269,16 @@ fn unpack_element(v: &Value) -> Result<Element, String> {
                     Element::Live(crate::geometry::live::LiveVariant::Generated(
                         crate::geometry::live::GeneratedElem::new(concept_id, params, common),
                     ))
+                }
+                "transformed" => {
+                    let child = Rc::new(unpack_element(at(arr, 8)?)?);
+                    let op = as_array(at(arr, 9)?)?;
+                    let matrix = unpack_transform(at(op, 0)?)?
+                        .ok_or_else(|| "transformed: no matrix".to_string())?;
+                    let scale_strokes = as_bool(at(op, 1)?)?;
+                    let mut t = crate::geometry::live::TransformedElem::new(child, matrix, scale_strokes);
+                    t.common = common;
+                    Element::Live(crate::geometry::live::LiveVariant::Transformed(t))
                 }
                 other => return Err(format!("unknown live kind: {}", other)),
             }
@@ -1984,7 +2004,45 @@ mod tests {
                 GeneratedElem::new("spiral".to_string(),
                                    serde_json::Value::Object(Default::default()),
                                    common.clone()))),
+            Element::Live(LiveVariant::Transformed(TransformedElem {
+                common: common.clone(),
+                ..TransformedElem::new(
+                    Rc::new(Element::Group(GroupElem {
+                        children: vec![], isolated_blending: false, knockout_group: false,
+                        common: CommonProps::default(),
+                    })),
+                    Transform::scale(2.0, 3.0),
+                    false,
+                )
+            })),
         ]
+    }
+
+    /// The live transform operation (council 2026-10-16, ruling 4) round-trips
+    /// WHOLE: the child (with its own paint and transform), the matrix, and
+    /// the Scale Strokes choice in both values, nested one wrapper in another.
+    #[test]
+    fn binary_round_trips_a_transformed_wrapper() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let rect = Element::Rect(RectElem {
+            x: 1.0, y: 2.0, width: 10.0, height: 5.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::BLACK)),
+            stroke: Some(Stroke::new(Color::BLACK, 1.5)),
+            common: CommonProps { transform: Some(Transform::rotate(30.0)), ..CommonProps::default() },
+            fill_gradient: None, stroke_gradient: None,
+        });
+        for scale_strokes in [false, true] {
+            let inner = TransformedElem::new(Rc::new(rect.clone()), Transform::scale(2.0, 3.0), scale_strokes);
+            let outer = TransformedElem::new(
+                Rc::new(Element::Live(LiveVariant::Transformed(inner))),
+                Transform::shear(0.25, 0.0),
+                !scale_strokes,
+            );
+            let elem = Element::Live(LiveVariant::Transformed(outer));
+            let doc = doc_with(elem.clone());
+            let back = binary_to_document(&document_to_binary(&doc, false)).expect("decode");
+            assert_eq!(first_child(&back), elem, "scale_strokes={scale_strokes}");
+        }
     }
 
     /// A blob written BEFORE the extension existed has only the tag's base

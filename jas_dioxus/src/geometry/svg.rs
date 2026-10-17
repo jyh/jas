@@ -1330,6 +1330,32 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                     common_attrs(&ge.common),
                 )
             }
+            crate::geometry::live::LiveVariant::Transformed(t) => {
+                // A transformed element exports as a data-jas-live group around
+                // its child, with the operation's matrix as a standard
+                // `transform`, so a foreign viewer draws Scale Strokes ON
+                // exactly. ⚠️ NOT YET FOR OFF: a foreign viewer scales the
+                // stroke under `transform`, so OFF draws scaled there until the
+                // export slice writes mapped geometry. The SVG READER for this
+                // kind is not built either; nothing produces the kind outside
+                // tests until the Scale dialog switches to it.
+                // One `transform` attribute: the wrapper's own transform
+                // (outside) composed with the operation's matrix (inside).
+                let child_indent = format!("{}  ", indent);
+                let outer = match t.common.transform {
+                    Some(c) => c.multiply(&t.matrix),
+                    None => t.matrix,
+                };
+                let common = CommonProps { transform: Some(outer), ..t.common.clone() };
+                format!(
+                    "{}<g data-jas-live=\"transformed\" data-jas-scale-strokes=\"{}\"{}>\n{}\n{}</g>",
+                    indent,
+                    t.scale_strokes,
+                    common_attrs(&common),
+                    element_svg(&t.child, &child_indent),
+                    indent,
+                )
+            }
         },
     }
 }
