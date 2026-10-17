@@ -33,12 +33,12 @@ pub fn element_evaluated_bbox(doc: &Document, path: &[usize]) -> Option<(f64, f6
     let mut node = doc.layers.get(path[0])?;
     let mut ancestors: Vec<Option<Transform>> = Vec::new();
     if path.len() > 1 {
-        ancestors.push(node.transform().copied()); // layer
+        ancestors.push(node.child_frame_transform()); // layer
         for &idx in &path[1..path.len() - 1] {
-            node = node.children().and_then(|c| c.get(idx))?;
-            ancestors.push(node.transform().copied());
+            node = node.path_children().and_then(|c| c.get(idx))?;
+            ancestors.push(node.child_frame_transform());
         }
-        node = node.children().and_then(|c| c.get(path[path.len() - 1]))?;
+        node = node.path_children().and_then(|c| c.get(path[path.len() - 1]))?;
     }
     let elem = node;
     // RESOLVEDBOUNDS: resolve the kinds whose geometry lives behind an id, so a
@@ -110,12 +110,12 @@ pub fn accumulated_transform(
     let mut node = doc.layers.get(path[0])?;
     let mut ancestors: Vec<Option<Transform>> = Vec::new();
     if path.len() > 1 {
-        ancestors.push(node.transform().copied()); // layer
+        ancestors.push(node.child_frame_transform()); // layer
         for &idx in &path[1..path.len() - 1] {
-            node = node.children().and_then(|c| c.get(idx))?;
-            ancestors.push(node.transform().copied());
+            node = node.path_children().and_then(|c| c.get(idx))?;
+            ancestors.push(node.child_frame_transform());
         }
-        node = node.children().and_then(|c| c.get(path[path.len() - 1]))?;
+        node = node.path_children().and_then(|c| c.get(path[path.len() - 1]))?;
     }
     // Innermost first, then each ancestor outward — the painter's CTM.
     let own = if include_own { node.transform().copied() } else { None };

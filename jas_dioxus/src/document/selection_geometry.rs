@@ -33,15 +33,15 @@ pub fn selection_handle_rects(
     };
     let mut ancestors: Vec<Option<Transform>> = Vec::new();
     if path.len() > 1 {
-        ancestors.push(node.transform().copied()); // layer
+        ancestors.push(node.child_frame_transform()); // layer
         for &idx in &path[1..path.len() - 1] {
-            node = match node.children().and_then(|c| c.get(idx)) {
+            node = match node.path_children().and_then(|c| c.get(idx)) {
                 Some(n) => n,
                 None => return Vec::new(),
             };
-            ancestors.push(node.transform().copied());
+            ancestors.push(node.child_frame_transform());
         }
-        node = match node.children().and_then(|c| c.get(path[path.len() - 1])) {
+        node = match node.path_children().and_then(|c| c.get(path[path.len() - 1])) {
             Some(n) => n,
             None => return Vec::new(),
         };
@@ -111,13 +111,13 @@ pub fn selection_outline_scale(doc: &Document, path: &[usize]) -> f64 {
     if path.len() > 1 {
         transforms.push(node.transform().copied()); // layer
         for &idx in &path[1..path.len() - 1] {
-            node = match node.children().and_then(|c| c.get(idx)) {
+            node = match node.path_children().and_then(|c| c.get(idx)) {
                 Some(n) => n,
                 None => return 1.0,
             };
-            transforms.push(node.transform().copied());
+            transforms.push(node.child_frame_transform());
         }
-        node = match node.children().and_then(|c| c.get(path[path.len() - 1])) {
+        node = match node.path_children().and_then(|c| c.get(path[path.len() - 1])) {
             Some(n) => n,
             None => return 1.0,
         };
