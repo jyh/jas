@@ -75,6 +75,11 @@ param(
     # Where the receipt goes. The caller reads it back from session 0.
     [Parameter(Mandatory = $true)][string]$Out,
     [int]$SettleMs = 40,
+    # SHIFT, HELD (§331 node 5): `press` puts it down before the press, `move`
+    # after the press and before the first move (draw_rect_shift.json's form);
+    # either way it comes up after the release. The reader refuses any other
+    # shape, so this never fakes a per-step modifier.
+    [ValidateSet('none', 'press', 'move')][string]$Shift = 'none',
     # ⛔⛔ THE HIT TARGET'S INSET FROM THE WINDOW CLIENT, IN DIP, MEASURED BY THE
     # SHELL AND PASSED IN -- NEVER GUESSED HERE.
     #
@@ -96,7 +101,7 @@ param(
 
 $ErrorActionPreference = 'Continue'
 $log = New-Object System.Collections.Generic.List[string]
-$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves")
+$log.Add("send_hand: pid=$ProcessId doc=($DocX,$DocY) delta=($DocDx,$DocDy) k=$Moves shift=$Shift")
 
 $source = @'
 using System;
@@ -177,6 +182,17 @@ public static class SbHand
 
     [DllImport("user32.dll")]
     public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
+    public const byte VK_SHIFT = 0x10;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    public static void Shift(bool down)
+    {
+        keybd_event(VK_SHIFT, 0, down ? 0u : KEYEVENTF_KEYUP, UIntPtr.Zero);
+    }
 
     public const uint MOVE = 0x0001;
     public const uint LEFTDOWN = 0x0002;
@@ -358,10 +374,17 @@ $n = ConvertTo-Normalized $px0 $py0
 $sent += [SbHand]::Send($moveFlags, $n[0], $n[1])
 Start-Sleep -Milliseconds $SettleMs
 
+# ⛔ A SHIFT LEFT DOWN WOULD MODIFY EVERY LATER INPUT ON THE DESKTOP, so the
+# key-up is in a `finally` that runs whatever happens between.
+$shiftDown = $false
+try {
+if ($Shift -eq 'press') { [SbHand]::Shift($true); $shiftDown = $true; Start-Sleep -Milliseconds $SettleMs }
+
 # The press, AT THE CURSOR. No MOVE, no ABSOLUTE: dx/dy are ignored for motion.
 $heldSw = [System.Diagnostics.Stopwatch]::StartNew()
 $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
 Start-Sleep -Milliseconds $SettleMs
+if ($Shift -eq 'move') { [SbHand]::Shift($true); $shiftDown = $true; Start-Sleep -Milliseconds $SettleMs }
 
 # ⭐ THE DRAG'S DURATION IS A RECEIPT FIELD NOW, BECAUSE IT IS THE VARIABLE THE
 # `move != k` DEFECT TURNED OUT TO BE ABOUT. Measured on kenai 2026-09-04 across
@@ -410,6 +433,10 @@ for ($i = 1; $i -le $Moves; $i++) {
 $dragSw.Stop()
 $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
 $heldSw.Stop()
+} finally {
+    if ($shiftDown) { Start-Sleep -Milliseconds $SettleMs; [SbHand]::Shift($false) }
+}
+$log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "before-$Shift" }) shift-up=$(if ($shiftDown) { 'after-release' } else { 'never' })")
 
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")
 $log.Add(("post-press-ms={0} button-held-ms={1} settle-ms={2}" -f
