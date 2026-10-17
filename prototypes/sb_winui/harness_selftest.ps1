@@ -2355,8 +2355,12 @@ Test-Case 'pa: a click on a select is refused: a person picks from it with a com
     Show-SbPanelAction (Select-SbPanelAction -Panel 'opacity_panel_content' -Widget 'op_mode' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.ComboBox' -Patterns $uiaComboBox)
 } "REFUSED: widget 'op_mode' (ControlType.ComboBox) has no Invoke, Toggle or SelectionItem pattern for a click: it has [Selection, ExpandCollapse, ScrollItem, ItemContainer]"
 function Show-SbChoice($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
+# The item row MEASURED on the box (2026-10-17, op_mode's `multiply` once the
+# list was open): [SelectionItemPatternIdentifiers.Pattern,
+# ScrollItemPatternIdentifiers.Pattern, VirtualizedItemPatternIdentifiers.Pattern].
+$uiaComboItem = @('SelectionItemPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'VirtualizedItemPatternIdentifiers.Pattern')
 Test-Case 'ch: the one item whose AutomationId is the value is selected' {
-    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns @('SelectionItemPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern'))
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns $uiaComboItem)
 } 'Select'
 Test-Case 'ch: a value the list does not hold is refused by name' {
     Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'mulitply' -ItemCount 0 -Patterns @())
