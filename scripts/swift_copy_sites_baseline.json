@@ -116,17 +116,6 @@
         "strokeGradient"
       ]
     },
-    "JasSwift/Sources/Document/OpApply.swift::Rect": {
-      "sites": 1,
-      "missing": [
-        "blendMode",
-        "fillGradient",
-        "id",
-        "mask",
-        "name",
-        "strokeGradient"
-      ]
-    },
     "JasSwift/Sources/Geometry/Normalize.swift::Ellipse": {
       "sites": 1,
       "missing": [

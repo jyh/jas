@@ -52,6 +52,32 @@
     "expected_json": "scale_options_confirm_uniform_150_strokes_off_expected.json"
   },
   {
+    "name": "scale_options_confirm_uniform_150_corners_off_named",
+    "setup_svg": "rounded_rect_named.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "scale_options_confirm",
+        "params": {
+          "uniform": true,
+          "uniform_pct": 150,
+          "horizontal_pct": 100,
+          "vertical_pct": 100,
+          "scale_strokes": true,
+          "scale_corners": false,
+          "preview": false,
+          "copy": false
+        }
+      }
+    ],
+    "expected_json": "scale_options_confirm_uniform_150_corners_off_named_expected.json"
+  },
+  {
     "name": "scale_options_confirm_copy_nonuniform",
     "setup_svg": "rect_with_stroke.svg",
     "selection": [

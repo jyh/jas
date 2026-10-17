@@ -6923,7 +6923,7 @@ fn scale_apply(
     let (rx, ry) = resolve_reference_point(model, store, ctx);
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
     let stroke_factor = crate::document::op_apply::stroke_compensation(sx, sy, scale_strokes);
-    let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
+    let corners = crate::document::op_apply::corner_compensation(sx, sy, scale_corners);
     let paths = op_apply_selection_paths(model);
     let new_doc = compose_matrix_over_paths(
         model.document(), &paths, &matrix, stroke_factor, corners);

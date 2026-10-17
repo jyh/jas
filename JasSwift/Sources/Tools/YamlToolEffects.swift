@@ -3360,7 +3360,7 @@ private func scaleApply(
     let newDoc = composeMatrixOverPaths(
         model.document, model.document.selection.map { $0.path }, matrix,
         strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
-        corners: scaleCorners ? (abs(sx), abs(sy)) : nil)
+        corners: cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners))
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
     model.setDocumentUnbracketed(newDoc, intent: .previewReapply)

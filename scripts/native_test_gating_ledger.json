@@ -220,6 +220,11 @@
       "kind": "debt",
       "reason": "Scale's DRAWN stroke width (SCALE_TOOL.md § Apply behavior): drives the real scale_options_confirm, then paints the result through emit_document into a RecordingPainter. The painting half is native; the action half is not.",
       "blocked_by": "crate::workspace::app_state, via run_action_case, as action_corpus."
+    },
+    "jas_dioxus/src/cross_language_test.rs::a_scaled_rounded_rects_drawn_radius_follows_scale_corners": {
+      "kind": "debt",
+      "reason": "Scale's DRAWN corner radius (SCALE_TOOL.md § Apply behavior, Scale Corners): drives the real scale_options_confirm, then compares the painted path through the transform stack with the spec's expected rect. The painting half is native; the action half is not.",
+      "blocked_by": "crate::workspace::app_state, via run_action_case, as action_corpus."
     }
   }
 }

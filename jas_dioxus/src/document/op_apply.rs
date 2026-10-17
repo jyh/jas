@@ -1491,6 +1491,17 @@ pub fn stroke_compensation(sx: f64, sy: f64, scale_strokes: bool) -> Option<f64>
     if scale_strokes || f == 0.0 { None } else { Some(1.0 / f) }
 }
 
+/// The factors a rounded rect's STORED rx/ry are multiplied by, so the DRAWN
+/// radius is what SCALE_TOOL.md § Apply behavior says (Scale Corners ON: the
+/// radii scale with the shape; OFF: they keep their size). Under the stored
+/// transform the radii are already drawn ×|sx|, ×|sy|: ON leaves them (`None`),
+/// OFF divides. Exact for an axis-aligned scale, non-uniform included.
+pub fn corner_compensation(sx: f64, sy: f64, scale_corners: bool) -> Option<(f64, f64)> {
+    // A degenerate scale (a zero factor) collapses the shape: there is nothing
+    // to compensate, and dividing by it would write an infinite radius.
+    if scale_corners || sx == 0.0 || sy == 0.0 { None } else { Some((1.0 / sx.abs(), 1.0 / sy.abs())) }
+}
+
 /// Multiply an element's stroke-width by `factor` in place (no-op without a
 /// stroke). A container has no stroke of its own: the factor reaches every
 /// leaf under it, since the container's transform scales them all. Document-layer twin of effects.rs's `scale_element_stroke_width`, kept
@@ -1523,6 +1534,14 @@ fn scale_elem_stroke_width(elem: &mut crate::geometry::element::Element, factor:
 /// radii are only modeled on the RectElem variant.
 fn scale_elem_corners(elem: &mut crate::geometry::element::Element, sx_abs: f64, sy_abs: f64) {
     use crate::geometry::element::Element;
+    // A container's transform scales the rects under it, so the factor reaches
+    // them, as the stroke factor does.
+    if let Some(kids) = elem.children_mut() {
+        for k in kids.iter_mut() {
+            scale_elem_corners(std::rc::Rc::make_mut(k), sx_abs, sy_abs);
+        }
+        return;
+    }
     if let Element::Rect(e) = elem {
         e.rx *= sx_abs;
         e.ry *= sy_abs;
@@ -1559,7 +1578,7 @@ pub fn apply_scale(
     let targets = controller::selection_to_ids(model.document());
     let matrix = transform_apply::scale_matrix(sx, sy, rx, ry);
     let stroke_factor = stroke_compensation(sx, sy, scale_strokes);
-    let corners = if scale_corners { Some((sx.abs(), sy.abs())) } else { None };
+    let corners = corner_compensation(sx, sy, scale_corners);
     let paths = selection_paths(model.document());
     let new_doc = compose_matrix_over_paths(
         model.document(),
