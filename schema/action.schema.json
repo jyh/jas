@@ -209,6 +209,7 @@
             "open_dialog": {},
             "pop": {},
             "release_compound_shape": {},
+            "release_transform": {},
             "remove_child": {},
             "repeat_boolean_operation": {},
             "reset_boolean_panel": {},

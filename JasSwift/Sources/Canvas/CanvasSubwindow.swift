@@ -2183,8 +2183,9 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
 /// Draw a `TransformedElem`. Scale Strokes ON draws the child UNDER the
 /// matrix, so CoreGraphics strokes in the transformed space (outlined, then
 /// scaled, for any matrix). OFF draws a copy of the child whose coordinates
-/// are MAPPED through the matrix (`mappedForDrawing`), so the stroke keeps
-/// its authored width on every edge. The same two drawings as jas_dioxus
+/// are MAPPED through the matrix (`mapElementGeometry`, the same function
+/// Release Transform uses), so the stroke keeps its authored width on every
+/// edge. The same two drawings as jas_dioxus
 /// `emit_transformed`, which maps at the painter instead of the element.
 func drawTransformed(_ ctx: CGContext, _ t: TransformedElem, ancestorVis: Visibility,
                      elementScale: Double, ancestorAlpha: Double) {
@@ -2195,121 +2196,9 @@ func drawTransformed(_ ctx: CGContext, _ t: TransformedElem, ancestorVis: Visibi
                     ancestorAlpha: ancestorAlpha)
         ctx.restoreGState()
     } else {
-        drawElement(ctx, mappedForDrawing(t.child, t.matrix, strokeScale: 1),
+        drawElement(ctx, mapElementGeometry(t.child, t.matrix),
                     ancestorVis: ancestorVis, elementScale: elementScale,
                     ancestorAlpha: ancestorAlpha)
-    }
-}
-
-/// A copy of `elem` for DRAWING ONLY: its coordinates mapped through `m`, its
-/// own transform folded into `m`, its stroke width and dashes multiplied by
-/// `strokeScale` (the scale of the child's OWN transforms, never the
-/// wrapper's). Leaves become paths; containers keep their children, mapped.
-///
-/// ⚠️ LIMITS, the same as jas_dioxus `MappedGeometry`: the child's own
-/// transform scales its stroke by √|det| (exact only when uniform); dashes
-/// stay in authored units; text keeps its glyphs and is drawn under the full
-/// mapping; a mask's artwork is not mapped. And this port's own: an ellipse
-/// maps as a bezier ring, and a gradient is placed on the mapped bounds.
-func mappedForDrawing(_ elem: Element, _ mIn: Transform, strokeScale kIn: Double) -> Element {
-    var m = mIn, k = kIn
-    if let own = elem.transform {
-        m = mIn.multiply(own)
-        k = kIn * uniformScale(own)
-    }
-    func path(_ d: [PathCommand], fill: Fill?, stroke: Stroke?, widthPoints: [StrokeWidthPoint] = [],
-              opacity: Double, locked: Bool, visibility: Visibility, blendMode: BlendMode,
-              mask: Mask?, fillGradient: Gradient?, strokeGradient: Gradient?,
-              name: String?, id: String?, fillRule: FillRule = .nonzero) -> Element {
-        .path(Path(d: mapPathCommands(d, m), fill: fill, stroke: scaledStroke(stroke, k),
-                   widthPoints: widthPoints, opacity: opacity, transform: nil,
-                   locked: locked, visibility: visibility, blendMode: blendMode, mask: mask,
-                   fillGradient: fillGradient, strokeGradient: strokeGradient,
-                   strokeBrush: nil, strokeBrushOverrides: nil, toolOrigin: nil,
-                   name: name, id: id, fillRule: fillRule))
-    }
-    switch elem {
-    case .rect(let v):
-        return path(rectPathCommands(x: v.x, y: v.y, w: v.width, h: v.height, rx: v.rx, ry: v.ry),
-                    fill: v.fill, stroke: v.stroke, opacity: v.opacity, locked: v.locked,
-                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    name: v.name, id: v.id)
-    case .ellipse(let v):
-        return path(ellipsePathCommands(cx: v.cx, cy: v.cy, rx: v.rx, ry: v.ry),
-                    fill: v.fill, stroke: v.stroke, opacity: v.opacity, locked: v.locked,
-                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    name: v.name, id: v.id)
-    case .line(let v):
-        return path([.moveTo(v.x1, v.y1), .lineTo(v.x2, v.y2)], fill: nil, stroke: v.stroke,
-                    widthPoints: v.widthPoints, opacity: v.opacity, locked: v.locked,
-                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                    fillGradient: nil, strokeGradient: v.strokeGradient, name: v.name, id: v.id)
-    case .polyline(let v):
-        guard let first = v.points.first else { return elem }
-        let d: [PathCommand] = [.moveTo(first.0, first.1)] + v.points.dropFirst().map { p in .lineTo(p.0, p.1) }
-        return path(d, fill: v.fill, stroke: v.stroke, opacity: v.opacity, locked: v.locked,
-                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    name: v.name, id: v.id)
-    case .polygon(let v):
-        guard let first = v.points.first else { return elem }
-        let d: [PathCommand] = [.moveTo(first.0, first.1)]
-            + v.points.dropFirst().map { p in .lineTo(p.0, p.1) } + [.closePath]
-        return path(d, fill: v.fill, stroke: v.stroke, opacity: v.opacity, locked: v.locked,
-                    visibility: v.visibility, blendMode: v.blendMode, mask: v.mask,
-                    fillGradient: v.fillGradient, strokeGradient: v.strokeGradient,
-                    name: v.name, id: v.id)
-    case .path(var v):
-        v.d = mapPathCommands(v.d, m)
-        v.stroke = scaledStroke(v.stroke, k)
-        v.transform = nil
-        return .path(v)
-    case .text(var v):
-        v.transform = m
-        return .text(v)
-    case .textPath(var v):
-        v.transform = m
-        return .textPath(v)
-    case .group(var g):
-        g.children = g.children.map { mappedForDrawing($0, m, strokeScale: k) }
-        g.transform = nil
-        return .group(g)
-    case .layer(var l):
-        l.children = l.children.map { mappedForDrawing($0, m, strokeScale: k) }
-        l.transform = nil
-        return .layer(l)
-    case .live(.transformed(let t)):
-        // A wrapper inside a wrapper: its matrix composes into the mapping,
-        // and an ON wrapper's matrix scales what it holds (by √|det|, the
-        // child's-own-transform rule above). Kept as a group so its own
-        // opacity, visibility and blend still apply.
-        let inner = mappedForDrawing(t.child, m.multiply(t.matrix),
-                                     strokeScale: t.scaleStrokes ? k * uniformScale(t.matrix) : k)
-        // A NEW group, not a rebuild: its transform is already in the
-        // mapping, and it isolates nothing.
-        return .group(Group(children: [inner], opacity: t.opacity, transform: nil,
-                            locked: t.locked, visibility: t.visibility, blendMode: t.blendMode,
-                            isolatedBlending: false, knockoutGroup: false, mask: t.mask,
-                            name: t.name, id: t.id))
-    case .live(let v):
-        // Any other live kind draws its evaluated rings with its own paint
-        // (a reference inherits its target's when unset, Fork F3), so map the
-        // rings and draw them as an even-odd path, as the live arm does.
-        var visiting = VisitSet()
-        let rings = elementToPolygonSetWith(.live(v.withTransform(nil)), precision: DEFAULT_PRECISION,
-                                            resolver: _currentRefResolver, visiting: &visiting)
-        var fill = v.fill, stroke = v.stroke
-        if case .reference(let r) = v {
-            let target = _currentRefResolver.resolve(r.target)
-            fill = r.fill ?? target?.fill
-            stroke = r.stroke ?? target?.stroke
-        }
-        return path(polygonSetToPath(rings), fill: fill, stroke: stroke, opacity: v.opacity,
-                    locked: v.locked, visibility: v.visibility, blendMode: v.blendMode,
-                    mask: v.mask, fillGradient: nil, strokeGradient: nil, name: v.name, id: v.id,
-                    fillRule: FillRule(boolResultFillRule))
     }
 }
 
