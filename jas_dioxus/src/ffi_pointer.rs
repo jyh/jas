@@ -308,7 +308,8 @@ pub unsafe extern "C" fn jas_pointer_event(
 ///   2. A character is resolved against `workspace/shortcuts.yaml` IN THE
 ///      CORE (`resolve_key`). Without `MOD_CMD`, a `select_tool` result
 ///      switches the tool as [`jas_set_tool`] does. With `MOD_CMD`, only
-///      `undo` and `redo` act (W5-3c); other command chords stay the menu's.
+///      `undo` and `redo` act here (W5-3c); the clipboard chords are actions
+///      `ffi::dispatch_key` runs, and other command chords stay the menu's.
 /// Returns `Ok` when the key was handled and `UnknownVerb` when nothing
 /// handled it, so the shell can let the key fall through to its own default.
 ///
@@ -375,6 +376,10 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
             Some(index) => unsafe { jas_set_tool(e, index) },
             None => JasStatus::UnknownVerb,
         },
+        // A clipboard chord is an ACTION that needs the shell's clipboard:
+        // `ffi::dispatch_key` runs it through `jas_dispatch_action` before
+        // calling here, so this arm is the not-reached answer.
+        KeyRoute::Clipboard(_) => JasStatus::UnknownVerb,
         KeyRoute::Unhandled => JasStatus::UnknownVerb,
         KeyRoute::BadKey => JasStatus::BadParamType,
     }

@@ -142,6 +142,10 @@ pub enum KeyRoute {
     Redo,
     /// Switch to this tool id (a `select_tool` shortcut, unmodified).
     SelectTool(String),
+    /// A clipboard command chord (Ctrl+C / X / V / Shift+V): this ACTION, run
+    /// by the engine's action route, which needs the shell's clipboard
+    /// (`menu_native::clipboard_verb`).
+    Clipboard(String),
     /// Nothing handles it; the shell may apply its own default.
     Unhandled,
     /// Not a key token the engine takes: a named key or one character.
@@ -175,11 +179,13 @@ pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
     let chord = KeyChord::new(&ch.to_string(), mods.ctrl, mods.shift, mods.alt, false);
     let Some(cmd) = resolve_key(&chord) else { return KeyRoute::Unhandled };
     // W5-3c: a COMMAND chord acts only where the engine can do the action
-    // itself; every other chord stays the menu's.
+    // itself (undo, redo, and the clipboard verbs since 2026-10-17); every
+    // other chord stays the menu's.
     if mods.ctrl {
         return match cmd.action.as_str() {
             "undo" => KeyRoute::Undo,
             "redo" => KeyRoute::Redo,
+            a if crate::workspace::menu_native::clipboard_verb(a).is_some() => KeyRoute::Clipboard(a.to_string()),
             _ => KeyRoute::Unhandled,
         };
     }
@@ -226,6 +232,17 @@ mod route_key_tests {
         assert_eq!(route_key("Z", m(true, true), free), KeyRoute::Redo);
         // Ctrl+G is `group` in shortcuts.yaml: the menu's, not the key route's.
         assert_eq!(route_key("G", m(true, false), free), KeyRoute::Unhandled);
+    }
+
+    #[test]
+    fn a_clipboard_chord_routes_to_its_action() {
+        assert_eq!(route_key("c", m(true, false), free), KeyRoute::Clipboard("copy".into()));
+        assert_eq!(route_key("X", m(true, false), free), KeyRoute::Clipboard("cut".into()));
+        assert_eq!(route_key("v", m(true, false), free), KeyRoute::Clipboard("paste".into()));
+        assert_eq!(route_key("V", m(true, true), free), KeyRoute::Clipboard("paste_in_place".into()));
+        // Unmodified, `C` and `V` are tool letters, never the clipboard.
+        assert!(!matches!(route_key("c", m(false, false), free), KeyRoute::Clipboard(_)));
+        assert!(!matches!(route_key("v", m(false, false), free), KeyRoute::Clipboard(_)));
     }
 
     #[test]

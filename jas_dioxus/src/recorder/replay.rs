@@ -205,6 +205,9 @@ fn replay_key(model: &mut Model, tool: &mut crate::tools::yaml_tool::YamlTool, e
             *tool = build_gesture_tool(&id);
             tool.activate(model);
         }
+        // The level-1 runner holds no system clipboard, so a clipboard chord
+        // changes nothing here. No script presses one yet.
+        KeyRoute::Clipboard(_) => {}
         KeyRoute::Unhandled => {}
         KeyRoute::BadKey => panic!("key event {ev}: {name:?} is not a key the engine takes"),
     }
