@@ -3150,6 +3150,14 @@ impl Controller {
     ) {
         let doc = model.document().clone();
         if let Some(Element::Path(pe)) = doc.get_element(path) {
+            // The drag arrives in DOCUMENT space; handles live in the path's
+            // LOCAL space (the S-3 mapping `move_selection` uses).
+            let (dx, dy) = match crate::document::evaluated_bounds::accumulated_transform(&doc, path, true)
+                .and_then(|t| t.inverse())
+            {
+                Some(inv) => (inv.a * dx + inv.c * dy, inv.b * dx + inv.d * dy),
+                None => (dx, dy),
+            };
             let new_pe = move_path_handle(pe, anchor_idx, handle_type, dx, dy);
             let new_doc = doc.replace_element(path, Element::Path(new_pe));
             model.edit_document(new_doc);

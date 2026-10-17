@@ -4970,9 +4970,15 @@ fn path_probe_partial_hit(
         for es in &doc.selection {
             if let Some(Element::Path(pe)) = doc.get_element(&es.path) {
                 let pe: &PathElem = &pe;
+                // A handle is compared where it is DRAWN, through the path's
+                // full frame; `Controller::move_path_handle` maps the drag
+                // back through the same frame.
+                let frame = crate::document::evaluated_bounds::accumulated_transform(&doc, &es.path, true);
+                let drawn = |h: Option<(f64, f64)>| h.map(|(hx, hy)| frame.map_or((hx, hy), |t| t.apply_point(hx, hy)));
                 let anchors = control_points(&Element::Path(pe.clone()));
                 for (ai, _) in anchors.iter().enumerate() {
                     let (h_in, h_out) = path_handle_positions(&pe.d, ai);
+                    let (h_in, h_out) = (drawn(h_in), drawn(h_out));
                     if let Some((hx, hy)) = h_in {
                         if (x - hx).hypot(y - hy) < radius {
                             store.set_tool("partial_selection", "mode",
@@ -12776,6 +12782,49 @@ mod tests {
             Some(&mut m), None, None, None);
         let mode = store.get_tool("partial_selection", "mode").as_str().unwrap_or("").to_string();
         (mode, m.document().selection.clone())
+    }
+
+    /// A Bezier HANDLE is grabbed where it is DRAWN and dragged in DOCUMENT
+    /// space, as a pair: the probe maps each handle through the path's full
+    /// frame and the move maps the drag back through it. A curve whose middle
+    /// anchor (30, 0) has its in-handle at (20, 10), inside a group at
+    /// matrix(2,0,0,2,100,0): the handle is drawn at (140, 20), and a
+    /// (10, 10) drag moves it (5, 5) locally. Fixing only the hit would grab
+    /// the handle and drag it the wrong way, which is why they go together.
+    #[test]
+    fn a_bezier_handle_is_grabbed_where_drawn_and_dragged_in_document_space() {
+        let path = Element::Path(PathElem { d: s7_curve(0.0), ..PathElem::default() });
+        let group = Element::Group(crate::geometry::element::GroupElem {
+            children: vec![std::rc::Rc::new(path)],
+            common: CommonProps {
+                transform: Some(crate::geometry::element::Transform { a: 2.0, b: 0.0, c: 0.0, d: 2.0, e: 100.0, f: 0.0 }),
+                ..CommonProps::default()
+            },
+            isolated_blending: false, knockout_group: false,
+        });
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(group)],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document {
+            layers: vec![layer], selected_layer: 0,
+            selection: vec![ElementSelection::all(vec![0, 0, 0])], ..Document::default()
+        }, None);
+        let mut store = StateStore::new();
+        run_effects(&vec![serde_json::json!({"doc.path.probe_partial_hit": {"x": 140.0, "y": 20.0, "hit_radius": 4}})],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        assert_eq!(*store.get_tool("partial_selection", "mode"), serde_json::json!("handle"), "the drawn handle is a hit");
+        assert_eq!(*store.get_tool("partial_selection", "handle_type"), serde_json::json!("in"));
+        assert_eq!(*store.get_tool("partial_selection", "handle_anchor_idx"), serde_json::json!(1));
+        run_effects(&vec![serde_json::json!({"doc.move_path_handle": {"dx": 10.0, "dy": 10.0}})],
+            &serde_json::json!({}), &mut store, Some(&mut model), None, None, None);
+        let d = path_at(&model, &[0, 0, 0]).d;
+        assert!(matches!(d[1], PathCommand::CurveTo { x2, y2, .. } if (x2, y2) == (25.0, 15.0)), "moved (5,5) locally: {:?}", d[1]);
+        let mut miss = StateStore::new();
+        let mut m2 = model.clone();
+        run_effects(&vec![serde_json::json!({"doc.path.probe_partial_hit": {"x": 25.0, "y": 15.0, "hit_radius": 4}})],
+            &serde_json::json!({}), &mut miss, Some(&mut m2), None, None, None);
+        assert_ne!(*miss.get_tool("partial_selection", "mode"), serde_json::json!("handle"), "the local position draws nothing");
     }
 
     #[test]
