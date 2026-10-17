@@ -11,6 +11,31 @@ import Foundation
 /// verbatim. Mirrors the Python `menu.menu` free functions the
 /// `_MENU_NATIVE_HANDLERS` intercept routes to.
 enum MenuActions {
+    /// The model-pure menu verbs, by action name: Rust `menu_native::VERBS`,
+    /// in its order. ``run(_:_:)`` runs exactly these.
+    static let verbs = ["select_all", "group", "ungroup", "ungroup_all", "lock",
+                        "unlock_all", "hide_selection", "show_all", "make_instance"]
+
+    /// Run `action` on `model` if it is one of ``verbs``; `false` (nothing
+    /// run) otherwise. Rust `menu_native::run`. The live menu (``JasCommands``)
+    /// and the level-1 input-script runner both call it.
+    @discardableResult
+    static func run(_ action: String, _ model: Model) -> Bool {
+        switch action {
+        case "select_all": selectAll(model)
+        case "group": groupSelection(model)
+        case "ungroup": ungroupSelection(model)
+        case "ungroup_all": ungroupAll(model)
+        case "lock": lockSelection(model)
+        case "unlock_all": unlockAll(model)
+        case "hide_selection": hideSelection(model)
+        case "show_all": showAll(model)
+        case "make_instance": makeInstance(model)
+        default: return false
+        }
+        return true
+    }
+
     /// Revert is offered only when there are changes AND a saved version to
     /// return to (an `Untitled-` document was never saved). Mirrors Rust
     /// `can_revert`, whose never-saved guard is "no saved SVG on the tab".
