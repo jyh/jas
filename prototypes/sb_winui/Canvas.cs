@@ -659,6 +659,10 @@ internal sealed unsafe class Canvas : IDisposable
             : null;
 
     private bool _probePending;
+
+    /// <summary>The last menu action was deferred for a clipboard read (#514):
+    /// its resend, not this pass, is the one SB_PROBE reads.</summary>
+    private bool _menuDeferred;
     private int _probeSeq;
     private string? _lastHash;
     private string _lastHashSurface = "";
@@ -1741,6 +1745,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case MenuActionCmd ma:
                     if (ApplyMenuAction(ma)) { dirty = true; cause = "menu"; }
+                    // SB_PROBE (jas §389): a menu step lands on the document as a
+                    // key does, so it is read the same way; a paste deferred for
+                    // the clipboard is read when its resend lands.
+                    if (ProbePath is not null && !_menuDeferred) { _probePending = true; }
                     break;
 
                 case PanelMenuCmd pm:
@@ -4915,6 +4923,7 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private bool ApplyMenuAction(MenuActionCmd cmd)
     {
+        _menuDeferred = false;
         if (_engine == IntPtr.Zero) { return false; }
         var head = $"item={cmd.ItemId} action={cmd.Action}";
         var request = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string> { ["menu_item"] = cmd.ItemId });
@@ -4928,6 +4937,7 @@ internal sealed unsafe class Canvas : IDisposable
             if (ClipboardAsked(channel, cmd.ClipboardCarried, head, text => _queue.Add(
                     new MenuActionCmd { ItemId = itemId, Action = action, ClipboardCarried = true, Clipboard = text })))
             {
+                _menuDeferred = true;
                 return false;
             }
             _report(channel.Length == 0

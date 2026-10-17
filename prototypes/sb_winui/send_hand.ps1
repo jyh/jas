@@ -499,7 +499,7 @@ $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
 # refusal; every refusal has a self-test arm. A refusal ends the hand with
 # `PANEL REFUSED` in the receipt and exit 6, and nothing after it is sent.
 $panelSteps = @(ConvertFrom-SbPanelText $Panels)
-$log.Add("panels=$($panelSteps.Count) parsed-from-bytes=$($Panels.Length)")
+$log.Add("late-steps=$($panelSteps.Count) panels=$(@($panelSteps | Where-Object { $_.panel }).Count) menus=$(@($panelSteps | Where-Object { $_.menu }).Count) parsed-from-bytes=$($Panels.Length)")
 if ($panelSteps.Count -gt 0) {
     Add-Type -AssemblyName UIAutomationClient
     Add-Type -AssemblyName UIAutomationTypes
@@ -550,28 +550,67 @@ if ($panelSteps.Count -gt 0) {
     # shown, else choose it in the pane's selector, `PanePicker`, whose items
     # carry the panel content ids, and wait for its controls to be built. The
     # reader admits one panel per script, so this runs once.
-    $want = "$($panelSteps[0].panel)"
+    $firstPanel = @($panelSteps | Where-Object { $_.panel }) | Select-Object -First 1
+    $want = if ($null -ne $firstPanel) { "$($firstPanel.panel)" } else { '' }
     $openTag = "open $want"
-    $shown = Find-SbById $window $want
-    $pickers = Find-SbById $window 'PanePicker'
-    $pickerPats = if ($pickers.Count -eq 1) { @($pickers[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
-    $open = Select-SbPanelOpen -Panel $want -PanelCount $shown.Count -PickerCount $pickers.Count -PickerPatterns $pickerPats
-    $log.Add("$openTag shown=$($shown.Count) pickers=$($pickers.Count) action=$(if ($open.Action) { $open.Action } else { 'refused' })")
-    if ($null -ne $open.Refusal) { Stop-SbPanelHand "$openTag -- $($open.Refusal)" }
-    if ($open.Action -eq 'Choose') {
-        $why = Invoke-SbChoose -List $pickers[0] -Value $want -Widget 'PanePicker' -Tag $openTag
-        if ($null -ne $why) { Stop-SbPanelHand "$openTag -- $why" }
-        $osw = [System.Diagnostics.Stopwatch]::StartNew()
-        do {
-            $shown = Find-SbById $window $want
-            if ($shown.Count -eq 0) { Start-Sleep -Milliseconds 100 }
-        } while ($shown.Count -eq 0 -and $osw.ElapsedMilliseconds -lt $PanelWaitMs)
-        $log.Add("$openTag panel-appeared=$($shown.Count -eq 1) waited-ms=$($osw.ElapsedMilliseconds)")
-        if ($shown.Count -ne 1) { Stop-SbPanelHand "$openTag -- panel '$want' was chosen in PanePicker and $($shown.Count) such panels were shown after $($PanelWaitMs) ms" }
+    if ($want.Length -gt 0) {
+        $shown = Find-SbById $window $want
+        $pickers = Find-SbById $window 'PanePicker'
+        $pickerPats = if ($pickers.Count -eq 1) { @($pickers[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
+        $open = Select-SbPanelOpen -Panel $want -PanelCount $shown.Count -PickerCount $pickers.Count -PickerPatterns $pickerPats
+        $log.Add("$openTag shown=$($shown.Count) pickers=$($pickers.Count) action=$(if ($open.Action) { $open.Action } else { 'refused' })")
+        if ($null -ne $open.Refusal) { Stop-SbPanelHand "$openTag -- $($open.Refusal)" }
+        if ($open.Action -eq 'Choose') {
+            $why = Invoke-SbChoose -List $pickers[0] -Value $want -Widget 'PanePicker' -Tag $openTag
+            if ($null -ne $why) { Stop-SbPanelHand "$openTag -- $why" }
+            $osw = [System.Diagnostics.Stopwatch]::StartNew()
+            do {
+                $shown = Find-SbById $window $want
+                if ($shown.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+            } while ($shown.Count -eq 0 -and $osw.ElapsedMilliseconds -lt $PanelWaitMs)
+            $log.Add("$openTag panel-appeared=$($shown.Count -eq 1) waited-ms=$($osw.ElapsedMilliseconds)")
+            if ($shown.Count -ne 1) { Stop-SbPanelHand "$openTag -- panel '$want' was chosen in PanePicker and $($shown.Count) such panels were shown after $($PanelWaitMs) ms" }
+        }
     }
     $n = 0
     foreach ($ps in $panelSteps) {
         $n++
+        # A MENU STEP (jas sections 389/392): open each top menu of the menubar
+        # in turn, as a person looks for an item, until one shows an item whose
+        # AutomationId is the step's node id; then Invoke it. The flyout is a
+        # popup, so its items are searched under the window, not the top item.
+        if ($ps.menu) {
+            $mtag = "step $n menu:$($ps.menu)"
+            $byClass = New-Object System.Windows.Automation.PropertyCondition($AE::ClassNameProperty, 'Microsoft.UI.Xaml.Controls.MenuBarItem')
+            $tops = $window.FindAll($tree::Descendants, $byClass)
+            $hits = $null; $openTop = $null; $looked = @()
+            foreach ($top in $tops) {
+                $tec = $top.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+                $tec.Expand()
+                $looked += "$($top.Current.Name)"
+                $msw = [System.Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $hits = Find-SbById $window "$($ps.menu)"
+                    if ($hits.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+                } while ($hits.Count -eq 0 -and $msw.ElapsedMilliseconds -lt 600)
+                if ($hits.Count -gt 0) { $openTop = $tec; break }
+                $tec.Collapse()
+                Start-Sleep -Milliseconds $SettleMs
+            }
+            $found = if ($null -eq $hits) { 0 } else { $hits.Count }
+            $menuEnabled = $found -eq 1 -and $hits[0].Current.IsEnabled
+            $menuPats = if ($found -eq 1) { @($hits[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
+            $mpick = Select-SbMenuItem -Item "$($ps.menu)" -Found $found -Enabled $menuEnabled -Patterns $menuPats
+            $log.Add("$mtag tops=$($tops.Count) looked-in=[$($looked -join ',')] found=$found enabled=$menuEnabled patterns=[$($menuPats -join ',')]")
+            if ($null -ne $mpick.Refusal) {
+                if ($null -ne $openTop) { try { $openTop.Collapse() } catch { } }
+                Stop-SbPanelHand "$mtag -- $($mpick.Refusal)"
+            }
+            Start-Sleep -Milliseconds $SettleMs
+            $hits[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+            $log.Add("MENU SENT: $mtag action=Invoke")
+            continue
+        }
         $tag = "step $n $($ps.panel)/$($ps.widget):$($ps.event)"
         # A pane redraws on the UI thread after the gesture lands, so a control
         # the gesture enables (Align once two things are selected) may still
