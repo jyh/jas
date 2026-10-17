@@ -801,7 +801,20 @@ public class Controller {
     /// Flat 2-level selection with group expansion. Used by `selectRect`
     /// and `selectPolygon` — the only difference between them is the
     /// hit-test predicate.
-    private func selectFlat(_ model: Model, predicate: (Element) -> Bool, extend: Bool) {
+    /// A DOCUMENT-space polygon mapped into the space `parent` maps to document
+    /// space; `nil` when the frame is singular. Twin of Rust
+    /// `polygon_in_parent_space`.
+    private func polygonInParentSpace(_ poly: [(Double, Double)], _ parent: Transform) -> [(Double, Double)]? {
+        guard let inv = parent.inverse() else { return nil }
+        return poly.map { inv.applyPoint($0.0, $0.1) }
+    }
+
+    /// The predicate's second argument is the element's PARENT frame: the
+    /// transform mapping its parent's space to document space (`nil` is the
+    /// identity) — the layer's transform for a layer child, layer · group for
+    /// a group member (transform-correct path verbs S6). Twin of Rust
+    /// `select_flat`.
+    private func selectFlat(_ model: Model, predicate: (Element, Transform?) -> Bool, extend: Bool) {
         let doc = model.document
         var selection: Selection = []
         for (li, layer) in doc.layers.enumerated() {
@@ -822,6 +835,7 @@ public class Controller {
             // suite green). The GRANDCHILD read below is the behavioural
             // change, and it does red.
             if doc.effectiveLocked([li]) || layerVis == .invisible { continue }
+            let layerFrame = layer.transform
             for (ci, child) in layer.children.enumerated() {
                 if doc.effectiveLocked([li, ci]) { continue }
                 let childVis = min(layerVis, child.visibility)
@@ -841,14 +855,20 @@ public class Controller {
                     // each member INTO the source group, so marquee-then-
                     // duplicate left the SOURCE holding four children instead
                     // of two. Move and delete survived it only by accident.
+                    let groupFrame: Transform? = {
+                        switch (layerFrame, g.transform) {
+                        case let (l?, t?): return l.multiply(t)
+                        case let (l, t): return l ?? t
+                        }
+                    }()
                     let anyHit = g.children.enumerated().contains {
-                        !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element)
+                        !doc.effectiveLocked([li, ci, $0.offset]) && predicate($0.element, groupFrame)
                     }
                     if anyHit {
                         selection.append(ElementSelection.all([li, ci]))
                     }
                 } else {
-                    if predicate(child) {
+                    if predicate(child, layerFrame) {
                         selection.append(ElementSelection.all([li, ci]))
                     }
                 }
@@ -934,15 +954,28 @@ public class Controller {
 
     public func selectRect(x: Double, y: Double, width: Double, height: Double, extend: Bool = false) {
         let resolver = hitResolver
+        // Compared where each element is DRAWN (transform-correct path verbs
+        // S6): with a parent frame the rect's corners are mapped into the
+        // parent space and tested as a polygon; with none this is the old call.
+        let corners = [(x, y), (x + width, y), (x + width, y + height), (x, y + height)]
         selectFlat(model,
-                   predicate: { elementIntersectsRectWith($0, x, y, width, height, resolver) },
+                   predicate: { elem, parent in
+                       guard let p = parent else { return elementIntersectsRectWith(elem, x, y, width, height, resolver) }
+                       guard let poly = polygonInParentSpace(corners, p) else { return false }
+                       return elementIntersectsPolygonWith(elem, poly, resolver)
+                   },
                    extend: extend)
     }
 
     public func selectPolygon(polygon: [(Double, Double)], extend: Bool = false) {
         let resolver = hitResolver
+        // Where each element is DRAWN (S6), as `selectRect` above.
         selectFlat(model,
-                   predicate: { elementIntersectsPolygonWith($0, polygon, resolver) },
+                   predicate: { elem, parent in
+                       guard let p = parent else { return elementIntersectsPolygonWith(elem, polygon, resolver) }
+                       guard let poly = polygonInParentSpace(polygon, p) else { return false }
+                       return elementIntersectsPolygonWith(elem, poly, resolver)
+                   },
                    extend: extend)
     }
 
