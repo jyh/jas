@@ -1,0 +1,10 @@
+{
+    "item":  "character.font_size",
+    "surface":  "2379x1333",
+    "frame_hash":  "8837c2a5856ca34de85e8d9581f2a36bec5b5432abb26e5bee03738dcb33b499",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "fc8d30dd0016a25b",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
