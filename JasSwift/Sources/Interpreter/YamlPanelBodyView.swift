@@ -3522,6 +3522,7 @@ private func elementTypeLabel(_ elem: Element) -> String {
         case .reference: return "Reference"
         case .recorded: return "Recorded"
         case .generated: return "Generated"
+        case .transformed: return "Transformed"
         }
     }
 }

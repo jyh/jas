@@ -252,9 +252,9 @@ public func segmentsOfElementWith(_ elem: Element,
         // Unreachable from `segmentsOfElementWith`: `resolvedRings` takes
         // these three first, whatever the resolver. Reached only through the
         // resolver-less verb, where empty is the right answer — and left as an
-        // explicit case rather than folded into `default` so a fifth live kind
+        // explicit case rather than folded into `default` so a sixth live kind
         // has to state which side of that line it falls on.
-        case .reference, .recorded, .generated:
+        case .reference, .recorded, .generated, .transformed:
             return []
         }
     default:

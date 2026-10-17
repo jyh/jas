@@ -111,6 +111,8 @@ public func resolvedRings(_ elem: Element, _ resolver: ElementResolver) -> BoolP
         return rec.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
     case .generated(let g):
         return g.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
+    case .transformed(let t):
+        return t.evaluateWith(precision: DEFAULT_PRECISION, resolver: resolver, visiting: &visiting)
     case .compoundShape:
         return nil
     }
@@ -1236,6 +1238,8 @@ public func elementToPolygonSetWith(
             return rec.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         case .generated(let gen):
             return gen.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
+        case .transformed(let t):
+            return t.evaluateWith(precision: precision, resolver: resolver, visiting: &visiting)
         }
     // THE CARRIED RULE CROSSES HERE (transcripts/BOOLEAN.md, "Fill
     // rule: the polygon set carries it"). A path's subpaths are only a
@@ -1511,6 +1515,89 @@ private func generatedNum(_ v: Any) -> Double? {
     return nil
 }
 
+// MARK: - Transformed (a live transform OPERATION over one child)
+
+/// A `Transformed` live element: one child drawn under an affine `matrix`,
+/// with the operation's own Scale Strokes choice (council 2026-10-16, ruling
+/// 4: *"the transform remains in the element tree, and the rectangle stays a
+/// rectangle"*). The child is never rewritten. Mirrors jas_dioxus
+/// `TransformedElem`.
+///
+/// ⚖️ THE TWO CASES ARE TWO DRAWINGS, NOT TWO WIDTHS: `scaleStrokes == true`
+/// draws the child UNDER the matrix (its stroke is outlined, then scaled);
+/// `false` draws the child's geometry MAPPED through the matrix with the
+/// stroke at its own width ("the stroke should stay 1pt" on every edge, under
+/// any matrix). The canvas half is `drawTransformed` in CanvasSubwindow.
+public struct TransformedElem: Equatable {
+    /// One-element storage: a struct cannot hold its own enum inline.
+    private var childStorage: [Element]
+    /// The element the operation applies to.
+    public var child: Element {
+        get { childStorage[0] }
+        set { childStorage = [newValue] }
+    }
+    /// The operation's matrix, in the wrapper's own coordinates (the
+    /// wrapper's `transform`, if any, applies outside it).
+    public var matrix: Transform
+    /// The operation's Scale Strokes choice.
+    public var scaleStrokes: Bool
+    public var id: String?
+    public var name: String?
+    public var transform: Transform?
+    public var opacity: Double
+    public var locked: Bool
+    public var visibility: Visibility
+    public var blendMode: BlendMode
+    public var mask: Mask?
+
+    public init(
+        child: Element,
+        matrix: Transform,
+        scaleStrokes: Bool,
+        name: String? = nil,
+        id: String? = nil,
+        transform: Transform? = nil,
+        opacity: Double = 1.0,
+        locked: Bool = false,
+        visibility: Visibility = .preview,
+        blendMode: BlendMode = .normal,
+        mask: Mask? = nil
+    ) {
+        self.childStorage = [child]
+        self.matrix = matrix
+        self.scaleStrokes = scaleStrokes
+        self.name = name
+        self.id = id
+        self.transform = transform
+        self.opacity = opacity
+        self.locked = locked
+        self.visibility = visibility
+        self.blendMode = blendMode
+        self.mask = mask
+    }
+
+    /// The operation's whole matrix over the child's LOCAL geometry: the
+    /// child's own transform first, then `matrix`.
+    public var childToWrapper: Transform {
+        if let t = child.transform { return matrix.multiply(t) }
+        return matrix
+    }
+
+    /// The child's region, mapped into the wrapper's coordinates.
+    public func evaluateWith(
+        precision: Double,
+        resolver: ElementResolver,
+        visiting: inout VisitSet
+    ) -> BoolPolygonSet {
+        let local = elementToPolygonSetWith(child, precision: precision,
+                                            resolver: resolver, visiting: &visiting)
+        return transformPolygonSet(local, childToWrapper)
+    }
+
+    /// The child's bounds, boxed through the matrix.
+    public var bounds: BBox { aabbThrough(child.bounds, matrix) }
+}
+
 // MARK: - LiveVariant
 
 /// Closed-world enum over all known LiveKinds. Adding a new kind adds
@@ -1521,6 +1608,7 @@ public enum LiveVariant: Equatable {
     case reference(ReferenceElem)
     case recorded(RecordedElem)
     case generated(GeneratedElem)
+    case transformed(TransformedElem)
 
     public var kind: String {
         switch self {
@@ -1528,6 +1616,7 @@ public enum LiveVariant: Equatable {
         case .reference: return "reference"
         case .recorded: return "recorded"
         case .generated: return "generated"
+        case .transformed: return "transformed"
         }
     }
 
@@ -1537,6 +1626,7 @@ public enum LiveVariant: Equatable {
         case .reference: return 1
         case .recorded: return 1
         case .generated: return 1
+        case .transformed: return 1
         }
     }
 
@@ -1550,6 +1640,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.id
         case .recorded(let rec): return rec.id
         case .generated(let gen): return gen.id
+        case .transformed(let t): return t.id
         }
     }
 
@@ -1562,6 +1653,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.name
         case .recorded(let rec): return rec.name
         case .generated(let gen): return gen.name
+        case .transformed(let t): return t.name
         }
     }
 
@@ -1571,6 +1663,8 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.fill
         case .recorded(let rec): return rec.fill
         case .generated(let gen): return gen.fill
+        // A wrapper's paint is its child's: it is an operation, not a shape.
+        case .transformed(let t): return t.child.fill
         }
     }
 
@@ -1580,6 +1674,8 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.stroke
         case .recorded(let rec): return rec.stroke
         case .generated(let gen): return gen.stroke
+        // A wrapper's paint is its child's: it is an operation, not a shape.
+        case .transformed(let t): return t.child.stroke
         }
     }
 
@@ -1589,6 +1685,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.opacity
         case .recorded(let rec): return rec.opacity
         case .generated(let gen): return gen.opacity
+        case .transformed(let t): return t.opacity
         }
     }
 
@@ -1598,6 +1695,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.transform
         case .recorded(let rec): return rec.transform
         case .generated(let gen): return gen.transform
+        case .transformed(let t): return t.transform
         }
     }
 
@@ -1607,6 +1705,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.locked
         case .recorded(let rec): return rec.locked
         case .generated(let gen): return gen.locked
+        case .transformed(let t): return t.locked
         }
     }
 
@@ -1616,6 +1715,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.visibility
         case .recorded(let rec): return rec.visibility
         case .generated(let gen): return gen.visibility
+        case .transformed(let t): return t.visibility
         }
     }
 
@@ -1625,6 +1725,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.blendMode
         case .recorded(let rec): return rec.blendMode
         case .generated(let gen): return gen.blendMode
+        case .transformed(let t): return t.blendMode
         }
     }
 
@@ -1634,6 +1735,7 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.mask
         case .recorded(let rec): return rec.mask
         case .generated(let gen): return gen.mask
+        case .transformed(let t): return t.mask
         }
     }
 
@@ -1646,6 +1748,9 @@ public enum LiveVariant: Equatable {
         case .recorded: return []
         // A generated element owns no children; its geometry comes from the generator.
         case .generated: return []
+        // The wrapped child is owned. Not yet editable through (route 4,
+        // slice 3); listed so walks that ask what a live element OWNS see it.
+        case .transformed(let t): return [t.child]
         }
     }
 
@@ -1660,6 +1765,8 @@ public enum LiveVariant: Equatable {
         case .reference(let r): return r.dependencies
         case .recorded(let rec): return rec.dependencies
         case .generated(let gen): return gen.dependencies
+        // The child is OWNED, so it is no by-id edge.
+        case .transformed: return []
         }
     }
 
@@ -1674,6 +1781,7 @@ public enum LiveVariant: Equatable {
         case .recorded: return (0, 0, 0, 0)
         // Degenerate too for a generated element — geometry comes from the generator.
         case .generated: return (0, 0, 0, 0)
+        case .transformed(let t): return t.bounds
         }
     }
 
@@ -1697,6 +1805,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.locked = locked
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.locked = locked
+            return .transformed(updated)
         }
     }
 
@@ -1718,6 +1830,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.visibility = visibility
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.visibility = visibility
+            return .transformed(updated)
         }
     }
 
@@ -1744,6 +1860,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.opacity = opacity
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.opacity = opacity
+            return .transformed(updated)
         }
     }
 
@@ -1767,6 +1887,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.blendMode = blendMode
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.blendMode = blendMode
+            return .transformed(updated)
         }
     }
 
@@ -1788,6 +1912,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.transform = transform
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.transform = transform
+            return .transformed(updated)
         }
     }
 
@@ -1809,6 +1937,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.fill = fill
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.child = JasLib.withFill(t.child, fill: fill)
+            return .transformed(updated)
         }
     }
 
@@ -1830,6 +1962,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.stroke = stroke
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.child = JasLib.withStroke(t.child, stroke: stroke)
+            return .transformed(updated)
         }
     }
 
@@ -1851,6 +1987,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.mask = mask
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.mask = mask
+            return .transformed(updated)
         }
     }
 
@@ -1878,6 +2018,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.id = id
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.id = id
+            return .transformed(updated)
         }
     }
 
@@ -1903,6 +2047,10 @@ public enum LiveVariant: Equatable {
             var updated = gen
             updated.name = name
             return .generated(updated)
+        case .transformed(let t):
+            var updated = t
+            updated.name = name
+            return .transformed(updated)
         }
     }
 }
