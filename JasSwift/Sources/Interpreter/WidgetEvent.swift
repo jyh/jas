@@ -659,12 +659,19 @@ enum WidgetEvent {
                 let params = b["params"] as? [String: Any] ?? [:]
                 if let dispatch = host.dispatch {
                     // Evaluated as the catalog dispatch evaluates them: after
-                    // the effects, against the store. A null stays a null.
+                    // the effects, against the store. A bare identifier that
+                    // evaluates to null is its own NAME (`mode: create`), as
+                    // in the catalog dispatch, the reference and Rust's
+                    // `dispatch_param_value`; any other null stays a null.
                     var resolved: [String: Any] = [:]
                     for (k, v) in params {
                         guard let expr = v as? String else { resolved[k] = v; continue }
                         let result = evaluate(expr, context: store.evalContext(extra: ctx))
-                        resolved[k] = result.toAny() ?? NSNull()
+                        if let any = result.toAny() {
+                            resolved[k] = any
+                        } else {
+                            resolved[k] = isBareIdentifier(expr) ? expr : NSNull()
+                        }
                     }
                     dispatch(action, resolved, ctx)
                 } else {

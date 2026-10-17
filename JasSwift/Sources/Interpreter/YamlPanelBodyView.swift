@@ -1150,6 +1150,17 @@ struct YamlElementView: View {
     /// panels can extend this when they wire up their own handlers.
     private func handleClickBehavior() {
         guard let model = model else { return }
+        // A CLICK KIND (`button`, `icon_button`) runs the contract's click
+        // through the app's widget route (``PanelWidgetEvents/click``), the
+        // same route the level-1 input scripts drive, so what a script pins
+        // is what this button does. Other kinds that carry a `click`
+        // behavior (a container row, a text row, a colour swatch) are not
+        // click kinds in WIDGET_EVENTS.md and keep the path below.
+        if let kind = element["type"] as? String, WidgetEvent.clickKinds.contains(kind),
+           let route = widgetEvents {
+            route.click(element, modifiers: currentEventModifiers())
+            return
+        }
         guard let behavior = element["behavior"] as? [[String: Any]] else { return }
         let ws = WorkspaceData.load()
         let actions = ws?.data["actions"] as? [String: Any]

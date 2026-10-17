@@ -1,0 +1,15 @@
+{
+  "item": "align.horizontal_center",
+  "spec": "workspace/panels/align.yaml",
+  "setup_svg": "three_rects.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 118, "y": 88},
+    {"kind": "move", "x": 20, "y": 6, "dragging": true},
+    {"kind": "release", "x": 20, "y": 6},
+    {"panel": "align_panel_content", "widget": "align_horizontal_center_button", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "align.horizontal_center.expected.json"
+}

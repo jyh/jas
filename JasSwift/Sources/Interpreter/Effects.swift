@@ -275,7 +275,7 @@ private func evalExpr(_ expr: Any?, store: StateStore, ctx: [String: Any]) -> Va
 
 /// A bare identifier: non-empty, letters, digits and `_` only (Rust's
 /// `dispatch_param_value` test, `char::is_alphanumeric`).
-private func isBareIdentifier(_ s: String) -> Bool {
+func isBareIdentifier(_ s: String) -> Bool {
     !s.isEmpty && s.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
 }
 
