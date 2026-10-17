@@ -1745,6 +1745,49 @@ mod stroke_panel_override_tests {
             "tile foreach source non-empty (got {:?})", brushes_json);
     }
 
+    /// **The engine's Stroke overlay is this dock's, key for key and value for
+    /// value** (`stroke_host::live_values`, read by `panel_scope`'s engine
+    /// scope). The stroke differs from the panel's defaults in EVERY field the
+    /// selection supplies, so the keys whose web value changes when the element
+    /// is selected are exactly the selection-derived ones, and the engine's
+    /// keys must be that set. A field dropped from either side reds here.
+    #[test]
+    fn the_engines_stroke_overlay_is_the_docks() {
+        use crate::geometry::element::{ArrowAlign, Arrowhead, Color, LineCap, LineJoin, Stroke};
+        let unselected = build_live_panel_overrides(&AppState::new());
+        let mut stroke = Stroke::new(Color::BLACK, 3.5);
+        stroke.linecap = LineCap::Square;
+        stroke.linejoin = LineJoin::Bevel;
+        stroke.start_arrow = Arrowhead::SimpleArrow;
+        stroke.end_arrow = Arrowhead::OpenArrow;
+        stroke.start_arrow_scale = 150.0;
+        stroke.end_arrow_scale = 175.0;
+        stroke.arrow_align = ArrowAlign::CenterAtEnd;
+        let mut st = AppState::new();
+        select_element(&mut st, GeoEl::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: Some(stroke), common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        }));
+        let web = build_live_panel_overrides(&st);
+        let engine = crate::interpreter::stroke_host::live_values(st.tab().unwrap().model.document());
+        // The candidates are the Stroke panel's declared fields (the spec's
+        // `state:` keys), never a list taken from either implementation.
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace loads");
+        let declared = ws.panel_state_defaults(crate::interpreter::stroke_host::STROKE_PANEL);
+        assert!(declared.len() > 10, "the Stroke panel declares {} fields", declared.len());
+        let mut from_selection: Vec<&String> = web.keys()
+            .filter(|k| declared.contains_key(k.as_str()) && unselected.get(*k) != web.get(*k))
+            .collect();
+        from_selection.sort();
+        let mut engine_keys: Vec<&String> = engine.keys().collect();
+        engine_keys.sort();
+        assert_eq!(engine_keys, from_selection, "the engine overlays a different set of Stroke fields");
+        for k in engine.keys() {
+            assert_eq!(engine.get(k), web.get(k), "Stroke field {k}: the engine and the dock disagree");
+        }
+    }
+
     // Part B.3: rotation / opacity / blend from the first selected element.
     #[test]
     fn properties_attrs_from_first_selected() {

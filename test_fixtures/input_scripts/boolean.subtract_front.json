@@ -1,0 +1,15 @@
+{
+  "item": "boolean.subtract_front",
+  "spec": "workspace/panels/boolean.yaml",
+  "setup_svg": "overlapping_rects.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 118, "y": 118},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "boolean_panel_content", "widget": "boolean_subtract_front_button", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "boolean.subtract_front.expected.json"
+}
