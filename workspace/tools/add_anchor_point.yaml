@@ -4,7 +4,8 @@
 # point. The geometry kernels (split_cubic / closest_segment_and_t
 # / insert_point_in_path) live in geometry/path_ops.rs (L2 per
 # NATIVE_BOUNDARY.md §5). doc.path.insert_anchor_on_segment_near
-# walks all unlocked Path elements, picks the closest segment
+# walks all unlocked, visible Path elements (a hidden group or layer
+# hides its paths), picks the closest segment
 # across the document, and does the split iff the distance is
 # within hit_radius.
 #

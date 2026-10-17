@@ -13,8 +13,8 @@ anchors.
 | Anchor Point (Convert)| C        | Click / drag to toggle corner ↔ smooth |
 
 All three operate only on Path elements (not on Line / Rect /
-Polygon / Star). All three walk every unlocked Path at any Group
-depth and hit a path where it is DRAWN, through its full frame
+Polygon / Star). All three walk every unlocked, visible Path at any
+Group depth and hit a path where it is DRAWN, through its full frame
 (see "Where a path is drawn" under the Anchor Point tool).
 
 ## Add Anchor Point tool
@@ -24,7 +24,7 @@ there. The click tolerance is 8 px.
 
 **Algorithm:**
 
-1. For every unlocked Path in the document (at any Group depth),
+1. For every unlocked, visible Path in the document (at any Group depth),
    map its commands through the path's full frame into document
    space and compute the closest segment to the cursor there,
    using the `closest_segment_and_t` kernel. The distance is a
@@ -64,7 +64,7 @@ anchor is deletable.
 **Algorithm:**
 
 1. Find the first anchor within `hit_radius` of the cursor across
-   all unlocked Paths, at any Group depth, each anchor compared
+   all unlocked, visible Paths, at any Group depth, each anchor compared
    where it is drawn.
 2. If no anchor is within `hit_radius` (8 px), no-op.
 3. Otherwise, snapshot and call `delete_anchor_from_path`:
@@ -100,8 +100,8 @@ handle independently.
    click on a corner anchor is intentionally unchanged).
 4. **Miss** → `idle`, mouseup is a no-op.
 
-**Where a path is drawn.** The probe visits every unlocked Path at
-any Group depth, in document order (the first hit is the bottom-most
+**Where a path is drawn.** The probe visits every unlocked, visible
+Path at any Group depth, in document order (the first hit is the bottom-most
 path), and compares each handle and anchor where it is DRAWN: through
 the path's full frame, every ancestor's transform and its own. So a
 path inside a scaled or rotated Group is hit at the anchor the user
@@ -110,6 +110,8 @@ and the probe reaches its child only while that element is the
 innermost isolation entry, under the frame the element gives its
 child. A path whose frame is singular (collapsed to a line or a
 point) is skipped, since a drawn point on it cannot be mapped back.
+A hidden path is never hit, and neither is a path whose group or
+layer is hidden: what the user cannot see, these tools cannot edit.
 
 The commit speaks document space and edits local space. The
 corner's release point is mapped back through the inverse frame

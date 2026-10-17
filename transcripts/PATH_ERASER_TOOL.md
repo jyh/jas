@@ -21,8 +21,9 @@ workspace YAML is authoritative for resolving the conflict).
 
 ## Algorithm (per-frame)
 
-For each unlocked Path that is a direct child of a layer (paths
-inside a Group are not reached yet; see Limitations):
+For each unlocked, visible Path that is a direct child of a visible
+layer (paths inside a Group are not reached yet; see Limitations; a
+hidden path, or any path of a hidden layer, is never erased):
 
 1. Compute the eraser AABB:
    `[min(last_x, x) − eraser_size,

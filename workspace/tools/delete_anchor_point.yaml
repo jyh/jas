@@ -4,6 +4,8 @@
 # segments merge into one, preserving the outer control handles
 # (geometry/path_ops.rs::delete_anchor_from_path). If the path would
 # end up with fewer than 2 anchors the whole element is removed.
+# The hit is made where the anchor is DRAWN, on unlocked, visible
+# paths only (a hidden group or layer hides its paths).
 #
 # Validated against schema/tool.schema.json.
 

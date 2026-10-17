@@ -3584,7 +3584,8 @@ fn anchor_index_near(
 /// visitor returns stops the walk and is returned.
 ///
 /// The walk is the Partial Selection probe's (`cp_recursive`): it descends
-/// through groups and layers at any depth, skips anything locked, and enters
+/// through groups and layers at any depth, skips anything locked or hidden (a
+/// hidden ancestor hides it too: INVISIBLE, 2026-10-17), and enters
 /// a Transformed wrapper only when the wrapper IS `isolated` (the innermost
 /// isolation entry), under the frame `W·M` it gives its child. So the anchor
 /// tools reach whatever that probe can.
@@ -3599,7 +3600,7 @@ fn find_in_editable_paths<R>(
     isolated: Option<&[usize]>,
     visit: &mut dyn FnMut(&[usize], &PathElem, Option<crate::geometry::element::Transform>) -> Option<R>,
 ) -> Option<R> {
-    use crate::geometry::element::Transform;
+    use crate::geometry::element::{Transform, Visibility};
     fn compose(outer: Option<Transform>, inner: Option<Transform>) -> Option<Transform> {
         match (outer, inner) {
             (Some(o), Some(i)) => Some(o.multiply(&i)),
@@ -3607,23 +3608,28 @@ fn find_in_editable_paths<R>(
         }
     }
     fn walk<R>(
-        elem: &Element, path: &[usize], frame: Option<Transform>, isolated: Option<&[usize]>,
+        elem: &Element, path: &[usize], ancestor_vis: Visibility, frame: Option<Transform>,
+        isolated: Option<&[usize]>,
         visit: &mut dyn FnMut(&[usize], &PathElem, Option<Transform>) -> Option<R>,
     ) -> Option<R> {
         if elem.locked() { return None; }
+        // INVISIBLE (the helm's ruling, 2026-10-17): a hidden element, or one
+        // under a hidden ancestor, is not hit, as in `cp_recursive`.
+        let vis = std::cmp::min(ancestor_vis, elem.visibility());
+        if vis == Visibility::Invisible { return None; }
         if let Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) = elem
             && isolated == Some(path)
         {
             let mut child_path = path.to_vec();
             child_path.push(0);
-            return walk(&t.child, &child_path, compose(frame, elem.child_frame_transform()), isolated, visit);
+            return walk(&t.child, &child_path, vis, compose(frame, elem.child_frame_transform()), isolated, visit);
         }
         if elem.is_group_or_layer() {
             let child_frame = compose(frame, elem.transform().copied());
             for (i, child) in elem.children().into_iter().flatten().enumerate() {
                 let mut child_path = path.to_vec();
                 child_path.push(i);
-                if let Some(r) = walk(child, &child_path, child_frame, isolated, visit) {
+                if let Some(r) = walk(child, &child_path, vis, child_frame, isolated, visit) {
                     return Some(r);
                 }
             }
@@ -3638,7 +3644,7 @@ fn find_in_editable_paths<R>(
     }
     for (li, layer) in doc.layers.iter().enumerate() {
         for (ci, child) in layer.children().into_iter().flatten().enumerate() {
-            if let Some(r) = walk(child, &[li, ci], layer.transform().copied(), isolated, visit) {
+            if let Some(r) = walk(child, &[li, ci], layer.visibility(), layer.transform().copied(), isolated, visit) {
                 return Some(r);
             }
         }
@@ -5207,7 +5213,7 @@ fn path_erase_at_rect(
 ) {
     use std::rc::Rc;
     use crate::document::artboard::{generate_element_id, mint_unique_ids};
-    use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem};
+    use crate::geometry::element::{flatten_path_commands, PathCommand, PathElem, Visibility};
     use crate::geometry::path_ops::{find_eraser_hit, split_path_at_eraser};
 
     let doc = model.document().clone();
@@ -5246,7 +5252,11 @@ fn path_erase_at_rect(
                     continue;
                 }
             };
-            if child.locked() {
+            // INVISIBLE (2026-10-17): a hidden path, or one in a hidden
+            // layer, is not erased.
+            if child.locked()
+                || std::cmp::min(layer.visibility(), child.visibility()) == Visibility::Invisible
+            {
                 new_children.push(child.clone());
                 continue;
             }
