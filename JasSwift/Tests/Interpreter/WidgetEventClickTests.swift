@@ -177,3 +177,19 @@ private func num(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
     }
     #expect(store.get("got_n") == nil)
 }
+
+// A host's dispatch (the app's route) resolves params as the catalog dispatch
+// and the reference do: a bare identifier that evaluates to null is its own
+// name (`mode: create`, the Brushes panel's New Brush button), an expression
+// is its value, and a literal is itself.
+@Test func clickAHostDispatchReceivesABareIdentifierAsItsName() {
+    let store = clickStore()
+    var got: [String: Any] = [:]
+    let host = WidgetEvent.Host(dispatch: { _, params, _ in got = params })
+    let r = WidgetEvent.click(widget: recordButton(), event: "click", store: store,
+                              panel: nil, actions: recordActions, host: host)
+    #expect(r.outcome == "committed")
+    #expect(got["target"] as? String == "artboard", "a bare null identifier is its name")
+    #expect(num(got["n"]) == 7, "a string param is an expression")
+    #expect(got["copy"] as? Bool == false, "a YAML literal is that value")
+}
