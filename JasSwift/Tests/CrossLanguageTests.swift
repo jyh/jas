@@ -5466,6 +5466,7 @@ private let actionFixtures = [
     "stroke_actions.json",
     "brush_actions.json",
     "transform_options_actions.json",
+    "options_confirm_actions.json",
     // YAML coverage census (2026-10-11): the Artboards panel verbs, each after an
     // artboards_panel_select, which is itself a verb with no other case.
     "artboard_actions.json",
