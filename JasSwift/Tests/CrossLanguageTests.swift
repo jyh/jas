@@ -1600,6 +1600,9 @@ private func preservationPinReport(
 
 // P7 — transforms (scale / rotate / shear / copy).
 @Test func operationTransformScale() throws { try runOperationFixture("transform_scale.json") }
+/// Route 4 slice 5: `scale_transform` with `wrap: true` wraps, absorbs a same-flag
+/// scale over a translation, and nests under a different flag.
+@Test func operationTransformScaleWrapped() throws { try runOperationFixture("transform_scale_wrapped.json") }
 @Test func operationTransformRotate() throws { try runOperationFixture("transform_rotate.json") }
 @Test func operationTransformShear() throws { try runOperationFixture("transform_shear.json") }
 @Test func operationTransformCopy() throws { try runOperationFixture("transform_copy.json") }

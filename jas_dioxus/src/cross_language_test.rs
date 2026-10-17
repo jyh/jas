@@ -6394,6 +6394,14 @@ pub(crate) mod tests {
         run_operation_fixture("operations/transform_scale.json");
     }
 
+    /// Route 4 slice 5: `scale_transform` with `wrap: true` wraps the rect,
+    /// absorbs a same-flag scale (also over a move's translation), and nests
+    /// under a different flag. Twin: JasSwift `operationTransformScaleWrapped`.
+    #[test]
+    fn operation_transform_scale_wrapped() {
+        run_operation_fixture("operations/transform_scale_wrapped.json");
+    }
+
     #[test]
     fn operation_transform_rotate() {
         run_operation_fixture("operations/transform_rotate.json");
@@ -6421,6 +6429,7 @@ pub(crate) mod tests {
     fn operation_transform_replay_is_deterministic() {
         for fixture in &[
             "operations/transform_scale.json",
+            "operations/transform_scale_wrapped.json",
             "operations/transform_rotate.json",
             "operations/transform_shear.json",
             "operations/transform_copy.json",
