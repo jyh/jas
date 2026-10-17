@@ -97,7 +97,9 @@ public func buildActiveDocumentView(
         guard layersPanelSelection.count == 1,
               let e = m.document.tryGetElement(layersPanelSelection[0]) else { return false }
         switch e {
-        case .group, .layer: return true
+        // A Transformed wrapper is entered to edit its child (route 4 slice
+        // 3b). Rust's `active_document_view` agrees.
+        case .group, .layer, .live(.transformed): return true
         default: return false
         }
     }()

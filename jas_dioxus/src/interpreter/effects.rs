@@ -5015,9 +5015,13 @@ fn path_probe_partial_hit(
     // the identity). A control point is compared where it is DRAWN, through
     // the parent frame and the element's own transform, which is where
     // `selection_handle_rects` draws its square.
+    //
+    // `isolated` is the innermost isolation entry. A Transformed wrapper is
+    // ONE element unless it IS that entry; then the probe reaches its child,
+    // under the frame `W·M` it gives the child (route 4 slice 3b).
     fn cp_recursive(
         elem: &Element, path: &[usize], ancestor_vis: Visibility,
-        frame: Option<Transform>,
+        frame: Option<Transform>, isolated: Option<&[usize]>,
         x: f64, y: f64, radius: f64,
         resolver: &dyn crate::geometry::live::ElementResolver,
     ) -> Option<(Vec<usize>, usize)> {
@@ -5027,6 +5031,15 @@ fn path_probe_partial_hit(
         };
         let eff = std::cmp::min(ancestor_vis, elem.visibility());
         if eff == Visibility::Invisible { return None; }
+        if let Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) = elem
+            && isolated == Some(path)
+        {
+            if t.child.locked() { return None; }
+            let mut child_path = path.to_vec();
+            child_path.push(0);
+            return cp_recursive(&t.child, &child_path, eff,
+                compose(frame, elem.child_frame_transform()), isolated, x, y, radius, resolver);
+        }
         if elem.is_group_or_layer() {
             let child_frame = compose(frame, elem.transform().copied());
             if let Some(children) = elem.children() {
@@ -5034,7 +5047,7 @@ fn path_probe_partial_hit(
                     if child.locked() { continue; }
                     let mut child_path = path.to_vec();
                     child_path.push(i);
-                    if let Some(r) = cp_recursive(child, &child_path, eff, child_frame, x, y, radius, resolver) {
+                    if let Some(r) = cp_recursive(child, &child_path, eff, child_frame, isolated, x, y, radius, resolver) {
                         return Some(r);
                     }
                 }
@@ -5055,6 +5068,7 @@ fn path_probe_partial_hit(
         None
     }
     let cp_hit = {
+        let isolated = model.isolation_stack.last().map(|p| p.as_slice());
         let doc = model.document();
         let index = crate::document::id_index::rebuild_id_index(doc);
         let resolver = crate::document::id_index::IndexResolver(&index);
@@ -5067,7 +5081,7 @@ fn path_probe_partial_hit(
                     if child.locked() { continue; }
                     let child_vis = std::cmp::min(layer_vis, child.visibility());
                     if child_vis == Visibility::Invisible { continue; }
-                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, layer.transform().copied(), x, y, radius, &resolver) {
+                    if let Some(r) = cp_recursive(child, &[li, ci], child_vis, layer.transform().copied(), isolated, x, y, radius, &resolver) {
                         hit = Some(r);
                         break 'outer;
                     }
@@ -12776,6 +12790,38 @@ mod tests {
             Some(&mut m), None, None, None);
         let mode = store.get_tool("partial_selection", "mode").as_str().unwrap_or("").to_string();
         (mode, m.document().selection.clone())
+    }
+
+    /// ROUTE 4 SLICE 3b: the probe reaches a Transformed wrapper's CHILD only
+    /// while that wrapper is the innermost isolation entry, and then hits the
+    /// child's points where they are drawn (frame `W·M`). Outside isolation a
+    /// wrapper is one element and nothing inside it is hit. The wrapper
+    /// scales a rect (2, 2, 10 x 10) by (2, 3), so the child's corner 2
+    /// (local 12, 12) is drawn at (24, 36).
+    #[test]
+    fn the_probe_reaches_a_wrapped_childs_corner_only_while_isolated() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let rect = Element::Rect(RectElem {
+            x: 2.0, y: 2.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0, fill: None, stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let w = TransformedElem::new(std::rc::Rc::new(rect), crate::geometry::element::Transform::scale(2.0, 3.0), false);
+        let layer = Element::Layer(LayerElem {
+            children: vec![std::rc::Rc::new(Element::Live(LiveVariant::Transformed(w)))],
+            isolated_blending: false, knockout_group: false, common: CommonProps::default(),
+        });
+        let mut model = Model::new(Document { layers: vec![layer], selected_layer: 0, selection: vec![], ..Document::default() }, None);
+        let (_, sel) = cp_probe(&model, 24.0, 36.0);
+        assert!(sel.iter().all(|es| es.path != vec![0, 0, 0]), "not isolated: the child is not reachable: {sel:?}");
+        model.isolation_stack.push(vec![0, 0]);
+        let (mode, sel) = cp_probe(&model, 24.0, 36.0);
+        assert_eq!(mode, "moving_pending");
+        assert_eq!(sel, vec![ElementSelection::partial(vec![0, 0, 0], [2usize])], "isolated: the drawn corner");
+        let (mode, _) = cp_probe(&model, 12.0, 12.0);
+        assert_eq!(mode, "marquee", "isolated: the child's untransformed corner draws nothing");
+        model.isolation_stack = vec![vec![0]];
+        let (_, sel) = cp_probe(&model, 24.0, 36.0);
+        assert!(sel.iter().all(|es| es.path != vec![0, 0, 0]), "isolated into the LAYER only: {sel:?}");
     }
 
     #[test]

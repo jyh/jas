@@ -2253,7 +2253,7 @@ private func pathProbePartialHit(
     }
     // 2. Control-point hit on any unlocked element (recurses into groups).
     if let (path, cpIdx) = findElementCpNear(
-        model.document, x: x, y: y, radius: radius
+        model.document, isolated: model.layersIsolationStack.last, x: x, y: y, radius: radius
     ) {
         let alreadySelected = model.document.selection.contains { es in
             es.path == path && es.kind.contains(cpIdx)
@@ -2292,7 +2292,7 @@ private func pathProbePartialHit(
 /// Recurse through layer / group children looking for a control-point
 /// hit on an unlocked, visible element.
 private func findElementCpNear(
-    _ doc: Document, x: Double, y: Double, radius: Double
+    _ doc: Document, isolated: [Int]? = nil, x: Double, y: Double, radius: Double
 ) -> (ElementPath, Int)? {
     let cpResolver = IdIndexResolver(index: rebuildIdIndex(doc))
     // `frame` maps the element's PARENT space to DOCUMENT space (`nil` is the
@@ -2304,8 +2304,15 @@ private func findElementCpNear(
         guard let i = inner else { return o }
         return o.multiply(i)
     }
+    // `isolated` is the innermost isolation entry. A Transformed wrapper is
+    // ONE element unless it IS that entry; then the probe reaches its child
+    // under the frame `W·M` (route 4 slice 3b). Twin of Rust `cp_recursive`.
     func recurse(_ elem: Element, _ path: ElementPath, _ frame: Transform?) -> (ElementPath, Int)? {
         if elem.visibility == .invisible { return nil }
+        if case .live(.transformed(let t)) = elem, isolated == path {
+            if t.child.isLocked { return nil }
+            return recurse(t.child, path + [0], compose(frame, elem.childFrameTransform))
+        }
         if case .group(let g) = elem {
             let childFrame = compose(frame, g.transform)
             for (i, child) in g.children.enumerated().reversed() {
