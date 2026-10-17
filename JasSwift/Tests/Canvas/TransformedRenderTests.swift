@@ -260,6 +260,53 @@ private func measure(_ buf: [UInt8]) -> (vertical: [Double], horizontal: [Double
     #expect(plain.document.layers == layers && !plain.canUndo, "a no-op release leaves no undo step")
 }
 
+// MARK: - SVG round trip (twins of Rust svg.rs)
+
+/// A Transformed wrapper ROUND-TRIPS through SVG, both Scale Strokes values,
+/// with its own transform W and its matrix M kept apart. The standard
+/// `transform` stays W·M for foreign viewers; `data-jas-matrix` (M) and
+/// `data-jas-own-transform` (W) carry the split. Coordinates are multiples of
+/// 3 pt so the px wire values are exact. Twin of Rust
+/// `a_transformed_wrapper_round_trips_through_svg`.
+@Test func aTransformedWrapperRoundTripsThroughSvg() {
+    for (own, scaleStrokes) in [(Transform?.some(.translate(6, 9)), false), (nil, true)] {
+        let child: Element = .rect(Rect(x: 3, y: 3, width: 12, height: 12,
+                                        stroke: Stroke(color: black, width: 3), id: "c"))
+        let w = TransformedElem(child: child, matrix: .scale(2, 3), scaleStrokes: scaleStrokes,
+                                id: "w", transform: own)
+        let doc = Document(layers: [Layer(name: "Layer", children: [.live(.transformed(w))])],
+                           selectedLayer: 0, selection: [])
+        let svg = documentToSvg(doc)
+        #expect(svg.contains(" data-jas-matrix=\""), "\(svg)")
+        #expect(svg.contains("data-jas-own-transform") == (own != nil), "\(svg)")
+        let back = svgToDocument(svg)
+        #expect(back.layers[0].children == doc.layers[0].children, "round trip, own=\(String(describing: own)): \(svg)")
+    }
+}
+
+/// Without the split attributes the whole `transform` is the matrix and there
+/// is no wrapper transform: the same picture. Twin of Rust
+/// `a_transformed_group_without_the_split_reads_its_transform_as_the_matrix`.
+@Test func aTransformedGroupWithoutTheSplitReadsItsTransformAsTheMatrix() {
+    let svg = """
+    <svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape">
+      <g inkscape:groupmode="layer" inkscape:label="L">
+        <g data-jas-live="transformed" data-jas-scale-strokes="false" transform="matrix(2,0,0,3,0,0)">
+          <rect x="4" y="4" width="16" height="16"/>
+        </g>
+      </g>
+    </svg>
+    """
+    guard case .live(.transformed(let t)) = svgToDocument(svg).getElement([0, 0]) else {
+        Issue.record("a wrapper"); return
+    }
+    #expect(t.matrix == .scale(2, 3))
+    #expect(t.transform == nil)
+    #expect(!t.scaleStrokes)
+    guard case .rect(let r) = t.child else { Issue.record("a rect child"); return }
+    #expect(r.x == 3 && r.width == 12)
+}
+
 // MARK: - Route 4 slice 3b: editing a wrapped child through a path
 
 private func wrappedChildModel() -> Model {
