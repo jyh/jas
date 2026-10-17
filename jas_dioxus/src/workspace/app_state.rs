@@ -274,7 +274,6 @@ pub(crate) struct AppState {
     /// Isolation mode stack. Each entry is the path of a container that
     /// has been entered. Panel and canvas restrict interaction to
     /// descendants of the deepest (last) isolated container.
-    pub(crate) layers_isolation_stack: Vec<Vec<usize>>,
     /// Solo visibility state: when Option-clicking the eye button, the
     /// clicked element's siblings get saved and hidden. Second Option-click
     /// on the same element restores them. Map from sibling path to saved
@@ -677,7 +676,6 @@ impl AppState {
             layers_drag_source: None,
             layers_context_menu: None,
             layers_search_query: String::new(),
-            layers_isolation_stack: Vec::new(),
             layers_solo_state: None,
             layers_type_filter: std::collections::HashSet::new(),
             layers_filter_dropdown_open: false,
@@ -869,6 +867,16 @@ impl AppState {
 
     pub(crate) fn tab_mut(&mut self) -> Option<&mut TabState> {
         self.tabs.get_mut(self.active_tab)
+    }
+
+    /// The ACTIVE tab's isolation stack (empty with no tab open).
+    pub(crate) fn isolation_stack(&self) -> &[Vec<usize>] {
+        self.tabs.get(self.active_tab).map_or(&[], |t| t.model.isolation_stack.as_slice())
+    }
+
+    /// The ACTIVE tab's isolation stack, to change (`None` with no tab open).
+    pub(crate) fn isolation_stack_mut(&mut self) -> Option<&mut Vec<Vec<usize>>> {
+        self.tabs.get_mut(self.active_tab).map(|t| &mut t.model.isolation_stack)
     }
 
     pub(crate) fn add_tab(&mut self, tab: TabState) {
@@ -1407,7 +1415,7 @@ impl AppState {
         let ctx_guard = crate::canvas::ctx_guard::CtxSaveGuard::new(&ctx);
         ctx.translate(tab.model.view_offset_x, tab.model.view_offset_y).ok();
         ctx.scale(tab.model.zoom_level, tab.model.zoom_level).ok();
-        let layers_isolation = self.layers_isolation_stack.last().map(|p| p.as_slice());
+        let layers_isolation = tab.model.isolation_stack.last().map(|p| p.as_slice());
         render::render(
             &ctx,
             w,
