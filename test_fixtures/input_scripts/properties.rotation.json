@@ -1,0 +1,14 @@
+{
+  "item": "properties.rotation",
+  "spec": "workspace/panels/properties.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "properties_panel_content", "widget": "prop_rotation_input", "event": "commit", "value": "90"},
+    {"read": "document"}
+  ],
+  "expected_json": "properties.rotation.expected.json"
+}
