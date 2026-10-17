@@ -298,6 +298,9 @@ HELPER_CALL_RULES = [
 # orphan detection inside the family is vacuous (see module docstring).
 DIRECTORY_GLOB_RULES = [
     ("rust", RUST_TESTS, "test_fixtures/svg"),
+    # The engine replay derives its scripts from the directory: every script,
+    # including a panel script the web runner cannot list.
+    ("rust", "jas_dioxus/src/ffi_script_replay.rs", "test_fixtures/input_scripts"),
     ("scripts", "scripts/check_preservation_corpus.py", "test_fixtures/preservation"),
     ("reference", "workspace_interpreter/tests/test_phase3_fixtures.py",
      "workspace/tests/phase3"),

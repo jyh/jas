@@ -4764,8 +4764,36 @@ private func assertGestureTest(_ tc: [String: Any]) {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["align.left.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
+
+/// One panel step, `{"panel", "widget", "event", "value"?}`, run as the app
+/// runs it: the panel opened the way the dock opens it (its `state:` defaults,
+/// active), the scope the dock renders with (`panel`, `state`,
+/// `active_document`), then ``PanelWidgetEvents``. True when the act ran.
+private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
+    guard let panelId = st["panel"] as? String, let widgetId = st["widget"] as? String,
+          let event = st["event"] as? String,
+          let panel = WorkspaceData.load()?.panel(panelId),
+          let widget = WidgetEvent.findWidget(in: panel["content"], id: widgetId) else { return false }
+    let store = model.stateStore
+    if !store.hasPanel(panelId) {
+        store.initPanel(panelId, defaults: WorkspaceData.load()?.panelStateDefaults(panelId) ?? [:])
+    }
+    store.setActivePanel(panelId)
+    let route = PanelWidgetEvents(model: model, panelId: panelId, scope: [
+        "panel": store.getPanelState(panelId), "state": store.getAll(),
+        "active_document": buildActiveDocumentView(model: model)])
+    let result: WidgetEvent.Result
+    switch event {
+    case "click" where WidgetEvent.clickKinds.contains(widget["type"] as? String ?? ""):
+        result = route.click(widget)
+    case "click": result = route.press(widget)
+    case "commit": result = route.commit(widget, text: st["value"] as? String)
+    default: return false
+    }
+    return result.outcome == "committed"
+}
 
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
@@ -4779,8 +4807,16 @@ private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.
             continue
         }
         var events: [[String: Any]] = []
+        // PANEL steps run on the model the gesture leaves, through the app's
+        // widget-event route (`PanelWidgetEvents`), so at level 1 they follow
+        // every pointer and key step; one before them is refused by name.
+        var panelSteps: [(Int, [String: Any])] = []
         for (i, st) in steps.dropLast().enumerated() {
-            if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
+            if st["panel"] != nil {
+                panelSteps.append((i, st))
+            } else if !panelSteps.isEmpty {
+                Issue.record("script \(item): step \(i) follows a panel step, which level 1 cannot replay yet")
+            } else if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
                 events.append(st)
             } else if st["kind"] == nil, let key = st["key"] as? String {
                 // A KEY step (the key corpus's chord form). Mirrors Rust
@@ -4800,7 +4836,14 @@ private let scriptFixtures = ["selection.drag.json", "rect.draw.json", "ellipse.
                                  "app_state": script["app_state"] ?? [:], "events": events]
         let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let actual = documentToTestJson(runGestureModel(tc).document)
+        let model = runGestureModel(tc)
+        for (i, st) in panelSteps {
+            guard runScriptPanelStep(st, model: model) else {
+                Issue.record("script \(item): step \(i) \(st): the panel act did not run")
+                continue
+            }
+        }
+        let actual = documentToTestJson(model.document)
         #expect(actual == expected, "script \(item): the level-1 read-back differs from the expected")
     }
 }

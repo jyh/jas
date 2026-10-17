@@ -182,13 +182,21 @@ each live app:
   A script without a `read` step asserts nothing and is refused.
 
 **Who replays it:**
-1. **Level 1:** each port's core, through the corpus runner. This is the EXPECTED read-back. It replays pointer and
-   key steps and refuses a panel step by name.
+1. **Level 1:** each port's core. This is the EXPECTED read-back.
+   * **Rust** has two runners. The gesture runner (`script_corpus`, web build) replays the pointer and key scripts
+     it lists. The engine replay (`ffi_script_replay`, FFI build) replays every step through the calls a native shell
+     makes: `jas_set_tool`, `jas_pointer_event`, `jas_dispatch_action` for a key and `jas_panel_behavior` for a
+     panel step. It sets aside the open's one artboard exactly as the Windows oracle does, and it derives its scripts
+     from the directory. A panel script's Rust read-back comes from the engine replay, because the panel behaviour
+     is engine-only and no build has both.
+   * **Swift** replays pointer and key steps through the gesture runner, then panel steps through the app's widget
+     route (`PanelWidgetEvents`: `click`, `press`, `commit`) on the model the gesture leaves. A pointer or key step
+     after a panel step is refused by name.
 2. **Level 2 on the Mac:** `jas_gui_harness.py` for pointer and key steps; a panel step by accessibility identifier.
 3. **Level 2 on Windows:** `send_hand.ps1` replays pointer steps (shift held from the press or the first move), then
    key steps, which it delivers after the release as real key events (`keybd_event`), so the shell's own key route
    runs. A key step inside the gesture, `meta`, and a panel step are refused by name; panel steps by UI Automation
-   are not built yet.
+   are not built yet. The first panel script is `align.left`.
 
 A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
 comparison, with the Mac's live read-back as the other side.
