@@ -295,9 +295,15 @@ pub fn ensure_paragraph_wrapper(tspans: &mut Vec<Tspan>) -> Vec<usize> {
                 Some(i)
             } else { None })
         .collect();
+    // TSPAN.md invariants 6 and 7: a new tspan's id is strictly greater than
+    // every id in the Text. The default tspan's id is 0, which the first body
+    // tspan already holds, so each new wrapper takes `max + 1` instead.
+    let fresh = |ts: &[Tspan]| ts.iter().map(|t| t.id).max().map_or(0, |m| m + 1);
     for &i in bad.iter().rev() {
+        let id = fresh(tspans);
         let src = &tspans[i];
         let new_wrapper = Tspan {
+            id,
             jas_role: Some("paragraph".into()),
             text_align: src.text_align.clone(),
             text_align_last: src.text_align_last.clone(),
@@ -338,6 +344,7 @@ pub fn ensure_paragraph_wrapper(tspans: &mut Vec<Tspan>) -> Vec<usize> {
         .collect();
     if !existing.is_empty() { return existing; }
     let wrapper = Tspan {
+        id: fresh(tspans),
         jas_role: Some("paragraph".into()),
         ..Tspan::default_tspan()
     };
@@ -922,6 +929,38 @@ mod tests {
         assert_eq!(tspans[1].jas_role, None, "the demoted tspan is still a wrapper");
         assert_eq!(tspans[1].text_align, None, "the demoted tspan kept an attribute");
         assert_eq!(tspans[1].jas_left_indent, None);
+    }
+
+    /// **A NEW WRAPPER TAKES A FRESH ID** (TSPAN.md invariants 6 and 7: ids are
+    /// unique within a Text, and a new id is strictly greater than every id in
+    /// it). The default tspan's id is 0, which the first body tspan already has,
+    /// so a wrapper built from it repeated the id. Ids are asserted pairwise
+    /// distinct and the new one above the old maximum, on bodies whose ids are
+    /// not 0..n, so a wrapper that copied any one body's id fails too.
+    #[test]
+    fn a_new_wrapper_takes_a_fresh_id_on_both_insert_paths() {
+        let with_id = |mut t: Tspan, id| { t.id = id; t };
+        // The prepend path.
+        let mut tspans = vec![with_id(body("hello"), 0), with_id(body("world"), 7)];
+        ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(tspans[0].id, 8, "the prepended wrapper's id is max + 1");
+        // The repair path: the demoted tspan keeps its id, the wrapper is fresh.
+        let mut bad = wrapper();
+        bad.content = "trapped".into();
+        let mut tspans = vec![with_id(bad, 3), with_id(body("tail"), 5)];
+        ensure_paragraph_wrapper(&mut tspans);
+        assert_eq!(tspans.iter().map(|t| t.id).collect::<Vec<_>>(), vec![6, 3, 5],
+            "the demoted tspan keeps its id and the new wrapper takes max + 1");
+        // Two corrupt wrappers: each new wrapper is fresh against the other.
+        let (mut a, mut b) = (wrapper(), wrapper());
+        a.content = "a".into();
+        b.content = "b".into();
+        let mut tspans = vec![with_id(a, 0), with_id(b, 1)];
+        ensure_paragraph_wrapper(&mut tspans);
+        let mut ids: Vec<_> = tspans.iter().map(|t| t.id).collect();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(ids.len(), tspans.len(), "ids repeat: {:?}", tspans.iter().map(|t| t.id).collect::<Vec<_>>());
     }
 
     /// An existing empty wrapper is used as-is — no repair, no second wrapper.

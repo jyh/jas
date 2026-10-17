@@ -2966,6 +2966,20 @@ class CanvasNSView: NSView {
     }
 
     override var isFlipped: Bool { true }
+
+    // A level-2 harness finds the canvas by its identifier (`jas_canvas`,
+    // set in `CanvasRepresentable`) and reads the view it has from its value,
+    // the line `FifoView.report` writes. The canvas is an accessibility element
+    // only under `--test-fifo`, so a normal launch's accessibility tree is
+    // unchanged.
+    override func isAccessibilityElement() -> Bool { FifoView.reportsToAccessibility }
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        FifoView.reportsToAccessibility ? .group : super.accessibilityRole()
+    }
+    override func accessibilityValue() -> Any? {
+        guard FifoView.reportsToAccessibility, let model = controller?.model else { return nil }
+        return FifoView.report(model)
+    }
     override var acceptsFirstResponder: Bool { true }
 
     /// Start a 265 ms timer that bumps `needsDisplay` while the active tool
@@ -4204,6 +4218,7 @@ struct CanvasRepresentable: NSViewRepresentable {
         // elements) OVER sibling views — seen live as the canvas obscuring
         // the dock panels. A canvas never legitimately draws outside itself.
         view.clipsToBounds = true
+        view.setAccessibilityIdentifier("jas_canvas")
         view.document = document
         view.controller = controller
         view.currentTool = currentTool

@@ -183,6 +183,11 @@ public struct PanelGroupView: View {
                         // of the body. Without this the slider's
                         // sibling number_input never refreshes after
                         // the user drags.
+                        // The body is one accessibility element CONTAINING its
+                        // widgets, identified by the panel content id: the id
+                        // the widget-tree pass emits and an input script's panel
+                        // step names (docs/TESTING.md section 6).
+                        SwiftUI.Group {
                         if let m = model {
                             PanelBodyObserver(
                                 model: m,
@@ -196,6 +201,9 @@ public struct PanelGroupView: View {
                             let ctx = buildPanelCtx(ws: ws, contentId: contentId)
                             YamlPanelBodyView(contentSpec: content, context: ctx, model: nil, panelId: contentId, theme: theme)
                         }
+                        }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier(contentId)
                     } else {
                         SwiftUI.Text(verbatim: panelLabel(kind))
                             .font(.system(size: 12))
@@ -398,14 +406,26 @@ public struct PanelGroupView: View {
             .padding(.vertical, 3)
             .background(SwiftUI.Color(nsColor: bg))
             .contentShape(Rectangle())
-            .onTapGesture {
-                // OP_LOG 3d-2: route through the shared layout-op runtime.
-                layoutApply(&workspaceLayout, opSetActivePanel(PanelAddr(
-                    group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
-                    panelIdx: pi
-                )))
-                workspaceLayout.saveIfNeeded()
-            }
+            .onTapGesture { selectTab(pi) }
+            // A tab is a Text (see above), so it is not a button to
+            // accessibility on its own. It gets the button trait, the press
+            // action a tap performs, and the identifier `<panel content
+            // id>_tab`, so a level-2 harness shows a panel the way a person
+            // does (docs/TESTING.md section 6), as the Windows hand does with
+            // the pane selector.
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier(panelKindToContentId(kind) + "_tab")
+            .accessibilityAction { selectTab(pi) }
+    }
+
+    private func selectTab(_ pi: Int) {
+        // OP_LOG 3d-2: route through the shared layout-op runtime.
+        layoutApply(&workspaceLayout, opSetActivePanel(PanelAddr(
+            group: GroupAddr(dockId: dockId, groupIdx: groupIdx),
+            panelIdx: pi
+        )))
+        workspaceLayout.saveIfNeeded()
     }
 
     private func chevronButton() -> some View {

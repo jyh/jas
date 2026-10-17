@@ -40,6 +40,8 @@ public extension WorkspaceState {
     /// Idempotent and best-effort: any I/O error is logged and
     /// swallowed (a failed session save shouldn't block app quit).
     func persistSession() {
+        // A `--test-fifo` launch is a harness, never the developer's session.
+        if TestHarness.isolatesSession() { return }
         let dir = Self.sessionDirectory
         do {
             try FileManager.default.createDirectory(
@@ -143,6 +145,8 @@ public extension WorkspaceState {
     @discardableResult
     func restoreSession() -> Int {
         sessionRestoreSkipped = []
+        // A `--test-fifo` launch is a harness, never the developer's session.
+        if TestHarness.isolatesSession() { return 0 }
         let dir = Self.sessionDirectory
         let indexURL = dir.appendingPathComponent("index.json")
         guard let data = try? Data(contentsOf: indexURL),

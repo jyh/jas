@@ -14,6 +14,9 @@ import JasLib
 //                                  lifecycle, via Model.requestTool — the
 //                                  same sink the keyboard / flyout toolbar
 //                                  selection uses)
+//     open <path>               -> File > Open's document, no dialog
+//     view <zoom> <offx> <offy> -> set the active canvas's view (level 2)
+//     read <path>               -> write the document's test JSON to path
 //     action <name> [json]      -> <name> with optional JSON params, run
 //                                  through the shared YAML effects pipeline
 //                                  (LayersPanel.dispatchYamlAction — the same
@@ -55,6 +58,8 @@ extension JasAppDelegate {
             return
         }
         testFifoFd = fd
+        // A harness reads the canvas's view back through accessibility.
+        FifoView.reportsToAccessibility = true
         testFifoBuffer = Data()
         // Read on the app's MAIN run loop: every command mutates the
         // tool / document, which must happen on the main thread.
@@ -143,6 +148,42 @@ extension JasAppDelegate {
             }
             guard let model = workspace?.activeModel else { return }
             FifoActionRouting.dispatch(name, model: model, params: params)
+        case "open":
+            // open <path>: File > Open's document without its dialog, so a
+            // level-2 harness can open a script's setup file (TESTING.md §6).
+            do {
+                workspace?.addCanvas(try FifoOpen.model(path: rest))
+            } catch {
+                NSLog("test-fifo: open REFUSED %@ (%@)", rest, "\(error)")
+            }
+        case "view":
+            // view <zoom> <offx> <offy>: set the active canvas's view, so a
+            // harness knows where a document point is on screen. `view 1 0 0`
+            // makes a document unit one canvas point. The canvas reports the
+            // view it then has in its accessibility value.
+            guard let v = FifoView.parse(rest) else {
+                NSLog("test-fifo: view REFUSED %@ (want three numbers, zoom > 0)", rest)
+                return
+            }
+            guard let model = workspace?.activeModel else {
+                NSLog("test-fifo: view REFUSED (no active canvas)")
+                return
+            }
+            v.apply(to: model)
+            NSLog("test-fifo: %@", FifoView.report(model))
+        case "read":
+            // read <path>: the active document's canonical test JSON, byte for
+            // byte, for a level-2 comparison (TESTING.md §6).
+            guard let model = workspace?.activeModel else {
+                NSLog("test-fifo: read REFUSED (no active canvas)")
+                return
+            }
+            do {
+                try FifoRead.write(model, to: rest)
+                NSLog("test-fifo: read wrote %@", rest)
+            } catch {
+                NSLog("test-fifo: read REFUSED %@ (%@)", rest, "\(error)")
+            }
         default:
             NSLog("test-fifo: unknown command %@", cmd)
         }

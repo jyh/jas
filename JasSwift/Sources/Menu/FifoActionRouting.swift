@@ -72,3 +72,90 @@ public enum FifoActionRouting {
         }
     }
 }
+
+// ── `view` and `open`: the level-2 harness's two needs (TESTING.md §6) ──
+// A level-2 harness on the Mac posts real pointer events at screen points, so
+// it must know where a document point is on screen. The canvas has pan and
+// zoom; the Windows shell has neither. `view 1 0 0` removes both, so a
+// document unit is one canvas point, and the canvas reports the view it has
+// (`report`) in its accessibility value, so the harness reads the mapping
+// back rather than trusting that the command took. `open <path>` opens a
+// script's setup file without File > Open's dialog. Both exist only behind
+// `--test-fifo`. The frozen Python app has neither; they are a level-2 need,
+// not a port of the reference.
+
+/// The view a `view <zoom> <offx> <offy>` command sets.
+public struct FifoView: Equatable {
+    public let zoom: Double
+    public let offsetX: Double
+    public let offsetY: Double
+
+    public init(zoom: Double, offsetX: Double, offsetY: Double) {
+        self.zoom = zoom
+        self.offsetX = offsetX
+        self.offsetY = offsetY
+    }
+
+    /// Exactly three numbers; the zoom positive and finite, the offsets
+    /// finite. Anything else is nil, so a typo never leaves the old view
+    /// standing while the harness believes it moved.
+    public static func parse(_ rest: String) -> FifoView? {
+        let f = rest.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+        guard f.count == 3,
+              let z = Double(f[0]), let x = Double(f[1]), let y = Double(f[2]),
+              z.isFinite, z > 0, x.isFinite, y.isFinite
+        else { return nil }
+        return FifoView(zoom: z, offsetX: x, offsetY: y)
+    }
+
+    /// The same bare field writes `doc.zoom.apply` makes (view state is
+    /// per-tab and not undoable).
+    public func apply(to model: Model) {
+        model.zoomLevel = zoom
+        model.viewOffsetX = offsetX
+        model.viewOffsetY = offsetY
+    }
+
+    /// The model's view as the command that would set it: `view z x y`.
+    public static func report(_ model: Model) -> String {
+        "view \(model.zoomLevel) \(model.viewOffsetX) \(model.viewOffsetY)"
+    }
+
+    /// Set by the app when `--test-fifo` is present, so the canvas reports
+    /// its view only to a harness and never to a screen reader.
+    nonisolated(unsafe) public static var reportsToAccessibility = false
+}
+
+/// `open <path>`: File > Open's document, without its dialog.
+public enum FifoOpen {
+    /// The model File > Open builds for this file: `documentForOpen` over
+    /// its text, with the path as the filename. Throws if it cannot be read.
+    public static func model(path: String) throws -> Model {
+        let svg = try String(contentsOfFile: path, encoding: .utf8)
+        return Model(document: documentForOpen(svg), filename: path)
+    }
+}
+
+/// `read <path>`: the active document's canonical test JSON, written to `path`
+/// byte for byte (atomically, replacing). The `jas://document` resource
+/// re-encodes the same JSON through JSONSerialization, which keeps the values
+/// and not the bytes; a level-2 comparison is of bytes, so it reads this.
+public enum FifoRead {
+    public static func write(_ model: Model, to path: String) throws {
+        try Data(documentToTestJson(model.document).utf8)
+            .write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+}
+
+/// What a `--test-fifo` launch changes beyond the FIFO itself.
+public enum TestHarness {
+    /// A harness launch neither restores nor saves the session
+    /// (`~/Library/Application Support/Jas/session`). A level-2 run launches
+    /// and quits the app once per script, so saving would overwrite the
+    /// developer's open tabs, and restoring would hand one script's edited
+    /// documents to the next. Read from the arguments, so launch order
+    /// cannot matter.
+    public static func isolatesSession(_ args: [String] = CommandLine.arguments) -> Bool {
+        args.contains("--test-fifo")
+    }
+}

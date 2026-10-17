@@ -1,0 +1,14 @@
+{
+  "item": "stroke.cap_butt",
+  "spec": "workspace/panels/stroke.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "stroke_panel_content", "widget": "stk_cap_butt", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "stroke.cap_butt.expected.json"
+}

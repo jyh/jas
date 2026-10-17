@@ -32,6 +32,7 @@ shortcuts. With another Chrome already open, prefer a focus-click over
 `activate` (the AppleScript target is ambiguous across Chrome instances).
 
 Verbs:
+  script FILE...   (level 2: an input script through the live app; see below)
   geom | activate | clearmods | shot PATH | click FX FY | key CHAR [MODS]
   drag FX1 FY1 FX2 FY2 [MODS] | dragbegin FX1 FY1 FX2 FY2 | dragend FX FY
   dragpath FX1 FY1 FX2 FY2 ...        (continuous drag through N waypoints)
@@ -232,6 +233,285 @@ def do_presshold(fx, fy, ms=400):
 def do_shot(path):
     subprocess.run(f"screencapture -o -l{WIN['id']} {path}", shell=True)
 
+# ── `script FILE...`: level 2 on the Mac (docs/TESTING.md section 6) ──────
+# Drives an input script through the LIVE app and compares the read-back with
+# the script's level-1 expected file, byte for byte. Every decision (the act
+# list, the refusals, the document -> screen mapping, the open's artboard) is
+# made by scripts/mac_l2_plan.py, which self-tests without a window; this part
+# only posts events and walks the accessibility tree.
+#   Launch:  (cd JasSwift && swift run Jas --title JasHarness --test-fifo /tmp/jas.fifo)
+#   Run:     JAS_TITLE=JasHarness JAS_FIFO=/tmp/jas.fifo python3 jas_gui_harness.py script test_fixtures/input_scripts/*.json
+#   Or set JAS_APP=<path to the built Jas binary> and skip the launch: the
+#   driver then starts a FRESH app per script, as level 1 starts each script
+#   from a fresh store. Without it, scripts run in ONE app, and opening a file
+#   that is already open FOCUSES its tab, edits and all (File > Open's rule,
+#   `WorkspaceState.addCanvas`), so scripts sharing a setup file share a document.
+# A script's `ctrl` is the engine's command modifier, which a person presses
+# as Cmd on the Mac, so it is posted as Cmd.
+import json as _json
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
+
+def _ax():
+    import ApplicationServices as AX
+    return AX
+
+def _attr(el, name):
+    AX = _ax()
+    err, v = AX.AXUIElementCopyAttributeValue(el, name, None)
+    return v if err == 0 else None
+
+def _children(el):
+    return list(_attr(el, "AXChildren") or [])
+
+def _find_all(root, pred, limit=40000):
+    out, stack, seen = [], [root], 0
+    while stack and seen < limit:
+        el = stack.pop(); seen += 1
+        if pred(el): out.append(el)
+        stack.extend(_children(el))
+    return out
+
+def _by_id(root, ident):
+    return _find_all(root, lambda e: _attr(e, "AXIdentifier") == ident)
+
+def _app_element():
+    win = find_window()
+    if not win:
+        raise _plan.Refused(f"no window titled {TITLE!r}")
+    wl = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID)
+    for w in wl:
+        if w.get(Quartz.kCGWindowNumber) == win["id"]:
+            return _ax().AXUIElementCreateApplication(w[Quartz.kCGWindowOwnerPID])
+    raise _plan.Refused("the harness window has no owning process")
+
+def _launch():
+    """With JAS_APP set, each script gets a FRESH app, as each port's level-1
+    runner starts each script from a fresh store. Returns the process."""
+    fifo = os.environ["JAS_FIFO"]
+    log = fifo + ".log"
+    if os.path.exists(fifo):
+        os.remove(fifo)
+    proc = subprocess.Popen([os.environ["JAS_APP"], "--title", TITLE, "--test-fifo", fifo],
+                            stdout=open(log, "w", encoding="utf-8", newline=""), stderr=subprocess.STDOUT)
+    for _ in range(100):
+        if os.path.exists(fifo) and find_window():
+            break
+        time.sleep(0.1)
+    else:
+        proc.terminate()
+        raise _plan.Refused("the app did not open its FIFO and window within 10 s")
+    subprocess.run(["osascript", "-e", f'tell application "System Events" to set frontmost of (first process whose unix id is {proc.pid}) to true'])
+    time.sleep(0.5)
+    return proc
+
+def _fifo(cmd):
+    with open(os.environ["JAS_FIFO"], "w", encoding="utf-8", newline="") as f:
+        f.write(cmd + "\n")
+
+def _press(el):
+    if _ax().AXUIElementPerformAction(el, "AXPress") != 0:
+        raise _plan.Refused(f"AXPress failed on {_attr(el, 'AXRole')} {_attr(el, 'AXIdentifier')!r}")
+
+def _menu_item(app, path):
+    bar = _attr(app, "AXMenuBar")
+    level = [c for c in _children(bar)] if bar else []
+    el = None
+    for depth, title in enumerate(path):
+        hits = [c for c in level if _plan.live_title(_attr(c, "AXTitle")) == title]
+        if len(hits) != 1:
+            raise _plan.Refused(f"menu path {path}: {len(hits)} items titled {title!r} at depth {depth}")
+        el = hits[0]
+        kids = _children(el)
+        level = _children(kids[0]) if kids and _attr(kids[0], "AXRole") == "AXMenu" else kids
+    return el
+
+def _canvas(app):
+    hits = _by_id(app, "jas_canvas")
+    if len(hits) != 1:
+        raise _plan.Refused(f"{len(hits)} canvases carry AXIdentifier jas_canvas; the run needs exactly one")
+    c = hits[0]
+    view = _plan.parse_view_report(_attr(c, "AXValue"))
+    pos, size = _attr(c, "AXPosition"), _attr(c, "AXSize")
+    if view is None or pos is None:
+        raise _plan.Refused(f"the canvas does not report its view ({_attr(c, 'AXValue')!r}); was the app launched with --test-fifo?")
+    import ApplicationServices as AX
+    ok, p = AX.AXValueGetValue(pos, AX.kAXValueCGPointType, None)
+    return view, (p.x, p.y)
+
+TEXT_ROLES = ("AXTextField", "AXComboBox", "AXTextArea")
+TYPE_DELAY_S = float(os.environ.get("JAS_TYPE_DELAY", "0.25"))  # between typed characters
+KEYNAME = {"Delete": "delete", "Backspace": "delete", "Escape": "escape", "Enter": "return"}
+
+def _run_script(path, menubar):
+    with open(path, encoding="utf-8") as f:
+        script = _json.load(f)
+    acts = _plan.plan(script, menubar, _plan.load_spec(script))
+    repo = os.path.dirname(os.path.abspath(__file__))
+    want = open(os.path.join(os.path.dirname(path), script["expected_json"]), encoding="utf-8").read().strip()
+    app = _app_element()
+    view = origin = None
+    for act in acts:
+        k = act[0]
+        if k == "open":
+            _fifo("open " + os.path.join(repo, "test_fixtures", "svg", act[1])); time.sleep(1.2)
+            _fifo("view 1 0 0"); time.sleep(0.4)
+            view, origin = _canvas(app)
+            if view != (1.0, 0.0, 0.0):
+                raise _plan.Refused(f"the canvas reports view {view} after `view 1 0 0`")
+        elif k == "tool":
+            _fifo("tool " + act[1]); time.sleep(0.3)
+        elif k in ("pointer", "key") and not _front_is_jas():
+            raise _plan.Refused("Jas is not the frontmost app; a real event would land elsewhere")
+        elif k == "pointer":
+            _, kind, x, y, dragging, mods = act
+            sx, sy = _plan.doc_to_screen(view, origin, x, y)
+            f = flags(mods)
+            if kind == "press":
+                mouse(Quartz.kCGEventMouseMoved, sx, sy, f); mouse(Quartz.kCGEventLeftMouseDown, sx, sy, f)
+            elif kind == "move":
+                mouse(Quartz.kCGEventLeftMouseDragged if dragging else Quartz.kCGEventMouseMoved, sx, sy, f)
+            else:
+                mouse(Quartz.kCGEventLeftMouseUp, sx, sy, f)
+            time.sleep(0.05)
+        elif k == "key":
+            _, key, mods = act
+            ch = KEYNAME.get(key, key.lower())
+            if ch not in KEYCODE:
+                raise _plan.Refused(f"key {key!r} has no keycode in this harness")
+            do_key(ch, ["cmd" if m == "ctrl" else m for m in mods]); time.sleep(0.2)
+        elif k == "panel":
+            _, pid, tab, wpath, widget, event, value, label = act
+            panels = _by_id(app, pid)
+            if not panels:
+                # Show it as a person does: its dock tab, or, for a panel in no
+                # dock group, its Window menu item.
+                tabs = _by_id(app, tab)
+                if len(tabs) > 1:
+                    raise _plan.Refused(f"{len(tabs)} dock tabs carry AXIdentifier {tab!r}")
+                if tabs:
+                    _press(tabs[0])
+                elif wpath:
+                    _press(_menu_item(app, wpath))
+                else:
+                    raise _plan.Refused(f"panel {pid!r} has no dock tab and no unique Window item")
+                time.sleep(0.6)
+                panels = _by_id(app, pid)
+            if len(panels) != 1:
+                raise _plan.Refused(f"{len(panels)} panels carry AXIdentifier {pid!r}")
+            ws = _by_id(panels[0], widget)
+            if len(ws) != 1:
+                raise _plan.Refused(f"{len(ws)} widgets carry AXIdentifier {widget!r} in {pid!r}")
+            w = ws[0]
+            if _attr(w, "AXEnabled") is False:
+                raise _plan.Refused(f"widget {widget!r} is disabled")
+            if event == "click":
+                _press(w)
+            elif label is not None:
+                # A select: open its popup and choose the item a person reads.
+                _press(w); time.sleep(0.4)
+                items = [m for m in _find_all(w, lambda e: _attr(e, "AXRole") == "AXMenuItem")
+                         if _plan.live_title(_attr(m, "AXTitle")) == label]
+                if len(items) != 1:
+                    do_key("escape", [])
+                    raise _plan.Refused(f"select {widget!r}: {len(items)} items titled {label!r}")
+                _press(items[0])
+            else:
+                # Type the text as a person does. Setting AXValue on a SwiftUI
+                # text field does not reach its binding, so Return committed
+                # the old text. The field is the widget or its one text-field
+                # descendant (a length input wraps one).
+                fields = [w] if _attr(w, "AXRole") in TEXT_ROLES else \
+                    _find_all(w, lambda e: _attr(e, "AXRole") in TEXT_ROLES)
+                if len(fields) != 1:
+                    raise _plan.Refused(f"widget {widget!r} holds {len(fields)} text fields; a commit needs one")
+                text = str(value)
+                bad = [c for c in text if c not in KEYCODE]
+                if bad:
+                    raise _plan.Refused(f"commit text {text!r} has characters this harness cannot type: {bad}")
+                _ax().AXUIElementSetAttributeValue(fields[0], "AXFocused", True); time.sleep(0.2)
+                do_key("a", ["cmd"]); time.sleep(0.1)
+                for c in text:
+                    do_key(c, []); time.sleep(TYPE_DELAY_S)
+                do_key("return", [])
+            time.sleep(0.3)
+        elif k == "menu":
+            _press(_menu_item(app, act[1])); time.sleep(0.4)
+        elif k == "read":
+            out = os.path.join(os.environ.get("TMPDIR", "/tmp"), "jas-l2-read.json")
+            if os.path.exists(out): os.remove(out)
+            _fifo("read " + out)
+            for _ in range(30):
+                if os.path.exists(out): break
+                time.sleep(0.1)
+            else:
+                raise _plan.Refused("the app wrote no read-back (is --test-fifo the same path as JAS_FIFO?)")
+            got = open(out, encoding="utf-8").read().strip()
+            got = _plan.set_aside_the_opens_artboard(got, want)
+            return got == want, got, want
+
+IDLE_FLOOR_S = 120  # a person's input this recent means the console is in use
+
+def _lastpost_file():
+    return os.environ["JAS_FIFO"] + ".lastpost"
+
+def _console_in_use():
+    # Real Quartz events go to whatever is under the pointer, so the driver
+    # never runs while a person is using the console. The HID idle clock also
+    # counts this driver's own events, so input is a person's only if it came
+    # after the driver's last post (recorded at the end of every run).
+    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType)
+    try:
+        since_mine = time.time() - float(open(_lastpost_file(), encoding="utf-8").read())
+    except (OSError, ValueError):
+        since_mine = None
+    if since_mine is not None and idle >= since_mine - 1.0:
+        return False, idle  # the last input was the driver's own
+    return idle < IDLE_FLOOR_S, idle
+
+def _front_is_jas():
+    from AppKit import NSWorkspace
+    app = NSWorkspace.sharedWorkspace().frontmostApplication()
+    return app is not None and app.localizedName() == PROC
+
+def do_script(paths):
+    global _plan
+    import mac_l2_plan as _plan
+    busy, idle = _console_in_use()
+    if busy:
+        print(f"REFUSED: the console saw input {idle:.0f} s ago (floor {IDLE_FLOOR_S} s); a person may be using it")
+        return 3
+    menubar = _plan.load_menubar()
+    bad = 0
+    for p in paths:
+        name = os.path.basename(p)
+        proc = None
+        clear_mods()  # a flag-carrying event leaks its modifier into the next script
+        try:
+            if os.environ.get("JAS_APP"):
+                proc = _launch()
+            ok, got, want = _run_script(p, menubar)
+            print(("PASS " if ok else "FAIL ") + name)
+            if not ok:
+                bad += 1
+                print("  got  ", got); print("  want ", want)
+        except _plan.Refused as e:
+            bad += 1
+            print("REFUSED " + name + ": " + str(e))
+        finally:
+            clear_mods()
+            if proc is not None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                time.sleep(0.3)
+    with open(_lastpost_file(), "w", encoding="utf-8", newline="") as f:
+        f.write(str(time.time()))
+    print(f"{len(paths) - bad} of {len(paths)} scripts passed")
+    return 1 if bad else 0
+
 if __name__=="__main__":
     v=sys.argv[1]
     if v=="activate":
@@ -244,6 +524,9 @@ if __name__=="__main__":
         print("activated"); sys.exit(0)
     if v=="clearmods":
         clear_mods(); print("mods cleared"); sys.exit(0)
+    if v=="script":
+        paths=[a for a in sys.argv[2:] if not a.endswith(".expected.json")]
+        sys.exit(do_script(paths))
     if not WIN: print("WINDOW NOT FOUND"); sys.exit(1)
     if v=="geom": print(WIN)
     elif v=="shot": do_shot(sys.argv[2]); print("shot",sys.argv[2])
