@@ -1200,6 +1200,93 @@ internal static class ActWire
     /// <summary>After Save All's save: `close` only if it wrote the file, else `keep`.</summary>
     internal static string AfterSaveAll(bool saved) => saved ? "close" : "keep";
 
+    /// <summary>
+    /// jas §364 (plan § 5 slice 8): `"clipboard_write": <text> | null`, in every
+    /// act reply. Copy and Cut carry it; the shell puts the string on the system
+    /// clipboard as plain text, UNCHANGED, and never parses it. Null when the
+    /// reply names none, an older engine sent no key, the value is not a
+    /// string, or the bytes are unreadable. An empty string is a string.
+    /// </summary>
+    internal static string? ClipboardWrite(string reply)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(reply);
+            return doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                   && doc.RootElement.TryGetProperty("clipboard_write", out var t)
+                   && t.ValueKind == System.Text.Json.JsonValueKind.String
+                ? t.GetString()
+                : null;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A paste sent with no `clipboard` field is refused with nothing run, and
+    /// the error channel reads `{"panel_event":"NeedsClipboard","detail":
+    /// "<action>"}`. The action it names (empty when it names none), or null
+    /// for any other channel, a clear one, or unreadable bytes.
+    /// </summary>
+    internal static string? NeedsClipboard(string channel)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(channel);
+            var root = doc.RootElement;
+            if (root.ValueKind != System.Text.Json.JsonValueKind.Object
+                || !root.TryGetProperty("panel_event", out var e)
+                || e.ValueKind != System.Text.Json.JsonValueKind.String
+                || e.GetString() != "NeedsClipboard")
+            {
+                return null;
+            }
+            return root.TryGetProperty("detail", out var d) && d.ValueKind == System.Text.Json.JsonValueKind.String
+                ? d.GetString()
+                : "";
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The resend: THE SAME request object, with `"clipboard"` set to the
+    /// clipboard's text, or a JSON null when it holds no text or the read
+    /// threw. A `clipboard` already there is replaced, never written twice.
+    /// </summary>
+    internal static string WithClipboard(string request, string? text)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(request);
+        using var buffer = new System.IO.MemoryStream();
+        using (var w = new System.Text.Json.Utf8JsonWriter(buffer, new System.Text.Json.JsonWriterOptions
+               { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        {
+            w.WriteStartObject();
+            foreach (var p in doc.RootElement.EnumerateObject())
+            {
+                if (p.NameEquals("clipboard")) { continue; }
+                p.WriteTo(w);
+            }
+            if (text is null) { w.WriteNull("clipboard"); }
+            else { w.WriteString("clipboard", text); }
+            w.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
+
+    /// <summary>
+    /// What a refusal asks of the shell. `read`: it was refused for the
+    /// clipboard, so read it and resend. `refused-again`: the request already
+    /// carried it and was refused for it again, a failure, never a second
+    /// retry. `none`: any other refusal.
+    /// </summary>
+    internal static string ClipboardStep(string? needs, bool carried) =>
+        needs is null ? "none" : carried ? "refused-again" : "read";
+
     /// <summary>Whether a reply names <paramref name="key"/> as a JSON `true`.</summary>
     private static bool NamedTrue(string reply, string key)
     {
