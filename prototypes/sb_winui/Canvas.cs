@@ -1630,6 +1630,10 @@ internal sealed unsafe class Canvas : IDisposable
                     if (p.Kind == JasCore.PointerRelease)
                     {
                         _panelStale = true;
+                        // jas §368: enablement follows the state a gesture
+                        // changes (a selection makes Copy available), so the
+                        // menu is re-read after every act, not only a menu one.
+                        ApplyMenuRefresh("pointer");
                         if (ProbePath is not null) { _probePending = true; }
                     }
                     break;
@@ -1645,6 +1649,10 @@ internal sealed unsafe class Canvas : IDisposable
                     cause = "key";
                     // A shortcut may have switched the tool, so an open panel is re-read.
                     _panelStale = true;
+                    // jas §368: and the menu, whose enablement a key changes as
+                    // surely as a menu item does. A deferred paste refreshes on
+                    // its resend.
+                    if (!keyDeferred) { ApplyMenuRefresh("key"); }
                     // SB_PROBE: a key lands on the document as a release does
                     // (shortcut.delete, shortcut.undo), so it is read the same way.
                     if (ProbePath is not null && !keyDeferred) { _probePending = true; }
