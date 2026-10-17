@@ -1,0 +1,14 @@
+{
+  "item": "opacity.opacity",
+  "spec": "workspace/panels/opacity.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "opacity_panel_content", "widget": "op_opacity", "event": "commit", "value": "50"},
+    {"read": "document"}
+  ],
+  "expected_json": "opacity.opacity.expected.json"
+}
