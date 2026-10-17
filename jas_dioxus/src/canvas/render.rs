@@ -2328,6 +2328,16 @@ fn draw_element_body(
                 draw_element_scaled(ctx, target, child, effective, precision, elem_scale);
             }
         }
+        // ⭐ THE LIVE TRANSFORM OPERATION (council 2026-10-16, ruling 4) draws
+        // through the seam, the renderer of record, so the web walk and the
+        // native walk cannot disagree about Scale Strokes. The context already
+        // carries the wrapper's own transform and alpha.
+        // ⚠️ LIMIT: the child is drawn by the seam's stroke model, which does
+        // not counter-scale against an ANCESTOR's transform as this walk does.
+        Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) => {
+            let mut painter = crate::painter::canvas2d::Canvas2dPainter::new(ctx);
+            crate::painter::element_render::emit_transformed(&mut painter, t, base_alpha, effective);
+        }
         Element::Live(v) => {
             // Evaluate the live element, resolving references against the
             // render-scoped index. The cycle guard is a fresh local per
@@ -2363,6 +2373,12 @@ fn draw_element_body(
                     ge.evaluate_with(precision, &RenderResolver, &mut visiting),
                     ge.fill.clone(),
                     ge.stroke.clone(),
+                ),
+                // Drawn by the arm above; here only so the match is total.
+                crate::geometry::live::LiveVariant::Transformed(t) => (
+                    t.evaluate_with(precision, &RenderResolver, &mut visiting),
+                    None,
+                    None,
                 ),
             };
             let (mut fill_op, mut stroke_op, mut stroke_align) =
@@ -2660,6 +2676,8 @@ fn trace_element_path(ctx: &CanvasRenderingContext2d, elem: &Element) {
                 crate::geometry::live::LiveVariant::Recorded(rec) => rec.evaluate_with(
                     crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
                 crate::geometry::live::LiveVariant::Generated(ge) => ge.evaluate_with(
+                    crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
+                crate::geometry::live::LiveVariant::Transformed(t) => t.evaluate_with(
                     crate::geometry::live::DEFAULT_PRECISION, &RenderResolver, &mut visiting),
             };
             for ring in &ps {

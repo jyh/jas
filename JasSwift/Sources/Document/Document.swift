@@ -428,6 +428,8 @@ public struct Document: Equatable {
             case .live(let variant):
                 switch variant {
                 case .compoundShape(let cs): for operand in cs.operands { walk(operand) }
+                // The wrapped child is owned and keeps its own id.
+                case .transformed(let t): walk(t.child)
                 case .reference, .recorded, .generated: break
                 }
             default: break

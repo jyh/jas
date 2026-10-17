@@ -1150,6 +1150,8 @@ private func packElementBase(_ elem: Element) -> MsgValue {
             let paramsJson = canonicalRecordedValue(gen.params)
             return .array([vint(tagLive)] + common +
                           [vstr("generated"), vstr(gen.conceptId), vstr(paramsJson)])
+        case .transformed(let t):
+            return packTransformed(t)
         }
     }
 }
@@ -1314,6 +1316,44 @@ private func containerFlagSlots(_ arr: [MsgValue], _ tag: Int)
         return b
     }
     return (flag(extIsolatedBlending), flag(extKnockoutGroup))
+}
+
+/// [tag, common(1..6), kind(7), child(8), [matrix, scale_strokes](9)].
+/// ⛔ tagLive's base arity is ONE number for every live kind, and the common
+/// extension starts right after it, so the operation's two fields share slot
+/// 9. Mirrors jas_dioxus. Non-inlined for the reason on `unpackTransformed`
+/// (the encoder recurses per element too).
+@inline(never)
+private func packTransformed(_ t: TransformedElem) -> MsgValue {
+    let common = packCommon(locked: t.locked, opacity: t.opacity,
+                            visibility: t.visibility, transform: t.transform,
+                            name: t.name, id: t.id)
+    return .array([vint(tagLive)] + common +
+                  [vstr("transformed"), packElement(t.child),
+                   .array([packTransform(t.matrix), vbool(t.scaleStrokes)])])
+}
+
+/// The `transformed` live kind's own slots: [child(8), [matrix, scale_strokes](9)].
+///
+/// ⛔ A SEPARATE, NON-INLINED FUNCTION ON PURPOSE: `unpackElement` recurses
+/// once per nested element and its debug frame is already large (a 15-deep
+/// chain overflows a swift-testing thread; see `aNestedRealDocumentStillRoundTrips`).
+/// Decoding this kind inline grew that frame enough to overflow at 10 (measured:
+/// even a `var` of the struct and two tuple assignments in that case did), so the
+/// case is ONE call and every local lives here, outside the recursive frame.
+@inline(never)
+private func unpackTransformed(_ arr: [MsgValue], name: String?, id: String?, transform: Transform?,
+                               opacity: Double, locked: Bool, visibility: Visibility,
+                               blendMode: BlendMode, mask: Mask?) throws -> Element {
+    let child = try unpackElement(at(arr, 8))
+    let op = try asArray(at(arr, 9))
+    guard let matrix = try unpackTransform(at(op, 0)) else {
+        throw BinaryError.invalidData("transformed: no matrix")
+    }
+    return .live(.transformed(TransformedElem(
+        child: child, matrix: matrix, scaleStrokes: try asBool(at(op, 1)),
+        name: name, id: id, transform: transform, opacity: opacity,
+        locked: locked, visibility: visibility, blendMode: blendMode, mask: mask)))
 }
 
 private func unpackElement(_ v: MsgValue) throws -> Element {
@@ -1535,6 +1575,9 @@ private func unpackElement(_ v: MsgValue) throws -> Element {
                 transform: xform, opacity: opacity,
                 locked: locked, visibility: vis,
                 blendMode: mode, mask: mask)))
+        case "transformed":
+            return try unpackTransformed(arr, name: name, id: id, transform: xform, opacity: opacity,
+                                         locked: locked, visibility: vis, blendMode: mode, mask: mask)
         default: throw BinaryError.invalidData("unknown live kind: \(kind)")
         }
     default:

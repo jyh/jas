@@ -3089,3 +3089,206 @@ fn an_anchored_flat_run_starts_at_its_anchored_left() {
     assert_eq!(xs.len(), 1, "{:?}", rec.commands());
     assert!((xs[0] - (100.0 - w / 2.0)).abs() < 1e-9, "origin {} != {}", xs[0], 100.0 - w / 2.0);
 }
+
+// ---------------------------------------------------------------------------
+// The live scale operation: `Transformed { child, matrix, scale_strokes }`
+// (council 2026-10-16, ruling 4; route 4)
+// ---------------------------------------------------------------------------
+
+/// Every stroked EDGE in the display list, in DEVICE space, as
+/// `(drawn_thickness, (x0, y0), (x1, y1))`.
+///
+/// The thickness is the width as drawn across the edge under the CTM: for a
+/// linear map M and an edge of unit direction u, a stroke of width w draws
+/// `w * |det M| / |M u|` thick. That is exact for a non-uniform scale, where
+/// `w * sqrt|det M|` (the uniform rule) is not: under 2 x 3 a horizontal edge
+/// is drawn 3 times thicker and a vertical one 2 times.
+///
+/// Only straight edges are measured; a curve in a stroked path PANICS, so a
+/// case that grows one cannot pass by being skipped.
+fn drawn_edges(cmds: &[Command]) -> Vec<(f64, (f64, f64), (f64, f64))> {
+    let mut stack = vec![Transform::IDENTITY];
+    let mut out = vec![];
+    let mut edge = |m: &Transform, w: f64, a: (f64, f64), b: (f64, f64), out: &mut Vec<_>| {
+        let (ux, uy) = (b.0 - a.0, b.1 - a.1);
+        let len = (ux * ux + uy * uy).sqrt();
+        if len == 0.0 {
+            return;
+        }
+        let (mx, my) = (m.a * ux / len + m.c * uy / len, m.b * ux / len + m.d * uy / len);
+        let det = (m.a * m.d - m.b * m.c).abs();
+        out.push((w * det / (mx * mx + my * my).sqrt(), m.apply_point(a.0, a.1), m.apply_point(b.0, b.1)));
+    };
+    for c in cmds {
+        match c {
+            Command::PushState { transform } => {
+                let top = *stack.last().unwrap();
+                stack.push(top.multiply(transform));
+            }
+            Command::PopState => {
+                stack.pop();
+            }
+            Command::StrokeRect { rect, stroke, .. } => {
+                let m = *stack.last().unwrap();
+                let (x0, y0, x1, y1) = (rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+                for (a, b) in [((x0, y0), (x1, y0)), ((x1, y0), (x1, y1)), ((x1, y1), (x0, y1)), ((x0, y1), (x0, y0))] {
+                    edge(&m, stroke.width, a, b, &mut out);
+                }
+            }
+            Command::StrokePath { path, stroke, .. } => {
+                let m = *stack.last().unwrap();
+                let (mut start, mut cur) = ((0.0, 0.0), (0.0, 0.0));
+                for pc in path {
+                    match *pc {
+                        PathCommand::MoveTo { x, y } => {
+                            start = (x, y);
+                            cur = (x, y);
+                        }
+                        PathCommand::LineTo { x, y } => {
+                            edge(&m, stroke.width, cur, (x, y), &mut out);
+                            cur = (x, y);
+                        }
+                        PathCommand::ClosePath => {
+                            edge(&m, stroke.width, cur, start, &mut out);
+                            cur = start;
+                        }
+                        ref other => panic!("drawn_edges measures straight edges only, got {other:?}"),
+                    }
+                }
+            }
+            Command::StrokeEllipseArc { .. } => panic!("drawn_edges cannot measure an ellipse"),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// His arm (council 2026-10-16, ruling 4): a 200 % x 300 % scale of a 1 pt
+/// rectangle. Scale Strokes OFF: "the stroke should stay 1pt", on all four
+/// edges. ON: "identical to converting the stroke to outlines, then scaling",
+/// so the vertical edges draw 2 pt and the horizontal ones 3 pt.
+///
+/// ⛔ THE WIDTHS ALONE CANNOT TELL OFF FROM "THE MATRIX WAS DROPPED": an
+/// unscaled 1 pt rect also reads 1 pt on every edge. So both cases also assert
+/// WHERE the edges are drawn: the 10 x 10 rect at the origin must land on
+/// 0..20 x 0..30 in device space.
+#[test]
+fn a_transformed_rect_draws_its_stroke_by_scale_strokes() {
+    use crate::geometry::live::{LiveVariant, TransformedElem};
+    let rect = Element::Rect(RectElem {
+        x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: None,
+        stroke: Some(stroke(Color::rgb(0.0, 0.0, 0.0), 1.0)),
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    let mut wrong = vec![];
+    for (scale_strokes, want) in [(false, [1.0, 1.0, 1.0, 1.0]), (true, [2.0, 2.0, 3.0, 3.0])] {
+        let elem = Element::Live(LiveVariant::Transformed(TransformedElem::new(
+            Rc::new(rect.clone()),
+            Transform::scale(2.0, 3.0),
+            scale_strokes,
+        )));
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, &elem, 1.0);
+        let edges = drawn_edges(rec.commands());
+        let mut widths: Vec<f64> = edges.iter().map(|e| e.0).collect();
+        widths.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut xs = vec![];
+        let mut ys = vec![];
+        for (_, a, b) in &edges {
+            xs.extend([a.0, b.0]);
+            ys.extend([a.1, b.1]);
+        }
+        let fold = |v: &[f64], f: fn(f64, f64) -> f64, z: f64| v.iter().copied().fold(z, f);
+        let bbox = (
+            fold(&xs, f64::min, f64::INFINITY), fold(&ys, f64::min, f64::INFINITY),
+            fold(&xs, f64::max, f64::NEG_INFINITY), fold(&ys, f64::max, f64::NEG_INFINITY),
+        );
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let widths_ok = widths.len() == 4 && widths.iter().zip(want).all(|(g, w)| near(*g, w));
+        let bbox_ok = near(bbox.0, 0.0) && near(bbox.1, 0.0) && near(bbox.2, 20.0) && near(bbox.3, 30.0);
+        if !widths_ok || !bbox_ok {
+            wrong.push(format!(
+                "scale_strokes={scale_strokes}: widths {widths:?} (want {want:?}), drawn over {bbox:?} (want (0, 0, 20, 30))"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "a 200 % x 300 % Transformed 1 pt rect: {wrong:?}");
+}
+
+/// An ellipse's image under an affine map is an ellipse, and
+/// `map_ellipse_arc` must produce THAT ellipse: every point of the original,
+/// mapped, must be the mapped arc's point at the mapped angle. Driven over a
+/// non-uniform scale, a rotation of one, a shear, and a MIRROR (which negates
+/// the angles and flips the sweep).
+#[test]
+fn a_mapped_ellipse_arc_is_the_image_of_the_arc() {
+    use crate::painter::EllipseArc;
+    let arc = EllipseArc { cx: 3.0, cy: -1.0, rx: 5.0, ry: 2.0, rotation: 0.3, start: 0.2, end: 2.5, ccw: false };
+    let at = |a: &EllipseArc, t: f64| {
+        let (x, y) = (a.rx * t.cos(), a.ry * t.sin());
+        let (c, s) = (a.rotation.cos(), a.rotation.sin());
+        (a.cx + c * x - s * y, a.cy + s * x + c * y)
+    };
+    let mats = [
+        ("scale 2x3", Transform::scale(2.0, 3.0)),
+        ("rotate*scale", Transform::rotate(30.0).multiply(&Transform::scale(2.0, 0.5))),
+        ("shear", Transform::shear(0.4, 0.1).translated(7.0, -2.0)),
+        ("mirror", Transform::scale(-1.0, 2.0)),
+    ];
+    let mut wrong = vec![];
+    for (name, m) in mats {
+        let mapped = super::map_ellipse_arc(&m, &arc);
+        let mirrored = (m.a * m.d - m.b * m.c) < 0.0;
+        if mapped.ccw != (arc.ccw != mirrored) {
+            wrong.push(format!("{name}: sweep {} (mirrored={mirrored})", mapped.ccw));
+        }
+        // Sample the arc's span through its own parameter. The mapped angle
+        // runs from mapped.start in the mapped sweep direction.
+        for k in 0..=8 {
+            let f = k as f64 / 8.0;
+            let t = arc.start + f * (arc.end - arc.start);
+            let tm = mapped.start + f * (mapped.end - mapped.start);
+            let want = { let (x, y) = at(&arc, t); m.apply_point(x, y) };
+            let got = at(&mapped, tm);
+            if (want.0 - got.0).abs() > 1e-9 || (want.1 - got.1).abs() > 1e-9 {
+                wrong.push(format!("{name} at f={f}: want {want:?} got {got:?}"));
+                break;
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:?}");
+}
+
+/// The stack order decides the case (council 2026-10-16, ruling 4): a scale
+/// with strokes OFF, then a scale with strokes ON, is the OFF result scaled
+/// with its stroke. 1 pt under OFF 2 x 3 stays 1 pt; the ON 2 x 2 above it
+/// doubles that on every edge, and the geometry lands on 0..40 x 0..60.
+#[test]
+fn an_off_wrapper_inside_an_on_wrapper_scales_the_kept_stroke() {
+    use crate::geometry::live::{LiveVariant, TransformedElem};
+    let rect = Element::Rect(RectElem {
+        x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: None,
+        stroke: Some(stroke(Color::rgb(0.0, 0.0, 0.0), 1.0)),
+        common: common(),
+        fill_gradient: None,
+        stroke_gradient: None,
+    });
+    let off = Element::Live(LiveVariant::Transformed(TransformedElem::new(
+        Rc::new(rect), Transform::scale(2.0, 3.0), false)));
+    let on = Element::Live(LiveVariant::Transformed(TransformedElem::new(
+        Rc::new(off), Transform::scale(2.0, 2.0), true)));
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &on, 1.0);
+    let edges = drawn_edges(rec.commands());
+    let widths: Vec<f64> = edges.iter().map(|e| e.0).collect();
+    let xs: Vec<f64> = edges.iter().flat_map(|e| [e.1 .0, e.2 .0]).collect();
+    let ys: Vec<f64> = edges.iter().flat_map(|e| [e.1 .1, e.2 .1]).collect();
+    let max = |v: &[f64]| v.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    assert_eq!(widths.len(), 4, "{:?}", rec.commands());
+    assert!(widths.iter().all(|w| (w - 2.0).abs() < 1e-9), "widths {widths:?}, want 2 on every edge");
+    assert!((max(&xs) - 40.0).abs() < 1e-9 && (max(&ys) - 60.0).abs() < 1e-9, "drawn to ({}, {})", max(&xs), max(&ys));
+}

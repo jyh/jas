@@ -487,14 +487,15 @@ pub fn segments_of_element_with(
                 segs
             }
             // Unreachable from `segments_of_element_with`: `resolved_rings`
-            // takes these three first, whatever the resolver. Reached only
+            // takes these four first, whatever the resolver. Reached only
             // through the resolver-less verb, where empty is the right answer
             // (see the module header) — and left as an explicit arm rather
-            // than folded into the catch-all so adding a fifth live kind has
+            // than folded into the catch-all so adding a sixth live kind has
             // to state which side of that line it falls on.
             LiveVariant::Reference(_)
             | LiveVariant::Recorded(_)
-            | LiveVariant::Generated(_) => vec![],
+            | LiveVariant::Generated(_)
+            | LiveVariant::Transformed(_) => vec![],
         },
         _ => vec![],
     }

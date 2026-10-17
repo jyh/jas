@@ -154,6 +154,7 @@ fn trace_element_path(ctx: &mut OverlayCtx, elem: &Element) {
                 LiveVariant::Reference(x) => x.evaluate_with(DEFAULT_PRECISION, &r, &mut visiting),
                 LiveVariant::Recorded(x) => x.evaluate_with(DEFAULT_PRECISION, &r, &mut visiting),
                 LiveVariant::Generated(x) => x.evaluate_with(DEFAULT_PRECISION, &r, &mut visiting),
+                LiveVariant::Transformed(x) => x.evaluate_with(DEFAULT_PRECISION, &r, &mut visiting),
             };
             for ring in &ps {
                 if ring.len() < 2 { continue; }

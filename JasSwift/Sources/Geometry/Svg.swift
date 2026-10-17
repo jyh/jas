@@ -1061,6 +1061,16 @@ private func elementSvgBody(_ elem: Element, indent: String) -> String {
                 " data-jas-concept=\"\(escapeXml(gen.conceptId))\"" +
                 " data-jas-params=\"\(escapeXml(params))\"" +
                 "\(opacityAttr(gen.opacity))\(transformAttr(gen.transform))\(idLockAttrs(gen.id, locked: gen.locked))\(nameAttr(gen.name))></g>"
+        case .transformed(let t):
+            // A data-jas-live group around the child, with ONE `transform`
+            // attribute: the wrapper's own transform (outside) composed with
+            // the operation's matrix (inside). A foreign viewer draws Scale
+            // Strokes ON exactly. ⚠️ NOT YET OFF (it scales the stroke there),
+            // and the SVG reader for this kind is not built. Mirrors Rust.
+            let outer = t.transform.map { $0.multiply(t.matrix) } ?? t.matrix
+            return "\(indent)<g data-jas-live=\"transformed\" data-jas-scale-strokes=\"\(t.scaleStrokes)\"" +
+                "\(opacityAttr(t.opacity))\(transformAttr(outer))\(idLockAttrs(t.id, locked: t.locked))\(nameAttr(t.name))>\n" +
+                elementSvg(t.child, indent: indent + "  ") + "\n\(indent)</g>"
         }
     }
 }

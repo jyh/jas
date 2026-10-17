@@ -116,7 +116,9 @@ fn element_dependencies(elem: &Element) -> Vec<ElementRef> {
             // Generated joins here too: its dependencies() are empty (a concept
             // generator is self-contained, with no by-id inputs).
             LiveVariant::Reference(_) | LiveVariant::CompoundShape(_)
-            | LiveVariant::Recorded(_) | LiveVariant::Generated(_) => v.dependencies(),
+            | LiveVariant::Recorded(_) | LiveVariant::Generated(_)
+            // Transformed OWNS its child (its dependencies() are empty).
+            | LiveVariant::Transformed(_) => v.dependencies(),
         },
         _ => Vec::new(),
     }

@@ -2461,6 +2461,11 @@ pub fn clear_ids(elem: &mut Element) {
             clear_ids(Rc::make_mut(operand));
         }
     }
+    // The live transform operation OWNS its child (`children_mut` is `None`
+    // until editing through the wrapper lands), so it is walked here too.
+    if let Element::Live(super::live::LiveVariant::Transformed(t)) = elem {
+        clear_ids(Rc::make_mut(&mut t.child));
+    }
 }
 
 pub fn move_control_points(
@@ -3260,6 +3265,16 @@ pub fn translate_element(elem: &Element, dx: f64, dy: f64) -> Element {
                 new_ge.common.transform = Some(existing.translated(dx, dy));
                 Element::Live(super::live::LiveVariant::Generated(new_ge))
             }
+            // A move is its own operation, so it rides the wrapper's
+            // common.transform and leaves the scale operation's matrix (and
+            // the child) untouched. A translation scales no stroke, so this is
+            // exact under either Scale Strokes choice.
+            super::live::LiveVariant::Transformed(t) => {
+                let mut new_t = t.clone();
+                let existing = new_t.common.transform.unwrap_or_default();
+                new_t.common.transform = Some(existing.translated(dx, dy));
+                Element::Live(super::live::LiveVariant::Transformed(new_t))
+            }
         },
     }
 }
@@ -3477,6 +3492,14 @@ pub fn with_fill(elem: &Element, fill: Option<Fill>) -> Element {
                     ..ge.clone()
                 }),
             ),
+            // The wrapper's paint IS its child's (it is an operation, not a
+            // shape), so the paint goes to the child.
+            super::live::LiveVariant::Transformed(t) => Element::Live(
+                super::live::LiveVariant::Transformed(super::live::TransformedElem {
+                    child: Rc::new(with_fill(&t.child, fill)),
+                    ..t.clone()
+                }),
+            ),
         },
     }
 }
@@ -3606,6 +3629,14 @@ pub fn with_stroke(elem: &Element, stroke: Option<Stroke>) -> Element {
                 super::live::LiveVariant::Generated(super::live::GeneratedElem {
                     stroke,
                     ..ge.clone()
+                }),
+            ),
+            // The wrapper's paint IS its child's (it is an operation, not a
+            // shape), so the paint goes to the child.
+            super::live::LiveVariant::Transformed(t) => Element::Live(
+                super::live::LiveVariant::Transformed(super::live::TransformedElem {
+                    child: Rc::new(with_stroke(&t.child, stroke)),
+                    ..t.clone()
                 }),
             ),
         },
