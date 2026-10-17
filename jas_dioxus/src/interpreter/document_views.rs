@@ -165,6 +165,22 @@ mod tests {
 
     const B: Option<&str> = Some("default_brushes/flat_10");
 
+    /// A Transformed wrapper is a container one can ENTER (route 4 slice 3b):
+    /// isolating it is how its child is edited. It is not a group, so it
+    /// does not light Flatten Artwork's `has_group`.
+    #[test]
+    fn a_transformed_wrapper_is_a_container_and_not_a_group() {
+        use crate::geometry::live::{LiveVariant, TransformedElem};
+        let w = TransformedElem::new(std::rc::Rc::new(rect(0.0, 0.0, 10.0, 10.0)),
+            crate::geometry::element::Transform::scale(2.0, 2.0), false);
+        let m = model_with(vec![Element::Live(LiveVariant::Transformed(w)), rect(0.0, 0.0, 5.0, 5.0)], &[]);
+        let v = active_document_view(&m, &[vec![0, 0]], &[], None);
+        assert_eq!(v["layers_panel_selection_is_container"], serde_json::json!(true));
+        assert_eq!(v["layers_panel_selection_has_group"], serde_json::json!(false));
+        let v = active_document_view(&m, &[vec![0, 1]], &[], None);
+        assert_eq!(v["layers_panel_selection_is_container"], serde_json::json!(false), "control: a rect");
+    }
+
     /// W2b-18: the reference's table (`test_brush_panel_spec.py::CASES`), row
     /// for row: (name, children, selected, has, single).
     #[test]
@@ -257,6 +273,9 @@ pub fn active_document_view(
         && matches!(
             model.document().get_element(&layers_sel[0]),
             Some(Element::Group(_)) | Some(Element::Layer(_))
+                // A Transformed wrapper is entered to edit its child (route 4
+                // slice 3b). JasSwift `ActiveDocumentView` agrees.
+                | Some(Element::Live(crate::geometry::live::LiveVariant::Transformed(_)))
         );
     let layers_panel_selection_has_group = layers_sel.iter().any(|p| {
         matches!(model.document().get_element(p), Some(Element::Group(_)))

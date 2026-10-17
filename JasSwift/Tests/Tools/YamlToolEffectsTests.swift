@@ -694,6 +694,31 @@ private func modelWithPath(_ cmds: [PathCommand]) -> Model {
     #expect(missSel.isEmpty)
 }
 
+/// ROUTE 4 SLICE 3b: the probe reaches a Transformed wrapper's CHILD only while
+/// that wrapper is the innermost isolation entry, and hits the child's points
+/// where they are drawn (frame `W·M`). The wrapper scales a rect (2, 2, 10 x 10)
+/// by (2, 3), so corner 2 (local 12, 12) is drawn at (24, 36). Twin of Rust
+/// `the_probe_reaches_a_wrapped_childs_corner_only_while_isolated`.
+@Test func theProbeReachesAWrappedChildsCornerOnlyWhileIsolated() {
+    func probe(_ stack: [[Int]], _ x: Double, _ y: Double) -> (String?, [ElementSelection]) {
+        let w = TransformedElem(child: .rect(Rect(x: 2, y: 2, width: 10, height: 10)),
+                                matrix: .scale(2, 3), scaleStrokes: false)
+        let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                             selectedLayer: 0, selection: []))
+        model.layersIsolationStack = stack
+        let store = StateStore()
+        runEffects([["doc.path.probe_partial_hit": ["x": x, "y": y, "hit_radius": 4]]],
+                   ctx: [:], store: store, platformEffects: buildYamlToolEffects(model: model))
+        return (store.getTool("partial_selection", "mode") as? String, model.document.selection)
+    }
+    #expect(probe([], 24, 36).1.allSatisfy { $0.path != [0, 0, 0] }, "not isolated: the child is unreachable")
+    let (mode, sel) = probe([[0, 0]], 24, 36)
+    #expect(mode == "moving_pending")
+    #expect(sel == [ElementSelection.partial([0, 0, 0], [2])], "isolated: the drawn corner")
+    #expect(probe([[0, 0]], 12, 12).0 == "marquee", "isolated: the untransformed corner draws nothing")
+    #expect(probe([[0]], 24, 36).1.allSatisfy { $0.path != [0, 0, 0] }, "isolated into the LAYER only")
+}
+
 @Test func docPathCommitPartialMarqueeRectSelects() {
     let model = twoRectModel()
     let store = StateStore()

@@ -9013,7 +9013,7 @@
         },
         "layers_panel_selection_is_container": {
           "type": "bool",
-          "description": "True when the sole selected layer item is a container (group or layer)"
+          "description": "True when the sole selected layer item is a container: a group, a layer, or a Transformed wrapper (entered to edit its child)"
         },
         "layers_panel_selection_has_group": {
           "type": "bool",
