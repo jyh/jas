@@ -195,8 +195,11 @@ each live app:
 2. **Level 2 on the Mac:** `jas_gui_harness.py` for pointer and key steps; a panel step by accessibility identifier.
 3. **Level 2 on Windows:** `send_hand.ps1` replays pointer steps (shift held from the press or the first move), then
    key steps, which it delivers after the release as real key events (`keybd_event`), so the shell's own key route
-   runs. A key step inside the gesture, `meta`, and a panel step are refused by name; panel steps by UI Automation
-   are not built yet. The first panel script is `align.left`.
+   runs. Panel steps come last, by UI Automation: the widget is found by `AutomationId` = widget id, inside the
+   panel's `AutomationId` = panel content id, and a click goes through its Invoke, Toggle or SelectionItem pattern, a
+   commit through its Value pattern and then Enter. A key step inside the gesture, `meta`, a key or pointer step after
+   a panel step, and a panel step whose widget is not found, is found twice, is disabled, or has no pattern for its
+   event are refused by name. The first panel script is `align.left`.
 
 A level-2 run passes when its `read`-back equals the level-1 read-back for that step. Windows parity is the same
 comparison, with the Mac's live read-back as the other side.
