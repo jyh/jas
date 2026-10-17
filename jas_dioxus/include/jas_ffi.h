@@ -685,7 +685,8 @@ struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
  *
  * `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
  * "remove_tab": <index> | null, "close_window": <bool>,
- * "save_all_then_close": <bool>}` ([`act_reply`]).
+ * "save_all_then_close": <bool>, "clipboard_write": <text> | null}`
+ * ([`act_reply`]; `clipboard_write` is [`jas_dispatch_action`]'s).
  * `close_window` names a window close the shell must do (the engine owns no
  * window): `quit` with nothing edited, or Save Changes' Don't Save.
  * `save_all_then_close` (Save Changes' Save All) names "save every modified
@@ -742,14 +743,31 @@ struct JasBytes jas_panel_behavior(struct JasEngine *e,
  * [`jas_panel_behavior`]'s ([`act_reply`]), so the shell repaints and
  * re-reads exactly as after a click, and opens the dialog it names.
  *
+ * # The clipboard
+ *
+ * The engine owns no system clipboard; the shell does. Copy and Cut (the
+ * menu items, the actions, Ctrl+C and Ctrl+X) reply
+ * `"clipboard_write": <text>`: the selection as SVG markup, plain text, which
+ * the shell puts on the system clipboard as it is, never looking inside. Every
+ * other reply carries `"clipboard_write": null`, and a Cut that would orphan
+ * an instance names `cut_orphan_confirm` in `dialog` and writes nothing until
+ * that dialog's OK, whose reply carries the payload.
+ * A paste (`paste`, `paste_in_place`, `paste_preserving_layers`, Ctrl+V,
+ * Ctrl+Shift+V) sent WITHOUT a `"clipboard"` field is refused
+ * `NeedsClipboard`, the action as detail, before anything runs: the shell
+ * reads its clipboard's text and sends the SAME request again with
+ * `"clipboard": <text>`, or `"clipboard": null` when it cannot read one.
+ * Nothing to paste (null or "") replies normally and reads `Unchanged`.
+ *
  * # ⛔ A refusal runs NOTHING
  *
  * The empty span, and [`jas_last_error_json`] reads `{"panel_event":
  * "<class>","detail":"<detail>"}`: `BadUtf8`, `BadJson`, `UnknownMenuItem` (a
  * menu item id the menubar does not hold, named), `MissingAction` (no
  * `action` string), `UnknownAction` (an id the workspace does not define,
- * named), or `PlatformEffect` (an effect only the shell can run, such as a
- * native dialog, found by the pre-flight before anything moved). An action
+ * named), `NeedsClipboard` (a paste sent without its `clipboard` field, the
+ * action named), or `PlatformEffect` (an effect only the shell can run, such
+ * as a native dialog, found by the pre-flight before anything moved). An action
  * that ran and changed nothing replies normally and ALSO reads `Unchanged`.
  *
  * **BL4**: copy the span, then release with [`jas_free`].

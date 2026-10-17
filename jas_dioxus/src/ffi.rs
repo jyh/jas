@@ -933,7 +933,8 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
 ///
 /// `{"changed": [<row>...], "doc_changed": <bool>, "dialog": <id> | null,
 /// "remove_tab": <index> | null, "close_window": <bool>,
-/// "save_all_then_close": <bool>}` ([`act_reply`]).
+/// "save_all_then_close": <bool>, "clipboard_write": <text> | null}`
+/// ([`act_reply`]; `clipboard_write` is [`jas_dispatch_action`]'s).
 /// `close_window` names a window close the shell must do (the engine owns no
 /// window): `quit` with nothing edited, or Save Changes' Don't Save.
 /// `save_all_then_close` (Save Changes' Save All) names "save every modified
@@ -1012,7 +1013,7 @@ pub unsafe extern "C" fn jas_panel_behavior(
         let mut host = crate::panel_behavior::EngineHost::default();
         let ran = crate::panel_behavior::run_widget_behavior(
             id, spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
-        (ran, Named { remove_tab: host.removed_tab, close_window: host.closed_window, save_all_then_close: host.save_all_then_close })
+        (ran, Named::of(host))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1190,9 +1191,73 @@ fn colour_value_commit(
     out
 }
 
+/// One clipboard verb, as the web menu runs it (`menu_bar.rs`), with the
+/// system clipboard on the far side of the reply:
+///
+/// * Copy names the selection's payload (`selection_clipboard_svg`, the web's
+///   and Swift's bytes) and edits nothing.
+/// * Cut names the payload and deletes the selection as ONE undo step
+///   (`journal_delete_selection`, `cut_selection`), unless deleting would
+///   ORPHAN a live instance: then it opens `cut_orphan_confirm` with its
+///   `count` and writes nothing, so Cancel is a true no-op (its OK runs
+///   `doc.copy_selection_to_clipboard`, which [`EngineHost`] names). The
+///   YAML `cut` is NOT run: it would write the payload, then open the DELETE
+///   confirm.
+/// * A paste hands `clipboard` (`null`: unreadable) to
+///   `apply_paste_clipboard_text`, the paste law every port calls: the run,
+///   the locked-layer refusal, the SVG-or-text rule, one undo step. Nothing to
+///   paste changes nothing. The web first offers the text to an open TEXT
+///   SESSION (`tool.paste_text`); the engine hosts no type tool
+///   (`sync_tool_to_state` refuses `type`), so no session can be open here,
+///   and that branch lands with the type tool and its own test.
+///
+/// [`EngineHost`]: crate::panel_behavior::EngineHost
+fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::ClipVerb,
+                      clipboard: Option<&serde_json::Value>) -> (crate::panel_behavior::Ran, Named) {
+    use crate::panel_behavior::Ran;
+    use crate::workspace::menu_native::ClipVerb;
+    let still = Ran { doc_changed: false, state_changed: false };
+    match verb {
+        ClipVerb::Copy => {
+            let payload = engine.with_document(crate::document::op_apply::selection_clipboard_svg);
+            (still, Named { clipboard_write: payload, ..Named::default() })
+        }
+        ClipVerb::Cut => {
+            let mut store = engine.store.borrow_mut();
+            let mut model = engine.model.borrow_mut();
+            let paths: Vec<Vec<usize>> = model.document().selection.iter().map(|es| es.path.clone()).collect();
+            let Some(payload) = crate::document::op_apply::selection_clipboard_svg(model.document()) else {
+                return (still, Named::default());
+            };
+            let orphans = crate::document::dependency_index::orphaned_references(model.document(), &paths).len();
+            if orphans > 0 {
+                const ID: &str = "cut_orphan_confirm";
+                let ws = Workspace::load();
+                if let Some(def) = ws.as_ref().and_then(|w| w.dialog(ID)) {
+                    let params = [("count".to_string(), serde_json::Value::from(orphans))].into_iter().collect();
+                    crate::interpreter::effects::open_dialog_in(
+                        ID, def, Some(params), None, &serde_json::Value::Null, &mut store, Some(&mut model));
+                }
+                return (Ran { doc_changed: false, state_changed: true }, Named::default());
+            }
+            crate::document::op_apply::journal_delete_selection(&mut model, "cut_selection");
+            (Ran { doc_changed: true, state_changed: false },
+             Named { clipboard_write: Some(payload), ..Named::default() })
+        }
+        ClipVerb::Paste { offset, preserve_layers } => {
+            let text = clipboard.and_then(serde_json::Value::as_str);
+            let pasted = engine.with_model_mut(|m| {
+                crate::document::op_apply::apply_paste_clipboard_text(m, text, offset, preserve_layers)
+            });
+            (Ran { doc_changed: pasted, state_changed: false }, Named::default())
+        }
+    }
+}
+
 /// The reply to an act (a click, a commit, an action): `{"changed": [<row>...],
 /// "doc_changed": <bool>, "dialog": <id> | null, "remove_tab": <index> | null,
-/// "close_window": <bool>, "save_all_then_close": <bool>}`. `dialog` is the dialog open
+/// "close_window": <bool>, "save_all_then_close": <bool>, "clipboard_write": <text> |
+/// null}`. `dialog` is the dialog open
 /// in the engine's store after the act (the dialog door, design 2026-10-14):
 /// a shell that reads an id there asks for that dialog's plan, and `null`
 /// means none is open, so a shell showing one closes it.
@@ -1201,16 +1266,26 @@ fn act_reply<T: serde::Serialize>(engine: &JasEngine, changed: &T, doc_changed: 
     let dialog = engine.store.borrow().dialog_id().map(str::to_string);
     serde_json::json!({"changed": changed, "doc_changed": doc_changed, "dialog": dialog,
                        "remove_tab": named.remove_tab, "close_window": named.close_window,
-                       "save_all_then_close": named.save_all_then_close})
+                       "save_all_then_close": named.save_all_then_close,
+                       "clipboard_write": named.clipboard_write})
 }
 
 /// The acts the host NAMES for the shell to do, because the engine owns no tabs
 /// and no window and cannot save ([`EngineHost`]): each becomes a reply field.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct Named {
     remove_tab: Option<i64>,
     close_window: bool,
     save_all_then_close: bool,
+    /// The payload a Copy or Cut asks the shell to put on the system clipboard.
+    clipboard_write: Option<String>,
+}
+
+impl Named {
+    fn of(host: crate::panel_behavior::EngineHost) -> Named {
+        Named { remove_tab: host.removed_tab, close_window: host.closed_window,
+                save_all_then_close: host.save_all_then_close, clipboard_write: host.clipboard_write }
+    }
 }
 
 /// A KEY by [`jas_dispatch_action`]: `{"key": <name>, "mods": {"shift": b,
@@ -1229,7 +1304,7 @@ struct Named {
 /// `{"panel_event":"KeyUnhandled","detail":<name>}`, so the shell may apply
 /// its own default.
 unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, name: &str,
-                       mods: Option<&serde_json::Value>) -> JasBytes {
+                       mods: Option<&serde_json::Value>, clipboard: Option<&serde_json::Value>) -> JasBytes {
     use crate::ffi_pointer::{KEY_BACKSPACE, KEY_DELETE, KEY_ENTER, KEY_ESCAPE, MOD_ALT, MOD_CMD, MOD_SHIFT};
     let code = match name {
         "Delete" => KEY_DELETE,
@@ -1251,6 +1326,23 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
     let mask = if flag("shift") { MOD_SHIFT } else { 0 }
         | if flag("alt") { MOD_ALT } else { 0 }
         | if flag("ctrl") { MOD_CMD } else { 0 };
+    // A clipboard chord runs its ACTION, so the key and the menu item give the
+    // same reply and the same `NeedsClipboard`; the shell's resend carries
+    // `clipboard` on the key request and it is passed through.
+    if mask & MOD_CMD != 0 {
+        let km = crate::tools::tool::KeyMods { shift: mask & MOD_SHIFT != 0, ctrl: true,
+                                               alt: mask & MOD_ALT != 0, meta: false };
+        if let crate::workspace::resolve_key::KeyRoute::Clipboard(action) =
+            crate::workspace::resolve_key::route_key(name, km, |_| false)
+        {
+            let mut req = serde_json::json!({"action": action});
+            if let Some(clip) = clipboard {
+                req["clipboard"] = clip.clone();
+            }
+            let req = req.to_string();
+            return unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) };
+        }
+    }
     if matches!(code, KEY_DELETE | KEY_BACKSPACE) && mask & MOD_CMD == 0 {
         let taken = engine.tool_slot().as_ref()
             .is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(name));
@@ -1298,14 +1390,31 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
 /// [`jas_panel_behavior`]'s ([`act_reply`]), so the shell repaints and
 /// re-reads exactly as after a click, and opens the dialog it names.
 ///
+/// # The clipboard
+///
+/// The engine owns no system clipboard; the shell does. Copy and Cut (the
+/// menu items, the actions, Ctrl+C and Ctrl+X) reply
+/// `"clipboard_write": <text>`: the selection as SVG markup, plain text, which
+/// the shell puts on the system clipboard as it is, never looking inside. Every
+/// other reply carries `"clipboard_write": null`, and a Cut that would orphan
+/// an instance names `cut_orphan_confirm` in `dialog` and writes nothing until
+/// that dialog's OK, whose reply carries the payload.
+/// A paste (`paste`, `paste_in_place`, `paste_preserving_layers`, Ctrl+V,
+/// Ctrl+Shift+V) sent WITHOUT a `"clipboard"` field is refused
+/// `NeedsClipboard`, the action as detail, before anything runs: the shell
+/// reads its clipboard's text and sends the SAME request again with
+/// `"clipboard": <text>`, or `"clipboard": null` when it cannot read one.
+/// Nothing to paste (null or "") replies normally and reads `Unchanged`.
+///
 /// # ⛔ A refusal runs NOTHING
 ///
 /// The empty span, and [`jas_last_error_json`] reads `{"panel_event":
 /// "<class>","detail":"<detail>"}`: `BadUtf8`, `BadJson`, `UnknownMenuItem` (a
 /// menu item id the menubar does not hold, named), `MissingAction` (no
 /// `action` string), `UnknownAction` (an id the workspace does not define,
-/// named), or `PlatformEffect` (an effect only the shell can run, such as a
-/// native dialog, found by the pre-flight before anything moved). An action
+/// named), `NeedsClipboard` (a paste sent without its `clipboard` field, the
+/// action named), or `PlatformEffect` (an effect only the shell can run, such
+/// as a native dialog, found by the pre-flight before anything moved). An action
 /// that ran and changed nothing replies normally and ALSO reads `Unchanged`.
 ///
 /// **BL4**: copy the span, then release with [`jas_free`].
@@ -1336,7 +1445,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // `{"key": <name>, "mods": {"shift","alt","ctrl"}}`: a KEY, resolved in the
     // engine and answered with the act reply (flask STATUS § 310, jas § 311).
     if let Some(name) = req.get("key").and_then(serde_json::Value::as_str) {
-        return unsafe { dispatch_key(e, engine, &ws, name, req.get("mods")) };
+        return unsafe { dispatch_key(e, engine, &ws, name, req.get("mods"), req.get("clipboard")) };
     }
     // `{"panel": <content id>, "menu_index": <i>}`: that PANEL menu's item i,
     // run with its panel active and in its panel's scope.
@@ -1376,6 +1485,18 @@ pub unsafe extern "C" fn jas_dispatch_action(
         return JasBytes::empty();
     };
     let params = source.get("params");
+    // The clipboard verbs (the Windows clipboard node): the menubar's, never a
+    // panel menu's. A paste needs the system clipboard, which the shell owns,
+    // so a paste request with no `clipboard` field is refused `NeedsClipboard`
+    // BEFORE anything runs; the shell resends it with `"clipboard": <text> |
+    // null` (null: unreadable).
+    let clip_verb = panel.is_none().then(|| crate::workspace::menu_native::clipboard_verb(action)).flatten();
+    if matches!(clip_verb, Some(crate::workspace::menu_native::ClipVerb::Paste { .. }))
+        && req.get("clipboard").is_none()
+    {
+        set_panel_event_error(engine, "NeedsClipboard", action);
+        return JasBytes::empty();
+    }
     // Every panel gets its store scope first: an action may write a panel the
     // shell has never opened (`set_brush_view_mode`, the colour panel's mode),
     // and `StateStore::set_panel` drops a write to a panel with no scope.
@@ -1404,7 +1525,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     // `Logged:select_all`). Their `actions.yaml` entries are `log` stubs; the
     // menu runs them in every app, through one table (`menu_native`), and so
     // does this route. A panel menu never names one, so only the menubar's.
-    let native = panel.is_none().then(|| {
+    let native = (panel.is_none() && clip_verb.is_none()).then(|| {
         let mut model = engine.model.borrow_mut();
         let generation = model.generation();
         crate::workspace::menu_native::run(action, &mut model).then(|| crate::panel_behavior::Ran {
@@ -1412,7 +1533,10 @@ pub unsafe extern "C" fn jas_dispatch_action(
             state_changed: false,
         })
     }).flatten();
-    let (ran, named) = if let Some(ran) = native {
+    let (ran, named) = if let Some(verb) = clip_verb {
+        let (ran, named) = run_clipboard_verb(engine, verb, req.get("clipboard"));
+        (Ok(ran), named)
+    } else if let Some(ran) = native {
         (Ok(ran), Named::default())
     } else {
         let mut store = engine.store.borrow_mut();
@@ -1422,7 +1546,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
             panel, action, params, item.is_none(), &scope, &mut store, &mut model, ws.actions(),
             ws.dialogs(),
             &mut host);
-        (ran, Named { remove_tab: host.removed_tab, close_window: host.closed_window, save_all_then_close: host.save_all_then_close })
+        (ran, Named::of(host))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -1441,7 +1565,7 @@ pub unsafe extern "C" fn jas_dispatch_action(
     ffi_instr::record_engine(sync.rows_evaluated, sync.panels_evaluated);
     let moved = sync.changed.as_array().map_or(false, |rows| !rows.is_empty());
     let state_changed = ran.state_changed && tool != crate::ffi_pointer::ToolSync::Refused;
-    if ran.doc_changed || state_changed || moved {
+    if ran.doc_changed || state_changed || moved || named.clipboard_write.is_some() {
         *engine.last_error.borrow_mut() = None;
     } else {
         set_panel_event_error(engine, "Unchanged", action);
@@ -1649,7 +1773,7 @@ pub unsafe extern "C" fn jas_dialog_event(e: *mut JasEngine, event_json: *const 
         let mut host = crate::panel_behavior::EngineHost::default();
         let ran = crate::panel_behavior::run_dialog_widget_behavior(
             spec, &ev, &scope, &mut store, &mut model, ws.actions(), ws.dialogs(), &mut host);
-        (ran, Named { remove_tab: host.removed_tab, close_window: host.closed_window, save_all_then_close: host.save_all_then_close })
+        (ran, Named::of(host))
     };
     let ran = match ran {
         Ok(ran) => ran,
@@ -4215,6 +4339,269 @@ mod tests {
         assert!(header.contains("jas_dispatch_action("), "the control: the one door is");
     }
 
+    // -----------------------------------------------------------------------
+    // THE CLIPBOARD CHANNEL (the Windows clipboard node, slices 2-7). The
+    // engine owns no system clipboard, so Copy and Cut NAME the payload in the
+    // reply (`clipboard_write`), and a Paste with no `clipboard` field is
+    // refused `NeedsClipboard` before anything runs; the shell resends the same
+    // request with `"clipboard": <text> | null`.
+    // -----------------------------------------------------------------------
+
+    fn reply_of(reply: &str, err: &str) -> serde_json::Value {
+        serde_json::from_str(reply).unwrap_or_else(|_| panic!("a reply, not a refusal: {reply:?} {err:?}"))
+    }
+
+    /// The first layer's children, as the document's test JSON writes them.
+    fn children(e: *mut JasEngine) -> Vec<serde_json::Value> {
+        let doc: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+        doc["layers"][0]["children"].as_array().cloned().unwrap_or_default()
+    }
+
+    /// Each child's `x`, to 1e-3: the payload is SVG in px, so a pasted edge
+    /// round-trips pt -> px -> pt at 4 decimals (34 reads 33.999975).
+    fn xs(e: *mut JasEngine) -> Vec<f64> {
+        children(e).iter().map(|c| (c["x"].as_f64().expect("a child with an x") * 1000.0).round() / 1000.0).collect()
+    }
+
+    /// The payload with its artboard's id blanked: `selection_clipboard_svg`
+    /// serialises a fresh default Document, which MINTS an artboard id on
+    /// every call, so two copies of one selection differ in those 8 bytes.
+    fn unminted(svg: &str) -> String {
+        let at = svg.find("<inkscape:page").expect("the payload's artboard");
+        let id = at + svg[at..].find(" id=\"").expect("its id") + 5;
+        let end = id + svg[id..].find("\"").unwrap();
+        format!("{}{}", &svg[..id], &svg[end..])
+    }
+
+    /// Two black rects at x 10 and 50, both selected.
+    fn two_rects() -> *mut JasEngine {
+        use crate::document::test_fixture::{model_with, rect};
+        engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0), rect(50.0, 20.0, 30.0, 40.0)], &[0, 1]))
+    }
+
+    /// The payload a Copy names: the selection as ONE unnamed layer of SVG, the
+    /// bytes `selection_clipboard_svg` builds (the web's and Swift's shape).
+    fn copied(e: *mut JasEngine) -> String {
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_copy"}"#);
+        let v = reply_of(&reply, &err);
+        assert_eq!(err, "", "a copy that named a payload is not Unchanged");
+        v["clipboard_write"].as_str().unwrap_or_else(|| panic!("copy names its payload: {reply}")).to_string()
+    }
+
+    fn paste_with(e: *mut JasEngine, item: &str, clip: serde_json::Value) -> (String, String) {
+        let req = serde_json::json!({"menu_item": item, "clipboard": clip});
+        dispatch(e, &req.to_string())
+    }
+
+    #[test]
+    fn clipboard_copy_names_the_selection_and_edits_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects();
+        let before = doc_json(e);
+        let payload = copied(e);
+        let expected = engine_of(e).with_document(crate::document::op_apply::selection_clipboard_svg);
+        assert_eq!(Some(unminted(&payload)), expected.as_deref().map(unminted),
+                   "the shared builder's bytes, no second format");
+        let back = crate::geometry::svg::svg_to_document(&payload);
+        assert_eq!(back.layers.len(), 1, "one layer: {payload}");
+        assert_eq!(back.layers[0].children().map_or(0, |k| k.len()), 2, "both rects: {payload}");
+        assert_eq!(doc_json(e), before, "copy is not an edit");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "copy recorded an undo step");
+        unsafe { jas_engine_free(e) };
+
+        // Nothing selected: nothing to copy, and the engine SAYS so.
+        use crate::document::test_fixture::{model_with, rect};
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_copy"}"#);
+        assert_eq!(reply_of(&reply, &err)["clipboard_write"], serde_json::Value::Null, "{reply}");
+        assert_eq!(err, refusal("Unchanged", "copy"));
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Cut = the payload, then the reference-aware delete as ONE undo step.
+    #[test]
+    fn clipboard_cut_names_the_payload_and_deletes_in_one_undo_step() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects();
+        let before = doc_json(e);
+        let expected = engine_of(e).with_document(crate::document::op_apply::selection_clipboard_svg);
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_cut"}"#);
+        let v = reply_of(&reply, &err);
+        assert_eq!(v["clipboard_write"].as_str().map(unminted), expected.as_deref().map(unminted), "{reply}");
+        assert_eq!(v["doc_changed"], true, "{reply}");
+        assert_eq!(v["dialog"], serde_json::Value::Null, "nothing to orphan, nothing to ask: {reply}");
+        assert!(children(e).is_empty(), "both rects are gone");
+        undo(e);
+        assert_eq!(doc_json(e), before, "one undo restores the cut");
+        assert!(!engine_of(e).with_model(|m| m.can_undo()), "the cut was ONE step");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A cut that would orphan a live instance asks first (`cut_orphan_confirm`
+    /// with its `count`) and writes NOTHING, so Cancel is a true no-op; the
+    /// dialog's OK (`doc.copy_selection_to_clipboard` then the delete) names
+    /// the payload and deletes.
+    #[test]
+    fn clipboard_cut_that_would_orphan_asks_first_and_writes_nothing() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        let path = engine_of(e).with_document(|d| d.selection.iter().next().map(|es| es.path.clone()))
+            .expect("the rect");
+        engine_of(e).with_model_mut(crate::workspace::menu_native::make_instance);
+        engine_of(e).with_model_mut(|m| crate::document::controller::Controller::select_element(m, &path));
+        let before = doc_json(e);
+        let expected = engine_of(e).with_document(crate::document::op_apply::selection_clipboard_svg);
+        assert!(expected.is_some(), "the control: the master is selected");
+        let (reply, err) = dispatch(e, r#"{"menu_item":"menu_cut"}"#);
+        let v = reply_of(&reply, &err);
+        assert_eq!(v["dialog"], "cut_orphan_confirm", "{reply} {err}");
+        assert_eq!(v["clipboard_write"], serde_json::Value::Null, "asking writes nothing: {reply}");
+        assert_eq!(doc_json(e), before, "and deletes nothing");
+        assert_eq!(engine_of(e).store.borrow().dialog_params().and_then(|p| p.get("count")).cloned(),
+                   Some(serde_json::json!(1)), "the orphan count");
+        let (reply, err) = dispatch(e, r#"{"action":"cut_orphan_confirm_ok"}"#);
+        let v = reply_of(&reply, &err);
+        assert_eq!(v["clipboard_write"].as_str().map(unminted), expected.as_deref().map(unminted),
+                   "OK names the payload: {reply} {err}");
+        assert_eq!(v["dialog"], serde_json::Value::Null, "and closes: {reply}");
+        assert_ne!(doc_json(e), before, "and deletes");
+        undo(e);
+        assert_eq!(doc_json(e), before, "as one undo step");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Paste asks the shell for the clipboard (refused `NeedsClipboard`, the
+    /// action as detail, nothing run), then lands through the shared paste law:
+    /// +24, then +48 for the same content; in place at 0; empty and unreadable
+    /// change nothing; and undo restores the run.
+    #[test]
+    fn clipboard_paste_asks_then_lands_through_the_shared_paste_run() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects();
+        let payload = copied(e);
+        let before = doc_json(e);
+        for (item, action) in [("menu_paste", "paste"), ("menu_paste_in_place", "paste_in_place"),
+                               ("menu_paste_preserving_layers", "paste_preserving_layers")] {
+            assert_eq!(dispatch(e, &format!(r#"{{"menu_item":"{item}"}}"#)),
+                       (String::new(), refusal("NeedsClipboard", action)), "{item}");
+            assert_eq!(doc_json(e), before, "{item}: a refusal runs nothing");
+        }
+        assert!(!engine_of(e).with_model(|m| m.can_undo()));
+
+        let (reply, err) = paste_with(e, "menu_paste", payload.clone().into());
+        assert_eq!(reply_of(&reply, &err)["doc_changed"], true, "{reply} {err}");
+        assert_eq!(err, "");
+        assert_eq!(xs(e), vec![10.0, 50.0, 34.0, 74.0], "the first paste lands +24");
+        let _ = paste_with(e, "menu_paste", payload.clone().into());
+        assert_eq!(xs(e)[4..], [58.0, 98.0], "the second paste of the same content +48");
+        undo(e);
+        let _ = paste_with(e, "menu_paste", payload.clone().into());
+        assert_eq!(xs(e)[4..], [58.0, 98.0], "undo restored the run, so the redo-paste lands +48 again");
+        let (reply, err) = paste_with(e, "menu_paste_in_place", payload.clone().into());
+        assert_eq!(reply_of(&reply, &err)["doc_changed"], true, "{reply} {err}");
+        assert_eq!(xs(e)[6..], [10.0, 50.0], "in place lands at 0");
+        unsafe { jas_engine_free(e) };
+
+        let e = two_rects();
+        let before = doc_json(e);
+        for clip in [serde_json::Value::Null, "".into()] {
+            let (reply, err) = paste_with(e, "menu_paste", clip.clone());
+            assert_eq!(reply_of(&reply, &err)["doc_changed"], false, "{clip}: {reply}");
+            assert_eq!(err, refusal("Unchanged", "paste"), "{clip}");
+            assert_eq!(doc_json(e), before, "{clip}");
+            assert!(!engine_of(e).with_model(|m| m.can_undo()), "{clip}: no undo step");
+        }
+        // Another app's text is a Text element (the SVG-or-text rule).
+        let (reply, err) = paste_with(e, "menu_paste", "hello".into());
+        assert_eq!(reply_of(&reply, &err)["doc_changed"], true, "{reply} {err}");
+        assert_eq!(children(e).last().map(|c| c["type"].clone()), Some("text".into()), "text pastes as Text");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Paste, Preserving Layers passes its `preserve` to the shared law: a
+    /// payload carrying a NAMED layer lands as `apply_paste_clipboard_text(..,
+    /// 24, true)` says, and differs from plain Paste (the control).
+    #[test]
+    fn clipboard_paste_preserving_layers_is_the_shared_law_with_preserve() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::test_fixture::{model_with, rect};
+        let payload = r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"><g inkscape:groupmode="layer" inkscape:label="Other"><rect x="0" y="0" width="4" height="4"/></g></svg>"#;
+        let oracle = |preserve: bool| {
+            let mut m = model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]);
+            assert!(crate::document::op_apply::apply_paste_clipboard_text(&mut m, Some(payload), 24.0, preserve));
+            unboarded(m.document())
+        };
+        // The artboard's id is minted per document; the paste is about layers.
+        fn unboarded(d: &crate::document::document::Document) -> serde_json::Value {
+            let mut v: serde_json::Value =
+                serde_json::from_str(&crate::geometry::test_json::document_to_test_json(d)).unwrap();
+            v.as_object_mut().unwrap().remove("artboards");
+            v
+        }
+        assert_ne!(oracle(true), oracle(false), "the control: preserve changes where the paste lands");
+        for (item, preserve) in [("menu_paste_preserving_layers", true), ("menu_paste", false)] {
+            let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+            let (reply, err) = paste_with(e, item, payload.into());
+            assert_eq!(reply_of(&reply, &err)["doc_changed"], true, "{item}: {reply} {err}");
+            assert_eq!(engine_of(e).with_document(unboarded), oracle(preserve), "{item}");
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
+    /// The five clipboard items are the engine's now: none is refused as a
+    /// platform effect, and the three pastes refuse `NeedsClipboard` instead.
+    #[test]
+    fn clipboard_items_are_not_platform_effects() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        for (item, class) in [("menu_copy", None), ("menu_cut", None), ("menu_paste", Some("NeedsClipboard")),
+                              ("menu_paste_in_place", Some("NeedsClipboard")),
+                              ("menu_paste_preserving_layers", Some("NeedsClipboard"))] {
+            let e = two_rects();
+            let (reply, err) = dispatch(e, &format!(r#"{{"menu_item":"{item}"}}"#));
+            assert!(!err.contains("PlatformEffect"), "{item}: {err}");
+            match class {
+                Some(c) => assert!(err.contains(c), "{item}: {err}"),
+                None => assert_eq!(err, "", "{item}: {reply} {err}"),
+            }
+            unsafe { jas_engine_free(e) };
+        }
+    }
+
+    /// Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+Shift+V resolve through `shortcuts.yaml`
+    /// in the engine into the same actions, with the same reply and the same
+    /// `NeedsClipboard`; the resend carries `clipboard` on the KEY request.
+    #[test]
+    fn clipboard_keys_resolve_to_the_same_actions() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = two_rects();
+        let (reply, err) = dispatch(e, r#"{"key":"c","mods":{"ctrl":true}}"#);
+        let payload = reply_of(&reply, &err)["clipboard_write"].as_str()
+            .unwrap_or_else(|| panic!("Ctrl+C names the payload: {reply} {err}")).to_string();
+        assert_eq!(dispatch(e, r#"{"key":"v","mods":{"ctrl":true}}"#),
+                   (String::new(), refusal("NeedsClipboard", "paste")));
+        assert_eq!(dispatch(e, r#"{"key":"V","mods":{"ctrl":true,"shift":true}}"#),
+                   (String::new(), refusal("NeedsClipboard", "paste_in_place")));
+        let req = serde_json::json!({"key": "v", "mods": {"ctrl": true}, "clipboard": payload});
+        let (reply, err) = dispatch(e, &req.to_string());
+        assert_eq!(reply_of(&reply, &err)["doc_changed"], true, "{reply} {err}");
+        assert_eq!(xs(e), vec![10.0, 50.0, 34.0, 74.0], "the key's paste is the menu's");
+        let (reply, err) = dispatch(e, r#"{"key":"x","mods":{"ctrl":true}}"#);
+        assert!(reply_of(&reply, &err)["clipboard_write"].is_string(), "Ctrl+X names the payload: {reply}");
+        assert_eq!(xs(e), vec![10.0, 50.0], "and cuts the pasted (selected) pair");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The C surface documents the channel where a shell author reads it.
+    #[test]
+    fn the_header_documents_the_clipboard_channel() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let header = include_str!("../include/jas_ffi.h");
+        assert!(header.contains("clipboard_write"), "the reply key");
+        assert!(header.contains("NeedsClipboard"), "the refusal");
+        assert!(header.contains("jas_dispatch_action("), "the control");
+    }
+
     /// SELECT ALL FROM THE MENU (flask STATUS §242, 2026-10-13: Edit > Select
     /// All on Windows read `PlatformEffect`, `Logged:select_all`). Its
     /// `actions.yaml` entry is a `log` stub: the behaviour is the menu's own,
@@ -4280,12 +4667,9 @@ mod tests {
         refused.sort();
         refused.dedup();
         let expected = [
-            // The clipboard: a platform's (the shell's own copy/paste).
-            "copy -> Logged:copy: selection to clipboard",
-            "cut -> Logged:copy: selection to clipboard",
-            "paste -> Logged:paste: offset 24pt",
-            "paste_in_place -> Logged:paste_in_place: offset 0",
-            "paste_preserving_layers -> Logged:paste_preserving_layers: offset 24pt",
+            // The clipboard left this list on 2026-10-17: Copy and Cut name
+            // `clipboard_write` in the reply, and the pastes refuse
+            // `NeedsClipboard` (`clipboard_items_are_not_platform_effects`).
             // Files: the Windows shell runs open_file, save and save_as itself
             // (`MainWindow.Invoke`); revert reads a file. `quit` left this list
             // on 2026-10-15: with nothing edited it names `close_window` in the
@@ -4812,7 +5196,7 @@ mod tests {
         let reply: serde_json::Value = serde_json::from_str(&reply)
             .unwrap_or_else(|_| panic!("the reply must be JSON: {reply:?} (error {err:?})"));
         let keys: Vec<&String> = reply.as_object().unwrap().keys().collect();
-        assert_eq!(keys, vec!["changed", "close_window", "dialog", "doc_changed", "remove_tab", "save_all_then_close"], "{reply}");
+        assert_eq!(keys, vec!["changed", "clipboard_write", "close_window", "dialog", "doc_changed", "remove_tab", "save_all_then_close"], "{reply}");
         assert_eq!(reply["doc_changed"], false);
         assert_eq!(err, "", "rows moved, so this is not Unchanged");
         let changed = reply["changed"].as_array().expect("changed is an array");
@@ -4836,7 +5220,7 @@ mod tests {
             vec![rect(10.0, 0.0, 5.0, 5.0), rect(10.0, 20.0, 5.0, 5.0)], &[0, 1]));
         let before = doc_json(e);
         let (reply, err) = behave(e, ALIGN, LEFT);
-        assert_eq!(reply, r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#);
+        assert_eq!(reply, r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#);
         assert_eq!(err, refusal("Unchanged", "align_left_button"));
         assert_eq!(doc_json(e), before);
         assert!(!engine_of(e).with_model(|m| m.can_undo()), "an empty step was recorded");
@@ -4892,13 +5276,13 @@ mod tests {
 
         // -> H1: the behavior runs and moves the document.
         let (reply, err) = behave(e, ALIGN, &click);
-        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":true,"remove_tab":null,"save_all_then_close":false}"#, ""));
+        assert_eq!((reply.as_str(), err.as_str()), (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":true,"remove_tab":null,"save_all_then_close":false}"#, ""));
         let h1 = doc_json(e);
         assert_ne!(h1, hs, "the click reported a change and the document did not move");
 
         // -> H1B: the selection is aligned now, and the engine SAYS so.
         assert_eq!(behave(e, ALIGN, &click),
-                   (r#"{"changed":[],"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
+                   (r#"{"changed":[],"clipboard_write":null,"close_window":false,"dialog":null,"doc_changed":false,"remove_tab":null,"save_all_then_close":false}"#.to_string(), refusal("Unchanged", widget)));
         assert_eq!(doc_json(e), h1);
 
         // -> H2: ONE undo restores the post-select document, so the second
