@@ -2228,9 +2228,17 @@ private func pathProbePartialHit(
     // 1. Handle hit on a selected Path.
     for es in model.document.selection {
         guard case .path(let pe) = model.document.getElement(es.path) else { continue }
+        // A handle is compared where it is DRAWN, through the path's full
+        // frame; `Controller.movePathHandle` maps the drag back through it.
+        let frame = accumulatedTransform(model.document, es.path, includeOwn: true)
+        func drawn(_ h: (Double, Double)?) -> (Double, Double)? {
+            guard let h = h else { return nil }
+            return frame.map { $0.applyPoint(h.0, h.1) } ?? h
+        }
         let anchors = Element.path(pe).controlPointPositions
         for ai in anchors.indices {
-            let (hIn, hOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            let (localIn, localOut) = pathHandlePositions(pe.d, anchorIdx: ai)
+            let (hIn, hOut) = (drawn(localIn), drawn(localOut))
             func matches(_ h: (Double, Double)?) -> Bool {
                 guard let h = h else { return false }
                 return hypot(x - h.0, y - h.1) < radius
