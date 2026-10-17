@@ -1111,9 +1111,11 @@ impl LiveElement for TransformedElem {
     fn kind_schema_version(&self) -> u32 { 1 }
     fn common(&self) -> &CommonProps { &self.common }
     fn common_mut(&mut self) -> &mut CommonProps { &mut self.common }
-    /// The paint is the child's: the wrapper is an operation, not a shape.
-    fn fill(&self) -> Option<&Fill> { None }
-    fn stroke(&self) -> Option<&Stroke> { None }
+    /// The paint is the child's: the wrapper is an operation, not a shape, so
+    /// it REPORTS the child's paint (and `with_fill`/`with_stroke` write it
+    /// there). JasSwift's `LiveVariant.fill`/`.stroke` answer the same.
+    fn fill(&self) -> Option<&Fill> { self.child.fill() }
+    fn stroke(&self) -> Option<&Stroke> { self.child.stroke() }
     fn children(&self) -> &[Rc<Element>] { std::slice::from_ref(&self.child) }
     /// ⚠️ NOT YET EDITABLE THROUGH: editing a child through the wrapper is its
     /// own slice (route 4, slice 3), with its own arms in both ports.
@@ -1482,6 +1484,31 @@ fn bounds_of_polygon_set(ps: &PolygonSet) -> Bounds {
 mod tests {
     use super::*;
     use crate::geometry::element::RectElem;
+
+    /// A wrapper's paint IS its child's: it reports the child's fill and stroke
+    /// (as JasSwift's `LiveVariant.fill`/`.stroke` do), and a paint write lands
+    /// on the child. A panel reading the selection's paint sees the same value
+    /// in both ports.
+    #[test]
+    fn a_transformed_wrapper_reports_and_writes_its_childs_paint() {
+        use crate::geometry::element::{with_fill, with_stroke, Color, Fill, Stroke, Transform};
+        let child = Element::Rect(RectElem {
+            x: 0.0, y: 0.0, width: 1.0, height: 1.0, rx: 0.0, ry: 0.0,
+            fill: Some(Fill::new(Color::rgb(1.0, 0.0, 0.0))),
+            stroke: Some(Stroke::new(Color::rgb(0.0, 0.0, 1.0), 2.0)),
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        });
+        let w = Element::Live(LiveVariant::Transformed(
+            TransformedElem::new(Rc::new(child.clone()), Transform::scale(2.0, 3.0), false)));
+        assert_eq!(w.fill(), child.fill(), "the wrapper reports its child's fill");
+        assert_eq!(w.stroke(), child.stroke(), "the wrapper reports its child's stroke");
+        let green = Some(Fill::new(Color::rgb(0.0, 1.0, 0.0)));
+        let w2 = with_stroke(&with_fill(&w, green), None);
+        let Element::Live(LiveVariant::Transformed(t)) = &w2 else { panic!("{w2:?}") };
+        assert_eq!(t.child.fill(), green.as_ref(), "a fill write lands on the child");
+        assert_eq!(t.child.stroke(), None, "a stroke write lands on the child");
+        assert_eq!(w2.fill(), green.as_ref());
+    }
 
     /// ANY ELEMENT CARRIES A NAME, live kinds included: `Element::common()`
     /// reaches `name` for all four conformers, and `common_mut()` writes it.
