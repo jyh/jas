@@ -2154,6 +2154,39 @@ fn untracked_flat_text_still_draws_with_no_spacing() {
     assert_eq!(run_spacings(rec.commands()), vec![0.0]);
 }
 
+/// ⛔ A SCALE OR ROTATION THE WALK DOES NOT DRAW IS REFUSED, NEVER DROPPED
+/// (STATUS-flask section 411). The legacy renderer wraps the draw in
+/// `scale(h, v)` and rotates each glyph; the seam lowered the element and
+/// IGNORED the fields, so on WinUI a 150% horizontal scale drew unscaled and
+/// the frame after the commit equalled the frame before it. Until a lowering
+/// carries them, a value that transforms keeps the element on legacy (an honest
+/// DOCUMENT INCOMPLETE); the identity values (100, 100, 0) and absent ones lower.
+#[test]
+fn a_text_scale_or_rotation_the_walk_does_not_draw_stays_legacy() {
+    let legacy = |f: &dyn Fn(&mut crate::geometry::element::TextElem)| {
+        let mut t = flat_text(20.0);
+        f(&mut t);
+        crate::painter::element_render::text_needs_legacy(&t)
+    };
+    assert!(legacy(&|t| t.horizontal_scale = "150".into()), "a 150% horizontal scale stays legacy");
+    assert!(legacy(&|t| t.vertical_scale = "50".into()), "a 50% vertical scale stays legacy");
+    assert!(legacy(&|t| t.rotate = "30".into()), "a 30-degree glyph rotation stays legacy");
+    assert!(legacy(&|t| t.horizontal_scale = "wide".into()), "an unreadable scale stays legacy");
+    assert!(!legacy(&|t| { t.horizontal_scale = "100".into(); t.vertical_scale = "100".into(); t.rotate = "0".into(); }),
+            "CONTROL: the identity values draw nothing different and lower");
+    assert!(!legacy(&|_| {}), "CONTROL: absent values lower");
+}
+
+/// The same rule for type on a path, which carries the same three fields.
+#[test]
+fn a_type_on_path_scale_the_walk_does_not_draw_stays_legacy() {
+    let t = crate::geometry::tspan::Tspan { content: "Hello Path".into(), ..crate::geometry::tspan::Tspan::default() };
+    let mut e = match text_path(flat_path(400.0), vec![t]) { Element::TextPath(e) => e, _ => unreachable!() };
+    e.horizontal_scale = "150".into();
+    assert!(crate::painter::element_render::element_needs_legacy(&Element::TextPath(e), all_caps()),
+            "a scaled type-on-path element stays legacy");
+}
+
 /// What node 15 did NOT take stays legacy, by name: a tracking the legacy
 /// renderer cannot read (it would draw it as 0, the seam must not guess), and
 /// anchored tracked text (the anchor shifts by a measured width, and whether

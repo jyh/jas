@@ -400,7 +400,23 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     {
         return true;
     }
-    !t.baseline_shift.is_empty() || draws_decoration(t)
+    !t.baseline_shift.is_empty()
+        || draws_decoration(t)
+        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+}
+
+/// ⛔ A SCALE OR GLYPH ROTATION THE WALK DOES NOT DRAW (STATUS-flask section
+/// 411). The legacy renderer wraps the draw in `scale(h/100, v/100)` and
+/// rotates each glyph by `rotate` degrees; no lowering carries either, and the
+/// seam used to take the element and ignore the fields, drawing it untransformed
+/// with no refusal. True for a value that transforms: a scale that does not read
+/// as 100, a rotation that does not read as 0, or one that does not read at all.
+/// Empty is the identity, as in `render.rs`.
+fn draws_text_transform(h_scale: &str, v_scale: &str, rotate: &str) -> bool {
+    let off = |v: &str, identity: f64| -> bool {
+        !v.is_empty() && v.trim().parse::<f64>().map_or(true, |n| n != identity)
+    };
+    off(h_scale, 100.0) || off(v_scale, 100.0) || off(rotate, 0.0)
 }
 
 /// ⭐ NODE 15: a flat text's uniform per-glyph spacing, the number the legacy
@@ -577,6 +593,7 @@ fn text_path_needs_legacy(e: &crate::geometry::element::TextPathElem) -> bool {
         || !e.kerning.is_empty()
         || !e.baseline_shift.is_empty()
         || draws_decoration_str(&e.text_decoration)
+        || draws_text_transform(&e.horizontal_scale, &e.vertical_scale, &e.rotate)
     {
         return true;
     }
