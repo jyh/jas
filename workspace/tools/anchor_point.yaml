@@ -14,6 +14,13 @@
 # matches regardless, the user just doesn't see the handles while
 # dragging. Adding live preview is a follow-up if the UX warrants.
 #
+# Hits are made where a path is DRAWN: the probe visits every unlocked
+# Path at any Group depth and compares through the path's full frame
+# (ancestors and its own transform). A Transformed live element is one
+# element unless it is the innermost isolation entry. The commit maps
+# the release point (corner) and the drag delta (handle) back into the
+# path's local space. See transcripts/ANCHOR_POINT_TOOLS.md.
+#
 # Validated against schema/tool.schema.json.
 
 id: anchor_point

@@ -1,0 +1,14 @@
+[
+ {
+  "_doc": "The S1 frame witness (transform-correct path verbs). The open path (0,0) -> (30,30) -> (60,0) sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30) in pt, so its corner (30,30) is DRAWN at (120,120). A press there must hit it; today's walker compared raw local points and found nothing. The drag to (140,120) is mapped into the path's local space through the inverse frame, ((140-60)/2, (120-30)/3) = (40,30), so the out-handle sits at (40,30) and the in-handle is mirrored through the anchor to (20,30). A walker that swapped a and d, or mapped the target as a delta, lands elsewhere.",
+  "name": "anchor_point_drag_corner_to_smooth_in_scaled_group",
+  "setup_svg": "group_scaled_path.svg",
+  "tool": "anchor_point",
+  "events": [
+   {"kind": "press", "x": 120, "y": 120},
+   {"kind": "move", "x": 140, "y": 120, "dragging": true},
+   {"kind": "release", "x": 140, "y": 120}
+  ],
+  "expected_json": "anchor_point_drag_corner_to_smooth_in_scaled_group_expected.json"
+ }
+]

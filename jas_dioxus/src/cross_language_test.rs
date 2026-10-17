@@ -1819,6 +1819,7 @@ pub(crate) mod tests {
         "add_anchor_point_on_line.json",
         "delete_anchor_point_corner.json",
         "anchor_point_drag_corner_to_smooth.json",
+        "anchor_point_drag_corner_to_smooth_in_scaled_group.json",
         "anchor_point_press_smooth_collapses.json",
         "smooth_zigzag.json",
         "path_eraser_cuts_line.json",
