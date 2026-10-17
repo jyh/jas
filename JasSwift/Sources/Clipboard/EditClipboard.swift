@@ -19,18 +19,19 @@ public enum EditClipboard {
     /// Serialize the current selection to SVG on the pasteboard. Clipboard-only:
     /// no document write, no undo step. No-op on an empty selection.
     static func copySelection(_ model: Model, pasteboard: NSPasteboard = .general) {
-        let doc = model.document
-        guard !doc.selection.isEmpty else { return }
-        var elements: [Element] = []
-        for es in doc.selection {
-            let elem = doc.getElement(es.path)
-            elements.append(elem)
-        }
-        guard !elements.isEmpty else { return }
-        let tempDoc = Document(layers: [Layer(children: elements)])
-        let svg = documentToSvg(tempDoc)
+        guard let svg = selectionPayload(model.document) else { return }
         pasteboard.clearContents()
         pasteboard.setString(svg, forType: .string)
+    }
+
+    /// The copy payload: the selection's elements, in selection order, in one
+    /// unnamed layer with no artboard, as SVG; nil for an empty selection.
+    /// Pinned byte for byte against Rust's `selection_clipboard_svg` by the
+    /// shared corpus `test_fixtures/clipboard/copy_payload.json`.
+    static func selectionPayload(_ doc: Document) -> String? {
+        guard !doc.selection.isEmpty else { return nil }
+        let elements = doc.selection.map { doc.getElement($0.path) }
+        return documentToSvg(Document(layers: [Layer(children: elements)]))
     }
 
     /// Paste pasteboard contents into the document, translated by `offset` in

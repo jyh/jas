@@ -4758,6 +4758,57 @@ private func assertGestureTest(_ tc: [String: Any]) {
     }
 }
 
+// MARK: - The copy payload (Edit > Copy, Ctrl+C)
+//
+// The bytes every app puts on the system clipboard. Mirrors Rust
+// `copy_payload_corpus`; the expected files are Rust-written.
+//
+// ⚠️ MEASURED 2026-10-17: the payloads agree in CONTENT (elements, order,
+// viewBox) and NOT in bytes. The difference is the SVG writers', not the
+// clipboard's: Rust's `document_to_svg` always declares `xmlns:sodipodi` and
+// `xmlns:jas` and writes a blank line after each element, while
+// `documentToSvg` declares `xmlns:jas` only when a `jas:` attribute is
+// written. So content is held hard here, and byte equality is a KNOWN ISSUE
+// that fails this test the day the writers agree.
+
+/// The payload with the two writer differences above removed.
+private func payloadContent(_ svg: String) -> String {
+    svg.replacingOccurrences(
+        of: " xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\"", with: "")
+        .replacingOccurrences(of: " xmlns:jas=\"urn:jas:1\"", with: "")
+        .split(separator: "\n", omittingEmptySubsequences: false)
+        .filter { !$0.allSatisfy(\.isWhitespace) }.joined(separator: "\n")
+}
+
+@Test func copyPayloadCorpus() throws {
+    let cases = try JSONSerialization.jsonObject(
+        with: readFixture("clipboard/copy_payload.json").data(using: .utf8)!) as! [[String: Any]]
+    #expect(cases.count >= 3, "the copy-payload corpus lost cases: \(cases.count)")
+    for c in cases {
+        let name = c["name"] as! String
+        let parsed = svgToDocument(readFixture("svg/\(c["setup_svg"] as! String)"))
+        let doc = Document(layers: parsed.layers, selectedLayer: parsed.selectedLayer,
+                           selection: (c["select"] as! [[Int]]).map { ElementSelection.all($0) })
+        let expected = (c["expected_svg"] as? String).map { readFixture("clipboard/\($0)") }
+        let got = EditClipboard.selectionPayload(doc)
+        if let e = expected {
+            // The normaliser drops blank lines and two attributes, never an
+            // element: a normaliser that emptied both sides would agree.
+            let kept = e.split(separator: "\n").filter { !$0.allSatisfy(\.isWhitespace) }.count
+            #expect(payloadContent(e).split(separator: "\n").count == kept && kept > 4,
+                    "copy payload \(name): the normaliser dropped a line")
+        }
+        #expect(got.map(payloadContent) == expected.map(payloadContent), "copy payload content \(name)")
+        if let expected = expected {
+            withKnownIssue("the SVG writers differ in namespace declarations and blank lines") {
+                #expect(got == expected, "copy payload bytes \(name)")
+            }
+        } else {
+            #expect(got == nil, "copy payload \(name): an empty selection has none")
+        }
+    }
+}
+
 // MARK: - The input scripts (docs/TESTING.md section 6)
 //
 // One script per spec item, shared by level 1 (each port's core, here) and
