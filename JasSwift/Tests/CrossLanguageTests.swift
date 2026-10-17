@@ -4443,6 +4443,9 @@ private let gestureFixtures = [
     "magic_wand_click.json",
     "partial_selection_marquee_corner.json",
     "partial_selection_drag_corner_anchor.json",
+    // A corner hit WHERE IT IS DRAWN, through a scaled group (2026-10-16);
+    // see the Rust list's comment on the same entry.
+    "partial_selection_drag_corner_in_scaled_group.json",
     "artboard_drag.json",
     // YAML coverage census, NOT_YET_BUILT tools (2026-10-12): the first
     // gesture case for the last twelve tools. Most act on a selection, which
