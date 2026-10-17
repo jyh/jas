@@ -4363,16 +4363,6 @@ mod tests {
         children(e).iter().map(|c| (c["x"].as_f64().expect("a child with an x") * 1000.0).round() / 1000.0).collect()
     }
 
-    /// The payload with its artboard's id blanked: `selection_clipboard_svg`
-    /// serialises a fresh default Document, which MINTS an artboard id on
-    /// every call, so two copies of one selection differ in those 8 bytes.
-    fn unminted(svg: &str) -> String {
-        let at = svg.find("<inkscape:page").expect("the payload's artboard");
-        let id = at + svg[at..].find(" id=\"").expect("its id") + 5;
-        let end = id + svg[id..].find("\"").unwrap();
-        format!("{}{}", &svg[..id], &svg[end..])
-    }
-
     /// Two black rects at x 10 and 50, both selected.
     fn two_rects() -> *mut JasEngine {
         use crate::document::test_fixture::{model_with, rect};
@@ -4400,8 +4390,7 @@ mod tests {
         let before = doc_json(e);
         let payload = copied(e);
         let expected = engine_of(e).with_document(crate::document::op_apply::selection_clipboard_svg);
-        assert_eq!(Some(unminted(&payload)), expected.as_deref().map(unminted),
-                   "the shared builder's bytes, no second format");
+        assert_eq!(Some(payload.clone()), expected, "the shared builder's bytes, no second format");
         let back = crate::geometry::svg::svg_to_document(&payload);
         assert_eq!(back.layers.len(), 1, "one layer: {payload}");
         assert_eq!(back.layers[0].children().map_or(0, |k| k.len()), 2, "both rects: {payload}");
@@ -4427,7 +4416,7 @@ mod tests {
         let expected = engine_of(e).with_document(crate::document::op_apply::selection_clipboard_svg);
         let (reply, err) = dispatch(e, r#"{"menu_item":"menu_cut"}"#);
         let v = reply_of(&reply, &err);
-        assert_eq!(v["clipboard_write"].as_str().map(unminted), expected.as_deref().map(unminted), "{reply}");
+        assert_eq!(v["clipboard_write"].as_str().map(str::to_string), expected, "{reply}");
         assert_eq!(v["doc_changed"], true, "{reply}");
         assert_eq!(v["dialog"], serde_json::Value::Null, "nothing to orphan, nothing to ask: {reply}");
         assert!(children(e).is_empty(), "both rects are gone");
@@ -4462,8 +4451,7 @@ mod tests {
                    Some(serde_json::json!(1)), "the orphan count");
         let (reply, err) = dispatch(e, r#"{"action":"cut_orphan_confirm_ok"}"#);
         let v = reply_of(&reply, &err);
-        assert_eq!(v["clipboard_write"].as_str().map(unminted), expected.as_deref().map(unminted),
-                   "OK names the payload: {reply} {err}");
+        assert_eq!(v["clipboard_write"].as_str().map(str::to_string), expected, "OK names the payload: {reply} {err}");
         assert_eq!(v["dialog"], serde_json::Value::Null, "and closes: {reply}");
         assert_ne!(doc_json(e), before, "and deletes");
         undo(e);
