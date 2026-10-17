@@ -4763,15 +4763,13 @@ private func assertGestureTest(_ tc: [String: Any]) {
 // The bytes every app puts on the system clipboard. Mirrors Rust
 // `copy_payload_corpus`; the expected files are Rust-written.
 //
-// ⚠️ MEASURED 2026-10-17: the payloads agree in CONTENT (elements, order,
-// viewBox) and NOT in bytes. The difference is the SVG writers', not the
-// clipboard's: Rust's `document_to_svg` always declares `xmlns:sodipodi` and
-// `xmlns:jas` and writes a blank line after each element, while
-// `documentToSvg` declares `xmlns:jas` only when a `jas:` attribute is
-// written. So content is held hard here, and byte equality is a KNOWN ISSUE
-// that fails this test the day the writers agree.
+// The bytes agree. Until 2026-10-17 they agreed only in content: Rust's
+// `document_to_svg` declared `xmlns:sodipodi` and `xmlns:jas` on every
+// document and wrote a blank line after each element. Content is still
+// checked on its own, so a byte red says which kind of disagreement it is.
 
-/// The payload with the two writer differences above removed.
+/// The payload without its namespace declarations and blank lines: the two
+/// ways the writers once disagreed.
 private func payloadContent(_ svg: String) -> String {
     svg.replacingOccurrences(
         of: " xmlns:sodipodi=\"http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd\"", with: "")
@@ -4800,9 +4798,7 @@ private func payloadContent(_ svg: String) -> String {
         }
         #expect(got.map(payloadContent) == expected.map(payloadContent), "copy payload content \(name)")
         if let expected = expected {
-            withKnownIssue("the SVG writers differ in namespace declarations and blank lines") {
-                #expect(got == expected, "copy payload bytes \(name)")
-            }
+            #expect(got == expected, "copy payload bytes \(name)")
         } else {
             #expect(got == nil, "copy payload \(name): an empty selection has none")
         }

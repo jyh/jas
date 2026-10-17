@@ -911,7 +911,13 @@ fn apply_gradient_attrs(node: &XmlNode, elem: Element) -> Element {
 }
 
 pub fn element_svg(elem: &Element, indent: &str) -> String {
-    let out = element_svg_body(elem, indent);
+    let mut out = element_svg_body(elem, indent);
+    // A leaf's body ends in a newline and its container joins with one, so
+    // the newline is dropped here, once, for every element: no blank line
+    // after an element, as JasSwift's `documentToSvg` writes.
+    if out.ends_with('\n') {
+        out.pop();
+    }
     let attrs = gradient_attrs(elem);
     if attrs.is_empty() {
         return out;
@@ -1456,6 +1462,18 @@ pub fn document_to_svg(doc: &Document) -> String {
         lines.splice(at..at, block);
     }
     lines.push("</svg>".to_string());
+    // The namespaces a document USES, as JasSwift's `documentToSvg` declares
+    // them: `sodipodi` only with a namedview, `jas` with a namedview or any
+    // ` jas:` attribute in the body (an undeclared prefix makes a strict XML
+    // parser refuse the whole file). A plain document declares neither, so
+    // the two writers' bytes agree (the copy-payload corpus pins it).
+    let has_jas_attr = lines[2..].iter().any(|l| l.contains(" jas:"));
+    if !want_namedview {
+        lines[1] = lines[1].replacen(&format!(" xmlns:sodipodi=\"{}\"", SODIPODI_NS), "", 1);
+        if !has_jas_attr {
+            lines[1] = lines[1].replacen(&format!(" xmlns:jas=\"{}\"", JAS_NS), "", 1);
+        }
+    }
     lines.join("\n")
 }
 
@@ -3813,6 +3831,43 @@ fn get_named_colors() -> &'static HashMap<&'static str, (u8, u8, u8)> {
 mod tests {
     use super::*;
     use crate::geometry::element::*;
+
+    /// The namespaces a document declares are the ones it USES, as JasSwift's
+    /// writer declares them, and no element is followed by a blank line.
+    /// Three shapes: a plain document (neither), a `jas:` attribute in the
+    /// body (`jas` only), a namedview (both).
+    #[test]
+    fn a_document_declares_the_namespaces_it_uses_and_no_blank_lines() {
+        const SODI: &str = "xmlns:sodipodi=";
+        const JAS: &str = "xmlns:jas=";
+        let rect = |x: f64| Element::Rect(RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None, common: CommonProps::default(),
+            fill_gradient: None, stroke_gradient: None,
+        });
+        let mut plain = make_doc(vec![rect(0.0), rect(20.0)]);
+        plain.artboards.clear();
+        let svg = document_to_svg(&plain);
+        assert!(!svg.contains(SODI) && !svg.contains(JAS), "{svg}");
+        assert!(!svg.contains("\n\n"), "a blank line: {svg}");
+        assert_eq!(svg.matches("<rect ").count(), 2, "{svg}");
+
+        let mut stroke = Stroke::new(Color::rgb(0.0, 0.0, 0.0), 2.0);
+        stroke.start_arrow = Arrowhead::SimpleArrow;
+        let mut arrowed = make_doc(vec![Element::Line(LineElem {
+            x1: 0.0, y1: 0.0, x2: 100.0, y2: 0.0, stroke: Some(stroke),
+            width_points: vec![], common: CommonProps::default(), stroke_gradient: None,
+        })]);
+        arrowed.artboards.clear();
+        let svg = document_to_svg(&arrowed);
+        assert!(svg.contains(" jas:start-arrow=") && svg.contains(JAS) && !svg.contains(SODI), "{svg}");
+
+        let paged = try_open_svg_document(&document_to_svg(&plain)).expect("opens");
+        assert!(!paged.artboards.is_empty());
+        let svg = document_to_svg(&paged);
+        assert!(svg.contains("<sodipodi:namedview") && svg.contains(SODI) && svg.contains(JAS), "{svg}");
+        assert!(!svg.contains("\n\n"), "a blank line: {svg}");
+    }
 
     /// The shell's open (`jas_load_svg`) OPENS, it does not merely decode: a
     /// drawing that declares no page gets its root's sheet and at least one
