@@ -21,9 +21,10 @@ workspace YAML is authoritative for resolving the conflict).
 
 ## Algorithm (per-frame)
 
-For each unlocked, visible Path that is a direct child of a visible
-layer (paths inside a Group are not reached yet; see Limitations; a
-hidden path, or any path of a hidden layer, is never erased):
+For each unlocked, visible Path at any Group depth, in document order
+(a locked or hidden group or layer is skipped with everything inside
+it; a Transformed live element is one element and is not entered,
+since its single child slot cannot hold a split):
 
 1. Compute the eraser AABB:
    `[min(last_x, x) − eraser_size,
@@ -31,8 +32,8 @@ hidden path, or any path of a hidden layer, is never erased):
      max(last_x, x) + eraser_size,
      max(last_y, y) + eraser_size]`.
 2. Flatten the path commands to a polyline, and map every flat
-   point through the path's full frame (the layer's transform and
-   the path's own), so steps 3–5 run in document space, where the
+   point through the path's full frame (every ancestor's transform
+   and the path's own), so steps 3–5 run in document space, where the
    path is drawn. A path whose frame is singular is left alone.
 3. Run `find_eraser_hit(flat, rect)` — returns the first
    contiguous run of flat segments that intersect the
@@ -55,6 +56,10 @@ hidden path, or any path of a hidden layer, is never erased):
      `split_cubic_cmd_at` / `split_quad_cmd_at`.
    - Closed paths → single open path that runs from the exit
      point around the non-erased side back to the entry point.
+   The sub-paths take the erased path's place in its own parent
+   (a layer or a group), at its index and in order, so they are
+   drawn under the same transforms; nothing moves to another
+   parent.
 
 When any path is modified, the selection is cleared as a side
 effect (matching native behavior — the old selection entries
@@ -167,11 +172,9 @@ since the circle-at-cursor shape is already well-known.
   commands, not the rendered stroke. For very thick strokes,
   cursor positions near the stroke's outer edge but inside
   the stroked extent don't trigger erasure.
-- **Paths inside Groups are not reached.** Erasing into a group
-  would splice the fragments into the group rather than the
-  layer, which is a structural change of its own (transform-correct
-  path verbs, fork F3). A path's own transform and its layer's are
-  honoured.
+- **Paths inside a Transformed live element are not reached.** The
+  element holds exactly one child, so a path split into two could not
+  be put back in its place.
 - **No eraser-shape variants** — the sweep is always an
   axis-aligned rectangle. Circular erasers, pressure-varying
   shapes, etc., are out of scope today.

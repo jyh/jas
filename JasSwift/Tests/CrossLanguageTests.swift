@@ -4483,6 +4483,7 @@ private let gestureFixtures = [
     "smooth_zigzag_in_scaled_group.json",
     "path_eraser_cuts_line.json",
     "path_eraser_cuts_transformed_line.json",
+    "path_eraser_cuts_line_in_scaled_group.json",
     "hand_drag_pans.json",
     "zoom_click_zooms_in.json",
 ]

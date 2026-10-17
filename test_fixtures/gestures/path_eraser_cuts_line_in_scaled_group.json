@@ -1,0 +1,21 @@
+[
+ {
+  "_doc": "F3, the Path Eraser DESCENDS into groups (the helm's ruling of 2026-10-17). The line (0,30) -> (120,30) in pt sits inside a group with the NON-UNIFORM matrix (2,0,0,3,60,30), between two rects, so it is DRAWN along y = 120 from x 60 to 300. A click at (150,120) erases the 4-by-4 square around it, which crosses the drawn line from x 148 to 152, that is local x 44 to 46: the S5 witness's cut, one level down. The two fragments (0,30) -> (44,30) and (46,30) -> (120,30), each with a fresh id, are spliced into the SAME group at the line's index, between the rects, under the group's transform: the group keeps four children in that order and nothing is hoisted. The old eraser walked layer children only and erased nothing.",
+  "name": "path_eraser_cuts_line_in_scaled_group",
+  "setup_svg": "group_scaled_line_between_rects.svg",
+  "tool": "path_eraser",
+  "events": [
+   {
+    "kind": "press",
+    "x": 150,
+    "y": 120
+   },
+   {
+    "kind": "release",
+    "x": 150,
+    "y": 120
+   }
+  ],
+  "expected_json": "path_eraser_cuts_line_in_scaled_group_expected.json"
+ }
+]

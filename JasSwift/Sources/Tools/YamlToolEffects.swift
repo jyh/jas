@@ -1943,109 +1943,143 @@ private func pathEraseAtRect(
     // avoiding them is merely conservative, never wrong.
     var existingIds = model.document.elementIds
 
+    // F3 (the helm's ruling, 2026-10-17): the eraser DESCENDS into groups,
+    // by the anchor tools' rule: any group depth, anything locked or hidden
+    // skipped (with all it holds). The fragments of an erased path are
+    // spliced into the SAME parent at the erased path's index, under the
+    // parent's transform, and nothing is hoisted. A Transformed live element
+    // is ONE element and is not entered (its child slot holds exactly one
+    // element, so a split could not be spliced there). The walk is FORWARD,
+    // so fragment ids are minted in document order. Twin of Rust
+    // `erase_in_children` / `erase_one_path`.
+    var aborted = false
+
+    /// One path: nil when not hit, its fragments when hit (empty when the
+    /// whole path fits inside the eraser). A failed mint sets `aborted`.
+    func eraseOnePath(_ pe: Path, _ path: ElementPath) -> [Element]? {
+        // The eraser sweeps DOCUMENT space, so the path is tested where it
+        // is DRAWN (transform-correct path verbs S5): flattened points go
+        // through its full frame. The hit's flat indices and t carry over
+        // (an affine map preserves ratios along a line); its entry and exit
+        // POINTS are mapped back to local space before the split. A
+        // singular frame is left alone. Twin of Rust `path_erase_at_rect`.
+        let frame = accumulatedTransform(model.document, path, includeOwn: true)
+        var inv: Transform? = nil
+        if let f = frame {
+            guard let i = f.inverse() else { return nil }
+            inv = i
+        }
+        let localFlat = flattenPathCommands(pe.d)
+        let flat = frame.map { f in localFlat.map { f.applyPoint($0.0, $0.1) } } ?? localFlat
+        guard flat.count >= 2 else { return nil }
+        guard let docHit = findEraserHit(
+            flat, minX, minY, maxX, maxY
+        ) else { return nil }
+        let hit = inv.map { i in
+            EraserHit(firstFlatIdx: docHit.firstFlatIdx, lastFlatIdx: docHit.lastFlatIdx,
+                      entryTSeg: docHit.entryTSeg, entry: i.applyPoint(docHit.entry.0, docHit.entry.1),
+                      exitTSeg: docHit.exitTSeg, exitPt: i.applyPoint(docHit.exitPt.0, docHit.exitPt.1))
+        } ?? docHit
+        // "Fits inside the eraser" is a DOCUMENT-space size.
+        let bounds = frame.map { aabbThrough(pe.bounds, $0) } ?? pe.bounds
+        if bounds.width <= eraserSize * 2 && bounds.height <= eraserSize * 2 {
+            // bbox fits inside the eraser — drop entirely.
+            return []
+        }
+        let isClosed = pe.d.contains { if case .closePath = $0 { return true }; return false }
+        let results = splitPathAtEraser(pe.d, hit, isClosed)
+            .filter { $0.count >= 2 }
+        // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object."
+        // Branch on the surviving-fragment count; Rust's path_erase_at_rect
+        // branches identically so the two ports agree in BOTH arms. One
+        // fragment is the one-element case and keeps everything including
+        // `id`; a severing erase gives each fragment a FRESH id (see
+        // pathWithCommands). A failed mint aborts the whole erase — never
+        // a half-identified split. The child list is rebuilt FRONT-TO-BACK
+        // and Rust rebuilds it the same way, so fragment ids are handed
+        // out in document order in both ports.
+        var identities: [PathEditIdentity] = [.sameElement]
+        if results.count > 1 {
+            guard let minted = mintUniqueIds(
+                results.count, existing: &existingIds,
+                mint: { generateElementId() })
+            else { aborted = true; return nil }
+            identities = minted.map { .splitFragment(id: $0) }
+        }
+        let severed = results.count > 1
+        var out: [Element] = []
+        for (cmds, identity) in zip(results, identities) {
+            let open = cmds.filter { if case .closePath = $0 { return false }; return true }
+            var frag = pathWithCommands(pe, open, identity: identity, rings: .preserved)
+            if severed {
+                // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2,
+                // ruled 2026-07-26). A gradient carries no position -- a
+                // linear one resolves angle + stops against the element's
+                // OWN bbox centre and half-diagonal -- so a fragment that
+                // inherited the parent's stops verbatim re-fitted the
+                // whole ramp to its own smaller box.
+                //
+                // Only the severing arm needs this. A single surviving
+                // fragment is the 1 -> 1 case, which the Theseus law owns;
+                // changing it is a separate ruling. RADIAL is deliberately
+                // left alone (its centre is forced to the bbox centre and
+                // the model has nowhere to record an anchor; JYH accepted
+                // the recentre) and FREEFORM paints nothing. Mirrors
+                // Rust's remap_linear_gradients call site.
+                let fb = Element.path(frag).bounds
+                frag = remapFragmentLinearGradients(
+                    frag,
+                    parent: (bounds.x, bounds.y, bounds.width, bounds.height),
+                    fragment: (fb.x, fb.y, fb.width, fb.height))
+            }
+            out.append(.path(frag))
+        }
+        return out
+    }
+
+    /// One child list at `prefix`: the rebuilt list when anything in it (at
+    /// any group depth) was erased, else nil.
+    func eraseInChildren(_ children: [Element], _ prefix: ElementPath, _ parentVis: Visibility) -> [Element]? {
+        var out: [Element] = []
+        var changed = false
+        for (ci, child) in children.enumerated() {
+            if aborted { return nil }
+            let path = prefix + [ci]
+            // INVISIBLE (2026-10-17): a hidden element, or one under a hidden
+            // ancestor or layer, is not erased; nor is a locked one.
+            let vis = min(parentVis, child.visibility)
+            if child.isLocked || vis == .invisible {
+                out.append(child)
+                continue
+            }
+            var replaced: [Element]? = nil
+            switch child {
+            case .group(let g):
+                if let rebuilt = eraseInChildren(g.children, path, vis) {
+                    replaced = [.group(g.withChildren(rebuilt))]
+                }
+            case .path(let pe):
+                replaced = eraseOnePath(pe, path)
+            default:
+                break
+            }
+            if let r = replaced {
+                out.append(contentsOf: r)
+                changed = true
+            } else {
+                out.append(child)
+            }
+        }
+        return changed ? out : nil
+    }
+
     var newLayers = model.document.layers
     var changed = false
     for li in 0..<newLayers.count {
         let layer = newLayers[li]
-        var newChildren: [Element] = []
-        var layerChanged = false
-        for (ci, child) in layer.children.enumerated() {
-            // INVISIBLE (2026-10-17): a hidden path, or one in a hidden
-            // layer, is not erased. Twin of Rust `path_erase_at_rect`.
-            guard case .path(let pe) = child, !pe.locked,
-                  min(layer.visibility, child.visibility) != .invisible else {
-                newChildren.append(child)
-                continue
-            }
-            // The eraser sweeps DOCUMENT space, so the path is tested where it
-            // is DRAWN (transform-correct path verbs S5): flattened points go
-            // through its full frame. The hit's flat indices and t carry over
-            // (an affine map preserves ratios along a line); its entry and exit
-            // POINTS are mapped back to local space before the split. A
-            // singular frame is left alone. Twin of Rust `path_erase_at_rect`.
-            let frame = accumulatedTransform(model.document, [li, ci], includeOwn: true)
-            var inv: Transform? = nil
-            if let f = frame {
-                guard let i = f.inverse() else {
-                    newChildren.append(child)
-                    continue
-                }
-                inv = i
-            }
-            let localFlat = flattenPathCommands(pe.d)
-            let flat = frame.map { f in localFlat.map { f.applyPoint($0.0, $0.1) } } ?? localFlat
-            guard flat.count >= 2 else {
-                newChildren.append(child)
-                continue
-            }
-            guard let docHit = findEraserHit(
-                flat, minX, minY, maxX, maxY
-            ) else {
-                newChildren.append(child)
-                continue
-            }
-            let hit = inv.map { i in
-                EraserHit(firstFlatIdx: docHit.firstFlatIdx, lastFlatIdx: docHit.lastFlatIdx,
-                          entryTSeg: docHit.entryTSeg, entry: i.applyPoint(docHit.entry.0, docHit.entry.1),
-                          exitTSeg: docHit.exitTSeg, exitPt: i.applyPoint(docHit.exitPt.0, docHit.exitPt.1))
-            } ?? docHit
-            // "Fits inside the eraser" is a DOCUMENT-space size.
-            let bounds = frame.map { aabbThrough(pe.bounds, $0) } ?? pe.bounds
-            if bounds.width <= eraserSize * 2 && bounds.height <= eraserSize * 2 {
-                // bbox fits inside the eraser — drop entirely.
-                layerChanged = true
-                continue
-            }
-            let isClosed = pe.d.contains { if case .closePath = $0 { return true }; return false }
-            let results = splitPathAtEraser(pe.d, hit, isClosed)
-                .filter { $0.count >= 2 }
-            // ERASE DOES NOT REMOVE IDENTITY — "it is still the same object."
-            // Branch on the surviving-fragment count; Rust's path_erase_at_rect
-            // branches identically so the two ports agree in BOTH arms. One
-            // fragment is the one-element case and keeps everything including
-            // `id`; a severing erase gives each fragment a FRESH id (see
-            // pathWithCommands). A failed mint aborts the whole erase — never
-            // a half-identified split. The child list is rebuilt FRONT-TO-BACK
-            // and Rust rebuilds it the same way, so fragment ids are handed
-            // out in document order in both ports.
-            var identities: [PathEditIdentity] = [.sameElement]
-            if results.count > 1 {
-                guard let minted = mintUniqueIds(
-                    results.count, existing: &existingIds,
-                    mint: { generateElementId() })
-                else { return }
-                identities = minted.map { .splitFragment(id: $0) }
-            }
-            let severed = results.count > 1
-            for (cmds, identity) in zip(results, identities) {
-                let open = cmds.filter { if case .closePath = $0 { return false }; return true }
-                var frag = pathWithCommands(pe, open, identity: identity, rings: .preserved)
-                if severed {
-                    // LINEAR GRADIENTS ARE REMAPPED on the severing arm (S-2,
-                    // ruled 2026-07-26). A gradient carries no position -- a
-                    // linear one resolves angle + stops against the element's
-                    // OWN bbox centre and half-diagonal -- so a fragment that
-                    // inherited the parent's stops verbatim re-fitted the
-                    // whole ramp to its own smaller box.
-                    //
-                    // Only the severing arm needs this. A single surviving
-                    // fragment is the 1 -> 1 case, which the Theseus law owns;
-                    // changing it is a separate ruling. RADIAL is deliberately
-                    // left alone (its centre is forced to the bbox centre and
-                    // the model has nowhere to record an anchor; JYH accepted
-                    // the recentre) and FREEFORM paints nothing. Mirrors
-                    // Rust's remap_linear_gradients call site.
-                    let fb = Element.path(frag).bounds
-                    frag = remapFragmentLinearGradients(
-                        frag,
-                        parent: (bounds.x, bounds.y, bounds.width, bounds.height),
-                        fragment: (fb.x, fb.y, fb.width, fb.height))
-                }
-                newChildren.append(.path(frag))
-            }
-            layerChanged = true
-        }
-        if layerChanged {
+        let rebuilt = eraseInChildren(layer.children, [li], layer.visibility)
+        if aborted { return }
+        if let newChildren = rebuilt {
             // T4, THE BYSTANDER CLAUSE: the layer is a container this edit
             // rebuilt only to reach the paths inside it, so it must come back
             // unchanged. This was a ten-field hand list that forwarded
