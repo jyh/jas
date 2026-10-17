@@ -2231,7 +2231,7 @@ func selectionOutlineScale(_ doc: Document, _ path: ElementPath) -> Double {
     guard !path.isEmpty else { return 1.0 }
     func isContainer(_ e: Element) -> Bool {
         switch e {
-        case .group, .layer: return true
+        case .group, .layer, .live(.transformed): return true
         default: return false
         }
     }
@@ -2244,7 +2244,7 @@ func selectionOutlineScale(_ doc: Document, _ path: ElementPath) -> Double {
             let children = elemChildren(node)
             guard idx < children.count else { return 1.0 }
             node = children[idx]
-            transforms.append(node.transform)
+            transforms.append(node.childFrameTransform)
         }
         guard isContainer(node) else { return 1.0 }
         let children = elemChildren(node)
@@ -2504,13 +2504,9 @@ func drawElementOverlay(_ ctx: CGContext, _ elem: Element, kind: SelectionKind =
     // stay under the element transform (they trace the geometry).
 }
 
-private func elemChildren(_ e: Element) -> [Element] {
-    switch e {
-    case .group(let g): return g.children
-    case .layer(let l): return l.children
-    default: return []
-    }
-}
+/// Path children, including a Transformed wrapper's single child (route 4
+/// slice 3b); see `Element.pathChildren`.
+private func elemChildren(_ e: Element) -> [Element] { e.pathChildren }
 
 // MARK: - Artboard rendering (ARTBOARDS.md §Canvas appearance)
 //
@@ -2707,7 +2703,7 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
     // `.layer` are valid containers to descend through.
     func isContainer(_ e: Element) -> Bool {
         switch e {
-        case .group, .layer: return true
+        case .group, .layer, .live(.transformed): return true
         default: return false
         }
     }
@@ -2718,7 +2714,7 @@ func selectionHandleRects(_ doc: Document, _ path: ElementPath) -> [CGRect] {
             let children = elemChildren(node)
             guard idx < children.count else { return [] }
             node = children[idx]
-            ancestors.append(node.transform)
+            ancestors.append(node.childFrameTransform)
         }
         guard isContainer(node) else { return [] }
         let children = elemChildren(node)
@@ -2781,6 +2777,8 @@ private func drawSelectionOverlays(_ ctx: CGContext, _ doc: Document, _ keyObjec
                     switch node {
                     case .group(let g): applyTransform(ctx, g.transform)
                     case .layer(let l): applyTransform(ctx, l.transform)
+                    // A wrapper's child is drawn under `W·M` (slice 3b).
+                    case .live(.transformed): applyTransform(ctx, node.childFrameTransform)
                     default: break
                     }
                 }

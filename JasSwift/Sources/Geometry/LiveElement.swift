@@ -2074,3 +2074,33 @@ public enum LiveVariant: Equatable {
         }
     }
 }
+
+// MARK: - Path addressing through a Transformed wrapper (route 4 slice 3b)
+
+extension Element {
+    /// The children a PATH can address: a Group's or Layer's children, and a
+    /// Transformed wrapper's single child (`[.., w, 0]`). Empty for anything
+    /// else. Deliberately separate from the container walks: generic walks
+    /// treat a wrapper as one leaf; path resolution reaches through it.
+    /// Compound-shape operands stay unaddressable. Twin of Rust
+    /// `Element::path_children`.
+    public var pathChildren: [Element] {
+        switch self {
+        case .group(let g): return g.children
+        case .layer(let l): return l.children
+        case .live(.transformed(let t)): return [t.child]
+        default: return []
+        }
+    }
+
+    /// The frame this element gives its path children: its own transform, and
+    /// for a Transformed wrapper its transform after its matrix (`W·M`; the
+    /// child is drawn at `W·M·C·p` under BOTH Scale Strokes values). `nil` is
+    /// the identity. Twin of Rust `Element::child_frame_transform`.
+    public var childFrameTransform: Transform? {
+        if case .live(.transformed(let t)) = self {
+            return t.transform.map { $0.multiply(t.matrix) } ?? t.matrix
+        }
+        return transform
+    }
+}
