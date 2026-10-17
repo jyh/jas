@@ -552,6 +552,34 @@ if ($panelSteps.Count -gt 0) {
             'Invoke' { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
             'Toggle' { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
             'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
+            'Choose' {
+                # A select (jas section 381): open the list as a person does, find
+                # the item whose AutomationId is the option VALUE (`PaneView` sets
+                # it), select it, and close the list if it is still open. The
+                # items appear on the open, so they are re-read for PanelWaitMs.
+                $ec = $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+                $ec.Expand()
+                $byValue = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "$($ps.value)")
+                $isw = [System.Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $items = $el.FindAll($tree::Descendants, $byValue)
+                    if ($items.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+                } while ($items.Count -eq 0 -and $isw.ElapsedMilliseconds -lt $PanelWaitMs)
+                $itemPats = if ($items.Count -eq 1) { @($items[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
+                $choice = Select-SbChoiceItem -Widget "$($ps.widget)" -Value "$($ps.value)" -ItemCount $items.Count -Patterns $itemPats
+                $log.Add("$tag choose items=$($items.Count) item-patterns=[$($itemPats -join ',')] waited-ms=$($isw.ElapsedMilliseconds)")
+                if ($null -ne $choice.Refusal) {
+                    try { $ec.Collapse() } catch { }
+                    $log.Add("PANEL REFUSED: $tag -- $($choice.Refusal)")
+                    $log | Set-Content -Path $Out -Encoding utf8
+                    exit 6
+                }
+                $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+                Start-Sleep -Milliseconds $SettleMs
+                $state = $ec.Current.ExpandCollapseState
+                if ($state -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $ec.Collapse() }
+                $log.Add("$tag chose '$($ps.value)' list-after-select=$state")
+            }
             'Value' {
                 $el.SetFocus()
                 $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$($ps.value)")

@@ -2340,6 +2340,40 @@ Test-Case 'pa: a click on a text box is refused: it has no pattern for a click' 
 Test-Case 'pa: a commit on a button is refused: it has no Value pattern' {
     Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'align_left_button' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Button' -Patterns $uiaButton)
 } "REFUSED: widget 'align_left_button' (ControlType.Button) has no Value pattern for a commit: it has [Invoke, ScrollItem]"
+# jas section 381 (node 10): a SELECT commit. A WinUI ComboBox has no Value
+# pattern: measured on the box (2026-10-17, the stroke panel), stk_profile
+# and both arrowhead selects are each a ComboBox exposing
+# [SelectionPatternIdentifiers.Pattern, ExpandCollapsePatternIdentifiers.Pattern,
+# ScrollItemPatternIdentifiers.Pattern, ItemContainerPatternIdentifiers.Pattern].
+# A commit on one is a CHOOSE: expand it, select the item whose AutomationId
+# is the OPTION'S VALUE (the shell sets it), never its label.
+$uiaComboBox = @('SelectionPatternIdentifiers.Pattern', 'ExpandCollapsePatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'ItemContainerPatternIdentifiers.Pattern')
+Test-Case 'pa: a commit on a select (ComboBox) is a Choose, by the option value' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'opacity_panel_content' -Widget 'op_mode' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.ComboBox' -Patterns $uiaComboBox)
+} 'Choose'
+Test-Case 'pa: a click on a select is refused: a person picks from it with a commit' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'opacity_panel_content' -Widget 'op_mode' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.ComboBox' -Patterns $uiaComboBox)
+} "REFUSED: widget 'op_mode' (ControlType.ComboBox) has no Invoke, Toggle or SelectionItem pattern for a click: it has [Selection, ExpandCollapse, ScrollItem, ItemContainer]"
+function Show-SbChoice($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
+# The item row MEASURED on the box (2026-10-17, op_mode's `multiply` once the
+# list was open): [SelectionItemPatternIdentifiers.Pattern,
+# ScrollItemPatternIdentifiers.Pattern, VirtualizedItemPatternIdentifiers.Pattern].
+$uiaComboItem = @('SelectionItemPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'VirtualizedItemPatternIdentifiers.Pattern')
+Test-Case 'ch: the one item whose AutomationId is the value is selected' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns $uiaComboItem)
+} 'Select'
+Test-Case 'ch: a value the list does not hold is refused by name' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'mulitply' -ItemCount 0 -Patterns @())
+} "REFUSED: value 'mulitply' is not an option of widget 'op_mode': no item in its list has that AutomationId"
+Test-Case 'ch: a LABEL is refused as not an option: the value is the option''s value, never its label' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'Multiply' -ItemCount 0 -Patterns @())
+} "REFUSED: value 'Multiply' is not an option of widget 'op_mode': no item in its list has that AutomationId"
+Test-Case 'ch: a value two items carry is refused, never guessed between' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 2 -Patterns @('SelectionItemPatternIdentifiers.Pattern'))
+} "REFUSED: value 'multiply' is carried by 2 items of widget 'op_mode': this driver will not guess which one a person meant"
+Test-Case 'ch: an item with no SelectionItem pattern is refused' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns @('ScrollItemPatternIdentifiers.Pattern'))
+} "REFUSED: the item 'multiply' of widget 'op_mode' has no SelectionItem pattern: it has [ScrollItem]"
 Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
 } 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'

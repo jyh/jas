@@ -1601,7 +1601,17 @@ public sealed partial class MainWindow
                 Padding = new Thickness(4, 0, 4, 0),
                 IsEditable = leaf.Type == "combo_box",
             };
-            foreach (var row in items) { combo.Items.Add(PanelWire.ChoiceText(row)); }
+            foreach (var row in items)
+            {
+                if (combo.IsEditable) { combo.Items.Add(PanelWire.ChoiceText(row)); continue; }
+                // jas §381: each item carries its option's VALUE as its
+                // AutomationId, so a UI Automation driver chooses by the value a
+                // script names, never by the label a person reads. An editable
+                // combo keeps text items: its box shows the item's text.
+                var item = new ComboBoxItem { Content = PanelWire.ChoiceText(row) };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(item, row.Value);
+                combo.Items.Add(item);
+            }
             var summary = leaf.Literal("summary");
             if (!string.IsNullOrEmpty(summary)) { ToolTipService.SetToolTip(combo, summary); }
             if (leaf.Id.Length == 0) { return combo; }
