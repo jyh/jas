@@ -926,7 +926,22 @@ impl Controller {
     ) {
         let index = hit_index(model);
         let resolver = IndexResolver(&index);
-        select_recursive(model, |path, elem| {
+        select_recursive(model, |path, elem, parent| {
+            // The marquee is in DOCUMENT space and is compared where the
+            // element is DRAWN (transform-correct path verbs S3): each control
+            // point through the full frame (`parent` · own), and the body by
+            // mapping the rect's corners into the PARENT space, where
+            // `element_intersects_polygon_with` applies the element's own
+            // transform. With no parent frame this is exactly the old call. A
+            // singular frame selects nothing (as a singular own transform
+            // already did in `element_intersects_rect_with`).
+            let full = match (parent, elem.transform()) {
+                (Some(p), Some(o)) => Some(p.multiply(o)),
+                (p, o) => p.or(o.copied()),
+            };
+            if full.is_some_and(|t| t.inverse().is_none()) {
+                return None;
+            }
             // RESOLVED: the resolver-less form collapses a symbol instance's
             // four corners onto the document ORIGIN, so a direct-select
             // marquee dropped anywhere near (0,0) partially-selected every
@@ -934,16 +949,32 @@ impl Controller {
             let cps = crate::geometry::element::control_points_with(elem, &resolver);
             let hit_cps: Vec<usize> = cps
                 .iter()
+                .map(|&(px, py)| full.map_or((px, py), |t| t.apply_point(px, py)))
                 .enumerate()
                 .filter(|(_, (px, py))| point_in_rect(*px, *py, x, y, width, height))
                 .map(|(i, _)| i)
                 .collect();
+            let body_hit = match parent {
+                None => element_intersects_rect_with(elem, x, y, width, height, &resolver),
+                Some(p) => match p.inverse() {
+                    Some(inv) => {
+                        let poly = [
+                            inv.apply_point(x, y),
+                            inv.apply_point(x + width, y),
+                            inv.apply_point(x + width, y + height),
+                            inv.apply_point(x, y + height),
+                        ];
+                        crate::algorithms::hit_test::element_intersects_polygon_with(elem, &poly, &resolver)
+                    }
+                    None => false,
+                },
+            };
             if !hit_cps.is_empty() {
                 Some(ElementSelection {
                     path: path.clone(),
                     kind: SelectionKind::Partial(SortedCps::from_iter(hit_cps)),
                 })
-            } else if element_intersects_rect_with(elem, x, y, width, height, &resolver) {
+            } else if body_hit {
                 Some(ElementSelection::partial(
                     path.clone(),
                     std::iter::empty::<usize>(),
@@ -3557,19 +3588,37 @@ fn hit_index(model: &Model) -> crate::document::id_index::IdIndex {
 /// Recursive selection: traverse the full element tree, calling
 /// `leaf_handler` on each non-container element. Groups and layers
 /// are traversed (not expanded).
+///
+/// The handler's third argument is the element's PARENT frame: the transform
+/// that maps its parent's space to DOCUMENT space (`None` is the identity),
+/// composed from every ancestor's transform. A Transformed wrapper is one leaf
+/// unless it IS the innermost isolation entry; then its child is the leaf,
+/// under the frame `W·M` the wrapper gives it (the Partial Selection probe's
+/// `cp_recursive` rule).
 fn select_recursive(
     model: &mut Model,
-    leaf_handler: impl Fn(&ElementPath, &Element) -> Option<ElementSelection>,
+    leaf_handler: impl Fn(&ElementPath, &Element, Option<crate::geometry::element::Transform>) -> Option<ElementSelection>,
     extend: bool,
 ) {
-    use crate::geometry::element::Visibility;
+    use crate::geometry::element::{Transform, Visibility};
+    type Handler<'a> = &'a dyn Fn(&ElementPath, &Element, Option<Transform>) -> Option<ElementSelection>;
 
+    fn compose(outer: Option<Transform>, inner: Option<Transform>) -> Option<Transform> {
+        match (outer, inner) {
+            (Some(o), Some(i)) => Some(o.multiply(&i)),
+            (o, i) => o.or(i),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn check(
         entries: &mut Selection,
         path: &ElementPath,
         elem: &Element,
         ancestor_vis: Visibility,
-        leaf_handler: &dyn Fn(&ElementPath, &Element) -> Option<ElementSelection>,
+        frame: Option<Transform>,
+        isolated: Option<&[usize]>,
+        leaf_handler: Handler,
     ) {
         if elem.locked() {
             return;
@@ -3578,25 +3627,36 @@ fn select_recursive(
         if effective == Visibility::Invisible {
             return;
         }
+        if let Element::Live(crate::geometry::live::LiveVariant::Transformed(t)) = elem
+            && isolated == Some(path.as_slice())
+        {
+            let mut child_path = path.clone();
+            child_path.push(0);
+            check(entries, &child_path, &t.child, effective,
+                compose(frame, elem.child_frame_transform()), isolated, leaf_handler);
+            return;
+        }
         if elem.is_group_or_layer() {
+            let child_frame = compose(frame, elem.transform().copied());
             if let Some(children) = elem.children() {
                 for (i, child) in children.iter().enumerate() {
                     let mut child_path = path.clone();
                     child_path.push(i);
-                    check(entries, &child_path, child, effective, leaf_handler);
+                    check(entries, &child_path, child, effective, child_frame, isolated, leaf_handler);
                 }
             }
             return;
         }
-        if let Some(es) = leaf_handler(path, elem) {
+        if let Some(es) = leaf_handler(path, elem, frame) {
             entries.push(es);
         }
     }
 
     let doc = model.document().clone();
+    let isolated = model.isolation_stack.last().cloned();
     let mut entries: Selection = Vec::new();
     for (li, layer) in doc.layers.iter().enumerate() {
-        check(&mut entries, &vec![li], layer, Visibility::Preview, &leaf_handler);
+        check(&mut entries, &vec![li], layer, Visibility::Preview, None, isolated.as_deref(), &leaf_handler);
     }
     let new_sel = if extend {
         toggle_selection(&doc.selection, &entries)

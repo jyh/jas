@@ -4396,6 +4396,7 @@ private let gestureFixtures = [
     // bridged the live tool used fit_error=0 (no smoothing) and dropped
     // the fill. See PAINTBRUSH_TOOL.md.
     "paintbrush_paint_fill.json",
+    "paintbrush_edit_in_scaled_group.json",
     "recorded_rect.json",
     "recorded_rect_panzoom.json",
     "recorded_blob_dot.json",
@@ -4453,6 +4454,7 @@ private let gestureFixtures = [
     "lasso_around_rect.json",
     "magic_wand_click.json",
     "partial_selection_marquee_corner.json",
+    "partial_selection_marquee_in_scaled_group.json",
     "partial_selection_drag_corner_anchor.json",
     // A corner hit WHERE IT IS DRAWN, through a scaled group (2026-10-16);
     // see the Rust list's comment on the same entry.
@@ -4467,11 +4469,14 @@ private let gestureFixtures = [
     "eyedropper_click_copies_to_selection.json",
     "pen_closed_triangle.json",
     "add_anchor_point_on_line.json",
+    "add_anchor_point_in_scaled_group.json",
     "delete_anchor_point_corner.json",
+    "delete_anchor_point_in_scaled_group.json",
     "anchor_point_drag_corner_to_smooth.json",
     "anchor_point_drag_corner_to_smooth_in_scaled_group.json",
     "anchor_point_press_smooth_collapses.json",
     "smooth_zigzag.json",
+    "smooth_zigzag_in_scaled_group.json",
     "path_eraser_cuts_line.json",
     "hand_drag_pans.json",
     "zoom_click_zooms_in.json",

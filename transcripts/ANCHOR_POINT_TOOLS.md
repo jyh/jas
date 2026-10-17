@@ -13,10 +13,9 @@ anchors.
 | Anchor Point (Convert)| C        | Click / drag to toggle corner ↔ smooth |
 
 All three operate only on Path elements (not on Line / Rect /
-Polygon / Star). Add and Delete walk the document one level of
-Group nesting, so an anchor inside an unlocked Group is
-reachable. The Anchor Point tool walks every depth and hits a
-path where it is drawn (see its section below).
+Polygon / Star). All three walk every unlocked Path at any Group
+depth and hit a path where it is DRAWN, through its full frame
+(see "Where a path is drawn" under the Anchor Point tool).
 
 ## Add Anchor Point tool
 
@@ -25,9 +24,16 @@ there. The click tolerance is 8 px.
 
 **Algorithm:**
 
-1. For every unlocked Path in the document (including one level
-   inside Groups), compute the closest segment to the cursor
-   using the `closest_segment_and_t` kernel.
+1. For every unlocked Path in the document (at any Group depth),
+   map its commands through the path's full frame into document
+   space and compute the closest segment to the cursor there,
+   using the `closest_segment_and_t` kernel. The distance is a
+   document-space distance. The `t` found on the mapped segment is
+   the same `t` on the path's own segment, because an affine map
+   takes a segment's point at `t` to its image's point at `t`. (The
+   cursor is never mapped into the path's local space instead:
+   under a non-uniform scale that changes both the closest `t` and
+   the radius.)
 2. Keep the globally-closest (path, segment index, t, distance)
    tuple.
 3. If the minimum distance exceeds `hit_radius` (8 px), no-op.
@@ -57,8 +63,9 @@ anchor is deletable.
 
 **Algorithm:**
 
-1. Find the anchor nearest the cursor across all unlocked
-   Paths (same one-level-deep Group recursion as Add).
+1. Find the first anchor within `hit_radius` of the cursor across
+   all unlocked Paths, at any Group depth, each anchor compared
+   where it is drawn.
 2. If no anchor is within `hit_radius` (8 px), no-op.
 3. Otherwise, snapshot and call `delete_anchor_from_path`:
    - Interior deletion merges the two adjacent segments into

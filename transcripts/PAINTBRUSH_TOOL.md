@@ -139,6 +139,19 @@ element.
    `paintbrush_fidelity`-derived `fit_error`.
 6. Replace `target.commands[c0..c1]` with the fit output.
 
+### Where the path is drawn
+
+The press and the drag buffer are in document space, so every
+comparison and the fit run there too. Each flattened point (in
+target selection and in the splice) is mapped through the path's
+full frame: every ancestor's transform and its own. The start-point
+of step 4 is mapped the same way, so the buffer and the start-point
+share one space. The fit's control points are mapped back through
+the frame's inverse before step 6, so the splice lands in the path's
+own coordinates. `paintbrush_edit_within` and `fit_error` are
+therefore document-space tolerances. A path whose frame is singular
+is never a target, and a splice into one is abandoned.
+
 ### Preservation rules
 
 **The Ship of Theseus law (JYH, ratified 2026-07-26):** an edit

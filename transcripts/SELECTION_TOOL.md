@@ -128,6 +128,18 @@ it's been drawn.
    fall inside on release. An empty-ish marquee (< 1px square)
    without Shift clears the selection.
 
+**Where things are drawn.** The probe and the marquee both compare
+in document space, where an element is drawn. A control point is
+compared through the element's full frame: every ancestor's
+transform and its own. The marquee's body test, for an element
+whose CPs all miss, maps the marquee rect into the element's parent
+space and tests the element there, so an element inside a scaled or
+rotated group is selected under the marquee the user drags, and
+nowhere else. A Transformed live element is one element unless it
+is the innermost isolation entry; then the probe and the marquee
+reach its child, under the frame the element gives its child. An
+element whose frame is singular is never selected by the marquee.
+
 **Drag behavior:**
 
 - Past the `DRAG_THRESHOLD` (4 px) from press, the press becomes
