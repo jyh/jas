@@ -507,10 +507,67 @@ if ($panelSteps.Count -gt 0) {
     $tree = [System.Windows.Automation.TreeScope]
     $byPid = New-Object System.Windows.Automation.PropertyCondition($AE::ProcessIdProperty, $ProcessId)
     $window = $AE::RootElement.FindFirst($tree::Children, $byPid)
-    if ($null -eq $window) {
-        $log.Add("PANEL REFUSED: no top-level UI Automation element for pid $ProcessId")
+    # A refusal ends the hand: written to the receipt by name, exit 6.
+    function Stop-SbPanelHand([string]$Why) {
+        $log.Add("PANEL REFUSED: $Why")
         $log | Set-Content -Path $Out -Encoding utf8
         exit 6
+    }
+    # A CHOOSE (jas section 381), for a select's commit and for opening a panel
+    # in the pane's selector: open the list as a person does, find the item
+    # whose AutomationId is the VALUE (the shell sets it), select it, and close
+    # the list if it is still open. The items appear on the open, so they are
+    # re-read for PanelWaitMs. Returns null, or the refusal.
+    function Invoke-SbChoose($List, [string]$Value, [string]$Widget, [string]$Tag) {
+        $ec = $List.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+        $ec.Expand()
+        $byValue = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Value)
+        $isw = [System.Diagnostics.Stopwatch]::StartNew()
+        do {
+            $items = $List.FindAll($tree::Descendants, $byValue)
+            if ($items.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+        } while ($items.Count -eq 0 -and $isw.ElapsedMilliseconds -lt $PanelWaitMs)
+        $itemPats = if ($items.Count -eq 1) { @($items[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
+        $choice = Select-SbChoiceItem -Widget $Widget -Value $Value -ItemCount $items.Count -Patterns $itemPats
+        $log.Add("$Tag choose items=$($items.Count) item-patterns=[$($itemPats -join ',')] waited-ms=$($isw.ElapsedMilliseconds)")
+        if ($null -ne $choice.Refusal) {
+            try { $ec.Collapse() } catch { }
+            return $choice.Refusal
+        }
+        $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+        Start-Sleep -Milliseconds $SettleMs
+        $state = $ec.Current.ExpandCollapseState
+        if ($state -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $ec.Collapse() }
+        $log.Add("$Tag chose '$Value' list-after-select=$state")
+        return $null
+    }
+    function Find-SbById($Under, [string]$Id) {
+        $Under.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Id)))
+    }
+    if ($null -eq $window) { Stop-SbPanelHand "no top-level UI Automation element for pid $ProcessId" }
+
+    # OPEN THE PANEL (jas section 383) as a person does: nothing when it is
+    # shown, else choose it in the pane's selector, `PanePicker`, whose items
+    # carry the panel content ids, and wait for its controls to be built. The
+    # reader admits one panel per script, so this runs once.
+    $want = "$($panelSteps[0].panel)"
+    $openTag = "open $want"
+    $shown = Find-SbById $window $want
+    $pickers = Find-SbById $window 'PanePicker'
+    $pickerPats = if ($pickers.Count -eq 1) { @($pickers[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
+    $open = Select-SbPanelOpen -Panel $want -PanelCount $shown.Count -PickerCount $pickers.Count -PickerPatterns $pickerPats
+    $log.Add("$openTag shown=$($shown.Count) pickers=$($pickers.Count) action=$(if ($open.Action) { $open.Action } else { 'refused' })")
+    if ($null -ne $open.Refusal) { Stop-SbPanelHand "$openTag -- $($open.Refusal)" }
+    if ($open.Action -eq 'Choose') {
+        $why = Invoke-SbChoose -List $pickers[0] -Value $want -Widget 'PanePicker' -Tag $openTag
+        if ($null -ne $why) { Stop-SbPanelHand "$openTag -- $why" }
+        $osw = [System.Diagnostics.Stopwatch]::StartNew()
+        do {
+            $shown = Find-SbById $window $want
+            if ($shown.Count -eq 0) { Start-Sleep -Milliseconds 100 }
+        } while ($shown.Count -eq 0 -and $osw.ElapsedMilliseconds -lt $PanelWaitMs)
+        $log.Add("$openTag panel-appeared=$($shown.Count -eq 1) waited-ms=$($osw.ElapsedMilliseconds)")
+        if ($shown.Count -ne 1) { Stop-SbPanelHand "$openTag -- panel '$want' was chosen in PanePicker and $($shown.Count) such panels were shown after $($PanelWaitMs) ms" }
     }
     $n = 0
     foreach ($ps in $panelSteps) {
@@ -542,43 +599,15 @@ if ($panelSteps.Count -gt 0) {
             if (-not $settled) { Start-Sleep -Milliseconds 100 }
         } while (-not $settled -and $sw.ElapsedMilliseconds -lt $PanelWaitMs)
         $log.Add("$tag panel-hits=$($panelHits.Count) widget-hits=$(if ($null -eq $widgetHits) { 0 } else { $widgetHits.Count }) type=$ctype enabled=$enabled patterns=[$($pats -join ',')] waited-ms=$($sw.ElapsedMilliseconds)")
-        if ($null -ne $pick.Refusal) {
-            $log.Add("PANEL REFUSED: $tag -- $($pick.Refusal)")
-            $log | Set-Content -Path $Out -Encoding utf8
-            exit 6
-        }
+        if ($null -ne $pick.Refusal) { Stop-SbPanelHand "$tag -- $($pick.Refusal)" }
         Start-Sleep -Milliseconds $SettleMs
         switch ($pick.Action) {
             'Invoke' { $el.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() }
             'Toggle' { $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Toggle() }
             'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
             'Choose' {
-                # A select (jas section 381): open the list as a person does, find
-                # the item whose AutomationId is the option VALUE (`PaneView` sets
-                # it), select it, and close the list if it is still open. The
-                # items appear on the open, so they are re-read for PanelWaitMs.
-                $ec = $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
-                $ec.Expand()
-                $byValue = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, "$($ps.value)")
-                $isw = [System.Diagnostics.Stopwatch]::StartNew()
-                do {
-                    $items = $el.FindAll($tree::Descendants, $byValue)
-                    if ($items.Count -eq 0) { Start-Sleep -Milliseconds 100 }
-                } while ($items.Count -eq 0 -and $isw.ElapsedMilliseconds -lt $PanelWaitMs)
-                $itemPats = if ($items.Count -eq 1) { @($items[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
-                $choice = Select-SbChoiceItem -Widget "$($ps.widget)" -Value "$($ps.value)" -ItemCount $items.Count -Patterns $itemPats
-                $log.Add("$tag choose items=$($items.Count) item-patterns=[$($itemPats -join ',')] waited-ms=$($isw.ElapsedMilliseconds)")
-                if ($null -ne $choice.Refusal) {
-                    try { $ec.Collapse() } catch { }
-                    $log.Add("PANEL REFUSED: $tag -- $($choice.Refusal)")
-                    $log | Set-Content -Path $Out -Encoding utf8
-                    exit 6
-                }
-                $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
-                Start-Sleep -Milliseconds $SettleMs
-                $state = $ec.Current.ExpandCollapseState
-                if ($state -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed) { $ec.Collapse() }
-                $log.Add("$tag chose '$($ps.value)' list-after-select=$state")
+                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag
+                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
             }
             'Value' {
                 $el.SetFocus()

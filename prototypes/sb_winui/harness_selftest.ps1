@@ -2247,16 +2247,16 @@ Test-Case 'is: a key then two panel steps on one panel are all carried, in order
 # The window shows ONE panel, and the certificate opens it at launch
 # (SB_PANEL, jas section 378): the script's panel is carried, and a script
 # whose panel steps name two panels is refused by name.
-Test-Case 'is: the panel the steps name is carried, for the launch to open (SB_PANEL)' {
+Test-Case 'is: the panel the steps name is carried' {
     $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pCommit, $sRead))
     "[$($s.Panel)]"
 } '[magic_wand_panel_content]'
 Test-Case 'is: a script with no panel step names no panel, and the shell keeps its default' {
     "[$((Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead))).Panel)]"
 } '[]'
-Test-Case 'is: panel steps on two panels are refused by name: the window shows one, opened at launch' {
+Test-Case 'is: panel steps on two panels are refused by name: the hand opens one panel' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pCommit, $sRead)))
-} 'REFUSED: step 4 panel magic_wand_panel_content/fill_tolerance names a second panel (step 3 named align_panel_content): the window shows one panel, which this driver opens at launch'
+} 'REFUSED: step 4 panel magic_wand_panel_content/fill_tolerance names a second panel (step 3 named align_panel_content): the hand opens one panel, through the pane''s selector'
 Test-Case 'is: the panel steps cross -File as one base64 string that decodes to the steps' {
     $pSpacing = [ordered]@{ panel = 'align_panel_content'; widget = 'distribute_spacing_value'; event = 'commit'; value = '40' }
     $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $pSpacing, $sRead))
@@ -2374,6 +2374,34 @@ Test-Case 'ch: a value two items carry is refused, never guessed between' {
 Test-Case 'ch: an item with no SelectionItem pattern is refused' {
     Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns @('ScrollItemPatternIdentifiers.Pattern'))
 } "REFUSED: the item 'multiply' of widget 'op_mode' has no SelectionItem pattern: it has [ScrollItem]"
+# jas section 383 (node 11): the hand OPENS the script's panel the way a person
+# does, by choosing it in the pane's selector, instead of SB_PANEL at launch.
+# Measured on the box (2026-10-17): PanePicker is a ComboBox exposing
+# [Selection, ExpandCollapse, ScrollItem, ItemContainer]; open, its 16 items
+# each expose [SelectionItem, ScrollItem, VirtualizedItem], and the shell now
+# gives each the panel CONTENT id as its AutomationId.
+function Show-SbPanelOpen($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)" } else { $a.Action } }
+Test-Case 'po: a panel already shown is not opened again' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'align_panel_content' -PanelCount 1 -PickerCount 1 -PickerPatterns $uiaComboBox)
+} 'Shown'
+Test-Case 'po: a panel not shown is chosen in the pane selector' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'stroke_panel_content' -PanelCount 0 -PickerCount 1 -PickerPatterns $uiaComboBox)
+} 'Choose'
+Test-Case 'po: a panel not shown with no selector to open it is refused by name' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'stroke_panel_content' -PanelCount 0 -PickerCount 0 -PickerPatterns @())
+} "REFUSED: panel 'stroke_panel_content' is not shown, and no PanePicker is found to open it"
+Test-Case 'po: two selectors are refused, never guessed between' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'stroke_panel_content' -PanelCount 0 -PickerCount 2 -PickerPatterns $uiaComboBox)
+} "REFUSED: panel 'stroke_panel_content' is not shown, and PanePicker is found 2 times: this driver will not guess which one a person meant"
+Test-Case 'po: a selector a person cannot open and choose from is refused' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'stroke_panel_content' -PanelCount 0 -PickerCount 1 -PickerPatterns @('ScrollItemPatternIdentifiers.Pattern'))
+} "REFUSED: panel 'stroke_panel_content' is not shown, and PanePicker has no ExpandCollapse and Selection patterns to choose it: it has [ScrollItem]"
+Test-Case 'po: a panel shown twice is refused, never guessed between' {
+    Show-SbPanelOpen (Select-SbPanelOpen -Panel 'align_panel_content' -PanelCount 2 -PickerCount 1 -PickerPatterns $uiaComboBox)
+} "REFUSED: panel 'align_panel_content' is found 2 times: this driver will not guess which one a person meant"
+Test-Case 'po: a panel the selector does not list is refused by name' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'PanePicker' -Value 'strok_panel_content' -ItemCount 0 -Patterns @())
+} "REFUSED: value 'strok_panel_content' is not an option of widget 'PanePicker': no item in its list has that AutomationId"
 Test-Case 'is: a named tool passes through, for the shell to resolve against the core (SB_TOOL by name)' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead) -Tool 'rect'))
 } 'selection.drag svg=complex_document.svg tool=rect at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
