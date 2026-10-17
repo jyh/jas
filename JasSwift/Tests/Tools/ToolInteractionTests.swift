@@ -343,7 +343,11 @@ private func scaleTool() -> CanvasTool {
     // to (200,200). Pre-fix the click stored the SCREEN point (10,20) into the
     // doc-space reference field, so the pivot landed at doc (10,20) and
     // applyPoint(0,0) would be (-10,-20) — which these assertions reject.
-    let t = layerChildren(model)[0].transform ?? .identity
+    // Route 4 slice 5: the scale is a Transformed WRAPPER around the rect, and
+    // the frame it gives the rect is the scale.
+    let committed = layerChildren(model)[0]
+    if case .live(.transformed) = committed {} else { Issue.record("a wrapper: \(committed)") }
+    let t = committed.childFrameTransform ?? .identity
     let pivot = t.applyPoint(0, 0)
     let corner = t.applyPoint(100, 100)
     #expect(abs(pivot.0 - 0.0) < 1e-6 && abs(pivot.1 - 0.0) < 1e-6,

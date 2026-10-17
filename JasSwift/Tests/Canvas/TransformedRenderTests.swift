@@ -316,3 +316,54 @@ private func wrappedChildModel() -> Model {
     #expect(centres.map { [$0.0, $0.1] } == [[4, 6], [4, 36], [24, 6], [24, 36]], "\(centres)")
     #expect(selectionOutlineScale(doc, [0, 0, 0]) == 6.0.squareRoot(), "the pen counter-scales W·M")
 }
+
+// MARK: - Route 4 slice 5: Scale wraps (twins of Rust `wrap_scale_tests`)
+
+private func strokedRounded(_ id: String) -> Element {
+    .rect(Rect(x: 0, y: 0, width: 10, height: 10, rx: 2, ry: 2,
+               stroke: Stroke(color: black, width: 1), id: id))
+}
+
+private func docOf(_ children: [Element], _ selection: [ElementSelection]) -> Document {
+    Document(layers: [Layer(name: "L", children: children)], selectedLayer: 0, selection: selection)
+}
+
+@Test func aScaledLeafBecomesAWrapperAroundTheUntouchedElement() {
+    for flag in [false, true] {
+        let doc = docOf([strokedRounded("r")], [ElementSelection.partial([0, 0], [1])])
+        let out = wrapScaleOverPaths(doc, [[0, 0]], .scale(1.5, 1.5), scaleStrokes: flag, corners: nil)
+        guard case .live(.transformed(let w)) = out.getElement([0, 0]) else { Issue.record("a wrapper"); return }
+        #expect(w.child == strokedRounded("r"))
+        #expect(w.matrix == .scale(1.5, 1.5) && w.scaleStrokes == flag && w.transform == nil && w.id == nil)
+        #expect(out.selection == [ElementSelection.all([0, 0])], "a partial entry becomes the whole wrapper")
+    }
+}
+
+@Test func cornersOffDividesTheChildsRadii() {
+    let doc = docOf([strokedRounded("r")], [ElementSelection.all([0, 0])])
+    let out = wrapScaleOverPaths(doc, [[0, 0]], .scale(2, 4), scaleStrokes: false,
+                                 corners: cornerCompensation(sx: 2, sy: 4, scaleCorners: false))
+    guard case .live(.transformed(let w)) = out.getElement([0, 0]), case .rect(let r) = w.child else {
+        Issue.record("a wrapped rect"); return
+    }
+    #expect(r.rx == 1 && r.ry == 0.5)
+}
+
+@Test func aWrapperAbsorbsAMatchingScaleAndOtherwiseIsWrappedAgain() {
+    let m = Transform.scale(2, 3), s = Transform.scale(1.5, 1.5)
+    for flag in [false, true] {
+        let w = TransformedElem(child: strokedRounded("r"), matrix: m, scaleStrokes: flag, transform: .translate(5, 7))
+        let doc = docOf([.live(.transformed(w))], [ElementSelection.all([0, 0])])
+        guard case .live(.transformed(let a)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: flag, corners: nil).getElement([0, 0])
+        else { Issue.record("a wrapper"); return }
+        #expect(a.child == strokedRounded("r"), "absorbed: still ONE wrapper, flag=\(flag)")
+        #expect(a.matrix == s.multiply(.translate(5, 7)).multiply(m) && a.transform == nil)
+        guard case .live(.transformed(let outer)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: !flag, corners: nil).getElement([0, 0]),
+              case .live(.transformed) = outer.child else { Issue.record("a different flag nests"); return }
+        #expect(outer.matrix == s && outer.scaleStrokes == !flag)
+    }
+    let rot = TransformedElem(child: strokedRounded("r"), matrix: m, scaleStrokes: false, transform: .rotate(30))
+    let doc = docOf([.live(.transformed(rot))], [ElementSelection.all([0, 0])])
+    guard case .live(.transformed(let o)) = wrapScaleOverPaths(doc, [[0, 0]], s, scaleStrokes: false, corners: nil).getElement([0, 0]),
+          case .live(.transformed) = o.child else { Issue.record("a rotated own transform is wrapped again"); return }
+}

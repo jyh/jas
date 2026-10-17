@@ -679,12 +679,14 @@ func buildYamlToolEffects(model: Model) -> [String: PlatformEffect] {
         let flags = (
             args["scale_strokes"] != nil ? evalBool(args["scale_strokes"], store: store, ctx: ctx) : stStrokes,
             args["scale_corners"] != nil ? evalBool(args["scale_corners"], store: store, ctx: ctx) : stCorners)
+        // `wrap` (route 4 slice 5): emit a Transformed wrapper, opt-in.
+        let wrap = evalBool(args["wrap"], store: store, ctx: ctx)
         if evalBool(args["journal"], store: store, ctx: ctx) {
             scaleApplyJournaled(model: model, store: store, ctx: ctx,
-                                sx: sx, sy: sy, copy: copy, flags: flags)
+                                sx: sx, sy: sy, copy: copy, flags: flags, wrap: wrap)
         } else {
             scaleApply(model: model, store: store, ctx: ctx,
-                       sx: sx, sy: sy, copy: copy, flags: flags)
+                       sx: sx, sy: sy, copy: copy, flags: flags, wrap: wrap)
         }
         return nil
     }
@@ -3285,7 +3287,7 @@ private func resolveScaleFlags(store: StateStore, ctx: [String: Any]) -> (Bool, 
 /// the live mutation byte-identical to replay. Mirrors Rust `scale_apply_journaled`.
 private func scaleApplyJournaled(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool), wrap: Bool
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     let controller = Controller(model: model)
@@ -3296,10 +3298,13 @@ private func scaleApplyJournaled(
     // path, which resolves the ref point post-copy against the duplicates).
     let (rx, ry) = resolveReferencePoint(model: model, store: store, ctx: ctx)
     let (scaleStrokes, scaleCorners) = flags
-    opApply(model, controller, [
+    var op: [String: Any] = [
         "op": "scale_transform", "sx": sx, "sy": sy, "rx": rx, "ry": ry,
         "scale_strokes": scaleStrokes, "scale_corners": scaleCorners,
-    ])
+    ]
+    // Recorded only when set, as Rust does.
+    if wrap { op["wrap"] = true }
+    opApply(model, controller, op)
 }
 
 /// Rotate apply — JOURNALED (CONFIRM) path. Resolves angle + reference point to
@@ -3347,7 +3352,7 @@ private func shearApplyJournaled(
 /// the matrix to the duplicates.
 private func scaleApply(
     model: Model, store: StateStore, ctx: [String: Any],
-    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool)
+    sx: Double, sy: Double, copy: Bool, flags: (Bool, Bool), wrap: Bool
 ) {
     if abs(sx - 1.0) < 1e-9 && abs(sy - 1.0) < 1e-9 { return }
     if copy { Controller(model: model).copySelection(dx: 0, dy: 0) }
@@ -3357,10 +3362,14 @@ private func scaleApply(
     // The SHARED compose, as the confirm path and Rust's preview use, so the
     // preview draws what OK will commit (2026-10-16).
     let (scaleStrokes, scaleCorners) = flags
-    let newDoc = composeMatrixOverPaths(
-        model.document, model.document.selection.map { $0.path }, matrix,
-        strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
-        corners: cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners))
+    let paths = model.document.selection.map { $0.path }
+    let corners = cornerCompensation(sx: sx, sy: sy, scaleCorners: scaleCorners)
+    let newDoc = wrap
+        ? wrapScaleOverPaths(model.document, paths, matrix, scaleStrokes: scaleStrokes, corners: corners)
+        : composeMatrixOverPaths(
+            model.document, paths, matrix,
+            strokeFactor: strokeCompensation(sx: sx, sy: sy, scaleStrokes: scaleStrokes),
+            corners: corners)
     // PREVIEW (out-of-band) write: non-undoable; the copySelection above
     // self-brackets its own undo step. Mirrors Rust scale/rotate/shear_apply.
     model.setDocumentUnbracketed(newDoc, intent: .previewReapply)
