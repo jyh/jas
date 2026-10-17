@@ -1092,6 +1092,36 @@ impl TransformedElem {
         }
     }
 
+    /// RELEASE TRANSFORM: the child alone, with the operation composed in so
+    /// the picture is unchanged (EDIT_SEMANTICS_FREEZE §3.4: an unwrap
+    /// composes the container into the child where composition is exact).
+    ///
+    /// * Scale Strokes ON composes the matrix into the child's transform: a
+    ///   stored transform draws the stroke scaled, which is what ON drew.
+    /// * OFF bakes the matrix into the child's coordinates with the width kept
+    ///   ([`crate::geometry::transformed::map_element_geometry`]): a rect stays a
+    ///   rect under an axis-aligned scale, and becomes a path only when the
+    ///   matrix rotates or shears it.
+    /// * The wrapper's own transform composes on top (it was outside), and its
+    ///   opacity multiplies into the child's. Its id and name END with it; the
+    ///   child keeps its own.
+    pub fn released(&self) -> Element {
+        let mut out = if self.scale_strokes {
+            let mut c = (*self.child).clone();
+            let t = c.transform().map_or(self.matrix, |t| self.matrix.multiply(t));
+            c.common_mut().transform = Some(t);
+            c
+        } else {
+            crate::geometry::transformed::map_element_geometry(&self.child, &self.matrix)
+        };
+        if let Some(w) = self.common.transform {
+            let inner = out.transform().copied();
+            out.common_mut().transform = Some(inner.map_or(w, |t| w.multiply(&t)));
+        }
+        out.common_mut().opacity *= self.common.opacity;
+        out
+    }
+
     /// The child's region, mapped into the wrapper's coordinates. Geometry
     /// only: Scale Strokes is a property of how the stroke is DRAWN, and a
     /// region has no stroke.

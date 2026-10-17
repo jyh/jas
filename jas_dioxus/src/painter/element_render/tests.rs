@@ -3292,3 +3292,131 @@ fn an_off_wrapper_inside_an_on_wrapper_scales_the_kept_stroke() {
     assert!(widths.iter().all(|w| (w - 2.0).abs() < 1e-9), "widths {widths:?}, want 2 on every edge");
     assert!((max(&xs) - 40.0).abs() < 1e-9 && (max(&ys) - 60.0).abs() < 1e-9, "drawn to ({}, {})", max(&xs), max(&ys));
 }
+
+/// RELEASE TRANSFORM LEAVES THE PICTURE UNCHANGED (EDIT_SEMANTICS_FREEZE §3.4:
+/// an unwrap composes the container into the child where composition is
+/// exact). Every stroked edge, its device position and its drawn thickness,
+/// is the same before and after, for both Scale Strokes values, over a
+/// non-uniform scale, a rotated one and a shear, with and without a wrapper
+/// transform, and for a rect, a rotated rect, a polygon and a line.
+#[test]
+fn releasing_a_transformed_wrapper_leaves_the_drawing_unchanged() {
+    use crate::geometry::live::{LiveVariant, TransformedElem};
+    let black = Color::rgb(0.0, 0.0, 0.0);
+    let rect = |t: Option<Transform>| Element::Rect(RectElem {
+        x: 2.0, y: 1.0, width: 10.0, height: 4.0, rx: 0.0, ry: 0.0,
+        fill: None, stroke: Some(stroke(black, 1.5)),
+        common: CommonProps { transform: t, ..common() },
+        fill_gradient: None, stroke_gradient: None,
+    });
+    let children = [
+        ("rect", rect(None)),
+        ("rotated rect", rect(Some(Transform::rotate(30.0)))),
+        ("polygon", Element::Polygon(PolygonElem {
+            points: vec![(0.0, 0.0), (6.0, 1.0), (3.0, 5.0)], fill: None,
+            stroke: Some(stroke(black, 2.0)), common: common(),
+            fill_gradient: None, stroke_gradient: None,
+        })),
+        ("line", Element::Line(LineElem {
+            x1: 1.0, y1: 1.0, x2: 9.0, y2: 4.0, stroke: Some(stroke(black, 1.0)),
+            width_points: vec![], common: common(), stroke_gradient: None,
+        })),
+    ];
+    let mats = [
+        ("scale 2x3", Transform::scale(2.0, 3.0)),
+        ("rotate*scale", Transform::rotate(30.0).multiply(&Transform::scale(2.0, 0.5))),
+        ("shear", Transform::shear(0.4, 0.0)),
+    ];
+    let key = |e: &(f64, (f64, f64), (f64, f64))| {
+        let (a, b) = if (e.1 .0, e.1 .1) <= (e.2 .0, e.2 .1) { (e.1, e.2) } else { (e.2, e.1) };
+        [a.0, a.1, b.0, b.1, e.0]
+    };
+    let picture = |el: &Element| {
+        let mut rec = RecordingPainter::new();
+        emit_element(&mut rec, el, 1.0);
+        let mut v: Vec<[f64; 5]> = drawn_edges(rec.commands()).iter().map(key).collect();
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        v
+    };
+    let mut wrong = vec![];
+    let mut cases = 0;
+    for (cname, child) in &children {
+        for (mname, m) in &mats {
+            for scale_strokes in [false, true] {
+                for outer in [None, Some(Transform::translate(5.0, 7.0))] {
+                    let mut t = TransformedElem::new(Rc::new(child.clone()), *m, scale_strokes);
+                    t.common.transform = outer;
+                    let released = t.released();
+                    let (before, after) = (picture(&Element::Live(LiveVariant::Transformed(t))), picture(&released));
+                    cases += 1;
+                    let same = before.len() == after.len() && !before.is_empty()
+                        && before.iter().zip(&after).all(|(a, b)| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9));
+                    if !same {
+                        wrong.push(format!("{cname} / {mname} / scale_strokes={scale_strokes} / outer={}: before {before:?} after {after:?}", outer.is_some()));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(cases, 48);
+    assert!(wrong.is_empty(), "{} of {cases} releases changed the picture: {wrong:#?}", wrong.len());
+}
+
+/// Release keeps the element's KIND wherever the kind can hold the result: an
+/// axis-aligned OFF scale of a rect is a rect (corner radii per axis), a
+/// rotated one is a path; ON keeps the rect and composes the matrix into its
+/// transform; the child's id survives and the wrapper's does not.
+#[test]
+fn a_released_wrapper_keeps_its_childs_kind_where_it_can() {
+    use crate::geometry::live::TransformedElem;
+    let r = Element::Rect(RectElem {
+        x: 1.0, y: 1.0, width: 4.0, height: 2.0, rx: 1.0, ry: 0.5,
+        fill: None, stroke: Some(stroke(Color::rgb(0.0, 0.0, 0.0), 1.0)),
+        common: CommonProps { id: Some("child".into()), ..common() },
+        fill_gradient: None, stroke_gradient: None,
+    });
+    let mut off = TransformedElem::new(Rc::new(r.clone()), Transform::scale(2.0, 3.0), false);
+    off.common.id = Some("wrapper".into());
+    match off.released() {
+        Element::Rect(e) => {
+            assert_eq!((e.x, e.y, e.width, e.height, e.rx, e.ry), (2.0, 3.0, 8.0, 6.0, 2.0, 1.5));
+            assert_eq!(e.stroke.unwrap().width, 1.0, "OFF keeps the authored width");
+            assert_eq!(e.common.transform, None);
+            assert_eq!(e.common.id.as_deref(), Some("child"));
+        }
+        other => panic!("OFF axis-aligned should stay a rect: {other:?}"),
+    }
+    let rot = TransformedElem::new(Rc::new(r.clone()), Transform::rotate(30.0), false);
+    assert!(matches!(rot.released(), Element::Path(_)), "a rotated rect is a path");
+    let on = TransformedElem::new(Rc::new(r), Transform::scale(2.0, 3.0), true);
+    match on.released() {
+        Element::Rect(e) => {
+            assert_eq!((e.x, e.width), (1.0, 4.0), "ON leaves the geometry");
+            assert_eq!(e.common.transform, Some(Transform::scale(2.0, 3.0)));
+        }
+        other => panic!("ON should stay a rect: {other:?}"),
+    }
+}
+
+/// ⚠️ TODAY'S ANSWER, RECORDED, NOT A LAW (the helm, 2026-10-16 20:27, item 4;
+/// coverage gap `stored-transform-stroke-law-differs-by-renderer`). The native
+/// seam strokes UNDER a stored transform, so a 1 pt stroke under a stored
+/// scale(2, 2) is drawn 2 pt on every edge. The Swift canvas and this crate's
+/// web walk counter-scale it to 1 pt (JasSwift
+/// `aStoredScaleDrawsTheStrokeAtItsAuthoredWidthOnThisCanvasToday`). No law is
+/// ruled yet; whichever one the Captain rules turns exactly one of the two
+/// arms red. Measured at the display list: this Mac has no native rasterizer,
+/// and the Direct2D pixels are the Windows lane's.
+#[test]
+fn a_stored_scale_strokes_at_the_scaled_width_in_the_native_seam() {
+    let r = Element::Rect(RectElem {
+        x: 2.0, y: 2.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+        fill: None, stroke: Some(stroke(Color::rgb(0.0, 0.0, 0.0), 1.0)),
+        common: CommonProps { transform: Some(Transform::scale(2.0, 2.0)), ..common() },
+        fill_gradient: None, stroke_gradient: None,
+    });
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &r, 1.0);
+    let widths: Vec<f64> = drawn_edges(rec.commands()).iter().map(|e| e.0).collect();
+    assert_eq!(widths, vec![2.0, 2.0, 2.0, 2.0], "{:?}", rec.commands());
+}

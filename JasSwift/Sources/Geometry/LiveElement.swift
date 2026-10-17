@@ -1596,6 +1596,26 @@ public struct TransformedElem: Equatable {
 
     /// The child's bounds, boxed through the matrix.
     public var bounds: BBox { aabbThrough(child.bounds, matrix) }
+
+    /// RELEASE TRANSFORM: the child alone, with the operation composed in so
+    /// the picture is unchanged (EDIT_SEMANTICS_FREEZE §3.4). ON composes the
+    /// matrix into the child's transform; OFF bakes it into the child's
+    /// coordinates with the width kept (`mapElementGeometry`). The wrapper's
+    /// own transform composes on top and its opacity multiplies into the
+    /// child's; its id and name end with it. Mirrors jas_dioxus
+    /// `TransformedElem::released`.
+    public func released() -> Element {
+        var out: Element
+        if scaleStrokes {
+            out = child.withTransformSet(child.transform.map { matrix.multiply($0) } ?? matrix)
+        } else {
+            out = mapElementGeometry(child, matrix)
+        }
+        if let w = transform {
+            out = out.withTransformSet(out.transform.map { w.multiply($0) } ?? w)
+        }
+        return out.withCommon(opacity: out.opacity * opacity)
+    }
 }
 
 // MARK: - LiveVariant
@@ -2052,5 +2072,35 @@ public enum LiveVariant: Equatable {
             updated.name = name
             return .transformed(updated)
         }
+    }
+}
+
+// MARK: - Path addressing through a Transformed wrapper (route 4 slice 3b)
+
+extension Element {
+    /// The children a PATH can address: a Group's or Layer's children, and a
+    /// Transformed wrapper's single child (`[.., w, 0]`). Empty for anything
+    /// else. Deliberately separate from the container walks: generic walks
+    /// treat a wrapper as one leaf; path resolution reaches through it.
+    /// Compound-shape operands stay unaddressable. Twin of Rust
+    /// `Element::path_children`.
+    public var pathChildren: [Element] {
+        switch self {
+        case .group(let g): return g.children
+        case .layer(let l): return l.children
+        case .live(.transformed(let t)): return [t.child]
+        default: return []
+        }
+    }
+
+    /// The frame this element gives its path children: its own transform, and
+    /// for a Transformed wrapper its transform after its matrix (`W·M`; the
+    /// child is drawn at `W·M·C·p` under BOTH Scale Strokes values). `nil` is
+    /// the identity. Twin of Rust `Element::child_frame_transform`.
+    public var childFrameTransform: Transform? {
+        if case .live(.transformed(let t)) = self {
+            return t.transform.map { $0.multiply(t.matrix) } ?? t.matrix
+        }
+        return transform
     }
 }

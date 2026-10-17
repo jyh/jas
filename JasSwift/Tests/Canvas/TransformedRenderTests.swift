@@ -151,3 +151,168 @@ private func measure(_ buf: [UInt8]) -> (vertical: [Double], horizontal: [Double
         #expect(back.layers[0].children.first == elem, "binary, scaleStrokes=\(scaleStrokes)")
     }
 }
+
+/// ⚠️ TODAY'S ANSWER, RECORDED, NOT A LAW (the helm, 2026-10-16 20:27, item 4;
+/// coverage gap `stored-transform-stroke-law-differs-by-renderer`). Under a
+/// STORED transform this canvas COUNTER-SCALES the stroke
+/// (`counterScaledElement`), so a 1 pt stroke under a stored scale(2, 2) draws
+/// 1 pt. jas_dioxus's native seam draws the same element 2 pt
+/// (`a_stored_scale_strokes_at_the_scaled_width_in_the_native_seam`). No law
+/// is ruled yet; whichever one the Captain rules turns exactly one of the two
+/// arms red, and that arm's port is the one to repair.
+@Test func aStoredScaleDrawsTheStrokeAtItsAuthoredWidthOnThisCanvasToday() {
+    let stored: Element = .rect(Rect(x: 2, y: 2, width: 10, height: 10,
+                                     stroke: Stroke(color: black, width: 1), transform: .scale(2, 2)))
+    let control: Element = .rect(Rect(x: 4, y: 4, width: 20, height: 20,
+                                      stroke: Stroke(color: black, width: 1)))
+    // Both land on 4…24 pt = 16…96 px. The bitmap's rows run bottom-up, so
+    // row 140 (y = 59 px) and col 56 are the lines that cross every edge.
+    for (label, elem) in [("stored scale(2,2)", stored), ("control, drawn at 2x size", control)] {
+        let buf = render(elem)
+        let w = { (r: (Int, Int)) in Double(r.1 - r.0 + 1) / pxPerPt }
+        #expect(runs(buf, row: 140).map(w) == [1, 1], "\(label): vertical edges \(runs(buf, row: 140).map(w))")
+        #expect(runs(buf, col: 56).map(w) == [1, 1], "\(label): horizontal edges \(runs(buf, col: 56).map(w))")
+    }
+}
+
+// MARK: - Release Transform (route 4 slice 3a)
+
+/// RELEASE TRANSFORM, Scale Strokes OFF, LEAVES THE PICTURE UNCHANGED: the
+/// wrapper and its released form render to the same pixels, for a rect, a
+/// rotated rect, a polygon, a line and an ellipse, under a non-uniform scale,
+/// a rotated one and a shear, with and without a wrapper transform. (Scale
+/// Strokes ON is NOT claimed here: it composes into a stored transform, and
+/// this canvas counter-scales a stored transform's stroke; see the coverage
+/// gap `stored-transform-stroke-law-differs-by-renderer`.)
+@Test func releasingAnOffWrapperLeavesThePictureUnchanged() {
+    let s = Stroke(color: black, width: 1.5)
+    let children: [(String, Element)] = [
+        ("rect", .rect(Rect(x: 2, y: 1, width: 10, height: 4, stroke: s))),
+        ("rotated rect", .rect(Rect(x: 2, y: 1, width: 10, height: 4, stroke: s, transform: .rotate(30)))),
+        ("polygon", .polygon(Polygon(points: [(0, 0), (6, 1), (3, 5)], stroke: s))),
+        ("line", .line(Line(x1: 1, y1: 1, x2: 9, y2: 4, stroke: s))),
+        ("ellipse", .ellipse(Ellipse(cx: 6, cy: 4, rx: 4, ry: 2, stroke: s))),
+    ]
+    let mats: [(String, Transform)] = [
+        ("scale 2x3", .scale(2, 3)),
+        ("rotate*scale", Transform.rotate(30).multiply(.scale(2, 0.5)).translated(10, 0)),
+        ("shear", .shear(0.4, 0)),
+    ]
+    var cases = 0
+    for (cname, child) in children {
+        for (mname, m) in mats {
+            for outer in [nil, Transform.translate(5, 7)] as [Transform?] {
+                let t = TransformedElem(child: child, matrix: m, scaleStrokes: false, transform: outer)
+                let before = render(.live(.transformed(t))), after = render(t.released())
+                cases += 1
+                #expect(before.contains { $0 != 0 }, "\(cname) / \(mname): nothing drawn")
+                #expect(before == after, "\(cname) / \(mname) / outer=\(outer != nil): release changed the picture")
+            }
+        }
+    }
+    #expect(cases == 30)
+}
+
+/// Release keeps the child's KIND where it can (mirrors jas_dioxus
+/// `a_released_wrapper_keeps_its_childs_kind_where_it_can`).
+@Test func aReleasedWrapperKeepsItsChildsKindWhereItCan() {
+    let r: Element = .rect(Rect(x: 1, y: 1, width: 4, height: 2, rx: 1, ry: 0.5,
+                                stroke: Stroke(color: black, width: 1), id: "child"))
+    let off = TransformedElem(child: r, matrix: .scale(2, 3), scaleStrokes: false, id: "wrapper")
+    guard case .rect(let e) = off.released() else { Issue.record("OFF axis-aligned should stay a rect"); return }
+    #expect((e.x, e.y, e.width, e.height, e.rx, e.ry) == (2, 3, 8, 6, 2, 1.5))
+    #expect(e.stroke?.width == 1 && e.transform == nil && e.id == "child")
+    if case .path = TransformedElem(child: r, matrix: .rotate(30), scaleStrokes: false).released() {} else {
+        Issue.record("a rotated rect is a path")
+    }
+    guard case .rect(let on) = TransformedElem(child: r, matrix: .scale(2, 3), scaleStrokes: true).released() else {
+        Issue.record("ON should stay a rect"); return
+    }
+    #expect(on.x == 1 && on.width == 4 && on.transform == .scale(2, 3))
+}
+
+/// The controller replaces the wrapper IN PLACE, keeps the selection, and is
+/// one undo step; nothing to release is no change and no step. Mirrors
+/// jas_dioxus `release_transform_replaces_the_wrapper_in_place_and_undo_restores_it`.
+@Test func releaseTransformReplacesTheWrapperInPlaceAndUndoRestoresIt() {
+    let child: Element = .rect(Rect(x: 2, y: 2, width: 10, height: 10,
+                                    fill: Fill(color: black), stroke: Stroke(color: black, width: 1), id: "child"))
+    let w = TransformedElem(child: child, matrix: .scale(2, 3), scaleStrokes: false)
+    let model = Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                         selectedLayer: 0, selection: []))
+    let before = model.document
+    let ctl = Controller(model: model)
+    ctl.setSelection([ElementSelection.all([0, 0])])
+    ctl.releaseTransform()
+    guard case .rect(let r) = model.document.getElement([0, 0]) else {
+        Issue.record("released to a rect: \(model.document.getElement([0, 0]))"); return
+    }
+    #expect((r.x, r.y, r.width, r.height) == (4, 6, 20, 30))
+    #expect(r.id == "child")
+    #expect(model.document.selection == [ElementSelection.all([0, 0])])
+    model.undo()
+    #expect(model.document.layers == before.layers, "undo restores the wrapper")
+    let plain = Model(document: Document(layers: [Layer(name: "L", children: [child])], selectedLayer: 0, selection: []))
+    let pctl = Controller(model: plain)
+    pctl.setSelection([ElementSelection.all([0, 0])])
+    let layers = plain.document.layers
+    pctl.releaseTransform()
+    #expect(plain.document.layers == layers && !plain.canUndo, "a no-op release leaves no undo step")
+}
+
+// MARK: - Route 4 slice 3b: editing a wrapped child through a path
+
+private func wrappedChildModel() -> Model {
+    let child: Element = .rect(Rect(x: 2, y: 2, width: 10, height: 10,
+                                    fill: Fill(color: black), stroke: Stroke(color: black, width: 1), id: "child"))
+    let w = TransformedElem(child: child, matrix: .scale(2, 3), scaleStrokes: false)
+    return Model(document: Document(layers: [Layer(name: "L", children: [.live(.transformed(w))])],
+                                    selectedLayer: 0, selection: []))
+}
+
+/// A wrapper is a container with exactly one slot, so `[layer, w, 0]` addresses
+/// its child. A document-space drag of one corner reaches the child in its OWN
+/// space (the wrapper's frame is `W·M`, here scale(2,3)); the matrix, flag and
+/// own props are untouched; one undo restores it. Twin of Rust
+/// `moving_a_wrapped_childs_corner_edits_the_child_in_its_own_space`. Before
+/// slice 3b the path trapped in `childrenOf`.
+@Test func movingAWrappedChildsCornerEditsTheChildInItsOwnSpace() {
+    let model = wrappedChildModel()
+    let before = model.document
+    guard case .live(.transformed(let t0)) = before.getElement([0, 0]) else { Issue.record("a wrapper"); return }
+    let ctl = Controller(model: model)
+    ctl.setSelection([ElementSelection.partial([0, 0, 0], [2])])
+    ctl.moveSelection(dx: 4, dy: 3)
+    guard case .live(.transformed(let t)) = model.document.getElement([0, 0]) else {
+        Issue.record("still a wrapper"); return
+    }
+    let p0 = t0.child.controlPointPositions, p = t.child.controlPointPositions
+    #expect(p[2].0 - p0[2].0 == 2 && p[2].1 - p0[2].1 == 1, "moved (4,3)/(2,3) locally: \(p)")
+    for i in p.indices where i != 2 { #expect(p[i] == p0[i], "only the selected corner moves") }
+    #expect(t.matrix == t0.matrix && t.scaleStrokes == t0.scaleStrokes && t.transform == t0.transform)
+    model.undo()
+    #expect(model.document.layers == before.layers, "one undo restores it")
+}
+
+/// The frame a wrapper gives its child is its transform after its matrix, `W·M`.
+@Test func theAccumulatedTransformOfAWrappedChildIncludesTheMatrix() {
+    let model = wrappedChildModel()
+    #expect(accumulatedTransform(model.document, [0, 0, 0], includeOwn: true) == .scale(2, 3))
+    guard case .live(.transformed(var w)) = model.document.getElement([0, 0]) else { return }
+    w.transform = .translate(5, 7)
+    let doc = model.document.replaceElement([0, 0], with: .live(.transformed(w)))
+    let t = accumulatedTransform(doc, [0, 0, 0], includeOwn: true)!
+    let (x, y) = t.applyPoint(1, 1)
+    #expect(x == 7 && y == 10, "scale first, then translate")
+}
+
+/// A wrapped child's handles sit on its DRAWN corners. Twin of Rust
+/// `a_wrapped_childs_highlight_sits_where_the_child_is_drawn` (its squares).
+@Test func aWrappedChildsHandlesSitWhereTheChildIsDrawn() {
+    let doc = wrappedChildModel().document
+    let half = handleDrawSize / 2
+    let centres = selectionHandleRects(doc, [0, 0, 0]).map { ($0.minX + half, $0.minY + half) }
+        .sorted { $0.0 != $1.0 ? $0.0 < $1.0 : $0.1 < $1.1 }
+    #expect(centres.map { [$0.0, $0.1] } == [[4, 6], [4, 36], [24, 6], [24, 36]], "\(centres)")
+    #expect(selectionOutlineScale(doc, [0, 0, 0]) == 6.0.squareRoot(), "the pen counter-scales W·M")
+}

@@ -8,4 +8,5 @@ pub mod pdf;
 pub mod regular_shapes;
 pub mod svg;
 pub mod test_json;
+pub mod transformed;
 pub mod tspan;

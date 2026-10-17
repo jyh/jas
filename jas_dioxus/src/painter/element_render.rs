@@ -1623,51 +1623,7 @@ impl<'a> MappedGeometry<'a> {
     }
 
     fn map_path(&self, path: &[PathCommand]) -> Vec<PathCommand> {
-        let m = self.top();
-        let pt = |x: f64, y: f64| m.apply_point(x, y);
-        path.iter()
-            .map(|c| match *c {
-                PathCommand::MoveTo { x, y } => {
-                    let (x, y) = pt(x, y);
-                    PathCommand::MoveTo { x, y }
-                }
-                PathCommand::LineTo { x, y } => {
-                    let (x, y) = pt(x, y);
-                    PathCommand::LineTo { x, y }
-                }
-                PathCommand::CurveTo { x1, y1, x2, y2, x, y } => {
-                    let ((x1, y1), (x2, y2), (x, y)) = (pt(x1, y1), pt(x2, y2), pt(x, y));
-                    PathCommand::CurveTo { x1, y1, x2, y2, x, y }
-                }
-                PathCommand::QuadTo { x1, y1, x, y } => {
-                    let ((x1, y1), (x, y)) = (pt(x1, y1), pt(x, y));
-                    PathCommand::QuadTo { x1, y1, x, y }
-                }
-                // A smooth segment's implied control point is a reflection,
-                // and an affine map preserves reflections, so mapping the
-                // stated points is exact.
-                PathCommand::SmoothCurveTo { x2, y2, x, y } => {
-                    let ((x2, y2), (x, y)) = (pt(x2, y2), pt(x, y));
-                    PathCommand::SmoothCurveTo { x2, y2, x, y }
-                }
-                PathCommand::SmoothQuadTo { x, y } => {
-                    let (x, y) = pt(x, y);
-                    PathCommand::SmoothQuadTo { x, y }
-                }
-                // An elliptical arc's image is an elliptical arc: new axes
-                // from the SVD, the same large-arc choice, and the sweep
-                // flipped by a mirror.
-                PathCommand::ArcTo { rx, ry, x_rotation, large_arc, sweep, x, y } => {
-                    let (rx, ry, rot, _, mirrored) =
-                        ellipse_axes_through(&m, rx, ry, x_rotation.to_radians());
-                    let (x, y) = pt(x, y);
-                    PathCommand::ArcTo {
-                        rx, ry, x_rotation: rot.to_degrees(), large_arc, sweep: sweep != mirrored, x, y,
-                    }
-                }
-                PathCommand::ClosePath => PathCommand::ClosePath,
-            })
-            .collect()
+        crate::geometry::transformed::map_path_commands(path, &self.top())
     }
 
     /// The authored style with the child's OWN pushes' scale applied (see the
@@ -1696,42 +1652,13 @@ fn rect_as_path(r: &Rect) -> [PathCommand; 5] {
     ]
 }
 
-/// The axes of an ellipse's image under the linear part of `m`.
-///
-/// The ellipse is `A·(cos t, sin t)` with `A = L·R(rotation)·diag(rx, ry)`. A
-/// mirroring `L` (det < 0) is first made rotation-only by
-/// `A·(cos t, sin t) = (A·F)·(cos −t, sin −t)` with `F = diag(1, −1)`, which
-/// negates the angles and flips the sweep. Then `A = R(φ)·diag(s1, s2)·R(θ)`
-/// (the closed-form 2×2 SVD), so the image has radii `s1 ≥ s2`, rotation `φ`,
-/// and a point at angle `t` lands at angle `t + θ` (after the negation, when
-/// mirrored). Returns `(s1, s2, φ, θ, mirrored)`.
-fn ellipse_axes_through(m: &super::Transform, rx: f64, ry: f64, rotation: f64) -> (f64, f64, f64, f64, bool) {
-    let (cr, sr) = (rotation.cos(), rotation.sin());
-    // A = L · R(rot) · diag(rx, ry), as [[a, b], [c, d]] (row-major).
-    let (a, mut b, c, mut d) = (
-        (m.a * cr + m.c * sr) * rx,
-        (-m.a * sr + m.c * cr) * ry,
-        (m.b * cr + m.d * sr) * rx,
-        (-m.b * sr + m.d * cr) * ry,
-    );
-    let mirrored = a * d - b * c < 0.0;
-    if mirrored {
-        // A·F negates A's second column.
-        b = -b;
-        d = -d;
-    }
-    let (e, f, g, h) = ((a + d) / 2.0, (a - d) / 2.0, (c + b) / 2.0, (c - b) / 2.0);
-    let (q, r) = ((e * e + h * h).sqrt(), (f * f + g * g).sqrt());
-    let (a1, a2) = (g.atan2(f), h.atan2(e));
-    ((q + r), (q - r).max(0.0), (a2 + a1) / 2.0, (a2 - a1) / 2.0, mirrored)
-}
-
 /// The image of an ellipse arc under an affine map, as an ellipse arc: an
 /// affine image of an ellipse IS an ellipse, so this is exact (no bezier ring,
 /// no new R4 exception), and the backend keeps its stroke align. See
-/// [`ellipse_axes_through`] for the derivation.
+/// [`crate::geometry::transformed::ellipse_axes_through`] for the derivation.
 fn map_ellipse_arc(m: &super::Transform, arc: &EllipseArc) -> EllipseArc {
-    let (rx, ry, rotation, theta, mirrored) = ellipse_axes_through(m, arc.rx, arc.ry, arc.rotation);
+    let (rx, ry, rotation, theta, mirrored) =
+        crate::geometry::transformed::ellipse_axes_through(m, arc.rx, arc.ry, arc.rotation);
     let sign = if mirrored { -1.0 } else { 1.0 };
     let (cx, cy) = m.apply_point(arc.cx, arc.cy);
     EllipseArc {
@@ -2097,6 +2024,12 @@ fn resolve_gradient(g: &Gradient, bbox: (f64, f64, f64, f64)) -> Option<Brush> {
 pub(crate) const ELLIPSE_KAPPA: f64 = 0.5522847498307933;
 
 
+
+/// A rect's outline as the path this renderer strokes for it (corner radii
+/// included), for a caller that must map it (Release Transform, OFF).
+pub(crate) fn rect_geometry_path(e: &RectElem) -> Vec<PathCommand> {
+    rounded_rect_path(e.x, e.y, e.width, e.height, e.rx, e.ry)
+}
 
 fn rounded_rect_path(x: f64, y: f64, w: f64, h: f64, rx_in: f64, ry_in: f64) -> Vec<PathCommand> {
     if rx_in <= 0.0 && ry_in <= 0.0 {

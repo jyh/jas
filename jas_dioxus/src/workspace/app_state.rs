@@ -1709,6 +1709,14 @@ impl AppState {
         }
     }
 
+    /// End every selected live transform operation, keeping the drawing. See
+    /// `Controller::release_transform`.
+    pub(crate) fn apply_release_transform(&mut self) {
+        if let Some(tab) = self.tab_mut() {
+            crate::document::controller::Controller::release_transform(&mut tab.model);
+        }
+    }
+
     /// Expand every selected compound shape to static polygons, through the
     /// shared `boolean_host` the engine also calls (W2b-13).
     pub(crate) fn apply_expand_compound_shape(&mut self) {
