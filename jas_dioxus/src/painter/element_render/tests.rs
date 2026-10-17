@@ -2168,13 +2168,95 @@ fn a_text_scale_or_rotation_the_walk_does_not_draw_stays_legacy() {
         f(&mut t);
         crate::painter::element_render::text_needs_legacy(&t)
     };
-    assert!(legacy(&|t| t.horizontal_scale = "150".into()), "a 150% horizontal scale stays legacy");
-    assert!(legacy(&|t| t.vertical_scale = "50".into()), "a 50% vertical scale stays legacy");
-    assert!(legacy(&|t| t.rotate = "30".into()), "a 30-degree glyph rotation stays legacy");
+    // ⭐ NODE 19 (jas section 414) LOWERS THE FLAT CASE: a readable scale on
+    // flat text draws through a transform frame now. An unreadable value still
+    // refuses, and the identity and absent values lower as before.
+    assert!(!legacy(&|t| t.horizontal_scale = "150".into()), "a 150% horizontal scale on flat text lowers (node 19)");
+    assert!(!legacy(&|t| t.vertical_scale = "50".into()), "a 50% vertical scale on flat text lowers (node 19)");
     assert!(legacy(&|t| t.horizontal_scale = "wide".into()), "an unreadable scale stays legacy");
+    assert!(legacy(&|t| t.rotate = "x".into()), "an unreadable rotation stays legacy");
     assert!(!legacy(&|t| { t.horizontal_scale = "100".into(); t.vertical_scale = "100".into(); t.rotate = "0".into(); }),
             "CONTROL: the identity values draw nothing different and lower");
     assert!(!legacy(&|_| {}), "CONTROL: absent values lower");
+}
+
+/// ⭐ NODE 19: a flat text's scale is the legacy frame, `translate(x, y) ·
+/// scale(h, v) · translate(-x, -y)` around the box's top-left
+/// (`canvas/render.rs`), pushed around the run and popped after it.
+#[test]
+fn a_flat_text_scale_draws_inside_the_legacy_scale_frame() {
+    let mut t = flat_text(20.0);
+    t.horizontal_scale = "150".into();
+    t.vertical_scale = "50".into();
+    let (x, y) = (t.x, t.y);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    let cmds = rec.commands();
+    let push = cmds.iter().position(|c| matches!(c, Command::PushState { .. })).expect("a scale frame is pushed");
+    let run = cmds.iter().position(|c| matches!(c, Command::DrawTextRun { .. })).expect("the run is drawn");
+    let pop = cmds.iter().rposition(|c| matches!(c, Command::PopState)).expect("the frame is popped");
+    assert!(push < run && run < pop, "push, run, pop in that order: {cmds:?}");
+    match &cmds[push] {
+        Command::PushState { transform: tr } => {
+            assert!((tr.a - 1.5).abs() < 1e-9 && (tr.d - 0.5).abs() < 1e-9, "scale (1.5, 0.5): {tr:?}");
+            assert!(tr.b.abs() < 1e-9 && tr.c.abs() < 1e-9, "no shear: {tr:?}");
+            assert!((tr.e - (x - 1.5 * x)).abs() < 1e-9 && (tr.f - (y - 0.5 * y)).abs() < 1e-9,
+                    "about the box top-left ({x}, {y}): {tr:?}");
+        }
+        _ => unreachable!(),
+    }
+}
+
+/// CONTROL: unscaled flat text pushes no frame at all.
+#[test]
+fn an_unscaled_flat_text_pushes_no_frame() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(flat_text(20.0)), 1.0);
+    assert!(!rec.commands().iter().any(|c| matches!(c, Command::PushState { .. })), "{:?}", rec.commands());
+}
+
+/// What node 19 did NOT take stays legacy, by name: segmented text and type on
+/// a path, whose legacy arms do not read the element's scale or rotation at
+/// all (lowering them would invent behaviour the reference renderer lacks),
+/// and per-glyph rotation where no real measurer exists to advance the pen.
+#[test]
+fn segmented_scale_and_unmeasured_rotation_stay_legacy() {
+    let mut seg = match segmented(vec![tspan("Hello ", None, None), tspan("world", Some("bold"), None)]) { Element::Text(t) => t, _ => unreachable!() };
+    seg.horizontal_scale = "150".into();
+    assert!(crate::painter::element_render::text_needs_legacy(&seg), "a scaled segmented text stays legacy");
+    let mut rot = flat_text(20.0);
+    rot.rotate = "30".into();
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&rot), !has_real,
+               "per-glyph rotation lowers only where a real measurer advances the pen");
+}
+
+/// ⭐ NODE 19: per-glyph rotation, as legacy draws it -- one run per glyph, each
+/// in its own `translate(cx, baseline) · rotate(θ)` frame, the pen advancing by
+/// the glyph's measured width. Gated on the backend that has a real measurer.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_flat_text_rotation_draws_one_rotated_frame_per_glyph() {
+    let mut t = flat_text(20.0);
+    t.rotate = "90".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    let cmds = rec.commands();
+    let runs: Vec<&str> = cmds.iter().filter_map(|c| match c {
+        Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, .. }, .. } => Some(text.as_str()),
+        _ => None,
+    }).collect();
+    assert_eq!(runs, vec!["H", "e", "l", "l", "o"], "one run per glyph: {cmds:?}");
+    let frames: Vec<&crate::painter::Transform> = cmds.iter().filter_map(|c| match c {
+        Command::PushState { transform } => Some(transform),
+        _ => None,
+    }).collect();
+    assert_eq!(frames.len(), 5, "one frame per glyph");
+    for f in &frames {
+        assert!((f.a - 0.0).abs() < 1e-9 && (f.b - 1.0).abs() < 1e-9, "rotate 90: {f:?}");
+        assert!((f.f - (2.0 + 0.8 * 20.0)).abs() < 1e-9, "each glyph sits on the baseline: {f:?}");
+    }
+    assert!(frames.windows(2).all(|w| w[1].e > w[0].e), "the pen advances left to right");
 }
 
 /// The same rule for type on a path, which carries the same three fields.
