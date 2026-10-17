@@ -1,13 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:jas="urn:jas:1" viewBox="-0.6666 -0.6666 268 201.3333" width="268" height="201.3333">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" viewBox="-0.6666 -0.6666 268 201.3333" width="268" height="201.3333">
   <g inkscape:groupmode="layer">
     <text x="13.3333" y="165.3333" font-family="serif" font-size="32" font-weight="bold" fill="rgb(0,0,0)" stroke="none">JAS</text>
-
     <rect x="0" y="0" width="96" height="96" rx="13.3333" ry="13.3333" fill="rgb(100,149,237)" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
-
     <g opacity="0.5">
       <line x1="0" y1="200" x2="266.6667" y2="0" stroke="rgb(0,0,0)" stroke-width="1.3333"/>
-
     </g>
   </g>
 </svg>
