@@ -373,10 +373,33 @@ _SEP = r"[/\\]+"
 # HOW A GUARD GETS BYPASSED. "/" is deliberately NOT added: an absolute path carries a slash
 # immediately before the root and MUST still be caught.
 _INTO = rf"(?<![A-Za-z0-9_.-])(?:{_ROOT_ALT}){_SEP}[A-Za-z0-9_.-]+"
+# ⛔⛔ A PATH THAT ENDS *AT* A ROOT (systems, 2026-10-16, the helm's item 11). Every pattern here wants a CHILD after the
+#   root, so `<host>:~/projects/claude/<tree>-v3-export-0d97b68 (marker…)` — bench's line on saltbench #354 — passed in BOTH
+#   pushes, beside two flagged twins that continued with `/harness/…`. Driven one variable at a time: the `host:` prefix is
+#   irrelevant (with a trailing child the same line is caught); the missing CHILD is the whole cause.
+# ✅ THE FORM: the root as the LAST segment of a path that has a path anchor before it — `~`, `<seg>:`, or at least two
+#   segments — plus the scp form `<host>:<root>`. ⛔ A bare owner/repo COORDINATE (one segment, `jyh/<tree>`) is a NAME, not
+#   a path: it is left alone, as the bare root in prose already is, because frozen amendments carry it and it discloses no
+#   location. MEASURED before adding, across the six gated repos' tracked trees: 4 new lines here (frozen amendments,
+#   accepted residue in the baseline) · 1 in saltworks · 0 in salt, jas, x86lean, tt-neural-dataflow-fabric.
+_PSEG = r"[A-Za-z0-9_.$>-]+"
+# kent's read of saltbench #355 (2026-10-16 23:49:51): `(?![A-Za-z0-9_.-])` read a sentence-final `.` as part of the name,
+#   so `…/<root>.` hid the root; now a `.` ends the name unless a name character follows it. `./` and `../` are anchors: a
+#   RELATIVE sibling-checkout path is a location, not a coordinate.
+_END_NAME = r"(?![A-Za-z0-9_-])(?!\.[A-Za-z0-9_-])"
+# kent's delta read of saltbench #355 (2026-10-17 00:02:08): the anchor took ZERO directories before the root, so
+#   `~/bench-dry/<root>`, `host:~/dir/<root>` and `/srv/<root>` passed. An anchor (`~`, `.`, `..`, `<host>:`) now takes any
+#   number of directories after it, and a LEADING `/` (not preceded by a name character) is an anchor too. `jyh/<root>` and
+#   `dir/<root>` stay names.
+_END_ROOT = (rf"(?:(?:~|\.\.?|{_PSEG}:~?)(?:{_SEP}{_PSEG})*|{_PSEG}{_SEP}{_PSEG}|(?<![A-Za-z0-9_.>~$:-])(?:{_SEP}{_PSEG})+)"
+             rf"{_SEP}(?:{_ROOT_ALT}){_END_NAME}(?!{_SEP}[A-Za-z0-9_.-])"
+             rf"|(?<=[A-Za-z0-9>_-]):(?:{_ROOT_ALT}){_END_NAME}")
 
 FORBIDDEN = [
     (re.compile(_INTO),
      "a path into a private-record repo"),
+    (re.compile(_END_ROOT),
+     "a path ending AT a private-record root"),
     (re.compile(_CFGDIR),
      "a per-" + _SEAT + " runtime config directory"),
     (re.compile(rf"(?<![A-Za-z0-9_-]){_KIT_RE}(?:{_SEP}|\b)"),
@@ -789,6 +812,20 @@ def self_test() -> int:
         ("xk-wt", "tools from /Users/x/" + "saltbench-sys" + "tems-v3-export-2833621" + "/harness"),
         ("xk-wt2", "scorer/walk " + "saltbench-sys" + "tems-v3-gemini-abb7829" + "/harness/systems-v3"),
         ("xk-bs", "at C:" + chr(92) + "saltbench-sys" + "tems-x86r1" + chr(92) + "t.md"),
+        # ⛔ A PATH THAT ENDS *AT* A ROOT (systems, 2026-10-16, the helm's item 11; saltbench #355): saltbench #354 carried this
+        #   exact line unflagged, because every pattern here wants a CHILD after the root. Split differently again.
+        ("end-host", "studio_export: DONE → <the run box>:~/projects/claude/" + "saltbench-sy" + "stems-v3-export-0d97b68" + " (marker)"),
+        ("end-tilde", "dest ~/projects/claude/" + "saltbench-sy" + "stems-v3-export-906775a" + " · 377 files"),
+        ("end-scp", "pushed to host:" + "saltbench-sy" + "stems-v3" + " tonight"),
+        ("end-url", "https://github.com/jyh/" + "se" + "at" + " is the memory mirror"),
+        # kent's read of saltbench #355 (2026-10-16 23:49:51): a SENTENCE-FINAL period hid the root; a RELATIVE sibling path is a location.
+        ("end-period", "the export is ~/projects/claude/" + "saltbench-sy" + "stems" + ". Next sentence"),
+        ("end-dotdot", "cd ../" + "saltbench-sy" + "stems-v3" + " and build"),
+        # kent's delta read of saltbench #355 (2026-10-17 00:02:08): ONE directory between the anchor and the root hid it.
+        ("end-one-tilde", "dest ~/bench-dry/" + "saltbench-sy" + "stems-v3-export-0d97b68" + " (marker)"),
+        ("end-one-tilde2", "dest ~/projects/" + "saltbench-sy" + "stems" + " tonight"),
+        ("end-one-host", "copied to host:~/bench-dry/" + "saltbench-sy" + "stems-v3" + " and built"),
+        ("end-one-abs", "dest /srv/" + "saltbench-sy" + "stems" + " on the box"),
         # ROOTLESS SHAPES (row J, 08/31). Assembled, never spelled.
         ("r-rl-b", "ruled in " + _ROOTLESS[0] + "/2026-08-30-x.md"),
         ("r-rl-f", "the row in " + _ROOTLESS[1] + "/RULING-x.md"),
@@ -833,6 +870,11 @@ def self_test() -> int:
         ("xk-c-public", "see " + "saltbench" + "/harness/systems-v3/x.md"),
         ("xk-c-prose", "the " + "saltbench-sys" + "tems" + " harness runs the cells"),
         ("xk-c-near", "a dir named " + "saltbench-sys" + "temsx" + "/x is not the tree"),
+        # item 11's guard: an owner/repo COORDINATE names a repo, it is not a path, and frozen amendments carry it.
+        ("end-c-coord", "repo: jyh/" + "saltbench-sy" + "stems" + "          not the public repo"),
+        ("end-c-clone", "cd <a clone of jyh/" + "saltbench-sy" + "stems" + ">"),
+        ("end-c-reldir", "the tree dir/" + "saltbench-sy" + "stems" + " has no anchor"),
+        ("end-c-dotgit", "the bare repo ~/x/" + "saltbench-sy" + "stems" + ".git" + "x is a longer name"),
         ("c-meta", "this gate forbids paths into the private record"),
         # ROOTLESS guards: a bare name stays softened by the ruling; a MID-PATH
         # component of the same ordinary word is the declared consequence of
@@ -1335,6 +1377,86 @@ def self_test() -> int:
         os.chdir(here2)
         shutil.rmtree(tmp2, ignore_errors=True)
 
+    # 12. --write-baseline MUST PRESERVE WHAT A READER WROTE (the helm's item 12, 2026-10-16 23:48:04). Until this arm,
+    #     every write REGENERATED its file from the scan: `--history --write-baseline` on this repo dropped d30ef38's
+    #     Captain's-word entry and row XK's text while every gate stayed green. The arm drives the three REAL write modes
+    #     over a scratch repo against ANNOTATED baselines: every `#` line survives, the history and message lists are
+    #     APPEND-ONLY (the old file is a byte prefix of the new one, a row the scan no longer sees is kept), and the tree
+    #     list keeps its comments and live rows in place, drops a paid row BY NAME, and appends the new one.
+    tmp12 = tempfile.mkdtemp()
+    here12 = os.getcwd()
+    saved12 = {k: globals()[k] for k in ("BASELINE", "HISTORY_BASELINE", "MSG_BASELINE")}
+    try:
+        r12 = os.path.join(tmp12, "r")
+        os.makedirs(r12)
+        os.chdir(r12)
+        g12 = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"]
+        subprocess.run(["git", "init", "-q"], check=True)
+        plant12 = ["see projects/claude/" + "saltbench-sys" + "tems" + "/tasks/a.md",
+                   "see projects/claude/" + "saltbench-sys" + "tems" + "/tasks/b.md"]
+        for i, text in enumerate(plant12):
+            with open(f"f{i}.md", "w", encoding="utf-8", newline="") as fh:
+                fh.write(text + "\n")
+            subprocess.run(["git", "add", f"f{i}.md"], check=True)
+            subprocess.run(g12 + ["commit", "-q", "-m", f"c{i} " + text], check=True)
+        tf12 = tree_findings()
+        hf12 = history_findings()
+        mf12 = scan(commit_messages("HEAD"))
+        if len({(f, line_sha(l)) for f, _, l in tf12}) < 2 or len({history_key(a, f, l) for a, f, _, l in hf12}) < 2 \
+                or len({a for a, _, _ in mf12}) < 2:
+            failures.append("write-baseline arm: the scratch repo must carry TWO findings in each population "
+                            f"(tree {len(tf12)}, history {len(hf12)}, messages {len(mf12)}) or the arm tests nothing")
+        else:
+            t0 = sorted(tf12)[0]
+            h0 = sorted(hf12)[0]
+            m0 = sorted(mf12)[0]
+            cases12 = {
+                "tree": ("BASELINE", tree_mode,
+                         f"{t0[0]}\t{line_sha(t0[2])}\t{t0[1]}\tKEPT-THIRD-FIELD\n",
+                         "gone.md\t0000000000000000\ta paid row\n"),
+                "history": ("HISTORY_BASELINE", history_mode,
+                            f"{h0[0]}\t{h0[1]}\t{line_sha(h0[3])}\t{h0[2]}\n",
+                            "0" * 40 + "\tgone.md\t0000000000000000\ta row the scan no longer sees\n"),
+                "messages": ("MSG_BASELINE", messages_mode,
+                             f"{m0[0]}\t{m0[1]}\n", "1" * 40 + "\ta row the scan no longer sees\n"),
+            }
+            for kind, (var, mode, live, stale) in cases12.items():
+                bpath = os.path.join(tmp12, kind + ".tsv")
+                before = ("# HEADER a reader wrote\n" + live
+                          + "# ON THE CAPTAIN'S WORD -- an annotation between rows\n#   and its second line\n"
+                          + stale)
+                with open(bpath, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(before)
+                globals()[var] = bpath
+                buf12 = io.StringIO()
+                with contextlib.redirect_stdout(buf12):
+                    rc12 = mode(True)
+                after = open(bpath, encoding="utf-8").read()
+                out12 = buf12.getvalue()
+                if rc12 != 0:
+                    failures.append(f"--{kind} --write-baseline must succeed (rc {rc12}): {out12.strip()[-160:]}")
+                    continue
+                for l in before.splitlines():
+                    if l.startswith("#") and l not in after.splitlines():
+                        failures.append(f"--{kind} --write-baseline DROPPED an annotation line: {l[:60]!r}")
+                if live not in after:
+                    failures.append(f"--{kind} --write-baseline must keep an existing live row VERBATIM")
+                rows12 = [l for l in after.splitlines() if l.strip() and not l.startswith("#")]
+                if len(rows12) < (2 if kind == "tree" else 3):
+                    failures.append(f"--{kind} --write-baseline must APPEND the newly found row ({len(rows12)} rows)")
+                if kind == "tree":
+                    if stale in after:
+                        failures.append("--tree --write-baseline must DROP a paid row (it shrinks after a repair)")
+                    if "gone.md" not in out12:
+                        failures.append("--tree --write-baseline must NAME each row it drops")
+                elif not after.startswith(before):
+                    failures.append(f"--{kind} --write-baseline must be APPEND-ONLY: the old file must be a byte "
+                                    "prefix of the new one (this list does not shrink)")
+    finally:
+        os.chdir(here12)
+        globals().update(saved12)
+        shutil.rmtree(tmp12, ignore_errors=True)
+
     for f in failures:
         print(f"SELF-TEST FAIL: {f}")
     if failures:
@@ -1386,7 +1508,12 @@ def tree_rows(exclude_self: bool = True) -> list[tuple[str, str]]:
     out = subprocess.run(["git", "ls-files", "-z"], capture_output=True,
                          check=True).stdout.decode("utf-8", "replace")
     rows: list[tuple[str, str]] = []
-    own = os.path.relpath(os.path.abspath(__file__), os.getcwd())
+    try:
+        own = os.path.relpath(os.path.abspath(__file__), os.getcwd())
+    except ValueError:
+        # Windows: the cwd is on another drive (a self-test scratch repo under C:\ beside a checkout on D:\), so this
+        #   file cannot be in the scanned tree and there is nothing to exclude (systems, 2026-10-17, measured on jas #503).
+        own = None
     for path in out.split("\0"):
         if not path or (exclude_self and path == own):
             continue
@@ -1418,6 +1545,49 @@ def load_baseline():
         return None
 
 
+def merge_write_baseline(path: str, header: str, key_of, rows: list, shrink: bool) -> tuple:
+    """Write a baseline WITHOUT erasing what a reader wrote in it (the helm's item 12, 2026-10-16).
+
+    `rows` is [(key, line)] for every finding the scan sees; `key_of(line)` reads the same key back from an existing
+    row. Every `#` line and blank line is kept IN PLACE, and every existing row is kept VERBATIM (extra fields too).
+    shrink=False (history, messages: "this list does not shrink"): nothing is dropped, so the old file is a byte prefix
+    of the new one. shrink=True (tree: "shrink it after a repair"): an existing row whose key the scan no longer sees
+    is dropped, and returned so the caller NAMES it. New keys are appended in sorted order. A missing file gets
+    `header`. Returns (kept, added, dropped_lines).
+    ⛔ Until 2026-10-16 every write REGENERATED its file from the scan, so `--history --write-baseline` on saltbench
+       dropped a Captain's-word entry and a desk row's text while every gate stayed green.
+    """
+    want = dict(rows)
+    out, seen, dropped = [], set(), []
+    if os.path.exists(path):
+        with open(path, encoding="utf-8", newline="") as fh:
+            old = fh.read()
+        if old and not old.endswith("\n"):
+            old += "\n"
+        for line in old.splitlines(keepends=True):
+            body = line.rstrip("\r\n")
+            if not body.strip() or body.startswith("#"):
+                out.append(line)
+                continue
+            k = key_of(body)
+            if shrink and k not in want:
+                dropped.append(body)
+                continue
+            out.append(line)
+            seen.add(k)
+    else:
+        out.append(header)
+    added = 0
+    for k in sorted(want):
+        if k not in seen:
+            out.append(want[k] + "\n")
+            seen.add(k)
+            added += 1
+    with open(path, "w", encoding="utf-8", newline="") as fh:
+        fh.write("".join(out))
+    return len(seen) - added, added, dropped
+
+
 def tree_findings() -> list[tuple[str, str, str]]:
     return scan(tree_rows())
 
@@ -1443,15 +1613,20 @@ def tree_mode(write: bool) -> int:
         # (jas's encoding-hygiene gate caught this when the ratchet was ported there: a file that
         # ships byte-identical to three repos must satisfy the STRICTEST repo's gates, not the
         # source's -- a port inherits the destination's rules, measured 08/29).
-        with open(BASELINE, "w", encoding="utf-8", newline="") as fh:
-            fh.write("# private_paths_baseline.tsv -- ACCEPTED residue for the tree ratchet "
-                     "(check_private_paths.py --tree).\n# file<TAB>line-sha16<TAB>what. "
-                     "Shrink it after a repair with --tree --write-baseline; a growth is a "
-                     "reviewed diff.\n")
-            for f, what, line in sorted(found):
-                fh.write(f"{f}\t{line_sha(line)}\t{what}\n")
+        kept, added, dropped = merge_write_baseline(
+            BASELINE,
+            "# private_paths_baseline.tsv -- ACCEPTED residue for the tree ratchet "
+            "(check_private_paths.py --tree).\n# file<TAB>line-sha16<TAB>what. "
+            "Shrink it after a repair with --tree --write-baseline; a growth is a "
+            "reviewed diff.\n",
+            lambda l: tuple(l.split("\t")[:2]),
+            [((f, line_sha(line)), f"{f}\t{line_sha(line)}\t{what}") for f, what, line in sorted(found)],
+            shrink=True)
         print(f"check_private_paths --write-baseline: {len(found)} accepted residue "
-              f"line(s) in {len({f for f,_,_ in found})} file(s) written to {os.path.basename(BASELINE)}")
+              f"line(s) in {len({f for f,_,_ in found})} file(s) in {os.path.basename(BASELINE)} "
+              f"({kept} kept in place, {added} appended, {len(dropped)} paid row(s) dropped; every # line kept)")
+        for d in dropped:
+            print(f"  dropped (paid): {d}")
         return 0
     base = load_baseline()
     if _tree_unarmed_fatal(base, len(found)):
@@ -1561,18 +1736,21 @@ def messages_mode(write: bool) -> int:
         # newline="" for the same reason as the tree baseline: a file shipped
         # byte-identical to three repos must satisfy the STRICTEST repo's
         # encoding gate (jas), not the source's.
-        with open(MSG_BASELINE, "w", encoding="utf-8", newline="") as fh:
-            fh.write("# private_paths_message_baseline.tsv -- ACCEPTED historical commits whose "
-                     "MESSAGES carry a private-record path (check_private_paths.py --messages).\n"
-                     "# sha<TAB>what. NEVER the line itself: an excerpt would put the path into "
-                     "the tree, where the tree ratchet reds on it.\n"
-                     "# A pushed message cannot be repaired without a force-push (ruled out "
-                     "08/30), so this list does not shrink; a growth is a reviewed diff that "
-                     "should be nearly impossible to justify.\n")
-            for sha in sorted(per_sha):
-                fh.write(f"{sha}\t{per_sha[sha][0]}\n")
+        kept, added, _ = merge_write_baseline(
+            MSG_BASELINE,
+            "# private_paths_message_baseline.tsv -- ACCEPTED historical commits whose "
+            "MESSAGES carry a private-record path (check_private_paths.py --messages).\n"
+            "# sha<TAB>what. NEVER the line itself: an excerpt would put the path into "
+            "the tree, where the tree ratchet reds on it.\n"
+            "# A pushed message cannot be repaired without a force-push (ruled out "
+            "08/30), so this list does not shrink; a growth is a reviewed diff that "
+            "should be nearly impossible to justify.\n",
+            lambda l: l.split("\t")[0].strip(),
+            [(sha, f"{sha}\t{per_sha[sha][0]}") for sha in sorted(per_sha)],
+            shrink=False)
         print(f"check_private_paths --messages --write-baseline: {len(per_sha)} accepted "
-              f"commit(s) written to {os.path.basename(MSG_BASELINE)}")
+              f"commit(s) in {os.path.basename(MSG_BASELINE)} (APPEND-ONLY: {kept} kept, "
+              f"{added} appended; every # line kept)")
         return 0
     base = load_msg_baseline()
     if _msg_unarmed_fatal(base, len(per_sha)):
@@ -1759,17 +1937,20 @@ def history_mode(write: bool, path: str | None = None) -> int:
     nwalked = len(subprocess.run(["git", "rev-list", "HEAD"], capture_output=True,
                                  text=True, encoding="utf-8", check=True).stdout.split())
     if write:
-        with open(target, "w", encoding="utf-8", newline="") as fh:
-            fh.write("# private_paths_history_baseline.tsv -- ACCEPTED HISTORICAL DEBT: content a\n"
-                     "# commit INTRODUCED, which every clone receives whatever the tree now says.\n"
-                     "# sha<TAB>file<TAB>line-sha16<TAB>what.\n"
-                     "# A TREE REPAIR NEVER SHRINKS THIS FILE. Only a history rewrite does, and\n"
-                     "# that is a council act -- so a shrink here is a diff somebody must have ruled.\n")
-            for sha, f, what, line in sorted(found):
-                fh.write(f"{sha}\t{f}\t{line_sha(line)}\t{what}\n")
+        kept, added, _ = merge_write_baseline(
+            target,
+            "# private_paths_history_baseline.tsv -- ACCEPTED HISTORICAL DEBT: content a\n"
+            "# commit INTRODUCED, which every clone receives whatever the tree now says.\n"
+            "# sha<TAB>file<TAB>line-sha16<TAB>what.\n"
+            "# A TREE REPAIR NEVER SHRINKS THIS FILE. Only a history rewrite does, and\n"
+            "# that is a council act -- so a shrink here is a diff somebody must have ruled.\n",
+            lambda l: tuple(l.split("\t")[:3]),
+            [(history_key(sha, f, line), f"{sha}\t{f}\t{line_sha(line)}\t{what}")
+             for sha, f, what, line in sorted(found)],
+            shrink=False)
         print(f"check_private_paths --history --write-baseline: {len(found)} accepted "
-              f"historical finding(s) across {ncommits} commit(s) written to "
-              f"{os.path.basename(target)}")
+              f"historical finding(s) across {ncommits} commit(s) in "
+              f"{os.path.basename(target)} (APPEND-ONLY: {kept} kept, {added} appended; every # line kept)")
         return 0
     base = load_history_baseline(target)
     if _msg_unarmed_fatal(base, len(found)):
