@@ -16,13 +16,9 @@
 
 import Foundation
 
-private func propChildren(_ e: Element) -> [Element] {
-    switch e {
-    case .group(let g): return g.children
-    case .layer(let l): return l.children
-    default: return []
-    }
-}
+/// Path children, including a Transformed wrapper's single child (route 4
+/// slice 3b); see `Element.pathChildren`.
+private func propChildren(_ e: Element) -> [Element] { e.pathChildren }
 
 /// Document-space AABB of the element at `path` (its own + ancestor transforms
 /// folded into the geometric-bounds corners). `nil` when `path` does not resolve.
@@ -42,7 +38,7 @@ public func elementEvaluatedBBox(_ doc: Document, _ path: ElementPath) -> BBox? 
             let kids = propChildren(node)
             guard idx < kids.count else { return nil }
             node = kids[idx]
-            ancestors.append(node.transform)
+            ancestors.append(node.childFrameTransform)
         }
         let kids = propChildren(node)
         guard let last = path.last, last < kids.count else { return nil }
@@ -103,7 +99,7 @@ public func accumulatedTransform(
             let kids = propChildren(node)
             guard idx < kids.count else { return nil }
             node = kids[idx]
-            ancestors.append(node.transform)
+            ancestors.append(node.childFrameTransform)
         }
         let kids = propChildren(node)
         guard let last = path.last, last < kids.count else { return nil }

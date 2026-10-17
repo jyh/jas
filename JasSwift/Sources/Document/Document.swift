@@ -777,12 +777,23 @@ public struct RebuildResolver: ElementResolver {
 
 // MARK: - Private helpers
 
+/// The children a path walks through: a Group's or Layer's, and a Transformed
+/// wrapper's single child (`[.., w, 0]`, route 4 slice 3b). Traps for anything
+/// else, as before.
 private func childrenOf(_ elem: Element) -> [Element] {
     switch elem {
-    case .group(let g): return g.children
-    case .layer(let l): return l.children
+    case .group, .layer, .live(.transformed): return elem.pathChildren
     default: fatalError("Element has no children")
     }
+}
+
+/// A Transformed wrapper's single slot can be REPLACED and never inserted into
+/// or removed from, so a wrapper never gains or loses its child. Rust's
+/// `insert_*_in_children` / `remove_from_children` skip a wrapper the same way
+/// (it offers no `children_mut`).
+private func isWrapper(_ elem: Element) -> Bool {
+    if case .live(.transformed) = elem { return true }
+    return false
 }
 
 /// Replace a container's children and change NOTHING else.
@@ -809,12 +820,16 @@ private func withChildren(_ elem: Element, _ newChildren: [Element]) -> Element 
         return .group(g.withChildren(newChildren))
     case .layer(let l):
         return .layer(l.withChildren(newChildren))
+    case .live(.transformed(var t)) where newChildren.count == 1:
+        t.child = newChildren[0]
+        return .live(.transformed(t))
     default:
         fatalError("Element has no children")
     }
 }
 
 private func insertAfterInGroup(_ node: Element, _ rest: [Int], _ newElem: Element) -> Element {
+    if rest.count == 1 && isWrapper(node) { return node }
     var children = childrenOf(node)
     if rest.count == 1 {
         children.insert(newElem, at: rest[0] + 1)
@@ -835,6 +850,7 @@ private func replaceInGroup(_ node: Element, _ rest: [Int], _ newElem: Element) 
 }
 
 private func removeFromGroup(_ node: Element, _ rest: [Int]) -> Element {
+    if rest.count == 1 && isWrapper(node) { return node }
     var children = childrenOf(node)
     if rest.count == 1 {
         children.remove(at: rest[0])
