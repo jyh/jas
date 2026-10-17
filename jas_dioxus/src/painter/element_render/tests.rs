@@ -2114,6 +2114,24 @@ fn flat_tracked_text_carries_its_spacing_on_the_run() {
     assert!((got[0] - 2.0).abs() < 1e-9, "0.1em at size 20 is 2.0 per glyph, got {}", got[0]);
 }
 
+/// ⛔ THE FLAT RUN'S BASELINE IS `y + 0.8 x size`, as the legacy renderer's
+/// (`canvas/render.rs`: `let baseline = e.y + e.font_size * 0.8`) and the
+/// segmented lowering's are: `TextElem.y` is the TOP of the box (SVG import
+/// subtracts the 0.8-em ascent). Drawing at `y` put every flat text one ascent
+/// high -- on `text_basic.svg`, above the canvas top -- which is why the WinUI
+/// certificate of a tracking change read the same frame as before it.
+#[test]
+fn a_flat_run_sits_on_the_baseline_not_the_box_top() {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(flat_text(20.0)), 1.0);
+    let ys: Vec<f64> = rec.commands().iter().filter_map(|c| match c {
+        Command::DrawTextRun { run: crate::painter::TextRun::FastRun { y, .. }, .. } => Some(*y),
+        _ => None,
+    }).collect();
+    assert_eq!(ys.len(), 1);
+    assert!((ys[0] - (2.0 + 0.8 * 20.0)).abs() < 1e-9, "baseline = y + 0.8 x size = 18, got {}", ys[0]);
+}
+
 /// Numeric kerning folds into the same uniform advance, as the legacy renderer
 /// folds it (Canvas 2D has no per-pair kerning): they open together because
 /// they are one number.

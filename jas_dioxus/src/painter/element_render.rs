@@ -1437,7 +1437,12 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                     // its spacing reads, so `None` here means none was set.
                     letter_spacing: flat_spacing(e).unwrap_or(0.0),
                     x: e.x + dx,
-                    y: e.y,
+                    // ⛔ THE BASELINE, NOT THE BOX TOP: `e.y` is the top of the
+                    // text box (SVG import subtracts the 0.8-em ascent), and the
+                    // legacy renderer and the segmented lowering both draw at
+                    // `e.y + 0.8 x size`. Drawing at `e.y` put every flat text
+                    // one ascent high (node 15, jas section 397).
+                    y: e.y + e.font_size * 0.8,
                 };
                 p.draw_text_run(&run, &Brush::Solid(f.color), eff * f.opacity);
             }
