@@ -175,6 +175,15 @@ struct PanelWidgetEvents {
 /// `terminal` marks a finished edit (slider pointer-up, Enter / blur in a
 /// value box) as opposed to a live drag tick; it is passed straight through
 /// to ``notifyPanelStateChanged``, whose Color branch is the only reader.
+/// The Properties field an Opacity panel key writes, or nil.
+func opacityPropertiesField(_ key: String) -> String? {
+    switch key {
+    case "opacity": return "opacity"
+    case "blend_mode": return "blend"
+    default: return nil
+    }
+}
+
 func commitPanelField(
     model: Model, panelId pid: String, key: String, value: Any?,
     terminal: Bool = false, mirror: String? = nil
@@ -213,6 +222,16 @@ func commitPanelField(
         applyPropertiesField(controller: Controller(model: model),
                              field: String(key.dropFirst("prop_".count)),
                              value: value)
+    }
+    // The Opacity panel's two inputs write the SAME two element attributes
+    // the Properties panel writes, so they run the SAME law (Rust's engine:
+    // `panel_behavior::opacity_prop_key`, W2b-8). `panel.opacity` is PERCENT,
+    // which `applyPropertiesField` divides by 100 and clamps. Until
+    // 2026-10-17 nothing here mapped them, so in this app the blend-mode
+    // select and the opacity field changed the panel and never the
+    // selection; the `opacity.blend_mode` input script found it.
+    if pid == "opacity_panel_content", let field = opacityPropertiesField(key) {
+        applyPropertiesField(controller: Controller(model: model), field: field, value: value)
     }
     model.panelStateVersion &+= 1
     // Name the committed field: the Stroke panel's apply is
