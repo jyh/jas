@@ -1,0 +1,10 @@
+{
+    "item":  "character.anti_aliasing",
+    "surface":  "2379x1333",
+    "frame_hash":  "8d522dac7da3e3d3967f09606700dbaa47ee1526e07da86acf849b0644d7fa68",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "507ba332511b82b1",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
