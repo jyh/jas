@@ -1,7 +1,7 @@
 {
   "item": "distribute.horizontal_center",
   "spec": "workspace/panels/align.yaml",
-  "setup_svg": "three_rects.svg",
+  "setup_svg": "three_rects_unequal.svg",
   "tool": "selection",
   "app_state": {},
   "steps": [

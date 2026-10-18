@@ -2518,6 +2518,24 @@ Test-Case 'rb: what follows the set-aside artboard is still compared byte for by
 Test-Case 'rb: an artboards member this reader cannot delimit is a FAIL by name' {
     Compare-SbReadBack -Got '{"artboards":[{"name":"a]b"}],"layers":[]}' -Want '{"layers":[]}'
 } 'FAIL(the read-back opens with an artboards member this reader cannot delimit)'
+Test-Case 'rb: a fresh minted id at each token is accepted, and the receipt says so' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"l006y7om"},{"id":"7xkxpudp"}]}' -Want '{"layers":[{"id":"<minted>"},{"id":"<minted>"}]}'
+} 'PASS(bytes=48; minted ids accepted)'
+Test-Case 'rb: one minted id carried twice is a FAIL by name: a mint is fresh' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"l006y7om"},{"id":"l006y7om"}]}' -Want '{"layers":[{"id":"<minted>"},{"id":"<minted>"}]}'
+} 'FAIL(the minted id "l006y7om" is carried twice; a mint is fresh)'
+Test-Case 'rb: a minted id that is not 8-character base36 is a FAIL by name' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"L006Y7OM"},{"id":"7xkxpudp"}]}' -Want '{"layers":[{"id":"<minted>"},{"id":"<minted>"}]}'
+} 'FAIL(a minted id is not an 8-character base-36 id: "L006Y7OM")'
+Test-Case 'rb: a read-back missing an id the expected names is a FAIL by name' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"l006y7om"},{}]}' -Want '{"layers":[{"id":"<minted>"},{"id":"<minted>"}]}'
+} 'FAIL(the read-back carries 1 ids where the expected names 2)'
+Test-Case 'rb: a literal id beside a token is still compared byte for byte' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"changed1"},{"id":"7xkxpudp"}]}' -Want '{"layers":[{"id":"keepthis"},{"id":"<minted>"}]}'
+} 'FAIL(at byte 18 of got=48 want=48: got "changed1"},{"id":"<minte" want "keepthis"},{"id":"<minte"; minted ids accepted)'
+Test-Case 'rb: with no token, ids are compared byte for byte' {
+    Compare-SbReadBack -Got '{"layers":[{"id":"l006y7om"},{"id":"7xkxpudp"}]}' -Want '{"layers":[{"id":"aaaaaaaa"},{"id":"bbbbbbbb"}]}'
+} 'FAIL(at byte 18 of got=48 want=48: got "l006y7om"},{"id":"7xkxpu" want "aaaaaaaa"},{"id":"bbbbbb")'
 
 # ---------------------------------------------------------------------------
 # Q6.D -- THE DOCK OPENED AND DREW EVERY TAB GROUP (jas's #316 review, item 1)

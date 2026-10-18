@@ -4811,7 +4811,7 @@ private func payloadContent(_ svg: String) -> String {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["boolean.trim.json", "boolean.crop.json", "boolean.subtract_back.json", "character.vertical_scale.json", "character.baseline_shift.json", "character.character_rotation.json", "align.top.json", "align.bottom.json", "distribute.vertical_center.json", "distribute.left.json", "boolean.exclude.json", "stroke.start_arrowhead.json", "stroke.end_arrowhead.json", "align.right.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["distribute.right.json", "distribute.top.json", "distribute.bottom.json", "boolean.merge.json", "boolean.divide.json", "boolean.trim.json", "boolean.crop.json", "boolean.subtract_back.json", "character.vertical_scale.json", "character.baseline_shift.json", "character.character_rotation.json", "align.top.json", "align.bottom.json", "distribute.vertical_center.json", "distribute.left.json", "boolean.exclude.json", "stroke.start_arrowhead.json", "stroke.end_arrowhead.json", "align.right.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
 
 /// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
@@ -4878,6 +4878,73 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
     #expect(runScriptPanelStep(commit, model: model), "the enabled commit did not run")
 }
 
+/// The token an expected file writes where the op MINTS an id (`boolean.divide`
+/// gives each fragment of a split source a fresh one). At each `"id":"<minted>"`
+/// the read-back must carry an 8-character base-36 id, pairwise distinct; every
+/// other id is compared as bytes, and the counts of `"id":` must agree. Each
+/// accepted id becomes the token. Rust's `accept_minted_ids` is the same law.
+private let mintedToken = "<minted>"
+
+private func acceptMintedIds(_ got: String, _ want: String) -> Result<String, MintRefusal> {
+    let key = "\"id\":\""
+    guard want.contains(key + mintedToken + "\"") else { return .success(got) }
+    func ids(_ s: String) -> [Range<String.Index>] {
+        var out: [Range<String.Index>] = []
+        var from = s.startIndex
+        while let k = s.range(of: key, range: from..<s.endIndex) {
+            let end = s[k.upperBound...].firstIndex(of: "\"") ?? k.upperBound
+            out.append(k.upperBound..<end)
+            from = end
+        }
+        return out
+    }
+    let g = ids(got), w = ids(want)
+    guard g.count == w.count else {
+        return .failure(MintRefusal("the read-back carries \(g.count) ids where the expected names \(w.count)"))
+    }
+    var out = "", seen = Set<Substring>(), at = got.startIndex
+    for (gr, wr) in zip(g, w) where want[wr] == mintedToken {
+        let id = got[gr]
+        guard id.count == 8, id.allSatisfy({ ("0"..."9").contains($0) || ("a"..."z").contains($0) }) else {
+            return .failure(MintRefusal("a minted id is not an 8-character base-36 id: \"\(id)\""))
+        }
+        guard seen.insert(id).inserted else {
+            return .failure(MintRefusal("the minted id \"\(id)\" is carried twice; a mint is fresh"))
+        }
+        out += got[at..<gr.lowerBound] + mintedToken
+        at = gr.upperBound
+    }
+    return .success(out + got[at...])
+}
+
+private struct MintRefusal: Error, Equatable {
+    let why: String
+    init(_ why: String) { self.why = why }
+}
+
+@Test func aMintedIdIsAcceptedOnlyWhereTheExpectedNamesOneAndOnlyFresh() {
+    func el(_ id: String) -> String { "{\"id\":\"\(id)\",\"type\":\"polygon\"}" }
+    func doc(_ a: String, _ b: String) -> String { "{\"layers\":[\(el(a)),\(el(b))]}" }
+    func why(_ r: Result<String, MintRefusal>) -> String {
+        if case .failure(let e) = r { return e.why } else { return "" }
+    }
+    let want = doc(mintedToken, mintedToken)
+    #expect(acceptMintedIds(doc("l006y7om", "7xkxpudp"), want) == .success(want))
+    // No token: the read-back is untouched, so its ids are compared as bytes.
+    #expect(acceptMintedIds(doc("l006y7om", "7xkxpudp"), doc("aaaaaaaa", "bbbbbbbb"))
+            == .success(doc("l006y7om", "7xkxpudp")))
+    // A literal id beside a token is left for the byte comparison.
+    let mixed = doc("keepthis", mintedToken)
+    #expect(acceptMintedIds(doc("keepthis", "7xkxpudp"), mixed) == .success(mixed))
+    #expect(acceptMintedIds(doc("changed1", "7xkxpudp"), mixed) != .success(mixed))
+    // One id stamped twice, a wrong shape, a missing id: refused by name.
+    #expect(why(acceptMintedIds(doc("l006y7om", "l006y7om"), want)).contains("carried twice"))
+    #expect(why(acceptMintedIds(doc("L006Y7OM", "7xkxpudp"), want)).contains("not an 8-character"))
+    #expect(why(acceptMintedIds(doc("l006y7o", "7xkxpudp"), want)).contains("not an 8-character"))
+    let one = "{\"layers\":[\(el("l006y7om")),{\"type\":\"polygon\"}]}"
+    #expect(why(acceptMintedIds(one, want)).contains("carries 1 ids where the expected names 2"))
+}
+
 @Test func scriptCorpus() throws {
     #expect(!scriptFixtures.isEmpty)
     for fixture in scriptFixtures {
@@ -4933,7 +5000,13 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
                 continue
             }
         }
-        let actual = documentToTestJson(model.document)
+        let actual: String
+        switch acceptMintedIds(documentToTestJson(model.document), expected) {
+        case .success(let a): actual = a
+        case .failure(let e):
+            Issue.record("script \(item): \(e.why)")
+            continue
+        }
         #expect(actual == expected, "script \(item): the level-1 read-back differs from the expected")
     }
 }
