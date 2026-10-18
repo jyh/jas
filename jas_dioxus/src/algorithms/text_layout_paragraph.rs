@@ -242,6 +242,64 @@ fn last_line_align_from(
     }
 }
 
+
+/// One list marker to draw: the layout line it sits on, its glyph text, and
+/// its x offset from the element's x (the paragraph's left indent).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ListMarker {
+    pub line: usize,
+    pub text: String,
+    pub indent: f64,
+}
+
+/// The list markers a laid-out text draws, PARAGRAPH.md's law, shared by the
+/// legacy renderer (`canvas/render.rs`) and the native walk
+/// (`painter/element_render.rs`), so the two cannot disagree. A line starts a
+/// paragraph when the line before it ended at a hard break, or when it is a
+/// non-empty segment's first line: a paragraph is a wrapper tspan (flask
+/// section 443, ruled in jas section 444), and a soft wrap starts nothing.
+/// Consecutive paragraphs of the same `num-*` style count up from 1; a
+/// different style, a bullet or no style resets the run.
+pub fn list_marker_paragraphs(
+    layout: &crate::algorithms::text_layout::TextLayout,
+    segments: &[ParagraphSegment],
+) -> Vec<ListMarker> {
+    let owner = |at: usize| segments.iter().position(|s| s.char_start <= at && at < s.char_end);
+    let mut starts: Vec<(usize, Option<String>, f64)> = Vec::new();
+    let mut after_break = true;
+    for (li, line) in layout.lines.iter().enumerate() {
+        let opens_segment = segments.iter().any(|s| s.char_end > s.char_start && s.char_start == line.start);
+        if after_break || opens_segment {
+            let (style, indent) = owner(line.start)
+                .map_or((None, 0.0), |si| (segments[si].list_style.clone(), segments[si].left_indent));
+            starts.push((li, style, indent));
+        }
+        after_break = line.hard_break;
+    }
+    let mut out = Vec::new();
+    let mut prev_num: Option<String> = None;
+    let mut counter = 0usize;
+    for (li, style, indent) in starts {
+        let n = match style.as_deref() {
+            Some(st) if st.starts_with("num-") => {
+                counter = if prev_num.as_deref() == Some(st) { counter + 1 } else { 1 };
+                prev_num = Some(st.to_string());
+                counter
+            }
+            _ => {
+                prev_num = None;
+                counter = 0;
+                0
+            }
+        };
+        let Some(st) = style.filter(|st| !st.is_empty()) else { continue };
+        let text = marker_text(&st, n);
+        if text.is_empty() { continue; }
+        out.push(ListMarker { line: li, text, indent });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,5 +551,47 @@ mod tests {
         ];
         let counters = compute_counters(&segs);
         assert_eq!(counters, vec![1, 0, 1]);
+    }
+
+    // ── NODE 30 (jas section 444): a wrapper starts a paragraph ──────────
+    // jas's four Swift arms, ported: two wrappers -> 1. 2.; a hard break in
+    // one wrapper -> 1. 2.; a soft wrap -> one marker; num, bullet, num ->
+    // 1. bullet 1.
+
+    fn markers_of(tspans: &[Tspan], max_w: f64) -> Vec<(usize, String)> {
+        let content: String = tspans.iter().map(|t| t.content.as_str()).collect();
+        let segs = build_segments_from_text(tspans, &content, true);
+        let measure = |s: &str| s.chars().count() as f64 * 10.0;
+        let layout = crate::algorithms::text_layout::layout_with_paragraphs(&content, max_w, 20.0, &segs, &measure);
+        list_marker_paragraphs(&layout, &segs).into_iter().map(|m| (m.line, m.text)).collect()
+    }
+
+    #[test]
+    fn two_wrappers_are_two_numbered_paragraphs() {
+        let m = markers_of(&[list_wrapper("num-decimal"), body("ab"), list_wrapper("num-decimal"), body("cd")], 1000.0);
+        assert_eq!(m.iter().map(|x| x.1.as_str()).collect::<Vec<_>>(),
+                   vec![marker_text("num-decimal", 1).as_str(), marker_text("num-decimal", 2).as_str()], "{m:?}");
+        assert!(m[1].0 > m[0].0, "the second marker on a later line: {m:?}");
+    }
+
+    #[test]
+    fn a_hard_break_in_one_wrapper_is_two_numbered_paragraphs() {
+        let m = markers_of(&[list_wrapper("num-decimal"), body("ab\ncd")], 1000.0);
+        assert_eq!(m.iter().map(|x| x.1.clone()).collect::<Vec<_>>(),
+                   vec![marker_text("num-decimal", 1), marker_text("num-decimal", 2)], "{m:?}");
+    }
+
+    #[test]
+    fn a_soft_wrap_starts_no_paragraph() {
+        let m = markers_of(&[list_wrapper("num-decimal"), body("aaaa bbbb cccc")], 60.0);
+        assert_eq!(m.len(), 1, "one paragraph, however many lines: {m:?}");
+    }
+
+    #[test]
+    fn a_bullet_between_restarts_the_count() {
+        let m = markers_of(&[list_wrapper("num-decimal"), body("a"), list_wrapper("bullet-disc"), body("b"),
+                             list_wrapper("num-decimal"), body("c")], 1000.0);
+        assert_eq!(m.iter().map(|x| x.1.clone()).collect::<Vec<_>>(),
+                   vec![marker_text("num-decimal", 1), marker_text("bullet-disc", 0), marker_text("num-decimal", 1)], "{m:?}");
     }
 }
