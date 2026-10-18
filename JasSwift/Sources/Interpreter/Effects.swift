@@ -378,10 +378,12 @@ private func runOne(
         // Phase 5 follow-up: gradient_* writes trigger the apply
         // pipeline. Host provides "apply_gradient_panel" in its
         // platformEffects map pointing at applyGradientPanelToSelection.
-        let wroteGradient = pairs.keys.contains { isGradientRenderKey($0) }
-        if wroteGradient,
-           let hook = platformEffects["apply_gradient_panel"] {
-            _ = hook("", ctx, store)
+        // Once per gradient key written, naming it, as the Rust engine's
+        // `global_written` applies one key per write.
+        if let hook = platformEffects["apply_gradient_panel"] {
+            for k in pairs.keys.filter(isGradientRenderKey).sorted() {
+                _ = hook(k, ctx, store)
+            }
         }
         // Active-color writes (set_active_color YAML action et al.)
         // need to propagate to the selected canvas element — the
@@ -1097,45 +1099,134 @@ private func gradientNumber(_ store: StateStore, _ key: String) -> Double? {
     }
 }
 
-/// Apply the current gradient panel state to the selected element(s).
-/// Builds a Gradient from store keys and writes it via the controller.
-/// Mirrors jas_dioxus::AppState::apply_gradient_panel_to_selection.
-public func applyGradientPanelToSelection(store: StateStore, controller: Controller) {
-    let typeStr = (store.get("gradient_type") as? String) ?? "linear"
-    let gType: GradientType
-    switch typeStr {
-    case "radial": gType = .radial
-    case "freeform": gType = .freeform
-    default: gType = .linear
+/// What the selection's active attribute holds, per GRADIENT.md
+/// §Multi-selection. Mirrors jas_dioxus `gradient_host::SelectionGradient`.
+public enum SelectionGradient: Equatable {
+    /// Nothing is selected.
+    case empty
+    /// Two distinct gradients, or some gradient and some solid/none.
+    case mixed
+    /// Every selected element carries this gradient.
+    case uniform(Gradient)
+    /// Every selected element is solid or none; the FIRST element's solid
+    /// colour (nil for none) is the seed's first stop.
+    case solid(Color?)
+}
+
+/// Read the active attribute (`fillOnTop` ⇒ fill, else stroke) of every
+/// selected element. Mirrors `gradient_host::selection_gradient`.
+public func selectionGradient(_ doc: Document, fillOnTop: Bool) -> SelectionGradient {
+    var first: Gradient?? = nil
+    var firstSolid: Color? = nil
+    for es in doc.selection {
+        guard let elem = doc.tryGetElement(es.path) else { continue }
+        let g = fillOnTop ? elem.fillGradient : elem.strokeGradient
+        if firstSolid == nil && g == nil {
+            firstSolid = fillOnTop ? elem.fill?.color : elem.stroke?.color
+        }
+        switch first {
+        case .none: first = .some(g)
+        case .some(let prev): if prev != g { return .mixed }
+        }
     }
-    let methodStr = (store.get("gradient_method") as? String) ?? "classic"
-    let gMethod: GradientMethod
-    switch methodStr {
-    case "smooth": gMethod = .smooth
-    case "points": gMethod = .points
-    case "lines": gMethod = .lines
-    default: gMethod = .classic
+    switch first {
+    case .none: return .empty
+    case .some(.some(let g)): return .uniform(g)
+    case .some(.none): return .solid(firstSolid)
     }
-    let subStr = (store.get("gradient_stroke_sub_mode") as? String) ?? "within"
-    let gSub: StrokeSubMode
-    switch subStr {
-    case "along": gSub = .along
-    case "across": gSub = .across
-    default: gSub = .within
+}
+
+/// The seed table's gradient (GRADIENT.md §Promotion): from a solid colour
+/// `C`, `[C@0, #ffffff@100]`; from none, `[#000000@0, #ffffff@100]`; linear,
+/// 0°, 100 %, classic, no dither, within. Mirrors `gradient_host::seed_gradient`.
+public func seedGradient(_ solid: Color?) -> Gradient {
+    Gradient(stops: [
+        GradientStop(color: "#" + (solid ?? .black).toHex(), location: 0),
+        GradientStop(color: "#ffffff", location: 100),
+    ])
+}
+
+/// `g` with the field a render key names set from a stored value, or nil
+/// when the value is outside its set or of the wrong type. Mirrors
+/// `gradient_host::set_render_field`.
+func settingGradientField(_ g: Gradient, _ key: String, _ value: Any?) -> Gradient? {
+    func num(_ v: Any?) -> Double? {
+        switch v {
+        case let n as NSNumber where !(v is Bool): return n.doubleValue
+        case let d as Double: return d
+        case let i as Int: return Double(i)
+        default: return nil
+        }
     }
-    let g = Gradient(
-        type: gType,
-        angle: gradientNumber(store, "gradient_angle") ?? 0,
-        aspectRatio: gradientNumber(store, "gradient_aspect_ratio") ?? 100,
-        method: gMethod,
-        dither: (store.get("gradient_dither") as? Bool) ?? false,
-        strokeSubMode: gSub
-        // Stops are panel-local working state; Phase 5 follow-up wires
-        // panel.stops <-> store.gradient_stops binding. For the
-        // foundation, an empty stops list still applies the type /
-        // angle / etc.
-    )
+    var (t, a, r, m, d, sub) = (g.type, g.angle, g.aspectRatio, g.method, g.dither, g.strokeSubMode)
+    switch key {
+    case "gradient_type":
+        guard let v = (value as? String).flatMap(GradientType.init(rawValue:)) else { return nil }; t = v
+    case "gradient_angle":
+        guard let v = num(value) else { return nil }; a = v
+    case "gradient_aspect_ratio":
+        guard let v = num(value) else { return nil }; r = v
+    case "gradient_method":
+        guard let v = (value as? String).flatMap(GradientMethod.init(rawValue:)) else { return nil }; m = v
+    case "gradient_dither":
+        guard let v = value as? Bool else { return nil }; d = v
+    case "gradient_stroke_sub_mode":
+        guard let v = (value as? String).flatMap(StrokeSubMode.init(rawValue:)) else { return nil }; sub = v
+    default: return nil
+    }
+    return Gradient(type: t, angle: a, aspectRatio: r, method: m, dither: d,
+                    strokeSubMode: sub, stops: g.stops, nodes: g.nodes)
+}
+
+/// The panel as the store holds it, for a mixed selection: the six render
+/// globals over the default gradient, with the Gradient panel scope's `stops`
+/// when they parse, else the seed's. Mirrors `gradient_host::gradient_from_store`.
+func gradientFromStore(_ store: StateStore) -> Gradient {
+    var g = seedGradient(nil)
+    for key in gradientRenderKeys.sorted() {
+        if let next = settingGradientField(g, key, store.get(key)) { g = next }
+    }
+    if let raw = store.getPanel("gradient_panel_content", "stops") as? [[String: Any]], !raw.isEmpty {
+        let stops: [GradientStop] = raw.compactMap { s in
+            guard let c = s["color"] as? String, Color.fromHex(c) != nil,
+                  let o = (s["opacity"] as? NSNumber)?.doubleValue,
+                  let l = (s["location"] as? NSNumber)?.doubleValue else { return nil }
+            return GradientStop(color: c, opacity: o, location: l,
+                                midpointToNext: (s["midpoint_to_next"] as? NSNumber)?.doubleValue ?? 50)
+        }
+        if stops.count == raw.count {
+            g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                         dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops)
+        }
+    }
+    return g
+}
+
+/// Apply a Gradient panel write to the selected element(s), per GRADIENT.md
+/// §Fill-type coupling. The base is what the selection holds — its shared
+/// gradient, or the seed when it is solid/none (the promotion) — and the
+/// written key is applied on top; a MIXED selection takes the panel as the
+/// store holds it; nothing selected writes nothing. `key` names the render
+/// key just written; nil applies every render key the store holds (a caller
+/// with no single key). Mirrors `gradient_host::apply_render_key`, which the
+/// Rust engine and web app both call.
+///
+/// Until 2026-10-18 this built its gradient from the store alone with NO
+/// stops, so a first edit on a solid element wrote a gradient with an empty
+/// stop list, against the spec's seed table.
+public func applyGradientPanelToSelection(store: StateStore, controller: Controller, key: String? = nil) {
     let fillOnTop = (store.get("fill_on_top") as? Bool) ?? true
+    var g: Gradient
+    switch selectionGradient(controller.model.document, fillOnTop: fillOnTop) {
+    case .empty: return
+    case .uniform(let held): g = held
+    case .solid(let c): g = seedGradient(c)
+    case .mixed: g = gradientFromStore(store)
+    }
+    let keys = key.map { [$0] } ?? gradientRenderKeys.sorted().filter { store.get($0) != nil }
+    for k in keys {
+        if let next = settingGradientField(g, k, store.get(k)) { g = next }
+    }
     if fillOnTop {
         controller.setSelectionFillGradient(g)
     } else {
@@ -2817,9 +2908,11 @@ func alignPlatformEffects(model: Model) -> [String: PlatformEffect] {
         //
         // Registered HERE because all four production panel-effect sites build
         // their map through this one function.
-        "apply_gradient_panel": { _, _, store in
+        "apply_gradient_panel": { key, _, store in
+            let k = key as? String
             applyGradientPanelToSelection(store: store,
-                                          controller: Controller(model: model))
+                                          controller: Controller(model: model),
+                                          key: (k?.isEmpty ?? true) ? nil : k)
             return nil
         },
         "snapshot": { _, _, _ in

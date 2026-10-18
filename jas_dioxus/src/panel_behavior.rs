@@ -77,6 +77,7 @@ use serde_json::{json, Map, Value};
 use crate::document::model::Model;
 use crate::interpreter::align_host::{self, AlignInput};
 use crate::interpreter::colour_host;
+use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
 use crate::interpreter::effects::{
     close_dialog_in, open_dialog_in, run_effects_hosted, EffectHost, Unhandled,
 };
@@ -390,6 +391,20 @@ impl EffectHost for EngineHost {
                 model.begin_txn();
             }
             colour_host::apply_active_colour(model, key, store.get(key));
+            return;
+        }
+        // The Gradient panel (`gradient_host`, GRADIENT.md §Fill-type
+        // coupling): the selection's own gradient, or the seed when it is
+        // solid/none, with the written key applied. A library tile writes six
+        // keys, so six calls; each reads the gradient the last one wrote.
+        if gradient_host::is_render_key(key) {
+            let fill_on_top = store.get("fill_on_top").as_bool().unwrap_or(true);
+            let value = store.get(key).clone();
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            gradient_host::apply_render_key(model, fill_on_top, key, &value,
+                || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
             return;
         }
         if !stroke_host::is_render_key(key) {

@@ -32,6 +32,7 @@ pub mod boolean_host;
 pub mod align_host;
 pub mod stroke_host;
 pub mod colour_host;
+pub mod gradient_host;
 pub mod character_host;
 pub mod properties_host;
 pub mod paragraph_host;
