@@ -226,7 +226,7 @@ pub fn layout(
     font_size: f64,
     measure: &Measurer<'_>,
 ) -> TextLayout {
-    layout_inner(content, max_width, font_size, None, measure, 0.0)
+    layout_inner(content, max_width, font_size, None, measure, 0.0, None)
 }
 
 /// Variant of [`layout`] that narrows the wrap width of line 0 by
@@ -241,7 +241,7 @@ pub fn layout_first_line_indent(
     measure: &Measurer<'_>,
     first_line_extra: f64,
 ) -> TextLayout {
-    layout_inner(content, max_width, font_size, None, measure, first_line_extra)
+    layout_inner(content, max_width, font_size, None, measure, first_line_extra, None)
 }
 
 /// Hyphenation options for greedy (non-justify) layout. When `Some`,
@@ -269,7 +269,7 @@ pub fn layout_with_hyphen(
     measure: &Measurer<'_>,
     first_line_extra: f64,
 ) -> TextLayout {
-    layout_inner(content, max_width, font_size, Some(opts), measure, first_line_extra)
+    layout_inner(content, max_width, font_size, Some(opts), measure, first_line_extra, None)
 }
 
 fn layout_inner(
@@ -279,6 +279,7 @@ fn layout_inner(
     hyph_opts: Option<HyphenOpts>,
     measure: &Measurer<'_>,
     first_line_extra: f64,
+    per_char: Option<&[f64]>,
 ) -> TextLayout {
     let line_height = font_size;
     let ascent = font_size * 0.8;
@@ -287,6 +288,17 @@ fn layout_inner(
 
     let chars: Vec<char> = content.chars().collect();
     let n = chars.len();
+    // Per-character widths (a tspan's own font for each character, the
+    // multi-tspan plan): a span's width is the sum of its characters'. A
+    // wrong-length array is ignored, as Swift's `perCharWidths` is. Without
+    // them every width is exactly the measurer call it always was.
+    let pcw = per_char.filter(|w| w.len() == n);
+    let mw_str = |a: usize, b: usize, s: &str| -> f64 {
+        match pcw { Some(w) => w[a..b].iter().sum(), None => measure(s) }
+    };
+    let mw_ch = |i: usize, s: String| -> f64 {
+        match pcw { Some(w) => w[i], None => measure(&s) }
+    };
 
     let mut idx = 0usize;
     let mut line_no = 0usize;
@@ -350,13 +362,13 @@ fn layout_inner(
             end += 1;
         }
         let token: String = chars[idx..end].iter().collect();
-        let token_w = measure(&token);
+        let token_w = mw_str(idx, end, &token);
 
         if is_ws {
             // Whitespace token: place each char one at a time so we can mark
             // the trailing ones if we wrap inside it.
             for (k, ch) in token.chars().enumerate() {
-                let cw = measure(&ch.to_string());
+                let cw = mw_ch(idx + k, ch.to_string());
                 let glyph_idx = idx + k;
                 let g = Glyph {
                     idx: glyph_idx,
@@ -402,7 +414,7 @@ fn layout_inner(
                     for bi in (1..token_chars.len()).rev() {
                         if !*breaks.get(bi).unwrap_or(&false) { continue; }
                         let prefix: String = token_chars[..bi].iter().collect();
-                        let prefix_w = measure(&prefix);
+                        let prefix_w = mw_str(idx, idx + bi, &prefix);
                         if prefix_w + hyphen_w <= avail {
                             hyphen_split = Some((bi, prefix_w));
                             break;
@@ -416,7 +428,7 @@ fn layout_inner(
                 // synthetic hyphen, then wrap.
                 let token_chars: Vec<char> = token.chars().collect();
                 for k in 0..split_at {
-                    let cw = measure(&token_chars[k].to_string());
+                    let cw = mw_ch(idx + k, token_chars[k].to_string());
                     glyphs.push(Glyph {
                         idx: idx + k,
                         line: line_no,
@@ -471,14 +483,14 @@ fn layout_inner(
                 // a fresh token that starts at x=0.
                 let tail_chars = &token_chars[split_at..];
                 let tail_w: f64 = tail_chars.iter()
-                    .map(|c| measure(&c.to_string())).sum();
+                    .enumerate().map(|(k, c)| mw_ch(idx + k, c.to_string())).sum();
                 // Even the tail might overflow; reuse the long-word
                 // char-by-char path or just place it (max_width > tail_w
                 // is the common case).
                 if max_width > 0.0 && tail_w > line_max(line_no) {
                     // Char-by-char break.
                     for (k, ch) in tail_chars.iter().enumerate() {
-                        let cw = measure(&ch.to_string());
+                        let cw = mw_ch(idx + k, ch.to_string());
                         if x + cw > line_max(line_no) && x > 0.0 {
                             push_line(&mut lines, line_no, line_start_char,
                                       idx + k, false, x);
@@ -501,7 +513,7 @@ fn layout_inner(
                 } else {
                     let mut cur_x = x;
                     for (k, ch) in tail_chars.iter().enumerate() {
-                        let cw = measure(&ch.to_string());
+                        let cw = mw_ch(idx + k, ch.to_string());
                         glyphs.push(Glyph {
                             idx: idx + k,
                             line: line_no,
@@ -536,7 +548,7 @@ fn layout_inner(
         if max_width > 0.0 && token_w > line_max(line_no) && x == 0.0 {
             // Word longer than the box: break at character boundaries.
             for (k, ch) in token.chars().enumerate() {
-                let cw = measure(&ch.to_string());
+                let cw = mw_ch(idx + k, ch.to_string());
                 if x + cw > line_max(line_no) && x > 0.0 {
                     push_line(&mut lines, line_no, line_start_char, idx + k, false, x);
                     line_no += 1;
@@ -560,7 +572,7 @@ fn layout_inner(
             // Fits on current line.
             let mut cur_x = x;
             for (k, ch) in token.chars().enumerate() {
-                let cw = measure(&ch.to_string());
+                let cw = mw_ch(idx + k, ch.to_string());
                 let g = Glyph {
                     idx: idx + k,
                     line: line_no,
@@ -631,8 +643,26 @@ pub fn layout_with_paragraphs(
     paragraphs: &[ParagraphSegment],
     measure: &Measurer<'_>,
 ) -> TextLayout {
+    layout_with_paragraphs_widths(content, max_width, font_size, paragraphs, measure, None)
+}
+
+/// [`layout_with_paragraphs`] with optional PER-CHARACTER widths, one per
+/// character of `content`: each character measured in its own tspan's font,
+/// so a styled run wraps and positions by its own widths (Swift's
+/// `layoutTextWithParagraphs(…, perCharWidths:)`). A span's width is the sum
+/// of its characters'; an array whose length is not the character count is
+/// ignored. `None` is exactly [`layout_with_paragraphs`].
+pub fn layout_with_paragraphs_widths(
+    content: &str,
+    max_width: f64,
+    font_size: f64,
+    paragraphs: &[ParagraphSegment],
+    measure: &Measurer<'_>,
+    per_char: Option<&[f64]>,
+) -> TextLayout {
     let chars: Vec<char> = content.chars().collect();
     let n = chars.len();
+    let per_char = per_char.filter(|w| w.len() == n);
     let line_height = font_size;
     let ascent = font_size * 0.8;
 
@@ -688,6 +718,7 @@ pub fn layout_with_paragraphs(
         let has_list = seg.list_style.is_some();
         let list_indent = if has_list { seg.marker_gap } else { 0.0 };
         let slice: String = chars[seg.char_start..seg.char_end].iter().collect();
+        let seg_widths = per_char.map(|w| &w[seg.char_start..seg.char_end]);
         let effective_max_w = if max_width > 0.0 {
             (max_width - seg.left_indent - list_indent - seg.right_indent).max(0.0)
         } else {
@@ -709,11 +740,10 @@ pub fn layout_with_paragraphs(
         let para_layout = if seg.text_align == TextAlign::Justify
             && effective_max_w > 0.0
         {
-            justify_layout(&slice, effective_max_w, font_size, seg, measure)
+            justify_layout(&slice, effective_max_w, font_size, seg, measure, seg_widths)
                 .unwrap_or_else(|| {
-                    layout_first_line_indent(
-                        &slice, effective_max_w, font_size, measure, first_line_extra,
-                    )
+                    layout_inner(&slice, effective_max_w, font_size, None, measure,
+                                 first_line_extra, seg_widths)
                 })
         } else if seg.hyphenate && effective_max_w > 0.0 {
             let opts = HyphenOpts {
@@ -722,13 +752,11 @@ pub fn layout_with_paragraphs(
                 min_after: seg.hyphenate_min_after,
                 allow_capitalized: seg.hyphenate_capitalized,
             };
-            layout_with_hyphen(
-                &slice, effective_max_w, font_size, opts, measure, first_line_extra,
-            )
+            layout_inner(&slice, effective_max_w, font_size, Some(opts), measure,
+                         first_line_extra, seg_widths)
         } else {
-            layout_first_line_indent(
-                &slice, effective_max_w, font_size, measure, first_line_extra,
-            )
+            layout_inner(&slice, effective_max_w, font_size, None, measure,
+                         first_line_extra, seg_widths)
         };
         let lines_n = para_layout.lines.len();
         let first_line_no_in_combined = all_lines.len();
@@ -977,6 +1005,7 @@ fn justify_layout(
     font_size: f64,
     seg: &ParagraphSegment,
     measure: &Measurer<'_>,
+    per_char: Option<&[f64]>,
 ) -> Option<TextLayout> {
     use crate::algorithms::knuth_plass::{compose, Item, Opts, PENALTY_INFINITY};
 
@@ -984,6 +1013,16 @@ fn justify_layout(
     let ascent = font_size * 0.8;
     let chars: Vec<char> = content.chars().collect();
     let n = chars.len();
+    // Per-character widths, as in `layout_inner`: a span's width is the sum
+    // of its characters'; without them, exactly the measurer call. The glue
+    // (`space_w`) and the synthetic hyphen keep the measurer's font.
+    let pcw = per_char.filter(|w| w.len() == n);
+    let mw_str = |a: usize, b: usize, s: &str| -> f64 {
+        match pcw { Some(w) => w[a..b].iter().sum(), None => measure(s) }
+    };
+    let mw_ch = |i: usize, s: String| -> f64 {
+        match pcw { Some(w) => w[i], None => measure(&s) }
+    };
     if n == 0 {
         return Some(TextLayout {
             glyphs: Vec::new(),
@@ -1057,7 +1096,7 @@ fn justify_layout(
             let word_start = i;
             while i < slice_chars.len() && !slice_chars[i].is_whitespace() { i += 1; }
             let word: String = slice_chars[word_start..i].iter().collect();
-            let word_w = measure(&word);
+            let word_w = mw_str(para_start + word_start, para_start + i, &word);
             // Hyphenation candidates inside the word. Capitalized
             // words (proper nouns) are excluded unless explicitly
             // allowed — without this, "Trump" hyphenates to
@@ -1080,7 +1119,7 @@ fn justify_layout(
                 for (bi, &is_break) in breaks.iter().enumerate() {
                     if !is_break || bi == 0 || bi >= breaks.len() - 1 { continue; }
                     let pre: String = word.chars().take(bi).skip(cur).collect();
-                    let pre_w = measure(&pre);
+                    let pre_w = mw_str(para_start + word_start + cur, para_start + word_start + bi, &pre);
                     items.push(Item::Box {
                         width: pre_w,
                         char_idx: para_start + word_start + cur,
@@ -1094,7 +1133,7 @@ fn justify_layout(
                     cur = bi;
                 }
                 let tail: String = word.chars().skip(cur).collect();
-                let tail_w = measure(&tail);
+                let tail_w = mw_str(para_start + word_start + cur, para_start + i, &tail);
                 items.push(Item::Box {
                     width: tail_w,
                     char_idx: para_start + word_start + cur,
@@ -1166,7 +1205,7 @@ fn justify_layout(
                         for ci in *char_idx..chunk_end.min(n + para_start) {
                             if ci >= para_start + slice_chars.len() { break; }
                             let ch = chars[ci];
-                            let cw = measure(&ch.to_string());
+                            let cw = mw_ch(ci, ch.to_string());
                             all_glyphs.push(Glyph {
                                 idx: ci,
                                 line: next_line_no,
@@ -1556,6 +1595,77 @@ mod tests {
     /// Deterministic measurer: every char is `width_per_char` wide.
     fn fixed(w: f64) -> Box<dyn Fn(&str) -> f64> {
         Box::new(move |s: &str| s.chars().count() as f64 * w)
+    }
+
+    /// Per-character widths are the multi-tspan text plan's first step (a
+    /// tspan's font measures its own characters, as Swift's `perCharWidths`).
+    /// With an ADDITIVE measurer and widths equal to it, the widths path must
+    /// produce the layout the measurer does, byte for byte, through every
+    /// branch that measures: greedy wrap, hard breaks, a first-line indent,
+    /// hyphenation and the justify composer. Equality here is what makes the
+    /// `None` path safe to leave every caller on.
+    #[test]
+    fn per_char_widths_equal_to_an_additive_measurer_change_nothing() {
+        let m = fixed(10.0);
+        let contents = [
+            "One fine day the cat extraordinarily patiently sat on the mat",
+            "a b\nc  d   e",
+            "hyphenation extraordinarily internationalisation",
+            "",
+        ];
+        let plain = ParagraphSegment::default();
+        let indented = ParagraphSegment { first_line_indent: 25.0, left_indent: 5.0, ..ParagraphSegment::default() };
+        let justified = ParagraphSegment { text_align: TextAlign::Justify, ..ParagraphSegment::default() };
+        let hyphenated = ParagraphSegment { hyphenate: true, ..ParagraphSegment::default() };
+        for content in contents {
+            let n = content.chars().count();
+            let widths = vec![10.0; n];
+            for seg in [&plain, &indented, &justified, &hyphenated] {
+                let segs = vec![ParagraphSegment { char_start: 0, char_end: n, ..seg.clone() }];
+                let want = layout_with_paragraphs(content, 120.0, 16.0, &segs, m.as_ref());
+                let got = layout_with_paragraphs_widths(content, 120.0, 16.0, &segs, m.as_ref(), Some(&widths));
+                assert_eq!(got, want, "content {content:?}, segment {seg:?}");
+            }
+        }
+    }
+
+    /// The point of the widths: a bold run measures wider than the measurer
+    /// says, so it wraps where single-font text would not, and the glyphs
+    /// after it start where ITS widths end. "aa BBBB cc": the measurer reads
+    /// 10/char (one line of 100 at max 120); with B at 20, "aa BBBB" ends at
+    /// 110 and the space at 120, so "cc" wraps. A widths array of the wrong length is ignored (the
+    /// measurer is used), as in Swift.
+    #[test]
+    fn per_char_widths_place_a_wide_run() {
+        let m = fixed(10.0);
+        let content = "aa BBBB cc";
+        let mut widths = vec![10.0; 10];
+        for w in &mut widths[3..7] { *w = 20.0; }
+        let segs = vec![ParagraphSegment { char_start: 0, char_end: 10, ..ParagraphSegment::default() }];
+        let single = layout_with_paragraphs(content, 120.0, 16.0, &segs, m.as_ref());
+        assert_eq!(single.lines.len(), 1, "the control fits on one line");
+        let wide = layout_with_paragraphs_widths(content, 120.0, 16.0, &segs, m.as_ref(), Some(&widths));
+        assert_eq!(wide.lines.len(), 2, "the wide run pushes cc to a second line");
+        assert_eq!(wide.glyphs[3].x, 30.0);
+        assert_eq!(wide.glyphs[6].right, 110.0, "B's own widths, 4 x 20 after 30");
+        let wrong = layout_with_paragraphs_widths(content, 120.0, 16.0, &segs, m.as_ref(), Some(&widths[..9]));
+        assert_eq!(wrong, single, "a wrong-length widths array falls back to the measurer");
+        // The TOKEN's wrap decision reads the widths too: "aa BBBB" at 90 fits
+        // by the measurer (30 + 40) and not by the widths (30 + 80), so BBBB
+        // starts line 2 at x 0. (Placing glyphs by the widths alone would
+        // leave it on line 1, overflowing to 110.)
+        let short = vec![ParagraphSegment { char_start: 0, char_end: 7, ..ParagraphSegment::default() }];
+        let t = layout_with_paragraphs_widths("aa BBBB", 90.0, 16.0, &short, m.as_ref(), Some(&widths[..7]));
+        assert_eq!((t.lines.len(), t.glyphs[3].line, t.glyphs[3].x), (2, 1, 0.0), "the wide token wraps whole");
+        // The justify composer and the hyphenating layout measure through the
+        // same widths: each wraps the wide run where its control does not.
+        for seg in [ParagraphSegment { text_align: TextAlign::Justify, ..ParagraphSegment::default() },
+                    ParagraphSegment { hyphenate: true, ..ParagraphSegment::default() }] {
+            let segs = vec![ParagraphSegment { char_start: 0, char_end: 10, ..seg.clone() }];
+            let ctl = layout_with_paragraphs(content, 120.0, 16.0, &segs, m.as_ref());
+            let got = layout_with_paragraphs_widths(content, 120.0, 16.0, &segs, m.as_ref(), Some(&widths));
+            assert_eq!((ctl.lines.len(), got.lines.len()), (1, 2), "segment {seg:?}");
+        }
     }
 
     #[test]
