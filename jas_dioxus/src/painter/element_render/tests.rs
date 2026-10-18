@@ -3772,7 +3772,9 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
     // Still legacy, by name, even with a measurer: list markers, and what the
     // per-line draw does not carry (spacing, decoration, glyph rotation).
     let listed = with_paragraph(area_text("Hello World", 120.0), |w| w.jas_list_style = Some("bullet-disc".into()));
-    assert!(text_needs_legacy(&listed), "a list marker stays legacy");
+    // NODE 28: a list marker lowers with the layout now (see
+    // `the_walk_draws_list_markers_as_legacy_does`).
+    assert_eq!(text_needs_legacy(&listed), !has_real, "a list marker lowers exactly where a real measurer exists");
     let mut rotated = indented.clone();
     rotated.rotate = "30".into();
     assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
@@ -3950,4 +3952,38 @@ fn a_readable_baseline_shift_lowers_with_a_real_measurer() {
     decorated.baseline_shift = "super".into();
     decorated.text_decoration = "underline".into();
     assert!(text_needs_legacy(&decorated), "a shifted decoration stays legacy (its line sits on the shifted baseline)");
+}
+
+/// ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass
+/// (`canvas/render.rs`): every sub-paragraph start (the first line, and any
+/// line after a hard break) of a list paragraph draws
+/// `marker_text(style, counter)` at `x + left_indent` on that line's baseline.
+/// Consecutive same-style `num-*` sub-paragraphs count up; anything else
+/// resets. The body is pushed right by the layout's marker gap.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_walk_draws_list_markers_as_legacy_does() {
+    use crate::algorithms::text_layout_paragraph::marker_text;
+    let bullets = runs_of(with_paragraph(area_text("Hello World", 300.0), |w| w.jas_list_style = Some("bullet-disc".into())));
+    let body = bullets.iter().find(|r| r.0 == "Hello World").expect("the body line");
+    let marker = bullets.iter().find(|r| r.0 == marker_text("bullet-disc", 0)).unwrap_or_else(|| panic!("a bullet: {bullets:?}"));
+    assert!((marker.1 - 1.0).abs() < 1e-9, "the bullet at x + left_indent: {bullets:?}");
+    assert!((marker.2 - body.2).abs() < 1e-9, "on the line's baseline: {bullets:?}");
+    assert!(body.1 > marker.1 + 1.0, "the body pushed right by the marker gap: {bullets:?}");
+
+    let mut numbered = with_paragraph(area_text("", 300.0), |w| {
+        w.jas_list_style = Some("num-decimal".into());
+        w.jas_left_indent = Some(10.0);
+    });
+    numbered.tspans[1].content = "one
+two".into();
+    let r = runs_of(numbered);
+    let one = r.iter().find(|x| x.0 == marker_text("num-decimal", 1)).unwrap_or_else(|| panic!("1: {r:?}"));
+    let two = r.iter().find(|x| x.0 == marker_text("num-decimal", 2)).unwrap_or_else(|| panic!("2: {r:?}"));
+    assert!((one.1 - 11.0).abs() < 1e-9 && (two.1 - 11.0).abs() < 1e-9, "each at x + left_indent: {r:?}");
+    assert!(two.2 > one.2, "the second sub-paragraph's marker on the second line: {r:?}");
+
+    // CONTROL: no list style, no marker.
+    let plain = runs_of(with_paragraph(area_text("Hello World", 300.0), |w| w.jas_left_indent = Some(10.0)));
+    assert_eq!(plain.len(), 1, "{plain:?}");
 }
