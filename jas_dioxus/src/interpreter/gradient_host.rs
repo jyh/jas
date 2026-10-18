@@ -167,6 +167,72 @@ pub fn gradient_from_store(store: &crate::interpreter::state_store::StateStore, 
     g
 }
 
+/// The global keys the two stop combos `set` (their bind is an indexed path,
+/// which the widget-event layer never writes), each with the stop field it
+/// edits. Not render keys: they need the selected stop's index.
+pub const STOP_KEYS: &[(&str, &str)] = &[
+    ("gradient_stop_opacity", "opacity"),
+    ("gradient_stop_location", "location"),
+];
+
+/// The stop field a [`STOP_KEYS`] key edits, or `None` for any other key.
+pub fn stop_field(key: &str) -> Option<&'static str> {
+    STOP_KEYS.iter().find(|(k, _)| *k == key).map(|(_, f)| *f)
+}
+
+/// The engine's stop write: stop `index` of the selection's gradient (the
+/// same base as [`apply_render_key`]: its own gradient, the seed when it is
+/// solid/none, `mixed_base` when mixed) gets `field` by [`edit_stop`].
+/// Returns the index the stop now sits at, or `None` when nothing is
+/// selected or the law refuses; nothing is written then.
+pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value: &Value,
+                       index: i64, mixed_base: impl FnOnce() -> Gradient) -> Option<usize> {
+    let mut g = match selection_gradient(model.document(), fill_on_top) {
+        SelectionGradient::Empty => return None,
+        SelectionGradient::Uniform(g) => g,
+        SelectionGradient::Solid(c) => seed_gradient(c),
+        SelectionGradient::Mixed => mixed_base(),
+    };
+    let (stops, moved) = edit_stop(&g.stops, index, field, value)?;
+    g.stops = stops;
+    apply_gradient_to_selection(model, fill_on_top, g);
+    Some(moved)
+}
+
+/// The Gradient panel's stop-edit law (GRADIENT.md, STOP_OPACITY_COMBO and
+/// STOP_LOCATION_COMBO; the reference is `gradient_law.edit_stop`, pinned by
+/// `test_fixtures/gradient_stop/stop_edit.json`). Returns `stops` with stop
+/// `index`'s `field` set to `value`, and the index that stop now sits at;
+/// `None` (nothing written) when `index` names no stop, `field` is not
+/// `opacity` or `location`, or `value` is not a number in [0, 100].
+///
+/// `opacity` is a plain set. `location` sets, then re-sorts STABLY by
+/// location (a tie does not cross); the index follows the moved stop, and
+/// every stop whose NEXT stop changed resets `midpoint_to_next` to 50.
+pub fn edit_stop(stops: &[GradientStop], index: i64, field: &str, value: &Value)
+                 -> Option<(Vec<GradientStop>, usize)> {
+    let i = usize::try_from(index).ok().filter(|&i| i < stops.len())?;
+    let v = value.as_f64().filter(|v| (0.0..=100.0).contains(v))?;
+    let mut out = stops.to_vec();
+    match field {
+        "opacity" => { out[i].opacity = v; return Some((out, i)); }
+        "location" => out[i].location = v,
+        _ => return None,
+    }
+    // Sort positions, not stops, so "the next stop changed" compares
+    // identities (two stops may be equal as values). `sort_by` is stable.
+    let mut order: Vec<usize> = (0..out.len()).collect();
+    order.sort_by(|&a, &b| out[a].location.total_cmp(&out[b].location));
+    for (k, &p) in order.iter().enumerate() {
+        let old_next = (p + 1 < out.len()).then_some(p + 1);
+        if order.get(k + 1).copied() != old_next {
+            out[p].midpoint_to_next = 50.0;
+        }
+    }
+    let moved = order.iter().position(|&p| p == i)?;
+    Some((order.iter().map(|&p| out[p]).collect(), moved))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

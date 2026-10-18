@@ -1086,6 +1086,17 @@ fn set_app_state_field(
         "gradient_method" => { if let Some(s) = val.as_str() { st.gradient_panel.method = s.into(); } }
         "gradient_dither" => { if let Some(b) = val.as_bool() { st.gradient_panel.dither = b; } }
         "gradient_stroke_sub_mode" => { if let Some(s) = val.as_str() { st.gradient_panel.stroke_sub_mode = s.into(); } }
+        // A stop combo: the panel's stops take the stop-edit law at the
+        // selected index, which follows the stop (gradient_host::edit_stop).
+        "gradient_stop_opacity" | "gradient_stop_location" => {
+            let field = crate::interpreter::gradient_host::stop_field(key).unwrap_or_default();
+            let gp = &mut st.gradient_panel;
+            if let Some((stops, moved)) = crate::interpreter::gradient_host::edit_stop(
+                &gp.stops, gp.selected_stop_index, field, val) {
+                gp.stops = stops;
+                gp.selected_stop_index = moved as i64;
+            }
+        }
         // Align panel fields — mirrors of AlignPanelState per
         // ALIGN.md Panel state.
         "align_to" => {
@@ -12635,6 +12646,41 @@ mod tests {
         assert_eq!(st.gradient_panel.stops[0].color, Color::rgb(1.0, 0.0, 0.0));
         // Second stop is the conventional white per fill-type-coupling rule.
         assert_eq!(st.gradient_panel.stops[1].color, Color::WHITE);
+    }
+
+    /// The stop combos' `set:` on the web app: the panel's stops (synced
+    /// from the selection) take the stop-edit law at the panel's selected
+    /// index, the index follows the moved stop, and the panel is applied.
+    /// A location crossing the right neighbour re-sorts (GRADIENT.md
+    /// Combo-driven reorder); an opacity edit is a plain set.
+    #[test]
+    fn a_stop_combo_set_edits_the_selected_stop_and_applies_it() {
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        let stop = |c: Color, l: f64| GradientStop { color: c, opacity: 100.0, location: l, midpoint_to_next: 50.0 };
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(red, 0.0), stop(Color::BLACK, 50.0), stop(Color::WHITE, 100.0)],
+            ..Gradient::default()
+        }));
+        st.sync_gradient_panel_from_selection();
+        st.gradient_panel.selected_stop_index = 0;
+        let set = |k: &str, v: serde_json::Value| {
+            let mut m = serde_json::Map::new();
+            m.insert(k.into(), v);
+            m
+        };
+        apply_set_effects(&set("gradient_stop_location", serde_json::json!(70)), &mut st);
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().expect("fill_gradient should be set");
+        let order: Vec<(Color, f64)> = g.stops.iter().map(|s| (s.color, s.location)).collect();
+        assert_eq!(order, vec![(Color::BLACK, 50.0), (red, 70.0), (Color::WHITE, 100.0)]);
+        assert_eq!(st.gradient_panel.selected_stop_index, 1, "the index follows the moved stop");
+        apply_set_effects(&set("gradient_stop_opacity", serde_json::json!(25)), &mut st);
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().unwrap();
+        assert_eq!(g.stops.iter().map(|s| s.opacity).collect::<Vec<_>>(), vec![100.0, 25.0, 100.0]);
     }
 
     #[test]

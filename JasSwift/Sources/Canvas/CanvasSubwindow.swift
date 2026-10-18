@@ -1876,61 +1876,13 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                 CTLineDraw(ctLine, ctx)
             }
         }
-        // Phase 6: list markers. A list-style segment may span
-        // multiple paragraphs (the user typed "a\nb\nc" then clicked
-        // bullets — the model has one wrapper covering all three
-        // lines). The bullet must appear on every paragraph, so walk
-        // the layout's lines and treat any line whose predecessor
-        // ended at a hard break ('\n') as a sub-paragraph start.
-        // Counter values follow the §Counter run rule across the
-        // flattened sub-paragraph sequence.
+        // Phase 6: list markers, one per paragraph start
+        // (`listMarkerParagraphs`: each wrapper's first line and each
+        // line after a hard break), counted by the §Counter run rule.
         if !pSegs.isEmpty {
-            func owningSegForLine(_ lineStart: Int) -> Int? {
-                for (i, s) in pSegs.enumerated() {
-                    if s.charStart <= lineStart && lineStart < s.charEnd { return i }
-                }
-                return nil
-            }
-            struct SubPara { let lineIdx: Int; let style: String?; let leftIndent: Double }
-            var subParas: [SubPara] = []
-            var prevHardBreak = true
-            for (li, line) in lay.lines.enumerated() {
-                if prevHardBreak {
-                    let style: String?
-                    let leftIndent: Double
-                    if let si = owningSegForLine(line.start) {
-                        style = pSegs[si].listStyle
-                        leftIndent = pSegs[si].leftIndent
-                    } else {
-                        style = nil
-                        leftIndent = 0
-                    }
-                    subParas.append(SubPara(lineIdx: li, style: style,
-                                            leftIndent: leftIndent))
-                }
-                prevHardBreak = line.hardBreak
-            }
-            // Per-style counter run: consecutive same num-* style
-            // sub-paragraphs continue counting; a different style
-            // (or bullet, or none) breaks the run.
-            var counters: [Int] = []
-            counters.reserveCapacity(subParas.count)
-            var prevNum: String? = nil
-            var current = 0
-            for sp in subParas {
-                if let s = sp.style, s.hasPrefix("num-") {
-                    if prevNum == s { current += 1 } else { current = 1 }
-                    counters.append(current)
-                    prevNum = s
-                } else {
-                    counters.append(0)
-                    prevNum = nil
-                    current = 0
-                }
-            }
-            for (sp, counter) in zip(subParas, counters) {
+            for sp in listMarkerParagraphs(lines: lay.lines, segs: pSegs) {
                 guard let style = sp.style, !style.isEmpty else { continue }
-                let marker = markerText(style, counter: counter)
+                let marker = markerText(style, counter: sp.counter)
                 if marker.isEmpty { continue }
                 let line = lay.lines[sp.lineIdx]
                 let baselineY = v.y + line.baselineY + yShift

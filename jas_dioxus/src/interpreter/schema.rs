@@ -118,6 +118,9 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         "gradient_method" => Some(SchemaEntry::new(Enum(GRADIENT_METHOD_VALUES), false, true)),
         "gradient_dither" => Some(SchemaEntry::new(Bool, false, true)),
         "gradient_stroke_sub_mode" => Some(SchemaEntry::new(Enum(GRADIENT_STROKE_SUB_MODE_VALUES), false, true)),
+        // The two stop combos' keys (gradient_host::STOP_KEYS).
+        "gradient_stop_opacity" => Some(SchemaEntry::new(Number, false, true)),
+        "gradient_stop_location" => Some(SchemaEntry::new(Number, false, true)),
         "fill_on_top" => Some(SchemaEntry::new(Bool, false, true)),
         "toolbar_visible" => Some(SchemaEntry::new(Bool, false, true)),
         "canvas_visible" => Some(SchemaEntry::new(Bool, false, true)),

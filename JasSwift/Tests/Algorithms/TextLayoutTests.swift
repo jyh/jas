@@ -287,6 +287,54 @@ private func fixedMeasure(_ width: Double) -> (String) -> Double {
     #expect(computeCounters(segs) == [1, 0, 1])
 }
 
+// List-marker paragraph starts (PARAGRAPH.md: a paragraph is a
+// wrapper tspan; the run rule counts consecutive paragraphs). A
+// marker paragraph starts at each segment's first line AND after
+// each hard break inside a segment; a soft wrap starts nothing.
+private func markerReadout(_ content: String, _ segs: [ParagraphSegment],
+                           maxWidth: Double = 0) -> [String] {
+    let l = layoutTextWithParagraphs(content, maxWidth: maxWidth, fontSize: 10,
+                                     paragraphs: segs, measure: fixedMeasure(10))
+    return listMarkerParagraphs(lines: l.lines, segs: segs).map {
+        "\($0.lineIdx):\(markerText($0.style ?? "", counter: $0.counter))"
+    }
+}
+
+@Test func listMarkerEachWrapperStartsAParagraph() {
+    // Two num-decimal wrappers with no "\n" between them: the
+    // second wrapper is the second list item.
+    let segs = [
+        ParagraphSegment(charStart: 0, charEnd: 3, listStyle: "num-decimal"),
+        ParagraphSegment(charStart: 3, charEnd: 6, listStyle: "num-decimal"),
+    ]
+    #expect(markerReadout("OneTwo", segs) == ["0:1.", "1:2."])
+}
+
+@Test func listMarkerHardBreakInsideOneWrapperStartsAParagraph() {
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 3, listStyle: "num-decimal")]
+    #expect(markerReadout("a\nb", segs) == ["0:1.", "1:2."])
+}
+
+@Test func listMarkerSoftWrapStartsNothing() {
+    // "aa bb" at 30 wide (marker gap 0) wraps into two lines of
+    // one paragraph: one marker.
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 5, listStyle: "num-decimal",
+                                 markerGap: 0)]
+    let l = layoutTextWithParagraphs("aa bb", maxWidth: 30, fontSize: 10,
+                                     paragraphs: segs, measure: fixedMeasure(10))
+    #expect(l.lines.count == 2)
+    #expect(markerReadout("aa bb", segs, maxWidth: 30) == ["0:1."])
+}
+
+@Test func listMarkerBulletWrapperBreaksTheRun() {
+    let segs = [
+        ParagraphSegment(charStart: 0, charEnd: 1, listStyle: "num-decimal"),
+        ParagraphSegment(charStart: 1, charEnd: 2, listStyle: "bullet-disc"),
+        ParagraphSegment(charStart: 2, charEnd: 3, listStyle: "num-decimal"),
+    ]
+    #expect(markerReadout("abc", segs) == ["0:1.", "1:\u{2022}", "2:1."])
+}
+
 @Test func listStylePushesTextByMarkerGap() {
     let m: (String) -> Double = { Double($0.count) * 10.0 }
     let segs = [ParagraphSegment(charStart: 0, charEnd: 2,

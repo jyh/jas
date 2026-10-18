@@ -7,6 +7,7 @@
   "steps": [
     {"kind": "press", "x": 36, "y": 18},
     {"kind": "release", "x": 36, "y": 18},
+    {"panel": "gradient_panel_content", "widget": "grad_radial_button", "event": "click"},
     {"panel": "gradient_panel_content", "widget": "grad_aspect_combo", "event": "commit", "value": "150"},
     {"read": "document"}
   ],

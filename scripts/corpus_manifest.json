@@ -332,6 +332,23 @@
       },
       "notes": "STROKEWIDTH: the FIELD-SCOPED Stroke-panel apply law (transcripts/STROKE.md 'The field-scoped apply law'). Gates all THREE live implementations off one corpus: a panel edit names its field and only that field's attribute group is written, everything else preserved per element; plus the colour-only recolour route. The reference states the field -> group table (workspace_interpreter/stroke_law.py) and the ports mirror it. The reference arm additionally asserts the corpus REJECTS the whole-rebuild law it replaced, so the gate cannot pass vacuously. No scripts consumer: the law is a pure function pinned in-port, not an algorithm_roundtrip binary."
     },
+    "test_fixtures/gradient_stop": {
+      "kind": "fixtures",
+      "required_consumers": [
+        "rust",
+        "swift",
+        "reference"
+      ],
+      "port_symmetry": true,
+      "checker": null,
+      "checker_gap": "the stop-edit law is a pure function over a stop list, pinned in-port as stroke_apply is",
+      "claim_style": {
+        "rust": "path literal (read_fixture in src/cross_language_test.rs gradient_stop_edit_corpus)",
+        "swift": "path literal (Tests/Panels/GradientStopCorpusTests.swift gradientStopCorpus)",
+        "reference": "os.path.join segments (workspace_interpreter/tests/test_gradient_stop.py)"
+      },
+      "notes": "The Gradient panel's STOP-EDIT law (transcripts/GRADIENT.md STOP_OPACITY_COMBO, STOP_LOCATION_COMBO, Combo-driven reorder). Gates all THREE live implementations off one corpus: opacity is a plain set; location sets, re-sorts stably, the selected index follows the moved stop, and every stop whose next stop changed resets its midpoint to 50. The reference states it (workspace_interpreter/gradient_law.py) and the ports mirror it (gradient_host::edit_stop, editStop). The reference arm also asserts the corpus rejects a law that sorts without resetting midpoints. No scripts consumer."
+    },
     "test_fixtures/widget_events": {
       "kind": "generated",
       "required_consumers": [

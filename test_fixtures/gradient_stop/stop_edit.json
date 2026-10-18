@@ -1,0 +1,495 @@
+{
+  "_doc": [
+    "The Gradient panel's stop-edit law (transcripts/GRADIENT.md: STOP_OPACITY_COMBO, STOP_LOCATION_COMBO, Combo-driven reorder).",
+    "edit_stop(stops, index, field, value) -> (stops, index), or refused (expected: null) when index names no stop, field is not opacity/location, or value is not a number in [0, 100].",
+    "opacity: the stop's opacity is set. location: the stop's location is set, then the list is STABLY sorted by location (a tie does not cross), the returned index is the moved stop's new position, and every stop whose next stop (by identity) changed has midpoint_to_next reset to 50.",
+    "Stops use the YAML shape {color, opacity, location, midpoint_to_next}. Every input stop here carries midpoint_to_next 40 so a reset is visible.",
+    "Read by workspace_interpreter/tests/test_gradient_stop.py (reference), jas_dioxus/src/cross_language_test.rs and JasSwift/Tests/Panels/GradientStopCorpusTests.swift."
+  ],
+  "vectors": [
+    {
+      "name": "opacity_sets_one_stop",
+      "_comment": "Opacity is a plain set on the selected stop; order, locations and midpoints are untouched.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "field": "opacity",
+      "value": 50,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 50,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "opacity_on_unsorted_stops_keeps_their_order",
+      "_comment": "A document can carry stops out of location order (an imported gradient). An opacity edit changes only the opacity: it does not sort.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 80,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 20,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "opacity",
+      "value": 25,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 25,
+            "location": 80,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 20,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "location_inside_neighbours_keeps_order",
+      "_comment": "A location that stays between its neighbours moves the stop and resets nothing.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "field": "location",
+      "value": 30,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 30,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "location_equal_to_a_neighbour_does_not_reorder",
+      "_comment": "A tie does not cross: the sort is stable, so the moved stop keeps its place and nothing resets.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "location",
+      "value": 50,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "location_crosses_the_right_neighbour",
+      "_comment": "GRADIENT.md Combo-driven reorder: the stops re-sort, the selected index follows the moved stop, and every stop whose NEXT stop changed has its midpoint reset to 50.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "location",
+      "value": 70,
+      "expected": {
+        "stops": [
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 70,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "location_crosses_two_stops",
+      "_comment": "Four stops; the first moves past two. A's next was B and is D, C's next was D and is A: both reset. B's next is still C: kept.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 30,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 60,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#000000",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "location",
+      "value": 80,
+      "expected": {
+        "stops": [
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 30,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 60,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 80,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#000000",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 2
+      }
+    },
+    {
+      "name": "location_crosses_the_left_neighbour",
+      "_comment": "The last stop moves left past the middle one: A's next changes (B to C), C's next changes (none to B), and B becomes last (its next changes from C to none). All three reset.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 2,
+      "field": "location",
+      "value": 20,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 20,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "index_out_of_range_refuses",
+      "_comment": "Index 2 of a two-stop list names no stop: refused, nothing written.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 2,
+      "field": "opacity",
+      "value": 50,
+      "expected": null
+    },
+    {
+      "name": "no_stop_selected_refuses",
+      "_comment": "selected_stop_index -1 (nothing selected, or a midpoint selected): refused.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": -1,
+      "field": "location",
+      "value": 30,
+      "expected": null
+    },
+    {
+      "name": "unknown_field_refuses",
+      "_comment": "Only opacity and location are stop fields this law writes; colour goes through the colour picker.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "color",
+      "value": "#123456",
+      "expected": null
+    },
+    {
+      "name": "non_number_value_refuses",
+      "_comment": "A value that is not a number is refused.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "opacity",
+      "value": "half",
+      "expected": null
+    },
+    {
+      "name": "value_outside_0_100_refuses",
+      "_comment": "Both fields are percentages in [0, 100]; the combo clamps before this law runs, so an outside value is refused here.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "field": "location",
+      "value": 120,
+      "expected": null
+    }
+  ]
+}

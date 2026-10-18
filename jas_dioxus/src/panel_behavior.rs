@@ -407,6 +407,22 @@ impl EffectHost for EngineHost {
                 || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
             return;
         }
+        // A stop combo (GRADIENT.md STOP_OPACITY_COMBO, STOP_LOCATION_COMBO):
+        // the selected stop of the same base, by the stop-edit law, and the
+        // selected index follows the stop when a location re-sorts them.
+        if let Some(field) = gradient_host::stop_field(key) {
+            let fill_on_top = store.get("fill_on_top").as_bool().unwrap_or(true);
+            let value = store.get(key).clone();
+            let index = store.get_panel(GRADIENT_PANEL, "selected_stop_index").as_i64().unwrap_or(-1);
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            if let Some(moved) = gradient_host::apply_stop_edit(model, fill_on_top, field, &value, index,
+                || gradient_host::gradient_from_store(store, GRADIENT_PANEL)) {
+                store.set_panel(GRADIENT_PANEL, "selected_stop_index", serde_json::json!(moved));
+            }
+            return;
+        }
         if !stroke_host::is_render_key(key) {
             return;
         }
@@ -1689,6 +1705,39 @@ mod tests {
         model.commit_txn();
         assert!(model.can_undo());
         assert_eq!(caps_and_joins(&model), vec!["Square/Miter", "Square/Miter"]);
+    }
+
+    /// The engine host's stop arm, called directly: a location that crosses
+    /// the right neighbour re-sorts the selected rect's stops by the
+    /// stop-edit law, and the panel's selected index follows the moved stop
+    /// (0 -> 1). The corpus pins the law; this pins the index write-back.
+    #[test]
+    fn the_engine_host_edits_the_selected_stop_and_the_index_follows_it() {
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        let stop = |c: Color, l: f64| GradientStop { color: c, opacity: 100.0, location: l, midpoint_to_next: 50.0 };
+        let red = Color::from_hex("#ff0000").unwrap();
+        let three = vec![stop(red, 0.0), stop(Color::BLACK, 50.0), stop(Color::WHITE, 100.0)];
+        let mut host = EngineHost::default();
+        let mut model = misaligned(&[0]);
+        gradient_host::apply_gradient_to_selection(&mut model, true,
+            Gradient { stops: three, ..Gradient::default() });
+        let mut store = StateStore::new();
+        store.init_panel(GRADIENT_PANEL, [("selected_stop_index".to_string(), json!(0))].into_iter().collect());
+        store.set("gradient_stop_location", json!(70));
+        host.global_written("gradient_stop_location", &mut store, Some(&mut model));
+        assert!(model.in_txn(), "the apply opened the batch's transaction");
+        model.commit_txn();
+        let g = model.document().layers[0].children().unwrap()[0].fill_gradient().cloned()
+            .expect("the selected rect keeps a gradient");
+        let order: Vec<(Option<Color>, f64)> = g.stops.iter().map(|s| (Some(s.color), s.location)).collect();
+        assert_eq!(order, vec![(Some(Color::BLACK), 50.0), (Some(red), 70.0), (Some(Color::WHITE), 100.0)]);
+        assert_eq!(store.get_panel(GRADIENT_PANEL, "selected_stop_index"), &json!(1));
+        // A refused edit (index -1: no stop selected) writes nothing.
+        store.set_panel(GRADIENT_PANEL, "selected_stop_index", json!(-1));
+        store.set("gradient_stop_opacity", json!(10));
+        host.global_written("gradient_stop_opacity", &mut store, Some(&mut model));
+        let g2 = model.document().layers[0].children().unwrap()[0].fill_gradient().cloned().unwrap();
+        assert_eq!(g2, g, "a refused stop edit changes nothing");
     }
 
     /// The engine host's active-colour arm, called directly: a write of

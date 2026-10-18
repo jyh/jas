@@ -7864,6 +7864,44 @@ pub(crate) mod tests {
         serde_json::Value::Object(out)
     }
 
+    // Runs test_fixtures/gradient_stop/stop_edit.json, the shared corpus
+    // for the Gradient panel's stop-edit law (GRADIENT.md, STOP_OPACITY_COMBO
+    // and STOP_LOCATION_COMBO). The reference (`gradient_law.edit_stop`) and
+    // Swift read the same file.
+    #[test]
+    fn gradient_stop_edit_corpus() {
+        use crate::geometry::element::{Color, GradientStop};
+        use crate::interpreter::gradient_host::edit_stop;
+        fn stop(v: &serde_json::Value) -> GradientStop {
+            GradientStop {
+                color: Color::from_hex(v["color"].as_str().unwrap()).unwrap(),
+                opacity: v["opacity"].as_f64().unwrap(),
+                location: v["location"].as_f64().unwrap(),
+                midpoint_to_next: v["midpoint_to_next"].as_f64().unwrap(),
+            }
+        }
+        let raw = read_fixture("gradient_stop/stop_edit.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let (mut refused, mut written) = (0usize, 0usize);
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let stops: Vec<GradientStop> = vec["stops"].as_array().unwrap().iter().map(stop).collect();
+            let got = edit_stop(&stops, vec["index"].as_i64().unwrap(),
+                                vec["field"].as_str().unwrap(), &vec["value"]);
+            if vec["expected"].is_null() {
+                assert!(got.is_none(), "gradient_stop '{}': must refuse", name);
+                refused += 1;
+            } else {
+                let (out, idx) = got.unwrap_or_else(|| panic!("gradient_stop '{}': refused", name));
+                let want: Vec<GradientStop> = vec["expected"]["stops"].as_array().unwrap().iter().map(stop).collect();
+                assert_eq!(out, want, "gradient_stop '{}': stops", name);
+                assert_eq!(idx as i64, vec["expected"]["index"].as_i64().unwrap(), "gradient_stop '{}': index", name);
+                written += 1;
+            }
+        }
+        assert!(refused >= 3 && written >= 5, "corpus too thin: {} refused, {} written", refused, written);
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn stroke_apply_panel_edit_corpus() {
