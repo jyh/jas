@@ -16015,6 +16015,19 @@
                           50,
                           75,
                           100
+                        ],
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "description": "The bind is an indexed path, which the commit reads and never writes (WIDGET_EVENTS.md), so this copies the committed opacity into gradient_stop_opacity, which edits the selected stop of the selection's gradient by the stop-edit law (GRADIENT.md STOP_OPACITY_COMBO).",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_stop_opacity": "event.value"
+                                }
+                              }
+                            ]
+                          }
                         ]
                       }
                     ]
@@ -16036,7 +16049,20 @@
                           "value": "panel.stops[panel.selected_stop_index].location"
                         },
                         "min": 0,
-                        "max": 100
+                        "max": 100,
+                        "behavior": [
+                          {
+                            "event": "change",
+                            "description": "The bind is an indexed path, which the commit reads and never writes (WIDGET_EVENTS.md), so this copies the committed location into gradient_stop_location, which edits the selected stop of the selection's gradient by the stop-edit law (GRADIENT.md STOP_LOCATION_COMBO; a location that crosses a neighbour re-sorts the stops, Combo-driven reorder).",
+                            "effects": [
+                              {
+                                "set": {
+                                  "gradient_stop_location": "event.value"
+                                }
+                              }
+                            ]
+                          }
+                        ]
                       }
                     ]
                   }
