@@ -2460,9 +2460,17 @@ function Show-SbChoice($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)
 # list was open): [SelectionItemPatternIdentifiers.Pattern,
 # ScrollItemPatternIdentifiers.Pattern, VirtualizedItemPatternIdentifiers.Pattern].
 $uiaComboItem = @('SelectionItemPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'VirtualizedItemPatternIdentifiers.Pattern')
-Test-Case 'ci: an item chosen by name that no item carries is refused by name' {
-    Show-SbChoice (Select-SbChoiceItem -Widget 'grad_angle_combo' -Value '37' -ItemCount 0 -Patterns @() -By 'name')
-} "REFUSED: value '37' is not the name of any item of widget 'grad_angle_combo': this driver chooses an editable combo's item by name and does not type a value no item carries"
+# NODE 32 (flask section 451): a value no item names is TYPED into the combo's
+# own text box (its template's EditableText) and committed by Enter, which is
+# the combo's TextSubmitted, the path a person's typing takes. Measured: the
+# combo's own Value reads '' while EditableText holds the shown text, so a
+# SetValue on the combo reaches nothing.
+Test-Case 'ci: an editable combo value that no item names is typed' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'grad_stop_location_combo' -Value '30' -ItemCount 0 -Patterns @() -By 'name')
+} 'Type'
+Test-Case 'ci: CONTROL -- a select (by id) value no item carries is still refused by name' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'mulitply' -ItemCount 0 -Patterns @())
+} "REFUSED: value 'mulitply' is not an option of widget 'op_mode': no item in its list has that AutomationId"
 Test-Case 'ci: an item chosen by name, found once, is selected' {
     Show-SbChoice (Select-SbChoiceItem -Widget 'grad_angle_combo' -Value '45' -ItemCount 1 -Patterns @('SelectionItemPatternIdentifiers.Pattern') -By 'name')
 } 'Select'
