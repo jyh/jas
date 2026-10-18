@@ -121,6 +121,50 @@ pub fn path_value(val: &serde_json::Value) -> Option<ElementPath> {
     Some(path)
 }
 
+/// The key object after a canvas click at `(x, y)` in key-object mode
+/// (ALIGN.md §Key-object designation): the selected element under the point
+/// becomes the key, clicking the current key clears it, and a click outside
+/// every selected element clears it. `(x, y)` are canvas coordinates; the
+/// model's zoom and pan are inverted here so the hit is in document space.
+/// The hit uses each element's resolved bounds, so a symbol instance is hit
+/// where its target is drawn.
+///
+/// This is the one Rust implementation: the web canvas
+/// (`AppState::try_designate_align_key_object`) and the engine's pointer route
+/// (`ffi_pointer::jas_pointer_event`) both call it.
+pub fn designate_key_object(model: &Model, current: Option<&ElementPath>, x: f64, y: f64) -> Option<ElementPath> {
+    let zoom = model.zoom_level;
+    let doc_x = (x - model.view_offset_x) / zoom;
+    let doc_y = (y - model.view_offset_y) / zoom;
+    let doc = model.document();
+    let key_index = crate::document::id_index::rebuild_id_index(doc);
+    let key_resolver = crate::document::id_index::IndexResolver(&key_index);
+    let hit = doc.selection.iter().find_map(|es| {
+        let e = doc.get_element(&es.path)?;
+        let (bx, by, bw, bh) = crate::geometry::element::resolved_bounds_with(
+            e, &key_resolver, Element::bounds)?;
+        (doc_x >= bx && doc_x <= bx + bw && doc_y >= by && doc_y <= by + bh).then(|| es.path.clone())
+    })?;
+    // Toggle: clicking the current key clears it.
+    (current != Some(&hit)).then_some(hit)
+}
+
+/// The key object after the selection changed: kept while it is still
+/// selected, else cleared (ALIGN.md §Panel state: "the selection changes and
+/// the previously-designated key is no longer among the selected elements").
+pub fn key_object_after_selection(doc: &crate::document::document::Document, key: Option<ElementPath>) -> Option<ElementPath> {
+    key.filter(|k| doc.selection.iter().any(|es| &es.path == k))
+}
+
+/// A key object path as the store holds one (`{"__path__": [..]}`, which
+/// [`path_value`] reads back), or null.
+pub fn path_store_value(path: Option<&ElementPath>) -> serde_json::Value {
+    match path {
+        Some(p) => serde_json::json!({ "__path__": p }),
+        None => serde_json::Value::Null,
+    }
+}
+
 /// What one align operation did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlignOutcome {
@@ -450,6 +494,45 @@ mod tests {
         i.key_object_path = Some(vec![0, 1]);
         assert_eq!(apply_align_operation(&mut m, "align_left", &i), AlignOutcome::Moved(2));
         assert_eq!(xs(&m), vec![50.0, 50.0, 50.0]);
+    }
+
+    #[test]
+    fn a_click_designates_the_selected_element_under_it_toggles_it_and_a_miss_clears() {
+        let m = model_with(
+            vec![rect(10.0, 0.0, 10.0, 10.0), rect(50.0, 0.0, 10.0, 10.0),
+                 rect(90.0, 0.0, 10.0, 10.0)],
+            &[0, 1], vec![]);
+        assert_eq!(designate_key_object(&m, None, 55.0, 5.0), Some(vec![0, 1]), "designate");
+        assert_eq!(designate_key_object(&m, Some(&vec![0, 0]), 55.0, 5.0), Some(vec![0, 1]),
+                   "re-designate");
+        assert_eq!(designate_key_object(&m, Some(&vec![0, 1]), 55.0, 5.0), None, "the key again clears");
+        assert_eq!(designate_key_object(&m, Some(&vec![0, 1]), 30.0, 5.0), None, "a miss clears");
+        // Element 2 is under the point but NOT selected: a miss.
+        assert_eq!(designate_key_object(&m, None, 95.0, 5.0), None, "an unselected element is no key");
+    }
+
+    #[test]
+    fn a_designating_click_is_read_through_the_view_transform() {
+        let mut m = model_with(
+            vec![rect(10.0, 0.0, 10.0, 10.0), rect(50.0, 0.0, 10.0, 10.0)], &[0, 1], vec![]);
+        m.zoom_level = 2.0;
+        m.view_offset_x = 100.0;
+        m.view_offset_y = 0.0;
+        // Canvas x 210 is document x (210 - 100) / 2 = 55: element 1. Read
+        // as document coordinates it would be past both.
+        assert_eq!(designate_key_object(&m, None, 210.0, 10.0), Some(vec![0, 1]));
+        assert_eq!(designate_key_object(&m, None, 55.0, 5.0), None);
+    }
+
+    #[test]
+    fn a_key_survives_a_selection_change_only_while_it_is_selected() {
+        let m = model_with(
+            vec![rect(10.0, 0.0, 10.0, 10.0), rect(50.0, 0.0, 10.0, 10.0)], &[0], vec![]);
+        assert_eq!(key_object_after_selection(m.document(), Some(vec![0, 0])), Some(vec![0, 0]));
+        assert_eq!(key_object_after_selection(m.document(), Some(vec![0, 1])), None);
+        assert_eq!(key_object_after_selection(m.document(), None), None);
+        assert_eq!(path_value(&path_store_value(Some(&vec![0, 1]))), Some(vec![0, 1]), "round trip");
+        assert!(path_store_value(None).is_null());
     }
 
     #[test]

@@ -4548,7 +4548,8 @@ private func gestureToolContext(_ model: Model) -> ToolContext {
 /// workspace spec (the same `loadYamlTool` path the running app uses), activates
 /// it, then dispatches each event through the CanvasTool seam (onPress / onMove /
 /// onRelease). Mirrors Rust `run_gesture_model`.
-private func runGestureModel(_ tc: [String: Any], opening: Bool = false) -> Model {
+private func runGestureModel(_ tc: [String: Any], opening: Bool = false,
+                             scriptStep: (([String: Any], Model) -> Void)? = nil) -> Model {
     // `setup_test_json` is the door for a setup SVG cannot carry (a hidden
     // element). Mirrors Rust `run_gesture_model`.
     //
@@ -4603,6 +4604,20 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false) -> Mode
     }
 
     for ev in tc["events"] as! [[String: Any]] {
+        // An input script's PANEL or MENU step, at its place among the pointer
+        // and key steps (a key-object script presses the canvas AFTER a panel
+        // click). It runs with the deterministic id source paused, exactly as
+        // panel steps ran when they could only follow the gesture.
+        if ev["kind"] as? String == "script_step" {
+            guard let run = scriptStep else {
+                Issue.record("a script step reached a runner that takes none: \(ev)")
+                continue
+            }
+            setTestIdRng(nil)
+            run(ev, model)
+            setTestIdRng({ defer { ctr += 1 }; return ctr })
+            continue
+        }
         // shift/alt default false; dragging defaults false on move.
         let shift = (ev["shift"] as? Bool) ?? false
         let alt = (ev["alt"] as? Bool) ?? false
@@ -4644,12 +4659,24 @@ private func runGestureModel(_ tc: [String: Any], opening: Bool = false) -> Mode
         let y = (ev["y"] as! NSNumber).doubleValue
         switch ev["kind"] as! String {
         case "press":
+            // The canvas's press order (`CanvasSubwindow.mouseDown`): the Align
+            // key-object intercept first, then the tool, then the key sync.
+            // Screen to document through the view, as the canvas converts.
+            let z = model.zoomLevel
+            let docX = z == 0 ? x : (x - model.viewOffsetX) / z
+            let docY = z == 0 ? y : (y - model.viewOffsetY) / z
+            if alignKeyObjectPressIntercept(model: model, store: model.stateStore,
+                                            docX: docX, docY: docY, shift: shift, alt: alt) {
+                continue
+            }
             tool.onPress(ctx, x: x, y: y, shift: shift, alt: alt)
+            syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
         case "move":
             let dragging = (ev["dragging"] as? Bool) ?? false
             tool.onMove(ctx, x: x, y: y, shift: shift, alt: alt, dragging: dragging)
         case "release":
             tool.onRelease(ctx, x: x, y: y, shift: shift, alt: alt)
+            syncAlignKeyObjectFromSelection(model: model, store: model.stateStore)
         default:
             Issue.record("unknown gesture event kind: \(ev["kind"] ?? "nil")")
         }
@@ -4818,7 +4845,7 @@ private func payloadContent(_ svg: String) -> String {
 // level 2 (each live app). Its pointer steps are gesture events, so it replays
 // through the gesture runner; any other step is REFUSED by name until this
 // runner can replay it, and a script must end on a document read.
-private let scriptFixtures = ["paragraph.left_indent.json", "paragraph.right_indent.json", "paragraph.first_line_indent.json", "paragraph.space_before.json", "paragraph.space_after.json", "paragraph.hyphenate.json", "paragraph.bullets.json", "paragraph.numbered_list.json", "paragraph.justify_left.json", "paragraph.justify_center.json", "paragraph.justify_right.json", "paragraph.justify_all.json", "stroke.cap_round.json", "stroke.join_bevel.json", "stroke.align_center.json", "paragraph.align_left.json", "boolean.expand.json", "distribute.horizontal_spacing.json", "distribute.vertical_spacing.json", "distribute.right.json", "distribute.top.json", "distribute.bottom.json", "boolean.merge.json", "boolean.divide.json", "boolean.trim.json", "boolean.crop.json", "boolean.subtract_back.json", "character.vertical_scale.json", "character.baseline_shift.json", "character.character_rotation.json", "align.top.json", "align.bottom.json", "distribute.vertical_center.json", "distribute.left.json", "boolean.exclude.json", "stroke.start_arrowhead.json", "stroke.end_arrowhead.json", "align.right.json", "align.right_to_artboard.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.all_caps.json", "character.small_caps.json", "character.strikethrough.json", "character.leading.json", "character.kerning.json", "character.superscript.json", "character.subscript.json", "character.language.json", "character.anti_aliasing.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "stroke.dash_1.json", "stroke.gap_1.json", "stroke.dash_pair_2.json", "gradient.linear.json", "gradient.radial.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
+private let scriptFixtures = ["paragraph.left_indent.json", "paragraph.right_indent.json", "paragraph.first_line_indent.json", "paragraph.space_before.json", "paragraph.space_after.json", "paragraph.hyphenate.json", "paragraph.bullets.json", "paragraph.numbered_list.json", "paragraph.justify_left.json", "paragraph.justify_center.json", "paragraph.justify_right.json", "paragraph.justify_all.json", "stroke.cap_round.json", "stroke.join_bevel.json", "stroke.align_center.json", "paragraph.align_left.json", "boolean.expand.json", "distribute.horizontal_spacing.json", "distribute.vertical_spacing.json", "distribute.right.json", "distribute.top.json", "distribute.bottom.json", "boolean.merge.json", "boolean.divide.json", "boolean.trim.json", "boolean.crop.json", "boolean.subtract_back.json", "character.vertical_scale.json", "character.baseline_shift.json", "character.character_rotation.json", "align.top.json", "align.bottom.json", "distribute.vertical_center.json", "distribute.left.json", "boolean.exclude.json", "stroke.start_arrowhead.json", "stroke.end_arrowhead.json", "align.right.json", "align.right_to_artboard.json", "align.left_to_key_object.json", "distribute.horizontal_spacing_key_object.json", "align.vertical_center.json", "distribute.horizontal_center.json", "boolean.intersection.json", "boolean.subtract_front.json", "character.underline.json", "character.all_caps.json", "character.small_caps.json", "character.strikethrough.json", "character.leading.json", "character.kerning.json", "character.superscript.json", "character.subscript.json", "character.language.json", "character.anti_aliasing.json", "character.horizontal_scale.json", "stroke.join_miter.json", "stroke.cap_butt.json", "stroke.align_outside.json", "stroke.miter_limit.json", "properties.y.json", "properties.rotation.json", "paragraph.align_right.json", "object.group.json", "align.left.json", "character.tracking.json", "opacity.opacity.json", "paragraph.align_center.json", "properties.h.json", "stroke.align_inside.json", "stroke.join_round.json", "stroke.weight.json", "stroke.dashed.json", "stroke.dash_1.json", "stroke.gap_1.json", "stroke.dash_pair_2.json", "gradient.linear.json", "gradient.radial.json", "opacity.blend_mode.json", "align.horizontal_center.json", "boolean.union.json", "character.font_size.json", "color.hex.json", "properties.w.json", "properties.x.json", "stroke.cap_square.json", "selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
                                      "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"]
 
 /// One menu step, `{"menu": <item id>}`: the menubar item's action, run as the
@@ -4993,15 +5020,12 @@ private struct MintRefusal: Error, Equatable {
             continue
         }
         var events: [[String: Any]] = []
-        // PANEL steps run on the model the gesture leaves, through the app's
-        // widget-event route (`PanelWidgetEvents`), so at level 1 they follow
-        // every pointer and key step; one before them is refused by name.
-        var panelSteps: [(Int, [String: Any])] = []
+        // PANEL and MENU steps run through the app's widget-event route
+        // (`PanelWidgetEvents`) and the menubar's, at their place in the
+        // script: the gesture runner hands each back to `scriptStep` below.
         for (i, st) in steps.dropLast().enumerated() {
             if st["panel"] != nil || st["menu"] != nil {
-                panelSteps.append((i, st))
-            } else if !panelSteps.isEmpty {
-                Issue.record("script \(item): step \(i) follows a panel step, which level 1 cannot replay yet")
+                events.append(["kind": "script_step", "index": i, "step": st])
             } else if let kind = st["kind"] as? String, ["press", "move", "release"].contains(kind) {
                 events.append(st)
             } else if st["kind"] == nil, let key = st["key"] as? String {
@@ -5022,18 +5046,15 @@ private struct MintRefusal: Error, Equatable {
                                  "app_state": script["app_state"] ?? [:], "events": events]
         let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = runGestureModel(tc, opening: true)
-        for (i, st) in panelSteps {
+        let model = runGestureModel(tc, opening: true) { ev, model in
+            let i = ev["index"] as! Int
+            let st = ev["step"] as! [String: Any]
             if let menuId = st["menu"] as? String {
-                guard runScriptMenuStep(menuId, model: model) else {
+                if !runScriptMenuStep(menuId, model: model) {
                     Issue.record("script \(item): step \(i) \(st): the menu item did not run")
-                    continue
                 }
-                continue
-            }
-            guard runScriptPanelStep(st, model: model) else {
+            } else if !runScriptPanelStep(st, model: model) {
                 Issue.record("script \(item): step \(i) \(st): the panel act did not run")
-                continue
             }
         }
         let actual: String

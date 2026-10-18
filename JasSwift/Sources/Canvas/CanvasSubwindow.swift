@@ -3822,13 +3822,15 @@ class CanvasNSView: NSView {
         let z = ctx.model.zoomLevel
         let docX: Double = z == 0 ? Double(pt.x) : (Double(pt.x) - ctx.model.viewOffsetX) / z
         let docY: Double = z == 0 ? Double(pt.y) : (Double(pt.y) - ctx.model.viewOffsetY) / z
-        if tryDesignateAlignKeyObject(model: ctx.model, store: ctx.model.stateStore,
-                                       x: docX, y: docY) {
+        if alignKeyObjectPressIntercept(model: ctx.model, store: ctx.model.stateStore,
+                                        docX: docX, docY: docY, shift: shift, alt: alt) {
             ensureBlinkTimer()
             return
         }
         activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onPress(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
+        // A key the press deselected is cleared (ALIGN.md §Panel state).
+        syncAlignKeyObjectFromSelection(model: ctx.model, store: ctx.model.stateStore)
         ensureBlinkTimer()
     }
 
@@ -4101,6 +4103,7 @@ class CanvasNSView: NSView {
         let alt = event.modifierFlags.contains(.option)
         activeTool.setDocumentFacts(artboardToolFacts(ctx.model))
         activeTool.onRelease(ctx, x: pt.x, y: pt.y, shift: shift, alt: alt)
+        syncAlignKeyObjectFromSelection(model: ctx.model, store: ctx.model.stateStore)
         // A dialog the tool opened (Scale's Alt-click) moves to the model's
         // store, where the app's dialog view reads it (flask STATUS §285).
         if let opened = activeTool.takeOpenedDialog() {
