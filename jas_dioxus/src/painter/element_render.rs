@@ -363,7 +363,7 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     // on the box, and nothing wrapped. FLAT text only: legacy draws segmented
     // text with no layout (`draw_segmented_text`), and the segmented lowering
     // below mirrors that. Stays legacy, by name: no real measurer (the layout
-    // breaks lines by measured widths); a list marker; and what the per-line
+    // breaks lines by measured widths); and what the per-line
     // draw does not carry -- spacing, decoration, a glyph rotation -- and a
     // baseline shift that does not read (node 27 lowers the readable ones).
     if t.render_is_flat() && needs_layout(t) {
@@ -372,7 +372,6 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
             t.font_size,
         ).is_some();
         return !has_measurer
-            || t.tspans.iter().any(|s| s.jas_role.as_deref() == Some("paragraph") && s.jas_list_style.is_some())
             || !t.letter_spacing.is_empty()
             || !t.kerning.is_empty()
             || !t.text_decoration.split_whitespace().all(|w| w == "none")
@@ -602,10 +601,10 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
 
 /// ⭐ NODE 25: `canvas/render.rs`'s flat-text line loop, for text the router
 /// admitted through [`needs_layout`] (a real measurer; no spacing, decoration,
-/// rotation, baseline shift or list marker). The same content transform, the
+/// rotation or unreadable baseline shift). The same content transform, the
 /// same leading, the same `layout_with_paragraphs`; each line one run at the
 /// layout's x, or word by word where the composer stretched the glue, and the
-/// synthetic hyphen a hyphenated break needs.
+/// synthetic hyphen a hyphenated break needs; then the list markers.
 fn emit_laid_out_text(
     p: &mut dyn Painter,
     e: &crate::geometry::element::TextElem,
@@ -688,6 +687,42 @@ fn emit_laid_out_text(
             let x = visible().last().map_or(line_x, |g| x0 + g.x);
             run(p, "-", x, baseline);
         }
+    }
+    // ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass.
+    // Every sub-paragraph start (the first line, and any line after a hard
+    // break) of a list paragraph draws its marker at `x + left_indent` on that
+    // line's baseline. Consecutive same-style `num-*` sub-paragraphs count up;
+    // a different style, a bullet or no style resets the run.
+    let owner = |at: usize| segments.iter().position(|s| s.char_start <= at && at < s.char_end);
+    let mut starts: Vec<(usize, Option<String>, f64)> = Vec::new();
+    let mut after_break = true;
+    for (li, line) in layout.lines.iter().enumerate() {
+        if after_break {
+            let (style, indent) = owner(line.start)
+                .map_or((None, 0.0), |si| (segments[si].list_style.clone(), segments[si].left_indent));
+            starts.push((li, style, indent));
+        }
+        after_break = line.hard_break;
+    }
+    let mut prev_num: Option<String> = None;
+    let mut counter = 0usize;
+    for (li, style, indent) in starts {
+        let n = match style.as_deref() {
+            Some(st) if st.starts_with("num-") => {
+                counter = if prev_num.as_deref() == Some(st) { counter + 1 } else { 1 };
+                prev_num = Some(st.to_string());
+                counter
+            }
+            _ => {
+                prev_num = None;
+                counter = 0;
+                0
+            }
+        };
+        let Some(st) = style.filter(|st| !st.is_empty()) else { continue };
+        let marker = crate::algorithms::text_layout_paragraph::marker_text(&st, n);
+        if marker.is_empty() { continue; }
+        run(p, &marker, e.x + indent, e.y + layout.lines[li].baseline_y + y_shift);
     }
 }
 
