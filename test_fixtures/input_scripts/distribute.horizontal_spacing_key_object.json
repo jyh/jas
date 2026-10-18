@@ -1,0 +1,19 @@
+{
+  "item": "distribute.horizontal_spacing_key_object",
+  "spec": "workspace/panels/align.yaml",
+  "setup_svg": "three_rects.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 118, "y": 88},
+    {"kind": "move", "x": 20, "y": 6, "dragging": true},
+    {"kind": "release", "x": 20, "y": 6},
+    {"panel": "align_panel_content", "widget": "align_to_key_object_button", "event": "click"},
+    {"kind": "press", "x": 50, "y": 34},
+    {"kind": "release", "x": 50, "y": 34},
+    {"panel": "align_panel_content", "widget": "distribute_spacing_value", "event": "commit", "value": "10"},
+    {"panel": "align_panel_content", "widget": "distribute_horizontal_spacing_button", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "distribute.horizontal_spacing_key_object.expected.json"
+}

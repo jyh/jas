@@ -243,6 +243,12 @@ impl JasEngine {
         f(&mut self.model.borrow_mut())
     }
 
+    /// The engine's store, for a sibling module (the pointer route's Align
+    /// key-object intercept reads and writes the Align panel's scope).
+    pub(crate) fn with_store_mut<R>(&self, f: impl FnOnce(&mut StateStore) -> R) -> R {
+        f(&mut self.store.borrow_mut())
+    }
+
     /// Name a refusal for [`jas_last_error_json`] from a sibling module.
     pub(crate) fn set_last_error(&self, json: String) { *self.last_error.borrow_mut() = Some(json); }
     pub(crate) fn dpi_scale(&self) -> f64 { self.dpi_scale.get() }
