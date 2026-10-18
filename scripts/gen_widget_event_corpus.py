@@ -107,6 +107,18 @@ SEED = [
     ("gradient_angle_commit", GRADIENT, "grad_angle_combo", {}, {"commit": "45"}),
     ("gradient_angle_clamped", GRADIENT, "grad_angle_combo", {}, {"commit": "500"}),
     ("gradient_aspect_commit", GRADIENT, "grad_aspect_combo", {}, {"commit": "150"}),
+    # The stop combos (an indexed bind, read never written): the behavior
+    # copies the value into the stop key. Disabled per GRADIENT.md: opacity
+    # when no stop is selected (a midpoint, or nothing); location only when
+    # neither a stop nor a midpoint is.
+    ("gradient_stop_opacity_commit", GRADIENT, "grad_stop_opacity_combo",
+     {"panel": {"selected_stop_index": 0, "selected_midpoint_index": -1}}, {"commit": "50"}),
+    ("gradient_stop_opacity_disabled_on_a_midpoint", GRADIENT, "grad_stop_opacity_combo",
+     {"panel": {"selected_stop_index": -1, "selected_midpoint_index": 0}}, {"commit": "50"}),
+    ("gradient_stop_location_disabled_with_nothing_selected", GRADIENT, "grad_stop_location_combo",
+     {"panel": {"selected_stop_index": -1, "selected_midpoint_index": -1}}, {"commit": "30"}),
+    ("gradient_stop_location_enabled_on_a_midpoint", GRADIENT, "grad_stop_location_combo",
+     {"panel": {"selected_stop_index": -1, "selected_midpoint_index": 0}}, {"commit": "30"}),
     ("gradient_method_option", GRADIENT, "grad_method_dropdown", {},
      {"commit": "smooth"}),
     ("gradient_method_by_label_refused", GRADIENT, "grad_method_dropdown", {},

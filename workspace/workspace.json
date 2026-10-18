@@ -16005,7 +16005,8 @@
                         "col": 9,
                         "summary": "Selected stop opacity (percentage)",
                         "bind": {
-                          "value": "panel.stops[panel.selected_stop_index].opacity"
+                          "value": "panel.stops[panel.selected_stop_index].opacity",
+                          "disabled": "panel.selected_stop_index < 0"
                         },
                         "min": 0,
                         "max": 100,
@@ -16046,7 +16047,8 @@
                         "col": 9,
                         "summary": "Selected stop location (percentage)",
                         "bind": {
-                          "value": "panel.stops[panel.selected_stop_index].location"
+                          "value": "panel.stops[panel.selected_stop_index].location",
+                          "disabled": "panel.selected_stop_index < 0 and panel.selected_midpoint_index < 0"
                         },
                         "min": 0,
                         "max": 100,
