@@ -355,6 +355,30 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
 /// the feature in order to refuse it, and a refusal that has to be right about
 /// the thing it refuses is the wrong shape for a gate.
 pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    // ⭐ NODE 25 (flask section 431): text the legacy renderer LAYS OUT
+    // (`needs_layout`) lowers through the same `layout_with_paragraphs`, drawn
+    // line by line in the flat arm. Before this, `render_is_flat` counted an
+    // empty paragraph wrapper as flat whatever it carried, and the flat arm drew
+    // ONE line: ten area-text scripts with ten paragraph settings drew one frame
+    // on the box, and nothing wrapped. FLAT text only: legacy draws segmented
+    // text with no layout (`draw_segmented_text`), and the segmented lowering
+    // below mirrors that. Stays legacy, by name: no real measurer (the layout
+    // breaks lines by measured widths); a list marker; and what the per-line
+    // draw does not carry -- spacing, decoration, a glyph rotation, a baseline
+    // shift.
+    if t.render_is_flat() && needs_layout(t) {
+        let has_measurer = crate::text_measure::try_make_measurer(
+            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+            t.font_size,
+        ).is_some();
+        return !has_measurer
+            || t.tspans.iter().any(|s| s.jas_role.as_deref() == Some("paragraph") && s.jas_list_style.is_some())
+            || !t.letter_spacing.is_empty()
+            || !t.kerning.is_empty()
+            || !t.text_decoration.split_whitespace().all(|w| w == "none")
+            || text_transform(t).map_or(true, |(_, _, r)| r != 0.0)
+            || !t.baseline_shift.is_empty();
+    }
     // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
     // tspan is feature-free AND a real measurer exists for the font.
     if !t.render_is_flat() {
@@ -517,6 +541,131 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
 /// override to nothing. Treating `Some([])` as "has a decoration" is
 /// conservative in the safe direction: it refuses an element that would in fact
 /// have rendered correctly, rather than drawing one that would not.
+/// Text the legacy renderer lays out rather than drawing as one run: area text
+/// (it wraps), a hard line break, a case transform or small caps (the layout
+/// runs on the transformed string), or a paragraph wrapper that sets a field
+/// `build_segments_from_text` or the leading reads. On POINT text the wrapper's
+/// alignment is a layout no-op (`max_w` is 0, so no line has room to shift) and
+/// the Paragraph panel aligns point text through `text_anchor`, so it alone
+/// does not count.
+pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
+    let is_area = t.is_area_text();
+    is_area
+        || t.content().contains('\n')
+        || t.text_transform == "uppercase"
+        || t.text_transform == "lowercase"
+        || t.font_variant == "small-caps"
+        || t.tspans.iter().any(|w| {
+            w.jas_role.as_deref() == Some("paragraph")
+                && ((is_area && (w.text_align.is_some() || w.text_align_last.is_some()))
+                    || w.jas_left_indent.is_some()
+                    || w.jas_right_indent.is_some()
+                    || w.text_indent.is_some()
+                    || w.jas_space_before.is_some()
+                    || w.jas_space_after.is_some()
+                    || w.jas_list_style.is_some()
+                    || w.jas_hanging_punctuation.is_some()
+                    || w.jas_word_spacing_min.is_some()
+                    || w.jas_word_spacing_desired.is_some()
+                    || w.jas_word_spacing_max.is_some()
+                    || w.jas_hyphenate.is_some()
+                    || w.jas_hyphenate_min_word.is_some()
+                    || w.jas_hyphenate_min_before.is_some()
+                    || w.jas_hyphenate_min_after.is_some()
+                    || w.jas_hyphenate_bias.is_some()
+                    || w.jas_hyphenate_capitalized.is_some()
+                    || w.jas_auto_leading.is_some())
+        })
+}
+
+/// ⭐ NODE 25: `canvas/render.rs`'s flat-text line loop, for text the router
+/// admitted through [`needs_layout`] (a real measurer; no spacing, decoration,
+/// rotation, baseline shift or list marker). The same content transform, the
+/// same leading, the same `layout_with_paragraphs`; each line one run at the
+/// layout's x, or word by word where the composer stretched the glue, and the
+/// synthetic hyphen a hyphenated break needs.
+fn emit_laid_out_text(
+    p: &mut dyn Painter,
+    e: &crate::geometry::element::TextElem,
+    font: &str,
+    brush: &Brush,
+    alpha: f64,
+) {
+    let Some(measure) = crate::text_measure::try_make_measurer(font, e.font_size) else { return };
+    let raw = e.content();
+    let content = if e.text_transform == "uppercase" || e.font_variant == "small-caps" {
+        raw.to_uppercase()
+    } else if e.text_transform == "lowercase" {
+        raw.to_lowercase()
+    } else {
+        raw
+    };
+    let leading = if e.line_height.is_empty() {
+        match e.tspans.iter()
+            .find(|t| t.jas_role.as_deref() == Some("paragraph"))
+            .and_then(|t| t.jas_auto_leading)
+        {
+            Some(pct) => e.font_size * pct / 100.0,
+            None => e.font_size,
+        }
+    } else {
+        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+    };
+    let max_w = if e.is_area_text() { e.width } else { 0.0 };
+    let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
+        &e.tspans, &content, e.is_area_text());
+    let layout = crate::algorithms::text_layout::layout_with_paragraphs(
+        &content, max_w, leading, &segments, &*measure);
+    let chars: Vec<char> = content.chars().collect();
+    let run = |p: &mut dyn Painter, text: &str, x: f64, y: f64| {
+        p.draw_text_run(
+            &TextRun::FastRun {
+                font: font.to_string(), size: e.font_size, text: text.to_string(),
+                letter_spacing: 0.0, x, y,
+            },
+            brush,
+            alpha,
+        );
+    };
+    for line in &layout.lines {
+        let s: String = chars[line.start..line.end].iter().collect();
+        let s = s.trim_end_matches('\n');
+        let x0 = if e.text_anchor.is_empty() { e.x } else { e.x + e.anchor_shift(measure(s)) };
+        let baseline = e.y + line.baseline_y;
+        let glyphs = &layout.glyphs[line.glyph_start..line.glyph_end];
+        let line_x = x0 + glyphs.first().map_or(0.0, |g| g.x);
+        let visible = || glyphs.iter().filter(|g| !g.is_trailing_space);
+        let right = visible().map(|g| g.right).fold(0.0f64, f64::max);
+        let left = visible().map(|g| g.x).fold(f64::INFINITY, f64::min);
+        if (right - left).max(0.0) <= measure(s) + 0.5 {
+            run(p, s, line_x, baseline);
+        } else {
+            // A justified line: each word at the x the composer gave it.
+            let line_chars: Vec<char> = s.chars().collect();
+            let mut word = String::new();
+            let mut word_x = 0.0;
+            for (i, g) in glyphs.iter().enumerate() {
+                let ch = line_chars.get(i).copied();
+                match ch {
+                    Some(c) if !c.is_whitespace() && !g.is_trailing_space => {
+                        if word.is_empty() { word_x = x0 + g.x; }
+                        word.push(c);
+                    }
+                    _ => if !word.is_empty() {
+                        run(p, &word, word_x, baseline);
+                        word.clear();
+                    },
+                }
+            }
+            if !word.is_empty() { run(p, &word, word_x, baseline); }
+        }
+        if line.trailing_hyphen {
+            let x = visible().last().map_or(line_x, |g| x0 + g.x);
+            run(p, "-", x, baseline);
+        }
+    }
+}
+
 fn tspan_needs_legacy(t: &crate::geometry::tspan::Tspan) -> bool {
     t.rotate.is_some()
         || t.transform.is_some()
@@ -1515,7 +1664,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                         a: h, b: 0.0, c: 0.0, d: v, e: e.x - h * e.x, f: e.y - v * e.y,
                     });
                 }
-                if rotate != 0.0 {
+                if needs_layout(e) {
+                    emit_laid_out_text(p, e, &font, &Brush::Solid(f.color), eff * f.opacity);
+                } else if rotate != 0.0 {
                     // Per-glyph rotation, as legacy draws it: each glyph in its
                     // own `translate(cx, baseline) · rotate(θ)` frame, the pen
                     // advancing by the glyph's measured width plus the spacing.
