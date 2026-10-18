@@ -543,7 +543,7 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
 /// have rendered correctly, rather than drawing one that would not.
 /// Text the legacy renderer lays out rather than drawing as one run: area text
 /// (it wraps), a hard line break, a case transform or small caps (the layout
-/// runs on the transformed string), or a paragraph wrapper that sets a field
+/// runs on the transformed string), a set leading, or a paragraph wrapper that sets a field
 /// `build_segments_from_text` or the leading reads. On POINT text the wrapper's
 /// alignment is a layout no-op (`max_w` is 0, so no line has room to shift) and
 /// the Paragraph panel aligns point text through `text_anchor`, so it alone
@@ -552,6 +552,10 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
     let is_area = t.is_area_text();
     is_area
         || t.content().contains('\n')
+        // NODE 26: the layout takes the leading as its line height and puts
+        // the first baseline at 0.8 x leading, so a set leading moves even
+        // one line of point text.
+        || !t.line_height.is_empty()
         || t.text_transform == "uppercase"
         || t.text_transform == "lowercase"
         || t.font_variant == "small-caps"
