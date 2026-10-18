@@ -1,0 +1,10 @@
+{
+    "item":  "character.character_rotation",
+    "surface":  "2379x1333",
+    "frame_hash":  "e0a91ec1604d0191b3bbe388e4771e31f47549a3c1897252b38a388628fbee76",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "78c0c8035c2dce37",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
