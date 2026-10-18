@@ -2176,70 +2176,13 @@ fn draw_element_body(
             // the run rule (consecutive same-style num-* paragraphs
             // count up; anything else resets) holds across the
             // element's whole content.
-            if !segments.is_empty() {
-                // A list-style segment may span multiple paragraphs
-                // (the user typed "a\nb\nc" then clicked bullets — the
-                // model has one wrapper covering all three lines). The
-                // bullet must appear on every paragraph, so walk the
-                // layout's lines and treat any line whose predecessor
-                // ended at a hard break ('\n') as a sub-paragraph
-                // start. Counter values follow the §Counter run rule
-                // across the flattened sub-paragraph sequence.
-                let owning_seg_for_line = |line_start: usize| -> Option<usize> {
-                    segments.iter().position(|s|
-                        s.char_start <= line_start && line_start < s.char_end)
-                };
-                #[derive(Clone)]
-                struct SubPara { line_idx: usize, style: Option<String>, left_indent: f64 }
-                let mut sub_paras: Vec<SubPara> = Vec::new();
-                let mut prev_hard_break = true;
-                for (li, line) in layout.lines.iter().enumerate() {
-                    if prev_hard_break {
-                        let (style, left_indent) = match owning_seg_for_line(line.start) {
-                            Some(si) => (segments[si].list_style.clone(), segments[si].left_indent),
-                            None => (None, 0.0),
-                        };
-                        sub_paras.push(SubPara { line_idx: li, style, left_indent });
-                    }
-                    prev_hard_break = line.hard_break;
-                }
-                // Per-style counter run: consecutive same num-* style
-                // sub-paragraphs continue counting; a different style
-                // (or bullet, or none) breaks the run.
-                let mut counters: Vec<usize> = Vec::with_capacity(sub_paras.len());
-                let mut prev_num: Option<String> = None;
-                let mut current = 0usize;
-                for sp in &sub_paras {
-                    match sp.style.as_deref() {
-                        Some(s) if s.starts_with("num-") => {
-                            if prev_num.as_deref() == Some(s) {
-                                current += 1;
-                            } else {
-                                current = 1;
-                            }
-                            counters.push(current);
-                            prev_num = Some(s.to_string());
-                        }
-                        _ => {
-                            counters.push(0);
-                            prev_num = None;
-                            current = 0;
-                        }
-                    }
-                }
-                for (sp, counter) in sub_paras.iter().zip(counters.iter()) {
-                    let style = match &sp.style {
-                        Some(s) if !s.is_empty() => s,
-                        _ => continue,
-                    };
-                    let marker = crate::algorithms::text_layout_paragraph::
-                        marker_text(style, *counter);
-                    if marker.is_empty() { continue; }
-                    let line = &layout.lines[sp.line_idx];
-                    let baseline = e.y + line.baseline_y + y_shift;
-                    let marker_x = e.x + sp.left_indent;
-                    ctx.fill_text(&marker, marker_x, baseline).ok();
-                }
+            // NODE 30 (jas section 444): the markers come from the law the
+            // walk shares, `list_marker_paragraphs`: a paragraph starts after
+            // a hard break OR at a wrapper's first line, and consecutive
+            // same-style num-* paragraphs count up.
+            for m in crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments) {
+                let baseline = e.y + layout.lines[m.line].baseline_y + y_shift;
+                ctx.fill_text(&m.text, e.x + m.indent, baseline).ok();
             }
             // Reset letterSpacing so subsequent text elements without
             // the attribute draw without inheriting this one's value.
