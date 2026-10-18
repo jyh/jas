@@ -3093,8 +3093,32 @@ function Read-SbInputScript([string]$Json) {
             $keys.Add($chord -join '+')
             continue
         }
+        # A LATE CLICK (flask section 443, node 29): after a panel or menu
+        # step the hand delivers one shape of pointer input, a click -- a press
+        # and a release at ONE point, no move, no modifier -- in script order
+        # with the panel and menu steps (the key-object scripts: marquee, `align
+        # to key object`, click the key, Align). Any other pointer shape there
+        # is refused by name, never delivered as something it is not.
         if ($panels.Count -gt 0) {
-            return (& $no "step $i is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture")
+            $nx = if ($i + 1 -lt $steps.Count) { $steps[$i + 1] } else { $null }
+            $plain = {
+                param($e)
+                $en = @($e.PSObject.Properties | ForEach-Object { $_.Name })
+                if ($en -contains 'mods' -and @($e.mods).Count -gt 0) { return $false }
+                foreach ($mod in @('shift', 'alt', 'ctrl', 'meta')) {
+                    if ($en -contains $mod -and $e.$mod -ne $false) { return $false }
+                }
+                $true
+            }
+            $isClick = "$($st.kind)" -eq 'press' -and $null -ne $nx -and "$($nx.kind)" -eq 'release' -and
+                [double]$nx.x -eq [double]$st.x -and [double]$nx.y -eq [double]$st.y -and
+                (& $plain $st) -and (& $plain $nx)
+            if (-not $isClick) {
+                return (& $no "step $i is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)")
+            }
+            $panels.Add([ordered]@{ click = $true; x = [double]$st.x; y = [double]$st.y })
+            $i++
+            continue
         }
         if ($keys.Count -gt 0) {
             return (& $no "step $i is a pointer step after a key: send_hand.ps1 delivers keys only after the gesture")
@@ -3168,6 +3192,7 @@ function Read-SbInputScript([string]$Json) {
             Shift = $clickHeld['shift']; Alt = $clickHeld['alt']
             Keys = $keys.Count; KeyText = ($keys -join ';')
             Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+            Clicks = @($panels | Where-Object { $_.click }).Count
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
             Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
         }
@@ -3199,6 +3224,7 @@ function Read-SbInputScript([string]$Json) {
         Shift = $shift; Alt = $held['alt']
         Keys = $keys.Count; KeyText = ($keys -join ';')
         Panels = @($panels | Where-Object { $_.panel }).Count; Menus = @($panels | Where-Object { $_.menu }).Count
+        Clicks = @($panels | Where-Object { $_.click }).Count
             PanelText = (ConvertTo-SbPanelText $panels); PanelShow = (Format-SbPanelSteps $panels)
         Panel = "$(@($panels | Where-Object { $_.panel } | ForEach-Object { $_.panel }) | Select-Object -First 1)"
     }
@@ -3227,6 +3253,7 @@ function ConvertFrom-SbPanelText([string]$Text) {
 function Format-SbPanelSteps($Panels) {
     @($Panels | ForEach-Object {
         if ($_.menu) { "menu:$($_.menu)" }
+        elseif ($_.click) { "click@($($_.x),$($_.y))" }
         else { "$($_.panel)/$($_.widget):$($_.event)" + $(if ($_.event -eq 'commit') { "=$($_.value)" } else { '' }) }
     }) -join ';'
 }

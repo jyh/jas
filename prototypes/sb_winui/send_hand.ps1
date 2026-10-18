@@ -499,6 +499,7 @@ $log.Add("keys=$Keys chords=$($chords.Count) key-events=$keyEvents")
 # refusal; every refusal has a self-test arm. A refusal ends the hand with
 # `PANEL REFUSED` in the receipt and exit 6, and nothing after it is sent.
 $panelSteps = @(ConvertFrom-SbPanelText $Panels)
+$clicksSent = 0
 $log.Add("late-steps=$($panelSteps.Count) panels=$(@($panelSteps | Where-Object { $_.panel }).Count) menus=$(@($panelSteps | Where-Object { $_.menu }).Count) parsed-from-bytes=$($Panels.Length)")
 if ($panelSteps.Count -gt 0) {
     Add-Type -AssemblyName UIAutomationClient
@@ -575,6 +576,27 @@ if ($panelSteps.Count -gt 0) {
     $n = 0
     foreach ($ps in $panelSteps) {
         $n++
+        # A LATE CLICK (flask section 443, node 29): a press and a release at
+        # one document point, in script order with the panel and menu steps.
+        # Aimed with the gesture's own transform (document DIP -> canvas
+        # physical px -> screen px), positioned by one move, and the buttons
+        # sent AT THE CURSOR, exactly as the gesture's are. The reader admits
+        # only this shape here.
+        if ($ps.click) {
+            $ctag = "step $n click@($($ps.x),$($ps.y))"
+            $cx = $origin.X + (([double]$ps.x + $TargetOffsetXDips) * $scale)
+            $cy = $origin.Y + (([double]$ps.y + $TargetOffsetYDips) * $scale)
+            Start-Sleep -Milliseconds $SettleMs
+            $cn = ConvertTo-Normalized $cx $cy
+            $sent += [SbHand]::Send($moveFlags, $cn[0], $cn[1])
+            Start-Sleep -Milliseconds $SettleMs
+            $sent += [SbHand]::Send([SbHand]::LEFTDOWN, 0, 0)
+            Start-Sleep -Milliseconds $SettleMs
+            $sent += [SbHand]::Send([SbHand]::LEFTUP, 0, 0)
+            $clicksSent++
+            $log.Add("CLICK SENT: $ctag screen=($cx,$cy)")
+            continue
+        }
         # A MENU STEP (jas sections 389/392): open each top menu of the menubar
         # in turn, as a person looks for an item, until one shows an item whose
         # AutomationId is the step's node id; then Invoke it. The flyout is a
@@ -664,9 +686,9 @@ $log.Add("shift=$Shift shift-down=$(if ($Shift -eq 'none') { 'never' } else { "b
 $log.Add("positioning-move=1 post-press-moves=$Moves normalized-collisions=$collisions button-events-carry-a-position=no")
 $log.Add(("post-press-ms={0} button-held-ms={1} settle-ms={2}" -f
           [int]$dragSw.Elapsed.TotalMilliseconds, [int]$heldSw.Elapsed.TotalMilliseconds, $SettleMs))
-$log.Add("events-inserted=$sent expected=$($Moves + 3)")
+$log.Add("events-inserted=$sent expected=$($Moves + 3 + 3 * $clicksSent) late-clicks=$clicksSent")
 $log.Add("NOTE: SendInput returning the expected count proves the events were INSERTED, not that they ARRIVED. UIPI discards are invisible here by design; the shell's counters are the only oracle for arrival.")
 $log.Add("NOTE: post-press-moves is what THIS injector sent, and as of 2026-09-06 it is also what the shell counts. The `move != k` extras are IDENTIFIED: they were RE-DELIVERIES of a pointer frame the shell had already applied -- same FrameId, same Timestamp, same position, raised again by XAML while the contact sat still, so they multiplied with the idle gap after each move (settle 10ms: 0 extras; 40/100/300ms: 1; 800ms: 5). NOT a system arrival: probe_hold.ps1 drives a bare Win32 window with THIS construction at these same configurations and reads arrivals == k exactly, in both input stacks. The shell now suppresses a repeated frame and reports the count as `dup-frames=` on its POINTER row. move<k with normalized-collisions=0 still means the window coalesced despite MOVE_NOCOALESCE.")
 $log | Set-Content -Path $Out -Encoding utf8
-if ($sent -ne ($Moves + 3)) { exit 5 }
+if ($sent -ne ($Moves + 3 + 3 * $clicksSent)) { exit 5 }
 exit 0

@@ -101,7 +101,12 @@ $keyText = "$($sc.KeyText)"; $keyCount = [int]$sc.Keys
 # Automation, carried across -File as one base64 string.
 $panelText = "$($sc.PanelText)"; $panelCount = [int]$sc.Panels; $panelShow = "$($sc.PanelShow)"
 # MENU STEPS (jas sections 389/392) ride in the same list, in script order.
-$menuCount = [int]$sc.Menus; $lateCount = $panelCount + $menuCount
+$menuCount = [int]$sc.Menus
+# LATE CLICKS (flask section 443, node 29) ride the same list; each release
+# probes, so each is one more PROBE seq, and each writes its own POINTER row.
+$clickCount = [int]$sc.Clicks
+$clickPoints = @(ConvertFrom-SbPanelText $panelText | Where-Object { $_.click })
+$lateCount = $panelCount + $menuCount + $clickCount
 
 function Out-Line([string]$s) { Write-Host $s }
 
@@ -232,8 +237,17 @@ $readback = Compare-SbReadBack -Got $got -Want ([System.IO.File]::ReadAllText($e
 # shell then applies a different gesture than was asked (measured 2026-10-10:
 # move=212 against k=7, the line moved by (-72,2) instead of (37,23)). A run
 # whose drive cannot be accounted for proves nothing and is never certified.
-$ptr = Select-SbRow (Read-SbRows $log $mark) 'POINTER REAL '
+# THE GESTURE IS THE FIRST `POINTER REAL` ROW, NOT THE LAST: a late click
+# (node 29) writes a row of its own after it, and `Select-SbRow` returns the
+# last match. Each later row must be one late click: no move, and offset from
+# the gesture's press by exactly the script's offset.
+$ptrRows = @(Select-SbRows (Read-SbRows $log $mark) 'POINTER REAL ')
+$ptr = if ($ptrRows.Count -gt 0) { $ptrRows[0] } else { $null }
 $drive = 'UNREADABLE(no POINTER REAL row)'
+if ($null -ne $ptr -and $ptrRows.Count -ne 1 + $clickCount) {
+    $drive = "DISTURBED(pointer-rows=$($ptrRows.Count) want=$(1 + $clickCount): one for the gesture and one per late click)"
+    $ptr = $null
+}
 if ($null -ne $ptr) {
     $mv = Get-SbField $ptr 'move'; $sc = [double](Get-SbField $ptr 'scale')
     $pa = (Get-SbField $ptr 'press@') -replace '[()]', '' -split ','
@@ -243,6 +257,18 @@ if ($null -ne $ptr) {
     if ([int]$mv -ne $moves -or [math]::Abs($ddx - $dx) -gt $tol -or [math]::Abs($ddy - $dy) -gt $tol) {
         $drive = "DISTURBED(move=$mv want=$moves delta=($([math]::Round($ddx,2)),$([math]::Round($ddy,2))) want=($dx,$dy))"
     } else { $drive = "PASS(move=$mv delta=($([math]::Round($ddx,2)),$([math]::Round($ddy,2))))" }
+    for ($ci = 0; $ci -lt $clickCount -and $drive -like 'PASS*'; $ci++) {
+        $crow = $ptrRows[1 + $ci]; $cp = $clickPoints[$ci]
+        $cpa = (Get-SbField $crow 'press@') -replace '[()]', '' -split ','
+        $cra = (Get-SbField $crow 'release@') -replace '[()]', '' -split ','
+        $ox = ([double]$cpa[0] - [double]$pa[0]) / $sc; $oy = ([double]$cpa[1] - [double]$pa[1]) / $sc
+        $wx = [double]$cp.x - $docX; $wy = [double]$cp.y - $docY
+        $still = [math]::Abs([double]$cra[0] - [double]$cpa[0]) -le 1.0 -and [math]::Abs([double]$cra[1] - [double]$cpa[1]) -le 1.0
+        if ([int](Get-SbField $crow 'move') -ne 0 -or -not $still -or [math]::Abs($ox - $wx) -gt $tol -or [math]::Abs($oy - $wy) -gt $tol) {
+            $drive = "DISTURBED(click $($ci + 1) move=$(Get-SbField $crow 'move') offset=($([math]::Round($ox,2)),$([math]::Round($oy,2))) want=($wx,$wy))"
+        }
+    }
+    if ($clickCount -gt 0 -and $drive -like 'PASS*') { $drive = $drive -replace '\)$', " clicks=$clickCount)" }
 }
 
 # ---- THE SPEC, independent of any baseline: the selected element moved by
