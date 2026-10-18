@@ -1,10 +1,10 @@
 {
     "item":  "distribute.left",
     "surface":  "2379x1333",
-    "frame_hash":  "a87d4dac33341fddf21c6df64cee65384391e422fb1e66842df749940c69d1a7",
+    "frame_hash":  "46e67e6808a6ee819b069968a0c06703e3043b3b3bf0adfe7764d76e81de303f",
     "plan_panel":  "align_panel_content",
     "plan_sha":  "6c5486e7ec783aeb",
-    "tab":  "[0,0]=on:\"three_rects.svg\"",
-    "tab_sha":  "b3eb2ebc4fb09b4e",
+    "tab":  "[0,0]=on:\"three_rects_unequal.svg\"",
+    "tab_sha":  "5b456b4f5c17e924",
     "selection_count":  3
 }
