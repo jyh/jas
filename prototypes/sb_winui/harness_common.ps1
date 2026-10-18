@@ -3341,11 +3341,12 @@ function Select-SbMenuItem {
 # refusal has a self-test arm.
 function Select-SbChoiceItem {
     # -By 'name' (node 31): an editable combo's items carry no AutomationId,
-    # so its item is found by its NAME; a value no item names is refused, never
-    # typed in its place.
+    # so its item is found by its NAME. A value no item names is TYPED (node
+    # 32): into the combo's own text box, committed by Enter, the combo's
+    # TextSubmitted path (send_hand.ps1, Invoke-SbChoose).
     param([string]$Widget, [string]$Value, [int]$ItemCount, [string[]]$Patterns, [string]$By = 'id')
     $no = { param($why) [pscustomobject]@{ Action = $null; Refusal = $why } }
-    if ($ItemCount -eq 0 -and $By -eq 'name') { return (& $no "value '$Value' is not the name of any item of widget '$Widget': this driver chooses an editable combo's item by name and does not type a value no item carries") }
+    if ($ItemCount -eq 0 -and $By -eq 'name') { return [pscustomobject]@{ Action = 'Type'; Refusal = $null } }
     if ($ItemCount -eq 0) { return (& $no "value '$Value' is not an option of widget '$Widget': no item in its list has that AutomationId") }
     if ($ItemCount -gt 1) { return (& $no "value '$Value' is carried by $ItemCount items of widget '$Widget': this driver will not guess which one a person meant") }
     $short = @($Patterns | ForEach-Object { $_ -replace 'PatternIdentifiers\.Pattern$', '' })

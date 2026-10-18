@@ -545,6 +545,36 @@ if ($panelSteps.Count -gt 0) {
             try { $ec.Collapse() } catch { }
             return $choice.Refusal
         }
+        if ($choice.Action -eq 'Type') {
+            # NODE 32 (flask section 451): no item names the value, so it is
+            # TYPED, as a person types into the box. Measured on the Windows box:
+            # the combo's own Value reads '' while its template's text box
+            # (AutomationId EditableText) holds the shown text, so a SetValue on
+            # the combo reaches nothing, and SetValue then Enter on it fires no
+            # TextSubmitted. SetFocus on the combo puts keyboard focus IN that
+            # box; SetValue on the box, then Enter, is the combo's TextSubmitted,
+            # measured reaching the shell as a commit with the typed value.
+            try { $ec.Collapse() } catch { }
+            Start-Sleep -Milliseconds $SettleMs
+            $boxes = @($List.FindAll($tree::Descendants, (New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, 'EditableText'))))
+            if ($boxes.Count -ne 1) { return "value '$Value' names no item, and the combo has $($boxes.Count) EditableText boxes, not one, so this driver will not guess where to type" }
+            # Focus the BOX itself: after the hand has opened and closed the
+            # list looking for an item, SetFocus on the combo did not reach it
+            # (measured: focus=False after 1 s).
+            $boxes[0].SetFocus()
+            # Focus lands on the UI thread's schedule (measured: the box held it
+            # 300 ms after SetFocus, not 40), so it is re-read for up to 1 s and
+            # the wait is written down; a box that never takes it is refused.
+            $fsw = [System.Diagnostics.Stopwatch]::StartNew()
+            while (-not $boxes[0].Current.HasKeyboardFocus -and $fsw.ElapsedMilliseconds -lt 1000) { Start-Sleep -Milliseconds 50 }
+            $log.Add("$Tag EditableText focus=$($boxes[0].Current.HasKeyboardFocus) after $($fsw.ElapsedMilliseconds) ms")
+            if (-not $boxes[0].Current.HasKeyboardFocus) { return "value '$Value' names no item, and the combo's EditableText box did not take keyboard focus within 1 s, so Enter would go elsewhere" }
+            $boxes[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($Value)
+            Start-Sleep -Milliseconds $SettleMs
+            [SbHand]::Key(0x0D, $true); [SbHand]::Key(0x0D, $false)
+            $log.Add("$Tag typed '$Value' into the combo's EditableText box (no item names it) and pressed Enter")
+            return $null
+        }
         $items[0].GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
         Start-Sleep -Milliseconds $SettleMs
         $state = $ec.Current.ExpandCollapseState
