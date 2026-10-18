@@ -4548,14 +4548,21 @@ private func gestureToolContext(_ model: Model) -> ToolContext {
 /// workspace spec (the same `loadYamlTool` path the running app uses), activates
 /// it, then dispatches each event through the CanvasTool seam (onPress / onMove /
 /// onRelease). Mirrors Rust `run_gesture_model`.
-private func runGestureModel(_ tc: [String: Any]) -> Model {
+private func runGestureModel(_ tc: [String: Any], opening: Bool = false) -> Model {
     // `setup_test_json` is the door for a setup SVG cannot carry (a hidden
     // element). Mirrors Rust `run_gesture_model`.
+    //
+    // `opening`: open the setup as a person does (`documentForOpen`, which
+    // adds the at-least-one artboard), as Rust's engine replay and the
+    // Windows level-2 run do. The script corpus needs it: "align to artboard"
+    // on a document the bare codec opened has no artboard and falls back to
+    // the selection, so it read back as plain "align right".
     let setup: Document
     if let name = tc["setup_test_json"] as? String {
         setup = testJsonToDocument(readFixture("expected/\(name)"))
     } else {
-        setup = svgToDocument(readFixture("svg/\(tc["setup_svg"] as! String)"))
+        let svg = readFixture("svg/\(tc["setup_svg"] as! String)")
+        setup = opening ? documentForOpen(svg) : svgToDocument(svg)
     }
     let model = Model(document: setup)
 
@@ -4885,6 +4892,35 @@ private func runScriptPanelStep(_ st: [String: Any], model: Model) -> Bool {
 /// accepted id becomes the token. Rust's `accept_minted_ids` is the same law.
 private let mintedToken = "<minted>"
 
+/// The open's artboard, set aside exactly as Rust's engine replay
+/// (`ffi_script_replay.rs`, `set_aside_the_opens_artboard`) and the Windows
+/// level-2 oracle (`Compare-SbReadBack`) do: every expected file is built by
+/// the codec, which adds no artboard, while a person's open adds the
+/// at-least-one artboard with a fresh id. Only when the expected names no
+/// artboards, and only exactly one, named `Artboard 1` with an 8-character
+/// base-36 id; anything else in its place is refused by name.
+private func setAsideTheOpensArtboard(_ got: String, _ want: String) -> Result<String, MintRefusal> {
+    let head = "{\"artboards\":["
+    if want.contains("\"artboards\":") || !got.hasPrefix(head) { return .success(got) }
+    guard let end = got.range(of: "],") else {
+        return .failure(MintRefusal("the read-back opens with an artboards member this reader cannot delimit"))
+    }
+    let member = String(got[got.index(got.startIndex, offsetBy: head.count - 1)...end.lowerBound])
+    guard let abs = try? JSONSerialization.jsonObject(with: member.data(using: .utf8)!) as? [[String: Any]] else {
+        return .failure(MintRefusal("the read-back opens with an artboards member this reader cannot delimit"))
+    }
+    guard abs.count == 1 else {
+        return .failure(MintRefusal("the read-back carries \(abs.count) artboards where the expected names none; the open adds exactly one"))
+    }
+    let id = abs[0]["id"] as? String ?? ""
+    let name = abs[0]["name"] as? String ?? ""
+    let base36 = id.allSatisfy { ("0"..."9").contains($0) || ("a"..."z").contains($0) }
+    guard id.count == 8, base36, name == "Artboard 1" else {
+        return .failure(MintRefusal("an artboard the expected does not name, and not the one the open adds: id \"\(id)\" name \"\(name)\""))
+    }
+    return .success("{" + String(got[end.upperBound...]))
+}
+
 private func acceptMintedIds(_ got: String, _ want: String) -> Result<String, MintRefusal> {
     let key = "\"id\":\""
     guard want.contains(key + mintedToken + "\"") else { return .success(got) }
@@ -4986,7 +5022,7 @@ private struct MintRefusal: Error, Equatable {
                                  "app_state": script["app_state"] ?? [:], "events": events]
         let expected = readFixture("input_scripts/\(script["expected_json"] as! String)")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let model = runGestureModel(tc)
+        let model = runGestureModel(tc, opening: true)
         for (i, st) in panelSteps {
             if let menuId = st["menu"] as? String {
                 guard runScriptMenuStep(menuId, model: model) else {
@@ -5001,7 +5037,14 @@ private struct MintRefusal: Error, Equatable {
             }
         }
         let actual: String
-        switch acceptMintedIds(documentToTestJson(model.document), expected) {
+        let readBack: String
+        switch setAsideTheOpensArtboard(documentToTestJson(model.document), expected) {
+        case .success(let r): readBack = r
+        case .failure(let e):
+            Issue.record("script \(item): \(e.why)")
+            continue
+        }
+        switch acceptMintedIds(readBack, expected) {
         case .success(let a): actual = a
         case .failure(let e):
             Issue.record("script \(item): \(e.why)")
