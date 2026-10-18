@@ -66,6 +66,12 @@ fn script_files() -> Vec<String> {
 /// Replay one script through the ABI and return the engine's read-back, or the
 /// step that the engine refused, named.
 fn replay(script: &Value) -> Result<String, String> {
+    replay_then(script, |e| take(unsafe { jas_document_json(e) }).ok_or_else(|| "no read-back".to_string()))
+}
+
+/// [`replay`]'s steps, then `read` on the engine in place of the JSON read-back,
+/// for an arm that needs the engine's own document rather than its bytes.
+fn replay_then<T>(script: &Value, read_back: impl Fn(*mut JasEngine) -> Result<T, String>) -> Result<T, String> {
     let item = script["item"].as_str().ok_or("a script names its spec item")?;
     let steps = script["steps"].as_array().ok_or("a script has steps")?;
     if steps.last() != Some(&serde_json::json!({"read": "document"})) {
@@ -141,7 +147,7 @@ fn replay(script: &Value) -> Result<String, String> {
                 return Err(format!("script {item}: step {i} {st} is not a pointer, key, menu or panel step"));
             }
         }
-        take(unsafe { jas_document_json(e) }).ok_or_else(|| format!("script {item}: no read-back"))
+        read_back(e).map_err(|why| format!("script {item}: {why}"))
     })();
     unsafe { jas_engine_free(e) };
     result
@@ -310,4 +316,104 @@ fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
         }
     }
     assert!(wrong.is_empty(), "{} of {} scripts:\n{}", wrong.len(), files.len(), wrong.join("\n\n"));
+}
+
+/// The single Text element of a script's document, by depth-first walk. A
+/// setup holding none, or more than one, is refused by name: this arm is about
+/// one paragraph layout and must not silently pick one of two.
+fn the_one_text(doc: &crate::document::document::Document) -> Result<crate::geometry::element::TextElem, String> {
+    use crate::geometry::element::Element;
+    fn walk(e: &Element, out: &mut Vec<crate::geometry::element::TextElem>) {
+        if let Element::Text(t) = e {
+            out.push(t.clone());
+        }
+        for c in e.children().unwrap_or(&[]) {
+            walk(c, out);
+        }
+    }
+    let mut out = vec![];
+    for l in &doc.layers {
+        walk(l, &mut out);
+    }
+    match out.len() {
+        1 => Ok(out.pop().unwrap()),
+        n => Err(format!("{n} text elements, not one")),
+    }
+}
+
+/// The legacy renderer's paragraph layout of `t` (`canvas/render.rs`, the
+/// `layout_with_paragraphs` call), as one string per line: the line's char
+/// range, baseline, trailing hyphen and every glyph's x to 0.001, then one
+/// string per list marker. ⚠️ The markers are not glyphs of the layout, and a
+/// list's marker gap is 12 pt, so a list and a 12 pt left indent place every
+/// glyph alike: without the markers the arm reads bullets, a numbered list
+/// and that indent as one setting.
+///
+/// ⚠️ THE MEASURER IS THE 0.55-PER-CHARACTER APPROXIMATION ON PURPOSE, not a
+/// font: this pins the LAYOUT LAW (which settings move which lines), and a real
+/// face would make the arm depend on what is installed. Whether a frame moves
+/// is measured on the box by flask, never inferred from this.
+fn legacy_layout_lines(t: &crate::geometry::element::TextElem) -> Vec<String> {
+    let fs = t.font_size;
+    let measure = move |s: &str| s.chars().count() as f64 * fs * 0.55;
+    let leading = match t.tspans.iter().find(|w| w.jas_role.as_deref() == Some("paragraph"))
+        .and_then(|w| w.jas_auto_leading) {
+        Some(pct) => fs * pct / 100.0,
+        None => fs,
+    };
+    let content = t.content();
+    let max_w = if t.is_area_text() { t.width } else { 0.0 };
+    let segs = crate::algorithms::text_layout_paragraph::build_segments_from_text(
+        &t.tspans, &content, t.is_area_text());
+    let l = crate::algorithms::text_layout::layout_with_paragraphs(&content, max_w, leading, &segs, &measure);
+    let counters = crate::algorithms::text_layout_paragraph::compute_counters(&segs);
+    let markers = segs.iter().zip(&counters).filter_map(|(sg, c)| sg.list_style.as_deref()
+        .map(|st| format!("marker {:?} at char {}", crate::algorithms::text_layout_paragraph::marker_text(st, *c), sg.char_start)));
+    l.lines.iter().map(|ln| {
+        let xs: Vec<String> = l.glyphs[ln.glyph_start..ln.glyph_end].iter()
+            .map(|g| format!("{:.3}", g.x)).collect();
+        format!("[{}..{}) y={:.3} hyphen={} x={}", ln.start, ln.end, ln.baseline_y, ln.trailing_hyphen, xs.join(","))
+    }).chain(markers).collect()
+}
+
+#[test]
+fn every_area_text_paragraph_script_moves_the_legacy_layout_and_no_two_move_it_alike() {
+    // Sweep 11 (jas section 432): a Paragraph script whose act lays out exactly
+    // like the untouched setup certifies a frame that cannot tell the act from
+    // doing nothing. Flask found five such on the one-line `text_area_basic`.
+    let _counters = crate::ffi_instr::test_lock::lock();
+    let mut by_setup: std::collections::BTreeMap<String, Vec<(String, Vec<String>)>> = Default::default();
+    for f in script_files() {
+        let script: Value = serde_json::from_str(&read(&format!("input_scripts/{f}"))).unwrap();
+        let setup = script["setup_svg"].as_str().unwrap().to_string();
+        if !f.starts_with("paragraph.") || !setup.starts_with("text_area") {
+            continue;
+        }
+        let lines = replay_then(&script, |e| {
+            unsafe { e.as_ref() }.unwrap().with_model(|m| the_one_text(m.document()))
+        }).unwrap_or_else(|why| panic!("{f}: {why}"));
+        by_setup.entry(setup).or_default().push((f, legacy_layout_lines(&lines)));
+    }
+    let n: usize = by_setup.values().map(Vec::len).sum();
+    // The floor is the population this arm was written for, never a target.
+    assert!(n >= 10, "only {n} area-text paragraph scripts were found: the population moved");
+    let mut wrong = vec![];
+    for (setup, rows) in &by_setup {
+        let doc = crate::geometry::svg::try_open_svg_document(&read(&format!("svg/{setup}")))
+            .unwrap_or_else(|| panic!("{setup} did not open"));
+        let control = legacy_layout_lines(&the_one_text(&doc).unwrap());
+        for (f, lines) in rows {
+            if *lines == control {
+                wrong.push(format!("{f} lays out exactly as the untouched {setup}:\n  {}", control.join("\n  ")));
+            }
+        }
+        for (i, (fa, a)) in rows.iter().enumerate() {
+            for (fb, b) in &rows[i + 1..] {
+                if a == b {
+                    wrong.push(format!("{fa} and {fb} lay out alike on {setup}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{} finding(s) over {n} scripts:\n{}", wrong.len(), wrong.join("\n"));
 }

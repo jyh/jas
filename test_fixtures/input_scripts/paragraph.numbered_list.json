@@ -1,0 +1,15 @@
+{
+  "item": "paragraph.numbered_list",
+  "spec": "workspace/panels/paragraph.yaml",
+  "setup_svg": "text_area_two_para.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 190, "y": 94},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "paragraph_panel_content", "widget": "pg_numbered_list", "event": "commit", "value": "num-decimal"},
+    {"read": "document"}
+  ],
+  "expected_json": "paragraph.numbered_list.expected.json"
+}
