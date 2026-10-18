@@ -3340,6 +3340,37 @@ function Compare-SbReadBack([string]$Got, [string]$Want) {
         $Got = '{' + $Got.Substring($m.Length)
         $note = '; the open''s artboard set aside'
     }
+    # THE MINTED ID (jas, sweep 7). boolean.divide gives each fragment of a split
+    # source a FRESH id, so its expected writes "id":"<minted>" there. At each
+    # token the read-back must carry an 8-character base36 id, pairwise
+    # distinct; every other id stays in the byte comparison, and the counts of
+    # ids must agree. Rust's accept_minted_ids and Swift's acceptMintedIds are
+    # the same law. The receipt says the ids were accepted.
+    if ($Want.Contains('"id":"<minted>"')) {
+        $gIds = @([regex]::Matches($Got, '"id":"([^"]*)"'))
+        $wIds = @([regex]::Matches($Want, '"id":"([^"]*)"'))
+        if ($gIds.Count -ne $wIds.Count) {
+            return ('FAIL(the read-back carries {0} ids where the expected names {1})' -f $gIds.Count, $wIds.Count)
+        }
+        $seen = @{}
+        $out = ''
+        $at = 0
+        for ($k = 0; $k -lt $gIds.Count; $k++) {
+            if ($wIds[$k].Groups[1].Value -cne '<minted>') { continue }
+            $grp = $gIds[$k].Groups[1]
+            if ($grp.Value -cnotmatch '^[0-9a-z]{8}$') {
+                return ('FAIL(a minted id is not an 8-character base-36 id: "{0}")' -f $grp.Value)
+            }
+            if ($seen.ContainsKey($grp.Value)) {
+                return ('FAIL(the minted id "{0}" is carried twice; a mint is fresh)' -f $grp.Value)
+            }
+            $seen[$grp.Value] = $true
+            $out += $Got.Substring($at, $grp.Index - $at) + '<minted>'
+            $at = $grp.Index + $grp.Length
+        }
+        $Got = $out + $Got.Substring($at)
+        $note += '; minted ids accepted'
+    }
     if ($Got -ceq $Want) { return "PASS(bytes=$($Got.Length)$note)" }
     $n = [math]::Min($Got.Length, $Want.Length)
     $i = 0

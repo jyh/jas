@@ -173,6 +173,79 @@ fn set_aside_the_opens_artboard(got: &str, want: &str) -> Result<String, String>
     Ok(format!("{{{}", &got[end + 2..]))
 }
 
+/// The token an expected file writes where the op MINTS an id: `boolean.divide`
+/// gives each fragment of a split source a fresh id, so its read-back differs
+/// on every run. At each `"id":"<minted>"` in the expected, the read-back must
+/// carry an 8-character base-36 id, and those ids must be pairwise distinct
+/// (fresh, not one id stamped twice). Every other id is compared as bytes, and
+/// the counts of `"id":` must agree, so a dropped or an extra id is refused.
+/// Each accepted id is replaced by the token, and the comparison after it is of
+/// BYTES. Swift's `acceptMintedIds` is the same law.
+const MINTED: &str = "<minted>";
+
+fn accept_minted_ids(got: &str, want: &str) -> Result<String, String> {
+    const KEY: &str = r#""id":""#;
+    if !want.contains(&format!("{KEY}{MINTED}\"")) {
+        return Ok(got.to_string());
+    }
+    let ids = |s: &str| -> Vec<(usize, usize)> {
+        let mut out = vec![];
+        let mut from = 0;
+        while let Some(i) = s[from..].find(KEY) {
+            let start = from + i + KEY.len();
+            let end = start + s[start..].find('"').unwrap_or(0);
+            out.push((start, end));
+            from = end;
+        }
+        out
+    };
+    let (g, w) = (ids(got), ids(want));
+    if g.len() != w.len() {
+        return Err(format!("the read-back carries {} ids where the expected names {}", g.len(), w.len()));
+    }
+    let mut out = String::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut at = 0;
+    for (&(gs, ge), &(ws, we)) in g.iter().zip(&w) {
+        if &want[ws..we] != MINTED {
+            continue;
+        }
+        let id = &got[gs..ge];
+        if id.len() != 8 || !id.bytes().all(|b| b.is_ascii_digit() || b.is_ascii_lowercase()) {
+            return Err(format!("a minted id is not an 8-character base-36 id: \"{id}\""));
+        }
+        if !seen.insert(id) {
+            return Err(format!("the minted id \"{id}\" is carried twice; a mint is fresh"));
+        }
+        out.push_str(&got[at..gs]);
+        out.push_str(MINTED);
+        at = ge;
+    }
+    out.push_str(&got[at..]);
+    Ok(out)
+}
+
+#[test]
+fn a_minted_id_is_accepted_only_where_the_expected_names_one_and_only_fresh() {
+    let el = |id: &str| format!(r#"{{"id":"{id}","type":"polygon"}}"#);
+    let doc = |a: &str, b: &str| format!(r#"{{"layers":[{},{}]}}"#, el(a), el(b));
+    let want = doc(MINTED, MINTED);
+    assert_eq!(accept_minted_ids(&doc("l006y7om", "7xkxpudp"), &want).unwrap(), want);
+    // No token: the read-back is untouched, so its ids are compared as bytes.
+    assert_eq!(accept_minted_ids(&doc("l006y7om", "7xkxpudp"), &doc("aaaaaaaa", "bbbbbbbb")).unwrap(),
+               doc("l006y7om", "7xkxpudp"));
+    // A literal id beside a token is left for the byte comparison.
+    let mixed = doc("keepthis", MINTED);
+    assert_eq!(accept_minted_ids(&doc("keepthis", "7xkxpudp"), &mixed).unwrap(), mixed);
+    assert_ne!(accept_minted_ids(&doc("changed1", "7xkxpudp"), &mixed).unwrap(), mixed);
+    // One id stamped twice, a wrong shape, a missing id: refused by name.
+    assert!(accept_minted_ids(&doc("l006y7om", "l006y7om"), &want).unwrap_err().contains("carried twice"));
+    assert!(accept_minted_ids(&doc("L006Y7OM", "7xkxpudp"), &want).unwrap_err().contains("not an 8-character"));
+    assert!(accept_minted_ids(&doc("l006y7o", "7xkxpudp"), &want).unwrap_err().contains("not an 8-character"));
+    let one = format!(r#"{{"layers":[{},{{"type":"polygon"}}]}}"#, el("l006y7om"));
+    assert!(accept_minted_ids(&one, &want).unwrap_err().contains("carries 1 ids where the expected names 2"));
+}
+
 #[test]
 fn the_opens_artboard_is_set_aside_only_in_the_one_shape_the_open_makes() {
     let ab = |id: &str, name: &str| format!(r#"{{"fill":"transparent","id":"{id}","name":"{name}","x":0.0}}"#);
@@ -228,7 +301,9 @@ fn every_input_script_replays_through_the_engine_to_its_expected_read_back() {
     for f in &files {
         let script: Value = serde_json::from_str(&read(&format!("input_scripts/{f}"))).unwrap();
         let expected = read(&format!("input_scripts/{}", script["expected_json"].as_str().unwrap()));
-        match replay(&script).and_then(|got| set_aside_the_opens_artboard(&got, expected.trim())) {
+        match replay(&script)
+            .and_then(|got| set_aside_the_opens_artboard(&got, expected.trim()))
+            .and_then(|got| accept_minted_ids(&got, expected.trim())) {
             Ok(actual) if actual == expected.trim() => {}
             Ok(actual) => wrong.push(format!("{f}: the engine read back\n{actual}\nnot\n{}", expected.trim())),
             Err(why) => wrong.push(why),
