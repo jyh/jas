@@ -1525,6 +1525,310 @@
         "state": {}
       },
       "event": {
+        "commit": "50"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": 50.0
+        },
+        "state_changed": {
+          "gradient_stop_opacity": 50
+        }
+      },
+      "name": "gradient_stop_opacity_commit",
+      "panel": "gradient_panel_content",
+      "widget": "grad_stop_opacity_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": 0,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "50"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": 0,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "gradient_stop_opacity_disabled_on_a_midpoint",
+      "panel": "gradient_panel_content",
+      "widget": "grad_stop_opacity_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "30"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 0,
+          "bind_written": false,
+          "outcome": "refused",
+          "reason": "Disabled",
+          "value": null
+        },
+        "state_changed": {}
+      },
+      "name": "gradient_stop_location_disabled_with_nothing_selected",
+      "panel": "gradient_panel_content",
+      "widget": "grad_stop_location_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": 0,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
+        "commit": "30"
+      },
+      "expected": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": 0,
+          "selected_stop_index": -1,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "result": {
+          "behaviors_run": 1,
+          "bind_written": false,
+          "outcome": "committed",
+          "reason": null,
+          "value": 30.0
+        },
+        "state_changed": {
+          "gradient_stop_location": 30
+        }
+      },
+      "name": "gradient_stop_location_enabled_on_a_midpoint",
+      "panel": "gradient_panel_content",
+      "widget": "grad_stop_location_combo"
+    },
+    {
+      "before": {
+        "panel": {
+          "active_library_id": "neutrals",
+          "angle": 0,
+          "aspect_ratio": 100,
+          "dither": false,
+          "method": "classic",
+          "preview_state": false,
+          "selected_midpoint_index": -1,
+          "selected_stop_index": 0,
+          "stops": [
+            {
+              "color": "#000000",
+              "location": 0,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            },
+            {
+              "color": "#ffffff",
+              "location": 100,
+              "midpoint_to_next": 50,
+              "opacity": 100
+            }
+          ],
+          "stroke_sub_mode": "within",
+          "thumbnail_size": "large",
+          "type": "linear"
+        },
+        "state": {}
+      },
+      "event": {
         "commit": "smooth"
       },
       "expected": {

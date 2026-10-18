@@ -671,6 +671,17 @@ def self_test(fixture: Path | None = None) -> int:
     return 0
 
 
+def level2_notice(pr: int, repo: str = REPO) -> list[str]:
+    """The LEVEL-2 NOTICE lines for the files the PR changes (read from the
+    forge), or one line saying why none could be computed."""
+    try:
+        import l2_baselines_at_risk as l2
+        files = _gh("api", "--paginate", f"repos/{repo}/pulls/{pr}/files", "--jq", ".[].filename").split()
+        return l2.report(l2.at_risk(files, l2._read, l2.load_baselines()))
+    except Exception as e:  # advice must not hide the verdict above it
+        return [f"LEVEL-2 NOTICE UNAVAILABLE: {type(e).__name__}: {e}"]
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("pr", nargs="?", type=int, help="pull request number")
@@ -695,6 +706,11 @@ def main() -> int:
     verdict = evaluate(state)
     print(f"merge_preflight: {args.repo}#{args.pr} head {state.head_sha[:8]}")
     print(f"  {verdict.receipt}")
+    # Advisory, never a refusal: the WinUI baselines a panel-YAML change may
+    # un-certify (l2_baselines_at_risk.py; STATUS-flask § 449). Level 2 is
+    # the box's, so the merger names them to flask in the release.
+    for line in level2_notice(args.pr, args.repo):
+        print(f"  {line}")
     if verdict.ok:
         print("merge_preflight: OK -- every condition holds; the green tree IS the merged tree")
         return 0

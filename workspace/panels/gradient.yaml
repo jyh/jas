@@ -432,7 +432,9 @@ content:
                   type: combo_box
                   col: 9
                   summary: "Selected stop opacity (percentage)"
-                  bind: { value: "panel.stops[panel.selected_stop_index].opacity" }
+                  bind:
+                    value: "panel.stops[panel.selected_stop_index].opacity"
+                    disabled: "panel.selected_stop_index < 0"
                   min: 0
                   max: 100
                   options: [0, 25, 50, 75, 100]
@@ -452,7 +454,9 @@ content:
                   type: combo_box
                   col: 9
                   summary: "Selected stop location (percentage)"
-                  bind: { value: "panel.stops[panel.selected_stop_index].location" }
+                  bind:
+                    value: "panel.stops[panel.selected_stop_index].location"
+                    disabled: "panel.selected_stop_index < 0 and panel.selected_midpoint_index < 0"
                   min: 0
                   max: 100
                   behavior:
