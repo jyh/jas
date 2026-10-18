@@ -228,3 +228,45 @@ public func computeCounters(_ segs: [ParagraphSegment]) -> [Int] {
     }
     return counters
 }
+
+/// One list-marker paragraph start: the layout line its marker sits
+/// on, the owning segment's list style and left indent, and its
+/// counter under PARAGRAPH.md §Counter run rule (0 for a bullet or
+/// no style).
+public struct ListMarkerParagraph: Equatable {
+    public let lineIdx: Int
+    public let style: String?
+    public let leftIndent: Double
+    public let counter: Int
+}
+
+/// The paragraph starts the marker pass draws at. PARAGRAPH.md: a
+/// paragraph is a wrapper tspan, so each segment's first line starts
+/// one, even with no "\n" before it (the layout lays out each
+/// segment separately). A list-style segment may also span several
+/// paragraphs (the user typed "a\nb\nc" then clicked bullets: one
+/// wrapper covers all three lines), so any line after a hard break
+/// starts one too. A soft wrap starts nothing.
+public func listMarkerParagraphs(lines: [LineInfo],
+                                 segs: [ParagraphSegment]) -> [ListMarkerParagraph] {
+    func owningSeg(_ lineStart: Int) -> Int? {
+        segs.firstIndex { $0.charStart <= lineStart && lineStart < $0.charEnd }
+    }
+    var starts: [(lineIdx: Int, seg: Int?)] = []
+    var prevHardBreak = true
+    for (li, line) in lines.enumerated() {
+        if prevHardBreak || segs.contains(where: { $0.charStart == line.start && $0.charEnd > line.start }) {
+            starts.append((li, owningSeg(line.start)))
+        }
+        prevHardBreak = line.hardBreak
+    }
+    let counters = computeCounters(starts.map { s in
+        ParagraphSegment(listStyle: s.seg.flatMap { segs[$0].listStyle })
+    })
+    return zip(starts, counters).map { s, c in
+        ListMarkerParagraph(lineIdx: s.lineIdx,
+                            style: s.seg.flatMap { segs[$0].listStyle },
+                            leftIndent: s.seg.map { segs[$0].leftIndent } ?? 0,
+                            counter: c)
+    }
+}
