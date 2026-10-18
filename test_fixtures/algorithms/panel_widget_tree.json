@@ -10797,6 +10797,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
+          "disabled",
           "value"
         ],
         "style": []
@@ -10846,6 +10847,7 @@
         "visible": true,
         "dyn_visible": false,
         "bind": [
+          "disabled",
           "value"
         ],
         "style": []
