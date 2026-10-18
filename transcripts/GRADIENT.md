@@ -303,6 +303,18 @@ Typing a value into `STOP_LOCATION_COMBO` that crosses a neighbor stop
 re-sorts `stops[]` on commit; midpoints involved in the reorder reset
 to 50%. The selected-stop index follows the moved stop.
 
+Precisely: the sort is stable, so a location EQUAL to a neighbour's does
+not cross it; a midpoint "involved in the reorder" is that of every stop
+whose next stop changed: when a stop crosses, that is the moved stop, its
+old left neighbour, its new left neighbour, and a stop that becomes or
+stops being last; when none crosses, no midpoint changes. An opacity
+edit never re-sorts, even when the stops are out of order. The executable
+statement is `workspace_interpreter/gradient_law.py` (`edit_stop`), pinned
+for all three implementations by `test_fixtures/gradient_stop/stop_edit.json`.
+Both combos reach it through a `change` behavior that sets
+`gradient_stop_opacity` or `gradient_stop_location`, because their bind is
+an indexed path, which the widget-event layer reads and never writes.
+
 ### Keyboard (when `GRADIENT_SLIDER` has focus and a stop or midpoint is selected)
 
 | Input | Action |
