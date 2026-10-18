@@ -3788,7 +3788,7 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
             ("underline", |t| t.text_decoration = "underline".into()),
             ("line-through", |t| t.text_decoration = "line-through".into()),
             ("rotation", |t| t.rotate = "30".into()),
-            ("baseline shift", |t| t.baseline_shift = "super".into()),
+            ("an unreadable baseline shift", |t| t.baseline_shift = "high".into()),
         ];
         for (name, set) in cases {
             let mut x = t.clone();
@@ -3894,4 +3894,60 @@ fn a_set_leading_needs_the_layout() {
     t.line_height = "24pt".into();
     assert!(crate::painter::element_render::needs_layout(&t));
     assert!(!crate::painter::element_render::needs_layout(&flat_text(20.0)), "control: no leading, no layout");
+}
+
+/// Every text run the walk emits, as `(text, size, x, y)`.
+fn sized_runs(t: crate::geometry::element::TextElem) -> Vec<(String, f64, f64, f64)> {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    rec.commands().iter().filter_map(|c| match c {
+        Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, size, x, y, .. }, .. } => Some((text.clone(), *size, *x, *y)),
+        _ => None,
+    }).collect()
+}
+
+/// ⭐ NODE 27 (jas section 440): a flat text's baseline shift, as legacy
+/// draws it (`canvas/render.rs`, flat branch): `super` at 0.7 x size and
+/// 0.35 x size up, `sub` at 0.7 x size and 0.2 x size down, `Npt` N up at full
+/// size. The scaled size feeds the measurer and the auto leading, so the
+/// layout's first baseline is 0.8 x the SCALED size, and the shift is added on
+/// top. Three refusals (character.baseline_shift, superscript, subscript)
+/// shared this one cause.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_walk_draws_a_baseline_shift_as_legacy_does() {
+    let y = 2.0;
+    for (shift, size, baseline) in [
+        ("super", 14.0, y + 0.8 * 14.0 - 0.35 * 20.0),
+        ("sub", 14.0, y + 0.8 * 14.0 + 0.2 * 20.0),
+        ("5pt", 20.0, y + 0.8 * 20.0 - 5.0),
+    ] {
+        let mut t = flat_text(20.0);
+        t.baseline_shift = shift.into();
+        let r = sized_runs(t);
+        assert_eq!(r.len(), 1, "{shift}: {r:?}");
+        assert!((r[0].1 - size).abs() < 1e-9, "{shift}: drawn at size {size}: {r:?}");
+        assert!((r[0].3 - baseline).abs() < 1e-9, "{shift}: the baseline at {baseline}: {r:?}");
+    }
+}
+
+/// The router: a readable baseline shift lowers where a real measurer exists;
+/// an unreadable one stays legacy (legacy would draw it as no shift, and the
+/// walk must not guess). A tspan-level shift on segmented text stays legacy.
+#[test]
+fn a_readable_baseline_shift_lowers_with_a_real_measurer() {
+    use crate::painter::element_render::text_needs_legacy;
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    for shift in ["super", "sub", "5pt"] {
+        let mut t = flat_text(20.0);
+        t.baseline_shift = shift.into();
+        assert_eq!(text_needs_legacy(&t), !has_real, "{shift} lowers exactly where a real measurer exists");
+    }
+    let mut bad = flat_text(20.0);
+    bad.baseline_shift = "high".into();
+    assert!(text_needs_legacy(&bad), "an unreadable shift stays legacy");
+    let mut decorated = flat_text(20.0);
+    decorated.baseline_shift = "super".into();
+    decorated.text_decoration = "underline".into();
+    assert!(text_needs_legacy(&decorated), "a shifted decoration stays legacy (its line sits on the shifted baseline)");
 }

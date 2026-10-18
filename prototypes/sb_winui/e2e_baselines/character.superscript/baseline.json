@@ -1,0 +1,10 @@
+{
+    "item":  "character.superscript",
+    "surface":  "2379x1333",
+    "frame_hash":  "c0e9039f0ecc891c42cca7202a72a3ac11250694ce91712436698d51ff54f8fb",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "d47db5fa8678bbe3",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
