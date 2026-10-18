@@ -336,15 +336,14 @@ pub fn stroke_with_group(
                 dash_pattern[0] = sp.dash_1;
                 dash_pattern[1] = sp.gap_1;
                 dash_len = 2;
-                if let (Some(d), Some(g)) = (sp.dash_2, sp.gap_2) {
-                    dash_pattern[2] = d;
-                    dash_pattern[3] = g;
-                    dash_len = 4;
-                }
-                if let (Some(d), Some(g)) = (sp.dash_3, sp.gap_3) {
-                    dash_pattern[4] = d;
-                    dash_pattern[5] = g;
-                    dash_len = 6;
+                // A blank pair ends the pattern, as the reference's loop
+                // `break`s (`stroke_law.py`, `_panel_dash`): pair 3 counts only
+                // after a whole pair 2, never at slots 4 and 5 behind a zero pair.
+                for (d, g) in [(sp.dash_2, sp.gap_2), (sp.dash_3, sp.gap_3)] {
+                    let (Some(d), Some(g)) = (d, g) else { break };
+                    dash_pattern[dash_len as usize] = d;
+                    dash_pattern[dash_len as usize + 1] = g;
+                    dash_len += 2;
                 }
             }
             s.dash_pattern = dash_pattern;
@@ -556,6 +555,37 @@ mod tests {
         store.init_panel(STROKE_PANEL,
                          fields.iter().map(|(k, v)| (k.to_string(), v.clone())).collect());
         store
+    }
+
+    /// **A blank pair ends the pattern** (`stroke_law.py`, `dash_array`: the
+    /// loop over pairs 2 and 3 `break`s at the first pair with either half
+    /// unset). So pair 3 counts only after a whole pair 2. Every presence
+    /// combination, each slot a distinct value so a pair written into the
+    /// wrong slot cannot pass.
+    #[test]
+    fn a_blank_dash_pair_ends_the_pattern_as_the_reference_does() {
+        use crate::geometry::element::{Color, Stroke};
+        let (d1, g1, d2, g2, d3, g3) = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0);
+        let cases: [(&str, Option<f64>, Option<f64>, Option<f64>, Option<f64>, &[f64]); 6] = [
+            ("no optional pair", None, None, None, None, &[d1, g1]),
+            ("pair 2 only", Some(d2), Some(g2), None, None, &[d1, g1, d2, g2]),
+            ("both pairs", Some(d2), Some(g2), Some(d3), Some(g3), &[d1, g1, d2, g2, d3, g3]),
+            ("pair 3 without pair 2", None, None, Some(d3), Some(g3), &[d1, g1]),
+            ("pair 3 after half of pair 2", Some(d2), None, Some(d3), Some(g3), &[d1, g1]),
+            ("half of pair 3", Some(d2), Some(g2), Some(d3), None, &[d1, g1, d2, g2]),
+        ];
+        let mut wrong = vec![];
+        for (name, dash_2, gap_2, dash_3, gap_3, want) in cases {
+            let sp = StrokePanelState {
+                dashed: true, dash_1: d1, gap_1: g1, dash_2, gap_2, dash_3, gap_3,
+                ..StrokePanelState::default()
+            };
+            let s = stroke_with_group(Stroke::new(Color::BLACK, 1.0), &sp, StrokeEditGroup::Dash, 1.0);
+            if s.dash_array() != want {
+                wrong.push(format!("{name}: {:?}, not {want:?}", s.dash_array()));
+            }
+        }
+        assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     }
 
     /// **The reference's order: the panel scope, then the flat global, then

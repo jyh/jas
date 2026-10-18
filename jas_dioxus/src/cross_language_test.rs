@@ -8089,32 +8089,23 @@ pub(crate) mod tests {
     }
 
     #[cfg(feature = "web")]
-    /// A fixture panel map as `CharacterPanelState`. Unlike the Stroke
-    /// corpus there is no panel-vs-global scope question: every Character
-    /// control binds `panel.<field>` only.
+    /// A fixture panel map as `CharacterPanelState`, through the production
+    /// reader (`CharacterPanelState::set_field`). Unlike the Stroke corpus
+    /// there is no panel-vs-global scope question: every Character control
+    /// binds `panel.<field>` only.
+    ///
+    /// ⛔ This used to be its own field-by-field reader, a copy of
+    /// `set_field`'s types — including its string-only kerning, so a kerning
+    /// committed as a number (what the number_input sends) was dropped by
+    /// the subject and by the test alike and the corpus agreed by
+    /// construction.
     fn character_panel_from_json(
         panel: &serde_json::Value,
     ) -> crate::workspace::app_state::CharacterPanelState {
         let mut cp = crate::workspace::app_state::CharacterPanelState::default();
-        let s = |k: &str| panel[k].as_str().map(|v| v.to_string());
-        if let Some(v) = s("font_family") { cp.font_family = v; }
-        if let Some(v) = s("style_name") { cp.style_name = v; }
-        if let Some(v) = panel["font_size"].as_f64() { cp.font_size = v; }
-        if let Some(v) = panel["leading"].as_f64() { cp.leading = v; }
-        if let Some(v) = s("kerning") { cp.kerning = v; }
-        if let Some(v) = panel["tracking"].as_f64() { cp.tracking = v; }
-        if let Some(v) = panel["vertical_scale"].as_f64() { cp.vertical_scale = v; }
-        if let Some(v) = panel["horizontal_scale"].as_f64() { cp.horizontal_scale = v; }
-        if let Some(v) = panel["baseline_shift"].as_f64() { cp.baseline_shift = v; }
-        if let Some(v) = panel["character_rotation"].as_f64() { cp.character_rotation = v; }
-        if let Some(v) = panel["all_caps"].as_bool() { cp.all_caps = v; }
-        if let Some(v) = panel["small_caps"].as_bool() { cp.small_caps = v; }
-        if let Some(v) = panel["superscript"].as_bool() { cp.superscript = v; }
-        if let Some(v) = panel["subscript"].as_bool() { cp.subscript = v; }
-        if let Some(v) = panel["underline"].as_bool() { cp.underline = v; }
-        if let Some(v) = panel["strikethrough"].as_bool() { cp.strikethrough = v; }
-        if let Some(v) = s("language") { cp.language = v; }
-        if let Some(v) = s("anti_aliasing") { cp.anti_aliasing = v; }
+        for (k, v) in panel.as_object().expect("a fixture panel is an object") {
+            cp.set_field(k, v);
+        }
         cp
     }
 

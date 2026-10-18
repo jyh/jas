@@ -246,6 +246,15 @@
       "expected": { "kerning": "0.05em" }
     },
     {
+      "name": "kerning_committed_as_a_number_is_thousandths_of_an_em",
+      "_comment": "The same entry as the vector above, committed as a JSON NUMBER, which is what the panel's Kerning number_input sends. The reference stringifies the field before reading it (character_law.py, kerning_attr(str(...))), so 50 and \"50\" are one entry. Rust's set_field took kerning only as a string and Swift read it with `as? String`, so both dropped the number and reported the edit as done.",
+      "op": "panel_edit",
+      "base": "rich_run",
+      "panel": { "kerning": 50 },
+      "edited": "kerning",
+      "expected": { "kerning": "0.05em" }
+    },
+    {
       "name": "kerning_auto_clears_the_attribute",
       "op": "panel_edit",
       "base": "rich_run",
