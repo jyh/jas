@@ -15,10 +15,14 @@ window lives here, so it runs (and self-tests) on any machine:
                               the Windows oracle's rule, and the Rust engine
                               replay's (`ffi_script_replay.rs`), here in Python
 
-The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a pointer or
-key step after a panel or menu step; a script with no `read`; and, for this
-channel, a `read` other than `document` (the tree and pixel reads are not built
-here). A menu id with no unique path in the menubar is refused by name, never
+The refusals mirror the Windows hand's (`send_hand.ps1`): `meta`; a script
+with no `read`; and, for this channel, a `read` other than `document` (the tree
+and pixel reads are not built here). ONE DELIBERATE DIFFERENCE: this channel
+plans a pointer or key step AFTER a panel or menu step, in script order (the
+Align key-object scripts press the canvas after clicking "align to key
+object"); the driver acts in order and re-checks that Jas is frontmost before
+every pointer and key act. The Windows hand sends its gesture first and its
+panel steps last, so it still refuses that shape (since 2026-10-18). A menu id with no unique path in the menubar is refused by name, never
 guessed. A panel is shown the way a person shows it on the Mac, by its dock tab,
 whose accessibility identifier is `<panel content id>_tab`.
 
@@ -144,7 +148,6 @@ def plan(script, menubar, spec=None):
         raise Refused(f"{item}: a script without a read step asserts nothing")
     menus, panels = menu_paths(menubar), panel_menu_paths(menubar)
     acts = [("open", script["setup_svg"]), ("tool", script["tool"])]
-    late = None  # the first panel or menu step, after which no gesture may come
     for i, st in enumerate(steps):
         if "read" in st:
             if st["read"] != "document":
@@ -154,8 +157,6 @@ def plan(script, menubar, spec=None):
         if st.get("meta"):
             raise Refused(f"{item}: step {i} carries meta, which the engine's key route does not take")
         if "kind" in st or "key" in st:
-            if late is not None:
-                raise Refused(f"{item}: step {i} is a pointer or key step after the {late} step")
             mods = tuple(m for m in MODS if st.get(m))
             if "kind" in st:
                 if st["kind"] not in POINTER_KINDS:
@@ -182,14 +183,12 @@ def plan(script, menubar, spec=None):
                     raise Refused(f"{item}: step {i}: {st.get('value')!r} is not an option of select {st['widget']!r}")
             acts.append(("panel", pid, pid + TAB_SUFFIX, panels.get(pid[: -len(PANEL_SUFFIX)]),
                          st["widget"], st["event"], st.get("value"), label))
-            late = late or "panel"
             continue
         if "menu" in st:
             path = menus.get(st["menu"])
             if not path:
                 raise Refused(f"{item}: step {i}: menu id {st['menu']!r} has no unique path in the menubar")
             acts.append(("menu", path))
-            late = late or "menu"
             continue
         raise Refused(f"{item}: step {i} is not a step this channel knows: {sorted(st)}")
     return acts
@@ -349,10 +348,12 @@ def self_test():
     check("no read is refused", refused(lambda: plan(dict(base, steps=[press]), mb), "without a read"))
     check("a tree read is refused", refused(lambda: plan(dict(base, steps=[{"read": "tree"}]), mb), "document only"))
     check("meta is refused", refused(lambda: plan(dict(base, steps=[{"key": "Z", "meta": True}, read]), mb), "meta"))
-    check("a gesture after a panel step is refused",
-          refused(lambda: plan(dict(base, steps=[pan, press, read]), mb), "after the panel step"))
-    check("a key after a menu step is refused",
-          refused(lambda: plan(dict(base, steps=[{"menu": "menu_group"}, {"key": "Z"}, read]), mb), "after the menu step"))
+    check("a gesture after a panel step is planned in script order",
+          [a[0] for a in plan(dict(base, steps=[pan, press, rel, read]), mb)]
+          == ["open", "tool", "panel", "pointer", "pointer", "read"])
+    check("a key after a menu step is planned in script order",
+          [a[0] for a in plan(dict(base, steps=[{"menu": "menu_group"}, {"key": "Z"}, read]), mb)]
+          == ["open", "tool", "menu", "key", "read"])
     check("an odd unit is refused", refused(lambda: plan(dict(base, steps=[dict(press, x=37), read]), mb), "even"))
     check("a fractional unit is refused", refused(lambda: plan(dict(base, steps=[dict(press, y=18.5), read]), mb), "even"))
     check("an unknown menu id is refused", refused(lambda: plan(dict(base, steps=[{"menu": "nope"}, read]), mb), "'nope'"))

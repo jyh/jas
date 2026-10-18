@@ -2860,6 +2860,22 @@ public func tryDesignateAlignKeyObject(model: Model, store: StateStore,
     return true
 }
 
+/// The canvas press's Align key-object intercept, in the Rust engine's and
+/// web canvas's order: a PLAIN press in key-object mode designates,
+/// re-designates or clears the key and the tool never sees it; a Shift or
+/// Alt press is a selection modifier and goes to the tool. `(docX, docY)` are
+/// document coordinates. Returns true when the press was consumed. The canvas
+/// (`CanvasSubwindow.mouseDown`) and the level-1 script runner both call it.
+///
+/// Until 2026-10-18 the canvas intercepted Shift and Alt presses too, and no
+/// runner intercepted at all.
+public func alignKeyObjectPressIntercept(model: Model, store: StateStore,
+                                         docX: Double, docY: Double,
+                                         shift: Bool, alt: Bool) -> Bool {
+    if shift || alt { return false }
+    return tryDesignateAlignKeyObject(model: model, store: store, x: docX, y: docY)
+}
+
 /// Clear the key-object path if the previously-designated key is
 /// no longer part of the current selection. Call after any
 /// selection change to uphold the spec guarantee that selection

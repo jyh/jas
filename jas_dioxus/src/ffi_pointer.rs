@@ -19,6 +19,8 @@
 use crate::document::model::Model;
 use crate::ffi::{JasEngine, JasStatus};
 use crate::tools::tool::CanvasTool;
+use crate::interpreter::align_host;
+use crate::panel_behavior::ALIGN_PANEL;
 
 /// Which pointer transition crossed. Values are ABI: the shell sends these
 /// integers, so they are appended to, never renumbered.
@@ -259,6 +261,28 @@ pub unsafe extern "C" fn jas_pointer_event(
     let alt = mods & MOD_ALT != 0;
     let dragging = mods & MOD_DRAGGING != 0;
 
+    // The Align panel's key-object intercept (ALIGN.md §Key-object
+    // designation), in the web canvas's order (`workspace/app.rs`, mousedown):
+    // while Align To is the key object, a plain press designates, re-designates
+    // or clears the key and the tool never sees it. Shift and Alt presses are
+    // selection modifiers and go to the tool. Until 2026-10-18 the engine had
+    // no intercept, so key-object mode could never get a key and every Align
+    // and Distribute button stayed disabled on Windows.
+    if kind == KIND_PRESS && !shift && !alt {
+        let consumed = engine.with_store_mut(|store| {
+            if store.get_panel(ALIGN_PANEL, "align_to").as_str() != Some("key_object") {
+                return false;
+            }
+            let current = align_host::path_value(store.get_panel(ALIGN_PANEL, "key_object_path"));
+            let key = engine.with_model(|m| align_host::designate_key_object(m, current.as_ref(), dx, dy));
+            store.set_panel(ALIGN_PANEL, "key_object_path", align_host::path_store_value(key.as_ref()));
+            true
+        });
+        if consumed {
+            return JasStatus::Ok;
+        }
+    }
+
     // The tool runs on its own store, so hand it the Artboards panel's facts
     // (selection, anchor) before every event, as the key route does for a
     // claimed key: the Artboard tool's handles, click and move read them.
@@ -291,6 +315,19 @@ pub unsafe extern "C" fn jas_pointer_event(
     let writes = tool.drain_pending_panel_writes();
     drop(slot);
     crate::ffi::apply_tool_panel_writes(engine, writes);
+    // A key that the tool's event deselected is cleared, as the web canvas
+    // clears it after every press and release (ALIGN.md §Panel state).
+    if kind != KIND_MOVE {
+        engine.with_store_mut(|store| {
+            let key = align_host::path_value(store.get_panel(ALIGN_PANEL, "key_object_path"));
+            if key.is_some() {
+                let kept = engine.with_model(|m| align_host::key_object_after_selection(m.document(), key.clone()));
+                if kept != key {
+                    store.set_panel(ALIGN_PANEL, "key_object_path", align_host::path_store_value(kept.as_ref()));
+                }
+            }
+        });
+    }
     if let Some((id, params)) = opened {
         crate::ffi::open_tool_dialog(engine, &id, &params);
     }
@@ -554,6 +591,60 @@ mod tests {
 
         assert_eq!(selection_len(e), 1,
                    "the marquee enclosed the rect, so the tool selected it");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ALIGN.md §Key-object designation through the C ABI: in key-object mode
+    /// a PLAIN press designates the selected element under it and the tool
+    /// never sees it; a SHIFT press goes to the tool (here it toggles B out of
+    /// the selection), and the key that left the selection is cleared.
+    #[test]
+    fn a_plain_press_designates_the_key_and_a_shift_press_that_deselects_it_clears_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        seed_two(e);
+        let key = || unsafe { &*e }.with_store_mut(|s|
+            align_host::path_value(s.get_panel(ALIGN_PANEL, "key_object_path")));
+        unsafe {
+            assert_eq!(jas_set_tool(e, 0), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 10.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 330.0, 120.0, MOD_DRAGGING);
+            jas_pointer_event(e, KIND_RELEASE, 330.0, 120.0, 0);
+        }
+        assert_eq!(selection_len(e), 2, "the marquee selected A and B");
+        // Selection mode first: a plain press is the tool's (no key written).
+        unsafe {
+            jas_pointer_event(e, KIND_PRESS, 250.0, 60.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 250.0, 60.0, 0);
+        }
+        assert_eq!(key(), None, "outside key-object mode nothing is designated");
+        // A shell's open seeds the panel's scope; a write to an unseeded
+        // scope is dropped by the store.
+        unsafe { &*e }.with_store_mut(|s| {
+            s.init_panel(ALIGN_PANEL, Default::default());
+            s.set_panel(ALIGN_PANEL, "align_to", serde_json::json!("key_object"));
+        });
+        // Re-select both (the press above may have narrowed the selection).
+        unsafe { &*e }.with_model_mut(|m| {
+            let mut d = m.document().clone();
+            d.selection = vec![ElementSelection::all(vec![0, 0]), ElementSelection::all(vec![0, 1])];
+            m.set_document_for_test(d);
+        });
+        unsafe {
+            assert_eq!(jas_pointer_event(e, KIND_PRESS, 250.0, 60.0, 0), JasStatus::Ok);
+        }
+        assert_eq!(key(), Some(vec![0, 1]), "a plain press on B designates B");
+        assert_eq!(selection_len(e), 2, "the designating press never reached the tool");
+        unsafe {
+            jas_pointer_event(e, KIND_RELEASE, 250.0, 60.0, 0);
+        }
+        assert_eq!(key(), Some(vec![0, 1]), "the release leaves a still-selected key alone");
+        unsafe {
+            jas_pointer_event(e, KIND_PRESS, 250.0, 60.0, MOD_SHIFT);
+            jas_pointer_event(e, KIND_RELEASE, 250.0, 60.0, MOD_SHIFT);
+        }
+        assert_eq!(selection_len(e), 1, "the shift press reached the tool, which toggled B off");
+        assert_eq!(key(), None, "B left the selection, so the key is cleared");
         unsafe { jas_engine_free(e) };
     }
 

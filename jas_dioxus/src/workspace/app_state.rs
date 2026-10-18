@@ -1776,52 +1776,11 @@ impl AppState {
             return false;
         }
         let Some(tab) = self.tabs.get(self.active_tab) else { return true; };
-        // Caller passes canvas-element coordinates; bounds are in
-        // document space. Invert zoom + pan so the hit-test uses the
-        // same coordinate system as e.bounds().
-        let zoom = tab.model.zoom_level;
-        let ox = tab.model.view_offset_x;
-        let oy = tab.model.view_offset_y;
-        let doc_x = (x - ox) / zoom;
-        let doc_y = (y - oy) / zoom;
-        let doc = tab.model.document();
-        // Hit-test against the current selection using preview
-        // bounds (matches what the user sees).
-        let mut hit: Option<crate::document::document::ElementPath> = None;
-        // RESOLVED: a symbol instance measures its TARGET, so the narrow form
-        // put its box at the ORIGIN — Align To in key-object mode could not
-        // designate a selected instance as the key, and a click near (0,0)
-        // designated one that is drawn nowhere near there.
-        let key_index = crate::document::id_index::rebuild_id_index(doc);
-        let key_resolver = crate::document::id_index::IndexResolver(&key_index);
-        for es in &doc.selection {
-            if let Some(e) = doc.get_element(&es.path) {
-                let Some((bx, by, bw, bh)) = crate::geometry::element::resolved_bounds_with(
-                    e,
-                    &key_resolver,
-                    crate::geometry::element::Element::bounds,
-                ) else {
-                    continue;
-                };
-                if doc_x >= bx && doc_x <= bx + bw && doc_y >= by && doc_y <= by + bh {
-                    hit = Some(es.path.clone());
-                    break;
-                }
-            }
-        }
-        match hit {
-            Some(p) => {
-                // Toggle: clicking the current key clears it.
-                if self.align_panel.key_object_path.as_ref() == Some(&p) {
-                    self.align_panel.key_object_path = None;
-                } else {
-                    self.align_panel.key_object_path = Some(p);
-                }
-            }
-            None => {
-                self.align_panel.key_object_path = None;
-            }
-        }
+        // Caller passes canvas-element coordinates. The hit, the toggle and
+        // the clear are `align_host`'s, which the engine's pointer route
+        // calls too.
+        self.align_panel.key_object_path = crate::interpreter::align_host::designate_key_object(
+            &tab.model, self.align_panel.key_object_path.as_ref(), x, y);
         true
     }
 
@@ -1832,15 +1791,12 @@ impl AppState {
     /// also clears the designation automatically." Idempotent
     /// — safe to call when no key is designated.
     pub(crate) fn sync_align_key_object_from_selection(&mut self) {
-        let Some(key_path) = self.align_panel.key_object_path.clone() else {
+        if self.align_panel.key_object_path.is_none() {
             return;
-        };
-        let Some(tab) = self.tabs.get(self.active_tab) else { return; };
-        let doc = tab.model.document();
-        let still_selected = doc.selection.iter().any(|es| es.path == key_path);
-        if !still_selected {
-            self.align_panel.key_object_path = None;
         }
+        let Some(tab) = self.tabs.get(self.active_tab) else { return; };
+        self.align_panel.key_object_path = crate::interpreter::align_host::key_object_after_selection(
+            tab.model.document(), self.align_panel.key_object_path.take());
     }
 
     /// Commit the 11 Justification-dialog field values onto every
