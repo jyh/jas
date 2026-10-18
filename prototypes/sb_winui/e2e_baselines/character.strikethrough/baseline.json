@@ -1,0 +1,10 @@
+{
+    "item":  "character.strikethrough",
+    "surface":  "2379x1333",
+    "frame_hash":  "40bd46cc5cac7e821186614df8d589f7f7508545ef52ac8cd75c4b1a43660d6b",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "1f840c01affaded2",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}

@@ -1,0 +1,10 @@
+{
+    "item":  "character.kerning",
+    "surface":  "2379x1333",
+    "frame_hash":  "bd70306fd81943fc793eea68926b53892e86f4b24600ea69c3e3fdc8be8f5412",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "8890a037c6b7352d",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
