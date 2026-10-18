@@ -1,0 +1,15 @@
+{
+  "item": "character.baseline_shift",
+  "spec": "workspace/panels/character.yaml",
+  "setup_svg": "text_basic.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 94, "y": 30},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "character_panel_content", "widget": "ch_baseline_shift", "event": "commit", "value": "5"},
+    {"read": "document"}
+  ],
+  "expected_json": "character.baseline_shift.expected.json"
+}
