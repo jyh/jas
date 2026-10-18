@@ -3871,3 +3871,27 @@ fn plain_point_text_keeps_one_run() {
     let r = runs_of(flat_text(20.0));
     assert_eq!(r, vec![("Hello".to_string(), 1.0, 2.0 + 0.8 * 20.0)]);
 }
+
+/// ⛔ NODE 26 (flask section 437): a set leading moves even ONE line of point
+/// text in legacy. `layout_with_paragraphs` takes the leading as its line
+/// height and puts the first baseline at `0.8 x leading`, so `line_height`
+/// is a layout input. The walk drew at `0.8 x size` and dropped it: on the
+/// box `character.leading` (24) drew the untouched frame.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_set_leading_moves_the_first_baseline_as_legacy_does() {
+    let mut t = flat_text(20.0);
+    t.line_height = "24pt".into();
+    let r = runs_of(t);
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert!((r[0].2 - (2.0 + 0.8 * 24.0)).abs() < 1e-9, "the baseline at y + 0.8 x leading: {r:?}");
+}
+
+/// The router side: a leading is a layout input wherever a real measurer exists.
+#[test]
+fn a_set_leading_needs_the_layout() {
+    let mut t = flat_text(20.0);
+    t.line_height = "24pt".into();
+    assert!(crate::painter::element_render::needs_layout(&t));
+    assert!(!crate::painter::element_render::needs_layout(&flat_text(20.0)), "control: no leading, no layout");
+}
