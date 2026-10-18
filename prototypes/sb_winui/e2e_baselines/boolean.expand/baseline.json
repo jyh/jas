@@ -1,0 +1,10 @@
+{
+    "item":  "boolean.expand",
+    "surface":  "2379x1333",
+    "frame_hash":  "7ebd4bc5c30cb1457a947ceafb909b62310d66d9df70b294f9f8c35f79af30f5",
+    "plan_panel":  "boolean_panel_content",
+    "plan_sha":  "214de6189eec9238",
+    "tab":  "[0,0]=on:\"compound_painted_and_rect.svg\"",
+    "tab_sha":  "b0f881fdc8fa8194",
+    "selection_count":  1
+}
