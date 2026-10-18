@@ -159,7 +159,7 @@ def main() -> int:
     if not args.range:
         ap.error("--range is required (or --self-test)")
     changed = subprocess.run(["git", "diff", "--name-only", args.range], cwd=ROOT, check=True,
-                             capture_output=True, text=True).stdout.split()
+                             capture_output=True, text=True, encoding="utf-8").stdout.split()
     lines = report(at_risk(changed, _read, load_baselines()))
     print("\n".join(lines) if lines else f"l2_baselines_at_risk {args.range}: no panel YAML changed")
     return 0
