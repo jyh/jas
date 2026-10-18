@@ -688,41 +688,12 @@ fn emit_laid_out_text(
             run(p, "-", x, baseline);
         }
     }
-    // ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass.
-    // Every sub-paragraph start (the first line, and any line after a hard
-    // break) of a list paragraph draws its marker at `x + left_indent` on that
-    // line's baseline. Consecutive same-style `num-*` sub-paragraphs count up;
-    // a different style, a bullet or no style resets the run.
-    let owner = |at: usize| segments.iter().position(|s| s.char_start <= at && at < s.char_end);
-    let mut starts: Vec<(usize, Option<String>, f64)> = Vec::new();
-    let mut after_break = true;
-    for (li, line) in layout.lines.iter().enumerate() {
-        if after_break {
-            let (style, indent) = owner(line.start)
-                .map_or((None, 0.0), |si| (segments[si].list_style.clone(), segments[si].left_indent));
-            starts.push((li, style, indent));
-        }
-        after_break = line.hard_break;
-    }
-    let mut prev_num: Option<String> = None;
-    let mut counter = 0usize;
-    for (li, style, indent) in starts {
-        let n = match style.as_deref() {
-            Some(st) if st.starts_with("num-") => {
-                counter = if prev_num.as_deref() == Some(st) { counter + 1 } else { 1 };
-                prev_num = Some(st.to_string());
-                counter
-            }
-            _ => {
-                prev_num = None;
-                counter = 0;
-                0
-            }
-        };
-        let Some(st) = style.filter(|st| !st.is_empty()) else { continue };
-        let marker = crate::algorithms::text_layout_paragraph::marker_text(&st, n);
-        if marker.is_empty() { continue; }
-        run(p, &marker, e.x + indent, e.y + layout.lines[li].baseline_y + y_shift);
+    // ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass,
+    // through the law the two renderers share (`list_marker_paragraphs`,
+    // node 30: a paragraph starts after a hard break OR at a wrapper's first
+    // line). Each marker at `x + left_indent` on its line's baseline.
+    for m in crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments) {
+        run(p, &m.text, e.x + m.indent, e.y + layout.lines[m.line].baseline_y + y_shift);
     }
 }
 
