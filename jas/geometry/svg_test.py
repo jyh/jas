@@ -620,6 +620,34 @@ class SvgImportTest(absltest.TestCase):
         self.assertEqual(cs.operation, CompoundOperation.SUBTRACT_FRONT)
         self.assertEqual(len(cs.operands), 2)
 
+    def test_compound_wrapper_paint_round_trips(self):
+        """BOOLEAN.md: a compound shape carries paint of its own on the
+        wrapper. The codec used to write no paint on the wrapper's <g> and
+        read it back as no fill and no stroke, so a saved compound reopened
+        unpainted. The operands are unpainted, so the wrapper's paint cannot
+        come from them; 1.5 pt is 2 px exactly. Mirrors the Rust
+        ``compound_wrapper_paint_round_trips_through_svg`` test."""
+        from geometry.element import CompoundOperation, CompoundShape, Stroke
+
+        def round_trip(fill, stroke):
+            operands = tuple(Rect(x=x, y=0, width=10, height=10, fill=None)
+                             for x in (0, 5))
+            cs = CompoundShape(operation=CompoundOperation.UNION,
+                               operands=operands, fill=fill, stroke=stroke)
+            doc = Document(layers=(Layer(children=(cs,)),))
+            back = svg_to_document(document_to_svg(doc)).layers[0].children[0]
+            self.assertIsInstance(back, CompoundShape)
+            return back.fill, back.stroke
+
+        blue, red = RgbColor(0, 0, 1), RgbColor(1, 0, 0)
+        fill, stroke = round_trip(Fill(color=blue), Stroke(color=red, width=1.5))
+        self.assertIsNotNone(fill, "wrapper fill round-trips")
+        self.assertEqual(fill.color, blue)
+        self.assertIsNotNone(stroke, "wrapper stroke round-trips")
+        self.assertEqual((stroke.color, stroke.width), (red, 1.5))
+        # The control: an unpainted wrapper stays unpainted.
+        self.assertEqual(round_trip(None, None), (None, None))
+
     def test_import_relative_path_commands(self):
         """Relative (lowercase) path commands are converted to absolute."""
         # m 10,20 l 30,0 l 0,40 z => absolute M 10,20 L 40,20 L 40,60 Z
