@@ -305,6 +305,19 @@ private func charStr(_ store: StateStore, _ field: String) -> String {
     return (characterPanelDefaults[field] as? String) ?? ""
 }
 
+/// The Kerning entry as text. The control is a number_input and commits a
+/// NUMBER; the reference stringifies the field before reading it
+/// (`character_law.py`, `kerning_attr(str(...))`), so 50 and "50" are one
+/// entry. `charStr` alone dropped every number to the "Auto" default.
+private func charKerning(_ store: StateStore) -> String {
+    switch characterPanelField(store, "kerning") {
+    case let n as NSNumber where !(n is NSString): return String(n.doubleValue)
+    case let d as Double: return String(d)
+    case let i as Int: return String(i)
+    default: return charStr(store, "kerning")
+    }
+}
+
 private func charNum(_ store: StateStore, _ field: String) -> Double {
     switch characterPanelField(store, field) {
     case let n as NSNumber: return n.doubleValue
@@ -408,7 +421,7 @@ public func characterWithGroup(
             c.lineHeight = ""
         }
     case .kerning:
-        c.kerning = kerningAttr(charStr(store, "kerning"))
+        c.kerning = kerningAttr(charKerning(store))
     case .tracking:
         let tracking = charNum(store, "tracking")
         c.letterSpacing = tracking == 0.0 ? "" : fmtNum(tracking / 1000.0) + "em"

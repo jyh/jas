@@ -706,7 +706,15 @@ impl CharacterPanelState {
         match key {
             "font_family" => if let Some(x) = v.as_str() { self.font_family = x.into() },
             "style_name" => if let Some(x) = v.as_str() { self.style_name = x.into() },
-            "kerning" => if let Some(x) = v.as_str() { self.kerning = x.into() },
+            // The Kerning control is a number_input and commits a NUMBER; the
+            // reference stringifies the field before reading it
+            // (`character_law.py`, `kerning_attr(str(...))`), so 50 and "50"
+            // are one entry. Taking only a string dropped every number.
+            "kerning" => if let Some(x) = v.as_str() {
+                self.kerning = x.into()
+            } else if let Some(n) = v.as_f64() {
+                self.kerning = format!("{n}")
+            },
             "language" => if let Some(x) = v.as_str() { self.language = x.into() },
             "anti_aliasing" => if let Some(x) = v.as_str() { self.anti_aliasing = x.into() },
             "font_size" => if let Some(x) = num(v) { self.font_size = x },
