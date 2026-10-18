@@ -448,6 +448,20 @@ jobs:
           MB="$(git merge-base origin/main HEAD)" || exit 1
           if [ "$MB" != "$(git rev-parse HEAD)" ]; then RANGE="$MB..HEAD"; else RANGE="$(sh scripts/pick_scan_range.sh)" || exit 1; fi
           python scripts/check_baseline_spec_change.py --range "$RANGE"
+      # The other direction (STATUS-flask section 449): a panel-YAML change can
+      # move the plan a WinUI baseline pins, which only the box's re-certify
+      # sees. This NAMES the baselines frozen on each changed panel (advice for
+      # the merger to pass to the box, never a refusal); its self-test holds the
+      # live tree to "every baseline's plan_panel is a live panel id".
+      - name: Name the WinUI baselines a panel change may un-certify
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          python scripts/l2_baselines_at_risk.py --self-test
+          MB="$(git merge-base origin/main HEAD)" || exit 1
+          if [ "$MB" != "$(git rev-parse HEAD)" ]; then RANGE="$MB..HEAD"; else RANGE="$(sh scripts/pick_scan_range.sh)" || exit 1; fi
+          python scripts/l2_baselines_at_risk.py --range "$RANGE"
       # ffi_paint.rs pins the SVG corpus count, and that test runs ONLY on the
       # Windows Direct2D lane, so a new SVG fixture used to go red there and
       # green everywhere its author could run. This reads the pin on every lane.
