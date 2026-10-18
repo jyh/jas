@@ -249,6 +249,45 @@
       "expected": {"dash": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0], "dash_align_anchors": true}
     },
     {
+      "name": "dash_pair_3_without_pair_2_is_unused",
+      "_comment": "A blank pair ENDS the pattern: the reference's loop over pairs 2 and 3 breaks at the first pair with either half unset, so pair 3 counts only after a whole pair 2. Before this vector the three implementations gave three answers here: the reference [1, 2], Swift [1, 2, 5, 6] (it appended pair 3), Rust [1, 2, 0, 0, 5, 6] (it wrote pair 3 at slots 4 and 5 behind a zero pair).",
+      "op": "panel_edit",
+      "base": "rich_stroke",
+      "panel": {
+        "dashed": true, "dash_1": 1.0, "gap_1": 2.0, "dash_3": 5.0, "gap_3": 6.0,
+        "dash_align_anchors": false
+      },
+      "edited": "dash_3",
+      "committed_width": 1.0,
+      "expected": {"dash": [1.0, 2.0], "dash_align_anchors": false}
+    },
+    {
+      "name": "dash_pair_3_after_half_of_pair_2_is_unused",
+      "_comment": "The same law when pair 2 is HALF set: a pair with either half blank is blank, and it still ends the pattern.",
+      "op": "panel_edit",
+      "base": "rich_stroke",
+      "panel": {
+        "dashed": true, "dash_1": 1.0, "gap_1": 2.0, "dash_2": 3.0, "dash_3": 5.0,
+        "gap_3": 6.0, "dash_align_anchors": false
+      },
+      "edited": "gap_3",
+      "committed_width": 1.0,
+      "expected": {"dash": [1.0, 2.0], "dash_align_anchors": false}
+    },
+    {
+      "name": "dash_half_of_pair_3_is_unused",
+      "_comment": "A half-set pair 3 after a whole pair 2: the pattern stops at pair 2.",
+      "op": "panel_edit",
+      "base": "rich_stroke",
+      "panel": {
+        "dashed": true, "dash_1": 1.0, "gap_1": 2.0, "dash_2": 3.0, "gap_2": 4.0,
+        "dash_3": 5.0, "dash_align_anchors": false
+      },
+      "edited": "dash_3",
+      "committed_width": 1.0,
+      "expected": {"dash": [1.0, 2.0, 3.0, 4.0], "dash_align_anchors": false}
+    },
+    {
       "name": "dashed_toggle_off_clears_the_pattern",
       "_comment": "dashed=false empties the pattern — and nothing else. The 5pt width and both arrowheads survive.",
       "op": "panel_edit",

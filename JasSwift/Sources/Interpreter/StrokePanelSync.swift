@@ -255,13 +255,13 @@ public func strokeWithGroup(
         if dashed {
             pattern = [strokePanelNumber(store, "dash_1") ?? 12.0,
                        strokePanelNumber(store, "gap_1") ?? 12.0]
-            if let d2 = strokePanelNumber(store, "dash_2"),
-               let g2 = strokePanelNumber(store, "gap_2") {
-                pattern.append(contentsOf: [d2, g2])
-            }
-            if let d3 = strokePanelNumber(store, "dash_3"),
-               let g3 = strokePanelNumber(store, "gap_3") {
-                pattern.append(contentsOf: [d3, g3])
+            // A blank pair ends the pattern, as the reference's loop breaks
+            // (`stroke_law.py`, `_panel_dash`): pair 3 counts only after a
+            // whole pair 2.
+            for (dk, gk) in [("dash_2", "gap_2"), ("dash_3", "gap_3")] {
+                guard let d = strokePanelNumber(store, dk),
+                      let g = strokePanelNumber(store, gk) else { break }
+                pattern.append(contentsOf: [d, g])
             }
         }
         dashPattern = pattern
