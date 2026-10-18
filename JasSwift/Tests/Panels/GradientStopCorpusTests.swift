@@ -10,8 +10,9 @@ import Foundation
 private func gradientStopCorpus() -> [[String: Any]] {
     let testsDir = ((#filePath as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent
     let jasSwiftDir = (testsDir as NSString).deletingLastPathComponent
-    let path = ((jasSwiftDir as NSString)
-        .appendingPathComponent("../test_fixtures/gradient_stop/stop_edit.json") as NSString).standardizingPath
+    let fixtures = (jasSwiftDir as NSString).appendingPathComponent("../test_fixtures")
+    let path = ((fixtures as NSString)
+        .appendingPathComponent("gradient_stop/stop_edit.json") as NSString).standardizingPath
     guard let data = FileManager.default.contents(atPath: path),
           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
           let vectors = obj["vectors"] as? [[String: Any]] else {
