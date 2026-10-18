@@ -1272,10 +1272,17 @@ fn element_svg_body(elem: &Element, indent: &str) -> String {
                     crate::geometry::live::CompoundOperation::Intersection => "intersection",
                     crate::geometry::live::CompoundOperation::Exclude => "exclude",
                 };
+                // The wrapper's own paint (BOOLEAN.md: a compound "carries
+                // paint of its own on the wrapper"). Written only when present,
+                // so an unpainted compound's markup is unchanged.
+                let mut paint = String::new();
+                if cs.fill.is_some() { paint.push_str(&fill_attrs(&cs.fill)); }
+                if cs.stroke.is_some() { paint.push_str(&stroke_attrs(&cs.stroke)); }
                 let mut lines = vec![format!(
-                    "{}<g data-jas-live=\"compound_shape\" data-jas-operation=\"{}\"{}>",
+                    "{}<g data-jas-live=\"compound_shape\" data-jas-operation=\"{}\"{}{}>",
                     indent,
                     op,
+                    paint,
                     common_attrs(&cs.common),
                 )];
                 let child_indent = format!("{}  ", indent);
@@ -2738,7 +2745,8 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
                 };
                 return Some(Element::Live(crate::geometry::live::LiveVariant::CompoundShape(
                     crate::geometry::live::CompoundShape {
-                        operation, operands: children, fill: None, stroke: None, common,
+                        operation, operands: children,
+                        fill: parse_fill(node), stroke: parse_stroke(node), common,
                     },
                 )));
             }
@@ -5679,6 +5687,53 @@ mod tests {
             }
             other => panic!("expected a CompoundShape, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn compound_wrapper_paint_round_trips_through_svg() {
+        // BOOLEAN.md: a compound shape "carries paint of its own on the
+        // wrapper", inherited from the frontmost operand at creation and
+        // independently editable after. The codec used to write no paint on
+        // the wrapper and read it back as `fill: None, stroke: None`, so a
+        // saved compound reopened unpainted and Expand carried no paint.
+        // The operands are unpainted on purpose: the wrapper's paint must
+        // not come from them. The stroke width is 1.5 pt = 2 px exactly, so
+        // the pt/px conversion adds no rounding to the comparison.
+        use crate::geometry::live::{LiveVariant, CompoundShape, CompoundOperation};
+        use crate::geometry::element::{RectElem, CommonProps, Color, Fill, Stroke};
+        let rect_at = |x: f64| RectElem {
+            x, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+            fill: None, stroke: None,
+            common: CommonProps::default(), fill_gradient: None, stroke_gradient: None,
+        };
+        let blue = Color::rgb(0.0, 0.0, 1.0);
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        let compound = |fill: Option<Fill>, stroke: Option<Stroke>| CompoundShape {
+            operation: CompoundOperation::Union,
+            operands: vec![
+                std::rc::Rc::new(Element::Rect(rect_at(0.0))),
+                std::rc::Rc::new(Element::Rect(rect_at(5.0))),
+            ],
+            fill, stroke, common: CommonProps::default(),
+        };
+        let round_trip = |cs: CompoundShape| {
+            let mut doc = Document::default();
+            doc.artboards.clear();
+            doc.layers[0].children_mut().unwrap()
+                .push(std::rc::Rc::new(Element::Live(LiveVariant::CompoundShape(cs))));
+            let parsed = svg_to_document(&document_to_svg(&doc));
+            match parsed.layers[0].children().unwrap()[0].as_ref() {
+                Element::Live(LiveVariant::CompoundShape(c)) => (c.fill, c.stroke.clone()),
+                other => panic!("expected a CompoundShape, got {other:?}"),
+            }
+        };
+        let painted = round_trip(compound(Some(Fill::new(blue)), Some(Stroke::new(red, 1.5))));
+        assert_eq!(painted.0.map(|f| f.color), Some(blue), "wrapper fill round-trips");
+        assert_eq!(painted.1.as_ref().map(|s| (s.color, s.width)), Some((red, 1.5)),
+            "wrapper stroke round-trips");
+        // The control: an unpainted wrapper stays unpainted, so the arm above
+        // is not satisfied by a reader that paints every compound.
+        assert_eq!(round_trip(compound(None, None)), (None, None), "no paint stays no paint");
     }
 
     #[test]

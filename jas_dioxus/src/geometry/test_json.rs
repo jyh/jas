@@ -553,6 +553,37 @@ fn tspan_json(t: &crate::geometry::tspan::Tspan) -> String {
     o.opt_str("text_transform", &t.text_transform);
     o.raw("transform", transform_json(&t.transform));
     o.opt_str("xml_lang", &t.xml_lang);
+    // The paragraph attributes (the paragraph wrapper tspan carries them),
+    // null when absent like every key above. `build` sorts the keys.
+    o.opt_str("jas_role", &t.jas_role);
+    o.opt_str("jas_list_style", &t.jas_list_style);
+    o.opt_str("text_align", &t.text_align);
+    o.opt_str("text_align_last", &t.text_align_last);
+    o.opt_str("jas_single_word_justify", &t.jas_single_word_justify);
+    o.opt_bool("jas_hyphenate", t.jas_hyphenate);
+    o.opt_bool("jas_hanging_punctuation", t.jas_hanging_punctuation);
+    o.opt_bool("jas_hyphenate_capitalized", t.jas_hyphenate_capitalized);
+    o.opt_num("jas_left_indent", t.jas_left_indent);
+    o.opt_num("jas_right_indent", t.jas_right_indent);
+    o.opt_num("text_indent", t.text_indent);
+    o.opt_num("jas_space_before", t.jas_space_before);
+    o.opt_num("jas_space_after", t.jas_space_after);
+    o.opt_num("jas_word_spacing_min", t.jas_word_spacing_min);
+    o.opt_num("jas_word_spacing_desired", t.jas_word_spacing_desired);
+    o.opt_num("jas_word_spacing_max", t.jas_word_spacing_max);
+    o.opt_num("jas_letter_spacing_min", t.jas_letter_spacing_min);
+    o.opt_num("jas_letter_spacing_desired", t.jas_letter_spacing_desired);
+    o.opt_num("jas_letter_spacing_max", t.jas_letter_spacing_max);
+    o.opt_num("jas_glyph_scaling_min", t.jas_glyph_scaling_min);
+    o.opt_num("jas_glyph_scaling_desired", t.jas_glyph_scaling_desired);
+    o.opt_num("jas_glyph_scaling_max", t.jas_glyph_scaling_max);
+    o.opt_num("jas_auto_leading", t.jas_auto_leading);
+    o.opt_num("jas_hyphenate_min_word", t.jas_hyphenate_min_word);
+    o.opt_num("jas_hyphenate_min_before", t.jas_hyphenate_min_before);
+    o.opt_num("jas_hyphenate_min_after", t.jas_hyphenate_min_after);
+    o.opt_num("jas_hyphenate_limit", t.jas_hyphenate_limit);
+    o.opt_num("jas_hyphenate_zone", t.jas_hyphenate_zone);
+    o.opt_num("jas_hyphenate_bias", t.jas_hyphenate_bias);
     o.build()
 }
 
@@ -3096,6 +3127,63 @@ mod tests {
         assert!(json.contains("\"text_decoration\":[]"), "in: {json}");
         // And the bytes are JSON: the whole point of the escaper.
         serde_json::from_str::<serde_json::Value>(&json).expect("emitted invalid JSON");
+    }
+
+    /// The paragraph attributes ride the tspan (the paragraph wrapper carries
+    /// them), and the canonical JSON used to emit none of them: the parser read
+    /// all of them and the writer wrote 22 keys, so justify, the indents and
+    /// the spacing ranges reached no read-back, and four justify scripts read
+    /// back byte-identical documents. Each field gets its OWN value, so a key
+    /// written under a sibling's name cannot pass.
+    #[test]
+    fn tspan_paragraph_attributes_round_trip_through_test_json() {
+        let strs = ["jas_role", "jas_list_style", "text_align", "text_align_last",
+                    "jas_single_word_justify"];
+        let bools = ["jas_hyphenate", "jas_hanging_punctuation", "jas_hyphenate_capitalized"];
+        let nums = ["jas_left_indent", "jas_right_indent", "text_indent", "jas_space_before",
+                    "jas_space_after", "jas_word_spacing_min", "jas_word_spacing_desired",
+                    "jas_word_spacing_max", "jas_letter_spacing_min", "jas_letter_spacing_desired",
+                    "jas_letter_spacing_max", "jas_glyph_scaling_min", "jas_glyph_scaling_desired",
+                    "jas_glyph_scaling_max", "jas_auto_leading", "jas_hyphenate_min_word",
+                    "jas_hyphenate_min_before", "jas_hyphenate_min_after", "jas_hyphenate_limit",
+                    "jas_hyphenate_zone", "jas_hyphenate_bias"];
+        let mut tspan = serde_json::json!({"id": 1, "content": "t"});
+        for k in strs { tspan[k] = serde_json::json!(format!("v_{k}")); }
+        for k in bools { tspan[k] = serde_json::json!(true); }
+        for (i, k) in nums.iter().enumerate() { tspan[*k] = serde_json::json!(1.5 + i as f64); }
+        let text = parse_element(&serde_json::json!({
+            "type": "text", "x": 0.0, "y": 0.0, "font_size": 12.0, "tspans": [tspan.clone()],
+        }));
+        let emitted: serde_json::Value = serde_json::from_str(&element_json(&text)).unwrap();
+        let back = &emitted["tspans"][0];
+        for k in strs.iter().chain(bools.iter()).chain(nums.iter()) {
+            assert_eq!(back[*k], tspan[*k], "tspan key {k} did not round-trip: {back}");
+        }
+    }
+
+    /// The tspan writer's key set is the Tspan struct's field set, derived from
+    /// the struct's source, so a field added to Tspan without a writer line
+    /// reds here instead of silently reaching no read-back.
+    #[test]
+    fn tspan_json_writes_every_tspan_field() {
+        let src = include_str!("tspan.rs");
+        let body = &src[src.find("pub struct Tspan {").unwrap()..];
+        let body = &body[..body.find("\n}").unwrap()];
+        let mut fields: Vec<String> = body.lines()
+            .filter_map(|l| l.trim().strip_prefix("pub "))
+            .filter_map(|l| l.split_once(':').map(|(n, _)| n.trim().to_string()))
+            .filter(|n| !n.starts_with("struct"))
+            .collect();
+        fields.sort();
+        assert!(fields.len() > 40, "the field census read too little of tspan.rs: {fields:?}");
+        let text = parse_element(&serde_json::json!({
+            "type": "text", "x": 0.0, "y": 0.0, "font_size": 12.0,
+            "tspans": [{"id": 1, "content": "t"}],
+        }));
+        let emitted: serde_json::Value = serde_json::from_str(&element_json(&text)).unwrap();
+        let mut keys: Vec<String> = emitted["tspans"][0].as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, fields, "tspan_json's keys differ from Tspan's fields");
     }
 
     /// SITE: `text_decoration_json` — the element-wide `text_decoration` list.

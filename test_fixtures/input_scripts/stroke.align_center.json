@@ -1,0 +1,15 @@
+{
+  "item": "stroke.align_center",
+  "spec": "workspace/panels/stroke.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "stroke_panel_content", "widget": "stk_align_stroke_inside", "event": "click"},
+    {"panel": "stroke_panel_content", "widget": "stk_align_stroke_center", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "stroke.align_center.expected.json"
+}

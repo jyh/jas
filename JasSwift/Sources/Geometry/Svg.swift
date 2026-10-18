@@ -1017,8 +1017,14 @@ private func elementSvgBody(_ elem: Element, indent: String) -> String {
             // whose reader lifted the label correctly on the way in.
             // `nameAttr` emits nothing when the name is nil, so an unnamed
             // compound is byte-identical to before.
+            // The wrapper's own paint (BOOLEAN.md: a compound "carries paint
+            // of its own on the wrapper"), written only when present so an
+            // unpainted compound is byte-identical to before, and placed
+            // after the operation as Rust places it.
+            let paint = (cs.fill == nil ? "" : fillAttrs(cs.fill))
+                + (cs.stroke == nil ? "" : strokeAttrs(cs.stroke))
             var lines = ["\(indent)<g data-jas-live=\"compound_shape\"" +
-                " data-jas-operation=\"\(cs.operation.rawValue)\"" +
+                " data-jas-operation=\"\(cs.operation.rawValue)\"" + paint +
                 "\(opacityAttr(cs.opacity))\(transformAttr(cs.transform))\(idLockAttrs(cs.id, locked: cs.locked))\(nameAttr(cs.name))>"]
             for child in cs.operands {
                 lines.append(elementSvg(child, indent: indent + "  "))
@@ -2288,6 +2294,7 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
             // discarded here for want of a slot.
             return .live(.compoundShape(CompoundShape(
                 operation: operation, operands: children, name: name, id: id,
+                fill: parseFill(elem), stroke: parseStroke(elem),
                 opacity: opacity, transform: transform)))
         }
         // A Transformed wrapper is <g data-jas-live="transformed"> around

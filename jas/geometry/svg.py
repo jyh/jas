@@ -514,8 +514,14 @@ def _element_svg(elem: Element, indent: str) -> str:
             # but NOT name (live elements never emit inkscape:label).
             attrs = (f'{_opacity_attr(opacity)}{_transform_attr(transform)}'
                      f'{_id_lock_attrs(eid, elem.locked)}')
+            # The wrapper's own paint (BOOLEAN.md: a compound "carries paint
+            # of its own on the wrapper"), written only when present so an
+            # unpainted compound's markup is unchanged, after the operation
+            # as Rust and Swift place it.
+            paint = ((_fill_attrs(elem.fill) if elem.fill is not None else '')
+                     + (_stroke_attrs(elem.stroke) if elem.stroke is not None else ''))
             lines = [f'{indent}<g data-jas-live="compound_shape"'
-                     f' data-jas-operation="{operation.value}"{attrs}>']
+                     f' data-jas-operation="{operation.value}"{paint}{attrs}>']
             for child in operands:
                 lines.append(_element_svg(child, indent + "  "))
             lines.append(f'{indent}</g>')
@@ -1488,7 +1494,7 @@ def _parse_element(node: ET.Element) -> Element | None:
             }.get(op_str, CompoundOperation.UNION)
             return CompoundShape(
                 operation=operation, operands=tuple(children),
-                fill=None, stroke=None,
+                fill=_parse_fill(node), stroke=_parse_stroke(node),
                 opacity=opacity, transform=transform, id=eid, locked=locked)
         # Layer detection: only inkscape:groupmode="layer" promotes a
         # <g> to a Layer. inkscape:label alone is a Group name now
