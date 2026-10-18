@@ -2403,6 +2403,18 @@ Test-Case 'pa: an enabled button is clicked through Invoke' {
 Test-Case 'pa: a text box is committed through Value' {
     Show-SbPanelAction (Select-SbPanelAction -Panel 'align_panel_content' -Widget 'distribute_spacing_value' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Edit' -Patterns $uiaTextBox)
 } 'Value'
+# NODE 31 (flask section 445): an EDITABLE combo (grad_angle_combo, measured on
+# the Windows box: Selection, Value, ExpandCollapse, ScrollItem, ItemContainer) was taken
+# through Value, and SetValue on a text that names an item selects nothing, so
+# the shell's SelectionChanged never ran. Its items are plain text (PaneView
+# keeps text items for an editable box), so it is chosen by NAME.
+$uiaEditCombo = @('SelectionPatternIdentifiers.Pattern', 'ValuePatternIdentifiers.Pattern', 'ExpandCollapsePatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'ItemContainerPatternIdentifiers.Pattern')
+Test-Case 'pa: an editable combo is committed by choosing its item by name' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'gradient_panel_content' -Widget 'grad_angle_combo' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.ComboBox' -Patterns $uiaEditCombo)
+} 'ChooseByName'
+Test-Case 'pa: CONTROL -- an edit box that also exposes Selection is still committed through Value' {
+    Show-SbPanelAction (Select-SbPanelAction -Panel 'p' -Widget 'w' -Event 'commit' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.Edit' -Patterns $uiaEditCombo)
+} 'Value'
 Test-Case 'pa: a toggle is clicked through Toggle, a selection item through Select' {
     $t = Select-SbPanelAction -Panel 'stroke_panel_content' -Widget 'stk_dashed' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.CheckBox' -Patterns $uiaCheckBox
     $r = Select-SbPanelAction -Panel 'p' -Widget 'r' -Event 'click' -PanelCount 1 -WidgetCount 1 -Enabled $true -ControlType 'ControlType.RadioButton' -Patterns @('SelectionItemPatternIdentifiers.Pattern')
@@ -2448,6 +2460,12 @@ function Show-SbChoice($a) { if ($null -ne $a.Refusal) { "REFUSED: $($a.Refusal)
 # list was open): [SelectionItemPatternIdentifiers.Pattern,
 # ScrollItemPatternIdentifiers.Pattern, VirtualizedItemPatternIdentifiers.Pattern].
 $uiaComboItem = @('SelectionItemPatternIdentifiers.Pattern', 'ScrollItemPatternIdentifiers.Pattern', 'VirtualizedItemPatternIdentifiers.Pattern')
+Test-Case 'ci: an item chosen by name that no item carries is refused by name' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'grad_angle_combo' -Value '37' -ItemCount 0 -Patterns @() -By 'name')
+} "REFUSED: value '37' is not the name of any item of widget 'grad_angle_combo': this driver chooses an editable combo's item by name and does not type a value no item carries"
+Test-Case 'ci: an item chosen by name, found once, is selected' {
+    Show-SbChoice (Select-SbChoiceItem -Widget 'grad_angle_combo' -Value '45' -ItemCount 1 -Patterns @('SelectionItemPatternIdentifiers.Pattern') -By 'name')
+} 'Select'
 Test-Case 'ch: the one item whose AutomationId is the value is selected' {
     Show-SbChoice (Select-SbChoiceItem -Widget 'op_mode' -Value 'multiply' -ItemCount 1 -Patterns $uiaComboItem)
 } 'Select'

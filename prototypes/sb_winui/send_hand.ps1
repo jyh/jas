@@ -519,17 +519,27 @@ if ($panelSteps.Count -gt 0) {
     # whose AutomationId is the VALUE (the shell sets it), select it, and close
     # the list if it is still open. The items appear on the open, so they are
     # re-read for PanelWaitMs. Returns null, or the refusal.
-    function Invoke-SbChoose($List, [string]$Value, [string]$Widget, [string]$Tag) {
+    function Invoke-SbChoose($List, [string]$Value, [string]$Widget, [string]$Tag, [string]$By = 'id') {
         $ec = $List.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
         $ec.Expand()
-        $byValue = New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Value)
+        # By id (a select's items carry the option's value) or by NAME (an
+        # editable combo's text items, node 31).
+        # By NAME the item's own text element carries the same Name (measured:
+        # '45' found twice), so the search is held to list items.
+        $byValue = if ($By -eq 'name') {
+            New-Object System.Windows.Automation.AndCondition(
+                (New-Object System.Windows.Automation.PropertyCondition($AE::NameProperty, $Value)),
+                (New-Object System.Windows.Automation.PropertyCondition($AE::ControlTypeProperty, [System.Windows.Automation.ControlType]::ListItem)))
+        } else {
+            New-Object System.Windows.Automation.PropertyCondition($AE::AutomationIdProperty, $Value)
+        }
         $isw = [System.Diagnostics.Stopwatch]::StartNew()
         do {
             $items = $List.FindAll($tree::Descendants, $byValue)
             if ($items.Count -eq 0) { Start-Sleep -Milliseconds 100 }
         } while ($items.Count -eq 0 -and $isw.ElapsedMilliseconds -lt $PanelWaitMs)
         $itemPats = if ($items.Count -eq 1) { @($items[0].GetSupportedPatterns() | ForEach-Object { $_.ProgrammaticName }) } else { @() }
-        $choice = Select-SbChoiceItem -Widget $Widget -Value $Value -ItemCount $items.Count -Patterns $itemPats
+        $choice = Select-SbChoiceItem -Widget $Widget -Value $Value -ItemCount $items.Count -Patterns $itemPats -By $By
         $log.Add("$Tag choose items=$($items.Count) item-patterns=[$($itemPats -join ',')] waited-ms=$($isw.ElapsedMilliseconds)")
         if ($null -ne $choice.Refusal) {
             try { $ec.Collapse() } catch { }
@@ -668,6 +678,10 @@ if ($panelSteps.Count -gt 0) {
             'SelectionItem' { $el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select() }
             'Choose' {
                 $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag
+                if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
+            }
+            'ChooseByName' {
+                $why = Invoke-SbChoose -List $el -Value "$($ps.value)" -Widget "$($ps.widget)" -Tag $tag -By 'name'
                 if ($null -ne $why) { Stop-SbPanelHand "$tag -- $why" }
             }
             'Value' {
