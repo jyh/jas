@@ -2307,7 +2307,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 96, "the fixture corpus changed size");
+        assert_eq!(total, 97, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2447,6 +2447,12 @@ mod tests {
         // and a first paragraph that wraps at its 240 px inline-size. Flat
         // text (empty wrappers), which presents; that it does is read, not
         // measured here. Both pins bumped in the same edit.
+        // ⛔ 96 → 97 (jas, 2026-10-18, the multi-tspan plan's first fixture):
+        // `text_area_styled_wrap.svg`, area text whose bold middle run is long
+        // enough to wrap. NON-flat text with a font override only, which the
+        // walk's segmented lowering carries where a measurer exists, so it
+        // presents (on one line, which is the point of the fixture); that it
+        // does is read, not measured here. Both pins bumped in the same edit.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2458,6 +2464,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 96, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 97, "the whole corpus presents");
     }
 }

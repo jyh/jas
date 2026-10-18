@@ -1549,7 +1549,14 @@ fn parse_xml_node(input: &str) -> Option<(XmlNode, &str)> {
     let _close_tag = format!("</{}", tag.split(':').next_back().unwrap_or(&tag));
     // Also handle namespaced close tags
     loop {
-        rest = rest.trim_start();
+        // Skip a run of only whitespace before a tag (indentation), but keep
+        // it when text follows: it is the start of the text, and a tspan's
+        // leading space is content (`<tspan> world</tspan>`). Trimming it
+        // here made a range-styled word lose the space before it.
+        let trimmed = rest.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('<') {
+            rest = trimmed;
+        }
         if rest.is_empty() {
             break;
         }
@@ -5136,6 +5143,31 @@ mod tests {
         assert_eq!(t.tspans.len(), 1);
         assert_eq!(t.tspans[0].content, "abc");
         assert_eq!(t.tspans[0].rotate, Some(30.0));
+    }
+
+    /// A tspan's content keeps its LEADING whitespace: `<tspan> world</tspan>`
+    /// after `<tspan>Hello</tspan>` is "Hello world", not "Helloworld". The
+    /// XML reader trimmed the start of every text run, so a range-styled word
+    /// lost the space before it on import, and so on every save and reopen;
+    /// Swift's parser keeps it. Indentation between elements (a run of only
+    /// whitespace before a tag) is still skipped, and the round trip through
+    /// the writer is the second arm.
+    #[test]
+    fn a_tspan_keeps_its_leading_whitespace_on_import() {
+        let svg = tspan_svg_doc(r#"<tspan>Hello</tspan><tspan font-weight="bold"> world</tspan><tspan>  two</tspan>"#);
+        let doc = svg_to_document(&svg);
+        let Element::Text(t) = &*doc.layers[0].children().unwrap()[0] else { panic!("expected Text"); };
+        let contents: Vec<&str> = t.tspans.iter().map(|x| x.content.as_str()).collect();
+        assert_eq!(contents, vec!["Hello", " world", "  two"]);
+        // Through the writer and back: the spaces survive a save and reopen.
+        let again = svg_to_document(&document_to_svg(&doc));
+        let Element::Text(t2) = &*again.layers[0].children().unwrap()[0] else { panic!("expected Text"); };
+        let contents2: Vec<&str> = t2.tspans.iter().map(|x| x.content.as_str()).collect();
+        assert_eq!(contents2, contents);
+        // Indentation between elements is not content.
+        let indented = "<?xml version=\"1.0\"?>\n<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\">\n  <g>\n    <rect x=\"0\" y=\"0\" width=\"1\" height=\"1\"/>\n  </g>\n</svg>";
+        let d = svg_to_document(indented);
+        assert_eq!(d.layers.len(), 1, "an indented document still imports one layer");
     }
 
     #[test]

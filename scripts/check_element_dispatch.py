@@ -134,6 +134,25 @@ def _strip_noise(src):
     i, n = 0, len(src)
     while i < n:
         c = src[i]
+        # A Rust RAW STRING (`r"…"`, `r#"…"#`, `br#"…"#`): one literal however
+        # many quotes or `//` it holds, closed only by a quote followed by the
+        # same number of `#`. Read as plain strings, an SVG literal closes at
+        # its first attribute quote and a URL's `//` then reads as a comment,
+        # which inverts the string state for the rest of the file.
+        if c == "r" and (i == 0 or not (src[i - 1].isalnum() or src[i - 1] == "_")
+                         or (src[i - 1] == "b" and (i < 2 or not (src[i - 2].isalnum() or src[i - 2] == "_")))):
+            j = i + 1
+            while j < n and src[j] == "#":
+                j += 1
+            if j < n and src[j] == '"':
+                close = '"' + "#" * (j - i - 1)
+                end = src.find(close, j + 1)
+                end = n if end == -1 else end + len(close)
+                for k in range(i, end):
+                    if out[k] != "\n":
+                        out[k] = " "
+                i = end
+                continue
         if c == '"':
             j = i + 1
             while j < n and src[j] != '"':
@@ -428,6 +447,17 @@ def self_test():
         #     quote, so treating it as one would blank code instead.
         "jas_dioxus/src/p.rs":
             f"fn life<'a>(e: &'a Element) -> f64 {{ match e {{ {rect} {circ} {elli} _ => 0.0 }} }}\n",
+        # (q) A RAW STRING is one literal however many quotes it holds:
+        #     `r#"<svg xmlns="http://x" a="{">"#` read as plain strings closes
+        #     at `xmlns="`, then takes `//` in the URL for a comment, which ate
+        #     a quote and inverted the string state for the rest of the file
+        #     (svg.rs's SVG test literals, 2026-10-18: a test was reported as
+        #     the function after it). The blind function after it must still
+        #     be FOUND, under its own name.
+        "jas_dioxus/src/q.rs":
+            'fn raw() -> &\'static str { r#"<svg xmlns="http://x" a="{">"# }\n'
+            'fn raw2() -> &\'static str { r"a//b" }\n'
+            f"fn after_raw(e: &Element) -> f64 {{ match e {{ {rect} {circ} {elli} _ => 0.0 }} }}\n",
     }
     found = {key(s) for s in scan(corpus)}
     expected = {
@@ -441,6 +471,7 @@ def self_test():
         "swift:JasSwift/Sources/n.swift::area",
         "rust:jas_dioxus/src/o.rs::after_quote",
         "rust:jas_dioxus/src/p.rs::life",
+        "rust:jas_dioxus/src/q.rs::after_raw",
     }
     silent = {
         "rust:jas_dioxus/src/b.rs::paint",
@@ -452,6 +483,8 @@ def self_test():
         "swift:JasSwift/Sources/i.swift::nowMs",
         "rust:jas_dioxus/src/l.rs::decl",
         "swift:JasSwift/Sources/m.swift::toolYamlId",
+        "rust:jas_dioxus/src/q.rs::raw",
+        "rust:jas_dioxus/src/q.rs::raw2",
     }
     for k in expected - found:
         failures.append(f"  MISSED a container-blind site: {k}")
