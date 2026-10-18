@@ -364,8 +364,8 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     // text with no layout (`draw_segmented_text`), and the segmented lowering
     // below mirrors that. Stays legacy, by name: no real measurer (the layout
     // breaks lines by measured widths); a list marker; and what the per-line
-    // draw does not carry -- spacing, decoration, a glyph rotation, a baseline
-    // shift.
+    // draw does not carry -- spacing, decoration, a glyph rotation -- and a
+    // baseline shift that does not read (node 27 lowers the readable ones).
     if t.render_is_flat() && needs_layout(t) {
         let has_measurer = crate::text_measure::try_make_measurer(
             &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
@@ -377,7 +377,7 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
             || !t.kerning.is_empty()
             || !t.text_decoration.split_whitespace().all(|w| w == "none")
             || text_transform(t).map_or(true, |(_, _, r)| r != 0.0)
-            || !t.baseline_shift.is_empty();
+            || baseline_shift_of(t).is_none();
     }
     // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
     // tspan is feature-free AND a real measurer exists for the font.
@@ -541,6 +541,21 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
 /// override to nothing. Treating `Some([])` as "has a decoration" is
 /// conservative in the safe direction: it refuses an element that would in fact
 /// have rendered correctly, rather than drawing one that would not.
+/// ⭐ NODE 27 (jas section 440): a flat text's baseline shift as
+/// `(size_scale, y_shift)`, legacy's law (`canvas/render.rs`, flat branch):
+/// `super` draws at 0.7 x size, 0.35 x size up; `sub` at 0.7 x size, 0.2 x
+/// size down; `Npt` N up at full size; none is `(1, 0)`. `None` for a value
+/// that does not read: legacy draws that as no shift, and the walk refuses it
+/// rather than guess.
+fn baseline_shift_of(t: &crate::geometry::element::TextElem) -> Option<(f64, f64)> {
+    match t.baseline_shift.as_str() {
+        "" => Some((1.0, 0.0)),
+        "super" => Some((0.7, -t.font_size * 0.35)),
+        "sub" => Some((0.7, t.font_size * 0.2)),
+        other => crate::geometry::tspan::parse_pt(other).map(|pt| (1.0, -pt)),
+    }
+}
+
 /// Text the legacy renderer lays out rather than drawing as one run: area text
 /// (it wraps), a hard line break, a case transform or small caps (the layout
 /// runs on the transformed string), a set leading, or a paragraph wrapper that sets a field
@@ -556,6 +571,9 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
         // the first baseline at 0.8 x leading, so a set leading moves even
         // one line of point text.
         || !t.line_height.is_empty()
+        // NODE 27: a baseline shift re-sizes the text the layout measures and
+        // offsets every line's baseline.
+        || !t.baseline_shift.is_empty()
         || t.text_transform == "uppercase"
         || t.text_transform == "lowercase"
         || t.font_variant == "small-caps"
@@ -595,7 +613,10 @@ fn emit_laid_out_text(
     brush: &Brush,
     alpha: f64,
 ) {
-    let Some(measure) = crate::text_measure::try_make_measurer(font, e.font_size) else { return };
+    // The router admits only a readable shift (`baseline_shift_of`).
+    let (size_scale, y_shift) = baseline_shift_of(e).unwrap_or((1.0, 0.0));
+    let size = e.font_size * size_scale;
+    let Some(measure) = crate::text_measure::try_make_measurer(font, size) else { return };
     let raw = e.content();
     let content = if e.text_transform == "uppercase" || e.font_variant == "small-caps" {
         raw.to_uppercase()
@@ -609,11 +630,11 @@ fn emit_laid_out_text(
             .find(|t| t.jas_role.as_deref() == Some("paragraph"))
             .and_then(|t| t.jas_auto_leading)
         {
-            Some(pct) => e.font_size * pct / 100.0,
-            None => e.font_size,
+            Some(pct) => size * pct / 100.0,
+            None => size,
         }
     } else {
-        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(size)
     };
     let max_w = if e.is_area_text() { e.width } else { 0.0 };
     let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
@@ -624,7 +645,7 @@ fn emit_laid_out_text(
     let run = |p: &mut dyn Painter, text: &str, x: f64, y: f64| {
         p.draw_text_run(
             &TextRun::FastRun {
-                font: font.to_string(), size: e.font_size, text: text.to_string(),
+                font: font.to_string(), size, text: text.to_string(),
                 letter_spacing: 0.0, x, y,
             },
             brush,
@@ -635,7 +656,7 @@ fn emit_laid_out_text(
         let s: String = chars[line.start..line.end].iter().collect();
         let s = s.trim_end_matches('\n');
         let x0 = if e.text_anchor.is_empty() { e.x } else { e.x + e.anchor_shift(measure(s)) };
-        let baseline = e.y + line.baseline_y;
+        let baseline = e.y + line.baseline_y + y_shift;
         let glyphs = &layout.glyphs[line.glyph_start..line.glyph_end];
         let line_x = x0 + glyphs.first().map_or(0.0, |g| g.x);
         let visible = || glyphs.iter().filter(|g| !g.is_trailing_space);
