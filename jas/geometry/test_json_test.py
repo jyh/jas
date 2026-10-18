@@ -99,5 +99,54 @@ class FillRuleTestJsonTest(absltest.TestCase):
         self.assertEqual(parse_element_json(json.loads(j)).fill_rule, FillRule.NONZERO)
 
 
+PARAGRAPH_STRS = ["jas_role", "jas_list_style", "text_align", "text_align_last",
+                  "jas_single_word_justify"]
+PARAGRAPH_BOOLS = ["jas_hyphenate", "jas_hanging_punctuation", "jas_hyphenate_capitalized"]
+PARAGRAPH_NUMS = ["jas_left_indent", "jas_right_indent", "text_indent", "jas_space_before",
+                  "jas_space_after", "jas_word_spacing_min", "jas_word_spacing_desired",
+                  "jas_word_spacing_max", "jas_letter_spacing_min", "jas_letter_spacing_desired",
+                  "jas_letter_spacing_max", "jas_glyph_scaling_min", "jas_glyph_scaling_desired",
+                  "jas_glyph_scaling_max", "jas_auto_leading", "jas_hyphenate_min_word",
+                  "jas_hyphenate_min_before", "jas_hyphenate_min_after", "jas_hyphenate_limit",
+                  "jas_hyphenate_zone", "jas_hyphenate_bias"]
+
+
+class TspanParagraphAttributesTest(absltest.TestCase):
+    """The paragraph attributes ride the tspan, and the canonical JSON used
+    to neither write nor read them, so justify, the indents and the spacing
+    ranges reached no read-back. Mirrors Rust's
+    ``tspan_paragraph_attributes_round_trip_through_test_json`` and
+    ``tspan_json_writes_every_tspan_field``."""
+
+    def test_paragraph_attributes_round_trip(self):
+        # Each field gets its OWN value, so a key written under a sibling's
+        # name cannot pass.
+        tspan = {"id": 1, "content": "t"}
+        tspan.update({k: f"v_{k}" for k in PARAGRAPH_STRS})
+        tspan.update({k: True for k in PARAGRAPH_BOOLS})
+        tspan.update({k: 1.5 + i for i, k in enumerate(PARAGRAPH_NUMS)})
+        from geometry.element import Text
+        base = json.loads(_element_json(Text(x=0.0, y=0.0, content="t")))
+        base["tspans"] = [tspan]
+        elem = parse_element_json(base)
+        back = json.loads(_element_json(elem))["tspans"][0]
+        for k in PARAGRAPH_STRS + PARAGRAPH_BOOLS + PARAGRAPH_NUMS:
+            self.assertEqual(back.get(k, "absent"), tspan[k], f"tspan key {k}")
+
+    def test_both_tspan_writers_write_every_tspan_field(self):
+        # The key set is the Tspan dataclass's field set, derived, so a field
+        # added without a writer line reds here, for the full writer and for
+        # the default-tspan writer a flat-content text goes through.
+        import dataclasses
+        from geometry.tspan import Tspan
+        from geometry.test_json import _default_tspan_json, _tspan_json
+        fields = {f.name for f in dataclasses.fields(Tspan)}
+        self.assertGreater(len(fields), 40)
+        full = set(json.loads(_tspan_json(Tspan(id=0, content="t"))))
+        default = set(json.loads(_default_tspan_json("t")))
+        self.assertEqual(full, fields, f"writer only {full - fields}, struct only {fields - full}")
+        self.assertEqual(default, fields, f"writer only {default - fields}, struct only {fields - default}")
+
+
 if __name__ == "__main__":
     absltest.main()

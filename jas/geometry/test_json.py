@@ -309,6 +309,39 @@ def _text_decoration_array_json(td: str) -> str:
     return "[" + ",".join(f'"{t}"' for t in tokens) + "]"
 
 
+_PARAGRAPH_KEYS = (
+    "jas_role",
+    "jas_list_style",
+    "text_align",
+    "text_align_last",
+    "jas_single_word_justify",
+    "jas_hyphenate",
+    "jas_hanging_punctuation",
+    "jas_hyphenate_capitalized",
+    "jas_left_indent",
+    "jas_right_indent",
+    "text_indent",
+    "jas_space_before",
+    "jas_space_after",
+    "jas_word_spacing_min",
+    "jas_word_spacing_desired",
+    "jas_word_spacing_max",
+    "jas_letter_spacing_min",
+    "jas_letter_spacing_desired",
+    "jas_letter_spacing_max",
+    "jas_glyph_scaling_min",
+    "jas_glyph_scaling_desired",
+    "jas_glyph_scaling_max",
+    "jas_auto_leading",
+    "jas_hyphenate_min_word",
+    "jas_hyphenate_min_before",
+    "jas_hyphenate_min_after",
+    "jas_hyphenate_limit",
+    "jas_hyphenate_zone",
+    "jas_hyphenate_bias",
+)
+
+
 def _default_tspan_json(content: str) -> str:
     """Emit a single default tspan carrying ``content`` — id 0 and
     every override ``null``. Used to derive the canonical ``tspans``
@@ -336,6 +369,9 @@ def _default_tspan_json(content: str) -> str:
     o.null("text_transform")
     o.null("transform")
     o.null("xml_lang")
+    # The paragraph attributes, null like every override above.
+    for key in _PARAGRAPH_KEYS:
+        o.null(key)
     return o.build()
 
 
@@ -372,6 +408,37 @@ def _tspan_json(t) -> str:
     o._entries.append(("text_transform", _null_or_str(t.text_transform)))
     o.null("transform")  # transform on tspan omitted for now
     o._entries.append(("xml_lang", _null_or_str(t.xml_lang)))
+    # The paragraph attributes (the paragraph wrapper tspan carries them),
+    # null when absent like every key above. `build` sorts the keys.
+    o._entries.append(("jas_role", _null_or_str(t.jas_role)))
+    o._entries.append(("jas_list_style", _null_or_str(t.jas_list_style)))
+    o._entries.append(("text_align", _null_or_str(t.text_align)))
+    o._entries.append(("text_align_last", _null_or_str(t.text_align_last)))
+    o._entries.append(("jas_single_word_justify", _null_or_str(t.jas_single_word_justify)))
+    o._entries.append(("jas_hyphenate", _null_or_bool(t.jas_hyphenate)))
+    o._entries.append(("jas_hanging_punctuation", _null_or_bool(t.jas_hanging_punctuation)))
+    o._entries.append(("jas_hyphenate_capitalized", _null_or_bool(t.jas_hyphenate_capitalized)))
+    o._entries.append(("jas_left_indent", _null_or_num(t.jas_left_indent)))
+    o._entries.append(("jas_right_indent", _null_or_num(t.jas_right_indent)))
+    o._entries.append(("text_indent", _null_or_num(t.text_indent)))
+    o._entries.append(("jas_space_before", _null_or_num(t.jas_space_before)))
+    o._entries.append(("jas_space_after", _null_or_num(t.jas_space_after)))
+    o._entries.append(("jas_word_spacing_min", _null_or_num(t.jas_word_spacing_min)))
+    o._entries.append(("jas_word_spacing_desired", _null_or_num(t.jas_word_spacing_desired)))
+    o._entries.append(("jas_word_spacing_max", _null_or_num(t.jas_word_spacing_max)))
+    o._entries.append(("jas_letter_spacing_min", _null_or_num(t.jas_letter_spacing_min)))
+    o._entries.append(("jas_letter_spacing_desired", _null_or_num(t.jas_letter_spacing_desired)))
+    o._entries.append(("jas_letter_spacing_max", _null_or_num(t.jas_letter_spacing_max)))
+    o._entries.append(("jas_glyph_scaling_min", _null_or_num(t.jas_glyph_scaling_min)))
+    o._entries.append(("jas_glyph_scaling_desired", _null_or_num(t.jas_glyph_scaling_desired)))
+    o._entries.append(("jas_glyph_scaling_max", _null_or_num(t.jas_glyph_scaling_max)))
+    o._entries.append(("jas_auto_leading", _null_or_num(t.jas_auto_leading)))
+    o._entries.append(("jas_hyphenate_min_word", _null_or_num(t.jas_hyphenate_min_word)))
+    o._entries.append(("jas_hyphenate_min_before", _null_or_num(t.jas_hyphenate_min_before)))
+    o._entries.append(("jas_hyphenate_min_after", _null_or_num(t.jas_hyphenate_min_after)))
+    o._entries.append(("jas_hyphenate_limit", _null_or_num(t.jas_hyphenate_limit)))
+    o._entries.append(("jas_hyphenate_zone", _null_or_num(t.jas_hyphenate_zone)))
+    o._entries.append(("jas_hyphenate_bias", _null_or_num(t.jas_hyphenate_bias)))
     return o.build()
 
 
@@ -1122,6 +1189,35 @@ def _parse_tspan(d: dict):
         text_transform=d.get("text_transform"),
         transform=transform,
         xml_lang=d.get("xml_lang"),
+        jas_role=d.get("jas_role"),
+        jas_list_style=d.get("jas_list_style"),
+        text_align=d.get("text_align"),
+        text_align_last=d.get("text_align_last"),
+        jas_single_word_justify=d.get("jas_single_word_justify"),
+        jas_hyphenate=d.get("jas_hyphenate"),
+        jas_hanging_punctuation=d.get("jas_hanging_punctuation"),
+        jas_hyphenate_capitalized=d.get("jas_hyphenate_capitalized"),
+        jas_left_indent=d.get("jas_left_indent"),
+        jas_right_indent=d.get("jas_right_indent"),
+        text_indent=d.get("text_indent"),
+        jas_space_before=d.get("jas_space_before"),
+        jas_space_after=d.get("jas_space_after"),
+        jas_word_spacing_min=d.get("jas_word_spacing_min"),
+        jas_word_spacing_desired=d.get("jas_word_spacing_desired"),
+        jas_word_spacing_max=d.get("jas_word_spacing_max"),
+        jas_letter_spacing_min=d.get("jas_letter_spacing_min"),
+        jas_letter_spacing_desired=d.get("jas_letter_spacing_desired"),
+        jas_letter_spacing_max=d.get("jas_letter_spacing_max"),
+        jas_glyph_scaling_min=d.get("jas_glyph_scaling_min"),
+        jas_glyph_scaling_desired=d.get("jas_glyph_scaling_desired"),
+        jas_glyph_scaling_max=d.get("jas_glyph_scaling_max"),
+        jas_auto_leading=d.get("jas_auto_leading"),
+        jas_hyphenate_min_word=d.get("jas_hyphenate_min_word"),
+        jas_hyphenate_min_before=d.get("jas_hyphenate_min_before"),
+        jas_hyphenate_min_after=d.get("jas_hyphenate_min_after"),
+        jas_hyphenate_limit=d.get("jas_hyphenate_limit"),
+        jas_hyphenate_zone=d.get("jas_hyphenate_zone"),
+        jas_hyphenate_bias=d.get("jas_hyphenate_bias"),
     )
 
 

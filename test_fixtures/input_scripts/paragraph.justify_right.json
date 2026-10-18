@@ -1,0 +1,15 @@
+{
+  "item": "paragraph.justify_right",
+  "spec": "workspace/panels/paragraph.yaml",
+  "setup_svg": "text_area_basic.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 94, "y": 30},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "paragraph_panel_content", "widget": "pg_justify_right", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "paragraph.justify_right.expected.json"
+}
