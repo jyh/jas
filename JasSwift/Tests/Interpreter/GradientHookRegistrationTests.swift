@@ -82,4 +82,33 @@ struct GradientHookRegistrationTests {
         #expect(g?.angle == 45, "applied: \(String(describing: g))")
         #expect(g?.aspectRatio == 150)
     }
+
+    /// A stop combo through the hook: a location crossing the right
+    /// neighbour re-sorts the selected rect's stops (the law is the corpus's;
+    /// GradientStopCorpusTests) and the panel's selected index follows the
+    /// moved stop, 0 -> 1. A refused edit (no stop selected) writes nothing.
+    @Test func aStopComboEditsTheSelectedStopAndTheIndexFollowsIt() {
+        let model = Model(document: Document(
+            layers: [Layer(name: "L", children: [rect(0)])],
+            selection: [ElementSelection.all([0, 0])]))
+        let controller = Controller(model: model)
+        controller.setSelectionFillGradient(Gradient(stops: [
+            GradientStop(color: "#ff0000", location: 0),
+            GradientStop(color: "#000000", location: 50),
+            GradientStop(color: "#ffffff", location: 100)]))
+        let store = StateStore()
+        store.initPanel("gradient_panel_content", defaults: ["selected_stop_index": 0])
+        store.set("gradient_stop_location", 70)
+        guard let hook = alignPlatformEffects(model: model)["apply_gradient_panel"] else {
+            Issue.record("hook not registered"); return
+        }
+        _ = hook("gradient_stop_location", [:], store)
+        let g = model.document.getElement([0, 0]).fillGradient
+        #expect(g?.stops.map { "\($0.color)@\($0.location)" } == ["#000000@50.0", "#ff0000@70.0", "#ffffff@100.0"])
+        #expect((store.getPanel("gradient_panel_content", "selected_stop_index") as? Int) == 1)
+        store.setPanel("gradient_panel_content", "selected_stop_index", -1)
+        store.set("gradient_stop_opacity", 10)
+        _ = hook("gradient_stop_opacity", [:], store)
+        #expect(model.document.getElement([0, 0]).fillGradient == g, "a refused stop edit changes nothing")
+    }
 }

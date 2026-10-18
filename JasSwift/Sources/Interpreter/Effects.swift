@@ -381,7 +381,7 @@ private func runOne(
         // Once per gradient key written, naming it, as the Rust engine's
         // `global_written` applies one key per write.
         if let hook = platformEffects["apply_gradient_panel"] {
-            for k in pairs.keys.filter(isGradientRenderKey).sorted() {
+            for k in pairs.keys.filter({ isGradientRenderKey($0) || gradientStopKeys[$0] != nil }).sorted() {
                 _ = hook(k, ctx, store)
             }
         }
@@ -1083,6 +1083,58 @@ public func isGradientRenderKey(_ key: String) -> Bool {
     gradientRenderKeys.contains(key)
 }
 
+/// The global keys the two stop combos `set`, with the stop field each edits.
+/// Not render keys: they need the selected stop's index. Mirrors
+/// `gradient_host::STOP_KEYS`.
+public let gradientStopKeys: [String: String] = [
+    "gradient_stop_opacity": "opacity",
+    "gradient_stop_location": "location",
+]
+
+/// The Gradient panel's stop-edit law (GRADIENT.md STOP_OPACITY_COMBO,
+/// STOP_LOCATION_COMBO; reference `gradient_law.edit_stop`, pinned by
+/// `test_fixtures/gradient_stop/stop_edit.json`). `stops` with stop `index`'s
+/// `field` set to `value` and the index that stop now sits at, or nil
+/// (nothing written) when `index` names no stop, `field` is not `opacity` or
+/// `location`, or `value` is not a number in [0, 100]. `location` re-sorts
+/// STABLY (a tie does not cross); the index follows the moved stop, and every
+/// stop whose NEXT stop changed resets its midpoint to 50. Mirrors
+/// `gradient_host::edit_stop`.
+public func editStop(_ stops: [GradientStop], index: Int, field: String,
+                     value: Any?) -> ([GradientStop], Int)? {
+    guard stops.indices.contains(index), !(value is Bool),
+          let v = (value as? NSNumber)?.doubleValue, (0...100).contains(v) else { return nil }
+    var out = stops
+    let s = out[index]
+    switch field {
+    case "opacity":
+        out[index] = GradientStop(color: s.color, opacity: v, location: s.location,
+                                  midpointToNext: s.midpointToNext)
+        return (out, index)
+    case "location":
+        out[index] = GradientStop(color: s.color, opacity: s.opacity, location: v,
+                                  midpointToNext: s.midpointToNext)
+    default:
+        return nil
+    }
+    // Sort positions, not stops, so "the next stop changed" compares
+    // identities. Swift's sort is not stable, so ties break on position.
+    let order = out.indices.sorted {
+        (out[$0].location, $0) < (out[$1].location, $1)
+    }
+    for (k, p) in order.enumerated() {
+        let oldNext: Int? = p + 1 < out.count ? p + 1 : nil
+        let newNext: Int? = k + 1 < order.count ? order[k + 1] : nil
+        if oldNext != newNext {
+            let t = out[p]
+            out[p] = GradientStop(color: t.color, opacity: t.opacity, location: t.location,
+                                  midpointToNext: 50)
+        }
+    }
+    guard let moved = order.firstIndex(of: index) else { return nil }
+    return (order.map { out[$0] }, moved)
+}
+
 
 // MARK: - Gradient panel writeback (Phase 5)
 
@@ -1223,9 +1275,20 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     case .solid(let c): g = seedGradient(c)
     case .mixed: g = gradientFromStore(store)
     }
-    let keys = key.map { [$0] } ?? gradientRenderKeys.sorted().filter { store.get($0) != nil }
-    for k in keys {
-        if let next = settingGradientField(g, k, store.get(k)) { g = next }
+    if let key = key, let field = gradientStopKeys[key] {
+        // A stop combo: the selected stop of the same base, by the stop-edit
+        // law; the panel's selected index follows the stop.
+        let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1
+        guard let (stops, moved) = editStop(g.stops, index: index, field: field,
+                                            value: store.get(key)) else { return }
+        g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                     dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes)
+        store.setPanel("gradient_panel_content", "selected_stop_index", moved)
+    } else {
+        let keys = key.map { [$0] } ?? gradientRenderKeys.sorted().filter { store.get($0) != nil }
+        for k in keys {
+            if let next = settingGradientField(g, k, store.get(k)) { g = next }
+        }
     }
     if fillOnTop {
         controller.setSelectionFillGradient(g)
