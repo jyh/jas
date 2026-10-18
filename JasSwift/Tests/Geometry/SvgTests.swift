@@ -1342,6 +1342,34 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
     #expect(cs.operands.count == 2)
 }
 
+@Test func compoundWrapperPaintRoundTripsThroughSvg() {
+    // BOOLEAN.md: a compound shape "carries paint of its own on the wrapper".
+    // The codec used to write no paint on the wrapper and read nothing back,
+    // so a saved compound reopened unpainted. The operands are unpainted on
+    // purpose, so the wrapper's paint cannot come from them; 1.5 pt is 2 px
+    // exactly, so the stroke width compares without rounding. Mirrors Rust's
+    // `compound_wrapper_paint_round_trips_through_svg`.
+    func roundTrip(_ fill: Fill?, _ stroke: Stroke?) -> (Fill?, Stroke?)? {
+        let operands: [Element] = [0.0, 5.0].map {
+            .rect(Rect(x: $0, y: 0, width: 10, height: 10, fill: nil))
+        }
+        let cs = CompoundShape(operation: .union, operands: operands, name: nil,
+                               fill: fill, stroke: stroke)
+        let doc = Document(layers: [Layer(children: [.live(.compoundShape(cs))])],
+                           artboards: [])
+        guard case .live(.compoundShape(let back)) =
+                svgToDocument(documentToSvg(doc)).layers[0].children[0] else { return nil }
+        return (back.fill, back.stroke)
+    }
+    let blue = Color(r: 0, g: 0, b: 1), red = Color(r: 1, g: 0, b: 0)
+    let painted = roundTrip(Fill(color: blue), Stroke(color: red, width: 1.5))
+    #expect(painted?.0?.color == blue, "wrapper fill round-trips")
+    #expect(painted?.1?.color == red && painted?.1?.width == 1.5, "wrapper stroke round-trips")
+    // The control: an unpainted wrapper stays unpainted.
+    let bare = roundTrip(nil, nil)
+    #expect(bare != nil && bare?.0 == nil && bare?.1 == nil, "no paint stays no paint")
+}
+
 // MARK: - Arrowhead SVG persistence (ARROWFIX2 item 2)
 
 @Test func svgArrowheadsRoundtripOnLine() {

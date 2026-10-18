@@ -1,0 +1,15 @@
+{
+  "item": "boolean.expand",
+  "spec": "workspace/panels/boolean.yaml",
+  "setup_svg": "compound_painted_and_rect.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 148, "y": 88},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "boolean_panel_content", "widget": "boolean_expand_button", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "boolean.expand.expected.json"
+}
