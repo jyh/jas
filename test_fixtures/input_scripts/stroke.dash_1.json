@@ -1,0 +1,15 @@
+{
+  "item": "stroke.dash_1",
+  "spec": "workspace/panels/stroke.yaml",
+  "setup_svg": "rect_with_stroke.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 18},
+    {"kind": "release", "x": 36, "y": 18},
+    {"panel": "stroke_panel_content", "widget": "stk_dashed", "event": "click"},
+    {"panel": "stroke_panel_content", "widget": "stk_dash_1", "event": "commit", "value": "6"},
+    {"read": "document"}
+  ],
+  "expected_json": "stroke.dash_1.expected.json"
+}
