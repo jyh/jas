@@ -1,0 +1,10 @@
+{
+    "item":  "align.bottom",
+    "surface":  "2379x1333",
+    "frame_hash":  "d53f9c92b26b8d68979cc43e0a8caf25b57cbdbeda0de67928b69e221791b709",
+    "plan_panel":  "align_panel_content",
+    "plan_sha":  "6c5486e7ec783aeb",
+    "tab":  "[0,0]=on:\"three_rects.svg\"",
+    "tab_sha":  "b3eb2ebc4fb09b4e",
+    "selection_count":  3
+}
