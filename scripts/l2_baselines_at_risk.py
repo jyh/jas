@@ -85,7 +85,10 @@ def _read(path: str) -> str | None:
 
 
 def report(risk: dict[str, list[str]]) -> list[str]:
-    """The receipt lines. Empty when no panel YAML changed."""
+    """The receipt lines; one line saying so when no panel YAML changed, so
+    the notice's silence never stands for "it did not run"."""
+    if not risk:
+        return ["LEVEL-2 NOTICE: no panel YAML changed"]
     lines = []
     for pid, items in risk.items():
         if items:
@@ -118,11 +121,14 @@ def self_test() -> int:
           f"one panel changed lists exactly its baselines: {r}")
     r = at_risk(["workspace/panels/nobase.yaml"], yamls.get, base)
     check(r == {"nobase_panel_content": []}, f"a panel with no baseline is NAMED, not dropped: {r}")
-    check(report(r) and "no WinUI baseline" in report(r)[0], "the no-baseline case prints a line")
+    check("no WinUI baseline" in report(r)[0], "the no-baseline case prints a line")
     r = at_risk(["workspace/panels/gone.yaml"], yamls.get, base)
     check(r == {"workspace/panels/gone.yaml": []}, f"a deleted panel is listed by path: {r}")
     r = at_risk(["workspace/actions.yaml", "workspace/panels/x.json"], yamls.get, base)
-    check(r == {} and report(r) == [], f"non-panel files list nothing: {r}")
+    check(r == {}, f"non-panel files list nothing: {r}")
+    # ...but the RECEIPT still says so: silence would read exactly like the
+    # notice never running (a crashed import, a skipped call).
+    check(report(r) == ["LEVEL-2 NOTICE: no panel YAML changed"], f"the empty case prints one line: {report(r)}")
     # The id must come from the file, never from its name: a mutant that
     # derived `<stem>_panel_content` agrees on every shipped file, so the arm
     # uses a file whose name and id differ.
@@ -141,7 +147,7 @@ def self_test() -> int:
     known = {panel_id(p.read_text(encoding="utf-8")) for p in panels}
     orphan = sorted({pp for _, pp in live if pp and pp not in known})
     check(not orphan, f"every baseline's plan_panel names a live panel id: {orphan}")
-    arms = 10
+    arms = 11
     for f in failures:
         print(f"  FAIL: {f}")
     print(f"l2_baselines_at_risk --self-test: {arms} arm(s), {len(failures)} failure(s), "
@@ -160,8 +166,7 @@ def main() -> int:
         ap.error("--range is required (or --self-test)")
     changed = subprocess.run(["git", "diff", "--name-only", args.range], cwd=ROOT, check=True,
                              capture_output=True, text=True, encoding="utf-8").stdout.split()
-    lines = report(at_risk(changed, _read, load_baselines()))
-    print("\n".join(lines) if lines else f"l2_baselines_at_risk {args.range}: no panel YAML changed")
+    print("\n".join(report(at_risk(changed, _read, load_baselines()))))
     return 0
 
 
