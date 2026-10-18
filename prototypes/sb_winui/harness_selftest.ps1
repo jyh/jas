@@ -2274,9 +2274,48 @@ Test-Case 'is: a key AFTER a panel step is refused by name: panel steps are deli
     $k = [ordered]@{ key = 'Delete' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $k, $sRead)))
 } 'REFUSED: step 4 key Delete comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps'
-Test-Case 'is: a pointer step after a panel step is refused by name' {
+Test-Case 'is: a late press with no release is refused by name' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pAlign, $sPress, $sRead)))
-} 'REFUSED: step 4 is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture'
+} 'REFUSED: step 4 is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)'
+# NODE 29 (flask section 443): a CLICK after a panel or menu step, the shape the
+# key-object scripts need (marquee, `align to key object`, click the key, Align).
+# It rides the late list in script order and the hand delivers it there.
+$cPress = [ordered]@{ kind = 'press'; x = 50; y = 34 }
+$cRelease = [ordered]@{ kind = 'release'; x = 50; y = 34 }
+$pKey = [ordered]@{ panel = 'align_panel_content'; widget = 'align_to_key_object_button'; event = 'click' }
+Test-Case 'is: a late CLICK rides the late list in script order' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $cPress, $cRelease, $pAlign, $sRead))
+    "$(Show-SbScript $s) clicks=$($s.Clicks) panels=$($s.Panels)"
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json panels=align_panel_content/align_to_key_object_button:click;click@(50,34);align_panel_content/align_left_button:click clicks=1 panels=2'
+Test-Case 'is: a late click crosses -File with its point' {
+    $s = Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $cPress, $cRelease, $pAlign, $sRead))
+    @(ConvertFrom-SbPanelText $s.PanelText | ForEach-Object { if ($_.click) { "click($($_.x),$($_.y))" } else { $_.widget } }) -join ';'
+} 'align_to_key_object_button;click(50,34);align_left_button'
+Test-Case 'is: a late DRAG is refused by name: only a click is delivered after a panel step' {
+    $m = [ordered]@{ kind = 'move'; x = 60; y = 40; dragging = $true }
+    $r = [ordered]@{ kind = 'release'; x = 60; y = 40 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $cPress, $m, $r, $sRead)))
+} 'REFUSED: step 4 is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)'
+Test-Case 'is: a late press and release at different points is refused by name' {
+    $r = [ordered]@{ kind = 'release'; x = 51; y = 34 }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $cPress, $r, $sRead)))
+} 'REFUSED: step 4 is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)'
+Test-Case 'is: a late click carrying shift is refused by name' {
+    $p = [ordered]@{ kind = 'press'; x = 50; y = 34; shift = $true }
+    $r = [ordered]@{ kind = 'release'; x = 50; y = 34; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $p, $r, $sRead)))
+} 'REFUSED: step 4 is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)'
+Test-Case 'is: a key after a late click is still refused by name' {
+    $k = [ordered]@{ key = 'Delete' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $pKey, $cPress, $cRelease, $k, $sRead)))
+} 'REFUSED: step 6 key Delete comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps'
+Test-Case 'is: the two key-object corpus scripts read, one late click each' {
+    $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    @('align.left_to_key_object', 'distribute.horizontal_spacing_key_object' | ForEach-Object {
+        $s = Read-SbInputScript ([System.IO.File]::ReadAllText((Join-Path $root "test_fixtures\input_scripts\$_.json"), [System.Text.Encoding]::UTF8))
+        if ($null -ne $s.Refusal) { "$_ REFUSED: $($s.Refusal)" } else { "$_ clicks=$($s.Clicks) late=$($s.PanelShow)" }
+    }) -join ' | '
+} 'align.left_to_key_object clicks=1 late=align_panel_content/align_to_key_object_button:click;click@(50,34);align_panel_content/align_left_button:click | distribute.horizontal_spacing_key_object clicks=1 late=align_panel_content/align_to_key_object_button:click;click@(50,34);align_panel_content/distribute_spacing_value:commit=10;align_panel_content/distribute_horizontal_spacing_button:click'
 Test-Case 'is: a panel step with an event other than click or commit is refused' {
     $p = [ordered]@{ panel = 'align_panel_content'; widget = 'align_left_button'; event = 'toggle' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $p, $sRead)))
@@ -2318,7 +2357,7 @@ Test-Case 'is: a key AFTER a menu step is refused by name' {
 } 'REFUSED: step 4 key Delete comes after a panel or menu step: send_hand.ps1 delivers keys, then panel and menu steps'
 Test-Case 'is: a pointer step after a menu step is refused by name' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $mGroup, $sPress, $sRead)))
-} 'REFUSED: step 4 is a pointer step after a panel or menu step: send_hand.ps1 delivers them only after the gesture'
+} 'REFUSED: step 4 is a pointer step after a panel or menu step that is not a click: send_hand.ps1 delivers only a click there (a press and a release at one point, no move, no modifier)'
 Test-Case 'is: a menu step that names no item is refused' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, [ordered]@{ menu = '' }, $sRead)))
 } 'REFUSED: step 3 menu step names no item'
