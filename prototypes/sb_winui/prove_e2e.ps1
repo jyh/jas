@@ -419,7 +419,9 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
     $clickRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'PANEL CLICK panel=\S+ widget=\S+ via=hand ' -and $_ -notmatch 'PANEL CLICK (DROPPED|REFUSED)' })
     # A menu step's arrival is the shell's `MENU ACTION RAN item=<id>` row.
     $menuRows = @(Read-SbRows $log $mark | Where-Object { $_ -match 'MENU ACTION RAN item=' })
-    $missing = @(ConvertFrom-SbPanelText $panelText | Where-Object {
+    # A late click (node 29) is not a panel step: its arrival is its own
+    # POINTER REAL row, which the drive check above already holds to the script.
+    $missing = @(ConvertFrom-SbPanelText $panelText | Where-Object { -not $_.click } | Where-Object {
         if ($_.menu) { $want = "MENU ACTION RAN item=$($_.menu) "; @($menuRows | Where-Object { $_.Contains($want) }).Count -eq 0 }
         else {
             $want = "PANEL CLICK panel=$($_.panel) widget=$($_.widget) via=hand event=$($_.event) "
