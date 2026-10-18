@@ -343,7 +343,11 @@ fn the_one_text(doc: &crate::document::document::Document) -> Result<crate::geom
 
 /// The legacy renderer's paragraph layout of `t` (`canvas/render.rs`, the
 /// `layout_with_paragraphs` call), as one string per line: the line's char
-/// range, baseline, trailing hyphen and every glyph's x to 0.001.
+/// range, baseline, trailing hyphen and every glyph's x to 0.001, then one
+/// string per list marker. ⚠️ The markers are not glyphs of the layout, and a
+/// list's marker gap is 12 pt, so a list and a 12 pt left indent place every
+/// glyph alike: without the markers the arm reads bullets, a numbered list
+/// and that indent as one setting.
 ///
 /// ⚠️ THE MEASURER IS THE 0.55-PER-CHARACTER APPROXIMATION ON PURPOSE, not a
 /// font: this pins the LAYOUT LAW (which settings move which lines), and a real
@@ -362,11 +366,14 @@ fn legacy_layout_lines(t: &crate::geometry::element::TextElem) -> Vec<String> {
     let segs = crate::algorithms::text_layout_paragraph::build_segments_from_text(
         &t.tspans, &content, t.is_area_text());
     let l = crate::algorithms::text_layout::layout_with_paragraphs(&content, max_w, leading, &segs, &measure);
+    let counters = crate::algorithms::text_layout_paragraph::compute_counters(&segs);
+    let markers = segs.iter().zip(&counters).filter_map(|(sg, c)| sg.list_style.as_deref()
+        .map(|st| format!("marker {:?} at char {}", crate::algorithms::text_layout_paragraph::marker_text(st, *c), sg.char_start)));
     l.lines.iter().map(|ln| {
         let xs: Vec<String> = l.glyphs[ln.glyph_start..ln.glyph_end].iter()
             .map(|g| format!("{:.3}", g.x)).collect();
         format!("[{}..{}) y={:.3} hyphen={} x={}", ln.start, ln.end, ln.baseline_y, ln.trailing_hyphen, xs.join(","))
-    }).collect()
+    }).chain(markers).collect()
 }
 
 #[test]
