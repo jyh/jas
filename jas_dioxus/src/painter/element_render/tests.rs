@@ -3776,6 +3776,51 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
     let mut rotated = indented.clone();
     rotated.rotate = "30".into();
     assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
+    // jas section 432: each feature the per-line draw does not carry REFUSES on
+    // laid-out text, never drops. Area text and an indented POINT text both,
+    // since only the area case was refused before node 25.
+    let indented_point = with_paragraph(flat_text(20.0), |w| w.jas_left_indent = Some(12.0));
+    for (label, t) in [("area", area_text("Hello World", 120.0)), ("indented point", indented_point)] {
+        type Set = fn(&mut crate::geometry::element::TextElem);
+        let cases: [(&str, Set); 6] = [
+            ("tracking", |t| t.letter_spacing = "0.1em".into()),
+            ("kerning", |t| t.kerning = "20".into()),
+            ("underline", |t| t.text_decoration = "underline".into()),
+            ("line-through", |t| t.text_decoration = "line-through".into()),
+            ("rotation", |t| t.rotate = "30".into()),
+            ("baseline shift", |t| t.baseline_shift = "super".into()),
+        ];
+        for (name, set) in cases {
+            let mut x = t.clone();
+            set(&mut x);
+            assert!(text_needs_legacy(&x), "laid-out {label} text with {name} stays legacy");
+        }
+    }
+}
+
+/// jas section 432: the case transform and small caps run before the layout,
+/// as legacy does (`render.rs`, content_str), so the walk draws the
+/// transformed string, and a hard break is a layout input too.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_walk_lays_out_the_transformed_string() {
+    let mut lower = flat_text(20.0);
+    lower.tspans[0].content = "HeLLo".into();
+    lower.text_transform = "lowercase".into();
+    assert_eq!(runs_of(lower)[0].0, "hello", "lowercase");
+    let mut caps = flat_text(20.0);
+    caps.font_variant = "small-caps".into();
+    assert_eq!(runs_of(caps)[0].0, "HELLO", "small caps draws uppercase, as legacy does");
+    let mut broken = flat_text(20.0);
+    broken.tspans[0].content = "Hello
+World".into();
+    let r = runs_of(broken);
+    assert_eq!(r.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), vec!["Hello", "World"], "a hard break draws two lines: {r:?}");
+    assert!(r[1].2 > r[0].2, "the second line below the first: {r:?}");
+    // CONTROL: "none" is the absent value and keeps the one-run path.
+    let mut none = flat_text(20.0);
+    none.text_transform = "none".into();
+    assert_eq!(runs_of(none), vec![("Hello".to_string(), 1.0, 2.0 + 0.8 * 20.0)]);
 }
 
 /// The layout's own law, mirrored line for line where a measurer exists.
