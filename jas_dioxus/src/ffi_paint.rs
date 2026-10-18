@@ -1966,6 +1966,75 @@ mod tests {
         assert_ne!(plain, tracked, "the spacing must move the glyphs");
     }
 
+    /// ⭐ NODE 19 (jas section 414): a 150% horizontal scale reaches the surface.
+    /// STATUS-flask section 411 measured the frame after a 150% commit EQUAL to
+    /// the frame before it; this is that measurement made a test. Red text, so
+    /// the control can see it.
+    #[test]
+    fn a_scaled_text_paints_differently_from_an_unscaled_one() {
+        let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+        let paint = |h_scale: &str| {
+            let mut doc = crate::geometry::svg::svg_to_document(&svg);
+            fn scale(e: &mut Element, h_scale: &str) {
+                match e {
+                    Element::Text(t) => {
+                        t.horizontal_scale = h_scale.into();
+                        t.fill = Some(crate::geometry::element::Fill {
+                            color: crate::geometry::element::Color::rgb(1.0, 0.0, 0.0), opacity: 1.0,
+                        });
+                    }
+                    Element::Layer(l) => for c in l.children.iter_mut() { scale(std::rc::Rc::make_mut(c), h_scale) },
+                    _ => {}
+                }
+            }
+            for l in doc.layers.iter_mut() { scale(l, h_scale); }
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            let surface: IDXGISurface = t.cast().expect("surface");
+            let rc = unsafe { jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32) };
+            assert_eq!(rc, JAS_PAINT_OK, "scaled flat text must paint, not refuse (h_scale {h_scale:?})");
+            read(&dev, &ctx, &t)
+        };
+        let blank = { let (dev, ctx) = warp(); let t = tex(&dev, false); read(&dev, &ctx, &t) };
+        let plain = paint("");
+        assert_ne!(blank, plain, "control: the unscaled text must reach the surface at all");
+        assert_ne!(plain, paint("150"), "a 150% horizontal scale must change the frame");
+    }
+
+    /// ⭐ NODE 20 (jas section 414): an underlined text paints, and differently
+    /// from plain text. Before node 20 the walk refused it (DOCUMENT
+    /// INCOMPLETE). Red text, so the control can see it.
+    #[test]
+    fn an_underlined_text_paints_differently_from_a_plain_one() {
+        let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+        let paint = |decoration: &str| {
+            let mut doc = crate::geometry::svg::svg_to_document(&svg);
+            fn decorate(e: &mut Element, decoration: &str) {
+                match e {
+                    Element::Text(t) => {
+                        t.text_decoration = decoration.into();
+                        t.fill = Some(crate::geometry::element::Fill {
+                            color: crate::geometry::element::Color::rgb(1.0, 0.0, 0.0), opacity: 1.0,
+                        });
+                    }
+                    Element::Layer(l) => for c in l.children.iter_mut() { decorate(std::rc::Rc::make_mut(c), decoration) },
+                    _ => {}
+                }
+            }
+            for l in doc.layers.iter_mut() { decorate(l, decoration); }
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            let surface: IDXGISurface = t.cast().expect("surface");
+            let rc = unsafe { jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32) };
+            assert_eq!(rc, JAS_PAINT_OK, "decorated flat text must paint, not refuse ({decoration:?})");
+            read(&dev, &ctx, &t)
+        };
+        let blank = { let (dev, ctx) = warp(); let t = tex(&dev, false); read(&dev, &ctx, &t) };
+        let plain = paint("none");
+        assert_ne!(blank, plain, "control: the plain text must reach the surface at all");
+        assert_ne!(plain, paint("underline"), "an underline must change the frame");
+    }
+
     /// An EMPTY document is complete, not incomplete. Nothing to draw is a
     /// legitimate state (a new file), and refusing it would make the app unable
     /// to open one.

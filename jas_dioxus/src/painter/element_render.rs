@@ -400,9 +400,60 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     {
         return true;
     }
-    !t.baseline_shift.is_empty()
-        || draws_decoration(t)
-        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+    // ⭐ NODE 19 (jas section 414): a readable scale and glyph rotation lower on
+    // FLAT text (`text_transform`, drawn in `emit_element_body`'s flat arm as
+    // the legacy renderer draws them). What stays legacy, by name: a value that
+    // does not read; segmented text, whose legacy arm does not read the
+    // element's scale or rotation at all, so lowering it would invent
+    // behaviour the reference lacks; and a rotation with no real measurer,
+    // because each glyph's pen advance is a measured width.
+    if draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate) {
+        let Some((_, _, rotate)) = text_transform(t) else { return true };
+        if !t.render_is_flat() {
+            return true;
+        }
+        if rotate != 0.0
+            && crate::text_measure::try_make_measurer(
+                &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+                t.font_size,
+            ).is_none()
+        {
+            return true;
+        }
+    }
+    !t.baseline_shift.is_empty() || decoration_needs_legacy(t)
+}
+
+/// ⭐ NODE 20 (jas section 414): an underline or line-through lowers on flat,
+/// POINT text where a real measurer gives the line its length (the legacy line
+/// spans the measured width). Stays legacy, by name: segmented or AREA text
+/// (legacy draws one line per run or per wrapped line), decoration with letter
+/// spacing or a glyph rotation (whether legacy's measured width includes them
+/// is not measured), and no real measurer.
+fn decoration_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    if !draws_decoration(t) {
+        return false;
+    }
+    !t.render_is_flat()
+        || t.is_area_text()
+        || !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || text_transform(t).map_or(true, |(_, _, r)| r != 0.0)
+        || crate::text_measure::try_make_measurer(
+            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+            t.font_size,
+        ).is_none()
+}
+
+/// ⭐ NODE 19: a flat text's `(h_scale, v_scale, rotate_degrees)` as the legacy
+/// renderer reads them (`canvas/render.rs`): a scale in percent over 100, empty
+/// being 1; a rotation in degrees, empty being 0. `None` when a set value does
+/// not read, which the router refuses rather than guess.
+pub fn text_transform(t: &crate::geometry::element::TextElem) -> Option<(f64, f64, f64)> {
+    let read = |v: &str, empty: f64| -> Option<f64> {
+        if v.is_empty() { Some(empty) } else { v.trim().parse::<f64>().ok() }
+    };
+    Some((read(&t.horizontal_scale, 100.0)? / 100.0, read(&t.vertical_scale, 100.0)? / 100.0, read(&t.rotate, 0.0)?))
 }
 
 /// ⛔ A SCALE OR GLYPH ROTATION THE WALK DOES NOT DRAW (STATUS-flask section
@@ -1446,22 +1497,95 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
                     crate::text_measure::try_make_measurer(&font, e.font_size)
                         .map_or(0.0, |m| e.anchor_shift(m(&e.content())))
                 };
-                let run = TextRun::FastRun {
-                    font,
-                    size: e.font_size,
-                    text: e.content(),
-                    // Node 15: the router admits a tracked flat text only when
-                    // its spacing reads, so `None` here means none was set.
-                    letter_spacing: flat_spacing(e).unwrap_or(0.0),
-                    x: e.x + dx,
-                    // ⛔ THE BASELINE, NOT THE BOX TOP: `e.y` is the top of the
-                    // text box (SVG import subtracts the 0.8-em ascent), and the
-                    // legacy renderer and the segmented lowering both draw at
-                    // `e.y + 0.8 x size`. Drawing at `e.y` put every flat text
-                    // one ascent high (node 15, jas section 397).
-                    y: e.y + e.font_size * 0.8,
-                };
-                p.draw_text_run(&run, &Brush::Solid(f.color), eff * f.opacity);
+                let spacing = flat_spacing(e).unwrap_or(0.0);
+                // ⛔ THE BASELINE, NOT THE BOX TOP: `e.y` is the top of the
+                // text box (SVG import subtracts the 0.8-em ascent), and the
+                // legacy renderer and the segmented lowering both draw at
+                // `e.y + 0.8 x size`. Drawing at `e.y` put every flat text
+                // one ascent high (node 15, jas section 397).
+                let baseline = e.y + e.font_size * 0.8;
+                // ⭐ NODE 19: the scale frame legacy pushes around the whole
+                // draw, `translate(x, y) · scale(h, v) · translate(-x, -y)`
+                // about the box's top-left. The router admits only readable
+                // values, so `None` here means none was set.
+                let (h, v, rotate) = text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+                let scaled = h != 1.0 || v != 1.0;
+                if scaled {
+                    p.push_state(super::Transform {
+                        a: h, b: 0.0, c: 0.0, d: v, e: e.x - h * e.x, f: e.y - v * e.y,
+                    });
+                }
+                if rotate != 0.0 {
+                    // Per-glyph rotation, as legacy draws it: each glyph in its
+                    // own `translate(cx, baseline) · rotate(θ)` frame, the pen
+                    // advancing by the glyph's measured width plus the spacing.
+                    // The router admits a rotation only where a real measurer
+                    // exists; without one, stop rather than guess an advance.
+                    if let Some(measure) = crate::text_measure::try_make_measurer(&font, e.font_size) {
+                        let (sin, cos) = rotate.to_radians().sin_cos();
+                        let mut cx = e.x + dx;
+                        for ch in e.content().chars() {
+                            let glyph = ch.to_string();
+                            p.push_state(super::Transform { a: cos, b: sin, c: -sin, d: cos, e: cx, f: baseline });
+                            p.draw_text_run(
+                                &TextRun::FastRun {
+                                    font: font.clone(), size: e.font_size, text: glyph.clone(),
+                                    letter_spacing: 0.0, x: 0.0, y: 0.0,
+                                },
+                                &Brush::Solid(f.color),
+                                eff * f.opacity,
+                            );
+                            p.pop_state();
+                            cx += measure(&glyph) + spacing;
+                        }
+                    }
+                } else {
+                    let run = TextRun::FastRun {
+                        font: font.clone(),
+                        size: e.font_size,
+                        text: e.content(),
+                        // Node 15: the router admits a tracked flat text only
+                        // when its spacing reads, so `None` means none was set.
+                        letter_spacing: spacing,
+                        x: e.x + dx,
+                        y: baseline,
+                    };
+                    p.draw_text_run(&run, &Brush::Solid(f.color), eff * f.opacity);
+                }
+                // ⭐ NODE 20: the decoration lines, as legacy's
+                // `draw_text_decorations`: an underline at baseline + 0.12 x
+                // size, a line-through at baseline - 0.3 x size, across the
+                // measured width, max(0.07 x size, 1) wide in the fill, inside
+                // the scale frame as legacy draws them. The router admits a
+                // decoration only where a real measurer exists.
+                let under = e.text_decoration.split_whitespace().any(|w| w == "underline");
+                let strike = e.text_decoration.split_whitespace().any(|w| w == "line-through");
+                if under || strike {
+                    if let Some(measure) = crate::text_measure::try_make_measurer(&font, e.font_size) {
+                        let x0 = e.x + dx;
+                        let x1 = x0 + measure(&e.content());
+                        let line = StrokeStyle {
+                            width: (e.font_size * 0.07).max(1.0),
+                            cap: crate::geometry::element::LineCap::Butt,
+                            join: crate::geometry::element::LineJoin::Miter,
+                            miter: 10.0,
+                            dash: Vec::new(),
+                        };
+                        for (on, y) in [(under, baseline + e.font_size * 0.12), (strike, baseline - e.font_size * 0.3)] {
+                            if on {
+                                p.stroke_path(
+                                    &[PathCommand::MoveTo { x: x0, y }, PathCommand::LineTo { x: x1, y }],
+                                    &Brush::Solid(f.color),
+                                    &line,
+                                    eff * f.opacity,
+                                );
+                            }
+                        }
+                    }
+                }
+                if scaled {
+                    p.pop_state();
+                }
             }
         }
         // ⭐ ROW CV -- LIVE GEOMETRY, ported from `render.rs`'s `Element::Live`
