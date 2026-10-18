@@ -1,0 +1,15 @@
+{
+  "item": "paragraph.left_indent",
+  "spec": "workspace/panels/paragraph.yaml",
+  "setup_svg": "text_area_basic.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 94, "y": 30},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "paragraph_panel_content", "widget": "pg_left_indent", "event": "commit", "value": "12"},
+    {"read": "document"}
+  ],
+  "expected_json": "paragraph.left_indent.expected.json"
+}
