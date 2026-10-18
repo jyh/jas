@@ -1,0 +1,15 @@
+{
+  "item": "paragraph.align_center_styled_wrap",
+  "spec": "workspace/panels/paragraph.yaml",
+  "setup_svg": "text_area_styled_wrap.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 190, "y": 94},
+    {"kind": "move", "x": 2, "y": 2, "dragging": true},
+    {"kind": "release", "x": 2, "y": 2},
+    {"panel": "paragraph_panel_content", "widget": "pg_align_center", "event": "click"},
+    {"read": "document"}
+  ],
+  "expected_json": "paragraph.align_center_styled_wrap.expected.json"
+}
