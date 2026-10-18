@@ -2038,7 +2038,9 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
     // converts; everything else still does not. The arm keeps its intent by
     // asserting BOTH SIDES of the new boundary rather than one side of the old.
     let flat = Element::Text(crate::geometry::element::TextElem::from_string(
-        1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        // POINT text (no box): a 10 x 12 box made this area text, which since
+        // node 25 lowers only through the layout, where a real measurer exists.
+        1.0, 2.0, "hi", "Arial", 12.0, "normal", "normal", "none", 0.0, 0.0, None, None,
         common(),
     ));
     assert!(
@@ -2057,6 +2059,10 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
         _ => unreachable!(),
     };
     underlined.text_decoration = "underline".into();
+    // In a box, as this arm always was: since node 20 an underlined POINT text
+    // lowers where a real measurer exists, while decorated AREA text stays
+    // legacy on every lane.
+    (underlined.width, underlined.height) = (10.0, 12.0);
     assert!(
         element_needs_legacy(&Element::Text(underlined), caps),
         "a REAL decoration is an extra primitive and stays legacy -- the clause \
@@ -3713,4 +3719,155 @@ fn a_stored_scale_strokes_at_the_scaled_width_in_the_native_seam() {
     emit_element(&mut rec, &r, 1.0);
     let widths: Vec<f64> = drawn_edges(rec.commands()).iter().map(|e| e.0).collect();
     assert_eq!(widths, vec![2.0, 2.0, 2.0, 2.0], "{:?}", rec.commands());
+}
+
+// ── NODE 25 (flask section 431): paragraph layout in the walk ──────────────
+
+/// A paragraph wrapper tspan carrying `set`, ahead of the text's body.
+fn with_paragraph(mut t: crate::geometry::element::TextElem, set: impl FnOnce(&mut crate::geometry::tspan::Tspan)) -> crate::geometry::element::TextElem {
+    let mut w = crate::geometry::tspan::Tspan::default();
+    w.jas_role = Some("paragraph".into());
+    set(&mut w);
+    t.tspans.insert(0, w);
+    t
+}
+
+fn area_text(content: &str, width: f64) -> crate::geometry::element::TextElem {
+    let mut t = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, content, "Arial", 20.0, "normal", "normal", "none", width, 200.0, None, None,
+        common(),
+    );
+    t.fill = fill(Color::BLACK);
+    t
+}
+
+/// Every text run the walk emits, as `(text, x, y)`.
+fn text_runs(cmds: &[Command]) -> Vec<(String, f64, f64)> {
+    cmds.iter().filter_map(|c| match c {
+        Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, x, y, .. }, .. } => Some((text.clone(), *x, *y)),
+        _ => None,
+    }).collect()
+}
+
+fn runs_of(t: crate::geometry::element::TextElem) -> Vec<(String, f64, f64)> {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    text_runs(rec.commands())
+}
+
+/// ⛔ THE DEFECT: `render_is_flat` counts an empty paragraph wrapper as flat
+/// whatever it carries, and the flat arm drew ONE line at `y + 0.8 x size`, so
+/// ten area-text scripts with ten paragraph settings drew ONE frame on the box,
+/// and nothing wrapped. Legacy lays the text out (`layout_with_paragraphs`).
+/// Without a real measurer there is no layout to mirror: such text refuses.
+#[test]
+fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
+    use crate::painter::element_render::text_needs_legacy;
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    let indented = with_paragraph(area_text("Hello World", 120.0), |w| w.jas_left_indent = Some(12.0));
+    assert_eq!(text_needs_legacy(&indented), !has_real, "indented area text lowers exactly where a real measurer exists");
+    let mut upper = flat_text(20.0);
+    upper.text_transform = "uppercase".into();
+    assert_eq!(text_needs_legacy(&upper), !has_real, "uppercase is a layout input");
+    // Still legacy, by name, even with a measurer: list markers, and what the
+    // per-line draw does not carry (spacing, decoration, glyph rotation).
+    let listed = with_paragraph(area_text("Hello World", 120.0), |w| w.jas_list_style = Some("bullet-disc".into()));
+    assert!(text_needs_legacy(&listed), "a list marker stays legacy");
+    let mut rotated = indented.clone();
+    rotated.rotate = "30".into();
+    assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
+    // jas section 432: each feature the per-line draw does not carry REFUSES on
+    // laid-out text, never drops. Area text and an indented POINT text both,
+    // since only the area case was refused before node 25.
+    let indented_point = with_paragraph(flat_text(20.0), |w| w.jas_left_indent = Some(12.0));
+    for (label, t) in [("area", area_text("Hello World", 120.0)), ("indented point", indented_point)] {
+        type Set = fn(&mut crate::geometry::element::TextElem);
+        let cases: [(&str, Set); 6] = [
+            ("tracking", |t| t.letter_spacing = "0.1em".into()),
+            ("kerning", |t| t.kerning = "20".into()),
+            ("underline", |t| t.text_decoration = "underline".into()),
+            ("line-through", |t| t.text_decoration = "line-through".into()),
+            ("rotation", |t| t.rotate = "30".into()),
+            ("baseline shift", |t| t.baseline_shift = "super".into()),
+        ];
+        for (name, set) in cases {
+            let mut x = t.clone();
+            set(&mut x);
+            assert!(text_needs_legacy(&x), "laid-out {label} text with {name} stays legacy");
+        }
+    }
+}
+
+/// jas section 432: the case transform and small caps run before the layout,
+/// as legacy does (`render.rs`, content_str), so the walk draws the
+/// transformed string, and a hard break is a layout input too.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_walk_lays_out_the_transformed_string() {
+    let mut lower = flat_text(20.0);
+    lower.tspans[0].content = "HeLLo".into();
+    lower.text_transform = "lowercase".into();
+    assert_eq!(runs_of(lower)[0].0, "hello", "lowercase");
+    let mut caps = flat_text(20.0);
+    caps.font_variant = "small-caps".into();
+    assert_eq!(runs_of(caps)[0].0, "HELLO", "small caps draws uppercase, as legacy does");
+    let mut broken = flat_text(20.0);
+    broken.tspans[0].content = "Hello
+World".into();
+    let r = runs_of(broken);
+    assert_eq!(r.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), vec!["Hello", "World"], "a hard break draws two lines: {r:?}");
+    assert!(r[1].2 > r[0].2, "the second line below the first: {r:?}");
+    // CONTROL: "none" is the absent value and keeps the one-run path.
+    let mut none = flat_text(20.0);
+    none.text_transform = "none".into();
+    assert_eq!(runs_of(none), vec![("Hello".to_string(), 1.0, 2.0 + 0.8 * 20.0)]);
+}
+
+/// The layout's own law, mirrored line for line where a measurer exists.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn the_walk_draws_the_paragraph_layout() {
+    let m = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).unwrap();
+    let base = runs_of(area_text("Hello World", 300.0));
+    assert_eq!(base.len(), 1, "control: one line: {base:?}");
+    let (x0, y0) = (base[0].1, base[0].2);
+    assert!((x0 - 1.0).abs() < 1e-9, "control: an unindented line starts at x: {base:?}");
+
+    let left = runs_of(with_paragraph(area_text("Hello World", 300.0), |w| w.jas_left_indent = Some(12.0)));
+    assert!((left[0].1 - (x0 + 12.0)).abs() < 1e-9, "a left indent moves the line by 12: {left:?}");
+    let first = runs_of(with_paragraph(area_text("Hello World", 300.0), |w| w.text_indent = Some(24.0)));
+    assert!((first[0].1 - (x0 + 24.0)).abs() < 1e-9, "a first-line indent moves the line by 24: {first:?}");
+
+    let w = m("Hello World");
+    let centre = runs_of(with_paragraph(area_text("Hello World", 300.0), |p| {
+        p.text_align = Some("justify".into()); p.text_align_last = Some("center".into());
+    }));
+    assert!((centre[0].1 - (x0 + (300.0 - w) / 2.0)).abs() < 0.5, "justify-center centres the last line: {centre:?} w={w}");
+    let right = runs_of(with_paragraph(area_text("Hello World", 300.0), |p| p.text_align = Some("right".into())));
+    assert!((right[0].1 - (x0 + 300.0 - w)).abs() < 0.5, "right puts the line at the right edge: {right:?}");
+
+    // Wrapping: a box too narrow for both words draws two lines, one below the other.
+    let wrapped = runs_of(area_text("Hello World", m("Hello ").max(m("World")) + 5.0));
+    assert_eq!(wrapped.len(), 2, "two lines: {wrapped:?}");
+    assert!(wrapped[1].2 > wrapped[0].2, "the second line is below the first: {wrapped:?}");
+
+    // Justify-all stretches the glue: the words are placed one by one, and the
+    // last word ends at the right edge.
+    let all = runs_of(with_paragraph(area_text("Hello World", 300.0), |p| {
+        p.text_align = Some("justify".into()); p.text_align_last = Some("justify".into());
+    }));
+    assert_eq!(all.len(), 2, "justify-all draws word by word: {all:?}");
+    assert!((all[1].1 + m("World") - (x0 + 300.0)).abs() < 0.5, "the last word ends at the right edge: {all:?}");
+
+    let mut upper = flat_text(20.0);
+    upper.text_transform = "uppercase".into();
+    assert_eq!(runs_of(upper)[0].0, "HELLO", "uppercase draws the transformed string");
+    let _ = y0;
+}
+
+/// CONTROL: plain flat point text keeps its certified one-run path, byte for byte.
+#[test]
+fn plain_point_text_keeps_one_run() {
+    let r = runs_of(flat_text(20.0));
+    assert_eq!(r, vec![("Hello".to_string(), 1.0, 2.0 + 0.8 * 20.0)]);
 }
