@@ -1,0 +1,10 @@
+{
+    "item":  "character.baseline_shift",
+    "surface":  "2379x1333",
+    "frame_hash":  "192d5ff95ce8dd95f03a15e7619c1ebb15fabdd6b027c556900b5355d8adfa42",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "65dc7e2ffd8d473c",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
