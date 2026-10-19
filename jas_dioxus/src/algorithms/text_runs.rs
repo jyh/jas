@@ -26,6 +26,9 @@ pub struct TextRun {
     pub tspan: usize,
     /// The content index of the run's first character.
     pub start: usize,
+    /// The size the run draws at (its tspan's, or the element's after a
+    /// baseline shift's scale).
+    pub size: f64,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -72,7 +75,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti, start: s });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0 });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -119,6 +122,31 @@ pub fn tspan_face<'a>(
     }
 }
 
+/// An element baseline shift as `(size_scale, y_shift)`, the flat path's
+/// and Swift's law (`canvas/render.rs`; `parseBaselineShift`): `super` at
+/// 0.7 x size and 0.35 x size up, `sub` at 0.7 x size and 0.2 x size down,
+/// `Npt` N up at full size, none `(1, 0)`. `None` for a value that does not
+/// read, which the router keeps away from the plan rather than guess.
+pub fn baseline_shift(e: &crate::geometry::element::TextElem) -> Option<(f64, f64)> {
+    match e.baseline_shift.as_str() {
+        "" => Some((1.0, 0.0)),
+        "super" => Some((0.7, -e.font_size * 0.35)),
+        "sub" => Some((0.7, e.font_size * 0.2)),
+        other => crate::geometry::tspan::parse_pt(other).map(|pt| (1.0, -pt)),
+    }
+}
+
+/// The face a tspan's run is measured and drawn in under a baseline shift's
+/// `scale`: [`tspan_face`], whose size falls back to the element's SCALED
+/// size; a tspan's own size is not scaled (Swift: `t.fontSize ?? effectiveFs`).
+fn run_face<'a>(
+    e: &'a crate::geometry::element::TextElem,
+    t: &'a crate::geometry::tspan::Tspan,
+    scale: f64,
+) -> RunFace<'a> {
+    RunFace { size: t.font_size.unwrap_or(e.font_size * scale), ..tspan_face(e, t) }
+}
+
 /// A list marker placed relative to the element's origin, drawn in the
 /// element's face.
 #[derive(Debug, Clone, PartialEq)]
@@ -126,6 +154,8 @@ pub struct PlacedMarker {
     pub text: String,
     pub x: f64,
     pub baseline_y: f64,
+    /// The size it draws at: the element's, after a baseline shift's scale.
+    pub size: f64,
 }
 
 /// Which line a decoration draws.
@@ -170,6 +200,8 @@ fn decorations(
     layout: &TextLayout,
     chars: &[char],
     ranges: &[(usize, usize)],
+    scale: f64,
+    dy: f64,
 ) -> Vec<Decoration> {
     let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
     // A decoration line at `size`: its offset from the baseline and thickness.
@@ -186,7 +218,7 @@ fn decorations(
             let mut span: Option<(f64, f64, f64)> = None;
             let mut close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
                 if let Some((x0, x1, size)) = span.take() {
-                    out.push(Decoration { kind, x0, x1, y: line.baseline_y + place(kind, size), thickness: (size * 0.07).max(1.0) });
+                    out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
                 }
             };
             for g in glyphs {
@@ -198,7 +230,7 @@ fn decorations(
                     close(&mut span, &mut out);
                     continue;
                 }
-                let size = t.map_or(e.font_size, |t| tspan_face(e, &e.tspans[t]).size);
+                let size = t.map_or(e.font_size * scale, |t| run_face(e, &e.tspans[t], scale).size);
                 match span {
                     Some((x0, x1, s)) if s == size => span = Some((x0, x1.max(g.right), s)),
                     _ => {
@@ -280,7 +312,7 @@ fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph])
 
 fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
     if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
-        out.push(TextRun { text, x: g.x, tspan, start });
+        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0 });
     }
 }
 
@@ -299,17 +331,22 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 ///
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
-/// plan does NOT draw (spacing, a scale or rotation, a baseline shift, an
-/// anchor, a tspan's dx, rotate or transform) is the router's to keep away
-/// from it (`element_render::runs_plan_excludes`). A tspan's own size is
-/// drawn (its characters measured and its run drawn at that size, on the
-/// element's uniform leading), and so is a case transform (each tspan's text
-/// as `cased` transforms it).
+/// plan does NOT draw (spacing, a scale or rotation, a baseline shift that
+/// does not read, an anchor, a tspan's dx, rotate, transform or baseline
+/// shift) is the router's to keep away from it
+/// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
+/// characters measured and its run drawn at that size, on the element's
+/// uniform leading), and so are a case transform (each tspan's text as
+/// `cased` transforms it) and an element baseline shift ([`baseline_shift`]:
+/// the element's size scaled, every baseline moved; each run and marker
+/// carries the size it draws at). `None` also when the shift does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
 ) -> Option<RunsPlan> {
-    let measure = measurer(&element_face(e))?;
+    let (scale, dy) = baseline_shift(e)?;
+    let base = RunFace { size: e.font_size * scale, ..element_face(e) };
+    let measure = measurer(&base)?;
     // Each tspan's characters as drawn: its case transform (its own over the
     // element's; small caps draws as uppercase), as Swift's per-run
     // `applyTextTransform`. A transform that would change the character count
@@ -320,7 +357,7 @@ pub fn plan(
     let mut widths: Vec<f64> = Vec::with_capacity(content.chars().count());
     for (t, text) in e.tspans.iter().zip(&shown) {
         if text.is_empty() { continue; }
-        let m = measurer(&tspan_face(e, t))?;
+        let m = measurer(&run_face(e, t, scale))?;
         widths.extend(text.chars().map(|c| m(&c.to_string())));
     }
     let leading = if e.line_height.is_empty() {
@@ -328,11 +365,11 @@ pub fn plan(
             .find(|t| t.jas_role.as_deref() == Some("paragraph"))
             .and_then(|t| t.jas_auto_leading)
         {
-            Some(pct) => e.font_size * pct / 100.0,
-            None => e.font_size,
+            Some(pct) => base.size * pct / 100.0,
+            None => base.size,
         }
     } else {
-        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(base.size)
     };
     let max_w = if e.is_area_text() { e.width } else { 0.0 };
     let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
@@ -353,15 +390,20 @@ pub fn plan(
             let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
             let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
             if let (Some(g), Some(t)) = (hyphen, owner) {
-                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end });
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0 });
             }
         }
+        // Each run at its resolved size, on the shifted baseline.
+        for r in &mut runs.runs {
+            r.size = run_face(e, &e.tspans[r.tspan], scale).size;
+        }
+        runs.baseline_y += dy;
     }
     let markers = crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments)
         .into_iter()
-        .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y, text: m.text, x: m.indent })
+        .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y + dy, text: m.text, x: m.indent, size: base.size })
         .collect();
-    let decorations = decorations(e, &layout, &chars, &ranges);
+    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy);
     Some(RunsPlan { lines, markers, decorations })
 }
 
@@ -694,6 +736,50 @@ mod tests {
         let plain = plan(&styled_area(2000.0), &caps).unwrap();
         assert_eq!(shape(&plain)[0][0], ("One fine day ".to_string(), 0.0, 1));
         assert_eq!(shape(&plain)[0][1].1, 140.0, "the capital O measures 20, the rest 10");
+    }
+
+    /// An element baseline shift (Swift's and the flat path's law): super and
+    /// sub draw at 0.7 x the size (a tspan's OWN size is not scaled), the
+    /// leading follows the scaled size, and every baseline moves: super up
+    /// 0.35 x size, sub down 0.2 x size, `Npt` up N at full size. Each run
+    /// carries the size it draws at.
+    #[test]
+    fn an_element_baseline_shift_scales_and_moves_the_plan() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.baseline_shift = "super".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        // Size 14: 7 per plain character, 14 per bold one.
+        assert_eq!(shape(&p)[0], vec![
+            ("One fine day ".to_string(), 0.0, 1),
+            ("extraordinarily patiently".to_string(), 91.0, 2),
+            (" sat".to_string(), 441.0, 3),
+        ]);
+        assert!(p.lines[0].runs.iter().all(|r| r.size == 14.0), "{:?}", p.lines[0].runs);
+        assert!((p.lines[0].baseline_y - (14.0 * 0.8 - 20.0 * 0.35)).abs() < 1e-9, "{}", p.lines[0].baseline_y);
+        // A marker and a decoration move and scale with it.
+        let mut deco = e.clone();
+        deco.tspans[0].jas_list_style = Some("bullet-disc".into());
+        deco.text_decoration = "underline".into();
+        let d = plan(&deco, &faces(&seen)).unwrap();
+        let b = d.lines[0].baseline_y;
+        assert_eq!((d.markers[0].baseline_y, d.markers[0].size), (b, 14.0), "{:?}", d.markers);
+        assert!((d.decorations[0].y - (b + 14.0 * 0.12)).abs() < 1e-9 && d.decorations[0].thickness == (14.0f64 * 0.07).max(1.0), "{:?}", d.decorations);
+        // A tspan's own size is not scaled.
+        let mut own = e.clone();
+        own.tspans[2].font_size = Some(30.0);
+        assert_eq!(plan(&own, &faces(&seen)).unwrap().lines[0].runs[1].size, 30.0);
+        // Sub, and a numeric shift at full size.
+        let mut sub = styled_area(2000.0);
+        sub.baseline_shift = "sub".into();
+        assert!((plan(&sub, &faces(&seen)).unwrap().lines[0].baseline_y - (14.0 * 0.8 + 20.0 * 0.2)).abs() < 1e-9);
+        let mut pt = styled_area(2000.0);
+        pt.baseline_shift = "3pt".into();
+        let q = plan(&pt, &faces(&seen)).unwrap();
+        assert!((q.lines[0].baseline_y - (16.0 - 3.0)).abs() < 1e-9 && q.lines[0].runs[0].size == 20.0);
+        // CONTROL: no shift, the size and baseline as written.
+        let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        assert_eq!((none.lines[0].baseline_y, none.lines[0].runs[0].size), (16.0, 20.0));
     }
 
     /// On a justified line the underline spans the STRETCHED glue, not the

@@ -2412,7 +2412,9 @@ fn draw_laid_out_runs(
     let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
     for line in &plan.lines {
         for r in &line.runs {
-            ctx.set_font(&css(&crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan])));
+            // The plan resolves the run's size (a baseline shift scales it).
+            let face = crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan]);
+            ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
             ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
         }
     }
@@ -2428,8 +2430,8 @@ fn draw_laid_out_runs(
         ctx.line_to(e.x + d.x1, e.y + d.y);
         ctx.stroke();
     }
-    ctx.set_font(&css(&crate::algorithms::text_runs::element_face(e)));
     for m in &plan.markers {
+        ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: m.size, ..crate::algorithms::text_runs::element_face(e) }));
         ctx.fill_text(&m.text, e.x + m.x, e.y + m.baseline_y).ok();
     }
 }
