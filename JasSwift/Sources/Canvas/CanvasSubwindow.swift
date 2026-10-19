@@ -1804,7 +1804,57 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             let naturalW = measure(segStr)
             let layoutW = max(0.0, lastVisibleRight - firstVisibleX)
             let gluesStretched = layoutW > naturalW + 0.5
-            if rotRad == 0.0 && !gluesStretched {
+            // A TSPAN's own rotation (TSPAN.md "Rotation"): each of its glyphs
+            // turns about its own baseline origin and the pen advances
+            // un-rotated. A line holding one draws tspan by tspan, each
+            // portion at its first glyph's layout x, a rotated portion one
+            // glyph per frame. Mirrors Rust's shared plan (`text_runs::plan`,
+            // a rotated tspan's runs cut per character).
+            let rotatedTspan = !v.renderIsFlat && v.tspans.contains { ($0.rotate ?? 0) != 0 }
+            if rotRad == 0.0 && !gluesStretched && rotatedTspan {
+                let glyphX = { (idx: Int) -> Double? in
+                    lineGlyphs.first(where: { $0.idx == idx }).map { v.x + anchorDx + $0.x }
+                }
+                var charPos = 0
+                var strPos = 0
+                for t in v.tspans {
+                    let tStart = charPos
+                    charPos += t.content.unicodeScalars.count
+                    let s = max(line.start, tStart), e = min(line.end, charPos)
+                    if s >= e { continue }
+                    // This portion's slice of `lineStr`, which appends each
+                    // portion's case-transformed text in tspan order.
+                    let own = String(String.UnicodeScalarView(
+                        Array(t.content.unicodeScalars)[(s - tStart)..<(e - tStart)]))
+                    let len = (applyTextTransform(t.textTransform ?? v.textTransform,
+                        t.fontVariant ?? v.fontVariant, own) as NSString).length
+                    let piece = lineStr.attributedSubstring(from: NSRange(location: strPos, length: len))
+                    strPos += len
+                    let angle = (t.rotate ?? 0) * (Double.pi / 180)
+                    if angle == 0 {
+                        guard let x = glyphX(s) else { continue }
+                        ctx.textPosition = CGPoint(x: x, y: baselineY)
+                        CTLineDraw(CTLineCreateWithAttributedString(piece), ctx)
+                        continue
+                    }
+                    let ns = piece.string as NSString
+                    var k = 0
+                    var at = 0
+                    while at < ns.length {
+                        let r = ns.rangeOfComposedCharacterSequence(at: at)
+                        if let x = glyphX(s + k) {
+                            ctx.saveGState()
+                            ctx.translateBy(x: x, y: baselineY)
+                            ctx.rotate(by: angle)
+                            ctx.textPosition = .zero
+                            CTLineDraw(CTLineCreateWithAttributedString(piece.attributedSubstring(from: r)), ctx)
+                            ctx.restoreGState()
+                        }
+                        at = r.location + r.length
+                        k += 1
+                    }
+                }
+            } else if rotRad == 0.0 && !gluesStretched {
                 let ctLine = CTLineCreateWithAttributedString(lineStr)
                 ctx.textPosition = CGPoint(x: lineX, y: baselineY)
                 CTLineDraw(ctLine, ctx)
