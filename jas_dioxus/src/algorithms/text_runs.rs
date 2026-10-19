@@ -348,7 +348,7 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing that does not read, a scale or rotation, a baseline shift that
-/// does not read, an anchor, a tspan's dx, rotate, transform or baseline
+/// does not read, a tspan's dx, rotate, transform or baseline
 /// shift) is the router's to keep away from it
 /// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
 /// characters measured and its run drawn at that size, on the element's
@@ -357,7 +357,9 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// the element's size scaled, every baseline moved; each run and marker
 /// carries the size it draws at), and tracking and kerning ([`letter_spacing`],
 /// in every character's width so the layout matches the draw; the plan carries
-/// the advance). `None` also when the shift or the spacing does not read.
+/// the advance), and a point text's anchor (each line, with its decorations,
+/// moved by `anchor_shift` of its own width; the markers stay at their indent).
+/// `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
@@ -399,11 +401,11 @@ pub fn plan(
     let mut lines = line_runs(&layout, &content, &ranges);
     let chars: Vec<char> = content.chars().collect();
     // A point text's anchor moves each line by the width it draws: its
-    // characters' widths, its hard break excluded (`anchor_shift` is 0 for
+    // characters' widths (a line's range stops before its hard break, as
+    // `LineInfo::end` says, so the break is not counted; `anchor_shift` is 0 for
     // area text and the default anchor). The markers stay at their indent.
     let shifts: Vec<f64> = layout.lines.iter().map(|line| {
         let w: f64 = (line.start..line.end.min(chars.len()))
-            .filter(|&i| chars[i] != '\n')
             .map(|i| widths[i])
             .sum();
         e.anchor_shift(w)

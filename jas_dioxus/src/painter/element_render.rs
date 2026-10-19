@@ -563,12 +563,13 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 /// NODE 33: what the runs path does not draw, so it stays legacy, by name:
 /// [`runs_plan_excludes`] (a tspan's rotate, transform, dx or own baseline
 /// shift; element spacing or a baseline shift that does not read; a scale or
-/// rotation; an anchor), and any tspan whose font has no real measurer (each
+/// rotation), and any tspan whose font has no real measurer (each
 /// character is measured in its own font). Drawn, so NOT excluded: a tspan's
 /// own size (each run at its size on the element's leading, as Swift draws
 /// it), readable tracking and kerning (in the layout's widths), a decoration
 /// (the element's or a tspan's), a case transform or small caps, a readable
-/// element baseline shift, and a justified or hyphenated paragraph (the plan
+/// element baseline shift, a point text's anchor (each line moved by its own
+/// width), and a justified or hyphenated paragraph (the plan
 /// cuts a stretched line into words and draws the synthetic hyphen).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     runs_plan_excludes(t) || t.tspans.iter().any(|s| {
