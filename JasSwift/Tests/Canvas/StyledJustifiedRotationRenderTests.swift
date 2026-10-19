@@ -72,6 +72,12 @@ private func justified(align: String, rotate: String = "", bold: Bool = true) ->
     let turnedJust = inkColumns(render(justified(align: "justify", rotate: "90"))).last!
     #expect(turnedJust > turnedLeft + 20,
             "a turned justified line keeps its stretch (\(turnedLeft) -> \(turnedJust))")
+    // Every word at its stretched x, not only the later tspans': line 1's
+    // last glyph ends at the box's right edge, 52 pt (208 px), less its
+    // right side bearing (about 0.6 pt, 3 px). Each word drawn at its
+    // portion's natural advance would end at least one glue's stretch
+    // (about 5.5 pt, 22 px) short.
+    #expect(uprightJust >= 200, "the stretched line reaches the box's right edge: \(uprightJust)")
 }
 
 /// A justified styled line draws each word in its own tspan's attributes: the
@@ -89,13 +95,14 @@ private func justified(align: String, rotate: String = "", bold: Bool = true) ->
     #expect(Double(lBold) > Double(lRegular) * 1.05, "CONTROL: \(lRegular) vs \(lBold)")
 }
 
-/// "go " then a bold "information", hyphenated in a box too narrow for the
-/// word. Its line 1 is broken inside the word, at `breakAt`.
-private func hyphenated(_ content: [String], rotate: String, hyphenate: Bool) -> Text {
+/// An italic "go " (so the text is STYLED whatever the word's weight) then
+/// "information" in `weight`, hyphenated in a box too narrow for the word.
+private func hyphenated(_ content: [String], rotate: String, hyphenate: Bool,
+                        weight: String = "bold") -> Text {
     Text(x: 2, y: 2, tspans: [
         Tspan(id: 0, content: "", jasRole: "paragraph", jasHyphenate: hyphenate),
-        Tspan(id: 1, content: content[0]),
-        Tspan(id: 2, content: content[1], fontWeight: "bold"),
+        Tspan(id: 1, content: content[0], fontStyle: "italic"),
+        Tspan(id: 2, content: content[1], fontWeight: weight),
     ], fontFamily: "Helvetica", fontSize: 8, rotate: rotate,
        width: 40, height: 50, fill: Fill(color: .black))
 }
@@ -111,22 +118,58 @@ private func firstLine(_ t: Text) -> (end: Int, hyphen: Bool) {
     return (lay.lines[0].end, lay.lines[0].trailingHyphen)
 }
 
-/// A turned hyphenated line draws its hyphen. The control text breaks at the
-/// same character with a SPACE in place of the hyphen, so both renders put
-/// every letter at the same x and differ by the hyphen's ink alone.
+/// The hyphen's ink: the pixels where the hyphenated render differs from a
+/// control that breaks at the same character with a SPACE in place of the
+/// hyphen (so every letter sits at the same x), as the box they span and the
+/// count of them the hyphen inks solidly. `nil` when a precondition fails.
+private func hyphenInk(rotate: String, weight: String) -> (w: Int, h: Int, solid: Int)? {
+    let word = "information"
+    let (end, hyphen) = firstLine(hyphenated(["go ", word], rotate: "", hyphenate: true, weight: weight))
+    #expect(hyphen, "precondition (\(weight)): line 1 is broken at a hyphenation point (it ends at \(end))")
+    guard hyphen, end > 3 else { return nil }
+    let w = Array(word)
+    let split = ["go ", String(w[..<(end - 3)]) + " " + String(w[(end - 3)...])]
+    let control = hyphenated(split, rotate: rotate, hyphenate: false, weight: weight)
+    #expect(firstLine(control).end == end + 1,
+            "precondition (\(weight)): the control breaks at the same letter, after its space")
+    let a = render(.text(hyphenated(["go ", word], rotate: rotate, hyphenate: true, weight: weight)))
+    let b = render(.text(control))
+    var xs: [Int] = [], ys: [Int] = [], solid = 0
+    for y in 0..<size {
+        for x in 0..<size where a[(y * size + x) * 4 + 3] != b[(y * size + x) * 4 + 3] {
+            xs.append(x); ys.append(y)
+            if a[(y * size + x) * 4 + 3] > 127 { solid += 1 }
+        }
+    }
+    guard let x0 = xs.min(), let x1 = xs.max(), let y0 = ys.min(), let y1 = ys.max() else {
+        return (0, 0, 0)
+    }
+    return (x1 - x0 + 1, y1 - y0 + 1, solid)
+}
+
+/// A hyphenated line draws its hyphen on a turned line too, turned with the
+/// broken word's glyphs, and in that word's tspan. The hyphen alone separates
+/// the two renders, so their difference is a small box: a bar wider than tall
+/// upright, taller than wide turned 90 degrees. Bounds, at 4 px per pt and
+/// 8 pt Helvetica: the hyphen is about 2.7 pt by 0.7 pt (11 px by 3 px), so
+/// its box's long side is under 20 px and its short side under 8 px.
 @Test func aTurnedHyphenatedLineDrawsItsHyphen() {
-    let probe = hyphenated(["go ", "information"], rotate: "", hyphenate: true)
-    let (end, hyphen) = firstLine(probe)
-    #expect(hyphen, "precondition: line 1 is broken at a hyphenation point (it ends at \(end))")
-    guard hyphen, end > 3 else { return }
-    let word = Array("information")
-    let split = ["go ", String(word[..<(end - 3)]) + " " + String(word[(end - 3)...])]
-    #expect(firstLine(hyphenated(split, rotate: "", hyphenate: false)).end == end + 1,
-            "precondition: the control breaks at the same letter, after its space")
+    guard let up = hyphenInk(rotate: "", weight: "bold"),
+          let turned = hyphenInk(rotate: "90", weight: "bold") else { return }
+    #expect(up.w > up.h && up.w < 20 && up.h < 8,
+            "CONTROL: upright, the difference is the hyphen alone, a flat bar: \(up)")
+    #expect(turned.h > turned.w && turned.h < 20 && turned.w < 8,
+            "turned, the hyphen draws as a turned bar: \(turned)")
+}
+
+/// The hyphen draws in the broken word's tspan: a bold word's hyphen inks more
+/// solid pixels than a regular word's, upright and turned.
+@Test func aHyphenDrawsInTheBrokenWordsTspan() {
     for rotate in ["", "90"] {
-        let withHyphen = anyInk(render(.text(hyphenated(["go ", "information"], rotate: rotate, hyphenate: true))))
-        let spaced = anyInk(render(.text(hyphenated(split, rotate: rotate, hyphenate: false))))
-        #expect(withHyphen > spaced,
-                "rotate '\(rotate)': the hyphen draws (\(spaced) -> \(withHyphen))")
+        guard let bold = hyphenInk(rotate: rotate, weight: "bold"),
+              let regular = hyphenInk(rotate: rotate, weight: "normal") else { return }
+        #expect(regular.solid > 0, "rotate '\(rotate)': the regular hyphen draws: \(regular)")
+        #expect(bold.solid > regular.solid,
+                "rotate '\(rotate)': the bold word's hyphen is bold (\(regular.solid) vs \(bold.solid))")
     }
 }
