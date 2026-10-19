@@ -4181,3 +4181,36 @@ fn a_tspans_own_baseline_shift_raises_its_run() {
         assert!((r.2 - p.2).abs() < 1e-9 && (r.3 - want).abs() < 1e-9, "{r:?} vs {p:?}");
     }
 }
+
+/// The walk draws a tspan's own rotation one glyph per frame: " sat" rotated
+/// 15 degrees draws four glyphs, each a run at (0, 0) inside a
+/// `translate(x, baseline) · rotate(15°)` frame, the frames' x increasing and
+/// sharing the line's baseline; the unrotated runs draw outside any frame.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
+    let mut e = styled_area(2000.0);
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let mut frames = Vec::new();
+    let cmds = rec.commands();
+    for (i, c) in cmds.iter().enumerate() {
+        if let Command::PushState { transform: t } = c {
+            if (t.a - cos).abs() < 1e-12 && (t.b - sin).abs() < 1e-12 {
+                match &cmds[i + 1] {
+                    Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, x, y, .. }, .. } => {
+                        assert_eq!((*x, *y), (0.0, 0.0));
+                        frames.push((text.clone(), t.e, t.f));
+                    }
+                    other => panic!("a rotated frame draws its glyph next: {other:?}"),
+                }
+                assert!(matches!(cmds[i + 2], Command::PopState), "and closes");
+            }
+        }
+    }
+    let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
+    assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
+}
