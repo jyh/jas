@@ -998,4 +998,21 @@ mod tests {
         assert_eq!(plain.lines[0].runs.len(), 3);
         assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.rotate == 0.0));
     }
+
+    /// A rotated glyph moves with its line's anchor: point text "ab" + "cd"
+    /// (rotated), end-anchored, is 40 wide, so its glyphs sit at -20 and -10.
+    #[test]
+    fn a_rotated_glyph_moves_with_its_lines_anchor() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = TextElem::from_string(
+            1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+            CommonProps::default(),
+        );
+        e.tspans = vec![tspan("ab\n", None), tspan("ab", None), tspan("cd", None)];
+        e.tspans[2].rotate = Some(-30.0);
+        e.text_anchor = "end".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got: Vec<(String, f64, f64)> = p.lines[1].runs.iter().map(|r| (r.text.clone(), r.x, r.rotate)).collect();
+        assert_eq!(got, vec![("ab".into(), -40.0, 0.0), ("c".into(), -20.0, -30.0), ("d".into(), -10.0, -30.0)]);
+    }
 }
