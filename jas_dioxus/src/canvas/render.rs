@@ -5172,3 +5172,59 @@ mod fill_rule_pixel_tests {
         assert_eq!(painter_overlap, 255, "a union's overlap is INSIDE the result");
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// The shared laid-out-runs plan on the legacy canvas (STATUS-flask § 454/455)
+// ═══════════════════════════════════════════════════════════════════════════
+// Non-flat AREA text drew through `draw_segmented_text`: one baseline at
+// y + 0.8 x size, no wrap, so a narrow box inked one long line and nothing
+// below it. Through `text_runs::plan` it wraps. The plan's layout is pinned
+// natively (`algorithms::text_runs` tests); this arm proves the canvas DRAWS it.
+#[cfg(all(test, target_arch = "wasm32"))]
+mod laid_out_runs_pixel_tests {
+    use super::*;
+    use crate::geometry::element::{CommonProps, Fill, TextElem};
+    use crate::geometry::tspan::Tspan;
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test_configure!(run_in_browser);
+
+    /// Area text at (1, 2), size 20, in a `width` box: wrapper, plain, bold, plain.
+    fn styled_area(width: f64) -> Element {
+        let mut e = TextElem::from_string(
+            1.0, 2.0, "", "sans-serif", 20.0, "normal", "normal", "none", width, 200.0, None, None,
+            CommonProps::default(),
+        );
+        e.fill = Some(Fill { color: Color::BLACK, opacity: 1.0 });
+        let mut w = Tspan::default();
+        w.jas_role = Some("paragraph".into());
+        let run = |s: &str, bold: bool| {
+            let mut t = Tspan::default_tspan();
+            t.content = s.into();
+            t.font_weight = bold.then(|| "bold".to_string());
+            t
+        };
+        e.tspans = vec![w, run("One fine day ", false), run("extraordinarily patiently", true), run(" sat", false)];
+        Element::Text(e)
+    }
+
+    /// Whether any pixel in rows `y0..y1` (x 0..300) carries ink.
+    fn inks(elem: &Element, y0: u32, y1: u32) -> bool {
+        let s = WebSurface::offscreen(300, 100).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        draw_element_scaled(&ctx, TargetSize::of(&s), elem, Visibility::Preview, 1.0, 1.0);
+        let px = s.read_rgba(0, y0, 300, y1 - y0).expect("in bounds");
+        px.chunks(4).any(|p| p[3] > 0)
+    }
+
+    /// Line 1's baseline is y 2 + 16 = 18; line 2's is 38. Rows 26..40 hold
+    /// only a second line's glyphs (line 1's descenders end near 23).
+    #[wasm_bindgen_test]
+    fn styled_area_text_wraps_on_the_legacy_canvas() {
+        // The instrument first: both boxes ink their first line.
+        assert!(inks(&styled_area(2000.0), 5, 18), "control: the wide box draws line 1");
+        assert!(inks(&styled_area(140.0), 5, 18), "control: the narrow box draws line 1");
+        assert!(!inks(&styled_area(2000.0), 26, 40), "control: a wide box has no second line");
+        assert!(inks(&styled_area(140.0), 26, 40), "a narrow box wraps the styled text onto a second line");
+    }
+}
