@@ -1600,6 +1600,10 @@ public sealed partial class MainWindow
                 MinHeight = 0,
                 Padding = new Thickness(4, 0, 4, 0),
                 IsEditable = leaf.Type == "combo_box",
+                // flask § 459, measured: with text search on, an editable combo
+                // COMPLETES a typed "13" to the option "135" and the blur commit
+                // sends the completion. A typed value is the value.
+                IsTextSearchEnabled = leaf.Type != "combo_box",
             };
             foreach (var row in items)
             {

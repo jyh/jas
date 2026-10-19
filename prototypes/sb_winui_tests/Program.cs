@@ -378,6 +378,14 @@ static class Program
             "(null)", PanelWire.ComboBlurCommit("13", "0", "0°", comboItems, true) ?? "(null)");
         Eq("combo blur: no readable text (the template part missing) sends nothing",
             "(null)", PanelWire.ComboBlurCommit(null, "0", "0°", comboItems, false) ?? "(null)");
+        // flask § 459, measured on the box: putting the box back after a
+        // commit can leave it EMPTY, and the next blur sent "" (BadValue).
+        Eq("combo blur: an empty box is not a value and sends nothing",
+            "(null)", PanelWire.ComboBlurCommit("", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: nor does a whitespace-only box",
+            "(null)", PanelWire.ComboBlurCommit("  ", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: CONTROL: an empty SHOWN text does not stop a typed value",
+            "27", PanelWire.ComboBlurCommit("27", "", "", comboItems, false) ?? "(null)");
 
         var list = PanelWire.ReadPanelList(
             "[{\"id\":\"align_panel_content\",\"summary\":\"Align\"},"
