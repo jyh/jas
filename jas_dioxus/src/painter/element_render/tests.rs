@@ -4058,7 +4058,7 @@ fn styled_area_text_lowers_only_where_the_runs_path_draws_it() {
     assert_eq!(text_needs_legacy(&styled_area(140.0)), !has_real, "styled area text lowers exactly where a real measurer exists");
     type Set = fn(&mut crate::geometry::element::TextElem);
     let cases: [(&str, Set); 3] = [
-        ("tracking", |e| e.letter_spacing = "0.1em".into()),
+        ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
     ];
@@ -4079,7 +4079,7 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
     let cases: [(&str, Set); 5] = [
-        ("tracking", |e| e.letter_spacing = "0.1em".into()),
+        ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
         ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
@@ -4088,7 +4088,9 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 9] = [
+    let admitted: [(&str, Admit); 11] = [
+        ("tracking", |e| e.letter_spacing = "0.1em".into()),
+        ("numeric kerning", |e| e.kerning = "0.05em".into()),
         ("a super baseline shift", |e| e.baseline_shift = "super".into()),
         ("a numeric baseline shift", |e| e.baseline_shift = "3pt".into()),
         ("a case transform", |e| e.text_transform = "uppercase".into()),

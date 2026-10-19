@@ -136,6 +136,18 @@ pub fn baseline_shift(e: &crate::geometry::element::TextElem) -> Option<(f64, f6
     }
 }
 
+/// Tracking plus numeric kerning as one uniform advance in px at `size`, the
+/// flat path's and Swift's law (`canvas/render.rs`'s `letterSpacing`;
+/// `letterSpacingPx`): each is `Nem`, empty is 0. `None` when either is set
+/// and does not read (a kerning MODE word such as `auto`): the router keeps
+/// that away from the plan rather than guess.
+pub fn letter_spacing(e: &crate::geometry::element::TextElem, size: f64) -> Option<f64> {
+    let read = |v: &str| -> Option<f64> {
+        if v.is_empty() { Some(0.0) } else { crate::geometry::tspan::parse_em_as_thousandths(v) }
+    };
+    Some((read(&e.letter_spacing)? + read(&e.kerning)?) * size / 1000.0)
+}
+
 /// The face a tspan's run is measured and drawn in under a baseline shift's
 /// `scale`: [`tspan_face`], whose size falls back to the element's SCALED
 /// size; a tspan's own size is not scaled (Swift: `t.fontSize ?? effectiveFs`).
@@ -269,6 +281,9 @@ pub struct RunsPlan {
     pub lines: Vec<RunLine>,
     pub markers: Vec<PlacedMarker>,
     pub decorations: Vec<Decoration>,
+    /// The uniform advance after every character (tracking plus numeric
+    /// kerning, in px), which every run draws with. 0 when neither is set.
+    pub letter_spacing: f64,
 }
 
 /// Whether a laid-out line's glue was stretched (or shrunk) away from the
@@ -331,7 +346,7 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 ///
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
-/// plan does NOT draw (spacing, a scale or rotation, a baseline shift that
+/// plan does NOT draw (spacing that does not read, a scale or rotation, a baseline shift that
 /// does not read, an anchor, a tspan's dx, rotate, transform or baseline
 /// shift) is the router's to keep away from it
 /// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
@@ -339,13 +354,16 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// uniform leading), and so are a case transform (each tspan's text as
 /// `cased` transforms it) and an element baseline shift ([`baseline_shift`]:
 /// the element's size scaled, every baseline moved; each run and marker
-/// carries the size it draws at). `None` also when the shift does not read.
+/// carries the size it draws at), and tracking and kerning ([`letter_spacing`],
+/// in every character's width so the layout matches the draw; the plan carries
+/// the advance). `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
 ) -> Option<RunsPlan> {
     let (scale, dy) = baseline_shift(e)?;
     let base = RunFace { size: e.font_size * scale, ..element_face(e) };
+    let spacing = letter_spacing(e, base.size)?;
     let measure = measurer(&base)?;
     // Each tspan's characters as drawn: its case transform (its own over the
     // element's; small caps draws as uppercase), as Swift's per-run
@@ -358,7 +376,7 @@ pub fn plan(
     for (t, text) in e.tspans.iter().zip(&shown) {
         if text.is_empty() { continue; }
         let m = measurer(&run_face(e, t, scale))?;
-        widths.extend(text.chars().map(|c| m(&c.to_string())));
+        widths.extend(text.chars().map(|c| m(&c.to_string()) + spacing));
     }
     let leading = if e.line_height.is_empty() {
         match e.tspans.iter()
@@ -404,7 +422,7 @@ pub fn plan(
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y + dy, text: m.text, x: m.indent, size: base.size })
         .collect();
     let decorations = decorations(e, &layout, &chars, &ranges, scale, dy);
-    Some(RunsPlan { lines, markers, decorations })
+    Some(RunsPlan { lines, markers, decorations, letter_spacing: spacing })
 }
 
 #[cfg(test)]
@@ -780,6 +798,36 @@ mod tests {
         // CONTROL: no shift, the size and baseline as written.
         let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
         assert_eq!((none.lines[0].baseline_y, none.lines[0].runs[0].size), (16.0, 20.0));
+    }
+
+    /// Tracking and numeric kerning (the flat path's and Swift's law: one
+    /// uniform advance, (tracking + kerning) in em x the size, after every
+    /// character) are IN the layout: each character's width carries it, so a
+    /// tracked line wraps and aligns at the width it is drawn at. The plan
+    /// carries the advance for the renderer to draw with.
+    #[test]
+    fn tracking_and_kerning_are_in_the_layout_and_the_draw() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.letter_spacing = "0.06em".into();
+        e.kerning = "0.04em".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        // 0.1 em at size 20 = 2 per character: plain 12, bold 22.
+        assert!((p.letter_spacing - 2.0).abs() < 1e-9, "{}", p.letter_spacing);
+        let got = shape(&p)[0].clone();
+        assert_eq!(got.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["One fine day ", "extraordinarily patiently", " sat"]);
+        assert!((got[1].1 - 156.0).abs() < 1e-9 && (got[2].1 - 706.0).abs() < 1e-9, "{got:?}");
+        // A super shift scales the advance with the size.
+        let mut sup = e.clone();
+        sup.baseline_shift = "super".into();
+        assert!((plan(&sup, &faces(&seen)).unwrap().letter_spacing - 1.4).abs() < 1e-9);
+        // CONTROL: none set, no advance and the widths as measured.
+        let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        assert_eq!((none.letter_spacing, shape(&none)[0][1].1), (0.0, 130.0));
+        // A value that does not read refuses the plan rather than guess.
+        let mut bad = styled_area(2000.0);
+        bad.kerning = "auto".into();
+        assert!(plan(&bad, &faces(&seen)).is_none());
     }
 
     /// On a justified line the underline spans the STRETCHED glue, not the

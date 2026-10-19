@@ -2049,13 +2049,24 @@ fn draw_element_body(
             // §Alignment sub-mapping per area / point text.
             let segments = crate::algorithms::text_layout_paragraph::
                 build_segments_from_text(&e.tspans, &content_str, e.is_area_text());
-            let layout = crate::algorithms::text_layout::layout_with_paragraphs(
+            // Tracking and kerning are IN the layout: each character's width
+            // carries the advance `letterSpacing` draws with, so a tracked line
+            // wraps and aligns at the width it is drawn at (the shared plan's
+            // law, `text_runs::plan`). Untracked text lays out exactly as before.
+            let spaced_widths: Option<Vec<f64>> = (ls_px != 0.0).then(|| {
+                content_str.chars().map(|c| measure(&c.to_string()) + ls_px).collect()
+            });
+            let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
                 &content_str,
                 max_w,
                 leading_px,
                 &segments,
                 measure.as_ref(),
+                spaced_widths.as_deref(),
             );
+            // A line's drawn width: measured, plus the advance after each
+            // character when tracked.
+            let natural = |s: &str| measure(s) + ls_px * s.chars().count() as f64;
             let chars: Vec<char> = content_str.chars().collect();
             let has_underline = e.text_decoration.split_whitespace().any(|t| t == "underline");
             let has_strike = e.text_decoration.split_whitespace().any(|t| t == "line-through");
@@ -2066,7 +2077,7 @@ fn draw_element_body(
                 // this line's own width (`TextElem::anchor_shift`, the law the
                 // bounds and every other renderer share). 0 for start and for
                 // area text, so every unanchored line draws exactly as before.
-                let x0 = if e.text_anchor.is_empty() { e.x } else { e.x + e.anchor_shift(measure(s)) };
+                let x0 = if e.text_anchor.is_empty() { e.x } else { e.x + e.anchor_shift(natural(s)) };
                 let baseline = e.y + line.baseline_y + y_shift;
                 // Per-line x shift comes from the first glyph's x,
                 // which the paragraph-aware layout already shifted
@@ -2093,7 +2104,7 @@ fn draw_element_body(
                     .filter(|g| !g.is_trailing_space)
                     .map(|g| g.x)
                     .fold(f64::INFINITY, f64::min);
-                let natural_w = measure(s);
+                let natural_w = natural(s);
                 let layout_w = (last_visible_right - first_visible_x).max(0.0);
                 let glues_stretched = layout_w > natural_w + 0.5;
                 if rotate_rad == 0.0 && !glues_stretched {
@@ -2167,7 +2178,7 @@ fn draw_element_body(
                     }
                 }
                 if has_underline || has_strike {
-                    let w = measure(s);
+                    let w = natural(s);
                     draw_text_decorations(
                         ctx, line_x, baseline, w, effective_fs,
                         has_underline, has_strike, e.fill.as_ref(),
@@ -2410,6 +2421,13 @@ fn draw_laid_out_runs(
         Some(crate::tools::text_measure::make_measurer(&css(f), f.size))
     };
     let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
+    // Tracking and kerning: the plan's widths carry the advance, so every run
+    // draws with it, as the flat path sets `letterSpacing`.
+    let spaced = plan.letter_spacing != 0.0;
+    if spaced {
+        let _ = js_sys::Reflect::set(ctx, &js_sys::JsString::from("letterSpacing"),
+            &js_sys::JsString::from(format!("{}px", plan.letter_spacing).as_str()));
+    }
     for line in &plan.lines {
         for r in &line.runs {
             // The plan resolves the run's size (a baseline shift scales it).
@@ -2417,6 +2435,9 @@ fn draw_laid_out_runs(
             ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
             ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
         }
+    }
+    if spaced {
+        let _ = js_sys::Reflect::set(ctx, &js_sys::JsString::from("letterSpacing"), &js_sys::JsString::from("0px"));
     }
     for d in &plan.decorations {
         let color = match e.fill.as_ref() {
@@ -5280,5 +5301,40 @@ mod laid_out_runs_pixel_tests {
         assert!(inks_in(&plain, 2, 30, 10, 18), "control: the plain line inks rows 10..18");
         assert!(inks_in(&sup, 2, 30, 0, 7), "control: the shifted line is drawn");
         assert!(!inks_in(&sup, 2, 30, 10, 18), "the shifted line is drawn above row 10");
+    }
+
+    /// Tracking is in the layout, on the flat path and on the plan's: a box
+    /// 4 px wider than the untracked line holds it on one line, and 0.1 em of
+    /// tracking (2 px after each of its characters) wraps it.
+    #[wasm_bindgen_test]
+    fn tracking_wraps_a_line_that_fits_untracked() {
+        let text = "One fine day the cat";
+        let w = crate::tools::text_measure::make_measurer("normal normal 20px sans-serif", 20.0)(text) + 4.0;
+        let flat = |ls: &str| {
+            let mut e = TextElem::from_string(
+                1.0, 2.0, text, "sans-serif", 20.0, "normal", "normal", "none", w, 200.0, None, None,
+                CommonProps::default(),
+            );
+            e.fill = Some(Fill { color: Color::BLACK, opacity: 1.0 });
+            e.letter_spacing = ls.into();
+            Element::Text(e)
+        };
+        assert!(inks(&flat(""), 5, 18), "control: the flat line is drawn");
+        assert!(!inks(&flat(""), 26, 40), "control: untracked, it fits one line");
+        assert!(inks(&flat("0.1em"), 26, 40), "tracked, the flat line wraps");
+        let styled = |ls: &str| {
+            let mut el = styled_area(w);
+            if let Element::Text(t) = &mut el {
+                t.tspans = vec![t.tspans[0].clone(), {
+                    let mut a = Tspan::default_tspan(); a.content = "One fine day ".into(); a
+                }, {
+                    let mut b = Tspan::default_tspan(); b.content = "the cat".into(); b
+                }];
+                t.letter_spacing = ls.into();
+            }
+            el
+        };
+        assert!(!inks(&styled(""), 26, 40), "control: the styled text fits one line untracked");
+        assert!(inks(&styled("0.1em"), 26, 40), "tracked, the styled text wraps");
     }
 }
