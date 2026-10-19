@@ -1640,8 +1640,58 @@ public sealed partial class MainWindow
                     if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text, leaf.Path); }
                     combo.Text = state?.Text ?? "";
                 };
+                // Leaving the combo commits what was typed, as a text box's blur
+                // does (flask § 451 / § 457: Enter was the only commit, so a value
+                // typed and clicked away from was lost). The text is read from the
+                // template's `EditableText` box: `combo.Text` is still empty when
+                // focus leaves. Focus moving into the combo's own dropdown is not
+                // leaving it.
+                combo.LostFocus += (_, _) =>
+                {
+                    var state = combo.Tag as ChoiceState;
+                    var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
+                        items.Select(PanelWire.ChoiceText), combo.IsDropDownOpen || FocusStaysIn(combo));
+                    if (send is null) { return; }
+                    SendPane(id, "commit", send, leaf.Path);
+                    combo.Text = state?.Text ?? "";
+                };
             }
             return combo;
+        }
+
+        /// <summary>
+        /// The text in an editable combo's own text box (the template part
+        /// `EditableText`), or null when the template has none.
+        /// </summary>
+        private static string? EditableText(ComboBox combo)
+        {
+            var pending = new Stack<DependencyObject>();
+            pending.Push(combo);
+            while (pending.Count > 0)
+            {
+                var node = pending.Pop();
+                if (node is TextBox box && box.Name == "EditableText") { return box.Text; }
+                var n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node);
+                for (var i = 0; i < n; i++) { pending.Push(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i)); }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Whether the element now holding focus is inside <paramref name="combo"/>:
+        /// one of its own items (they live in a popup, outside its visual tree)
+        /// or an element under it.
+        /// </summary>
+        private static bool FocusStaysIn(ComboBox combo)
+        {
+            if (combo.XamlRoot is null) { return false; }
+            var focused = FocusManager.GetFocusedElement(combo.XamlRoot) as DependencyObject;
+            if (focused is ComboBoxItem item && ItemsControl.ItemsControlFromItemContainer(item) == combo) { return true; }
+            for (var node = focused; node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node == combo) { return true; }
+            }
+            return false;
         }
     }
 }
