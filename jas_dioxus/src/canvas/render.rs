@@ -2395,8 +2395,9 @@ fn draw_element_body(
 /// those still collapse to the element-wide defaults for now.
 /// Non-flat text the router admitted: the shared plan
 /// (`text_runs::plan`), each character measured in its tspan's canvas font,
-/// each run drawn in that font at `x + run.x` on its line's baseline, then
-/// the list markers in the element's font. The canvas always measures, so
+/// each run drawn in that font at `x + run.x` on its line's baseline, the
+/// decoration lines (as `draw_text_decorations` strokes them), then the list
+/// markers in the element's font. The canvas always measures, so
 /// the plan always exists here.
 fn draw_laid_out_runs(
     ctx: &CanvasRenderingContext2d,
@@ -2414,6 +2415,18 @@ fn draw_laid_out_runs(
             ctx.set_font(&css(&crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan])));
             ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
         }
+    }
+    for d in &plan.decorations {
+        let color = match e.fill.as_ref() {
+            Some(f) => css_color(&f.color),
+            None => "currentColor".to_string(),
+        };
+        ctx.set_stroke_style_str(&color);
+        ctx.set_line_width(d.thickness);
+        ctx.begin_path();
+        ctx.move_to(e.x + d.x0, e.y + d.y);
+        ctx.line_to(e.x + d.x1, e.y + d.y);
+        ctx.stroke();
     }
     ctx.set_font(&css(&crate::algorithms::text_runs::element_face(e)));
     for m in &plan.markers {
@@ -5226,5 +5239,29 @@ mod laid_out_runs_pixel_tests {
         assert!(inks(&styled_area(140.0), 5, 18), "control: the narrow box draws line 1");
         assert!(!inks(&styled_area(2000.0), 26, 40), "control: a wide box has no second line");
         assert!(inks(&styled_area(140.0), 26, 40), "a narrow box wraps the styled text onto a second line");
+    }
+
+    /// Whether any pixel in the box (x0..x1, y0..y1) carries ink.
+    fn inks_in(elem: &Element, x0: u32, x1: u32, y0: u32, y1: u32) -> bool {
+        let s = WebSurface::offscreen(300, 100).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        draw_element_scaled(&ctx, TargetSize::of(&s), elem, Visibility::Preview, 1.0, 1.0);
+        let px = s.read_rgba(x0, y0, x1 - x0, y1 - y0).expect("in bounds");
+        px.chunks(4).any(|p| p[3] > 0)
+    }
+
+    /// The plan's underline is stroked: under "One" (no descenders) the row
+    /// at baseline + 0.12 x size (y 18 + 2.4) is inked only when the first
+    /// tspan is underlined.
+    #[wasm_bindgen_test]
+    fn a_styled_runs_underline_is_drawn_on_the_legacy_canvas() {
+        let plain = styled_area(2000.0);
+        let mut under = styled_area(2000.0);
+        if let Element::Text(t) = &mut under {
+            t.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }
+        assert!(inks_in(&plain, 2, 30, 5, 18), "control: the word is drawn");
+        assert!(!inks_in(&plain, 2, 30, 20, 22), "control: nothing under \"One\" without an underline");
+        assert!(inks_in(&under, 2, 30, 20, 22), "the underline is drawn under \"One\"");
     }
 }

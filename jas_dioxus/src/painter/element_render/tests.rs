@@ -4060,7 +4060,7 @@ fn styled_area_text_lowers_only_where_the_runs_path_draws_it() {
     let cases: [(&str, Set); 5] = [
         ("a per-tspan size", |e| e.tspans[2].font_size = Some(30.0)),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
-        ("a decoration", |e| e.text_decoration = "underline".into()),
+        ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift", |e| e.baseline_shift = "super".into()),
         ("a case transform", |e| e.text_transform = "uppercase".into()),
     ];
@@ -4083,7 +4083,7 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     let cases: [(&str, Set); 6] = [
         ("a per-tspan size", |e| e.tspans[2].font_size = Some(30.0)),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
-        ("a decoration", |e| e.text_decoration = "underline".into()),
+        ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift", |e| e.baseline_shift = "super".into()),
         ("a case transform", |e| e.text_transform = "uppercase".into()),
         ("an anchor", |e| e.text_anchor = "middle".into()),
@@ -4091,9 +4091,11 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 2] = [
+    let admitted: [(&str, Admit); 4] = [
         ("justify", |e| e.tspans[0].text_align = Some("justify".into())),
         ("hyphenation", |e| e.tspans[0].jas_hyphenate = Some(true)),
+        ("an element decoration", |e| e.text_decoration = "underline".into()),
+        ("a tspan decoration", |e| e.tspans[2].text_decoration = Some(vec!["line-through".into()])),
     ];
     for (name, set) in admitted {
         let mut e = styled_area(140.0);
@@ -4105,4 +4107,30 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
         set(&mut e);
         assert!(runs_plan_excludes(&e), "styled area text with {name} is excluded from the plan");
     }
+}
+
+/// The walk strokes the plan's decoration lines: a tspan's underline is one
+/// horizontal stroke under its run, at baseline + 0.12 x size, ending where
+/// the run's measured width ends.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_styled_runs_underline_is_stroked_under_it() {
+    let mut e = styled_area(2000.0);
+    e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e.clone()), 1.0);
+    let strokes: Vec<(f64, f64, f64)> = rec.commands().iter().filter_map(|c| match c {
+        Command::StrokePath { path, .. } => match path.as_slice() {
+            [PathCommand::MoveTo { x: x0, y }, PathCommand::LineTo { x: x1, .. }] => Some((*x0, *x1, *y)),
+            _ => None,
+        },
+        _ => None,
+    }).collect();
+    assert_eq!(strokes.len(), 1, "one underline: {strokes:?}");
+    let runs = font_runs(e);
+    let bold = runs.iter().find(|r| r.0 == "extraordinarily patiently").expect("the bold run");
+    let m = crate::text_measure::try_make_measurer("normal bold Arial", 20.0).unwrap();
+    let w: f64 = "extraordinarily patiently".chars().map(|c| m(&c.to_string())).sum();
+    assert!((strokes[0].0 - bold.2).abs() < 1e-6 && (strokes[0].1 - (bold.2 + w)).abs() < 1e-6, "{strokes:?} vs {bold:?}");
+    assert!((strokes[0].2 - (bold.3 + 20.0 * 0.12)).abs() < 1e-6, "{strokes:?}");
 }

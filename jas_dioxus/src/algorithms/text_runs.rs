@@ -128,12 +128,84 @@ pub struct PlacedMarker {
     pub baseline_y: f64,
 }
 
+/// Which line a decoration draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecorationKind {
+    Underline,
+    LineThrough,
+}
+
+/// One decoration line, relative to the element's origin: a horizontal
+/// stroke from `x0` to `x1` at `y`, `thickness` wide, in the element's fill.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decoration {
+    pub kind: DecorationKind,
+    pub x0: f64,
+    pub x1: f64,
+    pub y: f64,
+    pub thickness: f64,
+}
+
+/// Whether tspan `t` draws `kind`: its own tokens when it overrides (an
+/// empty override is "none"), else the element's.
+fn decorated(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan::Tspan, kind: DecorationKind) -> bool {
+    let token = match kind { DecorationKind::Underline => "underline", DecorationKind::LineThrough => "line-through" };
+    match &t.text_decoration {
+        Some(own) => own.iter().any(|w| w == token),
+        None => e.text_decoration.split_whitespace().any(|w| w == token),
+    }
+}
+
+/// The decoration lines of a laid-out text: per line and per kind, each run
+/// of contiguous decorated characters from its first glyph's x to its last
+/// glyph's right. A soft wrap's trailing space and the synthetic hyphen are
+/// not decorated; a justified line's stretched glue is, because the glyphs
+/// carry the stretch. Legacy's offsets and thickness
+/// (`canvas/render.rs`, `draw_text_decorations`): an underline at baseline +
+/// 0.12 x size, a line-through at baseline - 0.3 x size, max(0.07 x size, 1)
+/// wide.
+fn decorations(
+    e: &crate::geometry::element::TextElem,
+    layout: &TextLayout,
+    chars: &[char],
+    ranges: &[(usize, usize)],
+) -> Vec<Decoration> {
+    let size = e.font_size;
+    let thickness = (size * 0.07).max(1.0);
+    let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
+    let mut out = Vec::new();
+    for line in &layout.lines {
+        let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
+        for (kind, dy) in [(DecorationKind::Underline, size * 0.12), (DecorationKind::LineThrough, -size * 0.3)] {
+            let mut span: Option<(f64, f64)> = None;
+            for g in glyphs {
+                let drawn = g.idx < line.end && g.idx < chars.len() && !g.is_trailing_space && chars[g.idx] != '\n';
+                let on = drawn && owner(g.idx).is_some_and(|t| decorated(e, &e.tspans[t], kind));
+                match (on, span) {
+                    (true, None) => span = Some((g.x, g.right)),
+                    (true, Some((x0, x1))) => span = Some((x0, x1.max(g.right))),
+                    (false, Some((x0, x1))) if drawn => {
+                        out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
+                        span = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some((x0, x1)) = span {
+                out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
+            }
+        }
+    }
+    out
+}
+
 /// The whole plan a renderer draws: the runs of every line, then the
 /// markers. Every x and baseline is relative to the element's origin.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunsPlan {
     pub lines: Vec<RunLine>,
     pub markers: Vec<PlacedMarker>,
+    pub decorations: Vec<Decoration>,
 }
 
 /// Whether a laid-out line's glue was stretched (or shrunk) away from the
@@ -249,7 +321,8 @@ pub fn plan(
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y, text: m.text, x: m.indent })
         .collect();
-    Some(RunsPlan { lines, markers })
+    let decorations = decorations(e, &layout, &chars, &ranges);
+    Some(RunsPlan { lines, markers, decorations })
 }
 
 #[cfg(test)]
@@ -475,5 +548,61 @@ mod tests {
         let mut plain = e.clone();
         plain.tspans[0].jas_hyphenate = None;
         assert!(shape(&plan(&plain, &faces(&seen)).unwrap()).iter().flatten().all(|r| r.0 != "-"));
+    }
+    fn decos(p: &RunsPlan) -> Vec<(DecorationKind, f64, f64, f64)> {
+        p.decorations.iter().map(|d| (d.kind, d.x0, d.x1, d.y)).collect()
+    }
+
+    /// A tspan's underline is drawn under its own characters only, one line
+    /// per laid-out line it reaches, from its first glyph's x to its last
+    /// visible glyph's right (a soft wrap's trailing space is not underlined).
+    #[test]
+    fn a_tspans_underline_follows_its_characters_across_a_wrap() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let (b0, b1) = (p.lines[0].baseline_y, p.lines[1].baseline_y);
+        assert_eq!(decos(&p), vec![
+            (DecorationKind::Underline, 130.0, 430.0, b0 + 20.0 * 0.12),
+            (DecorationKind::Underline, 0.0, 180.0, b1 + 20.0 * 0.12),
+        ], "under \"extraordinarily\" on line 1 and \"patiently\" on line 2");
+        assert_eq!(p.decorations[0].thickness, (20.0f64 * 0.07).max(1.0));
+        // CONTROL: no decoration anywhere, no lines.
+        assert!(plan(&styled_area(450.0), &faces(&seen)).unwrap().decorations.is_empty());
+    }
+
+    /// The element's decoration reaches every tspan that does not override
+    /// it; an explicit empty override (`Some([])`) cuts the line; a strike is
+    /// at baseline - 0.3 x size.
+    #[test]
+    fn an_element_decoration_is_inherited_and_an_empty_override_cuts_it() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.text_decoration = "line-through".into();
+        e.tspans[2].text_decoration = Some(vec![]);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let b = p.lines[0].baseline_y;
+        assert_eq!(decos(&p), vec![
+            (DecorationKind::LineThrough, 0.0, 130.0, b - 20.0 * 0.3),
+            (DecorationKind::LineThrough, 630.0, 670.0, b - 20.0 * 0.3),
+        ], "struck through the plain runs, not the bold one");
+        // CONTROL: without the override the strike is continuous.
+        let mut whole = styled_area(2000.0);
+        whole.text_decoration = "line-through".into();
+        assert_eq!(decos(&plan(&whole, &faces(&seen)).unwrap()), vec![(DecorationKind::LineThrough, 0.0, 670.0, b - 20.0 * 0.3)]);
+    }
+
+    /// On a justified line the underline spans the STRETCHED glue, not the
+    /// natural width: one line from the first word to the last.
+    #[test]
+    fn an_underline_spans_a_justified_lines_stretched_glue() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[0].text_align = Some("justify".into());
+        e.text_decoration = "underline".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let d = decos(&p);
+        assert_eq!((d[0].1, d[0].2), (0.0, 450.0), "line 1 is underlined edge to edge: {d:?}");
     }
 }
