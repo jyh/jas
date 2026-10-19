@@ -564,10 +564,10 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 /// by name: a per-tspan feature the segmented lowering also refuses; a
 /// per-tspan SIZE (jas section 454: out of scope, the layout has one line
 /// height); element-level spacing, decoration, scale or rotation, baseline
-/// shift, case transform or small caps, and an anchor; a justified or
-/// hyphenated paragraph (a run is drawn at its first glyph's x, so stretched
-/// glue inside it and a synthetic hyphen are not drawn); and any tspan whose
+/// shift, case transform or small caps, and an anchor; and any tspan whose
 /// font has no real measurer (each character is measured in its own font).
+/// (A justified or hyphenated paragraph was excluded until the plan cut a
+/// stretched line into words and drew the synthetic hyphen.)
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     runs_plan_excludes(t) || t.tspans.iter().any(|s| {
         let (font, size) = tspan_font(t, s);
@@ -595,11 +595,8 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     {
         return true;
     }
-    if t.tspans.iter().any(|w| w.jas_role.as_deref() == Some("paragraph")
-        && (w.text_align.as_deref() == Some("justify") || w.jas_hyphenate.is_some()))
-    {
-        return true;
-    }
+    // A justified or hyphenated paragraph is drawn: the plan cuts a
+    // stretched line into words and adds the synthetic hyphen.
     false
 }
 

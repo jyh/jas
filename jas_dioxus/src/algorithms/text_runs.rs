@@ -24,6 +24,8 @@ pub struct TextRun {
     pub text: String,
     pub x: f64,
     pub tspan: usize,
+    /// The content index of the run's first character.
+    pub start: usize,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -70,7 +72,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -134,13 +136,59 @@ pub struct RunsPlan {
     pub markers: Vec<PlacedMarker>,
 }
 
+/// Whether a laid-out line's glue was stretched (or shrunk) away from the
+/// natural width of its whitespace: a justified line. Then a run drawn as one
+/// string would put its later words at the natural space.
+fn stretched(glyphs: &[crate::algorithms::text_layout::Glyph], line: &crate::algorithms::text_layout::LineInfo, chars: &[char], widths: &[f64]) -> bool {
+    glyphs.iter().any(|g| {
+        g.idx < line.end
+            && !g.is_trailing_space
+            && chars.get(g.idx).is_some_and(|c| c.is_whitespace())
+            && widths.get(g.idx).is_some_and(|w| ((g.right - g.x) - w).abs() > 1e-6)
+    })
+}
+
+/// A stretched line's runs, re-cut so each WORD is its own run at the x the
+/// layout gave its first character, as the flat path draws a justified line
+/// word by word. The whitespace between words is not drawn (it is invisible,
+/// and the plan's router keeps decorations away from it).
+fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph]) -> Vec<TextRun> {
+    let mut out = Vec::new();
+    for r in runs {
+        let mut word = String::new();
+        let mut word_start = 0usize;
+        for (k, c) in r.text.chars().enumerate() {
+            let at = r.start + k;
+            if c.is_whitespace() {
+                if !word.is_empty() {
+                    push_word(&mut out, std::mem::take(&mut word), word_start, r.tspan, glyphs);
+                }
+            } else {
+                if word.is_empty() { word_start = at; }
+                word.push(c);
+            }
+        }
+        if !word.is_empty() {
+            push_word(&mut out, word, word_start, r.tspan, glyphs);
+        }
+    }
+    out
+}
+
+fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
+    if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
+        out.push(TextRun { text, x: g.x, tspan, start });
+    }
+}
+
 /// The shared plan for non-flat text, which the legacy canvas
 /// (`canvas/render.rs`) and the walk (`painter/element_render.rs`) both draw,
 /// so the two cannot lay it out differently: each character measured in its
 /// own tspan's face, the content laid out once
 /// ([`text_layout::layout_with_paragraphs_widths`], the element's face for
 /// glue and the synthetic hyphen), then each line as its [`line_runs`] and
-/// the paragraphs' list markers.
+/// the paragraphs' list markers. A justified (stretched) line is drawn word
+/// by word, and a hyphenated break draws its hyphen.
 ///
 /// `measurer` answers a face's measurer, or `None` when it cannot measure
 /// that face; then there is no plan (the walk refuses rather than position
@@ -149,7 +197,7 @@ pub struct RunsPlan {
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing, decoration, a baseline shift, a case
-/// transform, a per-tspan size, justify, hyphenation, an anchor) is the
+/// transform, a per-tspan size, an anchor) is the
 /// router's to keep away from it (`element_render::runs_plan_excludes`).
 pub fn plan(
     e: &crate::geometry::element::TextElem,
@@ -180,7 +228,23 @@ pub fn plan(
     let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
         &content, max_w, leading, &segments, &*measure, Some(&widths));
     let ranges = tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
-    let lines = line_runs(&layout, &content, &ranges);
+    let mut lines = line_runs(&layout, &content, &ranges);
+    let chars: Vec<char> = content.chars().collect();
+    for (line, runs) in layout.lines.iter().zip(lines.iter_mut()) {
+        let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
+        if stretched(glyphs, line, &chars, &widths) {
+            runs.runs = word_runs(&runs.runs, glyphs);
+        }
+        if line.trailing_hyphen {
+            // The layout's hyphen glyph is the one past the line's last
+            // character; it is drawn in that character's tspan.
+            let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
+            let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
+            if let (Some(g), Some(t)) = (hyphen, owner) {
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end });
+            }
+        }
+    }
     let markers = crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments)
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y, text: m.text, x: m.indent })
@@ -340,5 +404,55 @@ mod tests {
         assert_eq!((p.markers[0].x, p.markers[0].baseline_y), (12.0, p.lines[0].baseline_y));
         let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
         assert!(none.markers.is_empty(), "control: no list style, no marker");
+    }
+
+    /// A justified line stretches its glue, so a run drawn as one string
+    /// would put its later words at the natural space: on a stretched line
+    /// each WORD is its own run, at the layout's x. The last line is ragged
+    /// (its glue is not stretched) and keeps whole runs.
+    #[test]
+    fn a_justified_line_draws_each_word_at_its_stretched_x() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[0].text_align = Some("justify".into());
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got = shape(&p);
+        // Line 1: One(30) fine(40) day(30) extraordinarily(300, bold) = 400 of
+        // words in 450, so each of the three glues is 50/3.
+        let g = 50.0 / 3.0;
+        let want0 = [("One", 0.0, 1), ("fine", 30.0 + g, 1), ("day", 70.0 + 2.0 * g, 1), ("extraordinarily", 100.0 + 3.0 * g, 2)];
+        assert_eq!(got[0].len(), want0.len(), "one run per word on the stretched line: {got:?}");
+        for (r, w) in got[0].iter().zip(want0) {
+            assert_eq!((r.0.as_str(), r.2), (w.0, w.2), "{got:?}");
+            assert!((r.1 - w.1).abs() < 1e-9, "{} at {} not {}: {got:?}", w.0, r.1, w.1);
+        }
+        assert_eq!(got[1], vec![("patiently".to_string(), 0.0, 2), (" sat".to_string(), 180.0, 3)],
+            "the ragged last line keeps whole runs");
+        // CONTROL: the same text unjustified keeps whole runs on line 1.
+        let ragged = shape(&plan(&styled_area(450.0), &faces(&seen)).unwrap());
+        assert_eq!(ragged[0].len(), 2, "{ragged:?}");
+    }
+
+    /// A line broken at a hyphenation point draws a visible hyphen after its
+    /// last character, at the layout's hyphen glyph, in that character's
+    /// tspan.
+    #[test]
+    fn a_hyphenated_line_draws_its_hyphen_in_the_broken_words_tspan() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(160.0);
+        e.tspans = vec![e.tspans[0].clone(), tspan("go ", None), tspan("information", Some("bold"))];
+        e.tspans[0].jas_hyphenate = Some(true);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got = shape(&p);
+        let last = got[0].last().expect("line 1 has runs");
+        assert_eq!((last.0.as_str(), last.2), ("-", 2), "the hyphen ends line 1, in the bold tspan: {got:?}");
+        let before = &got[0][got[0].len() - 2];
+        let bold_w = before.0.chars().count() as f64 * 20.0;
+        assert!((last.1 - (before.1 + bold_w)).abs() < 1e-9, "the hyphen sits right after the broken word: {got:?}");
+        assert!(got[1][0].0.chars().all(|c| c.is_alphabetic()), "line 2 carries the rest of the word: {got:?}");
+        // CONTROL: no hyphenation, no hyphen run.
+        let mut plain = e.clone();
+        plain.tspans[0].jas_hyphenate = None;
+        assert!(shape(&plan(&plain, &faces(&seen)).unwrap()).iter().flatten().all(|r| r.0 != "-"));
     }
 }
