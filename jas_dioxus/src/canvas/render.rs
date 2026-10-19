@@ -5322,15 +5322,20 @@ mod laid_out_runs_pixel_tests {
         assert!(inks(&flat(""), 5, 18), "control: the flat line is drawn");
         assert!(!inks(&flat(""), 26, 40), "control: untracked, it fits one line");
         assert!(inks(&flat("0.1em"), 26, 40), "tracked, the flat line wraps");
+        // A bold second run makes the text NON-flat, so it takes the plan (two
+        // plain runs would read as flat and test the flat path again).
+        let mm = |font: &str, s: &str| crate::tools::text_measure::make_measurer(font, 20.0)(s);
+        let sw = mm("normal normal 20px sans-serif", "One fine day ") + mm("normal bold 20px sans-serif", "the cat") + 4.0;
         let styled = |ls: &str| {
-            let mut el = styled_area(w);
+            let mut el = styled_area(sw);
             if let Element::Text(t) = &mut el {
                 t.tspans = vec![t.tspans[0].clone(), {
                     let mut a = Tspan::default_tspan(); a.content = "One fine day ".into(); a
                 }, {
-                    let mut b = Tspan::default_tspan(); b.content = "the cat".into(); b
+                    let mut b = Tspan::default_tspan(); b.content = "the cat".into(); b.font_weight = Some("bold".into()); b
                 }];
                 t.letter_spacing = ls.into();
+                assert!(!t.render_is_flat(), "the styled half must take the plan");
             }
             el
         };
