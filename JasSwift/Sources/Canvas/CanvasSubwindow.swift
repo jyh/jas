@@ -1809,7 +1809,13 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             // narrower than its own character's width? `naturalW` above is
             // measured in the ELEMENT's face, so a styled line holding a
             // wider run (a bold word) read as stretched and drew word by
-            // word in the element's attributes.
+            // word in the element's attributes. ⚠️ A mutant restoring that
+            // test SURVIVES the arms (StyledJustifiedRotationRenderTests): the
+            // branch below draws a falsely "stretched" styled line at the
+            // layout's x in each tspan's attributes, the same pixels. Only glue
+            // that justification SHRINKS differs (the `+ 0.5` test sees growth
+            // alone), and a 46-54 pt width sweep found no line that shrinks.
+            // The plan's test is kept because it is the plan's.
             let styled = !v.renderIsFlat
             let planStretched = styled && lineGlyphs.contains { g in
                 g.idx < line.end && !g.isTrailingSpace
