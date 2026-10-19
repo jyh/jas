@@ -561,9 +561,9 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 }
 
 /// NODE 33: what the runs path's first cut does not draw, so it stays legacy,
-/// by name: a per-tspan feature the segmented lowering also refuses; a
-/// per-tspan SIZE (jas section 454: out of scope, the layout has one line
-/// height); element-level spacing, decoration, scale or rotation, baseline
+/// by name: a per-tspan feature the segmented lowering also refuses (a
+/// per-tspan SIZE is drawn: each run at its size on the element's leading, as
+/// Swift draws it); element-level spacing, decoration, scale or rotation, baseline
 /// shift, case transform or small caps, and an anchor (a decoration, the
 /// element's or a tspan's, is drawn); and any tspan whose
 /// font has no real measurer (each character is measured in its own font).
@@ -582,9 +582,10 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 /// for the same elements.
 pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
-    // A tspan's decoration is drawn (the plan's decoration lines); its other
-    // per-tspan features, and a per-tspan size, are not.
-    if body().any(|s| (tspan_needs_legacy(s) && !only_decoration(s)) || s.font_size.is_some()) {
+    // A tspan's decoration and its own size are drawn (the plan's decoration
+    // lines; each run at its tspan's size on the element's leading, Swift's
+    // law); its other per-tspan features are not.
+    if body().any(|s| tspan_needs_legacy(s) && !only_decoration(s)) {
         return true;
     }
     if !t.letter_spacing.is_empty()
