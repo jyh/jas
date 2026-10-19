@@ -2421,6 +2421,19 @@ fn draw_laid_out_runs(
         Some(crate::tools::text_measure::make_measurer(&css(f), f.size))
     };
     let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
+    // A scale is the flat path's frame around the whole draw, about the box's
+    // top-left; the router admits only readable values. Dropping the guard
+    // at the end of this function restores it.
+    let (h_scale, v_scale, _) = crate::painter::element_render::text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+    let _scale_guard = if h_scale != 1.0 || v_scale != 1.0 {
+        let guard = CtxSaveGuard::new(ctx);
+        ctx.translate(e.x, e.y).ok();
+        ctx.scale(h_scale, v_scale).ok();
+        ctx.translate(-e.x, -e.y).ok();
+        Some(guard)
+    } else {
+        None
+    };
     // Tracking and kerning: the plan's widths carry the advance, so every run
     // draws with it, as the flat path sets `letterSpacing`.
     let spaced = plan.letter_spacing != 0.0;

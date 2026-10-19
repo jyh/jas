@@ -562,8 +562,8 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 
 /// NODE 33: what the runs path does not draw, so it stays legacy, by name:
 /// [`runs_plan_excludes`] (a tspan's transform or dx; a shifted or rotated
-/// tspan's decoration; element spacing or a baseline shift that does not read; a scale or
-/// rotation), and any tspan whose font has no real measurer (each
+/// tspan's decoration; element spacing, a baseline shift, a scale or a
+/// rotation that does not read; an element rotation beside a decoration), and any tspan whose font has no real measurer (each
 /// character is measured in its own font). Drawn, so NOT excluded: a tspan's
 /// own size (each run at its size on the element's leading, as Swift draws
 /// it), readable tracking and kerning (in the layout's widths), a decoration
@@ -594,9 +594,16 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
         return true;
     }
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
-        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+        || text_transform(t).is_none()
         || crate::algorithms::text_runs::baseline_shift(t).is_none()
     {
+        return true;
+    }
+    // A readable scale is the renderer's frame around the plan, and the
+    // element's rotation is every glyph's (the plan cuts them); but not a
+    // rotation beside a decoration, which neither port has measured.
+    let rotated = crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0);
+    if rotated && body().any(|s| draws_decoration_of(t, s)) {
         return true;
     }
     // A case transform or small caps is drawn (the plan measures and draws
@@ -611,12 +618,17 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
 /// its own baseline shift and its own rotation, but not a shift or rotation
 /// together with a decoration (its own or the element's).
 fn plan_draws_tspan(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
-    let decorated = match &s.text_decoration {
+    s.transform.is_none() && s.dx.is_none()
+        && !((s.baseline_shift.is_some() || s.rotate.is_some()) && draws_decoration_of(e, s))
+}
+
+/// Whether tspan `s` draws an underline or line-through: its own tokens when
+/// it overrides, else the element's.
+fn draws_decoration_of(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
+    match &s.text_decoration {
         Some(own) => own.iter().any(|w| w == "underline" || w == "line-through"),
         None => e.text_decoration.split_whitespace().any(|w| w == "underline" || w == "line-through"),
-    };
-    s.transform.is_none() && s.dx.is_none()
-        && !((s.baseline_shift.is_some() || s.rotate.is_some()) && decorated)
+    }
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -635,6 +647,14 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
     let Some(plan) = crate::algorithms::text_runs::plan(e, &real) else { return };
     let (element_font, _) = walk_font(&crate::algorithms::text_runs::element_face(e));
     let brush = Brush::Solid(f.color);
+    // A scale is the flat arm's frame around the whole draw (node 19):
+    // `translate(x, y) · scale(h, v) · translate(-x, -y)` about the box's
+    // top-left. The router admits only readable values.
+    let (h, v, _) = text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+    let scaled = h != 1.0 || v != 1.0;
+    if scaled {
+        p.push_state(super::Transform { a: h, b: 0.0, c: 0.0, d: v, e: e.x - h * e.x, f: e.y - v * e.y });
+    }
     for line in plan.lines {
         for r in line.runs {
             // The plan resolves the run's size (a baseline shift scales it).
@@ -686,6 +706,9 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             &brush,
             eff * f.opacity,
         );
+    }
+    if scaled {
+        p.pop_state();
     }
 }
 

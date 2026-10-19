@@ -32,8 +32,8 @@ pub struct TextRun {
     /// The run's own baseline offset from its line's (y down): its tspan's
     /// baseline shift, in pt with + up, so `dy` is its negation; 0 without one.
     pub dy: f64,
-    /// The run's own glyph rotation in degrees (+ clockwise), its tspan's
-    /// `rotate`; 0 without one. A rotated run is ONE character, drawn in a
+    /// The run's glyph rotation in degrees (+ clockwise): its tspan's own
+    /// `rotate`, else the element's; 0 without either. A rotated run is ONE character, drawn in a
     /// frame rotated about its baseline origin (TSPAN.md "Rotation").
     pub rotate: f64,
 }
@@ -141,6 +141,13 @@ pub fn baseline_shift(e: &crate::geometry::element::TextElem) -> Option<(f64, f6
         "sub" => Some((0.7, e.font_size * 0.2)),
         other => crate::geometry::tspan::parse_pt(other).map(|pt| (1.0, -pt)),
     }
+}
+
+/// The element's glyph rotation in degrees (`rotate`, the Character panel on
+/// the whole text): empty is 0. `None` when it does not read, which gives no
+/// plan rather than a guess.
+pub fn element_rotation(e: &crate::geometry::element::TextElem) -> Option<f64> {
+    if e.rotate.is_empty() { Some(0.0) } else { e.rotate.trim().parse::<f64>().ok() }
 }
 
 /// Tracking plus numeric kerning as one uniform advance in px at `size`, the
@@ -333,15 +340,16 @@ fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph])
     out
 }
 
-/// `runs` with every run of a rotated tspan cut into one run per character,
+/// `runs` with every run whose angle (`angle_of` its tspan: its own rotation,
+/// else the element's) is not 0 cut into one run per character,
 /// each at its glyph's x (plus the line's anchor `shift`) and carrying the
 /// angle. A one-character run (the synthetic hyphen among them) keeps the x
 /// it already has; a character the layout placed no glyph for drops, as in
 /// [`line_runs`].
-fn per_glyph(runs: Vec<TextRun>, e: &crate::geometry::element::TextElem, glyphs: &[crate::algorithms::text_layout::Glyph], shift: f64) -> Vec<TextRun> {
+fn per_glyph(runs: Vec<TextRun>, angle_of: &dyn Fn(usize) -> f64, glyphs: &[crate::algorithms::text_layout::Glyph], shift: f64) -> Vec<TextRun> {
     let mut out = Vec::new();
     for r in runs {
-        let angle = e.tspans[r.tspan].rotate.unwrap_or(0.0);
+        let angle = angle_of(r.tspan);
         if angle == 0.0 {
             out.push(r);
         } else if r.text.chars().count() == 1 {
@@ -391,13 +399,16 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// the advance), and a point text's anchor (each line, with its decorations,
 /// moved by `anchor_shift` of its own width; the markers stay at their indent),
 /// a tspan's own baseline shift (its runs' `dy`), and a tspan's own rotation
-/// (its runs cut per character, each carrying `rotate`).
+/// (its runs cut per character, each carrying `rotate`), and the element's
+/// rotation the same way, a tspan's own overriding it. `None` also when the
+/// element's rotation does not read. A scale is the renderer's frame.
 /// `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
 ) -> Option<RunsPlan> {
     let (scale, dy) = baseline_shift(e)?;
+    let element_angle = element_rotation(e)?;
     let base = RunFace { size: e.font_size * scale, ..element_face(e) };
     let spacing = letter_spacing(e, base.size)?;
     let measure = measurer(&base)?;
@@ -467,8 +478,9 @@ pub fn plan(
         // A rotated tspan's runs, cut into one run per character at the
         // layout's own glyph x: each glyph turns about its baseline origin
         // and the pen advances un-rotated (TSPAN.md "Rotation").
-        if runs.runs.iter().any(|r| e.tspans[r.tspan].rotate.is_some_and(|a| a != 0.0)) {
-            runs.runs = per_glyph(std::mem::take(&mut runs.runs), e, glyphs, *shift);
+        let angle = |t: usize| e.tspans[t].rotate.unwrap_or(element_angle);
+        if runs.runs.iter().any(|r| angle(r.tspan) != 0.0) {
+            runs.runs = per_glyph(std::mem::take(&mut runs.runs), &angle, glyphs, *shift);
         }
         runs.baseline_y += dy;
     }
@@ -997,6 +1009,29 @@ mod tests {
         // CONTROL: no rotation, whole runs, every angle 0.
         assert_eq!(plain.lines[0].runs.len(), 3);
         assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.rotate == 0.0));
+    }
+
+    /// The ELEMENT's rotation is every glyph's (the Character panel on the
+    /// whole text), and a tspan's own rotation overrides it for its glyphs
+    /// (a tspan's `None` inherits): each glyph its own run, at the layout's
+    /// x. A rotation that does not read gives no plan rather than a guess.
+    #[test]
+    fn an_element_rotation_turns_every_glyph_and_a_tspans_own_overrides_it() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.rotate = "20".into();
+        e.tspans[3].rotate = Some(-5.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let runs = &p.lines[0].runs;
+        let total: usize = ["One fine day ", "extraordinarily patiently", " sat"].iter().map(|t| t.chars().count()).sum();
+        assert_eq!(runs.len(), total, "one run per glyph");
+        assert!(runs.iter().all(|r| r.text.chars().count() == 1));
+        let angles: Vec<f64> = runs.iter().map(|r| r.rotate).collect();
+        assert!(angles[..total - 4].iter().all(|&a| a == 20.0) && angles[total - 4..].iter().all(|&a| a == -5.0), "{angles:?}");
+        assert_eq!((runs[13].text.as_str(), runs[13].x), ("e", 130.0), "the bold run's first glyph at its layout x");
+        let mut bad = styled_area(2000.0);
+        bad.rotate = "tilt".into();
+        assert!(plan(&bad, &faces(&seen)).is_none());
     }
 
     /// A rotated glyph moves with its line's anchor: point text "ab" + "cd"

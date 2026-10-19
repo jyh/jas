@@ -4078,7 +4078,7 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     use crate::painter::element_render::{needs_layout, runs_plan_excludes};
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 6] = [
+    let cases: [(&str, Set); 10] = [
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
@@ -4096,11 +4096,24 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
             e.tspans[2].rotate = Some(10.0);
             e.text_decoration = "underline".into();
         }),
+        ("a scale that does not read", |e| e.horizontal_scale = "wide".into()),
+        ("a rotation that does not read", |e| e.rotate = "tilt".into()),
+        ("an element rotation with a tspan's decoration", |e| {
+            e.rotate = "20".into();
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("an element rotation with its own decoration", |e| {
+            e.rotate = "20".into();
+            e.text_decoration = "line-through".into();
+        }),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 15] = [
+    let admitted: [(&str, Admit); 18] = [
+        ("a horizontal scale", |e| e.horizontal_scale = "150".into()),
+        ("a vertical scale", |e| e.vertical_scale = "80".into()),
+        ("an element rotation", |e| e.rotate = "20".into()),
         ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
         ("an anchor", |e| e.text_anchor = "middle".into()),
         ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
