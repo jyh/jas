@@ -32,6 +32,10 @@ pub struct TextRun {
     /// The run's own baseline offset from its line's (y down): its tspan's
     /// baseline shift, in pt with + up, so `dy` is its negation; 0 without one.
     pub dy: f64,
+    /// The run's own glyph rotation in degrees (+ clockwise), its tspan's
+    /// `rotate`; 0 without one. A rotated run is ONE character, drawn in a
+    /// frame rotated about its baseline origin (TSPAN.md "Rotation").
+    pub rotate: f64,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -78,7 +82,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0, dy: 0.0 });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0, dy: 0.0, rotate: 0.0 });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -329,9 +333,33 @@ fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph])
     out
 }
 
+/// `runs` with every run of a rotated tspan cut into one run per character,
+/// each at its glyph's x (plus the line's anchor `shift`) and carrying the
+/// angle. A one-character run (the synthetic hyphen among them) keeps the x
+/// it already has; a character the layout placed no glyph for drops, as in
+/// [`line_runs`].
+fn per_glyph(runs: Vec<TextRun>, e: &crate::geometry::element::TextElem, glyphs: &[crate::algorithms::text_layout::Glyph], shift: f64) -> Vec<TextRun> {
+    let mut out = Vec::new();
+    for r in runs {
+        let angle = e.tspans[r.tspan].rotate.unwrap_or(0.0);
+        if angle == 0.0 {
+            out.push(r);
+        } else if r.text.chars().count() == 1 {
+            out.push(TextRun { rotate: angle, ..r });
+        } else {
+            for (k, c) in r.text.chars().enumerate() {
+                if let Some(g) = glyphs.iter().find(|g| g.idx == r.start + k) {
+                    out.push(TextRun { text: c.to_string(), x: g.x + shift, start: r.start + k, rotate: angle, ..r.clone() });
+                }
+            }
+        }
+    }
+    out
+}
+
 fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
     if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
-        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0, dy: 0.0 });
+        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0, dy: 0.0, rotate: 0.0 });
     }
 }
 
@@ -351,7 +379,7 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing that does not read, a scale or rotation, a baseline shift that
-/// does not read, a tspan's dx, rotate or transform, a shifted tspan's
+/// does not read, a tspan's dx or transform, a shifted or rotated tspan's
 /// decoration) is the router's to keep away from it
 /// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
 /// characters measured and its run drawn at that size, on the element's
@@ -362,7 +390,8 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// in every character's width so the layout matches the draw; the plan carries
 /// the advance), and a point text's anchor (each line, with its decorations,
 /// moved by `anchor_shift` of its own width; the markers stay at their indent),
-/// and a tspan's own baseline shift (its runs' `dy`).
+/// a tspan's own baseline shift (its runs' `dy`), and a tspan's own rotation
+/// (its runs cut per character, each carrying `rotate`).
 /// `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
@@ -425,7 +454,7 @@ pub fn plan(
             let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
             let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
             if let (Some(g), Some(t)) = (hyphen, owner) {
-                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0, dy: 0.0 });
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0, dy: 0.0, rotate: 0.0 });
             }
         }
         // Each run at its resolved size, on the shifted baseline, offset by
@@ -434,6 +463,12 @@ pub fn plan(
             r.size = run_face(e, &e.tspans[r.tspan], scale).size;
             r.dy = -e.tspans[r.tspan].baseline_shift.unwrap_or(0.0);
             r.x += shift;
+        }
+        // A rotated tspan's runs, cut into one run per character at the
+        // layout's own glyph x: each glyph turns about its baseline origin
+        // and the pen advances un-rotated (TSPAN.md "Rotation").
+        if runs.runs.iter().any(|r| e.tspans[r.tspan].rotate.is_some_and(|a| a != 0.0)) {
+            runs.runs = per_glyph(std::mem::take(&mut runs.runs), e, glyphs, *shift);
         }
         runs.baseline_y += dy;
     }
@@ -932,5 +967,35 @@ mod tests {
         assert_eq!(sup.lines[0].runs[1].dy, -3.0);
         // CONTROL: no own shift, every run at 0.
         assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.dy == 0.0));
+    }
+
+    /// A tspan's own rotation (degrees, + clockwise; TSPAN.md "Rotation"):
+    /// each of its glyphs rotates about its own baseline origin and the pen
+    /// advances un-rotated, so the plan cuts the tspan's runs into one run
+    /// per character at the layout's own glyph x, each carrying the angle.
+    /// Other tspans keep whole runs at 0; the layout does not move.
+    #[test]
+    fn a_tspans_rotation_draws_each_of_its_glyphs_at_the_layouts_x() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let plain = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        let mut e = styled_area(2000.0);
+        e.tspans[3].rotate = Some(15.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got: Vec<(String, f64, usize, f64)> = p.lines[0].runs.iter()
+            .map(|r| (r.text.clone(), r.x, r.tspan, r.rotate)).collect();
+        // " sat" starts at 130 + 25 x 20 = 630, each character 10 wide.
+        let mut want = vec![
+            ("One fine day ".to_string(), 0.0, 1, 0.0),
+            ("extraordinarily patiently".to_string(), 130.0, 2, 0.0),
+        ];
+        for (k, c) in " sat".chars().enumerate() {
+            want.push((c.to_string(), 630.0 + 10.0 * k as f64, 3, 15.0));
+        }
+        assert_eq!(got, want);
+        assert_eq!(p.lines.len(), plain.lines.len());
+        assert_eq!(p.lines[0].baseline_y, plain.lines[0].baseline_y);
+        // CONTROL: no rotation, whole runs, every angle 0.
+        assert_eq!(plain.lines[0].runs.len(), 3);
+        assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.rotate == 0.0));
     }
 }

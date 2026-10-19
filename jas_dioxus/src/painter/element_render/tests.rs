@@ -4092,12 +4092,16 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
             e.tspans[2].baseline_shift = Some(3.0);
             e.text_decoration = "line-through".into();
         }),
-        ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
+        ("a rotated tspan's decoration", |e| {
+            e.tspans[2].rotate = Some(10.0);
+            e.text_decoration = "underline".into();
+        }),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 14] = [
+    let admitted: [(&str, Admit); 15] = [
+        ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
         ("an anchor", |e| e.text_anchor = "middle".into()),
         ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
         ("a shifted tspan beside a decorated one", |e| {

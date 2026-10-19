@@ -2433,7 +2433,17 @@ fn draw_laid_out_runs(
             // The plan resolves the run's size (a baseline shift scales it).
             let face = crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan]);
             ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
-            ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y + r.dy).ok();
+            let (x, y) = (e.x + r.x, e.y + line.baseline_y + r.dy);
+            if r.rotate != 0.0 {
+                // A rotated run is one glyph, turned about its baseline origin.
+                ctx.save();
+                ctx.translate(x, y).ok();
+                ctx.rotate(r.rotate.to_radians()).ok();
+                ctx.fill_text(&r.text, 0.0, 0.0).ok();
+                ctx.restore();
+            } else {
+                ctx.fill_text(&r.text, x, y).ok();
+            }
         }
     }
     if spaced {
