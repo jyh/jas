@@ -4160,3 +4160,20 @@ fn a_styled_runs_underline_is_stroked_under_it() {
     assert!((strokes[0].0 - bold.2).abs() < 1e-6 && (strokes[0].1 - (bold.2 + w)).abs() < 1e-6, "{strokes:?} vs {bold:?}");
     assert!((strokes[0].2 - (bold.3 + 20.0 * 0.12)).abs() < 1e-6, "{strokes:?}");
 }
+
+/// The walk draws a tspan's own baseline shift: its run sits `shift` above the
+/// line's baseline (y down), the other runs on it, and the x does not move.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_baseline_shift_raises_its_run() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.tspans[2].baseline_shift = Some(3.0);
+    let runs = font_runs(e);
+    assert_eq!(runs.len(), plain.len(), "{runs:?}");
+    assert!(runs.iter().any(|r| r.0 == "extraordinarily patiently"), "the shifted run is drawn: {runs:?}");
+    for (r, p) in runs.iter().zip(&plain) {
+        let want = if r.0 == "extraordinarily patiently" { p.3 - 3.0 } else { p.3 };
+        assert!((r.2 - p.2).abs() < 1e-9 && (r.3 - want).abs() < 1e-9, "{r:?} vs {p:?}");
+    }
+}
