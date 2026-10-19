@@ -255,11 +255,26 @@ public func layoutTextWithHyphen(_ content: String,
                                  fontSize: Double,
                                  opts: HyphenOpts,
                                  measure: (String) -> Double,
-                                 firstLineExtra: Double = 0.0) -> TextLayout {
+                                 firstLineExtra: Double = 0.0,
+                                 perCharWidths: [Double]? = nil) -> TextLayout {
     let lineHeight = fontSize
     let ascent = fontSize * 0.8
     let chars = Array(content)
     let n = chars.count
+    // Per-character widths (each character in its own tspan's face), as
+    // `layoutText` takes them and Rust's `layout_inner` does on this path
+    // too: a span's width is the sum of its characters'. A wrong-length
+    // array falls back to the measure closure. The synthetic hyphen is
+    // measured by the closure (the element's face) either way.
+    let widths: [Double] = {
+        if let w = perCharWidths, w.count == n { return w }
+        return chars.map { measure(String($0)) }
+    }()
+    func spanWidth(_ start: Int, _ end: Int) -> Double {
+        var sum = 0.0
+        for k in start..<end { sum += widths[k] }
+        return sum
+    }
     var glyphs: [TextGlyph] = []
     var lines: [LineInfo] = []
     var idx = 0
@@ -311,7 +326,7 @@ public func layoutTextWithHyphen(_ content: String,
         }
         if isWs {
             for k in 0..<(end - idx) {
-                let cw = measure(String(chars[idx + k]))
+                let cw = widths[idx + k]
                 addGlyph(idx + k, lineNo, x, cw)
                 x += cw
             }
@@ -319,7 +334,7 @@ public func layoutTextWithHyphen(_ content: String,
             continue
         }
         let token = String(chars[idx..<end])
-        let tokenW = measure(token)
+        let tokenW = spanWidth(idx, end)
         if maxWidth > 0 && x + tokenW > lineMax(lineNo) && x > 0 {
             // Hyphenation: try to split the token at a hyphenation
             // breakpoint that fits on the current line. Picks the
@@ -340,8 +355,7 @@ public func layoutTextWithHyphen(_ content: String,
                 // Try the largest valid break point first.
                 for bi in stride(from: tokenChars.count - 1, through: 1, by: -1) {
                     if bi >= breaks.count || !breaks[bi] { continue }
-                    let prefix = String(tokenChars[..<bi])
-                    let prefixW = measure(prefix)
+                    let prefixW = spanWidth(idx, idx + bi)
                     if prefixW + hyphenW <= avail {
                         hyphenSplit = (bi, prefixW)
                         break
@@ -352,7 +366,7 @@ public func layoutTextWithHyphen(_ content: String,
                 // Emit prefix glyphs on the current line, then the
                 // synthetic hyphen, then wrap.
                 for k in 0..<splitAt {
-                    let cw = measure(String(tokenChars[k]))
+                    let cw = widths[idx + k]
                     addGlyph(idx + k, lineNo, x, cw)
                     x += cw
                 }
@@ -370,10 +384,10 @@ public func layoutTextWithHyphen(_ content: String,
                 idx = idx + splitAt
                 // Place the tail at x=0 (or char-by-char if it overflows).
                 let tailChars = Array(tokenChars[splitAt...])
-                let tailW = tailChars.reduce(0.0) { $0 + measure(String($1)) }
+                let tailW = spanWidth(idx, idx + tailChars.count)
                 if maxWidth > 0 && tailW > lineMax(lineNo) {
-                    for (k, ch) in tailChars.enumerated() {
-                        let cw = measure(String(ch))
+                    for k in tailChars.indices {
+                        let cw = widths[idx + k]
                         if x + cw > lineMax(lineNo) && x > 0 {
                             pushLine(lineStart, idx + k, false, x, false)
                             lineNo += 1
@@ -385,8 +399,8 @@ public func layoutTextWithHyphen(_ content: String,
                     }
                 } else {
                     var curX = x
-                    for (k, ch) in tailChars.enumerated() {
-                        let cw = measure(String(ch))
+                    for k in tailChars.indices {
+                        let cw = widths[idx + k]
                         addGlyph(idx + k, lineNo, curX, cw)
                         curX += cw
                     }
@@ -410,7 +424,7 @@ public func layoutTextWithHyphen(_ content: String,
         if maxWidth > 0 && tokenW > lineMax(lineNo) && x == 0 {
             // Char-by-char break for an over-long token.
             for k in 0..<(end - idx) {
-                let cw = measure(String(chars[idx + k]))
+                let cw = widths[idx + k]
                 if x + cw > lineMax(lineNo) && x > 0 {
                     pushLine(lineStart, idx + k, false, x, false)
                     lineNo += 1
@@ -423,7 +437,7 @@ public func layoutTextWithHyphen(_ content: String,
         } else {
             var curX = x
             for k in 0..<(end - idx) {
-                let cw = measure(String(chars[idx + k]))
+                let cw = widths[idx + k]
                 addGlyph(idx + k, lineNo, curX, cw)
                 curX += cw
             }
@@ -808,7 +822,8 @@ public func layoutTextWithParagraphs(_ content: String,
             para = layoutTextWithHyphen(slice, maxWidth: effectiveMax,
                                         fontSize: fontSize, opts: opts,
                                         measure: measure,
-                                        firstLineExtra: firstLineExtra)
+                                        firstLineExtra: firstLineExtra,
+                                        perCharWidths: segWidths)
         } else {
             para = layoutText(slice, maxWidth: effectiveMax,
                               fontSize: fontSize, measure: measure,

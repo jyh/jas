@@ -531,3 +531,30 @@ private func markerReadout(_ content: String, _ segs: [ParagraphSegment],
     #expect(l.charCount == 17)
     #expect(l.glyphs.count == 17)
 }
+
+/// A hyphenated paragraph lays out by the per-character widths too (each
+/// character in its own tspan's face), as Rust's `layout_inner` does for its
+/// hyphenating path: here "information" is twice as wide as the measurer says.
+/// At 20 per character only "infor" (100) and the hyphen (10) fit after
+/// "go " (30) in 150; at the measurer's 10 the break would come later. The
+/// twin of jas_dioxus `a_hyphenated_line_draws_its_hyphen_in_the_broken_words_tspan`.
+@Test func aHyphenatedLayoutPlacesEachCharacterByItsOwnWidth() {
+    let m: (String) -> Double = { Double($0.count) * 10.0 }
+    let widths = Array(repeating: 10.0, count: 3) + Array(repeating: 20.0, count: 11)
+    let segs = [ParagraphSegment(charStart: 0, charEnd: 14, hyphenate: true)]
+    let l = layoutTextWithParagraphs("go information", maxWidth: 150, fontSize: 16,
+                                     paragraphs: segs, measure: m, perCharWidths: widths)
+    #expect(l.lines.count == 2)
+    #expect(l.lines[0].trailingHyphen, "line 1 breaks inside the word")
+    #expect(l.lines[0].end == 8, "only \"infor\" fits at its own width: \(l.lines[0].end)")
+    guard l.lines.count == 2 else { return }
+    let x = { (i: Int) in l.glyphs.first(where: { $0.idx == i && $0.line == (i < 8 ? 0 : 1) })?.x ?? -1 }
+    #expect(x(4) - x(3) == 20, "a bold character advances its own width")
+    #expect(x(9) - x(8) == 20, "the tail too")
+    #expect(l.glyphs.last(where: { $0.line == 0 })?.x == 130, "the hyphen follows the prefix at its own width")
+    // CONTROL: unhyphenated, the same widths already place the characters.
+    let plain = layoutTextWithParagraphs("go information", maxWidth: 150, fontSize: 16,
+                                         paragraphs: [ParagraphSegment(charStart: 0, charEnd: 14)],
+                                         measure: m, perCharWidths: widths)
+    #expect(plain.glyphs.first(where: { $0.idx == 4 })!.x - plain.glyphs.first(where: { $0.idx == 3 })!.x == 20)
+}
