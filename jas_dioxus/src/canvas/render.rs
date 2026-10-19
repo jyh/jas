@@ -1929,15 +1929,20 @@ fn draw_element_body(
         Element::Text(e) => {
             let fill_op = apply_fill(ctx, e.fill.as_ref(), None, (0.0, 0.0, 0.0, 0.0));
             ctx.set_global_alpha(base_alpha * fill_op);
-            // Multi-tspan text renders each tspan with its own
-            // effective font (family / size / weight / style) and
-            // text-decoration on a shared baseline. Single no-override
-            // tspan falls through to the flat fast path below. First
-            // pass covers the visible subset — font + decoration
-            // overrides per tspan; per-tspan baseline-shift / rotate /
-            // transform / dx / wrapping come in follow-ups.
+            // Multi-tspan text that is laid out (area text, a set leading,
+            // a paragraph field) draws the shared plan (`text_runs::plan`):
+            // it wraps, each run in its tspan's font, as the walk draws it
+            // (STATUS-flask § 454 / § 455). What the plan does not draw
+            // (`runs_plan_excludes`), and point text, renders each tspan
+            // with its own effective font and decoration on one shared
+            // baseline. Single no-override tspan falls through to the flat
+            // fast path below.
             let is_flat = e.render_is_flat();
-            if !is_flat {
+            if !is_flat && crate::painter::element_render::needs_layout(e)
+                && !crate::painter::element_render::runs_plan_excludes(e)
+            {
+                draw_laid_out_runs(ctx, e);
+            } else if !is_flat {
                 draw_segmented_text(ctx, e);
             } else {
             // Baseline-shift: super/sub render at a smaller size and
@@ -2388,6 +2393,34 @@ fn draw_element_body(
 /// across spans in the same Text. Omits per-tspan baseline-shift,
 /// transform, rotate, dx, small-caps, and multi-line wrapping —
 /// those still collapse to the element-wide defaults for now.
+/// Non-flat text the router admitted: the shared plan
+/// (`text_runs::plan`), each character measured in its tspan's canvas font,
+/// each run drawn in that font at `x + run.x` on its line's baseline, then
+/// the list markers in the element's font. The canvas always measures, so
+/// the plan always exists here.
+fn draw_laid_out_runs(
+    ctx: &CanvasRenderingContext2d,
+    e: &crate::geometry::element::TextElem,
+) {
+    let css = |f: &crate::algorithms::text_runs::RunFace| {
+        crate::tools::text_measure::font_string(f.style, f.weight, f.size, f.family)
+    };
+    let canvas = |f: &crate::algorithms::text_runs::RunFace| {
+        Some(crate::tools::text_measure::make_measurer(&css(f), f.size))
+    };
+    let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
+    for line in &plan.lines {
+        for r in &line.runs {
+            ctx.set_font(&css(&crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan])));
+            ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
+        }
+    }
+    ctx.set_font(&css(&crate::algorithms::text_runs::element_face(e)));
+    for m in &plan.markers {
+        ctx.fill_text(&m.text, e.x + m.x, e.y + m.baseline_y).ok();
+    }
+}
+
 fn draw_segmented_text(
     ctx: &CanvasRenderingContext2d,
     e: &crate::geometry::element::TextElem,
