@@ -1,0 +1,10 @@
+{
+    "item":  "character.all_caps_styled_wrap",
+    "surface":  "2379x1333",
+    "frame_hash":  "722ea1f215be34caa91893d337a68870f0ecf27b4ee49535fbe5dd3af72239dc",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "01f0a4fb57487e07",
+    "tab":  "[0,0]=on:\"text_area_styled_wrap.svg\"",
+    "tab_sha":  "ad0f55d79f3e9315",
+    "selection_count":  1
+}
