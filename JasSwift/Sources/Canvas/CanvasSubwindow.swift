@@ -1681,7 +1681,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
         // selection-highlight rectangles in TypeTool index into this
         // same layout, so layout-vs-render width drift would surface
         // as misaligned highlights inside an edit session.
-        let perCharW = textPerCharWidths(v.tspans, element: v)
+        let perCharW = textPerCharWidths(v.tspans, element: v, sizeScale: sizeScale)
         let lay = layoutTextWithParagraphs(
             drawContent, maxWidth: maxW, fontSize: layoutFs,
             paragraphs: pSegs, measure: measure,

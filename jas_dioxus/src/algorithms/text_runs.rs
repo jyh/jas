@@ -216,7 +216,7 @@ fn decorations(
             // (x0, x1, size): one piece of contiguous decorated characters of
             // one size; a change of size starts a new piece.
             let mut span: Option<(f64, f64, f64)> = None;
-            let mut close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
+            let close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
                 if let Some((x0, x1, size)) = span.take() {
                     out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
                 }
