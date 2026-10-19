@@ -563,7 +563,8 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 /// NODE 33: what the runs path's first cut does not draw, so it stays legacy,
 /// by name: a per-tspan feature the segmented lowering also refuses (a
 /// per-tspan SIZE is drawn: each run at its size on the element's leading, as
-/// Swift draws it); element-level spacing, decoration, scale or rotation, baseline
+/// Swift draws it); element-level spacing that does not read (readable
+/// tracking and kerning are drawn, in the layout's widths), decoration, scale or rotation, baseline
 /// shift that does not read, and an anchor (a decoration, the element's or a
 /// tspan's, a case transform or small caps, and a readable element baseline
 /// shift are drawn); and any tspan whose
@@ -589,8 +590,7 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     if body().any(|s| tspan_needs_legacy(s) && !only_decoration(s)) {
         return true;
     }
-    if !t.letter_spacing.is_empty()
-        || !t.kerning.is_empty()
+    if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
         || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
         || crate::algorithms::text_runs::baseline_shift(t).is_none()
         || !t.text_anchor.is_empty()
@@ -631,7 +631,7 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             // The plan resolves the run's size (a baseline shift scales it).
             let (font, _) = tspan_font(e, &e.tspans[r.tspan]);
             p.draw_text_run(
-                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: 0.0, x: e.x + r.x, y: e.y + line.baseline_y },
+                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x: e.x + r.x, y: e.y + line.baseline_y },
                 &brush,
                 eff * f.opacity,
             );

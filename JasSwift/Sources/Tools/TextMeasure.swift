@@ -62,8 +62,10 @@ public func stubMeasurer(_ size: Double) -> (String) -> Double {
 /// canvas draws a run with no size of its own at the element's SCALED size,
 /// so its widths are taken there too (a tspan's own size is not scaled), as
 /// Rust's shared plan takes them. The Type tool, which lays out with no
-/// shift, passes none.
-public func textPerCharWidths(_ tspans: [Tspan], element: Text, sizeScale: Double = 1.0) -> [Double] {
+/// shift, passes none. `spacing` is the uniform `.kern` advance the canvas
+/// draws every character with (tracking plus numeric kerning, in px), so a
+/// tracked line wraps and aligns at the width it is drawn at.
+public func textPerCharWidths(_ tspans: [Tspan], element: Text, sizeScale: Double = 1.0, spacing: Double = 0.0) -> [Double] {
     var out: [Double] = []
     for t in tspans {
         let effFamily = t.fontFamily ?? element.fontFamily
@@ -80,7 +82,7 @@ public func textPerCharWidths(_ tspans: [Tspan], element: Text, sizeScale: Doubl
                                     style: style, size: effSize)
         let display = applyTextTransform(effTT, effFV, t.content)
         for ch in display {
-            out.append(measure(String(ch)))
+            out.append(measure(String(ch)) + spacing)
         }
     }
     return out
