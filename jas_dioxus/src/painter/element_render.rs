@@ -592,7 +592,6 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
         || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
         || crate::algorithms::text_runs::baseline_shift(t).is_none()
-        || !t.text_anchor.is_empty()
     {
         return true;
     }

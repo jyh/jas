@@ -214,6 +214,7 @@ fn decorations(
     ranges: &[(usize, usize)],
     scale: f64,
     dy: f64,
+    shifts: &[f64],
 ) -> Vec<Decoration> {
     let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
     // A decoration line at `size`: its offset from the baseline and thickness.
@@ -222,7 +223,7 @@ fn decorations(
         DecorationKind::LineThrough => -size * 0.3,
     };
     let mut out = Vec::new();
-    for line in &layout.lines {
+    for (line, &shift) in layout.lines.iter().zip(shifts) {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
         for kind in [DecorationKind::Underline, DecorationKind::LineThrough] {
             // (x0, x1, size): one piece of contiguous decorated characters of
@@ -230,7 +231,7 @@ fn decorations(
             let mut span: Option<(f64, f64, f64)> = None;
             let close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
                 if let Some((x0, x1, size)) = span.take() {
-                    out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
+                    out.push(Decoration { kind, x0: x0 + shift, x1: x1 + shift, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
                 }
             };
             for g in glyphs {
@@ -397,7 +398,17 @@ pub fn plan(
     let ranges = tspan_ranges(shown.iter().map(|t| t.as_str()));
     let mut lines = line_runs(&layout, &content, &ranges);
     let chars: Vec<char> = content.chars().collect();
-    for (line, runs) in layout.lines.iter().zip(lines.iter_mut()) {
+    // A point text's anchor moves each line by the width it draws: its
+    // characters' widths, its hard break excluded (`anchor_shift` is 0 for
+    // area text and the default anchor). The markers stay at their indent.
+    let shifts: Vec<f64> = layout.lines.iter().map(|line| {
+        let w: f64 = (line.start..line.end.min(chars.len()))
+            .filter(|&i| chars[i] != '\n')
+            .map(|i| widths[i])
+            .sum();
+        e.anchor_shift(w)
+    }).collect();
+    for ((line, runs), shift) in layout.lines.iter().zip(lines.iter_mut()).zip(&shifts) {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
         if stretched(glyphs, line, &chars, &widths) {
             runs.runs = word_runs(&runs.runs, glyphs);
@@ -414,6 +425,7 @@ pub fn plan(
         // Each run at its resolved size, on the shifted baseline.
         for r in &mut runs.runs {
             r.size = run_face(e, &e.tspans[r.tspan], scale).size;
+            r.x += shift;
         }
         runs.baseline_y += dy;
     }
@@ -421,7 +433,7 @@ pub fn plan(
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y + dy, text: m.text, x: m.indent, size: base.size })
         .collect();
-    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy);
+    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy, &shifts);
     Some(RunsPlan { lines, markers, decorations, letter_spacing: spacing })
 }
 
@@ -841,5 +853,53 @@ mod tests {
         let p = plan(&e, &faces(&seen)).unwrap();
         let d = decos(&p);
         assert_eq!((d[0].1, d[0].2), (0.0, 450.0), "line 1 is underlined edge to edge: {d:?}");
+    }
+
+    /// Point text under an anchor: each line moves left by `anchor_shift` of
+    /// the width it draws (its characters' widths, its hard break excluded),
+    /// so a middle line centres on `x` and an end line ends there. Its
+    /// decorations move with it; a list marker stays at its indent, as the
+    /// layout path and Swift place it. Area text ignores the anchor.
+    #[test]
+    fn a_point_texts_anchor_moves_each_line_by_its_own_width() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let point = |anchor: &str| {
+            let mut e = TextElem::from_string(
+                1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+                CommonProps::default(),
+            );
+            let mut w = Tspan::default();
+            w.jas_role = Some("paragraph".into());
+            w.jas_list_style = Some("bullet-disc".into());
+            w.jas_left_indent = Some(12.0);
+            e.tspans = vec![w, tspan("ab\n", None), tspan("cdef", Some("bold"))];
+            e.text_decoration = "underline".into();
+            e.text_anchor = anchor.into();
+            e
+        };
+        let xs = |p: &RunsPlan| shape(p).iter().map(|l| l.iter().map(|r| r.1).collect::<Vec<_>>()).collect::<Vec<_>>();
+        // "ab" is 2 x 10 wide, "cdef" 4 x 20 (bold): each line by its own width.
+        let start = plan(&point(""), &faces(&seen)).unwrap();
+        // The list indent puts both lines at 24; the anchor moves them from there.
+        assert_eq!(xs(&start), vec![vec![24.0], vec![24.0]]);
+        let middle = plan(&point("middle"), &faces(&seen)).unwrap();
+        assert_eq!(xs(&middle), vec![vec![14.0], vec![-16.0]]);
+        let end = plan(&point("end"), &faces(&seen)).unwrap();
+        assert_eq!(xs(&end), vec![vec![4.0], vec![-56.0]]);
+        // The underline moves with its line.
+        let spans = |p: &RunsPlan| decos(p).iter().map(|d| (d.1, d.2)).collect::<Vec<_>>();
+        assert_eq!(spans(&start), vec![(24.0, 44.0), (24.0, 104.0)]);
+        assert_eq!(spans(&middle), vec![(14.0, 34.0), (-16.0, 64.0)]);
+        // A marker stays at its indent, whatever the anchor.
+        assert!(!start.markers.is_empty(), "the fixture must place a marker");
+        assert_eq!(middle.markers, start.markers);
+        assert_eq!(end.markers, start.markers);
+        // An unknown anchor is the default.
+        assert_eq!(plan(&point("bogus"), &faces(&seen)).unwrap(), start);
+        // Area text ignores the anchor.
+        let mut area = styled_area(450.0);
+        let plain = plan(&area, &faces(&seen)).unwrap();
+        area.text_anchor = "end".into();
+        assert_eq!(plan(&area, &faces(&seen)).unwrap(), plain);
     }
 }

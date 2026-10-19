@@ -4078,17 +4078,17 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     use crate::painter::element_render::{needs_layout, runs_plan_excludes};
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 5] = [
+    let cases: [(&str, Set); 4] = [
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
         ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
-        ("an anchor", |e| e.text_anchor = "middle".into()),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 11] = [
+    let admitted: [(&str, Admit); 12] = [
+        ("an anchor", |e| e.text_anchor = "middle".into()),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("numeric kerning", |e| e.kerning = "0.05em".into()),
         ("a super baseline shift", |e| e.baseline_shift = "super".into()),
@@ -4111,6 +4111,13 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
         set(&mut e);
         assert!(runs_plan_excludes(&e), "styled area text with {name} is excluded from the plan");
     }
+    // An anchor on POINT text is drawn too (the plan moves each line by its
+    // width): two lines of styled point text, centred.
+    let mut point = styled_area(140.0);
+    (point.width, point.height) = (0.0, 0.0);
+    point.tspans[1].content = "One\nfine day ".into();
+    point.text_anchor = "middle".into();
+    assert!(needs_layout(&point) && !runs_plan_excludes(&point), "anchored point text takes the plan");
 }
 
 /// The walk strokes the plan's decoration lines: a tspan's underline is one
