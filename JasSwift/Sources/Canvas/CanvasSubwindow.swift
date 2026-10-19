@@ -1804,14 +1804,16 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             let naturalW = measure(segStr)
             let layoutW = max(0.0, lastVisibleRight - firstVisibleX)
             let gluesStretched = layoutW > naturalW + 0.5
-            // A TSPAN's own rotation (TSPAN.md "Rotation"): each of its glyphs
-            // turns about its own baseline origin and the pen advances
-            // un-rotated. A line holding one draws tspan by tspan, each
-            // portion at its first glyph's layout x, a rotated portion one
-            // glyph per frame. Mirrors Rust's shared plan (`text_runs::plan`,
-            // a rotated tspan's runs cut per character).
-            let rotatedTspan = !v.renderIsFlat && v.tspans.contains { ($0.rotate ?? 0) != 0 }
-            if rotRad == 0.0 && !gluesStretched && rotatedTspan {
+            // A TSPAN's own rotation, or the element's on STYLED text (TSPAN.md
+            // "Rotation"): each glyph turns about its own baseline origin and
+            // the pen advances un-rotated. Such a line draws tspan by tspan,
+            // each portion at its first glyph's layout x in its own
+            // attributes, a turned portion one glyph per frame at its own
+            // angle (a tspan's rotate, else the element's). Mirrors Rust's
+            // shared plan (`text_runs::plan`, a turned run cut per character).
+            let rotatedTspan = !v.renderIsFlat
+                && (rotRad != 0.0 || v.tspans.contains { ($0.rotate ?? 0) != 0 })
+            if !gluesStretched && rotatedTspan {
                 let glyphX = { (idx: Int) -> Double? in
                     lineGlyphs.first(where: { $0.idx == idx }).map { v.x + anchorDx + $0.x }
                 }
@@ -1830,7 +1832,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                         t.fontVariant ?? v.fontVariant, own) as NSString).length
                     let piece = lineStr.attributedSubstring(from: NSRange(location: strPos, length: len))
                     strPos += len
-                    let angle = (t.rotate ?? 0) * (Double.pi / 180)
+                    let angle = t.rotate.map { $0 * (Double.pi / 180) } ?? rotRad
                     if angle == 0 {
                         guard let x = glyphX(s) else { continue }
                         ctx.textPosition = CGPoint(x: x, y: baselineY)

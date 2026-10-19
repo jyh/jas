@@ -96,3 +96,31 @@ private func columns(_ buf: [UInt8], _ cols: Range<Int>) -> [UInt8] {
     #expect(band(plain, rows: rows, cols: 0..<cut) != band(turned, rows: rows, cols: 0..<cut),
             "CONTROL: the rotated tspan leaves the cap band when turned")
 }
+
+/// The ELEMENT's rotation on styled text, the Swift twin of jas_dioxus
+/// `an_element_rotation_turns_every_glyph_and_a_tspans_own_overrides_it`:
+/// every glyph turns, each in ITS OWN tspan's font, and a tspan's own
+/// rotation overrides the element's for its glyphs.
+private func turnedText(bold: Bool, own: Double?) -> Element {
+    .text(Text(x: 2, y: 10, tspans: [
+        Tspan(id: 0, content: "HHHH "),
+        Tspan(id: 1, content: "HHHH", fontWeight: bold ? "bold" : nil, rotate: own),
+    ], fontFamily: "Helvetica", fontSize: 8, rotate: "90", fill: Fill(color: .black)))
+}
+
+private func inkCount(_ buf: [UInt8]) -> Int {
+    stride(from: 3, to: buf.count, by: 4).filter { buf[$0] > 0 }.count
+}
+
+@Test func anElementRotationTurnsEachGlyphInItsOwnTspansFont() {
+    let regular = render(turnedText(bold: false, own: nil))
+    let bold = render(turnedText(bold: true, own: nil))
+    #expect(inkCount(regular) > 0, "the turned text draws")
+    #expect(inkCount(bold) > inkCount(regular), "the bold tspan's glyphs turn in bold")
+}
+
+@Test func aTspansOwnRotationOverridesTheElements() {
+    let inherited = render(turnedText(bold: false, own: nil))
+    let upright = render(turnedText(bold: false, own: 0))
+    #expect(inherited != upright, "a tspan's rotate 0 keeps its glyphs upright under a turned element")
+}
