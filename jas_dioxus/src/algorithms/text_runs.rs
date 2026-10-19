@@ -160,7 +160,8 @@ fn decorated(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan:
 /// of contiguous decorated characters from its first glyph's x to its last
 /// glyph's right. A soft wrap's trailing space and the synthetic hyphen are
 /// not decorated; a justified line's stretched glue is, because the glyphs
-/// carry the stretch. Legacy's offsets and thickness
+/// carry the stretch. A change of tspan size cuts a piece, and each piece is
+/// placed at its own size. Legacy's offsets and thickness
 /// (`canvas/render.rs`, `draw_text_decorations`): an underline at baseline +
 /// 0.12 x size, a line-through at baseline - 0.3 x size, max(0.07 x size, 1)
 /// wide.
@@ -170,30 +171,43 @@ fn decorations(
     chars: &[char],
     ranges: &[(usize, usize)],
 ) -> Vec<Decoration> {
-    let size = e.font_size;
-    let thickness = (size * 0.07).max(1.0);
     let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
+    // A decoration line at `size`: its offset from the baseline and thickness.
+    let place = |kind: DecorationKind, size: f64| match kind {
+        DecorationKind::Underline => size * 0.12,
+        DecorationKind::LineThrough => -size * 0.3,
+    };
     let mut out = Vec::new();
     for line in &layout.lines {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
-        for (kind, dy) in [(DecorationKind::Underline, size * 0.12), (DecorationKind::LineThrough, -size * 0.3)] {
-            let mut span: Option<(f64, f64)> = None;
+        for kind in [DecorationKind::Underline, DecorationKind::LineThrough] {
+            // (x0, x1, size): one piece of contiguous decorated characters of
+            // one size; a change of size starts a new piece.
+            let mut span: Option<(f64, f64, f64)> = None;
+            let mut close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
+                if let Some((x0, x1, size)) = span.take() {
+                    out.push(Decoration { kind, x0, x1, y: line.baseline_y + place(kind, size), thickness: (size * 0.07).max(1.0) });
+                }
+            };
             for g in glyphs {
                 let drawn = g.idx < line.end && g.idx < chars.len() && !g.is_trailing_space && chars[g.idx] != '\n';
-                let on = drawn && owner(g.idx).is_some_and(|t| decorated(e, &e.tspans[t], kind));
-                match (on, span) {
-                    (true, None) => span = Some((g.x, g.right)),
-                    (true, Some((x0, x1))) => span = Some((x0, x1.max(g.right))),
-                    (false, Some((x0, x1))) if drawn => {
-                        out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
-                        span = None;
+                if !drawn { continue; }
+                let t = owner(g.idx);
+                let on = t.is_some_and(|t| decorated(e, &e.tspans[t], kind));
+                if !on {
+                    close(&mut span, &mut out);
+                    continue;
+                }
+                let size = t.map_or(e.font_size, |t| tspan_face(e, &e.tspans[t]).size);
+                match span {
+                    Some((x0, x1, s)) if s == size => span = Some((x0, x1.max(g.right), s)),
+                    _ => {
+                        close(&mut span, &mut out);
+                        span = Some((g.x, g.right, size));
                     }
-                    _ => {}
                 }
             }
-            if let Some((x0, x1)) = span {
-                out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
-            }
+            close(&mut span, &mut out);
         }
     }
     out
@@ -268,9 +282,11 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 ///
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
-/// plan does NOT draw (spacing, decoration, a baseline shift, a case
-/// transform, a per-tspan size, an anchor) is the
-/// router's to keep away from it (`element_render::runs_plan_excludes`).
+/// plan does NOT draw (spacing, a scale or rotation, a baseline shift, a case
+/// transform or small caps, an anchor, a tspan's dx, rotate or transform) is
+/// the router's to keep away from it (`element_render::runs_plan_excludes`).
+/// A tspan's own size is drawn: its characters measured and its run drawn at
+/// that size, on the element's uniform leading.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
@@ -403,12 +419,14 @@ mod tests {
         e
     }
 
-    /// A measurer per face: 10 per character, 20 in bold. Counts each face it
+    /// A measurer per face: size / 2 per character, the size in bold. Counts each face it
     /// was asked for, so an arm can see which faces the plan measured.
     fn faces(seen: &std::cell::RefCell<Vec<String>>) -> impl Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>> + '_ {
         move |f: &RunFace| {
             seen.borrow_mut().push(format!("{} {} {} {}", f.style, f.weight, f.size, f.family));
-            let w = if f.weight == "bold" { 20.0 } else { 10.0 };
+            // Half the size per character, the whole size in bold: 10 and 20
+            // at the element's size 20.
+            let w = if f.weight == "bold" { f.size } else { f.size / 2.0 };
             Some(Box::new(move |s: &str| s.chars().count() as f64 * w) as Box<dyn Fn(&str) -> f64>)
         }
     }
@@ -591,6 +609,33 @@ mod tests {
         let mut whole = styled_area(2000.0);
         whole.text_decoration = "line-through".into();
         assert_eq!(decos(&plan(&whole, &faces(&seen)).unwrap()), vec![(DecorationKind::LineThrough, 0.0, 670.0, b - 20.0 * 0.3)]);
+    }
+
+    /// A tspan's own SIZE (Swift's law: each run at its tspan's size on the
+    /// element's uniform leading): its characters are measured at that size,
+    /// the run draws at it, the baselines do not move, and a decoration is cut
+    /// where the size changes, each piece at its own offset and thickness.
+    #[test]
+    fn a_tspans_size_measures_and_decorates_its_run_on_the_uniform_leading() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.tspans[2].font_size = Some(30.0);
+        e.text_decoration = "underline".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        // 25 bold characters at 30 each: " sat" at 130 + 750.
+        assert_eq!(shape(&p)[0], vec![
+            ("One fine day ".to_string(), 0.0, 1),
+            ("extraordinarily patiently".to_string(), 130.0, 2),
+            (" sat".to_string(), 880.0, 3),
+        ]);
+        assert_eq!(p.lines[0].baseline_y, 16.0, "the leading is the element's, not the run's");
+        let b = p.lines[0].baseline_y;
+        let d: Vec<(f64, f64, f64, f64)> = p.decorations.iter().map(|d| (d.x0, d.x1, d.y, d.thickness)).collect();
+        assert_eq!(d, vec![
+            (0.0, 130.0, b + 20.0 * 0.12, (20.0f64 * 0.07).max(1.0)),
+            (130.0, 880.0, b + 30.0 * 0.12, (30.0f64 * 0.07).max(1.0)),
+            (880.0, 920.0, b + 20.0 * 0.12, (20.0f64 * 0.07).max(1.0)),
+        ], "the underline is cut where the size changes");
     }
 
     /// On a justified line the underline spans the STRETCHED glue, not the

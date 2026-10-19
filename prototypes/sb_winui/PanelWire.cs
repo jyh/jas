@@ -507,14 +507,16 @@ internal static class PanelWire
     /// What an editable combo sends when a person LEAVES it (flask § 451,
     /// § 457): the typed text, as a text box's blur commits it, or null. Null
     /// when focus stayed inside the combo (into its own dropdown), when there
-    /// is no readable text, when the text is what the core showed (its value
+    /// is no readable text or it is empty or whitespace (flask § 459: putting
+    /// the box back after a commit can leave it empty, and the next blur sent
+    /// "" to the engine), when the text is what the core showed (its value
     /// or its label: <c>CommitOnBlur</c>'s rule), and when it names an item,
     /// which is a pick and goes by the selection path as Enter's does.
     /// </summary>
     internal static string? ComboBlurCommit(string? typed, string shownValue, string shownText,
         IEnumerable<string> itemTexts, bool focusStaysInCombo)
     {
-        if (focusStaysInCombo || typed is null) { return null; }
+        if (focusStaysInCombo || string.IsNullOrWhiteSpace(typed)) { return null; }
         if (!CommitOnBlur(typed, shownValue) || !CommitOnBlur(typed, shownText)) { return null; }
         return itemTexts.Any(t => string.Equals(t, typed, StringComparison.Ordinal)) ? null : typed;
     }
