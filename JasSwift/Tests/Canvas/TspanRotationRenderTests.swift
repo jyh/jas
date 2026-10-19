@@ -119,8 +119,13 @@ private func inkCount(_ buf: [UInt8]) -> Int {
     #expect(inkCount(bold) > inkCount(regular), "the bold tspan's glyphs turn in bold")
 }
 
+/// Both renders are STYLED (the bold tspan), so both take the styled path and
+/// differ only in the override: with no override on either tspan the text is
+/// FLAT and draws by the flat per-glyph branch, which made this arm pass
+/// whatever the styled path did (a mutant dropping the inherited angle
+/// survived it).
 @Test func aTspansOwnRotationOverridesTheElements() {
-    let inherited = render(turnedText(bold: false, own: nil))
-    let upright = render(turnedText(bold: false, own: 0))
+    let inherited = render(turnedText(bold: true, own: nil))
+    let upright = render(turnedText(bold: true, own: 0))
     #expect(inherited != upright, "a tspan's rotate 0 keeps its glyphs upright under a turned element")
 }
