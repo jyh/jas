@@ -213,6 +213,23 @@ fn decorations(
     out
 }
 
+/// A tspan's text with its case transform applied: the tspan's own
+/// `text_transform` / `font_variant` over the element's; uppercase and small
+/// caps upper-case, lowercase lower-cases. The text as written when the
+/// transform would change its character count.
+fn cased(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan::Tspan) -> String {
+    let tt = t.text_transform.as_deref().unwrap_or(&e.text_transform);
+    let fv = t.font_variant.as_deref().unwrap_or(&e.font_variant);
+    let out = if tt == "uppercase" || fv == "small-caps" {
+        t.content.to_uppercase()
+    } else if tt == "lowercase" {
+        t.content.to_lowercase()
+    } else {
+        return t.content.clone();
+    };
+    if out.chars().count() == t.content.chars().count() { out } else { t.content.clone() }
+}
+
 /// The whole plan a renderer draws: the runs of every line, then the
 /// markers. Every x and baseline is relative to the element's origin.
 #[derive(Debug, Clone, PartialEq)]
@@ -282,22 +299,29 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 ///
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
-/// plan does NOT draw (spacing, a scale or rotation, a baseline shift, a case
-/// transform or small caps, an anchor, a tspan's dx, rotate or transform) is
-/// the router's to keep away from it (`element_render::runs_plan_excludes`).
-/// A tspan's own size is drawn: its characters measured and its run drawn at
-/// that size, on the element's uniform leading.
+/// plan does NOT draw (spacing, a scale or rotation, a baseline shift, an
+/// anchor, a tspan's dx, rotate or transform) is the router's to keep away
+/// from it (`element_render::runs_plan_excludes`). A tspan's own size is
+/// drawn (its characters measured and its run drawn at that size, on the
+/// element's uniform leading), and so is a case transform (each tspan's text
+/// as `cased` transforms it).
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
 ) -> Option<RunsPlan> {
     let measure = measurer(&element_face(e))?;
-    let content = e.content();
+    // Each tspan's characters as drawn: its case transform (its own over the
+    // element's; small caps draws as uppercase), as Swift's per-run
+    // `applyTextTransform`. A transform that would change the character count
+    // (a German sharp s uppercases to two letters) keeps the text as written,
+    // because the layout and the tspan ranges count characters.
+    let shown: Vec<String> = e.tspans.iter().map(|t| cased(e, t)).collect();
+    let content: String = shown.concat();
     let mut widths: Vec<f64> = Vec::with_capacity(content.chars().count());
-    for t in &e.tspans {
-        if t.content.is_empty() { continue; }
+    for (t, text) in e.tspans.iter().zip(&shown) {
+        if text.is_empty() { continue; }
         let m = measurer(&tspan_face(e, t))?;
-        widths.extend(t.content.chars().map(|c| m(&c.to_string())));
+        widths.extend(text.chars().map(|c| m(&c.to_string())));
     }
     let leading = if e.line_height.is_empty() {
         match e.tspans.iter()
@@ -315,7 +339,7 @@ pub fn plan(
         &e.tspans, &content, e.is_area_text());
     let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
         &content, max_w, leading, &segments, &*measure, Some(&widths));
-    let ranges = tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
+    let ranges = tspan_ranges(shown.iter().map(|t| t.as_str()));
     let mut lines = line_runs(&layout, &content, &ranges);
     let chars: Vec<char> = content.chars().collect();
     for (line, runs) in layout.lines.iter().zip(lines.iter_mut()) {
@@ -636,6 +660,40 @@ mod tests {
             (130.0, 880.0, b + 30.0 * 0.12, (30.0f64 * 0.07).max(1.0)),
             (880.0, 920.0, b + 20.0 * 0.12, (20.0f64 * 0.07).max(1.0)),
         ], "the underline is cut where the size changes");
+    }
+
+    /// A case transform (the element's, or a tspan's own over it; small caps
+    /// draws as uppercase, the flat path's placeholder) changes the characters
+    /// the plan MEASURES and DRAWS, as Swift's per-run transform does. Here a
+    /// capital measures 20 and anything else 10, so the widths prove the
+    /// measurement was taken on the transformed text.
+    #[test]
+    fn a_case_transform_is_measured_and_drawn_per_tspan() {
+        let caps = |_: &RunFace| Some(Box::new(|s: &str| s.chars().map(|c| if c.is_uppercase() { 20.0 } else { 10.0 }).sum::<f64>()) as Box<dyn Fn(&str) -> f64>);
+        let mut e = styled_area(2000.0);
+        e.text_transform = "uppercase".into();
+        e.tspans[2].text_transform = Some("none".into());
+        e.tspans[3].font_variant = Some("small-caps".into());
+        e.tspans[3].text_transform = Some("none".into());
+        let p = plan(&e, &caps).unwrap();
+        // "ONE FINE DAY ": 10 capitals and 3 spaces = 230; then 25 lower-case.
+        assert_eq!(shape(&p)[0], vec![
+            ("ONE FINE DAY ".to_string(), 0.0, 1),
+            ("extraordinarily patiently".to_string(), 230.0, 2),
+            (" SAT".to_string(), 480.0, 3),
+        ]);
+        // A transform that changes the character count keeps the text as
+        // written: "ß" uppercases to "SS".
+        let mut sharp = styled_area(2000.0);
+        sharp.text_transform = "uppercase".into();
+        sharp.tspans[3].content = " straße".into();
+        let q = shape(&plan(&sharp, &caps).unwrap());
+        assert_eq!(q[0].last().unwrap().0, " straße", "{q:?}");
+        assert_eq!(q[0][0].0, "ONE FINE DAY ", "and the other tspans still transform: {q:?}");
+        // CONTROL: no transform, the text as written.
+        let plain = plan(&styled_area(2000.0), &caps).unwrap();
+        assert_eq!(shape(&plain)[0][0], ("One fine day ".to_string(), 0.0, 1));
+        assert_eq!(shape(&plain)[0][1].1, 140.0, "the capital O measures 20, the rest 10");
     }
 
     /// On a justified line the underline spans the STRETCHED glue, not the
