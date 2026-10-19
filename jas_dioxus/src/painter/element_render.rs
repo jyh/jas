@@ -560,17 +560,16 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
     (format!("{} {} {}", f.style, f.weight, f.family), f.size)
 }
 
-/// NODE 33: what the runs path's first cut does not draw, so it stays legacy,
-/// by name: a per-tspan feature the segmented lowering also refuses (a
-/// per-tspan SIZE is drawn: each run at its size on the element's leading, as
-/// Swift draws it); element-level spacing that does not read (readable
-/// tracking and kerning are drawn, in the layout's widths), decoration, scale or rotation, baseline
-/// shift that does not read, and an anchor (a decoration, the element's or a
-/// tspan's, a case transform or small caps, and a readable element baseline
-/// shift are drawn); and any tspan whose
-/// font has no real measurer (each character is measured in its own font).
-/// (A justified or hyphenated paragraph was excluded until the plan cut a
-/// stretched line into words and drew the synthetic hyphen.)
+/// NODE 33: what the runs path does not draw, so it stays legacy, by name:
+/// [`runs_plan_excludes`] (a tspan's rotate, transform, dx or own baseline
+/// shift; element spacing or a baseline shift that does not read; a scale or
+/// rotation; an anchor), and any tspan whose font has no real measurer (each
+/// character is measured in its own font). Drawn, so NOT excluded: a tspan's
+/// own size (each run at its size on the element's leading, as Swift draws
+/// it), readable tracking and kerning (in the layout's widths), a decoration
+/// (the element's or a tspan's), a case transform or small caps, a readable
+/// element baseline shift, and a justified or hyphenated paragraph (the plan
+/// cuts a stretched line into words and draws the synthetic hyphen).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     runs_plan_excludes(t) || t.tspans.iter().any(|s| {
         let (font, size) = tspan_font(t, s);
