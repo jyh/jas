@@ -564,8 +564,9 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 /// by name: a per-tspan feature the segmented lowering also refuses (a
 /// per-tspan SIZE is drawn: each run at its size on the element's leading, as
 /// Swift draws it); element-level spacing, decoration, scale or rotation, baseline
-/// shift, case transform or small caps, and an anchor (a decoration, the
-/// element's or a tspan's, is drawn); and any tspan whose
+/// shift that does not read, and an anchor (a decoration, the element's or a
+/// tspan's, a case transform or small caps, and a readable element baseline
+/// shift are drawn); and any tspan whose
 /// font has no real measurer (each character is measured in its own font).
 /// (A justified or hyphenated paragraph was excluded until the plan cut a
 /// stretched line into words and drew the synthetic hyphen.)
@@ -591,14 +592,14 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     if !t.letter_spacing.is_empty()
         || !t.kerning.is_empty()
         || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
-        || !t.baseline_shift.is_empty()
-        || (!t.text_transform.is_empty() && t.text_transform != "none")
-        || t.font_variant == "small-caps"
+        || crate::algorithms::text_runs::baseline_shift(t).is_none()
         || !t.text_anchor.is_empty()
     {
         return true;
     }
-    // A justified or hyphenated paragraph is drawn: the plan cuts a
+    // A case transform or small caps is drawn (the plan measures and draws
+    // each tspan's transformed text, Swift's per-run law), and so is a
+    // readable element baseline shift (the plan scales and moves it). A justified or hyphenated paragraph is drawn: the plan cuts a
     // stretched line into words and adds the synthetic hyphen. An element
     // decoration is drawn too (the plan's decoration lines).
     false
@@ -627,9 +628,10 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
     let brush = Brush::Solid(f.color);
     for line in plan.lines {
         for r in line.runs {
-            let (font, size) = tspan_font(e, &e.tspans[r.tspan]);
+            // The plan resolves the run's size (a baseline shift scales it).
+            let (font, _) = tspan_font(e, &e.tspans[r.tspan]);
             p.draw_text_run(
-                &TextRun::FastRun { font, size, text: r.text, letter_spacing: 0.0, x: e.x + r.x, y: e.y + line.baseline_y },
+                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: 0.0, x: e.x + r.x, y: e.y + line.baseline_y },
                 &brush,
                 eff * f.opacity,
             );
@@ -655,7 +657,7 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
     for m in plan.markers {
         p.draw_text_run(
             &TextRun::FastRun {
-                font: element_font.clone(), size: e.font_size, text: m.text, letter_spacing: 0.0,
+                font: element_font.clone(), size: m.size, text: m.text, letter_spacing: 0.0,
                 x: e.x + m.x, y: e.y + m.baseline_y,
             },
             &brush,

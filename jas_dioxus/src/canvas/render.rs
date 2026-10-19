@@ -2412,7 +2412,9 @@ fn draw_laid_out_runs(
     let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
     for line in &plan.lines {
         for r in &line.runs {
-            ctx.set_font(&css(&crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan])));
+            // The plan resolves the run's size (a baseline shift scales it).
+            let face = crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan]);
+            ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
             ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
         }
     }
@@ -2428,8 +2430,8 @@ fn draw_laid_out_runs(
         ctx.line_to(e.x + d.x1, e.y + d.y);
         ctx.stroke();
     }
-    ctx.set_font(&css(&crate::algorithms::text_runs::element_face(e)));
     for m in &plan.markers {
+        ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: m.size, ..crate::algorithms::text_runs::element_face(e) }));
         ctx.fill_text(&m.text, e.x + m.x, e.y + m.baseline_y).ok();
     }
 }
@@ -5263,5 +5265,20 @@ mod laid_out_runs_pixel_tests {
         assert!(inks_in(&plain, 2, 30, 5, 18), "control: the word is drawn");
         assert!(!inks_in(&plain, 2, 30, 20, 22), "control: nothing under \"One\" without an underline");
         assert!(inks_in(&under, 2, 30, 20, 22), "the underline is drawn under \"One\"");
+    }
+
+    /// The plan's baseline shift is drawn: under `super` the line's baseline
+    /// moves from y 18 to y 2 + 0.8 x 14 - 7 = 6.2, so the rows 10..18 the
+    /// plain text inks under "One" are empty.
+    #[wasm_bindgen_test]
+    fn a_super_baseline_shift_moves_styled_text_up_on_the_legacy_canvas() {
+        let plain = styled_area(2000.0);
+        let mut sup = styled_area(2000.0);
+        if let Element::Text(t) = &mut sup {
+            t.baseline_shift = "super".into();
+        }
+        assert!(inks_in(&plain, 2, 30, 10, 18), "control: the plain line inks rows 10..18");
+        assert!(inks_in(&sup, 2, 30, 0, 7), "control: the shifted line is drawn");
+        assert!(!inks_in(&sup, 2, 30, 10, 18), "the shifted line is drawn above row 10");
     }
 }

@@ -4057,11 +4057,10 @@ fn styled_area_text_lowers_only_where_the_runs_path_draws_it() {
     let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
     assert_eq!(text_needs_legacy(&styled_area(140.0)), !has_real, "styled area text lowers exactly where a real measurer exists");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 4] = [
+    let cases: [(&str, Set); 3] = [
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
-        ("a baseline shift", |e| e.baseline_shift = "super".into()),
-        ("a case transform", |e| e.text_transform = "uppercase".into()),
+        ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
     ];
     for (name, set) in cases {
         let mut e = styled_area(140.0);
@@ -4082,14 +4081,18 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     let cases: [(&str, Set); 5] = [
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
-        ("a baseline shift", |e| e.baseline_shift = "super".into()),
-        ("a case transform", |e| e.text_transform = "uppercase".into()),
+        ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
+        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
         ("an anchor", |e| e.text_anchor = "middle".into()),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 5] = [
+    let admitted: [(&str, Admit); 9] = [
+        ("a super baseline shift", |e| e.baseline_shift = "super".into()),
+        ("a numeric baseline shift", |e| e.baseline_shift = "3pt".into()),
+        ("a case transform", |e| e.text_transform = "uppercase".into()),
+        ("small caps", |e| e.font_variant = "small-caps".into()),
         ("a per-tspan size", |e| e.tspans[2].font_size = Some(30.0)),
         ("justify", |e| e.tspans[0].text_align = Some("justify".into())),
         ("hyphenation", |e| e.tspans[0].jas_hyphenate = Some(true)),
