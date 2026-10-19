@@ -433,6 +433,19 @@ mod tests {
         assert_eq!(ragged[0].len(), 2, "{ragged:?}");
     }
 
+    /// A justified line that fits exactly is not stretched (ratio 0): its
+    /// dropped trailing glue leaves a ZERO-width space glyph, which is not a
+    /// stretch, so the line keeps its whole run.
+    #[test]
+    fn an_exactly_fitting_justified_line_keeps_its_whole_run() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(90.0);
+        e.tspans = vec![e.tspans[0].clone(), tspan("aaaa bbbb cc", None)];
+        e.tspans[0].text_align = Some("justify".into());
+        let got = shape(&plan(&e, &faces(&seen)).unwrap());
+        assert_eq!(got[0], vec![("aaaa bbbb ".to_string(), 0.0, 1)], "{got:?}");
+    }
+
     /// A line broken at a hyphenation point draws a visible hyphen after its
     /// last character, at the layout's hyphen glyph, in that character's
     /// tspan.
@@ -450,6 +463,14 @@ mod tests {
         let bold_w = before.0.chars().count() as f64 * 20.0;
         assert!((last.1 - (before.1 + bold_w)).abs() < 1e-9, "the hyphen sits right after the broken word: {got:?}");
         assert!(got[1][0].0.chars().all(|c| c.is_alphabetic()), "line 2 carries the rest of the word: {got:?}");
+        // Justified too: the composer's hyphen penalty places the glyph.
+        let mut both = e.clone();
+        both.tspans[0].text_align = Some("justify".into());
+        let j = shape(&plan(&both, &faces(&seen)).unwrap());
+        let jl = j.iter().find(|l| l.last().is_some_and(|r| r.0 == "-")).expect(&format!("a justified line ends in the hyphen: {j:?}"));
+        let jb = &jl[jl.len() - 2];
+        assert_eq!(jl.last().unwrap().2, 2, "{j:?}");
+        assert!((jl.last().unwrap().1 - (jb.1 + jb.0.chars().count() as f64 * 20.0)).abs() < 1e-9, "{j:?}");
         // CONTROL: no hyphenation, no hyphen run.
         let mut plain = e.clone();
         plain.tspans[0].jas_hyphenate = None;
