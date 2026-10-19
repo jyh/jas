@@ -2433,7 +2433,7 @@ fn draw_laid_out_runs(
             // The plan resolves the run's size (a baseline shift scales it).
             let face = crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan]);
             ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
-            ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
+            ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y + r.dy).ok();
         }
     }
     if spaced {

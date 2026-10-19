@@ -4078,17 +4078,32 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     use crate::painter::element_render::{needs_layout, runs_plan_excludes};
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 4] = [
+    let cases: [(&str, Set); 6] = [
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
-        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
+        // Whether a decoration follows a run's own shift is not measured on
+        // either port (Swift's is CoreText's), so the pair stays out.
+        ("a shifted tspan's own decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("a shifted tspan's inherited decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.text_decoration = "line-through".into();
+        }),
+        ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 12] = [
+    let admitted: [(&str, Admit); 14] = [
         ("an anchor", |e| e.text_anchor = "middle".into()),
+        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
+        ("a shifted tspan beside a decorated one", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("numeric kerning", |e| e.kerning = "0.05em".into()),
         ("a super baseline shift", |e| e.baseline_shift = "super".into()),

@@ -561,14 +561,14 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 }
 
 /// NODE 33: what the runs path does not draw, so it stays legacy, by name:
-/// [`runs_plan_excludes`] (a tspan's rotate, transform, dx or own baseline
-/// shift; element spacing or a baseline shift that does not read; a scale or
+/// [`runs_plan_excludes`] (a tspan's rotate, transform or dx; a shifted
+/// tspan's decoration; element spacing or a baseline shift that does not read; a scale or
 /// rotation), and any tspan whose font has no real measurer (each
 /// character is measured in its own font). Drawn, so NOT excluded: a tspan's
 /// own size (each run at its size on the element's leading, as Swift draws
 /// it), readable tracking and kerning (in the layout's widths), a decoration
 /// (the element's or a tspan's), a case transform or small caps, a readable
-/// element baseline shift, a point text's anchor (each line moved by its own
+/// element baseline shift, a tspan's own baseline shift, a point text's anchor (each line moved by its own
 /// width), and a justified or hyphenated paragraph (the plan
 /// cuts a stretched line into words and draws the synthetic hyphen).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
@@ -584,10 +584,12 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 /// for the same elements.
 pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
-    // A tspan's decoration and its own size are drawn (the plan's decoration
-    // lines; each run at its tspan's size on the element's leading, Swift's
-    // law); its other per-tspan features are not.
-    if body().any(|s| tspan_needs_legacy(s) && !only_decoration(s)) {
+    // A tspan's decoration, its own size and its own baseline shift are drawn
+    // (the plan's decoration lines; each run at its tspan's size on the
+    // element's leading, Swift's law; a run's `dy`); its other per-tspan
+    // features are not, nor a shifted tspan's decoration, because whether a
+    // decoration follows a run's own shift is measured on neither port.
+    if body().any(|s| tspan_needs_legacy(s) && !plan_draws_tspan(t, s)) {
         return true;
     }
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
@@ -604,9 +606,16 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     false
 }
 
-/// A tspan whose ONLY per-tspan feature is a decoration override.
-fn only_decoration(s: &crate::geometry::tspan::Tspan) -> bool {
-    s.rotate.is_none() && s.transform.is_none() && s.dx.is_none() && s.baseline_shift.is_none()
+/// A tspan whose per-tspan features the plan draws: a decoration override
+/// and its own baseline shift, but not both at once (a shifted tspan that
+/// draws a decoration, its own or the element's).
+fn plan_draws_tspan(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
+    let decorated = match &s.text_decoration {
+        Some(own) => own.iter().any(|w| w == "underline" || w == "line-through"),
+        None => e.text_decoration.split_whitespace().any(|w| w == "underline" || w == "line-through"),
+    };
+    s.rotate.is_none() && s.transform.is_none() && s.dx.is_none()
+        && !(s.baseline_shift.is_some() && decorated)
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -630,7 +639,7 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             // The plan resolves the run's size (a baseline shift scales it).
             let (font, _) = tspan_font(e, &e.tspans[r.tspan]);
             p.draw_text_run(
-                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x: e.x + r.x, y: e.y + line.baseline_y },
+                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x: e.x + r.x, y: e.y + line.baseline_y + r.dy },
                 &brush,
                 eff * f.opacity,
             );

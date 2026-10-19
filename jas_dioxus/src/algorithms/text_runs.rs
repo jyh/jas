@@ -29,6 +29,9 @@ pub struct TextRun {
     /// The size the run draws at (its tspan's, or the element's after a
     /// baseline shift's scale).
     pub size: f64,
+    /// The run's own baseline offset from its line's (y down): its tspan's
+    /// baseline shift, in pt with + up, so `dy` is its negation; 0 without one.
+    pub dy: f64,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -75,7 +78,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0 });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0, dy: 0.0 });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -328,7 +331,7 @@ fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph])
 
 fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
     if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
-        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0 });
+        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0, dy: 0.0 });
     }
 }
 
@@ -348,8 +351,8 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing that does not read, a scale or rotation, a baseline shift that
-/// does not read, a tspan's dx, rotate, transform or baseline
-/// shift) is the router's to keep away from it
+/// does not read, a tspan's dx, rotate or transform, a shifted tspan's
+/// decoration) is the router's to keep away from it
 /// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
 /// characters measured and its run drawn at that size, on the element's
 /// uniform leading), and so are a case transform (each tspan's text as
@@ -358,7 +361,8 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// carries the size it draws at), and tracking and kerning ([`letter_spacing`],
 /// in every character's width so the layout matches the draw; the plan carries
 /// the advance), and a point text's anchor (each line, with its decorations,
-/// moved by `anchor_shift` of its own width; the markers stay at their indent).
+/// moved by `anchor_shift` of its own width; the markers stay at their indent),
+/// and a tspan's own baseline shift (its runs' `dy`).
 /// `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
@@ -421,12 +425,14 @@ pub fn plan(
             let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
             let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
             if let (Some(g), Some(t)) = (hyphen, owner) {
-                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0 });
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0, dy: 0.0 });
             }
         }
-        // Each run at its resolved size, on the shifted baseline.
+        // Each run at its resolved size, on the shifted baseline, offset by
+        // its tspan's own shift (unscaled, as Swift's `baselineOffset`).
         for r in &mut runs.runs {
             r.size = run_face(e, &e.tspans[r.tspan], scale).size;
+            r.dy = -e.tspans[r.tspan].baseline_shift.unwrap_or(0.0);
             r.x += shift;
         }
         runs.baseline_y += dy;
@@ -903,5 +909,28 @@ mod tests {
         let plain = plan(&area, &faces(&seen)).unwrap();
         area.text_anchor = "end".into();
         assert_eq!(plan(&area, &faces(&seen)).unwrap(), plain);
+    }
+
+    /// A tspan's own baseline shift (pt, + is up) moves its run's baseline
+    /// only, unscaled, as Swift's per-run `baselineOffset` and legacy's
+    /// segmented path draw it: the run carries `dy`, every other run 0. The
+    /// layout, the x positions and the line baselines do not move.
+    #[test]
+    fn a_tspans_own_baseline_shift_moves_its_run_only() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let plain = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        let mut e = styled_area(2000.0);
+        e.tspans[2].baseline_shift = Some(3.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let dys: Vec<(usize, f64)> = p.lines[0].runs.iter().map(|r| (r.tspan, r.dy)).collect();
+        assert_eq!(dys, vec![(1, 0.0), (2, -3.0), (3, 0.0)]);
+        assert_eq!(shape(&p), shape(&plain), "x and text do not move");
+        assert_eq!(p.lines[0].baseline_y, plain.lines[0].baseline_y);
+        // Under an element super shift the tspan's own shift is NOT scaled.
+        e.baseline_shift = "super".into();
+        let sup = plan(&e, &faces(&seen)).unwrap();
+        assert_eq!(sup.lines[0].runs[1].dy, -3.0);
+        // CONTROL: no own shift, every run at 0.
+        assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.dy == 0.0));
     }
 }
