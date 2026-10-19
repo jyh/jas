@@ -2835,7 +2835,10 @@ fn tspan(content: &str, weight: Option<&str>, size: Option<f64>) -> crate::geome
 
 fn segmented(tspans: Vec<crate::geometry::tspan::Tspan>) -> Element {
     let mut e = crate::geometry::element::TextElem::from_string(
-        10.0, 20.0, "", "sans-serif", 12.0, "normal", "normal", "none", 10.0, 12.0, None, None,
+        // POINT text (no box): a 10 x 12 box made this AREA text, which since
+        // node 33 takes the laid-out-runs path; these arms are about the
+        // single-baseline segmented lowering.
+        10.0, 20.0, "", "sans-serif", 12.0, "normal", "normal", "none", 0.0, 0.0, None, None,
         common(),
     );
     e.fill = fill(Color::BLACK);
@@ -3986,4 +3989,86 @@ two".into();
     // CONTROL: no list style, no marker.
     let plain = runs_of(with_paragraph(area_text("Hello World", 300.0), |w| w.jas_left_indent = Some(10.0)));
     assert_eq!(plain.len(), 1, "{plain:?}");
+}
+
+// ── NODE 33 (jas section 454): the walk's half of the shared laid-out-runs plan ──
+
+/// Area text with styled runs: wrapper, plain, bold, plain, in a `width` box.
+fn styled_area(width: f64) -> crate::geometry::element::TextElem {
+    let mut e = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", width, 200.0, None, None,
+        common(),
+    );
+    e.fill = fill(Color::BLACK);
+    let mut w = crate::geometry::tspan::Tspan::default();
+    w.jas_role = Some("paragraph".into());
+    e.tspans = vec![w, tspan("One fine day ", None, None), tspan("extraordinarily patiently", Some("bold"), None), tspan(" sat", None, None)];
+    e
+}
+
+/// Every run as `(text, font, x, y)`.
+fn font_runs(t: crate::geometry::element::TextElem) -> Vec<(String, String, f64, f64)> {
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(t), 1.0);
+    rec.commands().iter().filter_map(|c| match c {
+        Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, font, x, y, .. }, .. } => Some((text.clone(), font.clone(), *x, *y)),
+        _ => None,
+    }).collect()
+}
+
+/// ⛔ THE DEFECT, frozen as paragraph.align_center_styled_wrap: non-flat AREA
+/// text took the segmented lowering, ONE baseline at y + 0.8 x size, no wrap,
+/// so Align center moved nothing. Through the shared plan, each character is
+/// measured in its tspan's font, the content is laid out once
+/// (`layout_with_paragraphs_widths`), and each line is drawn as its runs
+/// (`text_runs::line_runs`), each run in its own tspan's font.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn styled_area_text_wraps_and_draws_each_run_in_its_font() {
+    let wide = font_runs(styled_area(2000.0));
+    let ys: std::collections::BTreeSet<i64> = wide.iter().map(|r| (r.3 * 1000.0) as i64).collect();
+    assert_eq!(ys.len(), 1, "control: a wide box is one line: {wide:?}");
+    let narrow = font_runs(styled_area(140.0));
+    let ys: std::collections::BTreeSet<i64> = narrow.iter().map(|r| (r.3 * 1000.0) as i64).collect();
+    assert!(ys.len() >= 2, "a narrow box wraps the styled text onto several lines: {narrow:?}");
+    assert!(narrow.iter().any(|r| r.1.contains("bold") && r.0.contains("extraordinarily")), "the bold run draws in its own font: {narrow:?}");
+    assert!(narrow.iter().filter(|r| !r.1.contains("bold")).all(|r| !r.0.contains("extraordinarily")), "and only the bold run does: {narrow:?}");
+    // Each run starts where the characters before it end, EACH MEASURED IN ITS
+    // OWN TSPAN'S FONT: " sat" sits after the plain run and the BOLD run.
+    let plain = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).unwrap();
+    let bold = crate::text_measure::try_make_measurer("normal bold Arial", 20.0).unwrap();
+    let per_char = |m: &dyn Fn(&str) -> f64, s: &str| s.chars().map(|c| m(&c.to_string())).sum::<f64>();
+    let want = 1.0 + per_char(&*plain, "One fine day ") + per_char(&*bold, "extraordinarily patiently");
+    let sat = wide.iter().find(|r| r.0 == " sat").expect("the last run");
+    assert!((sat.2 - want).abs() < 1e-6, "the last run at the per-font sum: {} vs {want}", sat.2);
+    // A centred paragraph moves its first line right of the box's left edge.
+    let mut centred = styled_area(2000.0);
+    centred.tspans[0].text_align = Some("center".into());
+    let c = font_runs(centred);
+    assert!(c[0].2 > wide[0].2 + 1.0, "Align center moves the line: {:?} vs {:?}", c[0], wide[0]);
+}
+
+/// The router: non-flat area text lowers through the runs path where every
+/// tspan's font measures; what that first cut does not draw stays legacy, by
+/// name (jas section 454's scope, and the draw's own limits).
+#[test]
+fn styled_area_text_lowers_only_where_the_runs_path_draws_it() {
+    use crate::painter::element_render::text_needs_legacy;
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(text_needs_legacy(&styled_area(140.0)), !has_real, "styled area text lowers exactly where a real measurer exists");
+    type Set = fn(&mut crate::geometry::element::TextElem);
+    let cases: [(&str, Set); 7] = [
+        ("a per-tspan size", |e| e.tspans[2].font_size = Some(30.0)),
+        ("tracking", |e| e.letter_spacing = "0.1em".into()),
+        ("a decoration", |e| e.text_decoration = "underline".into()),
+        ("a baseline shift", |e| e.baseline_shift = "super".into()),
+        ("a case transform", |e| e.text_transform = "uppercase".into()),
+        ("justify", |e| e.tspans[0].text_align = Some("justify".into())),
+        ("hyphenation", |e| e.tspans[0].jas_hyphenate = Some(true)),
+    ];
+    for (name, set) in cases {
+        let mut e = styled_area(140.0);
+        set(&mut e);
+        assert!(text_needs_legacy(&e), "styled area text with {name} stays legacy");
+    }
 }
