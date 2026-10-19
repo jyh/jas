@@ -4230,8 +4230,8 @@ fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
 
 /// The walk draws styled text's scale in the flat arm's frame around the whole
 /// plan: a 150 % x 80 % scale pushes `scale(1.5, 0.8)` about the box's
-/// top-left first, every run inside it at its unscaled position, and pops it
-/// last.
+/// top-left before the first run, every run inside it at its unscaled
+/// position, and pops it after the last.
 #[cfg(all(feature = "d2d", windows))]
 #[test]
 fn styled_texts_scale_is_one_frame_around_the_plan() {
@@ -4251,6 +4251,7 @@ fn styled_texts_scale_is_one_frame_around_the_plan() {
         }
         _ => unreachable!(),
     }
-    assert!(matches!(cmds.last(), Some(Command::PopState)), "the frame closes last: {:?}", cmds.last());
+    let last_run = cmds.iter().rposition(|c| matches!(c, Command::DrawTextRun { .. })).unwrap();
+    assert!(cmds[last_run..].iter().any(|c| matches!(c, Command::PopState)), "the frame closes after the last run");
     assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
 }
