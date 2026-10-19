@@ -355,6 +355,14 @@ pub fn subtree_needs_legacy(elem: &Element, caps: Caps) -> bool {
 /// the feature in order to refuse it, and a refusal that has to be right about
 /// the thing it refuses is the wrong shape for a gate.
 pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    // ⭐ NODE 33 (jas section 454): NON-flat text that the legacy renderer
+    // would lay out (`needs_layout`: area text, a set leading, a paragraph
+    // field) takes the shared plan's runs path (`emit_laid_out_runs`) instead
+    // of the single-baseline segmented lowering, which drew it on one
+    // unwrapped line. What that first cut does not draw stays legacy, by name.
+    if !t.render_is_flat() && needs_layout(t) {
+        return runs_need_legacy(t);
+    }
     // ⭐ NODE 25 (flask section 431): text the legacy renderer LAYS OUT
     // (`needs_layout`) lowers through the same `layout_with_paragraphs`, drawn
     // line by line in the flat arm. Before this, `render_is_flat` counted an
@@ -540,6 +548,117 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
 /// override to nothing. Treating `Some([])` as "has a decoration" is
 /// conservative in the safe direction: it refuses an element that would in fact
 /// have rendered correctly, rather than drawing one that would not.
+/// The (font shorthand, size) a tspan draws in: its own family, weight and
+/// style over the element's. Shared by the segmented lowering and node 33's
+/// runs path, so the two cannot resolve a run's font differently.
+fn tspan_font(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan::Tspan) -> (String, f64) {
+    let family = t.font_family.as_deref().unwrap_or(&e.font_family);
+    let size = t.font_size.unwrap_or(e.font_size);
+    let weight = match t.font_weight.as_deref() {
+        Some(w) => w,
+        None => if e.font_weight == "bold" { "bold" } else { "normal" },
+    };
+    let style = match t.font_style.as_deref() {
+        Some(s) => s,
+        None => if e.font_style == "italic" || e.font_style == "oblique" { "italic" } else { "normal" },
+    };
+    (format!("{style} {weight} {family}"), size)
+}
+
+/// NODE 33: what the runs path's first cut does not draw, so it stays legacy,
+/// by name: a per-tspan feature the segmented lowering also refuses; a
+/// per-tspan SIZE (jas section 454: out of scope, the layout has one line
+/// height); element-level spacing, decoration, scale or rotation, baseline
+/// shift, case transform or small caps, and an anchor; a justified or
+/// hyphenated paragraph (a run is drawn at its first glyph's x, so stretched
+/// glue inside it and a synthetic hyphen are not drawn); and any tspan whose
+/// font has no real measurer (each character is measured in its own font).
+fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
+    if body().any(|s| tspan_needs_legacy(s) || s.font_size.is_some()) {
+        return true;
+    }
+    if !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || !t.text_decoration.split_whitespace().all(|w| w == "none")
+        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+        || !t.baseline_shift.is_empty()
+        || (!t.text_transform.is_empty() && t.text_transform != "none")
+        || t.font_variant == "small-caps"
+        || !t.text_anchor.is_empty()
+    {
+        return true;
+    }
+    if t.tspans.iter().any(|w| w.jas_role.as_deref() == Some("paragraph")
+        && (w.text_align.as_deref() == Some("justify") || w.jas_hyphenate.is_some()))
+    {
+        return true;
+    }
+    t.tspans.iter().any(|s| {
+        let (font, size) = tspan_font(t, s);
+        crate::text_measure::try_make_measurer(&font, size).is_none()
+    })
+}
+
+/// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
+/// character is measured in its own tspan's font; the content is laid out
+/// once (`layout_with_paragraphs_widths`, the measurer's font only for glue
+/// and the synthetic hyphen); each line is drawn as its runs
+/// (`text_runs::line_runs`), each in its tspan's font at `x + run.x` on the
+/// line's baseline; then the list markers. The router admits only what this
+/// draws (`runs_need_legacy`).
+fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextElem, eff: f64) {
+    let Some(f) = e.fill.as_ref() else { return };
+    let element_font = format!("{} {} {}", e.font_style, e.font_weight, e.font_family);
+    let Some(measure) = crate::text_measure::try_make_measurer(&element_font, e.font_size) else { return };
+    let content = e.content();
+    let mut widths: Vec<f64> = Vec::with_capacity(content.chars().count());
+    for t in &e.tspans {
+        if t.content.is_empty() { continue; }
+        let (font, size) = tspan_font(e, t);
+        let Some(m) = crate::text_measure::try_make_measurer(&font, size) else { return };
+        widths.extend(t.content.chars().map(|c| m(&c.to_string())));
+    }
+    let leading = if e.line_height.is_empty() {
+        match e.tspans.iter()
+            .find(|t| t.jas_role.as_deref() == Some("paragraph"))
+            .and_then(|t| t.jas_auto_leading)
+        {
+            Some(pct) => e.font_size * pct / 100.0,
+            None => e.font_size,
+        }
+    } else {
+        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+    };
+    let max_w = if e.is_area_text() { e.width } else { 0.0 };
+    let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
+        &e.tspans, &content, e.is_area_text());
+    let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
+        &content, max_w, leading, &segments, &*measure, Some(&widths));
+    let ranges = crate::algorithms::text_runs::tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
+    let brush = Brush::Solid(f.color);
+    for line in crate::algorithms::text_runs::line_runs(&layout, &content, &ranges) {
+        for r in line.runs {
+            let (font, size) = tspan_font(e, &e.tspans[r.tspan]);
+            p.draw_text_run(
+                &TextRun::FastRun { font, size, text: r.text, letter_spacing: 0.0, x: e.x + r.x, y: e.y + line.baseline_y },
+                &brush,
+                eff * f.opacity,
+            );
+        }
+    }
+    for m in crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments) {
+        p.draw_text_run(
+            &TextRun::FastRun {
+                font: element_font.clone(), size: e.font_size, text: m.text, letter_spacing: 0.0,
+                x: e.x + m.indent, y: e.y + layout.lines[m.line].baseline_y,
+            },
+            &brush,
+            eff * f.opacity,
+        );
+    }
+}
+
 /// ⭐ NODE 27 (jas section 440): a flat text's baseline shift as
 /// `(size_scale, y_shift)`, legacy's law (`canvas/render.rs`, flat branch):
 /// `super` draws at 0.7 x size, 0.35 x size up; `sub` at 0.7 x size, 0.2 x
@@ -725,24 +844,10 @@ fn tspan_needs_legacy(t: &crate::geometry::tspan::Tspan) -> bool {
 /// stub, and hoisting for speed would reintroduce it.
 fn emit_segmented_text(p: &mut dyn Painter, e: &crate::geometry::element::TextElem, eff: f64) {
     let Some(f) = e.fill.as_ref() else { return };
-    let parent_bold = e.font_weight == "bold";
-    let parent_italic = e.font_style == "italic" || e.font_style == "oblique";
     let baseline = e.y + e.font_size * 0.8;
-    // Each tspan's (font shorthand, size): style, weight, family, the same
-    // shape every other FastRun carries, with the size in its own field.
-    let run_font = |t: &crate::geometry::tspan::Tspan| {
-        let family = t.font_family.as_deref().unwrap_or(&e.font_family);
-        let size = t.font_size.unwrap_or(e.font_size);
-        let weight = match t.font_weight.as_deref() {
-            Some(w) => w,
-            None => if parent_bold { "bold" } else { "normal" },
-        };
-        let style = match t.font_style.as_deref() {
-            Some(s) => s,
-            None => if parent_italic { "italic" } else { "normal" },
-        };
-        (format!("{style} {weight} {family}"), size)
-    };
+    // Each tspan's (font shorthand, size), resolved by the one rule node 33's
+    // runs path shares (`tspan_font`).
+    let run_font = |t: &crate::geometry::tspan::Tspan| tspan_font(e, t);
     // An anchor moves the whole line by its measured width, so measure it
     // first with the same per-tspan measurers the pen advances by. A tspan
     // that will not measure stops the draw (the rule directly below).
@@ -1662,6 +1767,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         // ⭐ ROW DR: SEGMENTED text takes the tspan walk; flat keeps the single
         // run below. The router has already guaranteed both halves are
         // reachable -- feature-free tspans and a resolvable face.
+        // NODE 33: non-flat text the legacy renderer lays out takes the runs
+        // path; the rest keeps the single-baseline segmented lowering.
+        Element::Text(e) if !e.render_is_flat() && needs_layout(e) => emit_laid_out_runs(p, e, eff),
         Element::Text(e) if !e.render_is_flat() => emit_segmented_text(p, e, eff),
         Element::Text(e) => {
             // A simplified flat FastRun — proves the text op interleaves in
