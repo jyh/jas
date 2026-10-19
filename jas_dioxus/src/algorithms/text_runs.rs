@@ -77,6 +77,117 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
     }).collect()
 }
 
+/// A face a run (or the element) is measured and drawn in. Each renderer
+/// spells it as its own font string (the walk without the size, legacy's
+/// canvas with `{size}px`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunFace<'a> {
+    pub family: &'a str,
+    pub size: f64,
+    pub weight: &'a str,
+    pub style: &'a str,
+}
+
+/// The element's own face, its attributes as written: the face the layout's
+/// glue, the synthetic hyphen and the list markers are measured in.
+pub fn element_face(e: &crate::geometry::element::TextElem) -> RunFace<'_> {
+    RunFace { family: &e.font_family, size: e.font_size, weight: &e.font_weight, style: &e.font_style }
+}
+
+/// A tspan's face: its own family, size, weight and style over the
+/// element's, the element's weight read as bold or normal and its style as
+/// italic (or oblique) or normal. The one rule every multi-tspan path uses.
+pub fn tspan_face<'a>(
+    e: &'a crate::geometry::element::TextElem,
+    t: &'a crate::geometry::tspan::Tspan,
+) -> RunFace<'a> {
+    let weight = match t.font_weight.as_deref() {
+        Some(w) => w,
+        None => if e.font_weight == "bold" { "bold" } else { "normal" },
+    };
+    let style = match t.font_style.as_deref() {
+        Some(s) => s,
+        None => if e.font_style == "italic" || e.font_style == "oblique" { "italic" } else { "normal" },
+    };
+    RunFace {
+        family: t.font_family.as_deref().unwrap_or(&e.font_family),
+        size: t.font_size.unwrap_or(e.font_size),
+        weight,
+        style,
+    }
+}
+
+/// A list marker placed relative to the element's origin, drawn in the
+/// element's face.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacedMarker {
+    pub text: String,
+    pub x: f64,
+    pub baseline_y: f64,
+}
+
+/// The whole plan a renderer draws: the runs of every line, then the
+/// markers. Every x and baseline is relative to the element's origin.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RunsPlan {
+    pub lines: Vec<RunLine>,
+    pub markers: Vec<PlacedMarker>,
+}
+
+/// The shared plan for non-flat text, which the legacy canvas
+/// (`canvas/render.rs`) and the walk (`painter/element_render.rs`) both draw,
+/// so the two cannot lay it out differently: each character measured in its
+/// own tspan's face, the content laid out once
+/// ([`text_layout::layout_with_paragraphs_widths`], the element's face for
+/// glue and the synthetic hyphen), then each line as its [`line_runs`] and
+/// the paragraphs' list markers.
+///
+/// `measurer` answers a face's measurer, or `None` when it cannot measure
+/// that face; then there is no plan (the walk refuses rather than position
+/// text by metrics belonging to no font).
+///
+/// The leading is the element's `line_height` in pt, or Auto: the first
+/// wrapper's `jas:auto-leading` percent of the size, else the size. What the
+/// plan does NOT draw (spacing, decoration, a baseline shift, a case
+/// transform, a per-tspan size, justify, hyphenation, an anchor) is the
+/// router's to keep away from it (`element_render::runs_plan_excludes`).
+pub fn plan(
+    e: &crate::geometry::element::TextElem,
+    measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
+) -> Option<RunsPlan> {
+    let measure = measurer(&element_face(e))?;
+    let content = e.content();
+    let mut widths: Vec<f64> = Vec::with_capacity(content.chars().count());
+    for t in &e.tspans {
+        if t.content.is_empty() { continue; }
+        let m = measurer(&tspan_face(e, t))?;
+        widths.extend(t.content.chars().map(|c| m(&c.to_string())));
+    }
+    let leading = if e.line_height.is_empty() {
+        match e.tspans.iter()
+            .find(|t| t.jas_role.as_deref() == Some("paragraph"))
+            .and_then(|t| t.jas_auto_leading)
+        {
+            Some(pct) => e.font_size * pct / 100.0,
+            None => e.font_size,
+        }
+    } else {
+        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+    };
+    let max_w = if e.is_area_text() { e.width } else { 0.0 };
+    let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
+        &e.tspans, &content, e.is_area_text());
+    let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
+        &content, max_w, leading, &segments, &*measure, Some(&widths));
+    let ranges = tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
+    let lines = line_runs(&layout, &content, &ranges);
+    let markers = crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments)
+        .into_iter()
+        .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y, text: m.text, x: m.indent })
+        .collect();
+    Some(RunsPlan { lines, markers })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,5 +240,105 @@ mod tests {
             .map(|l| l.runs.iter().map(|r| (r.text.as_str(), r.tspan)).collect())
             .collect();
         assert_eq!(shape, vec![vec![("ab", 1)], vec![], vec![("cd", 3)]]);
+    }
+
+    // ── the whole plan, as both renderers draw it (legacy and the walk) ──
+
+    use crate::geometry::element::{CommonProps, TextElem};
+    use crate::geometry::tspan::Tspan;
+
+    fn tspan(content: &str, weight: Option<&str>) -> Tspan {
+        let mut t = Tspan::default_tspan();
+        t.content = content.to_string();
+        t.font_weight = weight.map(|w| w.to_string());
+        t
+    }
+
+    /// Area text with styled runs: wrapper, plain, bold, plain, in a `width` box.
+    fn styled_area(width: f64) -> TextElem {
+        let mut e = TextElem::from_string(
+            1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", width, 200.0, None, None,
+            CommonProps::default(),
+        );
+        let mut w = Tspan::default();
+        w.jas_role = Some("paragraph".into());
+        e.tspans = vec![w, tspan("One fine day ", None), tspan("extraordinarily patiently", Some("bold")), tspan(" sat", None)];
+        e
+    }
+
+    /// A measurer per face: 10 per character, 20 in bold. Counts each face it
+    /// was asked for, so an arm can see which faces the plan measured.
+    fn faces(seen: &std::cell::RefCell<Vec<String>>) -> impl Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>> + '_ {
+        move |f: &RunFace| {
+            seen.borrow_mut().push(format!("{} {} {} {}", f.style, f.weight, f.size, f.family));
+            let w = if f.weight == "bold" { 20.0 } else { 10.0 };
+            Some(Box::new(move |s: &str| s.chars().count() as f64 * w) as Box<dyn Fn(&str) -> f64>)
+        }
+    }
+
+    fn shape(p: &RunsPlan) -> Vec<Vec<(String, f64, usize)>> {
+        p.lines.iter().map(|l| l.runs.iter().map(|r| (r.text.clone(), r.x, r.tspan)).collect()).collect()
+    }
+
+    /// The defect `paragraph.align_center_styled_wrap` froze: the styled area
+    /// text wraps, each run in its tspan, every x the per-font sum of what
+    /// precedes it on its line.
+    #[test]
+    fn the_plan_wraps_styled_area_text_measuring_each_char_in_its_tspans_face() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let wide = plan(&styled_area(2000.0), &faces(&seen)).expect("every face measures");
+        assert_eq!(wide.lines.len(), 1, "control: a wide box is one line");
+        // " sat" after 13 plain (130) and 25 bold (500) characters.
+        assert_eq!(shape(&wide)[0], vec![
+            ("One fine day ".to_string(), 0.0, 1),
+            ("extraordinarily patiently".to_string(), 130.0, 2),
+            (" sat".to_string(), 630.0, 3),
+        ]);
+        assert!(seen.borrow().iter().any(|f| f == "normal bold 20 Arial"), "the bold tspan's face was measured: {:?}", seen.borrow());
+
+        let narrow = plan(&styled_area(450.0), &faces(&seen)).expect("every face measures");
+        assert_eq!(shape(&narrow), vec![
+            vec![("One fine day ".to_string(), 0.0, 1), ("extraordinarily ".to_string(), 130.0, 2)],
+            vec![("patiently".to_string(), 0.0, 2), (" sat".to_string(), 180.0, 3)],
+        ], "the bold run wraps in bold, at bold widths");
+        assert!(narrow.lines[1].baseline_y > narrow.lines[0].baseline_y);
+        assert_eq!(narrow.lines[0].baseline_y, 16.0, "first baseline at 0.8 x leading (Auto = the size)");
+    }
+
+    /// Align center moves the line, a set leading spaces the lines, and a
+    /// tspan whose face cannot be measured refuses the whole plan.
+    #[test]
+    fn the_plan_aligns_takes_the_leading_and_refuses_an_unmeasurable_face() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let left = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        let mut c = styled_area(2000.0);
+        c.tspans[0].text_align = Some("center".into());
+        let centred = plan(&c, &faces(&seen)).unwrap();
+        // The line is 670 wide in a 2000 box: centred, it starts at 665.
+        assert_eq!(centred.lines[0].runs[0].x, 665.0, "Align center moves the line: {:?}", centred.lines[0]);
+        assert_eq!(left.lines[0].runs[0].x, 0.0);
+
+        let mut lead = styled_area(400.0);
+        lead.line_height = "30pt".into();
+        let l = plan(&lead, &faces(&seen)).unwrap();
+        assert_eq!(l.lines[1].baseline_y - l.lines[0].baseline_y, 30.0, "a set leading is the line pitch");
+
+        let no_bold = |f: &RunFace| if f.weight == "bold" { None } else { faces(&seen)(f) };
+        assert!(plan(&styled_area(400.0), &no_bold).is_none(), "an unmeasurable tspan face refuses the plan");
+    }
+
+    /// The markers a list paragraph draws come with the plan, at the
+    /// paragraph's indent on its first line.
+    #[test]
+    fn the_plan_carries_the_list_markers() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.tspans[0].jas_list_style = Some("bullet-disc".into());
+        e.tspans[0].jas_left_indent = Some(12.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        assert_eq!(p.markers.len(), 1, "{:?}", p.markers);
+        assert_eq!((p.markers[0].x, p.markers[0].baseline_y), (12.0, p.lines[0].baseline_y));
+        let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        assert!(none.markers.is_empty(), "control: no list style, no marker");
     }
 }

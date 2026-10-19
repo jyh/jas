@@ -552,17 +552,12 @@ fn draws_decoration(t: &crate::geometry::element::TextElem) -> bool {
 /// style over the element's. Shared by the segmented lowering and node 33's
 /// runs path, so the two cannot resolve a run's font differently.
 fn tspan_font(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan::Tspan) -> (String, f64) {
-    let family = t.font_family.as_deref().unwrap_or(&e.font_family);
-    let size = t.font_size.unwrap_or(e.font_size);
-    let weight = match t.font_weight.as_deref() {
-        Some(w) => w,
-        None => if e.font_weight == "bold" { "bold" } else { "normal" },
-    };
-    let style = match t.font_style.as_deref() {
-        Some(s) => s,
-        None => if e.font_style == "italic" || e.font_style == "oblique" { "italic" } else { "normal" },
-    };
-    (format!("{style} {weight} {family}"), size)
+    walk_font(&crate::algorithms::text_runs::tspan_face(e, t))
+}
+
+/// A plan face as the walk spells a font: `style weight family`, the size apart.
+fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
+    (format!("{} {} {}", f.style, f.weight, f.family), f.size)
 }
 
 /// NODE 33: what the runs path's first cut does not draw, so it stays legacy,
@@ -574,6 +569,17 @@ fn tspan_font(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan
 /// glue inside it and a synthetic hyphen are not drawn); and any tspan whose
 /// font has no real measurer (each character is measured in its own font).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
+    runs_plan_excludes(t) || t.tspans.iter().any(|s| {
+        let (font, size) = tspan_font(t, s);
+        crate::text_measure::try_make_measurer(&font, size).is_none()
+    })
+}
+
+/// What the shared plan (`text_runs::plan`) does not draw, whatever measures
+/// it: [`runs_need_legacy`] less its measurer clause. The legacy canvas routes
+/// by this too (it always has a measurer), so the two renderers draw the plan
+/// for the same elements.
+pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
     if body().any(|s| tspan_needs_legacy(s) || s.font_size.is_some()) {
         return true;
@@ -594,10 +600,7 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     {
         return true;
     }
-    t.tspans.iter().any(|s| {
-        let (font, size) = tspan_font(t, s);
-        crate::text_measure::try_make_measurer(&font, size).is_none()
-    })
+    false
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -609,35 +612,14 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 /// draws (`runs_need_legacy`).
 fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextElem, eff: f64) {
     let Some(f) = e.fill.as_ref() else { return };
-    let element_font = format!("{} {} {}", e.font_style, e.font_weight, e.font_family);
-    let Some(measure) = crate::text_measure::try_make_measurer(&element_font, e.font_size) else { return };
-    let content = e.content();
-    let mut widths: Vec<f64> = Vec::with_capacity(content.chars().count());
-    for t in &e.tspans {
-        if t.content.is_empty() { continue; }
-        let (font, size) = tspan_font(e, t);
-        let Some(m) = crate::text_measure::try_make_measurer(&font, size) else { return };
-        widths.extend(t.content.chars().map(|c| m(&c.to_string())));
-    }
-    let leading = if e.line_height.is_empty() {
-        match e.tspans.iter()
-            .find(|t| t.jas_role.as_deref() == Some("paragraph"))
-            .and_then(|t| t.jas_auto_leading)
-        {
-            Some(pct) => e.font_size * pct / 100.0,
-            None => e.font_size,
-        }
-    } else {
-        crate::geometry::tspan::parse_pt(&e.line_height).unwrap_or(e.font_size)
+    let real = |face: &crate::algorithms::text_runs::RunFace| {
+        let (font, size) = walk_font(face);
+        crate::text_measure::try_make_measurer(&font, size)
     };
-    let max_w = if e.is_area_text() { e.width } else { 0.0 };
-    let segments = crate::algorithms::text_layout_paragraph::build_segments_from_text(
-        &e.tspans, &content, e.is_area_text());
-    let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
-        &content, max_w, leading, &segments, &*measure, Some(&widths));
-    let ranges = crate::algorithms::text_runs::tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
+    let Some(plan) = crate::algorithms::text_runs::plan(e, &real) else { return };
+    let (element_font, _) = walk_font(&crate::algorithms::text_runs::element_face(e));
     let brush = Brush::Solid(f.color);
-    for line in crate::algorithms::text_runs::line_runs(&layout, &content, &ranges) {
+    for line in plan.lines {
         for r in line.runs {
             let (font, size) = tspan_font(e, &e.tspans[r.tspan]);
             p.draw_text_run(
@@ -647,11 +629,11 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             );
         }
     }
-    for m in crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments) {
+    for m in plan.markers {
         p.draw_text_run(
             &TextRun::FastRun {
                 font: element_font.clone(), size: e.font_size, text: m.text, letter_spacing: 0.0,
-                x: e.x + m.indent, y: e.y + layout.lines[m.line].baseline_y,
+                x: e.x + m.x, y: e.y + m.baseline_y,
             },
             &brush,
             eff * f.opacity,

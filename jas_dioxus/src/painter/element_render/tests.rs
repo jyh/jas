@@ -4072,3 +4072,29 @@ fn styled_area_text_lowers_only_where_the_runs_path_draws_it() {
         assert!(text_needs_legacy(&e), "styled area text with {name} stays legacy");
     }
 }
+
+/// The plan's exclusions with no measurer in them, which the legacy canvas
+/// routes by: on every platform, styled area text is admitted and each named
+/// exclusion keeps it out. (The router arm above can see these only where a
+/// real measurer exists, so off Windows it reads `true` for all of them.)
+#[test]
+fn the_plan_excludes_the_same_cases_on_every_platform() {
+    use crate::painter::element_render::{needs_layout, runs_plan_excludes};
+    assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
+    type Set = fn(&mut crate::geometry::element::TextElem);
+    let cases: [(&str, Set); 8] = [
+        ("a per-tspan size", |e| e.tspans[2].font_size = Some(30.0)),
+        ("tracking", |e| e.letter_spacing = "0.1em".into()),
+        ("a decoration", |e| e.text_decoration = "underline".into()),
+        ("a baseline shift", |e| e.baseline_shift = "super".into()),
+        ("a case transform", |e| e.text_transform = "uppercase".into()),
+        ("justify", |e| e.tspans[0].text_align = Some("justify".into())),
+        ("hyphenation", |e| e.tspans[0].jas_hyphenate = Some(true)),
+        ("an anchor", |e| e.text_anchor = "middle".into()),
+    ];
+    for (name, set) in cases {
+        let mut e = styled_area(140.0);
+        set(&mut e);
+        assert!(runs_plan_excludes(&e), "styled area text with {name} is excluded from the plan");
+    }
+}
