@@ -4227,3 +4227,30 @@ fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
     assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
     assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
 }
+
+/// The walk draws styled text's scale in the flat arm's frame around the whole
+/// plan: a 150 % x 80 % scale pushes `scale(1.5, 0.8)` about the box's
+/// top-left first, every run inside it at its unscaled position, and pops it
+/// last.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn styled_texts_scale_is_one_frame_around_the_plan() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.horizontal_scale = "150".into();
+    e.vertical_scale = "80".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e.clone()), 1.0);
+    let cmds = rec.commands();
+    let first_run = cmds.iter().position(|c| matches!(c, Command::DrawTextRun { .. })).expect("a run is drawn");
+    let push = cmds[..first_run].iter().rposition(|c| matches!(c, Command::PushState { .. })).expect("a frame before the runs");
+    match &cmds[push] {
+        Command::PushState { transform: t } => {
+            assert_eq!((t.a, t.b, t.c, t.d), (1.5, 0.0, 0.0, 0.8));
+            assert!((t.e - (e.x - 1.5 * e.x)).abs() < 1e-12 && (t.f - (e.y - 0.8 * e.y)).abs() < 1e-12, "{t:?}");
+        }
+        _ => unreachable!(),
+    }
+    assert!(matches!(cmds.last(), Some(Command::PopState)), "the frame closes last: {:?}", cmds.last());
+    assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
+}
