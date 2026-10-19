@@ -57,11 +57,17 @@ public func stubMeasurer(_ size: Double) -> (String) -> Double {
 /// still produce the right count for ASCII (uppercased() preserves
 /// length there), and the layout falls back to its own measure when
 /// the array is the wrong size.
-public func textPerCharWidths(_ tspans: [Tspan], element: Text) -> [Double] {
+///
+/// `sizeScale` is a baseline shift's scale (0.7 for super and sub): the
+/// canvas draws a run with no size of its own at the element's SCALED size,
+/// so its widths are taken there too (a tspan's own size is not scaled), as
+/// Rust's shared plan takes them. The Type tool, which lays out with no
+/// shift, passes none.
+public func textPerCharWidths(_ tspans: [Tspan], element: Text, sizeScale: Double = 1.0) -> [Double] {
     var out: [Double] = []
     for t in tspans {
         let effFamily = t.fontFamily ?? element.fontFamily
-        let effSize = t.fontSize ?? element.fontSize
+        let effSize = t.fontSize ?? element.fontSize * sizeScale
         let effBold = t.fontWeight.map { $0 == "bold" }
             ?? (element.fontWeight == "bold")
         let effItalic = t.fontStyle.map { $0 == "italic" || $0 == "oblique" }
