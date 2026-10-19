@@ -363,6 +363,22 @@ static class Program
         Check("W2b-2: the comparison is ordinal, so a case change commits",
             PanelWire.CommitOnBlur("Abc", "abc"), "Abc over abc did not commit");
 
+        // flask § 451 / § 457: an editable combo's typed text commits when a
+        // person LEAVES it, as a text box's does; Enter was the only commit.
+        var comboItems = new[] { "0°", "45°", "90°" };
+        Eq("combo blur: typed text no item names commits as typed",
+            "13", PanelWire.ComboBlurCommit("13", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: CONTROL: the text the core showed does not commit",
+            "(null)", PanelWire.ComboBlurCommit("0°", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: CONTROL: the core's value typed back does not commit",
+            "(null)", PanelWire.ComboBlurCommit("0", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: an item's text is a pick, left to the selection path",
+            "(null)", PanelWire.ComboBlurCommit("45°", "0", "0°", comboItems, false) ?? "(null)");
+        Eq("combo blur: focus moving into the combo's own dropdown is not leaving",
+            "(null)", PanelWire.ComboBlurCommit("13", "0", "0°", comboItems, true) ?? "(null)");
+        Eq("combo blur: no readable text (the template part missing) sends nothing",
+            "(null)", PanelWire.ComboBlurCommit(null, "0", "0°", comboItems, false) ?? "(null)");
+
         var list = PanelWire.ReadPanelList(
             "[{\"id\":\"align_panel_content\",\"summary\":\"Align\"},"
             + "{\"id\":\"magic_wand_panel_content\",\"summary\":null},"

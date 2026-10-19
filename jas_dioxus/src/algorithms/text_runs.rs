@@ -24,6 +24,8 @@ pub struct TextRun {
     pub text: String,
     pub x: f64,
     pub tspan: usize,
+    /// The content index of the run's first character.
+    pub start: usize,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -70,7 +72,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -126,12 +128,129 @@ pub struct PlacedMarker {
     pub baseline_y: f64,
 }
 
+/// Which line a decoration draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecorationKind {
+    Underline,
+    LineThrough,
+}
+
+/// One decoration line, relative to the element's origin: a horizontal
+/// stroke from `x0` to `x1` at `y`, `thickness` wide, in the element's fill.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Decoration {
+    pub kind: DecorationKind,
+    pub x0: f64,
+    pub x1: f64,
+    pub y: f64,
+    pub thickness: f64,
+}
+
+/// Whether tspan `t` draws `kind`: its own tokens when it overrides (an
+/// empty override is "none"), else the element's.
+fn decorated(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan::Tspan, kind: DecorationKind) -> bool {
+    let token = match kind { DecorationKind::Underline => "underline", DecorationKind::LineThrough => "line-through" };
+    match &t.text_decoration {
+        Some(own) => own.iter().any(|w| w == token),
+        None => e.text_decoration.split_whitespace().any(|w| w == token),
+    }
+}
+
+/// The decoration lines of a laid-out text: per line and per kind, each run
+/// of contiguous decorated characters from its first glyph's x to its last
+/// glyph's right. A soft wrap's trailing space and the synthetic hyphen are
+/// not decorated; a justified line's stretched glue is, because the glyphs
+/// carry the stretch. Legacy's offsets and thickness
+/// (`canvas/render.rs`, `draw_text_decorations`): an underline at baseline +
+/// 0.12 x size, a line-through at baseline - 0.3 x size, max(0.07 x size, 1)
+/// wide.
+fn decorations(
+    e: &crate::geometry::element::TextElem,
+    layout: &TextLayout,
+    chars: &[char],
+    ranges: &[(usize, usize)],
+) -> Vec<Decoration> {
+    let size = e.font_size;
+    let thickness = (size * 0.07).max(1.0);
+    let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
+    let mut out = Vec::new();
+    for line in &layout.lines {
+        let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
+        for (kind, dy) in [(DecorationKind::Underline, size * 0.12), (DecorationKind::LineThrough, -size * 0.3)] {
+            let mut span: Option<(f64, f64)> = None;
+            for g in glyphs {
+                let drawn = g.idx < line.end && g.idx < chars.len() && !g.is_trailing_space && chars[g.idx] != '\n';
+                let on = drawn && owner(g.idx).is_some_and(|t| decorated(e, &e.tspans[t], kind));
+                match (on, span) {
+                    (true, None) => span = Some((g.x, g.right)),
+                    (true, Some((x0, x1))) => span = Some((x0, x1.max(g.right))),
+                    (false, Some((x0, x1))) if drawn => {
+                        out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
+                        span = None;
+                    }
+                    _ => {}
+                }
+            }
+            if let Some((x0, x1)) = span {
+                out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy, thickness });
+            }
+        }
+    }
+    out
+}
+
 /// The whole plan a renderer draws: the runs of every line, then the
 /// markers. Every x and baseline is relative to the element's origin.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RunsPlan {
     pub lines: Vec<RunLine>,
     pub markers: Vec<PlacedMarker>,
+    pub decorations: Vec<Decoration>,
+}
+
+/// Whether a laid-out line's glue was stretched (or shrunk) away from the
+/// natural width of its whitespace: a justified line. Then a run drawn as one
+/// string would put its later words at the natural space.
+fn stretched(glyphs: &[crate::algorithms::text_layout::Glyph], line: &crate::algorithms::text_layout::LineInfo, chars: &[char], widths: &[f64]) -> bool {
+    glyphs.iter().any(|g| {
+        g.idx < line.end
+            && !g.is_trailing_space
+            && chars.get(g.idx).is_some_and(|c| c.is_whitespace())
+            && widths.get(g.idx).is_some_and(|w| ((g.right - g.x) - w).abs() > 1e-6)
+    })
+}
+
+/// A stretched line's runs, re-cut so each WORD is its own run at the x the
+/// layout gave its first character, as the flat path draws a justified line
+/// word by word. The whitespace between words is not drawn (it is invisible,
+/// and the plan's router keeps decorations away from it).
+fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph]) -> Vec<TextRun> {
+    let mut out = Vec::new();
+    for r in runs {
+        let mut word = String::new();
+        let mut word_start = 0usize;
+        for (k, c) in r.text.chars().enumerate() {
+            let at = r.start + k;
+            if c.is_whitespace() {
+                if !word.is_empty() {
+                    push_word(&mut out, std::mem::take(&mut word), word_start, r.tspan, glyphs);
+                }
+            } else {
+                if word.is_empty() { word_start = at; }
+                word.push(c);
+            }
+        }
+        if !word.is_empty() {
+            push_word(&mut out, word, word_start, r.tspan, glyphs);
+        }
+    }
+    out
+}
+
+fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
+    if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
+        out.push(TextRun { text, x: g.x, tspan, start });
+    }
 }
 
 /// The shared plan for non-flat text, which the legacy canvas
@@ -140,7 +259,8 @@ pub struct RunsPlan {
 /// own tspan's face, the content laid out once
 /// ([`text_layout::layout_with_paragraphs_widths`], the element's face for
 /// glue and the synthetic hyphen), then each line as its [`line_runs`] and
-/// the paragraphs' list markers.
+/// the paragraphs' list markers. A justified (stretched) line is drawn word
+/// by word, and a hyphenated break draws its hyphen.
 ///
 /// `measurer` answers a face's measurer, or `None` when it cannot measure
 /// that face; then there is no plan (the walk refuses rather than position
@@ -149,7 +269,7 @@ pub struct RunsPlan {
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing, decoration, a baseline shift, a case
-/// transform, a per-tspan size, justify, hyphenation, an anchor) is the
+/// transform, a per-tspan size, an anchor) is the
 /// router's to keep away from it (`element_render::runs_plan_excludes`).
 pub fn plan(
     e: &crate::geometry::element::TextElem,
@@ -180,12 +300,29 @@ pub fn plan(
     let layout = crate::algorithms::text_layout::layout_with_paragraphs_widths(
         &content, max_w, leading, &segments, &*measure, Some(&widths));
     let ranges = tspan_ranges(e.tspans.iter().map(|t| t.content.as_str()));
-    let lines = line_runs(&layout, &content, &ranges);
+    let mut lines = line_runs(&layout, &content, &ranges);
+    let chars: Vec<char> = content.chars().collect();
+    for (line, runs) in layout.lines.iter().zip(lines.iter_mut()) {
+        let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
+        if stretched(glyphs, line, &chars, &widths) {
+            runs.runs = word_runs(&runs.runs, glyphs);
+        }
+        if line.trailing_hyphen {
+            // The layout's hyphen glyph is the one past the line's last
+            // character; it is drawn in that character's tspan.
+            let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
+            let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
+            if let (Some(g), Some(t)) = (hyphen, owner) {
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end });
+            }
+        }
+    }
     let markers = crate::algorithms::text_layout_paragraph::list_marker_paragraphs(&layout, &segments)
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y, text: m.text, x: m.indent })
         .collect();
-    Some(RunsPlan { lines, markers })
+    let decorations = decorations(e, &layout, &chars, &ranges);
+    Some(RunsPlan { lines, markers, decorations })
 }
 
 #[cfg(test)]
@@ -340,5 +477,132 @@ mod tests {
         assert_eq!((p.markers[0].x, p.markers[0].baseline_y), (12.0, p.lines[0].baseline_y));
         let none = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
         assert!(none.markers.is_empty(), "control: no list style, no marker");
+    }
+
+    /// A justified line stretches its glue, so a run drawn as one string
+    /// would put its later words at the natural space: on a stretched line
+    /// each WORD is its own run, at the layout's x. The last line is ragged
+    /// (its glue is not stretched) and keeps whole runs.
+    #[test]
+    fn a_justified_line_draws_each_word_at_its_stretched_x() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[0].text_align = Some("justify".into());
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got = shape(&p);
+        // Line 1: One(30) fine(40) day(30) extraordinarily(300, bold) = 400 of
+        // words in 450, so each of the three glues is 50/3.
+        let g = 50.0 / 3.0;
+        let want0 = [("One", 0.0, 1), ("fine", 30.0 + g, 1), ("day", 70.0 + 2.0 * g, 1), ("extraordinarily", 100.0 + 3.0 * g, 2)];
+        assert_eq!(got[0].len(), want0.len(), "one run per word on the stretched line: {got:?}");
+        for (r, w) in got[0].iter().zip(want0) {
+            assert_eq!((r.0.as_str(), r.2), (w.0, w.2), "{got:?}");
+            assert!((r.1 - w.1).abs() < 1e-9, "{} at {} not {}: {got:?}", w.0, r.1, w.1);
+        }
+        assert_eq!(got[1], vec![("patiently".to_string(), 0.0, 2), (" sat".to_string(), 180.0, 3)],
+            "the ragged last line keeps whole runs");
+        // CONTROL: the same text unjustified keeps whole runs on line 1.
+        let ragged = shape(&plan(&styled_area(450.0), &faces(&seen)).unwrap());
+        assert_eq!(ragged[0].len(), 2, "{ragged:?}");
+    }
+
+    /// A justified line that fits exactly is not stretched (ratio 0): its
+    /// dropped trailing glue leaves a ZERO-width space glyph, which is not a
+    /// stretch, so the line keeps its whole run.
+    #[test]
+    fn an_exactly_fitting_justified_line_keeps_its_whole_run() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(90.0);
+        e.tspans = vec![e.tspans[0].clone(), tspan("aaaa bbbb cc", None)];
+        e.tspans[0].text_align = Some("justify".into());
+        let got = shape(&plan(&e, &faces(&seen)).unwrap());
+        assert_eq!(got[0], vec![("aaaa bbbb ".to_string(), 0.0, 1)], "{got:?}");
+    }
+
+    /// A line broken at a hyphenation point draws a visible hyphen after its
+    /// last character, at the layout's hyphen glyph, in that character's
+    /// tspan.
+    #[test]
+    fn a_hyphenated_line_draws_its_hyphen_in_the_broken_words_tspan() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(160.0);
+        e.tspans = vec![e.tspans[0].clone(), tspan("go ", None), tspan("information", Some("bold"))];
+        e.tspans[0].jas_hyphenate = Some(true);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got = shape(&p);
+        let last = got[0].last().expect("line 1 has runs");
+        assert_eq!((last.0.as_str(), last.2), ("-", 2), "the hyphen ends line 1, in the bold tspan: {got:?}");
+        let before = &got[0][got[0].len() - 2];
+        let bold_w = before.0.chars().count() as f64 * 20.0;
+        assert!((last.1 - (before.1 + bold_w)).abs() < 1e-9, "the hyphen sits right after the broken word: {got:?}");
+        assert!(got[1][0].0.chars().all(|c| c.is_alphabetic()), "line 2 carries the rest of the word: {got:?}");
+        // Justified too: the composer's hyphen penalty places the glyph.
+        let mut both = e.clone();
+        both.tspans[0].text_align = Some("justify".into());
+        let j = shape(&plan(&both, &faces(&seen)).unwrap());
+        let jl = j.iter().find(|l| l.last().is_some_and(|r| r.0 == "-")).expect(&format!("a justified line ends in the hyphen: {j:?}"));
+        let jb = &jl[jl.len() - 2];
+        assert_eq!(jl.last().unwrap().2, 2, "{j:?}");
+        assert!((jl.last().unwrap().1 - (jb.1 + jb.0.chars().count() as f64 * 20.0)).abs() < 1e-9, "{j:?}");
+        // CONTROL: no hyphenation, no hyphen run.
+        let mut plain = e.clone();
+        plain.tspans[0].jas_hyphenate = None;
+        assert!(shape(&plan(&plain, &faces(&seen)).unwrap()).iter().flatten().all(|r| r.0 != "-"));
+    }
+    fn decos(p: &RunsPlan) -> Vec<(DecorationKind, f64, f64, f64)> {
+        p.decorations.iter().map(|d| (d.kind, d.x0, d.x1, d.y)).collect()
+    }
+
+    /// A tspan's underline is drawn under its own characters only, one line
+    /// per laid-out line it reaches, from its first glyph's x to its last
+    /// visible glyph's right (a soft wrap's trailing space is not underlined).
+    #[test]
+    fn a_tspans_underline_follows_its_characters_across_a_wrap() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let (b0, b1) = (p.lines[0].baseline_y, p.lines[1].baseline_y);
+        assert_eq!(decos(&p), vec![
+            (DecorationKind::Underline, 130.0, 430.0, b0 + 20.0 * 0.12),
+            (DecorationKind::Underline, 0.0, 180.0, b1 + 20.0 * 0.12),
+        ], "under \"extraordinarily\" on line 1 and \"patiently\" on line 2");
+        assert_eq!(p.decorations[0].thickness, (20.0f64 * 0.07).max(1.0));
+        // CONTROL: no decoration anywhere, no lines.
+        assert!(plan(&styled_area(450.0), &faces(&seen)).unwrap().decorations.is_empty());
+    }
+
+    /// The element's decoration reaches every tspan that does not override
+    /// it; an explicit empty override (`Some([])`) cuts the line; a strike is
+    /// at baseline - 0.3 x size.
+    #[test]
+    fn an_element_decoration_is_inherited_and_an_empty_override_cuts_it() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.text_decoration = "line-through".into();
+        e.tspans[2].text_decoration = Some(vec![]);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let b = p.lines[0].baseline_y;
+        assert_eq!(decos(&p), vec![
+            (DecorationKind::LineThrough, 0.0, 130.0, b - 20.0 * 0.3),
+            (DecorationKind::LineThrough, 630.0, 670.0, b - 20.0 * 0.3),
+        ], "struck through the plain runs, not the bold one");
+        // CONTROL: without the override the strike is continuous.
+        let mut whole = styled_area(2000.0);
+        whole.text_decoration = "line-through".into();
+        assert_eq!(decos(&plan(&whole, &faces(&seen)).unwrap()), vec![(DecorationKind::LineThrough, 0.0, 670.0, b - 20.0 * 0.3)]);
+    }
+
+    /// On a justified line the underline spans the STRETCHED glue, not the
+    /// natural width: one line from the first word to the last.
+    #[test]
+    fn an_underline_spans_a_justified_lines_stretched_glue() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(450.0);
+        e.tspans[0].text_align = Some("justify".into());
+        e.text_decoration = "underline".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let d = decos(&p);
+        assert_eq!((d[0].1, d[0].2), (0.0, 450.0), "line 1 is underlined edge to edge: {d:?}");
     }
 }

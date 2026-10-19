@@ -504,6 +504,22 @@ internal static class PanelWire
             : null;
 
     /// <summary>
+    /// What an editable combo sends when a person LEAVES it (flask § 451,
+    /// § 457): the typed text, as a text box's blur commits it, or null. Null
+    /// when focus stayed inside the combo (into its own dropdown), when there
+    /// is no readable text, when the text is what the core showed (its value
+    /// or its label: <c>CommitOnBlur</c>'s rule), and when it names an item,
+    /// which is a pick and goes by the selection path as Enter's does.
+    /// </summary>
+    internal static string? ComboBlurCommit(string? typed, string shownValue, string shownText,
+        IEnumerable<string> itemTexts, bool focusStaysInCombo)
+    {
+        if (focusStaysInCombo || typed is null) { return null; }
+        if (!CommitOnBlur(typed, shownValue) || !CommitOnBlur(typed, shownText)) { return null; }
+        return itemTexts.Any(t => string.Equals(t, typed, StringComparison.Ordinal)) ? null : typed;
+    }
+
+    /// <summary>
     /// W-b: what picking item <paramref name="picked"/> sends: its `value` text,
     /// or null when nothing is to be sent -- no item (-1, or out of range), or
     /// the item whose value the core already shows (<paramref name="shown"/>).
