@@ -426,6 +426,29 @@ the un-rotated direction, matching SVG's `rotate` attribute
 semantics. This is distinct from `transform: rotate(...)`, which
 applies the rotation to the tspan as a whole.
 
+### Decoration beside a shift or a turn
+
+An underline or strike-through is drawn in its **glyph's frame**. The
+glyph's baseline shift moves it, whether the element or the tspan
+declares the decoration. A shift can be a range's own `baseline-shift`
+or an element's super, sub or numeric shift. Under turned glyphs (a
+range's or the element's character rotation), each glyph's piece of the
+decoration turns with that glyph, about the glyph's baseline origin, so
+the line breaks into one short stroke per glyph. A stroke is cut
+wherever the size, the shift or the angle changes. Its offset and
+thickness come from its own run's size: an underline at baseline +
+0.12 × size, a strike-through at baseline − 0.3 × size, max(0.07 × size,
+1) wide.
+
+This is what both browser engines draw for the same SVG (Blink and
+WebKit, measured 2026-10-19 on one fixture: an element underline over a
+`baseline-shift` tspan, a tspan's own underline with the same shift, an
+element underline over a `rotate` tspan, and over a `dy` tspan; the
+engines agreed on all four; the SVG and both renders are in
+`docs/evidence/decoration_browser/`). CSS's rule for HTML, where a decoration
+stays at the position of the box that declares it, does **not** apply
+to SVG's `baseline-shift` in either engine.
+
 ### Wrapping (area text only)
 
 Word-wrap uses the same whitespace-run break model as today. The

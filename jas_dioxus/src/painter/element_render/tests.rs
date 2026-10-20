@@ -4078,12 +4078,20 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     use crate::painter::element_render::{needs_layout, runs_plan_excludes};
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 10] = [
+    let cases: [(&str, Set); 5] = [
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
-        // Whether a decoration follows a run's own shift is not measured on
-        // either port (Swift's is CoreText's), so the pair stays out.
+        ("a scale that does not read", |e| e.horizontal_scale = "wide".into()),
+        ("a rotation that does not read", |e| e.rotate = "tilt".into()),
+    ];
+    // The plan draws a justified or hyphenated paragraph (it cuts a
+    // stretched line into words and adds the hyphen), so neither excludes.
+    type Admit = fn(&mut crate::geometry::element::TextElem);
+    let admitted: [(&str, Admit); 23] = [
+        // A decoration beside a shift or a turn: it is drawn in its glyph's
+        // frame (TSPAN.md "Decoration beside a shift or a turn"), which the
+        // plan's decoration lines draw.
         ("a shifted tspan's own decoration", |e| {
             e.tspans[2].baseline_shift = Some(3.0);
             e.tspans[2].text_decoration = Some(vec!["underline".into()]);
@@ -4096,8 +4104,6 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
             e.tspans[2].rotate = Some(10.0);
             e.text_decoration = "underline".into();
         }),
-        ("a scale that does not read", |e| e.horizontal_scale = "wide".into()),
-        ("a rotation that does not read", |e| e.rotate = "tilt".into()),
         ("an element rotation with a tspan's decoration", |e| {
             e.rotate = "20".into();
             e.tspans[1].text_decoration = Some(vec!["underline".into()]);
@@ -4106,11 +4112,6 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
             e.rotate = "20".into();
             e.text_decoration = "line-through".into();
         }),
-    ];
-    // The plan draws a justified or hyphenated paragraph (it cuts a
-    // stretched line into words and adds the hyphen), so neither excludes.
-    type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 18] = [
         ("a horizontal scale", |e| e.horizontal_scale = "150".into()),
         ("a vertical scale", |e| e.vertical_scale = "80".into()),
         ("an element rotation", |e| e.rotate = "20".into()),
@@ -4226,6 +4227,57 @@ fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
     let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
     assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
     assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
+}
+
+/// The walk strokes a decoration in its glyph's frame (TSPAN.md
+/// "Decoration beside a shift or a turn"): under " sat" turned 15 degrees, the
+/// element's underline is four pieces, each a stroke at (0, 0.12 x size) in a
+/// `translate(x, baseline) · rotate(15°)` frame at its glyph's own origin; and
+/// under a tspan raised 3 pt, that run's piece is 3 above the others.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_decoration_is_stroked_in_its_glyphs_frame() {
+    let mut e = styled_area(2000.0);
+    e.text_decoration = "underline".into();
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let cmds = rec.commands();
+    let (mut glyphs, mut pieces) = (Vec::new(), Vec::new());
+    for (i, c) in cmds.iter().enumerate() {
+        let Command::PushState { transform: t } = c else { continue };
+        if (t.a - cos).abs() > 1e-12 || (t.b - sin).abs() > 1e-12 { continue; }
+        match &cmds[i + 1] {
+            Command::DrawTextRun { .. } => glyphs.push((t.e, t.f)),
+            Command::StrokePath { path, .. } => match path.as_slice() {
+                [PathCommand::MoveTo { x: x0, y: y0 }, PathCommand::LineTo { x: w, y: y1 }] => {
+                    assert!(*x0 == 0.0 && (y0 - 20.0 * 0.12).abs() < 1e-9 && y0 == y1 && *w > 0.0, "{path:?}");
+                    pieces.push((t.e, t.f));
+                }
+                other => panic!("a turned piece is one stroke from its origin: {other:?}"),
+            },
+            other => panic!("a turned frame draws a glyph or a piece: {other:?}"),
+        }
+        assert!(matches!(cmds[i + 2], Command::PopState), "and closes");
+    }
+    assert_eq!(glyphs.len(), 4, "{glyphs:?}");
+    assert_eq!(pieces, glyphs, "each piece turns about its own glyph's origin");
+    // CONTROL beside it: a tspan raised 3 pt; its piece is 3 above the others.
+    let mut raised = styled_area(2000.0);
+    raised.text_decoration = "underline".into();
+    raised.tspans[2].baseline_shift = Some(3.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(raised), 1.0);
+    let ys: Vec<f64> = rec.commands().iter().filter_map(|c| match c {
+        Command::StrokePath { path, .. } => match path.as_slice() {
+            [PathCommand::MoveTo { y, .. }, PathCommand::LineTo { .. }] => Some(*y),
+            _ => None,
+        },
+        _ => None,
+    }).collect();
+    assert_eq!(ys.len(), 3, "three pieces: {ys:?}");
+    assert!((ys[0] - ys[2]).abs() < 1e-9 && (ys[1] - (ys[0] - 3.0)).abs() < 1e-9, "{ys:?}");
 }
 
 /// The walk draws styled text's scale in the flat arm's frame around the whole

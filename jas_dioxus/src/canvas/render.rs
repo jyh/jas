@@ -2470,6 +2470,17 @@ fn draw_laid_out_runs(
         ctx.set_stroke_style_str(&color);
         ctx.set_line_width(d.thickness);
         ctx.begin_path();
+        if d.rotate != 0.0 {
+            // A turned glyph's piece, in its run's frame.
+            ctx.save();
+            ctx.translate(e.x + d.x0, e.y + d.origin_y).ok();
+            ctx.rotate(d.rotate.to_radians()).ok();
+            ctx.move_to(0.0, d.y - d.origin_y);
+            ctx.line_to(d.x1 - d.x0, d.y - d.origin_y);
+            ctx.stroke();
+            ctx.restore();
+            continue;
+        }
         ctx.move_to(e.x + d.x0, e.y + d.y);
         ctx.line_to(e.x + d.x1, e.y + d.y);
         ctx.stroke();
