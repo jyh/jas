@@ -1817,6 +1817,42 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
+/// The clipboard's `image/svg+xml` form of a tspan list (TSPAN.md "Cut /
+/// copy"): the same tspans serialized per the SVG serialization rules, each
+/// exactly as [`tspan_svg`] writes it into a document, in a `<text>` root that
+/// declares the `jas:` prefix those attributes use. Parent attributes are left
+/// to the receiver, which decides how to apply them.
+pub fn tspans_to_svg_fragment(tspans: &[crate::geometry::tspan::Tspan]) -> String {
+    let body: String = tspans.iter().map(tspan_svg).collect();
+    format!(
+        r#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">{body}</text>"#
+    )
+}
+
+/// Read an `image/svg+xml` clipboard fragment as the document reader reads a
+/// file: the first `<text>` at or under the root, its `<tspan>` children
+/// through [`parse_tspan`] (so a bare length is in user units, px), with
+/// fresh ids from 0. `None` when there is no `<text>` or it has no `<tspan>`.
+pub fn tspans_from_svg_fragment(svg: &str) -> Option<Vec<crate::geometry::tspan::Tspan>> {
+    fn find_text(n: &XmlNode) -> Option<&XmlNode> {
+        if strip_ns(&n.tag) == "text" {
+            return Some(n);
+        }
+        n.children.iter().find_map(find_text)
+    }
+    let root = parse_xml(svg)?;
+    let text = find_text(&root)?;
+    let tspans: Vec<_> = text
+        .children
+        .iter()
+        .filter(|c| strip_ns(&c.tag) == "tspan")
+        .flat_map(parse_tspan)
+        .enumerate()
+        .map(|(idx, mut t)| { t.id = idx as u32; t })
+        .collect();
+    if tspans.is_empty() { None } else { Some(tspans) }
+}
+
 /// A jas attribute by its local name: `jas:<name>` (written since 2026-10-15,
 /// a valid QName under the declared `xmlns:jas`), else `urn:jas:1:<name>`
 /// (the spelling every earlier file carries), so old files still read.
@@ -5199,10 +5235,12 @@ mod tests {
     /// field and has no `..`, so a NEW field does not compile here until it
     /// is given a value and so a round trip; `id` is the only field the file
     /// does not carry (it is in-memory, renumbered on load).
-    #[test]
-    fn every_tspan_field_survives_a_save_and_reopen() {
+    /// A tspan with EVERY field set. The literal names every field and has
+    /// no `..`, so a NEW field does not compile here until it is given a
+    /// value, and so a round trip in each arm that uses it.
+    fn every_field_tspan() -> crate::geometry::tspan::Tspan {
         use crate::geometry::tspan::Tspan;
-        let t = Tspan {
+        Tspan {
             id: 0,
             content: "Word".into(),
             baseline_shift: Some(3.5),
@@ -5254,7 +5292,13 @@ mod tests {
             text_transform: Some("uppercase".into()),
             transform: Some(Transform { a: 1.5, b: 0.0, c: 0.0, d: 0.8, e: 0.0, f: 0.0 }),
             xml_lang: Some("fr".into()),
-        };
+        }
+    }
+
+    #[test]
+    fn every_tspan_field_survives_a_save_and_reopen() {
+        use crate::geometry::tspan::Tspan;
+        let t = every_field_tspan();
         let doc = svg_to_document(&tspan_svg_doc(&tspan_svg(&t)));
         let children = doc.layers[0].children().unwrap();
         let Element::Text(back) = &*children[0] else { panic!("expected Text") };
@@ -5278,6 +5322,46 @@ mod tests {
             let Element::Text(x) = &*d2.layers[0].children().unwrap()[0] else { panic!("expected Text") };
             assert_eq!(Tspan { id: one.id, ..x.tspans[0].clone() }, one, "{name} alone");
         }
+    }
+
+    /// The clipboard's `image/svg+xml` fragment carries "the same tspans
+    /// serialized per the SVG serialization rules" (TSPAN.md "Cut / copy"):
+    /// each tspan exactly as the DOCUMENT writes it, under a `<text>` root
+    /// that declares the `jas:` prefix its attributes use. The fragment had
+    /// its own writer, which spelled a font size in pt where the document
+    /// writes px, a baseline shift, dx and tracking with no unit, dropped
+    /// `transform`, and used `jas:` with no declaration, so a
+    /// namespace-aware reader refused the whole fragment.
+    #[test]
+    fn the_clipboard_fragment_is_the_documents_tspans() {
+        use crate::geometry::tspan::{Tspan, tspans_from_svg_fragment, tspans_to_svg_fragment};
+        let t = every_field_tspan();
+        let plain = Tspan { content: "<&> next".into(), ..Tspan::default_tspan() };
+        let frag = tspans_to_svg_fragment(&[t.clone(), plain.clone()]);
+        let root = r#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#;
+        assert_eq!(frag, format!("{root}{}{}</text>", tspan_svg(&t), tspan_svg(&plain)));
+        let back = tspans_from_svg_fragment(&frag).expect("the fragment reads");
+        assert_eq!(back.len(), 2, "{back:?}");
+        assert_eq!((back[0].id, back[1].id), (0, 1));
+        assert_eq!(Tspan { id: t.id, ..back[0].clone() }, t, "fragment: {frag}");
+        assert_eq!(Tspan { id: plain.id, ..back[1].clone() }, plain, "fragment: {frag}");
+    }
+
+    /// A fragment another application writes is read as the document reader
+    /// reads its file: a bare length is in user units (px), so 16 is a
+    /// 12 pt size and a 4 px raise is 3 pt; a tracking in em is read.
+    #[test]
+    fn a_foreign_clipboard_fragment_reads_its_lengths_as_a_file_does() {
+        use crate::geometry::tspan::tspans_from_svg_fragment;
+        let frag = r#"<svg xmlns="http://www.w3.org/2000/svg"><text><tspan font-size="16" baseline-shift="4" letter-spacing="0.1em">A</tspan></text></svg>"#;
+        let back = tspans_from_svg_fragment(frag).expect("the fragment reads");
+        assert_eq!(back.len(), 1, "{back:?}");
+        assert_eq!(back[0].content, "A");
+        assert_eq!(back[0].font_size, Some(12.0));
+        assert_eq!(back[0].baseline_shift, Some(3.0));
+        assert_eq!(back[0].letter_spacing, Some(0.1));
+        assert!(tspans_from_svg_fragment("<span>hi</span>").is_none());
+        assert!(tspans_from_svg_fragment(r#"<text xmlns="http://www.w3.org/2000/svg">hi</text>"#).is_none());
     }
 
     #[test]
