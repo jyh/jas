@@ -1,0 +1,13 @@
+# ACCEPTED DEBT at the gate's birth (council 2026-10-20 1(b)): claim sentences that predate it, by sha + path + class.
+# class 'shape' = a sentence matching one of the lexicon's shapes (read off the 2026-10-19 census; matching is NOT thereby an overclaim, and each census correction, being the Captain's wording, shrinks this file); 'predates' = a claim word in a headline carrier.
+# A line whose sentence is gone is refused (STALE-BASELINE): delete it. A NEW claim is refused until a .prose-lean-reads record names its Lean statement and a non-author reader.
+a6d71bfa3eae	.githooks/README.md	predates
+814ac68393bd	README.md	predates
+eda91b49ace3	README.md	predates
+96f5ac4e7b18	docs/CHECKERS.md	shape
+b31b73db87d1	docs/CHECKERS.md	shape
+5a6f0cdfcd86	prototypes/sb_winui/README.md	predates
+9e8014efb39c	prototypes/sb_winui/README.md	predates
+cd5b914651fa	prototypes/sb_winui/README.md	predates
+871b80b300ed	prototypes/scaling_rig/README.md	predates
+bb6799a003b1	prototypes/scaling_rig/README.md	predates
