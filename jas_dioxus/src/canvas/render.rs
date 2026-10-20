@@ -5298,6 +5298,45 @@ mod laid_out_runs_pixel_tests {
         assert!(inks(&styled_area(140.0), 26, 40), "a narrow box wraps the styled text onto a second line");
     }
 
+    /// The columns of a 300 x 150 surface that carry any ink, as (first, last).
+    fn ink_extent(elem: &Element) -> Option<(u32, u32)> {
+        let s = WebSurface::offscreen(300, 150).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        draw_element_scaled(&ctx, TargetSize::of(&s), elem, Visibility::Preview, 1.0, 1.0);
+        let px = s.read_rgba(0, 0, 300, 150).expect("in bounds");
+        let cols: Vec<u32> = (0..300u32)
+            .filter(|&x| (0..150u32).any(|y| px[((y * 300 + x) * 4 + 3) as usize] > 0))
+            .collect();
+        Some((*cols.first()?, *cols.last()?))
+    }
+
+    /// A TURNED range on POINT text turns EACH glyph about its own origin
+    /// (TSPAN.md "Rotation"), so "MMMM" turned 90 degrees stays spread along
+    /// the line: about three advances plus a cap height wide (~64 px at size
+    /// 20). Turned as ONE block about its first glyph, which is what the
+    /// segmented path drew, it stands in a column one cap height wide
+    /// (~15 px). Margin: 40 px against ~64 and ~15. The control is the same
+    /// run unturned (four advances, ~67 px).
+    #[wasm_bindgen_test]
+    fn a_turned_range_on_point_text_turns_each_glyph() {
+        let point = |rotate: Option<f64>| {
+            let mut e = TextElem::from_string(
+                10.0, 30.0, "", "sans-serif", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+                CommonProps::default(),
+            );
+            e.fill = Some(Fill { color: Color::BLACK, opacity: 1.0 });
+            let mut t = Tspan::default_tspan();
+            t.content = "MMMM".into();
+            t.rotate = rotate;
+            e.tspans = vec![t];
+            Element::Text(e)
+        };
+        let (a, b) = ink_extent(&point(None)).expect("control: the unturned run inks");
+        assert!(b - a > 40, "control: the unturned run is wide ({a}..{b})");
+        let (a, b) = ink_extent(&point(Some(90.0))).expect("the turned run inks");
+        assert!(b - a > 40, "each glyph turned at its own x keeps the run wide ({a}..{b}); a block turn is one cap height wide");
+    }
+
     /// Whether any pixel in the box (x0..x1, y0..y1) carries ink.
     fn inks_in(elem: &Element, x0: u32, x1: u32, y0: u32, y1: u32) -> bool {
         let s = WebSurface::offscreen(300, 100).expect("a DOM is present in the browser lane");

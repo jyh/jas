@@ -747,6 +747,14 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
         || t.text_transform == "uppercase"
         || t.text_transform == "lowercase"
         || t.font_variant == "small-caps"
+        // STYLED text with a turn (a range's `rotate`, or the element's): the
+        // plan turns EACH glyph about its own origin (TSPAN.md "Rotation"),
+        // where the segmented path turned a range as one block about its
+        // first glyph and ignored the element's turn. Flat text is not routed
+        // here.
+        || (!t.render_is_flat()
+            && (t.tspans.iter().any(|s| s.rotate.is_some_and(|a| a != 0.0))
+                || crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0)))
         || t.tspans.iter().any(|w| {
             w.jas_role.as_deref() == Some("paragraph")
                 && ((is_area && (w.text_align.is_some() || w.text_align_last.is_some()))

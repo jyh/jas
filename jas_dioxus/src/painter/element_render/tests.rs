@@ -4153,6 +4153,40 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     assert!(needs_layout(&point) && !runs_plan_excludes(&point), "anchored point text takes the plan");
 }
 
+/// Styled POINT text with a turn takes the plan, which turns EACH glyph about
+/// its own origin (TSPAN.md "Rotation"); the segmented path turned a range as
+/// ONE block about its first glyph, and ignored the element's rotation. Only
+/// the turned case moves: styled point text without a turn keeps the
+/// segmented path, and FLAT text is not touched.
+#[test]
+fn styled_point_text_with_a_turn_takes_the_plan() {
+    use crate::painter::element_render::{needs_layout, runs_plan_excludes};
+    let point = || {
+        let mut e = styled_area(140.0);
+        (e.width, e.height) = (0.0, 0.0);
+        e
+    };
+    let plain = point();
+    assert!(!plain.is_area_text() && !plain.render_is_flat(), "precondition: styled point text");
+    assert!(!needs_layout(&plain), "CONTROL: styled point text without a turn keeps the segmented path");
+    let mut range = point();
+    range.tspans[2].rotate = Some(30.0);
+    assert!(needs_layout(&range) && !runs_plan_excludes(&range), "a turned range takes the plan");
+    let mut whole = point();
+    whole.rotate = "20".into();
+    assert!(needs_layout(&whole) && !runs_plan_excludes(&whole), "a turned element takes the plan");
+    let mut zero = point();
+    zero.tspans[2].rotate = Some(0.0);
+    assert!(!needs_layout(&zero), "a zero turn is no turn");
+    // FLAT text with a turn is not routed by this clause.
+    let mut flat = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "flat", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+        Default::default(),
+    );
+    flat.rotate = "20".into();
+    assert!(flat.render_is_flat() && !needs_layout(&flat), "flat text is untouched");
+}
+
 /// The walk strokes the plan's decoration lines: a tspan's underline is one
 /// horizontal stroke under its run, at baseline + 0.12 x size, ending where
 /// the run's measured width ends.
@@ -4278,6 +4312,37 @@ fn a_decoration_is_stroked_in_its_glyphs_frame() {
     }).collect();
     assert_eq!(ys.len(), 3, "three pieces: {ys:?}");
     assert!((ys[0] - ys[2]).abs() < 1e-9 && (ys[1] - (ys[0] - 3.0)).abs() < 1e-9, "{ys:?}");
+}
+
+/// The walk turns EACH glyph of a turned range on POINT text in its own
+/// frame, as it does on area text: " sat" turned 15 degrees on point text
+/// draws four glyph frames, x increasing on one baseline. (The segmented
+/// lowering refused a tspan's `rotate`; the web canvas's legacy path turned
+/// the range as one block, measured in pixels by
+/// `a_turned_range_on_point_text_turns_each_glyph`.)
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_turned_range_on_point_text_draws_each_glyph_in_its_own_frame() {
+    let mut e = styled_area(2000.0);
+    (e.width, e.height) = (0.0, 0.0);
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let cmds = rec.commands();
+    let mut frames = Vec::new();
+    for (i, c) in cmds.iter().enumerate() {
+        if let Command::PushState { transform: t } = c {
+            if (t.a - cos).abs() < 1e-12 && (t.b - sin).abs() < 1e-12 {
+                if let Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, .. }, .. } = &cmds[i + 1] {
+                    frames.push((text.clone(), t.e, t.f));
+                }
+            }
+        }
+    }
+    let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
+    assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
 }
 
 /// The walk draws styled text's scale in the flat arm's frame around the whole
