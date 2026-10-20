@@ -1326,7 +1326,7 @@ private func parseTspan(_ d: [String: Any]) -> Tspan {
         textDecoration: decor,
         textRendering: d["text_rendering"] as? String,
         textTransform: d["text_transform"] as? String,
-        transform: nil,
+        transform: parseTransform(d["transform"]),
         xmlLang: d["xml_lang"] as? String
     )
 }

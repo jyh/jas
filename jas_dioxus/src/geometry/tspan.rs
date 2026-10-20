@@ -1552,6 +1552,18 @@ mod tests {
         assert_eq!(back[1].font_weight.as_deref(), Some("bold"));
     }
 
+    /// A range's scale (the tspan's `transform`) is in the clipboard
+    /// payload, in the shape Swift's reader takes: `"transform":{"a":…}`.
+    #[test]
+    fn json_clipboard_carries_a_ranges_scale() {
+        let t = Tspan { content: "x".into(),
+                        transform: Some(crate::geometry::element::Transform { a: 1.5, b: 0.0, c: 0.0, d: 0.8, e: 0.0, f: 0.0 }),
+                        ..Tspan::default_tspan() };
+        let json = tspans_to_json_clipboard(&[t.clone()]);
+        assert!(json.contains(r#""transform":{"a":1.5,"b":0.0,"c":0.0,"d":0.8,"e":0.0,"f":0.0}"#), "{json}");
+        assert_eq!(tspans_from_json_clipboard(&json).unwrap()[0].transform, t.transform);
+    }
+
     #[test]
     fn json_clipboard_strips_id() {
         let src = vec![Tspan { id: 42, content: "x".into(),
