@@ -46,6 +46,15 @@ pub(crate) const KEY_BACKSPACE: u32 = 0x08;
 pub(crate) const KEY_ENTER: u32 = 0x0D;
 pub(crate) const KEY_ESCAPE: u32 = 0x1B;
 pub(crate) const KEY_DELETE: u32 = 0x7F;
+// The caret keys, as the AppKit function-key code points (NSUpArrowFunctionKey
+// and its neighbours, Unicode private use), so no printable character collides.
+pub(crate) const KEY_ARROW_UP: u32 = 0xF700;
+pub(crate) const KEY_ARROW_DOWN: u32 = 0xF701;
+pub(crate) const KEY_ARROW_LEFT: u32 = 0xF702;
+pub(crate) const KEY_ARROW_RIGHT: u32 = 0xF703;
+pub(crate) const KEY_HOME: u32 = 0xF729;
+pub(crate) const KEY_END: u32 = 0xF72B;
+pub(crate) const KEY_TAB: u32 = 0x09;
 
 /// `select_tool` targets in `workspace/shortcuts.yaml` the shell CANNOT select,
 /// by declaration. A key bound to one is not handled. Empty since 2026-10-20:
@@ -377,6 +386,13 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
         KEY_ENTER => "Enter".into(),
         KEY_DELETE => "Delete".into(),
         KEY_BACKSPACE => "Backspace".into(),
+        KEY_ARROW_UP => "ArrowUp".into(),
+        KEY_ARROW_DOWN => "ArrowDown".into(),
+        KEY_ARROW_LEFT => "ArrowLeft".into(),
+        KEY_ARROW_RIGHT => "ArrowRight".into(),
+        KEY_HOME => "Home".into(),
+        KEY_END => "End".into(),
+        KEY_TAB => "Tab".into(),
         _ => match char::from_u32(code) {
             Some(ch) => ch.to_string(),
             None => return JasStatus::BadParamType,
@@ -989,6 +1005,20 @@ mod tests {
             assert_eq!(unsafe { jas_key_event(e, k as u32, 0) }, JasStatus::Ok, "the key {k} reached the tool");
         }
         assert_eq!(texts(e), vec!["Hi".to_string()], "one text, holding what was typed");
+        // The caret keys (#596's named gaps): Left, Home and End move the
+        // caret the next key types at.
+        let typed = |e: *mut JasEngine, key: u32, ch: char| unsafe {
+            assert_eq!(jas_key_event(e, key, 0), JasStatus::Ok, "the caret key {key:#x} reached the tool");
+            assert_eq!(jas_key_event(e, ch as u32, 0), JasStatus::Ok);
+        };
+        typed(e, KEY_ARROW_LEFT, 'X');
+        assert_eq!(texts(e), vec!["HXi".to_string()], "Left moved the caret back one");
+        typed(e, KEY_HOME, 'A');
+        assert_eq!(texts(e), vec!["AHXi".to_string()], "Home moved it to the start");
+        typed(e, KEY_END, 'Z');
+        assert_eq!(texts(e), vec!["AHXiZ".to_string()], "End moved it to the end");
+        typed(e, KEY_ARROW_RIGHT, 'Y');
+        assert_eq!(texts(e), vec!["AHXiZY".to_string()], "Right at the end stays at the end");
         unsafe { jas_engine_free(e) };
     }
 

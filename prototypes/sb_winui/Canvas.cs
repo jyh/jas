@@ -1077,6 +1077,12 @@ internal sealed unsafe class Canvas : IDisposable
             JasCore.KeyEnter => "Enter",
             JasCore.KeyDelete => "Delete",
             JasCore.KeyBackspace => "Backspace",
+            JasCore.KeyArrowUp => "ArrowUp",
+            JasCore.KeyArrowDown => "ArrowDown",
+            JasCore.KeyArrowLeft => "ArrowLeft",
+            JasCore.KeyArrowRight => "ArrowRight",
+            JasCore.KeyHome => "Home",
+            JasCore.KeyEnd => "End",
             _ => KeyWire.CharName(k.Code),
         };
         if (name is null)

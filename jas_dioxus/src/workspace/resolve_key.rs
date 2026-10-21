@@ -167,6 +167,21 @@ pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
         "Backspace" => Some("Backspace"),
         _ => None,
     };
+    // The caret keys: a tool editing text takes them (the Type tool moves its
+    // caret); nothing in shortcuts.yaml binds them, so otherwise unhandled.
+    let caret: Option<&'static str> = match name {
+        "ArrowLeft" => Some("ArrowLeft"),
+        "ArrowRight" => Some("ArrowRight"),
+        "ArrowUp" => Some("ArrowUp"),
+        "ArrowDown" => Some("ArrowDown"),
+        "Home" => Some("Home"),
+        "End" => Some("End"),
+        "Tab" => Some("Tab"),
+        _ => None,
+    };
+    if let Some(key) = caret {
+        return if tool_takes(key) { KeyRoute::ToolKey(key) } else { KeyRoute::Unhandled };
+    }
     if let Some(key) = named {
         // flask STATUS § 277: an unclaimed Delete or Backspace is
         // `delete_selection` (shortcuts.yaml), unless the tool is editing text
@@ -239,6 +254,18 @@ mod route_key_tests {
         assert_eq!(route_key("H", m(false, false), free), KeyRoute::SelectTool("hand".into()));
     }
 
+    /// The caret keys (the Type tool's named gaps, #596): a tool editing text
+    /// takes them; with none, nothing binds them (shortcuts.yaml has no arrow),
+    /// so they are UNHANDLED, never a bad key name.
+    #[test]
+    fn caret_keys_go_to_a_tool_that_takes_them_and_are_unhandled_otherwise() {
+        for k in ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab"] {
+            assert_eq!(route_key(k, m(false, false), takes), KeyRoute::ToolKey(k), "{k} to the tool");
+            assert_eq!(route_key(k, m(false, false), free), KeyRoute::Unhandled, "{k} with no tool");
+        }
+        assert_eq!(route_key("F13", m(false, false), free), KeyRoute::BadKey, "CONTROL: still a bad name");
+    }
+
     #[test]
     fn a_claimed_delete_goes_to_the_tool() {
         assert_eq!(route_key("Delete", m(false, false), takes), KeyRoute::ToolKey("Delete"));
@@ -282,7 +309,8 @@ mod route_key_tests {
         // The engine's own `jas_key_event` routes `ch.to_string()`; a token of
         // two characters never reaches it (`dispatch_key` refuses BadKey).
         assert_eq!(route_key("J", m(false, false), free), KeyRoute::Unhandled);
-        assert_eq!(route_key("Tab", m(false, false), free), KeyRoute::BadKey);
+        // (`Tab` was this arm's long token until it became a caret key.)
+        assert_eq!(route_key("PageUp", m(false, false), free), KeyRoute::BadKey);
         assert_eq!(route_key("", m(false, false), free), KeyRoute::BadKey);
     }
 }
