@@ -558,6 +558,21 @@ internal static class PanelWire
         dropDownOpen || listJustClosed;
 
     /// <summary>
+    /// The item Up or Down picks in an editable combo with its list SHUT: the
+    /// one after (or before) the core's own, staying put at either end; from a free
+    /// value (no item, -1), Down picks the first and Up the last. -1 when the
+    /// list is empty. flask § 505: the platform's own Down stepped the box
+    /// `90` to `135` and sent nothing, so the shell takes the key and picks.
+    /// </summary>
+    internal static int ArrowPick(int coreIndex, int count, bool down)
+    {
+        if (count <= 0) { return -1; }
+        if (coreIndex < 0 || coreIndex >= count) { return down ? 0 : count - 1; }
+        if (down) { return coreIndex == count - 1 ? coreIndex : coreIndex + 1; }
+        return coreIndex == 0 ? 0 : coreIndex - 1;
+    }
+
+    /// <summary>
     /// The text an editable combo's blur commits: the editor's, unless the
     /// platform has BLANKED it, when it is what the person last typed. flask
     /// § 504: putting the selection back to -1 blanked the editor after the

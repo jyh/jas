@@ -1855,6 +1855,20 @@ public sealed partial class MainWindow
                     // and raised no TextSubmitted. Handled here, it never runs.
                     text.PreviewKeyDown += (_, e) =>
                     {
+                        if (!combo.IsDropDownOpen && (e.Key == Windows.System.VirtualKey.Down || e.Key == Windows.System.VirtualKey.Up))
+                        {
+                            // § 505: with the list shut the platform's arrow stepped
+                            // the box and sent nothing. The shell picks, from the
+                            // core's own item, and commits it as a pick.
+                            e.Handled = true;
+                            var at = combo.Tag as ChoiceState;
+                            var next = PanelWire.ArrowPick(at?.Index ?? -1, items.Count, e.Key == Windows.System.VirtualKey.Down);
+                            var pick = PanelWire.ChoiceCommit(next, items, at?.Shown);
+                            Trace($"arrow:'{pick}'");
+                            typed = null;
+                            if (pick is not null) { SendPane(id, "commit", pick, leaf.Path); }
+                            return;
+                        }
                         if (e.Key != Windows.System.VirtualKey.Enter) { return; }
                         e.Handled = true;
                         var state = combo.Tag as ChoiceState;
