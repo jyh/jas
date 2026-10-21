@@ -449,12 +449,42 @@ private func textExtraAttrs(textTransform: String, fontVariant: String,
     return s
 }
 
+/// The clipboard's `image/svg+xml` form of a tspan list (TSPAN.md "Cut /
+/// copy"): the same tspans serialized per the SVG serialization rules, each
+/// exactly as `tspanSvg` writes it into a document, in a `<text>` root that
+/// declares the `jas:` prefix those attributes use. Parent attributes are left
+/// to the receiver. Mirrors Rust `tspans_to_svg_fragment` (svg.rs).
+public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
+    #"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#
+        + tspans.map(tspanSvg).joined() + "</text>"
+}
+
+/// Read an `image/svg+xml` clipboard fragment as the document reader reads a
+/// file: the first `<text>` at or under the root, its `<tspan>` children
+/// through `parseTspan` (so a bare length is in user units, px), with fresh
+/// ids from 0. `nil` when it does not parse, or has no `<text>` with a
+/// `<tspan>`. Mirrors Rust `tspans_from_svg_fragment` (svg.rs).
+public func tspansFromSvgFragment(_ svg: String) -> [Tspan]? {
+    func findText(_ e: XMLElement) -> XMLElement? {
+        if e.localName == "text" { return e }
+        for case let c as XMLElement in e.children ?? [] {
+            if let t = findText(c) { return t }
+        }
+        return nil
+    }
+    guard let data = normalizeLegacyJasAttributes(svg).data(using: .utf8),
+          let root = (try? XMLDocument(data: data, options: []))?.rootElement(),
+          let text = findText(root) else { return nil }
+    let tspans = collectTspanChildren(text)
+    return tspans.isEmpty ? nil : tspans
+}
+
 /// Emit a single Tspan as an SVG `<tspan ...>content</tspan>` element.
 /// Only overridden attributes are emitted (inherited values are
 /// absent). Matches the Rust `tspan_svg` — the 5 attributes that
 /// round-trip via SVG natively: font-family, font-size, font-weight,
 /// font-style, text-decoration.
-private func tspanSvg(_ t: Tspan) -> String {
+func tspanSvg(_ t: Tspan) -> String {
     var attrs = ""
     if let v = t.fontFamily {
         attrs += " font-family=\"\(escapeXml(v))\""
@@ -1561,7 +1591,7 @@ private func parseTspanLayout(_ node: XMLElement) -> [Tspan] {
     let content = node.stringValue ?? ""
     let fontFamily = node.attribute(forName: "font-family")?.stringValue
     let fontSize = (node.attribute(forName: "font-size")?.stringValue)
-        .flatMap(Double.init).map(toPt)
+        .flatMap(absoluteLengthPx).map(toPt)
     let fontWeight = node.attribute(forName: "font-weight")?.stringValue
     let fontStyle = node.attribute(forName: "font-style")?.stringValue
     let decoration = (node.attribute(forName: "text-decoration")?.stringValue).map { raw -> [String] in
@@ -2227,7 +2257,9 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
 
     case "text":
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
-        let fs = toPt(attrF(elem, "font-size", 16.0))
+        // A CSS px is one user unit, so `16px` and `12pt` read as `16` does;
+        // a relative size (`em`, `%`) keeps the default. Mirrors Rust.
+        let fs = toPt((elem.attribute(forName: "font-size")?.stringValue).flatMap(absoluteLengthPx) ?? 16.0)
         let fw = elem.attribute(forName: "font-weight")?.stringValue ?? "normal"
         let fst = elem.attribute(forName: "font-style")?.stringValue ?? "normal"
         let td = elem.attribute(forName: "text-decoration")?.stringValue ?? "none"

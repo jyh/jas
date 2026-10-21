@@ -1817,6 +1817,42 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     format!("<tspan{}>{}</tspan>", attrs, escape_xml(&t.content))
 }
 
+/// The clipboard's `image/svg+xml` form of a tspan list (TSPAN.md "Cut /
+/// copy"): the same tspans serialized per the SVG serialization rules, each
+/// exactly as [`tspan_svg`] writes it into a document, in a `<text>` root that
+/// declares the `jas:` prefix those attributes use. Parent attributes are left
+/// to the receiver, which decides how to apply them.
+pub fn tspans_to_svg_fragment(tspans: &[crate::geometry::tspan::Tspan]) -> String {
+    let body: String = tspans.iter().map(tspan_svg).collect();
+    format!(
+        r#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">{body}</text>"#
+    )
+}
+
+/// Read an `image/svg+xml` clipboard fragment as the document reader reads a
+/// file: the first `<text>` at or under the root, its `<tspan>` children
+/// through [`parse_tspan`] (so a bare length is in user units, px), with
+/// fresh ids from 0. `None` when there is no `<text>` or it has no `<tspan>`.
+pub fn tspans_from_svg_fragment(svg: &str) -> Option<Vec<crate::geometry::tspan::Tspan>> {
+    fn find_text(n: &XmlNode) -> Option<&XmlNode> {
+        if strip_ns(&n.tag) == "text" {
+            return Some(n);
+        }
+        n.children.iter().find_map(find_text)
+    }
+    let root = parse_xml(svg)?;
+    let text = find_text(&root)?;
+    let tspans: Vec<_> = text
+        .children
+        .iter()
+        .filter(|c| strip_ns(&c.tag) == "tspan")
+        .flat_map(parse_tspan)
+        .enumerate()
+        .map(|(idx, mut t)| { t.id = idx as u32; t })
+        .collect();
+    if tspans.is_empty() { None } else { Some(tspans) }
+}
+
 /// A jas attribute by its local name: `jas:<name>` (written since 2026-10-15,
 /// a valid QName under the declared `xmlns:jas`), else `urn:jas:1:<name>`
 /// (the spelling every earlier file carries), so old files still read.
@@ -1856,7 +1892,7 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
         font_size: node
             .attrs
             .get("font-size")
-            .and_then(|s| s.parse::<f64>().ok())
+            .and_then(|s| absolute_length_px(s))
             .map(pt),
         font_weight: node.attrs.get("font-weight").cloned(),
         font_style: node.attrs.get("font-style").cloned(),
@@ -2644,7 +2680,9 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
         }
         "text" => {
             let ff = get_s(node, "font-family", "sans-serif").to_string();
-            let fs = pt(get_f(node, "font-size", 16.0));
+            // A CSS px is one user unit, so `16px` and `12pt` read as `16`
+            // does; a relative size (`em`, `%`) keeps the default.
+            let fs = pt(node.attrs.get("font-size").and_then(|s| absolute_length_px(s)).unwrap_or(16.0));
             let fw = get_s(node, "font-weight", "normal").to_string();
             let fst = get_s(node, "font-style", "normal").to_string();
             let td = get_s(node, "text-decoration", "none").to_string();
@@ -5181,6 +5219,38 @@ mod tests {
         }
     }
 
+    /// ⭐ A FONT SIZE READS ITS UNIT. `font-size="16px"` is 16 user units, as
+    /// a bare `16` is, and `12pt` is 16 px; both readers took the attribute
+    /// with a bare number parse, so a unit made the element's size the 16
+    /// default and a tspan's size none. Each expectation is the unitless
+    /// reading of the same length, so no number here is typed by hand.
+    #[test]
+    fn a_font_size_with_a_unit_reads_as_the_same_length_without_one() {
+        let text = |el: &str, ts: &str| {
+            let doc = svg_to_document(&format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="0" y="20" font-size="{el}"><tspan font-size="{ts}">a</tspan><tspan>b</tspan></text></svg>"#));
+            match &doc.layers[0] {
+                Element::Layer(l) => match &*l.children[0] {
+                    Element::Text(t) => (t.font_size, t.tspans[0].font_size),
+                    other => panic!("expected Text, got {other:?}"),
+                },
+                other => panic!("expected Layer, got {other:?}"),
+            }
+        };
+        let bare = text("16", "16");
+        // The control moves: a different bare number reads differently.
+        assert_ne!(text("9", "9"), bare, "the reader must see the attribute at all");
+        assert_eq!(text("16px", "16px"), bare, "px is a user unit");
+        assert_eq!(text("12pt", "12pt"), bare, "12pt is 16px");
+        assert_eq!(text(" 16px ", "16 px"), bare, "whitespace around and inside");
+        // Off the element's 16 default, which a dropped unit falls back to.
+        assert_eq!(text("12px", "12px"), text("12", "12"), "px off the default");
+        assert_eq!(text("9pt", "9pt"), text("12", "12"), "9pt is 12px, off the default");
+        // A relative size says nothing absolute: the element keeps its default,
+        // the tspan reads none, as before.
+        assert_eq!(text("1.2em", "1.2em"), (bare.0, None));
+    }
+
     // ── tspan rotate roundtrip ───────────────────────────────────────
 
     /// Build a minimal SVG string of the form produced by our writer,
@@ -5199,10 +5269,12 @@ mod tests {
     /// field and has no `..`, so a NEW field does not compile here until it
     /// is given a value and so a round trip; `id` is the only field the file
     /// does not carry (it is in-memory, renumbered on load).
-    #[test]
-    fn every_tspan_field_survives_a_save_and_reopen() {
+    /// A tspan with EVERY field set. The literal names every field and has
+    /// no `..`, so a NEW field does not compile here until it is given a
+    /// value, and so a round trip in each arm that uses it.
+    fn every_field_tspan() -> crate::geometry::tspan::Tspan {
         use crate::geometry::tspan::Tspan;
-        let t = Tspan {
+        Tspan {
             id: 0,
             content: "Word".into(),
             baseline_shift: Some(3.5),
@@ -5254,7 +5326,13 @@ mod tests {
             text_transform: Some("uppercase".into()),
             transform: Some(Transform { a: 1.5, b: 0.0, c: 0.0, d: 0.8, e: 0.0, f: 0.0 }),
             xml_lang: Some("fr".into()),
-        };
+        }
+    }
+
+    #[test]
+    fn every_tspan_field_survives_a_save_and_reopen() {
+        use crate::geometry::tspan::Tspan;
+        let t = every_field_tspan();
         let doc = svg_to_document(&tspan_svg_doc(&tspan_svg(&t)));
         let children = doc.layers[0].children().unwrap();
         let Element::Text(back) = &*children[0] else { panic!("expected Text") };
@@ -5278,6 +5356,46 @@ mod tests {
             let Element::Text(x) = &*d2.layers[0].children().unwrap()[0] else { panic!("expected Text") };
             assert_eq!(Tspan { id: one.id, ..x.tspans[0].clone() }, one, "{name} alone");
         }
+    }
+
+    /// The clipboard's `image/svg+xml` fragment carries "the same tspans
+    /// serialized per the SVG serialization rules" (TSPAN.md "Cut / copy"):
+    /// each tspan exactly as the DOCUMENT writes it, under a `<text>` root
+    /// that declares the `jas:` prefix its attributes use. The fragment had
+    /// its own writer, which spelled a font size in pt where the document
+    /// writes px, a baseline shift, dx and tracking with no unit, dropped
+    /// `transform`, and used `jas:` with no declaration, so a
+    /// namespace-aware reader refused the whole fragment.
+    #[test]
+    fn the_clipboard_fragment_is_the_documents_tspans() {
+        use crate::geometry::tspan::{Tspan, tspans_from_svg_fragment, tspans_to_svg_fragment};
+        let t = every_field_tspan();
+        let plain = Tspan { content: "<&> next".into(), ..Tspan::default_tspan() };
+        let frag = tspans_to_svg_fragment(&[t.clone(), plain.clone()]);
+        let root = r#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#;
+        assert_eq!(frag, format!("{root}{}{}</text>", tspan_svg(&t), tspan_svg(&plain)));
+        let back = tspans_from_svg_fragment(&frag).expect("the fragment reads");
+        assert_eq!(back.len(), 2, "{back:?}");
+        assert_eq!((back[0].id, back[1].id), (0, 1));
+        assert_eq!(Tspan { id: t.id, ..back[0].clone() }, t, "fragment: {frag}");
+        assert_eq!(Tspan { id: plain.id, ..back[1].clone() }, plain, "fragment: {frag}");
+    }
+
+    /// A fragment another application writes is read as the document reader
+    /// reads its file: a bare length is in user units (px), so 16 is a
+    /// 12 pt size and a 4 px raise is 3 pt; a tracking in em is read.
+    #[test]
+    fn a_foreign_clipboard_fragment_reads_its_lengths_as_a_file_does() {
+        use crate::geometry::tspan::tspans_from_svg_fragment;
+        let frag = r#"<svg xmlns="http://www.w3.org/2000/svg"><text><tspan font-size="16" baseline-shift="4" letter-spacing="0.1em">A</tspan></text></svg>"#;
+        let back = tspans_from_svg_fragment(frag).expect("the fragment reads");
+        assert_eq!(back.len(), 1, "{back:?}");
+        assert_eq!(back[0].content, "A");
+        assert_eq!(back[0].font_size, Some(12.0));
+        assert_eq!(back[0].baseline_shift, Some(3.0));
+        assert_eq!(back[0].letter_spacing, Some(0.1));
+        assert!(tspans_from_svg_fragment("<span>hi</span>").is_none());
+        assert!(tspans_from_svg_fragment(r#"<text xmlns="http://www.w3.org/2000/svg">hi</text>"#).is_none());
     }
 
     #[test]
