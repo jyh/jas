@@ -918,6 +918,11 @@ public sealed partial class MainWindow : Window
 
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        // Finding 13: a value typed into a panel and clicked away from onto the
+        // canvas is committed BEFORE the press reaches the engine (the press may
+        // deselect), then focus leaves the panel for the canvas's own.
+        _dock.CommitFocusedEdit();
+        CanvasFocus.Focus(FocusState.Pointer);
         if (sender is UIElement el) { el.CapturePointer(e.Pointer); }
         TracePointer("PRESS", e);
         _gestureOpen = true;

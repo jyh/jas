@@ -543,6 +543,61 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// Whether an EDITABLE combo's selection change is a person's pick: one made
+    /// in its list, open now or closed by that same pick. Any other move is the
+    /// platform COMPLETING typed text to an option (`13` to `135`), and it is not
+    /// sent; the typed text goes by Enter or blur. flask § 499: after a
+    /// re-entry completed `13`, Enter committed the selected `135` over a typed
+    /// `31`.
+    ///
+    /// ⛔ NOT "the box shows the item's text": a completion WRITES that text, so
+    /// that test passed it (§ 500). And there is no pick with the list closed:
+    /// Down there changes nothing (§ 500, measured), so the list is the only door.
+    /// </summary>
+    internal static bool EditablePickIsReal(bool dropDownOpen, bool listJustClosed) =>
+        dropDownOpen || listJustClosed;
+
+    /// <summary>
+    /// The item Up or Down picks in an editable combo with its list SHUT: the
+    /// one after (or before) the core's own, staying put at either end; from a free
+    /// value (no item, -1), Down picks the first and Up the last. -1 when the
+    /// list is empty. flask § 505: the platform's own Down stepped the box
+    /// `90` to `135` and sent nothing, so the shell takes the key and picks.
+    /// </summary>
+    internal static int ArrowPick(int coreIndex, int count, bool down)
+    {
+        if (count <= 0) { return -1; }
+        if (coreIndex < 0 || coreIndex >= count) { return down ? 0 : count - 1; }
+        if (down) { return coreIndex == count - 1 ? coreIndex : coreIndex + 1; }
+        return coreIndex == 0 ? 0 : coreIndex - 1;
+    }
+
+    /// <summary>
+    /// The text an editable combo's blur commits: the editor's, unless the
+    /// platform has BLANKED it, when it is what the person last typed. flask
+    /// § 504: putting the selection back to -1 blanked the editor after the
+    /// undo had written the typed `13`, so the blur read `''` and the entry was
+    /// lost. A box the person emptied themselves types `''`, which stays blank.
+    /// </summary>
+    internal static string? BlurText(string? box, string? typed) =>
+        string.IsNullOrEmpty(box) ? typed : box;
+
+    /// <summary>
+    /// What Enter in an editable combo sends, from the EDITOR's text: the value
+    /// of the item it names, or the text itself when it names none; nothing
+    /// when it is the core's own value or text, or blank. The shell takes Enter
+    /// itself (flask § 503: the platform's Enter resolved its own stale text,
+    /// `135`, over the editor's `31`, and raised no TextSubmitted).
+    /// </summary>
+    internal static string? EnterCommit(string? typed, string shownValue, string shownText, List<PaneOption> items)
+    {
+        if (string.IsNullOrWhiteSpace(typed)) { return null; }
+        var named = items.FindIndex(r => string.Equals(ChoiceText(r), typed, StringComparison.Ordinal));
+        if (named >= 0) { return ChoiceCommit(named, items, shownValue); }
+        return CommitOnBlur(typed, shownValue) && CommitOnBlur(typed, shownText) ? typed : null;
+    }
+
+    /// <summary>
     /// W-b: the text an item shows in the list. An `icon_select` row carries a
     /// `glyph` (a single mark, "•") beside its label, and both are shown; any
     /// other row shows its label.

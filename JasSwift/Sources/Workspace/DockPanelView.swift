@@ -718,6 +718,14 @@ func buildPanelBodyContext(ws: WorkspaceData, model: Model?, contentId: String,
             stateMap[k] = v
         }
     }
+    // Gradient panel — type, angle, stops and the rest reflect the
+    // selection's active attribute (flask STATUS 495: the slider drew the
+    // YAML's black→white over a selected blue radial). Over the stored panel,
+    // as the Rust dock and the engine lay it, because `grad_dither_checkbox`
+    // negates what it reads (W2b-7).
+    if contentId == "gradient_panel_content", let m = model {
+        for (k, v) in gradientPanelLiveOverrides(model: m) { panelMap[k] = v }
+    }
     // Properties panel — X/Y/W/H reflect the selection's evaluated
     // bounding box (document space, post-transform), decision-5 Part B.1.
     // Display-only merge into the render scope; never written to the

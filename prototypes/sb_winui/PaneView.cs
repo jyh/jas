@@ -27,6 +27,14 @@ public sealed partial class MainWindow
         private readonly long _availW;
         private readonly bool _topAligned;
 
+        /// <summary>
+        /// Finding 13 (flask § 497): each edit control's commit AS FOCUS LEAVES IT,
+        /// so a press on the canvas, which cannot take focus and so never blurs a
+        /// control, can run it first (<see cref="CommitFocusedEdit"/>). Weak, so a
+        /// rebuilt pane's controls are not kept alive by it.
+        /// </summary>
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, Action> _blurCommits = new();
+
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
                           bool topAligned = false, double pad = PanePad, bool dialog = false)
         {
@@ -1264,7 +1272,13 @@ public sealed partial class MainWindow
                     {
                         combo.SelectedIndex = index;
                         // A value no item carries (a free entry) is shown as text.
-                        if (combo.IsEditable && index < 0) { combo.Text = shownText; }
+                        if (combo.IsEditable && index < 0)
+                        {
+                            combo.Text = shownText;
+                            // § 503 row 15: setting `combo.Text` COMPLETES it (`13`
+                            // showed `135`), so the editor is given the shown text too.
+                            if (EditableTextBox(combo) is { } box && box.Text != shownText) { box.Text = shownText; }
+                        }
                     }
                     off = off || leaf.Id.Length == 0;
                     combo.IsEnabled = !off;
@@ -1433,10 +1447,12 @@ public sealed partial class MainWindow
                 e.Handled = true;
                 CommitBox(box, id, leaf.Path);
             };
-            box.LostFocus += (_, _) =>
+            void Blur()
             {
                 if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
-            };
+            }
+            box.LostFocus += (_, _) => Blur();
+            _blurCommits.AddOrUpdate(box, Blur);
             return box;
         }
 
@@ -1743,19 +1759,102 @@ public sealed partial class MainWindow
             if (leaf.Id.Length == 0) { return combo; }
 
             var id = leaf.Id;
+            // § 500: a pick in the list may raise SelectionChanged after the list
+            // has closed, so "just closed" lasts one dispatcher turn past it.
+            var listJustClosed = false;
+            // § 501: the text a person last TYPED (read at each key), so undoing a
+            // completion can give it back. Cleared at every commit, so it is never
+            // older than the core's own value.
+            string? typed = null;
+            var undoing = false;
+            combo.DropDownOpened += (_, _) => listJustClosed = false;
+            combo.DropDownClosed += (_, _) =>
+            {
+                listJustClosed = true;
+                combo.DispatcherQueue.TryEnqueue(() => listJustClosed = false);
+            };
             combo.SelectionChanged += (_, _) =>
             {
                 var state = combo.Tag as ChoiceState;
+                // flask § 499: in an editable combo the platform completes typed
+                // text to an option and moves the selection there; that is not a
+                // pick, and the typed text goes by Enter or blur instead.
+                if (combo.IsEditable && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, listJustClosed))
+                {
+                    // § 501: refusing to SEND the completion was not enough. Its
+                    // selection stayed on the option, so Enter took the selection
+                    // path and the box showed a value the core never got. UNDO it:
+                    // the core's own index, and the typed text (else the core's).
+                    // The put-back raises SelectionChanged again, at the core's
+                    // index, which lands here and changes nothing.
+                    // § 503: the put-back raises SelectionChanged again; `undoing`
+                    // keeps that nested event from undoing the undo. Typed text
+                    // goes back through the EDITOR, never `combo.Text`: setting
+                    // `combo.Text` is itself what completes (§ 503 row 15), and a
+                    // core value that IS an item (index 3, `0`) must not win over
+                    // what the person typed (§ 503 measurement 4).
+                    if (!undoing && combo.SelectedIndex != (typed is null ? state?.Index ?? -1 : -1))
+                    {
+                        undoing = true;
+                        combo.SelectedIndex = typed is null ? state?.Index ?? -1 : -1;
+                        var back = typed ?? ((state?.Index ?? -1) < 0 ? state?.Text : null);
+                        if (back is not null && EditableTextBox(combo) is { } box)
+                        {
+                            box.Text = back;
+                            // § 504: the platform blanks the editor AFTER this, when
+                            // the index it was given settles, so write it again then.
+                            combo.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (string.IsNullOrEmpty(box.Text)) { box.Text = back; }
+                            });
+                        }
+                        undoing = false;
+                    }
+                    return;
+                }
                 var send = PanelWire.ChoiceCommit(combo.SelectedIndex, items, state?.Shown);
                 if (send is null) { return; }
                 // Put back first: this raises SelectionChanged again, at the core's
                 // own index, and `ChoiceCommit` sends nothing for that.
                 combo.SelectedIndex = state?.Index ?? -1;
                 if (combo.IsEditable && (state?.Index ?? -1) < 0) { combo.Text = state?.Text ?? ""; }
+                typed = null;
                 SendPane(id, "commit", send, leaf.Path);
             };
             if (combo.IsEditable)
             {
+                // Item 7 (flask § 497): the template's own `EditableText` box keeps
+                // the platform's 32 DIP minimum height and its padding inside a
+                // 28 DIP combo, so its glyphs are clipped out of view (a committed
+                // `150` showed only its selection bar). Give it the metrics a
+                // number box already uses at the same height.
+                combo.Loaded += (_, _) =>
+                {
+                    var text = EditableTextBox(combo);
+                    if (text is null) { return; }
+                    text.MinHeight = 0;
+                    text.Padding = new Thickness(4, 0, 4, 0);
+                    text.VerticalContentAlignment = VerticalAlignment.Center;
+                    // Arrows and Enter are not typing: they never change what `typed` holds.
+                    text.KeyUp += (_, e) =>
+                    {
+                        if (e.Key is Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down
+                                  or Windows.System.VirtualKey.Enter) { return; }
+                        typed = text.Text;
+                    };
+                    // § 503: Enter is the SHELL's. The platform's own Enter resolved
+                    // its stale `Text` (a completed `135`) over the editor's `31`
+                    // and raised no TextSubmitted. Handled here, it never runs.
+                    text.PreviewKeyDown += (_, e) =>
+                    {
+                        if (e.Key != Windows.System.VirtualKey.Enter) { return; }
+                        e.Handled = true;
+                        var state = combo.Tag as ChoiceState;
+                        var send = PanelWire.EnterCommit(text.Text, state?.Shown ?? "", state?.Text ?? "", items);
+                        typed = null;
+                        if (send is not null) { SendPane(id, "commit", send, leaf.Path); }
+                    };
+                };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text
                 // that names an item is left to SelectionChanged above.
                 combo.TextSubmitted += (_, e) =>
@@ -1764,6 +1863,7 @@ public sealed partial class MainWindow
                     if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
                     e.Handled = true;
                     if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text, leaf.Path); }
+                    typed = null;
                     combo.Text = state?.Text ?? "";
                 };
                 // Leaving the combo commits what was typed, as a text box's blur
@@ -1772,15 +1872,50 @@ public sealed partial class MainWindow
                 // template's `EditableText` box: `combo.Text` is still empty when
                 // focus leaves. Focus moving into the combo's own dropdown is not
                 // leaving it.
-                combo.LostFocus += (_, _) =>
+                void Blur(bool focusStays)
                 {
                     var state = combo.Tag as ChoiceState;
-                    var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
-                        items.Select(PanelWire.ChoiceText), combo.IsDropDownOpen || FocusStaysIn(combo));
+                    var send = PanelWire.ComboBlurCommit(PanelWire.BlurText(EditableText(combo), typed),
+                        state?.Shown ?? "", state?.Text ?? "",
+                        items.Select(PanelWire.ChoiceText), focusStays);
                     if (send is null) { return; }
+                    typed = null;
                     SendPane(id, "commit", send, leaf.Path);
                     combo.Text = state?.Text ?? "";
+                }
+                combo.LostFocus += (_, _) => Blur(combo.IsDropDownOpen || FocusStaysIn(combo));
+                // § 505 / § 506: with the list shut, Up/Down are the shell's. The
+                // ComboBox's own class handler takes them FIRST, at this level, and
+                // marks them handled, so an editor `+=` handler never saw them (§ 506:
+                // no row). Registered here with handledEventsToo, this runs after the
+                // platform has moved the box, and commits the step from the CORE's
+                // item. The re-read then shows the committed value.
+                combo.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler((_, e) =>
+                {
+                    if (combo.IsDropDownOpen) { return; }
+                    if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) { return; }
+                    e.Handled = true;
+                    var at = combo.Tag as ChoiceState;
+                    var next = PanelWire.ArrowPick(at?.Index ?? -1, items.Count, e.Key == Windows.System.VirtualKey.Down);
+                    var pick = PanelWire.ChoiceCommit(next, items, at?.Shown);
+                    _w.Report($"COMBO ARROW id={id} key={e.Key} core={at?.Index ?? -1} next={next} sent={pick ?? "-"}");
+                    typed = null;
+                    if (pick is not null) { SendPane(id, "commit", pick, leaf.Path); }
+                }), true);
+                // § 504 row 15: on RE-ENTRY the platform completes a free value
+                // (`13` showed `135`) after the put-back has written it, and an
+                // Enter on that untouched box would commit `135`. One turn after
+                // focus arrives, an untyped free value is shown as the core's.
+                combo.GotFocus += (_, _) =>
+                {
+                    combo.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (typed is not null || combo.Tag is not ChoiceState st || st.Index >= 0) { return; }
+                        if (EditableTextBox(combo) is { } box && box.Text != st.Text) { box.Text = st.Text; }
+                    });
                 };
+                // From the canvas press, focus IS leaving, though it has not left yet.
+                _blurCommits.AddOrUpdate(combo, () => Blur(false));
             }
             return combo;
         }
@@ -1789,14 +1924,38 @@ public sealed partial class MainWindow
         /// The text in an editable combo's own text box (the template part
         /// `EditableText`), or null when the template has none.
         /// </summary>
-        private static string? EditableText(ComboBox combo)
+        private static string? EditableText(ComboBox combo) => EditableTextBox(combo)?.Text;
+
+        /// <summary>
+        /// Finding 13: run the blur commit of the edit control holding keyboard
+        /// focus in this pane, if any, NOW, before a canvas press reaches the
+        /// engine. A press on empty canvas deselects, and the control's own
+        /// `LostFocus` is a queued event that would commit after it, onto nothing.
+        /// Its later `LostFocus` sends nothing: the box was put back to the core's
+        /// value, which `CommitOnBlur` does not send.
+        /// </summary>
+        internal void CommitFocusedEdit()
+        {
+            if (_host.XamlRoot is null) { return; }
+            for (var node = FocusManager.GetFocusedElement(_host.XamlRoot) as DependencyObject;
+                 node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node is Control c && _blurCommits.TryGetValue(c, out var commit)) { commit(); return; }
+            }
+        }
+
+        /// <summary>
+        /// An editable combo's own text box (the template part `EditableText`),
+        /// or null when the template has none (or is not yet applied).
+        /// </summary>
+        private static TextBox? EditableTextBox(ComboBox combo)
         {
             var pending = new Stack<DependencyObject>();
             pending.Push(combo);
             while (pending.Count > 0)
             {
                 var node = pending.Pop();
-                if (node is TextBox box && box.Name == "EditableText") { return box.Text; }
+                if (node is TextBox box && box.Name == "EditableText") { return box; }
                 var n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node);
                 for (var i = 0; i < n; i++) { pending.Push(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i)); }
             }
