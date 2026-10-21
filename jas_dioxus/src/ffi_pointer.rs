@@ -473,6 +473,19 @@ pub unsafe extern "C" fn jas_selection_len(e: *mut JasEngine) -> usize {
 /// frame with no tool is a document, which is what `jas_paint_document` has
 /// always drawn.
 pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter) {
+    // THE VIEW, as the web canvas applies it (`app_state.rs`:
+    // `translate(view_offset) . scale(zoom)` around `render::render`): the
+    // document and the selection draw under it, and the tool's overlay after
+    // the pop, because a tool's state is in viewport pixels already. Every tool
+    // converts the pointer through this same view, so without it a pan moved
+    // the hit mapping and not the picture (the 10-20 feel sitting, finding 1).
+    // The identity view pushes nothing, so a frame at it is byte-identical to
+    // what it was.
+    let (z, ox, oy) = engine.with_model(|m| (m.zoom_level, m.view_offset_x, m.view_offset_y));
+    let viewed = (z, ox, oy) != (1.0, 0.0, 0.0) && z > 0.0;
+    if viewed {
+        p.push_state(crate::painter::Transform { a: z, b: 0.0, c: 0.0, d: z, e: ox, f: oy });
+    }
     engine.with_document(|doc| {
         crate::document::paint::emit_document(p, doc, crate::geometry::live::DEFAULT_PRECISION);
     });
@@ -485,6 +498,9 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
         crate::painter::selection_overlay::draw_selection_overlays(&mut ctx, doc);
         ctx.finish();
     });
+    if viewed {
+        p.pop_state();
+    }
     let mut slot = engine.tool_slot();
     if let Some((_, tool)) = slot.as_mut() {
         let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
@@ -928,6 +944,56 @@ mod tests {
         // wrong on a screen.
         assert_eq!(&cmds[..doc_only], &bare.commands()[..doc_only],
                    "the document half is unchanged and comes FIRST");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⭐ THE FRAME DRAWS THE VIEW. The 10-20 feel sitting, findings 1 and 11:
+    /// a Hand drag moved the pointer's hit mapping and not the picture, and
+    /// zoom and fit changed nothing he could see, because this frame drew in
+    /// document space while every tool converts the pointer through the view
+    /// (`yaml_tool::pointer_event_payload`). The web canvas's law
+    /// (`app_state.rs`, `translate(view_offset) . scale(zoom)` around
+    /// `render::render`, restored before the tool overlay): the document and
+    /// the selection draw under the view; the tool's overlay draws after the
+    /// pop, in viewport pixels, because a tool's state is already in them.
+    #[test]
+    fn a_frame_draws_the_document_and_selection_under_the_view_and_the_overlay_outside_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::{Command, RecordingPainter};
+
+        let e = jas_engine_new();
+        seed(e);
+        // The identity view pushes nothing: a frame is exactly what it was, so
+        // no baseline frozen at the identity view can move.
+        let mut identity = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut identity);
+        assert!(!identity.commands().iter().any(|c| matches!(c, Command::PushState { .. })),
+                "the seeded rect draws no state of its own, so a push here is the view's");
+
+        // The sitting's own pan, (+32, -12) DIPs, at a zoom that is not 1.
+        unsafe { &*e }.with_model_mut(|m| {
+            m.view_offset_x = 32.0;
+            m.view_offset_y = -12.0;
+            m.zoom_level = 1.5;
+        });
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 10.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 140.0, 120.0, MOD_DRAGGING);
+        }
+        let mut framed = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut framed);
+        let cmds = framed.commands();
+        let Some(Command::PushState { transform: t }) = cmds.first() else {
+            panic!("the frame must open with the view: {:?}", cmds.first());
+        };
+        assert_eq!((t.a, t.b, t.c, t.d, t.e, t.f), (1.5, 0.0, 0.0, 1.5, 32.0, -12.0),
+                   "translate(view_offset) . scale(zoom), as the web canvas pushes it");
+        // The document between the push and its pop is the identity frame's.
+        let n = identity.commands().len();
+        assert_eq!(&cmds[1..=n], identity.commands(), "the document draws unchanged, inside the view");
+        assert!(matches!(cmds[n + 1], Command::PopState), "the view closes after the document: {:?}", cmds[n + 1]);
+        assert!(cmds.len() > n + 2, "the marquee draws after the pop, in viewport pixels");
         unsafe { jas_engine_free(e) };
     }
 
