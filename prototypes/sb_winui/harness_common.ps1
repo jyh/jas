@@ -129,6 +129,25 @@ function Select-SbRows($Rows, [string]$Pattern) {
     return @($Rows | Where-Object { $_ -match $Pattern })
 }
 
+# The PAINT arm. A run the shell refused to paint did not draw its frame: on a
+# `RUSTFAIL REPAINT-FAILED` row the host keeps the PREVIOUS frame (ffi_paint
+# refuses the whole document before BeginDraw), so the frame hash a run reads
+# is a picture of an earlier state. Measured 10-20 (flask STATUS 477, 483):
+# every click logged doc-changed=true while 1,223 repaints were refused, and a
+# hash cannot tell "painted" from "kept". So any refused repaint in the run's
+# own rows FAILS, naming the shell's reason; and a run with NO drawn repaint
+# fails too, because a run that drew nothing certifies nothing.
+function Get-SbPaintVerdict($Rows) {
+    $ok = @(Select-SbRows $Rows 'RUSTOK REPAINT ').Count
+    $failed = @(Select-SbRows $Rows 'RUSTFAIL REPAINT-FAILED ')
+    if ($failed.Count -gt 0) {
+        $why = if ($failed[0] -match 'failure=([A-Z][A-Z ]*[A-Z])') { $Matches[1] } else { 'UNNAMED' }
+        return "FAIL(repaint-failed=$($failed.Count) ok=$ok failure=$why)"
+    }
+    if ($ok -eq 0) { return 'FAIL(no RUSTOK REPAINT row after the mark)' }
+    return "PASS(ok=$ok)"
+}
+
 # ---------------------------------------------------------------------------
 # Waiting on a row -- BOUNDED, with a NAMED refusal
 # ---------------------------------------------------------------------------
@@ -3005,6 +3024,12 @@ function Read-SbInputScript([string]$Json) {
     # (SB_TOOL by name, `ToolKnob.Resolve`) and refuses an unknown one by name.
     if ([string]::IsNullOrWhiteSpace("$($s.tool)")) {
         return (& $no 'the script names no tool')
+    }
+    # The read-back's oracle. Without one, prove_e2e's `Join-Path <dir> ''` is
+    # the script's own DIRECTORY, which its existence check finds, so the run
+    # drove the app and only then threw reading a directory as a document.
+    if ([string]::IsNullOrWhiteSpace("$($s.expected_json)")) {
+        return (& $no 'the script names no expected_json')
     }
     if ($null -ne $s.app_state) {
         $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })
