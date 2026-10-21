@@ -43,6 +43,10 @@ pub mod panel_scope;
 // values, in the engine (wave 2, A5). Same gate as the boundary it serves.
 #[cfg(feature = "ffi")]
 pub mod panel_plan;
+// The engine's dock layout, seeded from `default_layouts.yaml` through
+// `panel_plan::dock_layout` and read back for a shell (floating panels, FP-2).
+#[cfg(feature = "ffi")]
+pub mod layout_seed;
 // A widget's BEHAVIOR run in the engine, with the pre-flight refusal (wave 2,
 // A6). Same gate as the boundary it serves.
 #[cfg(feature = "ffi")]
