@@ -48,5 +48,13 @@
       {"op": "bring_pane_to_front", "pane_id": 0}
     ],
     "expected_json": "pane_bring_to_front.json"
+  },
+  {
+    "name": "clamp_panes_in_a_viewport_smaller_than_the_margin",
+    "setup": "workspace_default_with_panes.json",
+    "ops": [
+      {"op": "clamp_floating_docks", "viewport_w": 0.0, "viewport_h": 0.0}
+    ],
+    "expected_json": "pane_clamp_tiny.json"
   }
 ]

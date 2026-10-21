@@ -884,6 +884,14 @@ public sealed partial class MainWindow : Window
         FloatLayer.SizeChanged += (_, e) =>
         {
             if (_floatDrawn == 0) { return; }
+            // The window's own size law: a zero (a minimised window) is REFUSED,
+            // never clamped to, or every floating dock would jump to the corner.
+            var decision = SurfacePolicy.Decide((uint)e.NewSize.Width, (uint)e.NewSize.Height, hasSurface: true);
+            if (decision != Decision.Accept)
+            {
+                Report($"FLOAT DOCK CLAMP {decision} {(uint)e.NewSize.Width}x{(uint)e.NewSize.Height} -- docks stay where they are");
+                return;
+            }
             _canvas.LayoutOp(new LayoutOpCmd
             {
                 Op = LayoutWire.ClampFloatingDocks(e.NewSize.Width, e.NewSize.Height),
