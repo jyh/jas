@@ -199,6 +199,7 @@ internal static unsafe class JasCore
     // them into the key names of the `{"key"}` dispatch. Any other code is the
     // character a key produced.
     internal const uint KeyBackspace = 0x08;
+    internal const uint KeyTab = 0x09;
     internal const uint KeyEnter = 0x0D;
     internal const uint KeyEscape = 0x1B;
     internal const uint KeyDelete = 0x7F;

@@ -780,6 +780,29 @@ static class Program
             + "|" + (GradientSliderWire.Stops("""[{"location":5}]""")?.Count.ToString() ?? "(null)"));
         Eq("gradient: the selected index reads -1 when absent or not a number", "0|-1|-1|2",
             $"{GradientSliderWire.Index("0")}|{GradientSliderWire.Index("-1")}|{GradientSliderWire.Index(null)}|{GradientSliderWire.Index("2")}");
+        // The shell's named keys, by the code `OnKeyDown` sends (`JasCore.Key*`).
+        // Tab is 0x09, a CONTROL character, so the character fallback names it
+        // nothing: before Tab was in this table it reached `ApplyKey` as
+        // `RUSTFAIL KEY UNNAMED` and the engine never saw it.
+        var named = new (uint Code, string Name)[]
+        {
+            (0x08, "Backspace"), (0x09, "Tab"), (0x0D, "Enter"), (0x1B, "Escape"), (0x7F, "Delete"),
+            (0xF700, "ArrowUp"), (0xF701, "ArrowDown"), (0xF702, "ArrowLeft"), (0xF703, "ArrowRight"),
+            (0xF729, "Home"), (0xF72B, "End"),
+        };
+        Eq("key name: each named code is its engine key name",
+            string.Join("|", named.Select(n => n.Name)),
+            string.Join("|", named.Select(n => KeyWire.Name(n.Code) ?? "(null)")));
+        Eq("key name: the eleven names are pairwise distinct", "11",
+            named.Select(n => KeyWire.Name(n.Code)).Distinct().Count().ToString());
+        Eq("key name: Tab is not a character, so only the table names it", "(null)|Tab",
+            (KeyWire.CharName(0x09) ?? "(null)") + "|" + (KeyWire.Name(0x09) ?? "(null)"));
+        Eq("key name: any other code is the character it produced, or none", "O|(null)",
+            (KeyWire.Name('O') ?? "(null)") + "|" + (KeyWire.Name(0x07) ?? "(null)"));
+        // Tab goes to the engine only from the CANVAS's focus, as on the web
+        // (`keyboard.rs`: Tab on a widget is the platform's focus traversal).
+        Eq("tab: sent and kept from the canvas, left to the platform elsewhere", "True|False",
+            KeyWire.TakesTab(fromCanvas: true) + "|" + KeyWire.TakesTab(fromCanvas: false));
         // FP-3: the dock is drawn from the ENGINE's layout (`jas_layout_state`),
         // its first anchored dock read strictly: a group is its panels (content
         // ids), its active index and its collapsed flag, all the engine's.
