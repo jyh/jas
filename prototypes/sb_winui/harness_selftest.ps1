@@ -2788,6 +2788,26 @@ Test-Case 'lane: the build log names a file in a directory that now exists (fres
 Remove-Item $SbLogProbe -Recurse -Force -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
+# The paint arm: a run that the shell REFUSED to paint is not a run that drew
+# its frame. Measured 10-20: a stacked superscript + underline logged
+# doc-changed=true on every click while ffi_paint refused the whole frame
+# (`RUSTFAIL REPAINT-FAILED ... failure=DOCUMENT INCOMPLETE`), so the screen
+# kept the PREVIOUS frame and a frame hash frozen from it froze the wrong picture.
+# Rows below are the real shapes from that sitting's sb-runs.log.
+# ---------------------------------------------------------------------------
+$SbPaintOk   = 'SB_MODE=(default:offscreen)	RUSTOK REPAINT events_total=1 distinct_sizes=1 arrivals=0 frames=1 cause=pointer surface=2379x1333 paint=1.94ms present=3.46ms'
+$SbPaintFail = 'SB_MODE=(default:offscreen)	RUSTFAIL REPAINT-FAILED events_total=72 frames=1 cause=panel surface=1908x675 paint=0.70ms present=0.00ms render-has-dispatcher=false failure=DOCUMENT INCOMPLETE -- the document holds an element the native walk cannot draw'
+$SbPaintClick = 'SB_MODE=(default:offscreen)	PANEL CLICK panel=character_panel_content widget=ch_underline via=hand event=click value=- outcome=changed changed-rows=1 doc-changed=true'
+Test-Case 'paint: every repaint drew -> PASS with the count' { Get-SbPaintVerdict @($SbPaintOk, $SbPaintClick, $SbPaintOk) } 'PASS(ok=2)'
+Test-Case 'paint: ONE refused repaint among drawn ones -> FAIL naming the reason' { Get-SbPaintVerdict @($SbPaintOk, $SbPaintClick, $SbPaintFail, $SbPaintOk) } 'FAIL(repaint-failed=1 ok=2 failure=DOCUMENT INCOMPLETE)'
+Test-Case 'paint: refused only -> FAIL, not a pass on zero drawn' { Get-SbPaintVerdict @($SbPaintFail, $SbPaintFail) } 'FAIL(repaint-failed=2 ok=0 failure=DOCUMENT INCOMPLETE)'
+Test-Case 'paint: no repaint row at all -> FAIL, a run that drew nothing certifies nothing' { Get-SbPaintVerdict @($SbPaintClick) } 'FAIL(no RUSTOK REPAINT row after the mark)'
+Test-Case 'paint: no rows -> FAIL' { Get-SbPaintVerdict @() } 'FAIL(no RUSTOK REPAINT row after the mark)'
+Test-Case 'paint: CONTROL -- a REPAINT-FAILED row is not counted as a drawn repaint' { @(Select-SbRows @($SbPaintFail) 'RUSTOK REPAINT ').Count } 0
+Test-Case 'paint: CONTROL -- the failure pattern matches the real row' { @(Select-SbRows @($SbPaintFail) 'RUSTFAIL REPAINT-FAILED ').Count } 1
+Test-Case 'paint: a failure with no reason field still FAILS' { Get-SbPaintVerdict @($SbPaintOk, 'RUSTFAIL REPAINT-FAILED events_total=1 frames=1') } 'FAIL(repaint-failed=1 ok=1 failure=UNNAMED)'
+
+# ---------------------------------------------------------------------------
 Write-Host ""
 $cases | ForEach-Object { Write-Host $_ }
 Write-Host ""
