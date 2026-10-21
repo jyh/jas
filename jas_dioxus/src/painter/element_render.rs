@@ -375,16 +375,7 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     // draw does not carry -- spacing, decoration, a glyph rotation -- and a
     // baseline shift that does not read (node 27 lowers the readable ones).
     if t.render_is_flat() && needs_layout(t) {
-        let has_measurer = crate::text_measure::try_make_measurer(
-            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
-            t.font_size,
-        ).is_some();
-        return !has_measurer
-            || !t.letter_spacing.is_empty()
-            || !t.kerning.is_empty()
-            || !t.text_decoration.split_whitespace().all(|w| w == "none")
-            || text_transform(t).map_or(true, |(_, _, r)| r != 0.0)
-            || baseline_shift_of(t).is_none();
+        return flat_layout_route(t, flat_has_measurer(t)) == FlatLayoutRoute::Legacy;
     }
     // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
     // tspan is feature-free AND a real measurer exists for the font.
@@ -453,6 +444,52 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
         }
     }
     !t.baseline_shift.is_empty() || decoration_needs_legacy(t)
+}
+
+/// How flat text that the legacy renderer lays out (`needs_layout`) is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlatLayoutRoute {
+    /// The per-line draw (`emit_laid_out_text`), node 25.
+    Lines,
+    /// The shared plan (`emit_laid_out_runs`), for what the line draw lacks.
+    Runs,
+    /// Neither: the legacy renderer.
+    Legacy,
+}
+
+/// ⭐ THE 10-20 FEEL SITTING, FINDING 10. The per-line draw carries no
+/// spacing, decoration or glyph rotation, so superscript + underline (a shift
+/// is what makes the text `needs_layout`, node 27) went to legacy, and the
+/// Windows walk refused the WHOLE frame: 1,223 `DOCUMENT INCOMPLETE` repaints
+/// in his sitting. What the line draw lacks now takes the shared plan, which
+/// draws all three (its decoration lines, its letter spacing, each glyph
+/// turned), provided the plan takes the element at all (`runs_plan_excludes`).
+/// What the line draw carries keeps it, so no frame at a single style moves.
+/// Stays legacy, by name: no real measurer (both draws break lines by measured
+/// widths), and a baseline shift that does not read. `has_measurer` is an
+/// argument so the decision can be driven where no real measurer exists.
+pub(crate) fn flat_layout_route(t: &crate::geometry::element::TextElem, has_measurer: bool) -> FlatLayoutRoute {
+    if !has_measurer || baseline_shift_of(t).is_none() {
+        return FlatLayoutRoute::Legacy;
+    }
+    let lines_lack = !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || !t.text_decoration.split_whitespace().all(|w| w == "none")
+        || text_transform(t).map_or(true, |(_, _, r)| r != 0.0);
+    if !lines_lack {
+        FlatLayoutRoute::Lines
+    } else if !runs_plan_excludes(t) {
+        FlatLayoutRoute::Runs
+    } else {
+        FlatLayoutRoute::Legacy
+    }
+}
+
+fn flat_has_measurer(t: &crate::geometry::element::TextElem) -> bool {
+    crate::text_measure::try_make_measurer(
+        &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+        t.font_size,
+    ).is_some()
 }
 
 /// ⭐ NODE 20 (jas section 414): an underline or line-through lowers on flat,
@@ -1830,6 +1867,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         // NODE 33: non-flat text the legacy renderer lays out takes the runs
         // path; the rest keeps the single-baseline segmented lowering.
         Element::Text(e) if !e.render_is_flat() && needs_layout(e) => emit_laid_out_runs(p, e, eff),
+        // Finding 10: flat laid-out text with what the line draw lacks.
+        Element::Text(e) if e.render_is_flat() && needs_layout(e)
+            && flat_layout_route(e, flat_has_measurer(e)) == FlatLayoutRoute::Runs => emit_laid_out_runs(p, e, eff),
         Element::Text(e) if !e.render_is_flat() => emit_segmented_text(p, e, eff),
         Element::Text(e) => {
             // A simplified flat FastRun — proves the text op interleaves in
