@@ -1811,7 +1811,16 @@ public sealed partial class MainWindow
                         undoing = true;
                         combo.SelectedIndex = typed is null ? state?.Index ?? -1 : -1;
                         var back = typed ?? ((state?.Index ?? -1) < 0 ? state?.Text : null);
-                        if (back is not null && EditableTextBox(combo) is { } box) { box.Text = back; }
+                        if (back is not null && EditableTextBox(combo) is { } box)
+                        {
+                            box.Text = back;
+                            // § 504: the platform blanks the editor AFTER this, when
+                            // the index it was given settles, so write it again then.
+                            combo.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (string.IsNullOrEmpty(box.Text)) { box.Text = back; Trace("undone-late"); }
+                            });
+                        }
                         undoing = false;
                         Trace("undone");
                     }
@@ -1877,7 +1886,8 @@ public sealed partial class MainWindow
                 void Blur(bool focusStays)
                 {
                     var state = combo.Tag as ChoiceState;
-                    var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
+                    var send = PanelWire.ComboBlurCommit(PanelWire.BlurText(EditableText(combo), typed),
+                        state?.Shown ?? "", state?.Text ?? "",
                         items.Select(PanelWire.ChoiceText), focusStays);
                     if (send is null) { return; }
                     typed = null;
@@ -1885,7 +1895,19 @@ public sealed partial class MainWindow
                     combo.Text = state?.Text ?? "";
                 }
                 combo.LostFocus += (_, _) => { Trace("lost-focus"); Blur(combo.IsDropDownOpen || FocusStaysIn(combo)); };
-                combo.GotFocus += (_, _) => Trace("got-focus");
+                // § 504 row 15: on RE-ENTRY the platform completes a free value
+                // (`13` showed `135`) after the put-back has written it, and an
+                // Enter on that untouched box would commit `135`. One turn after
+                // focus arrives, an untyped free value is shown as the core's.
+                combo.GotFocus += (_, _) =>
+                {
+                    Trace("got-focus");
+                    combo.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (typed is not null || combo.Tag is not ChoiceState st || st.Index >= 0) { return; }
+                        if (EditableTextBox(combo) is { } box && box.Text != st.Text) { box.Text = st.Text; Trace("shown-core"); }
+                    });
+                };
                 // From the canvas press, focus IS leaving, though it has not left yet.
                 _blurCommits.AddOrUpdate(combo, () => Blur(false));
             }

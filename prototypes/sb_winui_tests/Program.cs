@@ -395,6 +395,15 @@ static class Program
             "(null)", PanelWire.EnterCommit("0", "0", "0", angleItems) ?? "(null)");
         Eq("enter: a blank editor sends nothing",
             "(null)", PanelWire.EnterCommit(" ", "13", "13", angleItems) ?? "(null)");
+        // flask § 504: the platform blanks the editor after the undo restored it.
+        Eq("blur text: a blanked editor gives back what was typed",
+            "13", PanelWire.BlurText("", "13") ?? "(null)");
+        Eq("blur text: CONTROL: an editor with text is read as it is",
+            "31", PanelWire.BlurText("31", "13") ?? "(null)");
+        Eq("blur text: a box the person emptied stays empty",
+            "", PanelWire.BlurText("", "") ?? "(null)");
+        Eq("blur text: nothing typed and a blank box is nothing",
+            "(null)", PanelWire.BlurText(null, null) ?? "(null)");
         Eq("combo blur: an item's text is a pick, left to the selection path",
             "(null)", PanelWire.ComboBlurCommit("45°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: focus moving into the combo's own dropdown is not leaving",
