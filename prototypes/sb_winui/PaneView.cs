@@ -323,6 +323,7 @@ public sealed partial class MainWindow
             var spacers = 0;
             var separators = 0;
             var (previews, previewEmpty) = (0, 0);
+            var gradients = 0;
             var textClicks = 0;
             foreach (var leaf in leaves)
             {
@@ -396,6 +397,16 @@ public sealed partial class MainWindow
                     case "brush_preview":
                         previews++;
                         el = BuildBrushPreview(leaf, ref previewEmpty);
+                        break;
+
+                    // The gradient slider (the 10-20 sitting, item 6: it was a
+                    // `[gradient_slider]` placeholder). DISPLAY ONLY, as in every
+                    // port: the spec declares no event for it, so it takes no
+                    // pointer. ApplyLeafValues draws it from `bind.stops`.
+                    case "gradient_slider":
+                        gradients++;
+                        el = new GradientSliderSurface { IsHitTestVisible = false };
+                        if (leaf.Literal("summary") is { Length: > 0 } gtip) { ToolTipService.SetToolTip(el, gtip); }
                         break;
 
                     // A `length_input` is this control too: the person types TEXT
@@ -596,7 +607,7 @@ public sealed partial class MainWindow
             // and asserts only `leaves` and `controls`; nothing sums the category
             // counters, and the self-test's row is an INPUT to that parser.
             _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} text-clicks={textClicks} "
-                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} "
+                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} gradients={gradients} "
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
@@ -816,6 +827,78 @@ public sealed partial class MainWindow
             var path = leaf.Path;
             if (PanelWire.Addressable(id, path)) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
             return swatch;
+        }
+
+        /// <summary>
+        /// The gradient slider's picture, the web's layout scaled into the plan's
+        /// rect (`render_gradient_slider` draws it 44 px tall; the plan gives 24):
+        /// a diamond per pair across the top, the bar previewing the stops, and
+        /// a circle per stop along the bottom, each at its `location`. The
+        /// selected stop or midpoint is edged in the checked colour. Stops that do
+        /// not parse, or fewer than two, draw a grey bar and no markers.
+        /// </summary>
+        private void DrawGradientSlider(GradientSliderSurface slider, PaneLeaf leaf)
+        {
+            slider.Children.Clear();
+            double w = leaf.W, h = leaf.H;
+            var r = h * 0.2;                       // a stop's radius; the inset that keeps it in
+            var d = h * 0.25;                      // a diamond's side
+            var barTop = d + 1;
+            var (barW, barH) = (w - 2 * r, h - barTop - 2 * r);
+            if (barW <= 0 || barH <= 0) { return; }   // a rect too small to draw draws nothing
+            double At(double loc) => r + barW * loc / 100;
+            Microsoft.UI.Xaml.Media.SolidColorBrush Brush(string hex, double opacity) =>
+                PanelWire.SwatchColor(hex) is { } c
+                    ? new(Microsoft.UI.ColorHelper.FromArgb((byte)Math.Round(255 * opacity / 100), c.R, c.G, c.B))
+                    : _paneMutedBrush;
+            var stops = GradientSliderWire.Stops(leaf.Value("bind.stops"));
+            var bar = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = barW, Height = barH, Stroke = _paneMutedBrush, StrokeThickness = 1 };
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(bar, r);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(bar, barTop);
+            slider.Children.Add(bar);
+            if (stops is null || stops.Count < 2) { bar.Fill = _paneMutedBrush; return; }
+            var preview = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0.5),
+                EndPoint = new Windows.Foundation.Point(1, 0.5),
+            };
+            foreach (var st in stops)
+            {
+                preview.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+                {
+                    Color = Brush(st.Color, st.Opacity).Color,
+                    Offset = st.Location / 100,
+                });
+            }
+            bar.Fill = preview;
+            var stopAt = GradientSliderWire.Index(leaf.Value("bind.selected_stop_index"));
+            var midAt = GradientSliderWire.Index(leaf.Value("bind.selected_midpoint_index"));
+            for (var i = 0; i + 1 < stops.Count; i++)
+            {
+                var diamond = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Width = d, Height = d,
+                    Fill = i == midAt ? _paneCheckedEdge : _paneMutedBrush,
+                    RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                    RenderTransform = new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 45 },
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(diamond, At(GradientSliderWire.MidpointLocation(stops[i], stops[i + 1])) - d / 2);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(diamond, 0);
+                slider.Children.Add(diamond);
+            }
+            for (var i = 0; i < stops.Count; i++)
+            {
+                var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+                {
+                    Width = 2 * r, Height = 2 * r,
+                    Fill = Brush(stops[i].Color, stops[i].Opacity),
+                    Stroke = i == stopAt ? _paneCheckedEdge : _paneMutedBrush,
+                    StrokeThickness = i == stopAt ? 2 : 1,
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(dot, At(stops[i].Location) - r);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(dot, h - 2 * r);
+                slider.Children.Add(dot);
+            }
         }
 
         /// <summary>The fill for a swatch: its colour, or TRANSPARENT when the core
@@ -1098,6 +1181,10 @@ public sealed partial class MainWindow
             {
                 case SwatchTile swatch when leaf.Type == "color_swatch":
                     swatch.Background = SwatchBrush(leaf.Value("bind.color"));
+                    break;
+
+                case GradientSliderSurface slider when leaf.Type == "gradient_slider":
+                    DrawGradientSlider(slider, leaf);
                     break;
 
                 case TextBlock tb when leaf.Type == "text":
@@ -1755,6 +1842,17 @@ internal sealed partial class SwatchTile : Grid
 /// bar's AutomationId reaches the rendered tree.
 /// </summary>
 internal sealed partial class ColorBarSurface : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// The gradient slider's surface (<c>DrawGradientSlider</c>). A `Canvas` has no
+/// automation peer, so it is given the plain element peer, as
+/// <see cref="ColorBarSurface"/> is, and `grad_slider` reaches the rendered tree.
+/// </summary>
+internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls.Canvas
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
