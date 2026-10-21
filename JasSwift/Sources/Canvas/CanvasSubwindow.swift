@@ -1761,7 +1761,11 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                         pAttrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
                     }
                     if let bs = t.baselineShift, bs != 0 {
-                        pAttrs[.baselineOffset] = bs as NSNumber
+                        // + is UP (CHARACTER.md). CoreText's offset is in TEXT
+                        // space, which `textMatrix` (d = -1) flips against
+                        // this y-down canvas, so the offset is negated; a
+                        // positive one drew a raised range LOWERED.
+                        pAttrs[.baselineOffset] = -bs as NSNumber
                     }
                     if kernPx != 0 {
                         pAttrs[.kern] = kernPx as NSNumber
@@ -1804,7 +1808,121 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             let naturalW = measure(segStr)
             let layoutW = max(0.0, lastVisibleRight - firstVisibleX)
             let gluesStretched = layoutW > naturalW + 0.5
-            if rotRad == 0.0 && !gluesStretched {
+            // STYLED text asks the shared plan's question instead
+            // (`text_runs::stretched`): was a glue glyph laid out wider or
+            // narrower than its own character's width? `naturalW` above is
+            // measured in the ELEMENT's face, so a styled line holding a
+            // wider run (a bold word) read as stretched and drew word by
+            // word in the element's attributes. ⚠️ A mutant restoring that
+            // test SURVIVES the arms (StyledJustifiedRotationRenderTests): the
+            // branch below draws a falsely "stretched" styled line at the
+            // layout's x in each tspan's attributes, the same pixels. Only glue
+            // that justification SHRINKS differs (the `+ 0.5` test sees growth
+            // alone), and a 46-54 pt width sweep found no line that shrinks.
+            // The plan's test is kept because it is the plan's.
+            let styled = !v.renderIsFlat
+            let planStretched = styled && lineGlyphs.contains { g in
+                g.idx < line.end && !g.isTrailingSpace
+                    && g.idx < chars.count && chars[g.idx].isWhitespace
+                    && g.idx < perCharW.count
+                    && abs((g.right - g.x) - perCharW[g.idx]) > 1e-6
+            }
+            // A TSPAN's own rotation, or the element's on STYLED text (TSPAN.md
+            // "Rotation"): each glyph turns about its own baseline origin and
+            // the pen advances un-rotated. Such a line, or a stretched styled
+            // line, draws tspan by tspan in each one's own attributes: a
+            // stretched line word by word, each word at its first glyph's
+            // layout x, else each portion at its first glyph's x; a turned
+            // portion one glyph per frame at its own angle (a tspan's rotate,
+            // else the element's), at the glyph's layout x, so a turned line
+            // keeps its stretch. Mirrors Rust's shared plan (`text_runs::plan`:
+            // `word_runs`, then `per_glyph`).
+            let rotatedTspan = styled
+                && (rotRad != 0.0 || v.tspans.contains { ($0.rotate ?? 0) != 0 })
+            // A decoration is drawn in its glyph's frame (TSPAN.md
+            // "Decoration beside a shift or a turn"), but CoreText strokes a
+            // line's underline at ONE position whatever a run's
+            // `.baselineOffset`. So a line holding a shifted, decorated tspan
+            // draws portion by portion, each at its own shifted baseline.
+            let shiftedDecorated = styled && v.tspans.contains { t in
+                (t.baselineShift ?? 0) != 0 && {
+                    let d = t.textDecoration ?? tdTokens
+                    return d.contains("underline") || d.contains("line-through")
+                }()
+            }
+            if rotatedTspan || planStretched || shiftedDecorated {
+                let glyphX = { (idx: Int) -> Double? in
+                    lineGlyphs.first(where: { $0.idx == idx }).map { v.x + anchorDx + $0.x }
+                }
+                var charPos = 0
+                var strPos = 0
+                for t in v.tspans {
+                    let tStart = charPos
+                    charPos += t.content.unicodeScalars.count
+                    let s = max(line.start, tStart), e = min(line.end, charPos)
+                    if s >= e { continue }
+                    // This portion's slice of `lineStr`, which appends each
+                    // portion's case-transformed text in tspan order.
+                    let own = String(String.UnicodeScalarView(
+                        Array(t.content.unicodeScalars)[(s - tStart)..<(e - tStart)]))
+                    let len = (applyTextTransform(t.textTransform ?? v.textTransform,
+                        t.fontVariant ?? v.fontVariant, own) as NSString).length
+                    // The portion's own shift moves its baseline (y down), and
+                    // the attribute is dropped so CoreText draws the glyphs AND
+                    // their decoration there.
+                    let mPiece = NSMutableAttributedString(
+                        attributedString: lineStr.attributedSubstring(from: NSRange(location: strPos, length: len)))
+                    mPiece.removeAttribute(.baselineOffset, range: NSRange(location: 0, length: mPiece.length))
+                    let piece: NSAttributedString = mPiece
+                    let portionY = baselineY - (t.baselineShift ?? 0)
+                    strPos += len
+                    let angle = t.rotate.map { $0 * (Double.pi / 180) } ?? rotRad
+                    // The portion's characters: (range in `piece`, index in
+                    // the content), and the pieces it draws as: its words on
+                    // a stretched line (the glue between them not drawn),
+                    // else the whole portion.
+                    let ns = piece.string as NSString
+                    var glyphs: [(r: NSRange, idx: Int)] = []
+                    var at = 0
+                    while at < ns.length {
+                        let r = ns.rangeOfComposedCharacterSequence(at: at)
+                        glyphs.append((r, s + glyphs.count))
+                        at = r.location + r.length
+                    }
+                    var pieces: [ArraySlice<(r: NSRange, idx: Int)>] = []
+                    if planStretched {
+                        var from: Int? = nil
+                        for (i, g) in glyphs.enumerated() {
+                            let ws = ns.substring(with: g.r).allSatisfy { $0.isWhitespace }
+                            if ws, let f = from { pieces.append(glyphs[f..<i]); from = nil }
+                            if !ws && from == nil { from = i }
+                        }
+                        if let f = from { pieces.append(glyphs[f...]) }
+                    } else if !glyphs.isEmpty {
+                        pieces = [glyphs[...]]
+                    }
+                    for p in pieces {
+                        guard let first = p.first, let last = p.last else { continue }
+                        if angle == 0 {
+                            guard let x = glyphX(first.idx) else { continue }
+                            let span = NSRange(location: first.r.location,
+                                               length: last.r.location + last.r.length - first.r.location)
+                            ctx.textPosition = CGPoint(x: x, y: portionY)
+                            CTLineDraw(CTLineCreateWithAttributedString(piece.attributedSubstring(from: span)), ctx)
+                            continue
+                        }
+                        for g in p {
+                            guard let x = glyphX(g.idx) else { continue }
+                            ctx.saveGState()
+                            ctx.translateBy(x: x, y: portionY)
+                            ctx.rotate(by: angle)
+                            ctx.textPosition = .zero
+                            CTLineDraw(CTLineCreateWithAttributedString(piece.attributedSubstring(from: g.r)), ctx)
+                            ctx.restoreGState()
+                        }
+                    }
+                }
+            } else if styled || (rotRad == 0.0 && !gluesStretched) {
                 let ctLine = CTLineCreateWithAttributedString(lineStr)
                 ctx.textPosition = CGPoint(x: lineX, y: baselineY)
                 CTLineDraw(ctLine, ctx)
@@ -1858,7 +1976,7 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                     cx += measure(String(ch)) + kernPx
                 }
             }
-            if line.trailingHyphen && rotRad == 0.0 {
+            if line.trailingHyphen && (styled || rotRad == 0.0) {
                 // Hyphenation broke a word at end of line. The
                 // composer reserved space for the hyphen but the
                 // source content has no hyphen char, so the
@@ -1870,10 +1988,30 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                     .filter { !$0.isTrailingSpace }
                     .last
                     .map { v.x + anchorDx + $0.x } ?? lineX
-                let str = NSAttributedString(string: "-", attributes: attrs)
+                // Styled text draws it in the broken word's tspan, at that
+                // tspan's angle on a turned line, as the shared plan's
+                // hyphen run (`text_runs::plan`).
+                var hAttrs = attrs
+                var hAngle = 0.0
+                if styled && lineStr.length > 0 {
+                    hAttrs = lineStr.attributes(at: lineStr.length - 1, effectiveRange: nil)
+                    var pos = 0
+                    for t in v.tspans {
+                        pos += t.content.unicodeScalars.count
+                        if line.end <= pos {
+                            hAngle = t.rotate.map { $0 * (Double.pi / 180) } ?? rotRad
+                            break
+                        }
+                    }
+                }
+                let str = NSAttributedString(string: "-", attributes: hAttrs)
                 let ctLine = CTLineCreateWithAttributedString(str)
-                ctx.textPosition = CGPoint(x: hyphenX, y: baselineY)
+                ctx.saveGState()
+                ctx.translateBy(x: hyphenX, y: baselineY)
+                ctx.rotate(by: hAngle)
+                ctx.textPosition = .zero
                 CTLineDraw(ctLine, ctx)
+                ctx.restoreGState()
             }
         }
         // Phase 6: list markers, one per paragraph start

@@ -27,6 +27,14 @@ public sealed partial class MainWindow
         private readonly long _availW;
         private readonly bool _topAligned;
 
+        /// <summary>
+        /// Finding 13 (flask § 497): each edit control's commit AS FOCUS LEAVES IT,
+        /// so a press on the canvas, which cannot take focus and so never blurs a
+        /// control, can run it first (<see cref="CommitFocusedEdit"/>). Weak, so a
+        /// rebuilt pane's controls are not kept alive by it.
+        /// </summary>
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, Action> _blurCommits = new();
+
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
                           bool topAligned = false, double pad = PanePad, bool dialog = false)
         {
@@ -323,6 +331,7 @@ public sealed partial class MainWindow
             var spacers = 0;
             var separators = 0;
             var (previews, previewEmpty) = (0, 0);
+            var gradients = 0;
             var textClicks = 0;
             foreach (var leaf in leaves)
             {
@@ -398,6 +407,16 @@ public sealed partial class MainWindow
                         el = BuildBrushPreview(leaf, ref previewEmpty);
                         break;
 
+                    // The gradient slider (the 10-20 sitting, item 6: it was a
+                    // `[gradient_slider]` placeholder). DISPLAY ONLY, as in every
+                    // port: the spec declares no event for it, so it takes no
+                    // pointer. ApplyLeafValues draws it from `bind.stops`.
+                    case "gradient_slider":
+                        gradients++;
+                        el = new GradientSliderSurface { IsHitTestVisible = false };
+                        if (leaf.Literal("summary") is { Length: > 0 } gtip) { ToolTipService.SetToolTip(el, gtip); }
+                        break;
+
                     // A `length_input` is this control too: the person types TEXT
                     // and the core parses it by the widget's kind. What differs is
                     // the DISPLAY, and the core now sends that ready-made.
@@ -422,7 +441,7 @@ public sealed partial class MainWindow
                     case "checkbox":
                         toggles++;
                         if (leaf.Id.Length == 0) { unaddressable++; }
-                        el = BuildToggle(leaf);
+                        el = BuildToggle(leaf, icons);
                         break;
 
                     // §1.2: a `dropdown` is a MENU BUTTON (`items` + a `behavior`),
@@ -596,7 +615,7 @@ public sealed partial class MainWindow
             // and asserts only `leaves` and `controls`; nothing sums the category
             // counters, and the self-test's row is an INPUT to that parser.
             _w.Report($"PANEL BUILT panel={_paneDrawnPanel} build={_paneBuild} leaves={leaves.Count} texts={texts} text-clicks={textClicks} "
-                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} "
+                 + $"buttons={buttons} inputs={inputs} toggles={toggles} glyphs={glyphs} swatches={swatches} spacers={spacers} separators={separators} previews={previews} preview-empty={previewEmpty} gradients={gradients} "
                  + $"unmaterialized={unmaterialized} boxes={boxes.Count} boxes-active={boxes.Count(b => b.Active)} "
                  + $"unaddressable={unaddressable} icon-loads={_paneIconsPending} icon-text={_paneIconsText} "
                  + $"options-refused={optionsRefused} menus={menus} items-refused={itemsRefused}");
@@ -816,6 +835,78 @@ public sealed partial class MainWindow
             var path = leaf.Path;
             if (PanelWire.Addressable(id, path)) { swatch.Tapped += (_, _) => OnPaneClick(id, path); }
             return swatch;
+        }
+
+        /// <summary>
+        /// The gradient slider's picture, the web's layout scaled into the plan's
+        /// rect (`render_gradient_slider` draws it 44 px tall; the plan gives 24):
+        /// a diamond per pair across the top, the bar previewing the stops, and
+        /// a circle per stop along the bottom, each at its `location`. The
+        /// selected stop or midpoint is edged in the checked colour. Stops that do
+        /// not parse, or fewer than two, draw a grey bar and no markers.
+        /// </summary>
+        private void DrawGradientSlider(GradientSliderSurface slider, PaneLeaf leaf)
+        {
+            slider.Children.Clear();
+            double w = leaf.W, h = leaf.H;
+            var r = h * 0.2;                       // a stop's radius; the inset that keeps it in
+            var d = h * 0.25;                      // a diamond's side
+            var barTop = d + 1;
+            var (barW, barH) = (w - 2 * r, h - barTop - 2 * r);
+            if (barW <= 0 || barH <= 0) { return; }   // a rect too small to draw draws nothing
+            double At(double loc) => r + barW * loc / 100;
+            Microsoft.UI.Xaml.Media.SolidColorBrush Brush(string hex, double opacity) =>
+                PanelWire.SwatchColor(hex) is { } c
+                    ? new(Microsoft.UI.ColorHelper.FromArgb((byte)Math.Round(255 * opacity / 100), c.R, c.G, c.B))
+                    : _paneMutedBrush;
+            var stops = GradientSliderWire.Stops(leaf.Value("bind.stops"));
+            var bar = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = barW, Height = barH, Stroke = _paneMutedBrush, StrokeThickness = 1 };
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(bar, r);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(bar, barTop);
+            slider.Children.Add(bar);
+            if (stops is null || stops.Count < 2) { bar.Fill = _paneMutedBrush; return; }
+            var preview = new Microsoft.UI.Xaml.Media.LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0, 0.5),
+                EndPoint = new Windows.Foundation.Point(1, 0.5),
+            };
+            foreach (var st in stops)
+            {
+                preview.GradientStops.Add(new Microsoft.UI.Xaml.Media.GradientStop
+                {
+                    Color = Brush(st.Color, st.Opacity).Color,
+                    Offset = st.Location / 100,
+                });
+            }
+            bar.Fill = preview;
+            var stopAt = GradientSliderWire.Index(leaf.Value("bind.selected_stop_index"));
+            var midAt = GradientSliderWire.Index(leaf.Value("bind.selected_midpoint_index"));
+            for (var i = 0; i + 1 < stops.Count; i++)
+            {
+                var diamond = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Width = d, Height = d,
+                    Fill = i == midAt ? _paneCheckedEdge : _paneMutedBrush,
+                    RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5),
+                    RenderTransform = new Microsoft.UI.Xaml.Media.RotateTransform { Angle = 45 },
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(diamond, At(GradientSliderWire.MidpointLocation(stops[i], stops[i + 1])) - d / 2);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(diamond, 0);
+                slider.Children.Add(diamond);
+            }
+            for (var i = 0; i < stops.Count; i++)
+            {
+                var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+                {
+                    Width = 2 * r, Height = 2 * r,
+                    Fill = Brush(stops[i].Color, stops[i].Opacity),
+                    Stroke = i == stopAt ? _paneCheckedEdge : _paneMutedBrush,
+                    StrokeThickness = i == stopAt ? 2 : 1,
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(dot, At(stops[i].Location) - r);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(dot, h - 2 * r);
+                slider.Children.Add(dot);
+            }
         }
 
         /// <summary>The fill for a swatch: its colour, or TRANSPARENT when the core
@@ -1100,6 +1191,10 @@ public sealed partial class MainWindow
                     swatch.Background = SwatchBrush(leaf.Value("bind.color"));
                     break;
 
+                case GradientSliderSurface slider when leaf.Type == "gradient_slider":
+                    DrawGradientSlider(slider, leaf);
+                    break;
+
                 case TextBlock tb when leaf.Type == "text":
                     tb.Text = leaf.Value("content") ?? leaf.Literal("content") ?? "";
                     break;
@@ -1177,7 +1272,13 @@ public sealed partial class MainWindow
                     {
                         combo.SelectedIndex = index;
                         // A value no item carries (a free entry) is shown as text.
-                        if (combo.IsEditable && index < 0) { combo.Text = shownText; }
+                        if (combo.IsEditable && index < 0)
+                        {
+                            combo.Text = shownText;
+                            // § 503 row 15: setting `combo.Text` COMPLETES it (`13`
+                            // showed `135`), so the editor is given the shown text too.
+                            if (EditableTextBox(combo) is { } box && box.Text != shownText) { box.Text = shownText; }
+                        }
                     }
                     off = off || leaf.Id.Length == 0;
                     combo.IsEnabled = !off;
@@ -1259,7 +1360,9 @@ public sealed partial class MainWindow
                     break;
                 }
 
-                case CheckBox toggle:
+                // A `CheckBox` IS a `ToggleButton`, so one case holds both faces
+                // `BuildToggle` makes.
+                case ToggleButton toggle:
                     off = off || leaf.Id.Length == 0;
                     toggle.Tag = on;
                     toggle.IsChecked = on;
@@ -1344,10 +1447,12 @@ public sealed partial class MainWindow
                 e.Handled = true;
                 CommitBox(box, id, leaf.Path);
             };
-            box.LostFocus += (_, _) =>
+            void Blur()
             {
                 if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
-            };
+            }
+            box.LostFocus += (_, _) => Blur();
+            _blurCommits.AddOrUpdate(box, Blur);
             return box;
         }
 
@@ -1359,20 +1464,53 @@ public sealed partial class MainWindow
         }
 
         /// <summary>
-        /// A `toggle`: a check box labelled with the plan's `label`. A press is a
-        /// `click`; what it writes is the core's, which is why the box is put back
-        /// to the core's value before the press is sent.
+        /// A `toggle` or `checkbox`. With no icon it is a check box labelled with
+        /// the plan's `label`. With an `icon` the workspace defines (Paragraph's
+        /// alignment buttons, Character's six styles) it is a toggle BUTTON whose
+        /// face is that icon, as `BuildIconButton` draws one; a check box has no
+        /// room for a picture at the plan's 24 x 24, and until 2026-10-20 the icon
+        /// was never read here, so those buttons drew blank (the 10-20 sitting,
+        /// finding 5). A press is a `click`; what it writes is the core's, which
+        /// is why the control is put back to the core's value before the press
+        /// is sent.
         /// </summary>
-        private CheckBox BuildToggle(PaneLeaf leaf)
+        private ToggleButton BuildToggle(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
         {
-            var box = new CheckBox
+            ToggleButton box;
+            var name = leaf.IconName;
+            if (name is not null && icons.TryGetValue(name, out var def))
             {
-                Content = leaf.Literal("label") ?? leaf.Id,
-                FontSize = 12,
-                MinWidth = 0,
-                MinHeight = 0,
-                IsThreeState = false,
-            };
+                box = new ToggleButton
+                {
+                    Padding = new Thickness(0),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    IsThreeState = false,
+                };
+                var summary = leaf.Literal("summary") ?? leaf.Literal("label") ?? leaf.Id;
+                ToolTipService.SetToolTip(box, summary);
+                // Its face is a picture, so without this an assistive reader
+                // (and the harness's UIA hand) finds a button with no name.
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, summary);
+                _paneIconsPending++;
+                LoadIcon(box, def.Viewbox, def.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild);
+            }
+            else
+            {
+                box = new CheckBox
+                {
+                    Content = leaf.Literal("label") ?? leaf.Id,
+                    FontSize = 12,
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    IsThreeState = false,
+                };
+                // An icon named but not defined (`icons_missing`) keeps the text
+                // face, and is counted as one, as `BuildIconButton` counts it.
+                if (name is not null) { _paneIconsText++; }
+            }
             var id = leaf.Id;
             box.Click += (_, _) =>
             {
@@ -1621,19 +1759,102 @@ public sealed partial class MainWindow
             if (leaf.Id.Length == 0) { return combo; }
 
             var id = leaf.Id;
+            // § 500: a pick in the list may raise SelectionChanged after the list
+            // has closed, so "just closed" lasts one dispatcher turn past it.
+            var listJustClosed = false;
+            // § 501: the text a person last TYPED (read at each key), so undoing a
+            // completion can give it back. Cleared at every commit, so it is never
+            // older than the core's own value.
+            string? typed = null;
+            var undoing = false;
+            combo.DropDownOpened += (_, _) => listJustClosed = false;
+            combo.DropDownClosed += (_, _) =>
+            {
+                listJustClosed = true;
+                combo.DispatcherQueue.TryEnqueue(() => listJustClosed = false);
+            };
             combo.SelectionChanged += (_, _) =>
             {
                 var state = combo.Tag as ChoiceState;
+                // flask § 499: in an editable combo the platform completes typed
+                // text to an option and moves the selection there; that is not a
+                // pick, and the typed text goes by Enter or blur instead.
+                if (combo.IsEditable && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, listJustClosed))
+                {
+                    // § 501: refusing to SEND the completion was not enough. Its
+                    // selection stayed on the option, so Enter took the selection
+                    // path and the box showed a value the core never got. UNDO it:
+                    // the core's own index, and the typed text (else the core's).
+                    // The put-back raises SelectionChanged again, at the core's
+                    // index, which lands here and changes nothing.
+                    // § 503: the put-back raises SelectionChanged again; `undoing`
+                    // keeps that nested event from undoing the undo. Typed text
+                    // goes back through the EDITOR, never `combo.Text`: setting
+                    // `combo.Text` is itself what completes (§ 503 row 15), and a
+                    // core value that IS an item (index 3, `0`) must not win over
+                    // what the person typed (§ 503 measurement 4).
+                    if (!undoing && combo.SelectedIndex != (typed is null ? state?.Index ?? -1 : -1))
+                    {
+                        undoing = true;
+                        combo.SelectedIndex = typed is null ? state?.Index ?? -1 : -1;
+                        var back = typed ?? ((state?.Index ?? -1) < 0 ? state?.Text : null);
+                        if (back is not null && EditableTextBox(combo) is { } box)
+                        {
+                            box.Text = back;
+                            // § 504: the platform blanks the editor AFTER this, when
+                            // the index it was given settles, so write it again then.
+                            combo.DispatcherQueue.TryEnqueue(() =>
+                            {
+                                if (string.IsNullOrEmpty(box.Text)) { box.Text = back; }
+                            });
+                        }
+                        undoing = false;
+                    }
+                    return;
+                }
                 var send = PanelWire.ChoiceCommit(combo.SelectedIndex, items, state?.Shown);
                 if (send is null) { return; }
                 // Put back first: this raises SelectionChanged again, at the core's
                 // own index, and `ChoiceCommit` sends nothing for that.
                 combo.SelectedIndex = state?.Index ?? -1;
                 if (combo.IsEditable && (state?.Index ?? -1) < 0) { combo.Text = state?.Text ?? ""; }
+                typed = null;
                 SendPane(id, "commit", send, leaf.Path);
             };
             if (combo.IsEditable)
             {
+                // Item 7 (flask § 497): the template's own `EditableText` box keeps
+                // the platform's 32 DIP minimum height and its padding inside a
+                // 28 DIP combo, so its glyphs are clipped out of view (a committed
+                // `150` showed only its selection bar). Give it the metrics a
+                // number box already uses at the same height.
+                combo.Loaded += (_, _) =>
+                {
+                    var text = EditableTextBox(combo);
+                    if (text is null) { return; }
+                    text.MinHeight = 0;
+                    text.Padding = new Thickness(4, 0, 4, 0);
+                    text.VerticalContentAlignment = VerticalAlignment.Center;
+                    // Arrows and Enter are not typing: they never change what `typed` holds.
+                    text.KeyUp += (_, e) =>
+                    {
+                        if (e.Key is Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down
+                                  or Windows.System.VirtualKey.Enter) { return; }
+                        typed = text.Text;
+                    };
+                    // § 503: Enter is the SHELL's. The platform's own Enter resolved
+                    // its stale `Text` (a completed `135`) over the editor's `31`
+                    // and raised no TextSubmitted. Handled here, it never runs.
+                    text.PreviewKeyDown += (_, e) =>
+                    {
+                        if (e.Key != Windows.System.VirtualKey.Enter) { return; }
+                        e.Handled = true;
+                        var state = combo.Tag as ChoiceState;
+                        var send = PanelWire.EnterCommit(text.Text, state?.Shown ?? "", state?.Text ?? "", items);
+                        typed = null;
+                        if (send is not null) { SendPane(id, "commit", send, leaf.Path); }
+                    };
+                };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text
                 // that names an item is left to SelectionChanged above.
                 combo.TextSubmitted += (_, e) =>
@@ -1642,6 +1863,7 @@ public sealed partial class MainWindow
                     if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
                     e.Handled = true;
                     if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text, leaf.Path); }
+                    typed = null;
                     combo.Text = state?.Text ?? "";
                 };
                 // Leaving the combo commits what was typed, as a text box's blur
@@ -1650,15 +1872,50 @@ public sealed partial class MainWindow
                 // template's `EditableText` box: `combo.Text` is still empty when
                 // focus leaves. Focus moving into the combo's own dropdown is not
                 // leaving it.
-                combo.LostFocus += (_, _) =>
+                void Blur(bool focusStays)
                 {
                     var state = combo.Tag as ChoiceState;
-                    var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
-                        items.Select(PanelWire.ChoiceText), combo.IsDropDownOpen || FocusStaysIn(combo));
+                    var send = PanelWire.ComboBlurCommit(PanelWire.BlurText(EditableText(combo), typed),
+                        state?.Shown ?? "", state?.Text ?? "",
+                        items.Select(PanelWire.ChoiceText), focusStays);
                     if (send is null) { return; }
+                    typed = null;
                     SendPane(id, "commit", send, leaf.Path);
                     combo.Text = state?.Text ?? "";
+                }
+                combo.LostFocus += (_, _) => Blur(combo.IsDropDownOpen || FocusStaysIn(combo));
+                // § 505 / § 506: with the list shut, Up/Down are the shell's. The
+                // ComboBox's own class handler takes them FIRST, at this level, and
+                // marks them handled, so an editor `+=` handler never saw them (§ 506:
+                // no row). Registered here with handledEventsToo, this runs after the
+                // platform has moved the box, and commits the step from the CORE's
+                // item. The re-read then shows the committed value.
+                combo.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler((_, e) =>
+                {
+                    if (combo.IsDropDownOpen) { return; }
+                    if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) { return; }
+                    e.Handled = true;
+                    var at = combo.Tag as ChoiceState;
+                    var next = PanelWire.ArrowPick(at?.Index ?? -1, items.Count, e.Key == Windows.System.VirtualKey.Down);
+                    var pick = PanelWire.ChoiceCommit(next, items, at?.Shown);
+                    _w.Report($"COMBO ARROW id={id} key={e.Key} core={at?.Index ?? -1} next={next} sent={pick ?? "-"}");
+                    typed = null;
+                    if (pick is not null) { SendPane(id, "commit", pick, leaf.Path); }
+                }), true);
+                // § 504 row 15: on RE-ENTRY the platform completes a free value
+                // (`13` showed `135`) after the put-back has written it, and an
+                // Enter on that untouched box would commit `135`. One turn after
+                // focus arrives, an untyped free value is shown as the core's.
+                combo.GotFocus += (_, _) =>
+                {
+                    combo.DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (typed is not null || combo.Tag is not ChoiceState st || st.Index >= 0) { return; }
+                        if (EditableTextBox(combo) is { } box && box.Text != st.Text) { box.Text = st.Text; }
+                    });
                 };
+                // From the canvas press, focus IS leaving, though it has not left yet.
+                _blurCommits.AddOrUpdate(combo, () => Blur(false));
             }
             return combo;
         }
@@ -1667,14 +1924,38 @@ public sealed partial class MainWindow
         /// The text in an editable combo's own text box (the template part
         /// `EditableText`), or null when the template has none.
         /// </summary>
-        private static string? EditableText(ComboBox combo)
+        private static string? EditableText(ComboBox combo) => EditableTextBox(combo)?.Text;
+
+        /// <summary>
+        /// Finding 13: run the blur commit of the edit control holding keyboard
+        /// focus in this pane, if any, NOW, before a canvas press reaches the
+        /// engine. A press on empty canvas deselects, and the control's own
+        /// `LostFocus` is a queued event that would commit after it, onto nothing.
+        /// Its later `LostFocus` sends nothing: the box was put back to the core's
+        /// value, which `CommitOnBlur` does not send.
+        /// </summary>
+        internal void CommitFocusedEdit()
+        {
+            if (_host.XamlRoot is null) { return; }
+            for (var node = FocusManager.GetFocusedElement(_host.XamlRoot) as DependencyObject;
+                 node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node is Control c && _blurCommits.TryGetValue(c, out var commit)) { commit(); return; }
+            }
+        }
+
+        /// <summary>
+        /// An editable combo's own text box (the template part `EditableText`),
+        /// or null when the template has none (or is not yet applied).
+        /// </summary>
+        private static TextBox? EditableTextBox(ComboBox combo)
         {
             var pending = new Stack<DependencyObject>();
             pending.Push(combo);
             while (pending.Count > 0)
             {
                 var node = pending.Pop();
-                if (node is TextBox box && box.Name == "EditableText") { return box.Text; }
+                if (node is TextBox box && box.Name == "EditableText") { return box; }
                 var n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node);
                 for (var i = 0; i < n; i++) { pending.Push(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i)); }
             }
@@ -1720,6 +2001,17 @@ internal sealed partial class SwatchTile : Grid
 /// bar's AutomationId reaches the rendered tree.
 /// </summary>
 internal sealed partial class ColorBarSurface : Grid
+{
+    protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
+        new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
+}
+
+/// <summary>
+/// The gradient slider's surface (<c>DrawGradientSlider</c>). A `Canvas` has no
+/// automation peer, so it is given the plain element peer, as
+/// <see cref="ColorBarSurface"/> is, and `grad_slider` reaches the rendered tree.
+/// </summary>
+internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls.Canvas
 {
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);

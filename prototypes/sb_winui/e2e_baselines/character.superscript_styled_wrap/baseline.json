@@ -1,7 +1,7 @@
 {
     "item":  "character.superscript_styled_wrap",
     "surface":  "2379x1333",
-    "frame_hash":  "2562be65bf76261d7a4ea61b893777cd2cc053d3d215dbbddb666fa3f37ca4b3",
+    "frame_hash":  "cd5cd4d0306c769fc0976b4f449c33c2c6ad2de74aa997e4fcc73e3bd3ffc6a7",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "d47db5fa8678bbe3",
     "tab":  "[0,0]=on:\"text_area_styled_wrap.svg\"",

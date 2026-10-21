@@ -372,6 +372,46 @@ static class Program
             "(null)", PanelWire.ComboBlurCommit("0°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: CONTROL: the core's value typed back does not commit",
             "(null)", PanelWire.ComboBlurCommit("0", "0", "0°", comboItems, false) ?? "(null)");
+        // flask § 499 / § 500: a selection the platform moved by COMPLETING typed
+        // text (13 to 135) is not a pick. Only the list picks, open or closed by
+        // the pick itself; a completion writes the item's text into the box, so
+        // the box text cannot tell them apart.
+        Check("editable pick: a pick in the open dropdown is real",
+            PanelWire.EditablePickIsReal(true, false), "an open-list pick was refused");
+        Check("editable pick: a pick that has just closed the list is real",
+            PanelWire.EditablePickIsReal(false, true), "a closing pick was refused");
+        Check("editable pick: a selection moved with the list shut is NOT a pick",
+            !PanelWire.EditablePickIsReal(false, false), "a completion read as a pick");
+        // flask § 503: the shell takes Enter, from the EDITOR's text.
+        var angleItems = new List<PaneOption> {
+            new(false, "0", "0", null, true), new(false, "45", "45", null, false), new(false, "135", "135", null, false) };
+        Eq("enter: typed text that names no item sends as typed (31, not the completed 135)",
+            "31", PanelWire.EnterCommit("31", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: an item's text sends that item's VALUE",
+            "45", PanelWire.EnterCommit("45", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: CONTROL: the core's own value sends nothing",
+            "(null)", PanelWire.EnterCommit("13", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: CONTROL: the item the core shows sends nothing",
+            "(null)", PanelWire.EnterCommit("0", "0", "0", angleItems) ?? "(null)");
+        Eq("enter: a blank editor sends nothing",
+            "(null)", PanelWire.EnterCommit(" ", "13", "13", angleItems) ?? "(null)");
+        // flask § 505: Up/Down with the list shut step from the CORE's item.
+        Eq("arrow: Down from 90 (index 5 of 8) picks 135 (6)", "6", PanelWire.ArrowPick(5, 8, true).ToString());
+        Eq("arrow: Up from 90 picks 45 (4)", "4", PanelWire.ArrowPick(5, 8, false).ToString());
+        Eq("arrow: Down at the last item stays there", "7", PanelWire.ArrowPick(7, 8, true).ToString());
+        Eq("arrow: Up at the first item stays there", "0", PanelWire.ArrowPick(0, 8, false).ToString());
+        Eq("arrow: Down from a free value picks the first", "0", PanelWire.ArrowPick(-1, 8, true).ToString());
+        Eq("arrow: Up from a free value picks the last", "7", PanelWire.ArrowPick(-1, 8, false).ToString());
+        Eq("arrow: an empty list picks nothing", "-1", PanelWire.ArrowPick(-1, 0, true).ToString());
+        // flask § 504: the platform blanks the editor after the undo restored it.
+        Eq("blur text: a blanked editor gives back what was typed",
+            "13", PanelWire.BlurText("", "13") ?? "(null)");
+        Eq("blur text: CONTROL: an editor with text is read as it is",
+            "31", PanelWire.BlurText("31", "13") ?? "(null)");
+        Eq("blur text: a box the person emptied stays empty",
+            "", PanelWire.BlurText("", "") ?? "(null)");
+        Eq("blur text: nothing typed and a blank box is nothing",
+            "(null)", PanelWire.BlurText(null, null) ?? "(null)");
         Eq("combo blur: an item's text is a pick, left to the selection path",
             "(null)", PanelWire.ComboBlurCommit("45°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: focus moving into the combo's own dropdown is not leaving",
@@ -722,6 +762,24 @@ static class Program
         Eq("key: a quote is escaped as JSON", """{"key":"\"","mods":{"shift":false,"alt":true,"ctrl":false}}""",
             KeyWire.Request("\"", shift: false, alt: true, ctrl: false));
         Eq("key: an empty name is no request", "(null)", KeyWire.Request("", false, false, false) ?? "(null)");
+        // The gradient slider's picture (gradient.yaml grad_slider), DISPLAY ONLY
+        // as in every port: `bind.stops` is the plan's JSON text, each stop
+        // {color, location, midpoint_to_next?, opacity}, keys in any order.
+        const string twoStops = """[{"color":"#000000","location":0,"midpoint_to_next":50,"opacity":100},{"color":"#ffffff","location":100,"opacity":100}]""";
+        Eq("gradient: two stops parse with their fields", "#000000@0/50/100|#ffffff@100/50/100",
+            string.Join("|", GradientSliderWire.Stops(twoStops)!.Select(st => $"{st.Color}@{st.Location}/{st.Midpoint}/{st.Opacity}")));
+        Eq("gradient: a midpoint sits between its pair, at midpoint_to_next %", "0|25|80",
+            string.Join("|", new[] { (0.0, 100.0, 0.0), (0.0, 50.0, 50.0), (60.0, 100.0, 50.0) }
+                .Select(t => GradientSliderWire.MidpointLocation(new GradientSliderWire.Stop("#000000", 100, t.Item1, t.Item3),
+                                                                 new GradientSliderWire.Stop("#000000", 100, t.Item2, 50)).ToString())));
+        Eq("gradient: a percentage outside 0..100 is REFUSED, never clamped, and so is an unparsable list", "(null)|(null)|(null)|(null)|(null)",
+            (GradientSliderWire.Stops("""[{"color":"#000000","location":-5},{"color":"#000000","location":40}]""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""[{"color":"#000000","location":0,"opacity":140},{"color":"#000000","location":40}]""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("not json")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""{"color":"#000000"}""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""[{"location":5}]""")?.Count.ToString() ?? "(null)"));
+        Eq("gradient: the selected index reads -1 when absent or not a number", "0|-1|-1|2",
+            $"{GradientSliderWire.Index("0")}|{GradientSliderWire.Index("-1")}|{GradientSliderWire.Index(null)}|{GradientSliderWire.Index("2")}");
         Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",
             (KeyWire.CharName('O') ?? "(null)") + "|" + (KeyWire.CharName('=') ?? "(null)") + "|"
             + (KeyWire.CharName(0x07) ?? "(null)") + "|" + (KeyWire.CharName(0x7F) ?? "(null)"));

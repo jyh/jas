@@ -1,9 +1,9 @@
 {
     "item":  "gradient.linear",
     "surface":  "2379x1333",
-    "frame_hash":  "b0fddebd972ae0574705d96745d727453156f63e715f01f110e511a598e5bb93",
+    "frame_hash":  "fa4e76e83f0e7a21ef07c6400209a25749ce412c630b3d3ed048d74940b8ea22",
     "plan_panel":  "gradient_panel_content",
-    "plan_sha":  "c3946621578f20e9",
+    "plan_sha":  "6b46fba6b231beb7",
     "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
     "tab_sha":  "bf94097025b37fd6",
     "selection_count":  1

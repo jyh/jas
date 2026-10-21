@@ -1,7 +1,7 @@
 {
     "item":  "boolean.intersection",
     "surface":  "2379x1333",
-    "frame_hash":  "98a1674a28d479b0428c463733c03fe8d86992efd8961e7aef0ddfff1f12033f",
+    "frame_hash":  "d9390860bec1ada92321ef0264aee8099548be565334318b8a3c672ef1465f2f",
     "plan_panel":  "boolean_panel_content",
     "plan_sha":  "214de6189eec9238",
     "tab":  "[0,0]=on:\"overlapping_rects.svg\"",

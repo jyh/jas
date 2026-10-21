@@ -1,9 +1,9 @@
 {
     "item":  "opacity.blend_mode",
     "surface":  "2379x1333",
-    "frame_hash":  "86dbc4f5234104694958000c963d2390e60e177b7dae984e0aca4ddf297ca600",
+    "frame_hash":  "b1200434d83c13d506452338331aac3094b4681dc187e79dc1db30f0e11afd65",
     "plan_panel":  "opacity_panel_content",
-    "plan_sha":  "6c760f654dc1b016",
+    "plan_sha":  "cbd2dd325934b897",
     "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
     "tab_sha":  "bf94097025b37fd6",
     "selection_count":  1

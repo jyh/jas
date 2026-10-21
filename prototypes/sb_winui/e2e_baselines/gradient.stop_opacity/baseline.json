@@ -1,9 +1,9 @@
 {
     "item":  "gradient.stop_opacity",
     "surface":  "2379x1333",
-    "frame_hash":  "79b2b5870592c0a1b78bc2fa0f6dc90bc41a4c5ab50c5f540502252cb23db826",
+    "frame_hash":  "35a48982b15b0e0a611b385bb9d63be8565121fdd3717181237ba3b6ea98d14a",
     "plan_panel":  "gradient_panel_content",
-    "plan_sha":  "c3946621578f20e9",
+    "plan_sha":  "516c78a3d24f61fd",
     "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
     "tab_sha":  "bf94097025b37fd6",
     "selection_count":  1

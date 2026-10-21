@@ -44,6 +44,12 @@
 # the script's expected document, which the ports agree on at level 1, and no
 # baseline is needed for it.
 #
+# `paint` needs no baseline either: any `RUSTFAIL REPAINT-FAILED` row this run
+# wrote, or no drawn repaint at all, is a FAIL, and -Freeze refuses on it. A
+# refused repaint keeps the PREVIOUS frame on screen, so without this arm a
+# frame hash can freeze and then certify a picture of an earlier state
+# (flask STATUS 483: a stacked superscript + underline did exactly that).
+#
 # ASCII only: Windows PowerShell 5.1 reads a BOM-less script as cp1252.
 
 param(
@@ -370,9 +376,14 @@ $reading = [ordered]@{
     plan_panel = $r.plan_panel; plan_sha = $r.plan_sha; tab = $r.tab; tab_sha = $r.tab_sha; selection_count = $selCount
 }
 
+# The paint arm (harness_common.ps1 Get-SbPaintVerdict): a refused repaint
+# leaves the PREVIOUS frame on screen, so this run's frame hash would be a
+# picture of an earlier state. Read from this run's own rows, frozen or not.
+$paint = Get-SbPaintVerdict (Read-SbRows $log $mark)
+
 if ($Freeze) {
-    if ($drive -notlike 'PASS*' -or ($dragOnly -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*') {
-        Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback"
+    if ($drive -notlike 'PASS*' -or ($dragOnly -and $moved -notlike 'PASS*') -or $readback -notlike 'PASS*' -or $paint -notlike 'PASS*') {
+        Out-Line "E2E-FROZEN v1 item=$item REFUSED -- a baseline is frozen only from a clean run: drive=$drive spec=$moved readback=$readback paint=$paint"
         exit 7
     }
     if ($r.tab_sha -eq 'UNREADABLE') {
@@ -386,7 +397,7 @@ if ($Freeze) {
     # of the person's screen (other windows, URLs) and the baseline is
     # committed to a public repo. It stays in bin/ (git-ignored); the
     # certificate carries its hash only.
-    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback surface=$($r.surface) frame=$($r.frame_hash) plan-sha=$($r.plan_sha) tab-sha=$($r.tab_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
+    Out-Line "E2E-FROZEN v1 item=$item commit=$commit$dirty drive=$drive spec=$moved readback=$readback paint=$paint surface=$($r.surface) frame=$($r.frame_hash) plan-sha=$($r.plan_sha) tab-sha=$($r.tab_sha) selection=$selCount screenshot=$shotSha -> $Baseline"
     exit 0
 }
 
@@ -429,9 +440,9 @@ if ($lateCount -gt 0 -and $drive -like 'PASS*') {
         ForEach-Object { if ($_.menu) { "menu:$($_.menu)" } else { "$($_.panel)/$($_.widget)" } })
     if ($missing.Count -gt 0) { $drive = "FAIL(no shell PANEL CLICK or MENU ACTION RAN row for $($missing -join ','))" }
 }
-$verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
+$verdict = if ($drive -like 'PASS*' -and $core -eq 'PASS' -and $tree -eq 'PASS' -and $pix -eq 'PASS' -and $paint -like 'PASS*') { 'CERTIFIED' } else { 'NOT CERTIFIED' }
 $line = "E2E-CERT v1 spec=$specSha build=$build$dirty platform=$platform item=$item drive=SendInput(session=1,pid=$appPid,moves=$moves$shiftTag$(if ($keyCount -gt 0) { ",keys=$keyText" })$(if ($lateCount -gt 0) { ",panels=$panelShow" })):$drive " +
-        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) screenshot=$shotSha(archived,not compared) " +
+        "spec=$moved script=$Script readback=$readback core=$core tree=$tree pixels=$pix@$($r.surface) paint=$paint screenshot=$shotSha(archived,not compared) " +
         "foreign-input=$(if ($drive -like 'PASS*') { 'none-reached-the-gesture' } else { 'DETECTED-or-unreadable' }) verdict=$verdict date=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
 Out-Line $line
 Add-Content -Path (Join-Path $exeDir 'e2e-certificates.log') -Value $line -Encoding ascii

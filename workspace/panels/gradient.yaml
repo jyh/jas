@@ -236,9 +236,14 @@ content:
     - type: row
       id: grad_main_row
       children:
-        - id: grad_fill_stroke_widget
-          type: fill_stroke_widget
+        # The shared fill/stroke template, as the Color panel uses it in the
+        # same column (color.yaml cp_controls_row): every port expands it to
+        # standard elements, where `type: fill_stroke_widget` was a native
+        # render no materializing shell could draw (the 10-20 sitting, item 9).
+        - template: fill_stroke_widget
+          params: { id_prefix: "grad_", size: 48 }
           col: 3
+          style: { min_height: 60 }
 
         - type: container
           col: 9

@@ -75,6 +75,10 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.textDecoration { obj["text_decoration"] = v }
         if let v = t.textRendering { obj["text_rendering"] = v }
         if let v = t.textTransform { obj["text_transform"] = v }
+        // A range's scale, in Rust's serde shape for `Transform`.
+        if let m = t.transform {
+            obj["transform"] = ["a": m.a, "b": m.b, "c": m.c, "d": m.d, "e": m.e, "f": m.f]
+        }
         if let v = t.xmlLang { obj["xml_lang"] = v }
         arr.append(obj)
     }
@@ -143,192 +147,23 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             textDecoration: obj["text_decoration"] as? [String],
             textRendering: obj["text_rendering"] as? String,
             textTransform: obj["text_transform"] as? String,
-            transform: nil,  // transform isn't part of the clipboard payload
+            transform: (obj["transform"] as? [String: Any]).flatMap { m -> Transform? in
+                let k = ["a", "b", "c", "d", "e", "f"].compactMap { (m[$0] as? NSNumber)?.doubleValue }
+                return k.count == 6 ? Transform(a: k[0], b: k[1], c: k[2], d: k[3], e: k[4], f: k[5]) : nil
+            },
             xmlLang: obj["xml_lang"] as? String)
         out.append(t)
     }
     return out
 }
 
-/// Serialize `tspans` as an SVG fragment suitable for the
-/// `image/svg+xml` clipboard format — a single `<text>` element
-/// wrapping the tspan children with standard CSS-style attribute
-/// names, alphabetically sorted.
-public func tspansToSvgFragment(_ tspans: [Tspan]) -> String {
-    var out = #"<text xmlns="http://www.w3.org/2000/svg">"#
-    for t in tspans {
-        out += "<tspan"
-        var attrs: [(String, String)] = []
-        if let v = t.baselineShift { attrs.append(("baseline-shift", _fmtDouble(v))) }
-        if let v = t.dx { attrs.append(("dx", _fmtDouble(v))) }
-        if let v = t.fontFamily { attrs.append(("font-family", v)) }
-        if let v = t.fontSize { attrs.append(("font-size", _fmtDouble(v))) }
-        if let v = t.fontStyle { attrs.append(("font-style", v)) }
-        if let v = t.fontVariant { attrs.append(("font-variant", v)) }
-        if let v = t.fontWeight { attrs.append(("font-weight", v)) }
-        if let v = t.jasAaMode { attrs.append(("jas:aa-mode", v)) }
-        if let v = t.jasFractionalWidths { attrs.append(("jas:fractional-widths", v ? "true" : "false")) }
-        if let v = t.jasKerningMode { attrs.append(("jas:kerning-mode", v)) }
-        if let v = t.jasNoBreak { attrs.append(("jas:no-break", v ? "true" : "false")) }
-        if let v = t.jasRole { attrs.append(("jas:role", v)) }
-        if let v = t.jasLeftIndent { attrs.append(("jas:left-indent", _fmtDouble(v))) }
-        if let v = t.jasRightIndent { attrs.append(("jas:right-indent", _fmtDouble(v))) }
-        if let v = t.jasHyphenate { attrs.append(("jas:hyphenate", v ? "true" : "false")) }
-        if let v = t.jasHangingPunctuation { attrs.append(("jas:hanging-punctuation", v ? "true" : "false")) }
-        if let v = t.jasListStyle { attrs.append(("jas:list-style", v)) }
-        if let v = t.textAlign { attrs.append(("text-align", v)) }
-        if let v = t.textAlignLast { attrs.append(("text-align-last", v)) }
-        if let v = t.textIndent { attrs.append(("text-indent", _fmtDouble(v))) }
-        if let v = t.jasSpaceBefore { attrs.append(("jas:space-before", _fmtDouble(v))) }
-        if let v = t.jasSpaceAfter { attrs.append(("jas:space-after", _fmtDouble(v))) }
-        if let v = t.jasWordSpacingMin { attrs.append(("jas:word-spacing-min", _fmtDouble(v))) }
-        if let v = t.jasWordSpacingDesired { attrs.append(("jas:word-spacing-desired", _fmtDouble(v))) }
-        if let v = t.jasWordSpacingMax { attrs.append(("jas:word-spacing-max", _fmtDouble(v))) }
-        if let v = t.jasLetterSpacingMin { attrs.append(("jas:letter-spacing-min", _fmtDouble(v))) }
-        if let v = t.jasLetterSpacingDesired { attrs.append(("jas:letter-spacing-desired", _fmtDouble(v))) }
-        if let v = t.jasLetterSpacingMax { attrs.append(("jas:letter-spacing-max", _fmtDouble(v))) }
-        if let v = t.jasGlyphScalingMin { attrs.append(("jas:glyph-scaling-min", _fmtDouble(v))) }
-        if let v = t.jasGlyphScalingDesired { attrs.append(("jas:glyph-scaling-desired", _fmtDouble(v))) }
-        if let v = t.jasGlyphScalingMax { attrs.append(("jas:glyph-scaling-max", _fmtDouble(v))) }
-        if let v = t.jasAutoLeading { attrs.append(("jas:auto-leading", _fmtDouble(v))) }
-        if let v = t.jasSingleWordJustify { attrs.append(("jas:single-word-justify", v)) }
-        if let v = t.jasHyphenateMinWord { attrs.append(("jas:hyphenate-min-word", _fmtDouble(v))) }
-        if let v = t.jasHyphenateMinBefore { attrs.append(("jas:hyphenate-min-before", _fmtDouble(v))) }
-        if let v = t.jasHyphenateMinAfter { attrs.append(("jas:hyphenate-min-after", _fmtDouble(v))) }
-        if let v = t.jasHyphenateLimit { attrs.append(("jas:hyphenate-limit", _fmtDouble(v))) }
-        if let v = t.jasHyphenateZone { attrs.append(("jas:hyphenate-zone", _fmtDouble(v))) }
-        if let v = t.jasHyphenateBias { attrs.append(("jas:hyphenate-bias", _fmtDouble(v))) }
-        if let v = t.jasHyphenateCapitalized { attrs.append(("jas:hyphenate-capitalized", v ? "true" : "false")) }
-        if let v = t.letterSpacing { attrs.append(("letter-spacing", _fmtDouble(v))) }
-        if let v = t.lineHeight { attrs.append(("line-height", _fmtDouble(v))) }
-        if let v = t.rotate { attrs.append(("rotate", _fmtDouble(v))) }
-        if let v = t.styleName { attrs.append(("jas:style-name", v)) }
-        if let v = t.textDecoration, !v.isEmpty { attrs.append(("text-decoration", v.joined(separator: " "))) }
-        if let v = t.textRendering { attrs.append(("text-rendering", v)) }
-        if let v = t.textTransform { attrs.append(("text-transform", v)) }
-        if let v = t.xmlLang { attrs.append(("xml:lang", v)) }
-        attrs.sort { $0.0 < $1.0 }
-        for (k, v) in attrs {
-            out += " \(k)=\"\(_xmlEscape(v))\""
-        }
-        out += ">\(_xmlEscape(t.content))</tspan>"
-    }
-    out += "</text>"
-    return out
-}
-
-/// Internal rather than private so `R9GuardedCastTests` can hold it to Rust's
-/// `fmt_f64` (geometry/tspan.rs).
-///
-/// `saturatingInt` mirrors that function's `v as i64`. The `v == v.rounded()`
-/// predicate is TRUE for +/-infinity and for every integral value at or above
-/// 2^63, so a plain `Int(v)` trapped on SAVE for a value Rust writes out (risk
-/// R9) -- and this formatter is applied to roughly twenty Tspan Double fields.
-func _fmtDouble(_ v: Double) -> String {
-    v == v.rounded() ? "\(saturatingInt(v))" : "\(v)"
-}
-
-private func _xmlEscape(_ s: String) -> String {
-    s.replacingOccurrences(of: "&", with: "&amp;")
-        .replacingOccurrences(of: "<", with: "&lt;")
-        .replacingOccurrences(of: ">", with: "&gt;")
-        .replacingOccurrences(of: "\"", with: "&quot;")
-}
-
-private func _xmlUnescape(_ s: String) -> String {
-    s.replacingOccurrences(of: "&quot;", with: "\"")
-        .replacingOccurrences(of: "&gt;", with: ">")
-        .replacingOccurrences(of: "&lt;", with: "<")
-        .replacingOccurrences(of: "&amp;", with: "&")
-}
-
-/// Parse an SVG fragment of the shape emitted by `tspansToSvgFragment`
-/// (or a compatible shape from another SVG app) into a tspan list
-/// with fresh ids. Returns `nil` when the root is not `<text>`.
-public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
-    let trimmed = svgStr.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard let textRange = trimmed.range(of: "<text") else { return nil }
-    let rest = String(trimmed[textRange.lowerBound...])
-    var out: [Tspan] = []
-    var nextId: UInt32 = 0
-    var searchStart = rest.startIndex
-    while let openRange = rest.range(of: "<tspan", range: searchStart..<rest.endIndex) {
-        // Find end of open tag
-        guard let gtRange = rest.range(of: ">", range: openRange.upperBound..<rest.endIndex)
-        else { break }
-        let attrsStr = String(rest[openRange.upperBound..<gtRange.lowerBound])
-        guard let closeRange = rest.range(of: "</tspan>", range: gtRange.upperBound..<rest.endIndex)
-        else { break }
-        let contentRaw = String(rest[gtRange.upperBound..<closeRange.lowerBound])
-        // Flatten nested tags.
-        let content = _xmlUnescape(_stripTags(contentRaw))
-        var t = Tspan(id: nextId, content: content)
-        nextId += 1
-        for (k, v) in _parseXmlAttrs(attrsStr) {
-            switch k {
-            case "baseline-shift": t = mergeFields(t, baselineShift: Double(v))
-            case "dx": t = mergeFields(t, dx: Double(v))
-            case "font-family": t = mergeFields(t, fontFamily: v)
-            case "font-size": t = mergeFields(t, fontSize: Double(v))
-            case "font-style": t = mergeFields(t, fontStyle: v)
-            case "font-variant": t = mergeFields(t, fontVariant: v)
-            case "font-weight": t = mergeFields(t, fontWeight: v)
-            case "jas:aa-mode": t = mergeFields(t, jasAaMode: v)
-            case "jas:fractional-widths": t = mergeFields(t, jasFractionalWidths: v == "true")
-            case "jas:kerning-mode": t = mergeFields(t, jasKerningMode: v)
-            case "jas:no-break": t = mergeFields(t, jasNoBreak: v == "true")
-            case "jas:role": t = mergeFields(t, jasRole: v)
-            case "jas:left-indent": t = mergeFields(t, jasLeftIndent: Double(v))
-            case "jas:right-indent": t = mergeFields(t, jasRightIndent: Double(v))
-            case "jas:hyphenate": t = mergeFields(t, jasHyphenate: v == "true")
-            case "jas:hanging-punctuation": t = mergeFields(t, jasHangingPunctuation: v == "true")
-            case "jas:list-style": t = mergeFields(t, jasListStyle: v)
-            case "text-align": t = mergeFields(t, textAlign: v)
-            case "text-align-last": t = mergeFields(t, textAlignLast: v)
-            case "text-indent": t = mergeFields(t, textIndent: Double(v))
-            case "jas:space-before": t = mergeFields(t, jasSpaceBefore: Double(v))
-            case "jas:space-after": t = mergeFields(t, jasSpaceAfter: Double(v))
-            case "jas:word-spacing-min": t = mergeFields(t, jasWordSpacingMin: Double(v))
-            case "jas:word-spacing-desired": t = mergeFields(t, jasWordSpacingDesired: Double(v))
-            case "jas:word-spacing-max": t = mergeFields(t, jasWordSpacingMax: Double(v))
-            case "jas:letter-spacing-min": t = mergeFields(t, jasLetterSpacingMin: Double(v))
-            case "jas:letter-spacing-desired": t = mergeFields(t, jasLetterSpacingDesired: Double(v))
-            case "jas:letter-spacing-max": t = mergeFields(t, jasLetterSpacingMax: Double(v))
-            case "jas:glyph-scaling-min": t = mergeFields(t, jasGlyphScalingMin: Double(v))
-            case "jas:glyph-scaling-desired": t = mergeFields(t, jasGlyphScalingDesired: Double(v))
-            case "jas:glyph-scaling-max": t = mergeFields(t, jasGlyphScalingMax: Double(v))
-            case "jas:auto-leading": t = mergeFields(t, jasAutoLeading: Double(v))
-            case "jas:single-word-justify": t = mergeFields(t, jasSingleWordJustify: v)
-            case "jas:hyphenate-min-word": t = mergeFields(t, jasHyphenateMinWord: Double(v))
-            case "jas:hyphenate-min-before": t = mergeFields(t, jasHyphenateMinBefore: Double(v))
-            case "jas:hyphenate-min-after": t = mergeFields(t, jasHyphenateMinAfter: Double(v))
-            case "jas:hyphenate-limit": t = mergeFields(t, jasHyphenateLimit: Double(v))
-            case "jas:hyphenate-zone": t = mergeFields(t, jasHyphenateZone: Double(v))
-            case "jas:hyphenate-bias": t = mergeFields(t, jasHyphenateBias: Double(v))
-            case "jas:hyphenate-capitalized": t = mergeFields(t, jasHyphenateCapitalized: v == "true")
-            case "letter-spacing": t = mergeFields(t, letterSpacing: Double(v))
-            case "line-height": t = mergeFields(t, lineHeight: Double(v))
-            case "rotate": t = mergeFields(t, rotate: Double(v))
-            case "jas:style-name": t = mergeFields(t, styleName: v)
-            case "text-decoration":
-                let parts = v.split(separator: " ").map(String.init).filter { $0 != "none" }
-                t = mergeFields(t, textDecoration: parts)
-            case "text-rendering": t = mergeFields(t, textRendering: v)
-            case "text-transform": t = mergeFields(t, textTransform: v)
-            case "xml:lang": t = mergeFields(t, xmlLang: v)
-            default: break
-            }
-        }
-        out.append(t)
-        searchStart = closeRange.upperBound
-    }
-    return out.isEmpty ? nil : out
-}
 
 /// Return a new Tspan derived from `t` with the supplied fields
 /// replacing the existing values. Fields default to the current
-/// value, so only the one(s) you name change.
-private func mergeFields(_ t: Tspan,
+/// value, so only the one(s) you name change. Internal, not private:
+/// the document reader (`Svg.swift` `parseTspan`) overlays a tspan's
+/// character attributes with it too.
+func mergeFields(_ t: Tspan,
                          baselineShift: Double?? = .some(nil),
                          dx: Double?? = .some(nil),
                          fontFamily: String?? = .some(nil),
@@ -376,6 +211,7 @@ private func mergeFields(_ t: Tspan,
                          textDecoration: [String]?? = .some(nil),
                          textRendering: String?? = .some(nil),
                          textTransform: String?? = .some(nil),
+                         transform: Transform?? = .some(nil),
                          xmlLang: String?? = .some(nil)) -> Tspan {
     // Each double-optional parameter has three possible states:
     //   .some(.some(v)) — explicit new value
@@ -437,7 +273,7 @@ private func mergeFields(_ t: Tspan,
         textDecoration: pick(textDecoration, t.textDecoration),
         textRendering: pick(textRendering, t.textRendering),
         textTransform: pick(textTransform, t.textTransform),
-        transform: t.transform,
+        transform: pick(transform, t.transform),
         xmlLang: pick(xmlLang, t.xmlLang))
 }
 
@@ -479,45 +315,6 @@ public func tspanClearingCharacterAttribute(
     case "font_style": return mergeFields(t, fontStyle: nil)
     default: return t
     }
-}
-
-private func _stripTags(_ s: String) -> String {
-    var out = ""
-    var inTag = false
-    for c in s {
-        if c == "<" { inTag = true; continue }
-        if c == ">" && inTag { inTag = false; continue }
-        if !inTag { out.append(c) }
-    }
-    return out
-}
-
-private func _parseXmlAttrs(_ s: String) -> [(String, String)] {
-    var out: [(String, String)] = []
-    let chars = Array(s)
-    var i = 0
-    while i < chars.count {
-        while i < chars.count && chars[i].isWhitespace { i += 1 }
-        if i >= chars.count { break }
-        let nameStart = i
-        while i < chars.count && chars[i] != "=" && !chars[i].isWhitespace { i += 1 }
-        let name = String(chars[nameStart..<i])
-        if name.isEmpty { break }
-        while i < chars.count && chars[i] != "=" { i += 1 }
-        if i >= chars.count { break }
-        i += 1
-        while i < chars.count && chars[i] != "\"" && chars[i] != "'" { i += 1 }
-        if i >= chars.count { break }
-        let quote = chars[i]
-        i += 1
-        let valStart = i
-        while i < chars.count && chars[i] != quote { i += 1 }
-        let val = String(chars[valStart..<i])
-        if i < chars.count { i += 1 }
-        out.append((name, _xmlUnescape(val)))
-        _ = nameStart  // suppress unused warning on some compilers
-    }
-    return out
 }
 
 // MARK: - merge overrides
