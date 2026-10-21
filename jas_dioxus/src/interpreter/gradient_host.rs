@@ -153,15 +153,7 @@ pub fn gradient_from_store(store: &crate::interpreter::state_store::StateStore, 
     for key in GRADIENT_RENDER_KEYS {
         set_render_field(&mut g, key, store.get(key));
     }
-    let stops: Option<Vec<GradientStop>> = store.get_panel(panel_id, "stops").as_array().and_then(|a| {
-        a.iter().map(|s| Some(GradientStop {
-            color: Color::from_hex(s.get("color")?.as_str()?)?,
-            opacity: s.get("opacity")?.as_f64()?,
-            location: s.get("location")?.as_f64()?,
-            midpoint_to_next: s.get("midpoint_to_next").and_then(Value::as_f64).unwrap_or(50.0),
-        })).collect()
-    });
-    if let Some(stops) = stops.filter(|s| !s.is_empty()) {
+    if let Some(stops) = stops_from_json(store.get_panel(panel_id, "stops")).filter(|s| !s.is_empty()) {
         g.stops = stops;
     }
     g
@@ -188,13 +180,30 @@ pub fn live_values(doc: &Document, fill_on_top: bool) -> serde_json::Map<String,
     m.insert("method".into(), name(g.method));
     m.insert("dither".into(), json!(g.dither));
     m.insert("stroke_sub_mode".into(), name(g.stroke_sub_mode));
-    m.insert("stops".into(), Value::Array(g.stops.iter().map(|s| json!({
+    m.insert("stops".into(), stops_to_json(&g.stops));
+    m
+}
+
+/// Stops in the YAML's shape (`{color, opacity, location, midpoint_to_next}`),
+/// the one the panel's `stops` field holds. `None` when any stop does not
+/// parse; a missing midpoint reads as 50.
+pub fn stops_from_json(v: &Value) -> Option<Vec<GradientStop>> {
+    v.as_array()?.iter().map(|s| Some(GradientStop {
+        color: Color::from_hex(s.get("color")?.as_str()?)?,
+        opacity: s.get("opacity")?.as_f64()?,
+        location: s.get("location")?.as_f64()?,
+        midpoint_to_next: s.get("midpoint_to_next").and_then(Value::as_f64).unwrap_or(50.0),
+    })).collect()
+}
+
+/// The inverse of [`stops_from_json`].
+pub fn stops_to_json(stops: &[GradientStop]) -> Value {
+    Value::Array(stops.iter().map(|s| json!({
         "color": format!("#{}", s.color.to_hex()),
         "opacity": s.opacity,
         "location": s.location,
         "midpoint_to_next": s.midpoint_to_next,
-    })).collect()));
-    m
+    })).collect())
 }
 
 /// The global keys the two stop combos `set` (their bind is an indexed path,
@@ -227,6 +236,27 @@ pub fn apply_stop_edit(model: &mut Model, fill_on_top: bool, field: &str, value:
     g.stops = stops;
     apply_gradient_to_selection(model, fill_on_top, g);
     Some(moved)
+}
+
+/// The global key the slider's `commit` behavior sets (gradient.yaml
+/// `grad_slider`; WIDGET_EVENTS.md §The stops kind): the whole stops list.
+pub const STOPS_KEY: &str = "gradient_stops";
+
+/// The engine's whole-list write: the selection's gradient (the same base as
+/// [`apply_stop_edit`]) takes `stops`. `false`, and nothing written, when
+/// nothing is selected, `stops` does not parse, or it has fewer than two stops.
+pub fn apply_stops(model: &mut Model, fill_on_top: bool, stops: &Value,
+                   mixed_base: impl FnOnce() -> Gradient) -> bool {
+    let Some(stops) = stops_from_json(stops).filter(|s| s.len() >= 2) else { return false };
+    let mut g = match selection_gradient(model.document(), fill_on_top) {
+        SelectionGradient::Empty => return false,
+        SelectionGradient::Uniform(g) => g,
+        SelectionGradient::Solid(c) => seed_gradient(c),
+        SelectionGradient::Mixed => mixed_base(),
+    };
+    g.stops = stops;
+    apply_gradient_to_selection(model, fill_on_top, g);
+    true
 }
 
 /// The Gradient panel's stop-edit law (GRADIENT.md, STOP_OPACITY_COMBO and

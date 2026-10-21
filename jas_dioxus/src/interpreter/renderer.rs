@@ -1086,6 +1086,14 @@ fn set_app_state_field(
         "gradient_method" => { if let Some(s) = val.as_str() { st.gradient_panel.method = s.into(); } }
         "gradient_dither" => { if let Some(b) = val.as_bool() { st.gradient_panel.dither = b; } }
         "gradient_stroke_sub_mode" => { if let Some(s) = val.as_str() { st.gradient_panel.stroke_sub_mode = s.into(); } }
+        // The slider's finished gesture (WIDGET_EVENTS.md §The stops kind):
+        // the whole list, which the selection then takes.
+        "gradient_stops" => {
+            if let Some(stops) = crate::interpreter::gradient_host::stops_from_json(val)
+                .filter(|s| s.len() >= 2) {
+                st.gradient_panel.stops = stops;
+            }
+        }
         // A stop combo: the panel's stops take the stop-edit law at the
         // selected index, which follows the stop (gradient_host::edit_stop).
         "gradient_stop_opacity" | "gradient_stop_location" => {
@@ -12681,6 +12689,32 @@ mod tests {
         let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
             .fill_gradient().cloned().unwrap();
         assert_eq!(g.stops.iter().map(|s| s.opacity).collect::<Vec<_>>(), vec![100.0, 25.0, 100.0]);
+    }
+
+    #[test]
+    fn the_sliders_whole_list_key_writes_the_selections_stops() {
+        // WIDGET_EVENTS.md §The stops kind: a finished slider gesture sets
+        // `gradient_stops` to the new list, which the selection takes whole.
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(Color::BLACK, 0.0), stop(Color::WHITE, 100.0)],
+            ..Gradient::default()
+        }));
+        st.sync_gradient_panel_from_selection();
+        let mut m = serde_json::Map::new();
+        m.insert("gradient_stops".into(), serde_json::json!([
+            {"color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50},
+            {"color": "#ff0000", "opacity": 75, "location": 25, "midpoint_to_next": 50},
+            {"color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 40}]));
+        apply_set_effects(&m, &mut st);
+        let g = st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+            .fill_gradient().cloned().expect("fill_gradient should be set");
+        assert_eq!(g.stops.iter().map(|s| (s.location, s.opacity, s.midpoint_to_next)).collect::<Vec<_>>(),
+                   vec![(0.0, 100.0, 50.0), (25.0, 75.0, 50.0), (100.0, 100.0, 40.0)]);
+        assert_eq!(g.stops[1].color, Color::rgb(1.0, 0.0, 0.0));
     }
 
     #[test]

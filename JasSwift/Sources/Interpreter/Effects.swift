@@ -381,7 +381,8 @@ private func runOne(
         // Once per gradient key written, naming it, as the Rust engine's
         // `global_written` applies one key per write.
         if let hook = platformEffects["apply_gradient_panel"] {
-            for k in pairs.keys.filter({ isGradientRenderKey($0) || gradientStopKeys[$0] != nil }).sorted() {
+            for k in pairs.keys.filter({ isGradientRenderKey($0) || gradientStopKeys[$0] != nil
+                                         || $0 == gradientStopsKey }).sorted() {
                 _ = hook(k, ctx, store)
             }
         }
@@ -1135,6 +1136,32 @@ public func editStop(_ stops: [GradientStop], index: Int, field: String,
     return (order.map { out[$0] }, moved)
 }
 
+/// The global key the slider's `commit` behavior sets: the whole stops list
+/// (WIDGET_EVENTS.md §The stops kind; `gradient_host::STOPS_KEY`).
+public let gradientStopsKey = "gradient_stops"
+
+/// Stops in the YAML's shape (`{color, opacity, location, midpoint_to_next}`);
+/// nil when any stop does not parse. A missing midpoint reads as 50. Mirrors
+/// `gradient_host::stops_from_json`.
+public func gradientStopsFromJSON(_ v: Any?) -> [GradientStop]? {
+    guard let list = v as? [Any] else { return nil }
+    var out: [GradientStop] = []
+    for item in list {
+        guard let s = item as? [String: Any], let color = s["color"] as? String,
+              let opacity = sliderNumber(s["opacity"]), let location = sliderNumber(s["location"])
+        else { return nil }
+        out.append(GradientStop(color: color, opacity: opacity, location: location,
+                                midpointToNext: sliderNumber(s["midpoint_to_next"]) ?? 50))
+    }
+    return out
+}
+
+/// The inverse of `gradientStopsFromJSON`.
+public func gradientStopsToJSON(_ stops: [GradientStop]) -> [[String: Any]] {
+    stops.map { ["color": $0.color, "opacity": $0.opacity, "location": $0.location,
+                 "midpoint_to_next": $0.midpointToNext] }
+}
+
 // MARK: - The slider law (GRADIENT.md, "The slider law (precisely)")
 //
 // The GRADIENT_SLIDER's five gestures, mirroring `gradient_law.py` and
@@ -1446,7 +1473,13 @@ public func applyGradientPanelToSelection(store: StateStore, controller: Control
     case .solid(let c): g = seedGradient(c)
     case .mixed: g = gradientFromStore(store)
     }
-    if let key = key, let field = gradientStopKeys[key] {
+    if key == gradientStopsKey {
+        // The slider's finished gesture: the whole list (WIDGET_EVENTS.md
+        // §The stops kind), as `gradient_host::apply_stops`.
+        guard let stops = gradientStopsFromJSON(store.get(gradientStopsKey)), stops.count >= 2 else { return }
+        g = Gradient(type: g.type, angle: g.angle, aspectRatio: g.aspectRatio, method: g.method,
+                     dither: g.dither, strokeSubMode: g.strokeSubMode, stops: stops, nodes: g.nodes)
+    } else if let key = key, let field = gradientStopKeys[key] {
         // A stop combo: the selected stop of the same base, by the stop-edit
         // law; the panel's selected index follows the stop.
         let index = (store.getPanel("gradient_panel_content", "selected_stop_index") as? NSNumber)?.intValue ?? -1

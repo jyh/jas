@@ -107,7 +107,7 @@ use crate::interpreter::properties_host::{self, PROPERTIES_PANEL};
 use crate::interpreter::stroke_host::{self, StrokePanelState};
 use crate::interpreter::widget_commit::{
     self, BOOLEAN_KINDS, CHECK_KINDS, CHOOSE_EVENTS, COMMIT_EVENTS, INPUT_KINDS, ITEM_KINDS,
-    OPTION_KINDS, PICK_EVENTS, PRESS_EVENTS,
+    OPTION_KINDS, PICK_EVENTS, PRESS_EVENTS, STOPS_EVENTS, STOPS_GESTURES, STOPS_KINDS,
 };
 pub use crate::panel_scope::COLOUR_PANEL;
 
@@ -404,6 +404,18 @@ impl EffectHost for EngineHost {
                 model.begin_txn();
             }
             gradient_host::apply_render_key(model, fill_on_top, key, &value,
+                || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
+            return;
+        }
+        // The slider's finished gesture (WIDGET_EVENTS.md §The stops kind): the
+        // whole stops list, onto the same base as the keys above.
+        if key == gradient_host::STOPS_KEY {
+            let fill_on_top = store.get("fill_on_top").as_bool().unwrap_or(true);
+            let stops = store.get(key).clone();
+            if !model.in_txn() {
+                model.begin_txn();
+            }
+            gradient_host::apply_stops(model, fill_on_top, &stops,
                 || gradient_host::gradient_from_store(store, GRADIENT_PANEL));
             return;
         }
@@ -713,6 +725,10 @@ fn run_widget_behavior_in(
     if OPTION_KINDS.contains(&kind) {
         return choose(panel_id, spec, node, ev, scope, store, model, actions, dialogs, host);
     }
+    // EVERY event on a stops kind is a slider gesture or a refusal.
+    if STOPS_KINDS.contains(&kind) {
+        return stops_gesture(panel_id, node, ev, scope, store, model, actions, dialogs, host);
+    }
 
     let mut cond_scope = scope.clone();
     if let Some(m) = cond_scope.as_object_mut() {
@@ -995,6 +1011,170 @@ fn commit_value(
     }
     run_batch(panel_id, &batch, value_event(ev, value), scope, store, model, actions, dialogs,
               host)
+}
+
+/// The suffix of the panel key a slider press snapshots into, beside the
+/// bound stops (WIDGET_EVENTS.md §The stops kind; the reference's
+/// `widget_event.PRESS_SUFFIX`).
+pub const PRESS_SUFFIX: &str = "__press";
+
+/// What one stops gesture writes: the stops and selection, the snapshot
+/// (`Some(Null)` clears it, `None` leaves it), and whether the gesture
+/// finished, so its `commit` behaviors run.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopsStep {
+    pub stops: Value,
+    pub stop: i64,
+    pub midpoint: i64,
+    pub snapshot: Option<Value>,
+    pub commit: bool,
+}
+
+/// One slider gesture over the panel's CURRENT stops and selection and the
+/// press `snapshot` (WIDGET_EVENTS.md §The stops kind; the reference is
+/// `widget_event.gesture`). `Ok(None)` is the contract's `inert`; `Err` is a
+/// refusal class (`WrongEvent`, `NoPress`, `LawRefused`). Pure: the caller
+/// reads the store and writes the step.
+pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, midpoint: i64,
+                  snapshot: &Value) -> Result<Option<StopsStep>, &'static str> {
+    use crate::interpreter::gradient_host::{
+        add_stop, delete_stop, drag_midpoint, drag_stop, set_midpoint, stops_from_json, stops_to_json,
+    };
+    if !STOPS_GESTURES.contains(&gesture) {
+        return Err("WrongEvent");
+    }
+    let p = |k: &str| params.get(k).cloned().unwrap_or(Value::Null);
+    let int = |k: &str| params.get(k).and_then(Value::as_i64);
+    let stops = stops_from_json(current).ok_or("LawRefused")?;
+    let step = |s: &[crate::geometry::element::GradientStop], stop: i64, midpoint: i64,
+                snapshot: Option<Value>, commit: bool| Some(StopsStep {
+        stops: stops_to_json(s), stop, midpoint, snapshot, commit,
+    });
+    match gesture {
+        "press" | "press_midpoint" => {
+            let is_stop = gesture == "press";
+            let i = int(if is_stop { "index" } else { "pair" }).ok_or("LawRefused")?;
+            let n = if is_stop { stops.len() } else { stops.len().saturating_sub(1) };
+            if i < 0 || i as usize >= n {
+                return Err("LawRefused");
+            }
+            let snap = json!({"kind": if is_stop { "stop" } else { "midpoint" }, "index": i,
+                              "stops": current});
+            let (st, mid) = if is_stop { (i, -1) } else { (-1, i) };
+            Ok(step(&stops, st, mid, Some(snap), false))
+        }
+        "drag" | "release" | "drag_midpoint" | "release_midpoint" => {
+            let is_stop = gesture == "drag" || gesture == "release";
+            let kind = if is_stop { "stop" } else { "midpoint" };
+            if snapshot.get("kind").and_then(Value::as_str) != Some(kind) {
+                return Err("NoPress");
+            }
+            let at = snapshot.get("index").and_then(Value::as_i64).ok_or("NoPress")?;
+            let press = stops_from_json(&snapshot["stops"]).ok_or("NoPress")?;
+            let (out, st, mid) = if is_stop {
+                let (out, sel) = drag_stop(&press, at, &p("location"), &p("dy")).ok_or("LawRefused")?;
+                (out, sel as i64, -1)
+            } else {
+                (drag_midpoint(&press, at, &p("location")).ok_or("LawRefused")?, -1, at)
+            };
+            let finished = gesture.starts_with("release");
+            Ok(step(&out, st, mid, finished.then_some(Value::Null), finished))
+        }
+        "add" => {
+            let (out, at) = add_stop(&stops, &p("location")).ok_or("LawRefused")?;
+            Ok(step(&out, at as i64, -1, None, true))
+        }
+        _ => {
+            // key: GRADIENT.md's keyboard table.
+            let key = params.get("key").and_then(Value::as_str).unwrap_or("");
+            let shift = params.get("shift").and_then(Value::as_bool).unwrap_or(false);
+            let nudge = match key {
+                "Left" => Some(if shift { -10.0 } else { -1.0 }),
+                "Right" => Some(if shift { 10.0 } else { 1.0 }),
+                _ => None,
+            };
+            let to = |here: f64| match key {
+                "Home" => Some(0.0),
+                "End" => Some(100.0),
+                _ => nudge.map(|d| here + d),
+            };
+            if stop >= 0 && (stop as usize) < stops.len() {
+                let here = stops[stop as usize].location;
+                let got = match key {
+                    "Delete" | "Backspace" => delete_stop(&stops, stop),
+                    _ => match to(here) {
+                        Some(v) => drag_stop(&stops, stop, &json!(v), &json!(0)),
+                        None => return Ok(None),
+                    },
+                };
+                let (out, sel) = got.ok_or("LawRefused")?;
+                return Ok(step(&out, sel as i64, -1, None, true));
+            }
+            if midpoint >= 0 && (midpoint as usize) + 1 < stops.len() {
+                let Some(v) = to(stops[midpoint as usize].midpoint_to_next) else { return Ok(None) };
+                let out = set_midpoint(&stops, midpoint, &json!(v)).ok_or("LawRefused")?;
+                return Ok(step(&out, -1, midpoint, None, true));
+            }
+            Ok(None)
+        }
+    }
+}
+
+/// A gesture on a stops kind (WIDGET_EVENTS.md §The stops kind). The widget's
+/// three binds must be `panel.` fields of a panel (`NotWritable`). The current
+/// stops and selection are the SCOPE's, which is the selection's gradient
+/// (`panel_scope::engine_scope`) except while a press snapshot stands. The
+/// step is written to the store; a finished gesture then runs its `commit`
+/// behaviors in one batch with `event.value` the new stops.
+#[allow(clippy::too_many_arguments)]
+fn stops_gesture(
+    panel_id: Option<&str>,
+    node: &Value,
+    ev: &UserEvent,
+    scope: &Value,
+    store: &mut StateStore,
+    model: &mut Model,
+    actions: &Value,
+    dialogs: &Value,
+    host: &mut dyn EffectHost,
+) -> Result<Ran, Refusal> {
+    let refuse = |class: &'static str| Refusal::new(class, ev.widget.clone());
+    let bind = |name: &str| node.get("bind").and_then(|b| b.get(name)).and_then(Value::as_str)
+        .and_then(|e| e.strip_prefix("panel.")).filter(|k| !k.is_empty()
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+    let (Some(pid), Some(stops_key), Some(stop_key), Some(mid_key)) = (
+        panel_id, bind("stops"), bind("selected_stop_index"), bind("selected_midpoint_index"),
+    ) else {
+        return Err(refuse("NotWritable"));
+    };
+    let press_key = format!("{stops_key}{PRESS_SUFFIX}");
+    let panel = &scope["panel"];
+    let index = |k: &str| panel.get(k).and_then(Value::as_i64).unwrap_or(-1);
+    let params = ev.value.clone().unwrap_or(Value::Null);
+    let snapshot = store.get_panel(pid, &press_key).clone();
+    let step = match stops_step(&ev.event, &params, &panel[stops_key], index(stop_key),
+                                index(mid_key), &snapshot) {
+        Ok(Some(step)) => step,
+        Ok(None) => return Err(refuse("EmptyBehavior")),
+        Err(class) => return Err(refuse(class)),
+    };
+    store.set_panel(pid, stops_key, step.stops.clone());
+    store.set_panel(pid, stop_key, json!(step.stop));
+    store.set_panel(pid, mid_key, json!(step.midpoint));
+    if let Some(snap) = step.snapshot {
+        store.set_panel(pid, &press_key, snap);
+    }
+    let wrote = Ran { doc_changed: false, state_changed: true };
+    if !step.commit {
+        return Ok(wrote);
+    }
+    let (batch, _) = value_behaviors(node, &STOPS_EVENTS, &ev.widget)?;
+    if batch.is_empty() {
+        return Ok(wrote);
+    }
+    let ran = run_batch(Some(pid), &batch, value_event(ev, step.stops), scope, store, model,
+                        actions, dialogs, host)?;
+    Ok(Ran { doc_changed: ran.doc_changed, state_changed: true })
 }
 
 /// A press on a boolean kind (WIDGET_EVENTS.md, "Pressing a boolean"). The

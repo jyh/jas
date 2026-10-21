@@ -100,6 +100,24 @@ private func modelWithRect(_ r: Element) -> Model {
     #expect((store.get("gradient_preview_state") as? Bool) == false)
 }
 
+@Test func theSlidersWholeListKeyWritesTheSelectionsStops() {
+    // WIDGET_EVENTS.md §The stops kind: a finished slider gesture sets
+    // `gradient_stops`, which the selection takes whole (from the seed here,
+    // since the rect is solid). Mirrors renderer.rs's arm of the same name.
+    let model = modelWithRect(rectWithFillGradient(nil))
+    let store = model.stateStore
+    store.set("fill_on_top", true)
+    store.set(gradientStopsKey, [
+        ["color": "#000000", "opacity": 100, "location": 0, "midpoint_to_next": 50],
+        ["color": "#ff0000", "opacity": 75, "location": 25, "midpoint_to_next": 50],
+        ["color": "#ffffff", "opacity": 100, "location": 100, "midpoint_to_next": 40]])
+    applyGradientPanelToSelection(store: store, controller: Controller(model: model), key: gradientStopsKey)
+    let stops = model.document.getElement([0, 0]).fillGradient?.stops ?? []
+    #expect(stops.map { [$0.location, $0.opacity, $0.midpointToNext] }
+        == [[0, 100, 50], [25, 75, 50], [100, 100, 40]])
+    #expect(stops.map(\.color) == ["#000000", "#ff0000", "#ffffff"])
+}
+
 @Test func demoteGradientPanelClearsFillGradient() {
     let g = sampleGradient()
     let model = modelWithRect(rectWithFillGradient(g))
