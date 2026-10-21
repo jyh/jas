@@ -3025,6 +3025,12 @@ function Read-SbInputScript([string]$Json) {
     if ([string]::IsNullOrWhiteSpace("$($s.tool)")) {
         return (& $no 'the script names no tool')
     }
+    # The read-back's oracle. Without one, prove_e2e's `Join-Path <dir> ''` is
+    # the script's own DIRECTORY, which its existence check finds, so the run
+    # drove the app and only then threw reading a directory as a document.
+    if ([string]::IsNullOrWhiteSpace("$($s.expected_json)")) {
+        return (& $no 'the script names no expected_json')
+    }
     if ($null -ne $s.app_state) {
         $keys = @($s.app_state.PSObject.Properties | ForEach-Object { $_.Name })
         if ($keys.Count -gt 0) { return (& $no "app_state sets $($keys -join ','): this driver cannot seed state") }

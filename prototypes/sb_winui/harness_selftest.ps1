@@ -2089,6 +2089,20 @@ function Show-SbScript($s) {
     "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })$(if ($s.PanelShow) { " panels=$($s.PanelShow)" })"
 }
 
+# A script with no `expected_json` used to pass prove_e2e's up-front check:
+# `Join-Path <dir> ''` is the script's own DIRECTORY, which Test-Path finds,
+# so the run drove the app and then threw reading a directory as the expected
+# document (measured 10-20 on a scratch stacked-style script). Refused by name.
+Test-Case 'is: a script that names no expected_json is REFUSED by name' {
+    $j = New-SbScript @($sPress, $sMove, $sRelease, $sRead) | ConvertFrom-Json
+    $j.PSObject.Properties.Remove('expected_json')
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 6))
+} 'REFUSED: the script names no expected_json'
+Test-Case 'is: an empty expected_json is REFUSED by name' {
+    $j = New-SbScript @($sPress, $sMove, $sRelease, $sRead) | ConvertFrom-Json
+    $j.expected_json = ' '
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 6))
+} 'REFUSED: the script names no expected_json'
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
