@@ -29,6 +29,13 @@ pub struct TextRun {
     /// The size the run draws at (its tspan's, or the element's after a
     /// baseline shift's scale).
     pub size: f64,
+    /// The run's own baseline offset from its line's (y down): its tspan's
+    /// baseline shift, in pt with + up, so `dy` is its negation; 0 without one.
+    pub dy: f64,
+    /// The run's glyph rotation in degrees (+ clockwise): its tspan's own
+    /// `rotate`, else the element's; 0 without either. A rotated run is ONE character, drawn in a
+    /// frame rotated about its baseline origin (TSPAN.md "Rotation").
+    pub rotate: f64,
 }
 
 /// One laid-out line: its baseline (relative to the element's origin) and
@@ -75,7 +82,7 @@ pub fn line_runs(layout: &TextLayout, content: &str, ranges: &[(usize, usize)]) 
             // layout placed no glyph for (it should not happen) drops the run
             // rather than guess an x.
             if let Some(g) = glyphs.iter().find(|g| g.idx == s) {
-                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0 });
+                runs.push(TextRun { text, x: g.x, tspan: ti, start: s, size: 0.0, dy: 0.0, rotate: 0.0 });
             }
         }
         RunLine { baseline_y: line.baseline_y, runs }
@@ -134,6 +141,13 @@ pub fn baseline_shift(e: &crate::geometry::element::TextElem) -> Option<(f64, f6
         "sub" => Some((0.7, e.font_size * 0.2)),
         other => crate::geometry::tspan::parse_pt(other).map(|pt| (1.0, -pt)),
     }
+}
+
+/// The element's glyph rotation in degrees (`rotate`, the Character panel on
+/// the whole text): empty is 0. `None` when it does not read, which gives no
+/// plan rather than a guess.
+pub fn element_rotation(e: &crate::geometry::element::TextElem) -> Option<f64> {
+    if e.rotate.is_empty() { Some(0.0) } else { e.rotate.trim().parse::<f64>().ok() }
 }
 
 /// Tracking plus numeric kerning as one uniform advance in px at `size`, the
@@ -214,6 +228,7 @@ fn decorations(
     ranges: &[(usize, usize)],
     scale: f64,
     dy: f64,
+    shifts: &[f64],
 ) -> Vec<Decoration> {
     let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
     // A decoration line at `size`: its offset from the baseline and thickness.
@@ -222,7 +237,7 @@ fn decorations(
         DecorationKind::LineThrough => -size * 0.3,
     };
     let mut out = Vec::new();
-    for line in &layout.lines {
+    for (line, &shift) in layout.lines.iter().zip(shifts) {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
         for kind in [DecorationKind::Underline, DecorationKind::LineThrough] {
             // (x0, x1, size): one piece of contiguous decorated characters of
@@ -230,7 +245,7 @@ fn decorations(
             let mut span: Option<(f64, f64, f64)> = None;
             let close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
                 if let Some((x0, x1, size)) = span.take() {
-                    out.push(Decoration { kind, x0, x1, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
+                    out.push(Decoration { kind, x0: x0 + shift, x1: x1 + shift, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
                 }
             };
             for g in glyphs {
@@ -325,9 +340,34 @@ fn word_runs(runs: &[TextRun], glyphs: &[crate::algorithms::text_layout::Glyph])
     out
 }
 
+/// `runs` with every run whose angle (`angle_of` its tspan: its own rotation,
+/// else the element's) is not 0 cut into one run per character,
+/// each at its glyph's x (plus the line's anchor `shift`) and carrying the
+/// angle. A one-character run (the synthetic hyphen among them) keeps the x
+/// it already has; a character the layout placed no glyph for drops, as in
+/// [`line_runs`].
+fn per_glyph(runs: Vec<TextRun>, angle_of: &dyn Fn(usize) -> f64, glyphs: &[crate::algorithms::text_layout::Glyph], shift: f64) -> Vec<TextRun> {
+    let mut out = Vec::new();
+    for r in runs {
+        let angle = angle_of(r.tspan);
+        if angle == 0.0 {
+            out.push(r);
+        } else if r.text.chars().count() == 1 {
+            out.push(TextRun { rotate: angle, ..r });
+        } else {
+            for (k, c) in r.text.chars().enumerate() {
+                if let Some(g) = glyphs.iter().find(|g| g.idx == r.start + k) {
+                    out.push(TextRun { text: c.to_string(), x: g.x + shift, start: r.start + k, rotate: angle, ..r.clone() });
+                }
+            }
+        }
+    }
+    out
+}
+
 fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, glyphs: &[crate::algorithms::text_layout::Glyph]) {
     if let Some(g) = glyphs.iter().find(|g| g.idx == start) {
-        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0 });
+        out.push(TextRun { text, x: g.x, tspan, start, size: 0.0, dy: 0.0, rotate: 0.0 });
     }
 }
 
@@ -347,8 +387,8 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// The leading is the element's `line_height` in pt, or Auto: the first
 /// wrapper's `jas:auto-leading` percent of the size, else the size. What the
 /// plan does NOT draw (spacing that does not read, a scale or rotation, a baseline shift that
-/// does not read, an anchor, a tspan's dx, rotate, transform or baseline
-/// shift) is the router's to keep away from it
+/// does not read, a tspan's dx or transform, a shifted or rotated tspan's
+/// decoration) is the router's to keep away from it
 /// (`element_render::runs_plan_excludes`). A tspan's own size is drawn (its
 /// characters measured and its run drawn at that size, on the element's
 /// uniform leading), and so are a case transform (each tspan's text as
@@ -356,12 +396,19 @@ fn push_word(out: &mut Vec<TextRun>, text: String, start: usize, tspan: usize, g
 /// the element's size scaled, every baseline moved; each run and marker
 /// carries the size it draws at), and tracking and kerning ([`letter_spacing`],
 /// in every character's width so the layout matches the draw; the plan carries
-/// the advance). `None` also when the shift or the spacing does not read.
+/// the advance), and a point text's anchor (each line, with its decorations,
+/// moved by `anchor_shift` of its own width; the markers stay at their indent),
+/// a tspan's own baseline shift (its runs' `dy`), and a tspan's own rotation
+/// (its runs cut per character, each carrying `rotate`), and the element's
+/// rotation the same way, a tspan's own overriding it. `None` also when the
+/// element's rotation does not read. A scale is the renderer's frame.
+/// `None` also when the shift or the spacing does not read.
 pub fn plan(
     e: &crate::geometry::element::TextElem,
     measurer: &dyn Fn(&RunFace) -> Option<Box<dyn Fn(&str) -> f64>>,
 ) -> Option<RunsPlan> {
     let (scale, dy) = baseline_shift(e)?;
+    let element_angle = element_rotation(e)?;
     let base = RunFace { size: e.font_size * scale, ..element_face(e) };
     let spacing = letter_spacing(e, base.size)?;
     let measure = measurer(&base)?;
@@ -397,7 +444,17 @@ pub fn plan(
     let ranges = tspan_ranges(shown.iter().map(|t| t.as_str()));
     let mut lines = line_runs(&layout, &content, &ranges);
     let chars: Vec<char> = content.chars().collect();
-    for (line, runs) in layout.lines.iter().zip(lines.iter_mut()) {
+    // A point text's anchor moves each line by the width it draws: its
+    // characters' widths (a line's range stops before its hard break, as
+    // `LineInfo::end` says, so the break is not counted; `anchor_shift` is 0 for
+    // area text and the default anchor). The markers stay at their indent.
+    let shifts: Vec<f64> = layout.lines.iter().map(|line| {
+        let w: f64 = (line.start..line.end.min(chars.len()))
+            .map(|i| widths[i])
+            .sum();
+        e.anchor_shift(w)
+    }).collect();
+    for ((line, runs), shift) in layout.lines.iter().zip(lines.iter_mut()).zip(&shifts) {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
         if stretched(glyphs, line, &chars, &widths) {
             runs.runs = word_runs(&runs.runs, glyphs);
@@ -408,12 +465,22 @@ pub fn plan(
             let hyphen = glyphs.iter().rev().find(|g| g.idx >= line.end && !g.is_trailing_space);
             let owner = ranges.iter().position(|&(a, b)| a < line.end && line.end <= b);
             if let (Some(g), Some(t)) = (hyphen, owner) {
-                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0 });
+                runs.runs.push(TextRun { text: "-".into(), x: g.x, tspan: t, start: line.end, size: 0.0, dy: 0.0, rotate: 0.0 });
             }
         }
-        // Each run at its resolved size, on the shifted baseline.
+        // Each run at its resolved size, on the shifted baseline, offset by
+        // its tspan's own shift (unscaled, as Swift's `baselineOffset`).
         for r in &mut runs.runs {
             r.size = run_face(e, &e.tspans[r.tspan], scale).size;
+            r.dy = -e.tspans[r.tspan].baseline_shift.unwrap_or(0.0);
+            r.x += shift;
+        }
+        // A rotated tspan's runs, cut into one run per character at the
+        // layout's own glyph x: each glyph turns about its baseline origin
+        // and the pen advances un-rotated (TSPAN.md "Rotation").
+        let angle = |t: usize| e.tspans[t].rotate.unwrap_or(element_angle);
+        if runs.runs.iter().any(|r| angle(r.tspan) != 0.0) {
+            runs.runs = per_glyph(std::mem::take(&mut runs.runs), &angle, glyphs, *shift);
         }
         runs.baseline_y += dy;
     }
@@ -421,7 +488,7 @@ pub fn plan(
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y + dy, text: m.text, x: m.indent, size: base.size })
         .collect();
-    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy);
+    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy, &shifts);
     Some(RunsPlan { lines, markers, decorations, letter_spacing: spacing })
 }
 
@@ -841,5 +908,146 @@ mod tests {
         let p = plan(&e, &faces(&seen)).unwrap();
         let d = decos(&p);
         assert_eq!((d[0].1, d[0].2), (0.0, 450.0), "line 1 is underlined edge to edge: {d:?}");
+    }
+
+    /// Point text under an anchor: each line moves left by `anchor_shift` of
+    /// the width it draws (its characters' widths, its hard break excluded),
+    /// so a middle line centres on `x` and an end line ends there. Its
+    /// decorations move with it; a list marker stays at its indent, as the
+    /// layout path and Swift place it. Area text ignores the anchor.
+    #[test]
+    fn a_point_texts_anchor_moves_each_line_by_its_own_width() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let point = |anchor: &str| {
+            let mut e = TextElem::from_string(
+                1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+                CommonProps::default(),
+            );
+            let mut w = Tspan::default();
+            w.jas_role = Some("paragraph".into());
+            w.jas_list_style = Some("bullet-disc".into());
+            w.jas_left_indent = Some(12.0);
+            e.tspans = vec![w, tspan("ab\n", None), tspan("cdef", Some("bold"))];
+            e.text_decoration = "underline".into();
+            e.text_anchor = anchor.into();
+            e
+        };
+        let xs = |p: &RunsPlan| shape(p).iter().map(|l| l.iter().map(|r| r.1).collect::<Vec<_>>()).collect::<Vec<_>>();
+        // "ab" is 2 x 10 wide, "cdef" 4 x 20 (bold): each line by its own width.
+        let start = plan(&point(""), &faces(&seen)).unwrap();
+        // The list indent puts both lines at 24; the anchor moves them from there.
+        assert_eq!(xs(&start), vec![vec![24.0], vec![24.0]]);
+        let middle = plan(&point("middle"), &faces(&seen)).unwrap();
+        assert_eq!(xs(&middle), vec![vec![14.0], vec![-16.0]]);
+        let end = plan(&point("end"), &faces(&seen)).unwrap();
+        assert_eq!(xs(&end), vec![vec![4.0], vec![-56.0]]);
+        // The underline moves with its line.
+        let spans = |p: &RunsPlan| decos(p).iter().map(|d| (d.1, d.2)).collect::<Vec<_>>();
+        assert_eq!(spans(&start), vec![(24.0, 44.0), (24.0, 104.0)]);
+        assert_eq!(spans(&middle), vec![(14.0, 34.0), (-16.0, 64.0)]);
+        // A marker stays at its indent, whatever the anchor.
+        assert!(!start.markers.is_empty(), "the fixture must place a marker");
+        assert_eq!(middle.markers, start.markers);
+        assert_eq!(end.markers, start.markers);
+        // An unknown anchor is the default.
+        assert_eq!(plan(&point("bogus"), &faces(&seen)).unwrap(), start);
+        // Area text ignores the anchor.
+        let mut area = styled_area(450.0);
+        let plain = plan(&area, &faces(&seen)).unwrap();
+        area.text_anchor = "end".into();
+        assert_eq!(plan(&area, &faces(&seen)).unwrap(), plain);
+    }
+
+    /// A tspan's own baseline shift (pt, + is up) moves its run's baseline
+    /// only, unscaled, as Swift's per-run `baselineOffset` and legacy's
+    /// segmented path draw it: the run carries `dy`, every other run 0. The
+    /// layout, the x positions and the line baselines do not move.
+    #[test]
+    fn a_tspans_own_baseline_shift_moves_its_run_only() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let plain = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        let mut e = styled_area(2000.0);
+        e.tspans[2].baseline_shift = Some(3.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let dys: Vec<(usize, f64)> = p.lines[0].runs.iter().map(|r| (r.tspan, r.dy)).collect();
+        assert_eq!(dys, vec![(1, 0.0), (2, -3.0), (3, 0.0)]);
+        assert_eq!(shape(&p), shape(&plain), "x and text do not move");
+        assert_eq!(p.lines[0].baseline_y, plain.lines[0].baseline_y);
+        // Under an element super shift the tspan's own shift is NOT scaled.
+        e.baseline_shift = "super".into();
+        let sup = plan(&e, &faces(&seen)).unwrap();
+        assert_eq!(sup.lines[0].runs[1].dy, -3.0);
+        // CONTROL: no own shift, every run at 0.
+        assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.dy == 0.0));
+    }
+
+    /// A tspan's own rotation (degrees, + clockwise; TSPAN.md "Rotation"):
+    /// each of its glyphs rotates about its own baseline origin and the pen
+    /// advances un-rotated, so the plan cuts the tspan's runs into one run
+    /// per character at the layout's own glyph x, each carrying the angle.
+    /// Other tspans keep whole runs at 0; the layout does not move.
+    #[test]
+    fn a_tspans_rotation_draws_each_of_its_glyphs_at_the_layouts_x() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let plain = plan(&styled_area(2000.0), &faces(&seen)).unwrap();
+        let mut e = styled_area(2000.0);
+        e.tspans[3].rotate = Some(15.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got: Vec<(String, f64, usize, f64)> = p.lines[0].runs.iter()
+            .map(|r| (r.text.clone(), r.x, r.tspan, r.rotate)).collect();
+        // " sat" starts at 130 + 25 x 20 = 630, each character 10 wide.
+        let mut want = vec![
+            ("One fine day ".to_string(), 0.0, 1, 0.0),
+            ("extraordinarily patiently".to_string(), 130.0, 2, 0.0),
+        ];
+        for (k, c) in " sat".chars().enumerate() {
+            want.push((c.to_string(), 630.0 + 10.0 * k as f64, 3, 15.0));
+        }
+        assert_eq!(got, want);
+        assert_eq!(p.lines.len(), plain.lines.len());
+        assert_eq!(p.lines[0].baseline_y, plain.lines[0].baseline_y);
+        // CONTROL: no rotation, whole runs, every angle 0.
+        assert_eq!(plain.lines[0].runs.len(), 3);
+        assert!(plain.lines.iter().flat_map(|l| &l.runs).all(|r| r.rotate == 0.0));
+    }
+
+    /// The ELEMENT's rotation is every glyph's (the Character panel on the
+    /// whole text), and a tspan's own rotation overrides it for its glyphs
+    /// (a tspan's `None` inherits): each glyph its own run, at the layout's
+    /// x. A rotation that does not read gives no plan rather than a guess.
+    #[test]
+    fn an_element_rotation_turns_every_glyph_and_a_tspans_own_overrides_it() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = styled_area(2000.0);
+        e.rotate = "20".into();
+        e.tspans[3].rotate = Some(-5.0);
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let runs = &p.lines[0].runs;
+        let total: usize = ["One fine day ", "extraordinarily patiently", " sat"].iter().map(|t| t.chars().count()).sum();
+        assert_eq!(runs.len(), total, "one run per glyph");
+        assert!(runs.iter().all(|r| r.text.chars().count() == 1));
+        let angles: Vec<f64> = runs.iter().map(|r| r.rotate).collect();
+        assert!(angles[..total - 4].iter().all(|&a| a == 20.0) && angles[total - 4..].iter().all(|&a| a == -5.0), "{angles:?}");
+        assert_eq!((runs[13].text.as_str(), runs[13].x), ("e", 130.0), "the bold run's first glyph at its layout x");
+        let mut bad = styled_area(2000.0);
+        bad.rotate = "tilt".into();
+        assert!(plan(&bad, &faces(&seen)).is_none());
+    }
+
+    /// A rotated glyph moves with its line's anchor: point text "ab" + "cd"
+    /// (rotated), end-anchored, is 40 wide, so its glyphs sit at -20 and -10.
+    #[test]
+    fn a_rotated_glyph_moves_with_its_lines_anchor() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let mut e = TextElem::from_string(
+            1.0, 2.0, "", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+            CommonProps::default(),
+        );
+        e.tspans = vec![tspan("ab\n", None), tspan("ab", None), tspan("cd", None)];
+        e.tspans[2].rotate = Some(-30.0);
+        e.text_anchor = "end".into();
+        let p = plan(&e, &faces(&seen)).unwrap();
+        let got: Vec<(String, f64, f64)> = p.lines[1].runs.iter().map(|r| (r.text.clone(), r.x, r.rotate)).collect();
+        assert_eq!(got, vec![("ab".into(), -40.0, 0.0), ("c".into(), -20.0, -30.0), ("d".into(), -10.0, -30.0)]);
     }
 }
