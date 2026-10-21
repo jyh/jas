@@ -269,242 +269,19 @@ pub fn tspans_from_json_clipboard(json_str: &str) -> Option<Vec<Tspan>> {
     Some(out)
 }
 
-/// Serialize `tspans` as an SVG fragment suitable for the
-/// `image/svg+xml` clipboard format. Wraps the tspans in a single
-/// `<text>` element with the standard SVG namespace. See TSPAN.md.
-/// Parent-element attributes (fill, font-family, etc.) are left to
-/// the default since the receiver decides how to apply them.
+/// Serialize `tspans` as the SVG fragment of the `image/svg+xml` clipboard
+/// format: each tspan as the document writes it (TSPAN.md "Cut / copy"). The
+/// codec is the document's; see [`crate::geometry::svg::tspans_to_svg_fragment`].
 pub fn tspans_to_svg_fragment(tspans: &[Tspan]) -> String {
-    let mut out = String::new();
-    out.push_str(r#"<text xmlns="http://www.w3.org/2000/svg">"#);
-    for t in tspans {
-        out.push_str("<tspan");
-        // Writers sort attributes alphabetically for stable output.
-        let mut attrs: Vec<(&str, String)> = Vec::new();
-        if let Some(v) = &t.baseline_shift { attrs.push(("baseline-shift", fmt_f64(*v))); }
-        if let Some(v) = &t.dx { attrs.push(("dx", fmt_f64(*v))); }
-        if let Some(v) = &t.font_family { attrs.push(("font-family", v.clone())); }
-        if let Some(v) = t.font_size { attrs.push(("font-size", fmt_f64(v))); }
-        if let Some(v) = &t.font_style { attrs.push(("font-style", v.clone())); }
-        if let Some(v) = &t.font_variant { attrs.push(("font-variant", v.clone())); }
-        if let Some(v) = &t.font_weight { attrs.push(("font-weight", v.clone())); }
-        if let Some(v) = &t.jas_aa_mode { attrs.push(("jas:aa-mode", v.clone())); }
-        if let Some(v) = t.jas_fractional_widths { attrs.push(("jas:fractional-widths", v.to_string())); }
-        if let Some(v) = &t.jas_kerning_mode { attrs.push(("jas:kerning-mode", v.clone())); }
-        if let Some(v) = t.jas_no_break { attrs.push(("jas:no-break", v.to_string())); }
-        if let Some(v) = &t.jas_role { attrs.push(("jas:role", v.clone())); }
-        if let Some(v) = t.jas_left_indent { attrs.push(("jas:left-indent", fmt_f64(v))); }
-        if let Some(v) = t.jas_right_indent { attrs.push(("jas:right-indent", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate { attrs.push(("jas:hyphenate", v.to_string())); }
-        if let Some(v) = t.jas_hanging_punctuation { attrs.push(("jas:hanging-punctuation", v.to_string())); }
-        if let Some(v) = &t.jas_list_style { attrs.push(("jas:list-style", v.clone())); }
-        if let Some(v) = &t.text_align { attrs.push(("text-align", v.clone())); }
-        if let Some(v) = &t.text_align_last { attrs.push(("text-align-last", v.clone())); }
-        if let Some(v) = t.text_indent { attrs.push(("text-indent", fmt_f64(v))); }
-        if let Some(v) = t.jas_space_before { attrs.push(("jas:space-before", fmt_f64(v))); }
-        if let Some(v) = t.jas_space_after { attrs.push(("jas:space-after", fmt_f64(v))); }
-        if let Some(v) = t.jas_word_spacing_min { attrs.push(("jas:word-spacing-min", fmt_f64(v))); }
-        if let Some(v) = t.jas_word_spacing_desired { attrs.push(("jas:word-spacing-desired", fmt_f64(v))); }
-        if let Some(v) = t.jas_word_spacing_max { attrs.push(("jas:word-spacing-max", fmt_f64(v))); }
-        if let Some(v) = t.jas_letter_spacing_min { attrs.push(("jas:letter-spacing-min", fmt_f64(v))); }
-        if let Some(v) = t.jas_letter_spacing_desired { attrs.push(("jas:letter-spacing-desired", fmt_f64(v))); }
-        if let Some(v) = t.jas_letter_spacing_max { attrs.push(("jas:letter-spacing-max", fmt_f64(v))); }
-        if let Some(v) = t.jas_glyph_scaling_min { attrs.push(("jas:glyph-scaling-min", fmt_f64(v))); }
-        if let Some(v) = t.jas_glyph_scaling_desired { attrs.push(("jas:glyph-scaling-desired", fmt_f64(v))); }
-        if let Some(v) = t.jas_glyph_scaling_max { attrs.push(("jas:glyph-scaling-max", fmt_f64(v))); }
-        if let Some(v) = t.jas_auto_leading { attrs.push(("jas:auto-leading", fmt_f64(v))); }
-        if let Some(v) = &t.jas_single_word_justify { attrs.push(("jas:single-word-justify", v.clone())); }
-        if let Some(v) = t.jas_hyphenate_min_word { attrs.push(("jas:hyphenate-min-word", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_min_before { attrs.push(("jas:hyphenate-min-before", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_min_after { attrs.push(("jas:hyphenate-min-after", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_limit { attrs.push(("jas:hyphenate-limit", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_zone { attrs.push(("jas:hyphenate-zone", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_bias { attrs.push(("jas:hyphenate-bias", fmt_f64(v))); }
-        if let Some(v) = t.jas_hyphenate_capitalized { attrs.push(("jas:hyphenate-capitalized", v.to_string())); }
-        if let Some(v) = t.letter_spacing { attrs.push(("letter-spacing", fmt_f64(v))); }
-        if let Some(v) = t.line_height { attrs.push(("line-height", fmt_f64(v))); }
-        if let Some(v) = t.rotate { attrs.push(("rotate", fmt_f64(v))); }
-        if let Some(v) = &t.style_name { attrs.push(("jas:style-name", v.clone())); }
-        if let Some(v) = &t.text_decoration {
-            if !v.is_empty() {
-                attrs.push(("text-decoration", v.join(" ")));
-            }
-        }
-        if let Some(v) = &t.text_rendering { attrs.push(("text-rendering", v.clone())); }
-        if let Some(v) = &t.text_transform { attrs.push(("text-transform", v.clone())); }
-        if let Some(v) = &t.xml_lang { attrs.push(("xml:lang", v.clone())); }
-        attrs.sort_by(|a, b| a.0.cmp(b.0));
-        for (k, v) in attrs {
-            out.push(' ');
-            out.push_str(k);
-            out.push_str("=\"");
-            out.push_str(&xml_escape(&v));
-            out.push('"');
-        }
-        out.push('>');
-        out.push_str(&xml_escape(&t.content));
-        out.push_str("</tspan>");
-    }
-    out.push_str("</text>");
-    out
+    crate::geometry::svg::tspans_to_svg_fragment(tspans)
 }
 
-fn fmt_f64(v: f64) -> String {
-    if v == v.trunc() { format!("{}", v as i64) } else { format!("{}", v) }
-}
-
-fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
-/// Parse an SVG fragment that came from a `image/svg+xml` clipboard
-/// payload. Expects a `<text>` root containing one or more `<tspan>`
-/// children; returns their flattened tspan list (fresh ids, parse
-/// errors yield `None`). Attributes map from CSS / SVG form to the
-/// snake_case tspan fields.
+/// Parse an `image/svg+xml` clipboard fragment into its flattened tspan list
+/// (fresh ids from 0), as the document reader reads a file; `None` when it
+/// has no `<text>` with a `<tspan>`. See
+/// [`crate::geometry::svg::tspans_from_svg_fragment`].
 pub fn tspans_from_svg_fragment(svg_str: &str) -> Option<Vec<Tspan>> {
-    // Minimal XML tokenizer — enough for the shape our writer emits
-    // and the shape other SVG apps typically produce. Handles
-    // nested tspans by flattening (spec says parsers may flatten).
-    let s = svg_str.trim();
-    let pos = s.find("<text")?;
-    let rest = &s[pos..];
-    let mut out = Vec::new();
-    let mut next_id: TspanId = 0;
-    let mut i = 0;
-    while let Some(open) = rest[i..].find("<tspan") {
-        let i_open = i + open;
-        let gt = rest[i_open..].find('>')?;
-        let attrs_str = &rest[i_open + "<tspan".len()..i_open + gt];
-        let close_tag = "</tspan>";
-        let close_pos = rest[i_open + gt + 1..].find(close_tag)?;
-        let content_raw = &rest[i_open + gt + 1..i_open + gt + 1 + close_pos];
-        // Drop any nested <tspan>...</tspan> markup inside the
-        // content; we only care about the flattened text.
-        let content = xml_unescape(&strip_tags(content_raw));
-        let mut t = Tspan::default_tspan();
-        t.id = next_id;
-        t.content = content;
-        next_id += 1;
-        for (k, v) in parse_xml_attrs(attrs_str) {
-            match k.as_str() {
-                "baseline-shift" => t.baseline_shift = v.parse().ok(),
-                "dx" => t.dx = v.parse().ok(),
-                "font-family" => t.font_family = Some(v),
-                "font-size" => t.font_size = v.parse().ok(),
-                "font-style" => t.font_style = Some(v),
-                "font-variant" => t.font_variant = Some(v),
-                "font-weight" => t.font_weight = Some(v),
-                "jas:aa-mode" => t.jas_aa_mode = Some(v),
-                "jas:fractional-widths" => t.jas_fractional_widths = Some(v == "true"),
-                "jas:kerning-mode" => t.jas_kerning_mode = Some(v),
-                "jas:no-break" => t.jas_no_break = Some(v == "true"),
-                "jas:role" => t.jas_role = Some(v),
-                "jas:left-indent" => t.jas_left_indent = v.parse().ok(),
-                "jas:right-indent" => t.jas_right_indent = v.parse().ok(),
-                "jas:hyphenate" => t.jas_hyphenate = Some(v == "true"),
-                "jas:hanging-punctuation" => t.jas_hanging_punctuation = Some(v == "true"),
-                "jas:list-style" => t.jas_list_style = Some(v),
-                "text-align" => t.text_align = Some(v),
-                "text-align-last" => t.text_align_last = Some(v),
-                "text-indent" => t.text_indent = v.parse().ok(),
-                "jas:space-before" => t.jas_space_before = v.parse().ok(),
-                "jas:space-after" => t.jas_space_after = v.parse().ok(),
-                "jas:word-spacing-min" => t.jas_word_spacing_min = v.parse().ok(),
-                "jas:word-spacing-desired" => t.jas_word_spacing_desired = v.parse().ok(),
-                "jas:word-spacing-max" => t.jas_word_spacing_max = v.parse().ok(),
-                "jas:letter-spacing-min" => t.jas_letter_spacing_min = v.parse().ok(),
-                "jas:letter-spacing-desired" => t.jas_letter_spacing_desired = v.parse().ok(),
-                "jas:letter-spacing-max" => t.jas_letter_spacing_max = v.parse().ok(),
-                "jas:glyph-scaling-min" => t.jas_glyph_scaling_min = v.parse().ok(),
-                "jas:glyph-scaling-desired" => t.jas_glyph_scaling_desired = v.parse().ok(),
-                "jas:glyph-scaling-max" => t.jas_glyph_scaling_max = v.parse().ok(),
-                "jas:auto-leading" => t.jas_auto_leading = v.parse().ok(),
-                "jas:single-word-justify" => t.jas_single_word_justify = Some(v),
-                "jas:hyphenate-min-word" => t.jas_hyphenate_min_word = v.parse().ok(),
-                "jas:hyphenate-min-before" => t.jas_hyphenate_min_before = v.parse().ok(),
-                "jas:hyphenate-min-after" => t.jas_hyphenate_min_after = v.parse().ok(),
-                "jas:hyphenate-limit" => t.jas_hyphenate_limit = v.parse().ok(),
-                "jas:hyphenate-zone" => t.jas_hyphenate_zone = v.parse().ok(),
-                "jas:hyphenate-bias" => t.jas_hyphenate_bias = v.parse().ok(),
-                "jas:hyphenate-capitalized" => t.jas_hyphenate_capitalized = Some(v == "true"),
-                "letter-spacing" => t.letter_spacing = v.parse().ok(),
-                "line-height" => t.line_height = v.parse().ok(),
-                "rotate" => t.rotate = v.parse().ok(),
-                "jas:style-name" => t.style_name = Some(v),
-                "text-decoration" => {
-                    let parts: Vec<String> = v
-                        .split_whitespace()
-                        .filter(|p| *p != "none")
-                        .map(String::from)
-                        .collect();
-                    t.text_decoration = Some(parts);
-                }
-                "text-rendering" => t.text_rendering = Some(v),
-                "text-transform" => t.text_transform = Some(v),
-                "xml:lang" => t.xml_lang = Some(v),
-                _ => {}
-            }
-        }
-        out.push(t);
-        i = i_open + gt + 1 + close_pos + close_tag.len();
-    }
-    if out.is_empty() { None } else { Some(out) }
-}
-
-fn xml_unescape(s: &str) -> String {
-    s.replace("&quot;", "\"")
-        .replace("&gt;", ">")
-        .replace("&lt;", "<")
-        .replace("&amp;", "&")
-}
-
-fn strip_tags(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut in_tag = false;
-    for c in s.chars() {
-        match c {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if !in_tag => out.push(c),
-            _ => {}
-        }
-    }
-    out
-}
-
-fn parse_xml_attrs(s: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        // Skip whitespace
-        while i < bytes.len() && bytes[i].is_ascii_whitespace() { i += 1; }
-        if i >= bytes.len() { break; }
-        // Read name
-        let name_start = i;
-        while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() { i += 1; }
-        let name = std::str::from_utf8(&bytes[name_start..i]).unwrap_or("").to_string();
-        if name.is_empty() { break; }
-        // Skip to '='
-        while i < bytes.len() && bytes[i] != b'=' { i += 1; }
-        if i >= bytes.len() { break; }
-        i += 1;
-        // Skip to quote
-        while i < bytes.len() && bytes[i] != b'"' && bytes[i] != b'\'' { i += 1; }
-        if i >= bytes.len() { break; }
-        let quote = bytes[i];
-        i += 1;
-        let val_start = i;
-        while i < bytes.len() && bytes[i] != quote { i += 1; }
-        let val = std::str::from_utf8(&bytes[val_start..i]).unwrap_or("").to_string();
-        if i < bytes.len() { i += 1; }
-        out.push((name, xml_unescape(&val)));
-    }
-    out
+    crate::geometry::svg::tspans_from_svg_fragment(svg_str)
 }
 
 /// Copy every non-`None` override field from `source` into `target`.
@@ -1552,6 +1329,18 @@ mod tests {
         assert_eq!(back[1].font_weight.as_deref(), Some("bold"));
     }
 
+    /// A range's scale (the tspan's `transform`) is in the clipboard
+    /// payload, in the shape Swift's reader takes: `"transform":{"a":…}`.
+    #[test]
+    fn json_clipboard_carries_a_ranges_scale() {
+        let t = Tspan { content: "x".into(),
+                        transform: Some(crate::geometry::element::Transform { a: 1.5, b: 0.0, c: 0.0, d: 0.8, e: 0.0, f: 0.0 }),
+                        ..Tspan::default_tspan() };
+        let json = tspans_to_json_clipboard(&[t.clone()]);
+        assert!(json.contains(r#""transform":{"a":1.5,"b":0.0,"c":0.0,"d":0.8,"e":0.0,"f":0.0}"#), "{json}");
+        assert_eq!(tspans_from_json_clipboard(&json).unwrap()[0].transform, t.transform);
+    }
+
     #[test]
     fn json_clipboard_strips_id() {
         let src = vec![Tspan { id: 42, content: "x".into(),
@@ -1589,7 +1378,9 @@ mod tests {
     fn svg_fragment_roundtrip_preserves_content_and_weight() {
         let src = vec![plain("hello "), bold("world")];
         let svg = tspans_to_svg_fragment(&src);
-        assert!(svg.contains(r#"<text xmlns="http://www.w3.org/2000/svg">"#));
+        assert!(svg.starts_with(
+            r#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#
+        ), "{svg}");
         assert!(svg.contains("<tspan>hello </tspan>"));
         assert!(svg.contains(r#"<tspan font-weight="bold">world</tspan>"#));
         let back = tspans_from_svg_fragment(&svg).unwrap();

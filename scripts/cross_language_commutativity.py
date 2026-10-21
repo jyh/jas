@@ -73,6 +73,16 @@ FIXTURE_NAMES = [
     # agreeing with itself. `locked_all_kinds` additionally covers every
     # writer arm that has an SVG read path.
     "locked_layer_and_element", "locked_all_kinds",
+    # A tspan's per-range character attributes (baseline shift, case, small
+    # caps, tracking, leading, language, ...): written by one port, read by
+    # the other, so the two spellings are proven the SAME, not each merely
+    # self-consistent. Both document writers dropped all fourteen until
+    # 2026-10-19, IN AGREEMENT, which no cross-port cell can see; the
+    # diagonal's golden is what reds a port that drops one again. It is area
+    # text with no `dx` or `transform`, so the Windows walk presents it (the
+    # whole-corpus law in `ffi_paint.rs`); those two are carried by each
+    # port's every-field arm, so their cross-port spelling is NOT pinned here.
+    "text_tspan_character_attrs",
 ]
 
 

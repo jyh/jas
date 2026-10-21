@@ -239,11 +239,12 @@ struct R9GuardedCastTests {
         #expect(Value.number(1e30).toAny() as? Double == 1e30)
     }
 
-    /// `fmtNum` / `_fmtNum` / `_fmtDouble` all test `n == n.trunc()` and then
-    /// cast. That predicate is TRUE for ±infinity and for every integral value
-    /// at or above 2^63, so the guard admits exactly what the cast cannot take.
-    /// Rust's `fmt_num` (workspace/app_state.rs) and `fmt_f64`
-    /// (geometry/tspan.rs) both saturate to i64::MAX there and print it.
+    /// `fmtNum` / `_fmtNum` both test `n == n.trunc()` and then cast. That
+    /// predicate is TRUE for ±infinity and for every integral value at or
+    /// above 2^63, so the guard admits exactly what the cast cannot take.
+    /// Rust's `fmt_num` (workspace/app_state.rs) saturates to i64::MAX there
+    /// and prints it. (A third, `_fmtDouble`, was the clipboard fragment's own
+    /// formatter; the fragment now writes each tspan as the document does.)
     @Test func fmtNumSaturatesLikeRust() {
         #expect(fmtNum(3.0) == "3")
         #expect(fmtNum(2.5) == "2.5")
@@ -257,13 +258,6 @@ struct R9GuardedCastTests {
         #expect(_fmtNum(2.5) == "2.5")
         #expect(_fmtNum(.infinity) == "9223372036854775807")
         #expect(_fmtNum(1e30) == "9223372036854775807")
-    }
-
-    @Test func fmtDoubleSaturatesLikeRust() {
-        #expect(_fmtDouble(3.0) == "3")
-        #expect(_fmtDouble(2.5) == "2.5")
-        #expect(_fmtDouble(.infinity) == "9223372036854775807")
-        #expect(_fmtDouble(1e30) == "9223372036854775807")
     }
 
     /// `path()` / `path_child()` guard `n >= 0`, which rejects NaN in both ports

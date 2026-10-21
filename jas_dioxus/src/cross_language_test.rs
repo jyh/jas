@@ -87,7 +87,7 @@ pub(crate) mod tests {
             // Tspan-bearing text fixtures (TSPAN.md): styled runs + xml:space
             // content round-trip through test_json. Mirrors the Swift
             // jsonRoundtripAllExpected registration.
-            "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
+            "text_with_tspans", "text_tspan_character_attrs", "text_path_with_tspans", "text_xml_space_preserve",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             // Stable identity: elements carrying an `id` must survive the
@@ -150,7 +150,7 @@ pub(crate) mod tests {
             // content round-trip through the binary codec (self-roundtrip
             // only; no Python-generated .bin exists for these). Mirrors the
             // Swift binaryRoundtripAllExpected registration.
-            "text_with_tspans", "text_path_with_tspans", "text_xml_space_preserve",
+            "text_with_tspans", "text_tspan_character_attrs", "text_path_with_tspans", "text_xml_space_preserve",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
             // Stable identity (binary v2): id+name round-trip generically.
@@ -318,7 +318,7 @@ pub(crate) mod tests {
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
-            "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
+            "text_with_tspans", "text_tspan_character_attrs", "text_xml_space_preserve", "text_path_with_tspans",
             // Import normalization: duplicate ids collapse to first-pre-order-wins.
             "dup_id_import",
             // The same normalization reaching INSIDE a live compound's operands.
@@ -366,7 +366,7 @@ pub(crate) mod tests {
             "text_basic", "text_path_basic",
             "group_nested", "transform_translate", "transform_rotate",
             "multi_layer", "complex_document",
-            "text_with_tspans", "text_xml_space_preserve", "text_path_with_tspans",
+            "text_with_tspans", "text_tspan_character_attrs", "text_xml_space_preserve", "text_path_with_tspans",
             // Live elements round-trip through SVG (Phase 2a): reference as
             // <use href>, compound as <g data-jas-live ...data-jas-operation>.
             "live_reference", "live_compound",
@@ -458,6 +458,13 @@ pub(crate) mod tests {
     #[test]
     fn svg_parse_text_with_tspans() {
         assert_svg_parse("text_with_tspans");
+    }
+
+    /// A tspan's per-range character attributes (baseline shift, case,
+    /// small caps, tracking, leading, language, ...) read from SVG.
+    #[test]
+    fn svg_parse_text_tspan_character_attrs() {
+        assert_svg_parse("text_tspan_character_attrs");
     }
 
     #[test]

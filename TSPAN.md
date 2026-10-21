@@ -220,6 +220,23 @@ so round-trips are byte-stable:
 - Text elements with a single tspan that overrides nothing round-
   trip to SVG without a `<tspan>` element, so pre-Tspan documents
   serialize identically.
+- **Every field round-trips.** The per-range character attributes
+  are written with the model's own unit, which SVG reads as written
+  and which reopens exactly: `baseline-shift="3.5pt"` (pt, + = up),
+  `dx="0.25em"` and `letter-spacing="0.1em"` (em), `line-height="1.5"`
+  (a multiplier, as CSS's unitless `line-height`), `font-variant`,
+  `text-transform`, `text-rendering`, `xml:lang`, `transform` (the
+  tspan's scale, as a matrix), and `jas:style-name`, `jas:aa-mode`,
+  `jas:kerning-mode`, `jas:fractional-widths`, `jas:no-break`. On
+  import a bare `baseline-shift` number is user units (px), as
+  another application writes it, and a keyword or percentage is
+  not a tspan's numeric shift. Until 2026-10-19 both active ports'
+  document writers and readers dropped all fourteen, in agreement,
+  so Save and Copy/Paste lost them. The guards are
+  `every_tspan_field_survives_a_save_and_reopen` (Rust; its literal
+  names every field, so a new field does not compile until it
+  round-trips), its Swift twin, and the cross-port cell
+  `text_tspan_character_attrs` in `cross_language_commutativity.py`.
 
 ### Known limitation (2026-07-22)
 
@@ -523,7 +540,14 @@ It is extended as follows:
     cross elements). Preferred by jas apps.
   - `image/svg+xml` — an SVG fragment `<text><tspan>…</tspan>…</text>`
     with the same tspans serialized per the SVG serialization
-    rules. Preferred by other SVG-aware apps.
+    rules: each `<tspan>` is byte-for-byte what the document writer
+    emits (lengths in their units, a size in px, `transform`), under a
+    root `<text xmlns="http://www.w3.org/2000/svg"
+    xmlns:jas="urn:jas:1" xml:space="preserve">` that declares the
+    `jas:` prefix (a namespace-aware reader refuses an undeclared
+    one). It is read as a document is: the first `<text>` at or under
+    the root, a bare length in user units (px). Preferred by other
+    SVG-aware apps.
   - `text/plain` — the concatenated `content` of the selected
     range. Used as a last resort by unrelated text editors.
 - **Paste.** On paste, the session reads the clipboard in
