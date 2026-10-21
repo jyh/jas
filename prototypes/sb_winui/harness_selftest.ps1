@@ -2089,6 +2089,20 @@ function Show-SbScript($s) {
     "$($s.Item) svg=$($s.Svg) tool=$($s.Tool) at=($($s.DocX),$($s.DocY)) by=($($s.Dx),$($s.Dy)) k=$($s.Moves) read=$($s.Read) expected=$($s.Expected)$(if ($s.Shift -and $s.Shift -ne 'none') { " shift=$($s.Shift)" })$(if ($s.Alt -and $s.Alt -ne 'none') { " alt=$($s.Alt)" })$(if ($s.KeyText) { " keys=$($s.KeyText)" })$(if ($s.PanelShow) { " panels=$($s.PanelShow)" })"
 }
 
+# A script with no `expected_json` used to pass prove_e2e's up-front check:
+# `Join-Path <dir> ''` is the script's own DIRECTORY, which Test-Path finds,
+# so the run drove the app and then threw reading a directory as the expected
+# document (measured 10-20 on a scratch stacked-style script). Refused by name.
+Test-Case 'is: a script that names no expected_json is REFUSED by name' {
+    $j = New-SbScript @($sPress, $sMove, $sRelease, $sRead) | ConvertFrom-Json
+    $j.PSObject.Properties.Remove('expected_json')
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 6))
+} 'REFUSED: the script names no expected_json'
+Test-Case 'is: an empty expected_json is REFUSED by name' {
+    $j = New-SbScript @($sPress, $sMove, $sRelease, $sRead) | ConvertFrom-Json
+    $j.expected_json = ' '
+    Show-SbScript (Read-SbInputScript ($j | ConvertTo-Json -Depth 6))
+} 'REFUSED: the script names no expected_json'
 Test-Case 'is: the first script maps onto one drag, k=1' {
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $sRead)))
 } 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json'
@@ -2786,6 +2800,26 @@ Test-Case 'lane: CONTROL -- the census literal matches the old spelled-out line'
 $SbLogProbe = Join-Path ([IO.Path]::GetTempPath()) ('sb-lane-' + [guid]::NewGuid().ToString('N'))
 Test-Case 'lane: the build log names a file in a directory that now exists (fresh clone)' { $l = New-SbBuildLog $SbLogProbe 'b.txt'; "$((Split-Path $l -Leaf)) $(Test-Path (Split-Path $l -Parent))" } 'b.txt True'
 Remove-Item $SbLogProbe -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---------------------------------------------------------------------------
+# The paint arm: a run that the shell REFUSED to paint is not a run that drew
+# its frame. Measured 10-20: a stacked superscript + underline logged
+# doc-changed=true on every click while ffi_paint refused the whole frame
+# (`RUSTFAIL REPAINT-FAILED ... failure=DOCUMENT INCOMPLETE`), so the screen
+# kept the PREVIOUS frame and a frame hash frozen from it froze the wrong picture.
+# Rows below are the real shapes from that sitting's sb-runs.log.
+# ---------------------------------------------------------------------------
+$SbPaintOk   = 'SB_MODE=(default:offscreen)	RUSTOK REPAINT events_total=1 distinct_sizes=1 arrivals=0 frames=1 cause=pointer surface=2379x1333 paint=1.94ms present=3.46ms'
+$SbPaintFail = 'SB_MODE=(default:offscreen)	RUSTFAIL REPAINT-FAILED events_total=72 frames=1 cause=panel surface=1908x675 paint=0.70ms present=0.00ms render-has-dispatcher=false failure=DOCUMENT INCOMPLETE -- the document holds an element the native walk cannot draw'
+$SbPaintClick = 'SB_MODE=(default:offscreen)	PANEL CLICK panel=character_panel_content widget=ch_underline via=hand event=click value=- outcome=changed changed-rows=1 doc-changed=true'
+Test-Case 'paint: every repaint drew -> PASS with the count' { Get-SbPaintVerdict @($SbPaintOk, $SbPaintClick, $SbPaintOk) } 'PASS(ok=2)'
+Test-Case 'paint: ONE refused repaint among drawn ones -> FAIL naming the reason' { Get-SbPaintVerdict @($SbPaintOk, $SbPaintClick, $SbPaintFail, $SbPaintOk) } 'FAIL(repaint-failed=1 ok=2 failure=DOCUMENT INCOMPLETE)'
+Test-Case 'paint: refused only -> FAIL, not a pass on zero drawn' { Get-SbPaintVerdict @($SbPaintFail, $SbPaintFail) } 'FAIL(repaint-failed=2 ok=0 failure=DOCUMENT INCOMPLETE)'
+Test-Case 'paint: no repaint row at all -> FAIL, a run that drew nothing certifies nothing' { Get-SbPaintVerdict @($SbPaintClick) } 'FAIL(no RUSTOK REPAINT row after the mark)'
+Test-Case 'paint: no rows -> FAIL' { Get-SbPaintVerdict @() } 'FAIL(no RUSTOK REPAINT row after the mark)'
+Test-Case 'paint: CONTROL -- a REPAINT-FAILED row is not counted as a drawn repaint' { @(Select-SbRows @($SbPaintFail) 'RUSTOK REPAINT ').Count } 0
+Test-Case 'paint: CONTROL -- the failure pattern matches the real row' { @(Select-SbRows @($SbPaintFail) 'RUSTFAIL REPAINT-FAILED ').Count } 1
+Test-Case 'paint: a failure with no reason field still FAILS' { Get-SbPaintVerdict @($SbPaintOk, 'RUSTFAIL REPAINT-FAILED events_total=1 frames=1') } 'FAIL(repaint-failed=1 ok=1 failure=UNNAMED)'
 
 # ---------------------------------------------------------------------------
 Write-Host ""

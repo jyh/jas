@@ -518,6 +518,14 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
         if panel_id == crate::interpreter::stroke_host::STROKE_PANEL {
             panel.extend(crate::interpreter::stroke_host::live_values(model.document()));
         }
+        // The Gradient panel's type, angle, stops and the rest describe the
+        // selection's active attribute too; the slider drew the store's default
+        // stops over a selected gradient until this (flask §495). A boolean
+        // (`dither`) negates what it reads, so this is W2b-7's law again.
+        if panel_id == crate::interpreter::gradient_host::GRADIENT_PANEL {
+            panel.extend(crate::interpreter::gradient_host::live_values(model.document(),
+                                                                       slice.fill_on_top));
+        }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         // The web's whole `active_document` view first (`document_views`), so
@@ -806,6 +814,39 @@ mod tests {
             })
             .collect();
         d
+    }
+
+    /// The Gradient panel's fields describe the SELECTION (W2b-7's law). Until
+    /// this the engine's scope was the store's panel alone, so a selected blue
+    /// radial drew `gradient.yaml`'s black→white linear default (flask §495).
+    /// Nothing selected leaves the store's panel standing.
+    #[test]
+    fn the_engine_gradient_panel_reads_the_selection_and_else_the_store() {
+        use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+        use crate::interpreter::state_store::StateStore;
+        let mut store = StateStore::new();
+        store.init_panel("gradient", std::collections::HashMap::from([
+            ("type".to_string(), json!("linear")),
+            ("angle".to_string(), json!(45.0)),
+        ]));
+        let mut m = crate::document::test_fixture::model_with(
+            vec![crate::document::test_fixture::rect(0.0, 0.0, 10.0, 10.0)], &[0]);
+        assert!(gradient_host::apply_render_key(&mut m, true, "gradient_type", &json!("radial"),
+                                                || panic!("not mixed")));
+        let panel = |m: &Model, fill_on_top: bool| {
+            let slice = PanelState { fill_on_top, ..PanelState::default() };
+            engine_scope(&slice, &store, m, GRADIENT_PANEL)["panel"].clone()
+        };
+        let p = panel(&m, true);
+        assert_eq!((&p["type"], &p["angle"]), (&json!("radial"), &json!(0.0)), "{p}");
+        assert_eq!(p["stops"][1]["color"], json!("#ffffff"), "{p}");
+        // The stroke is on top and the rect has none: the seed, not the fill's.
+        assert_eq!(panel(&m, false)["type"], json!("linear"));
+        let mut none = m.document().clone();
+        none.selection.clear();
+        m.set_document_for_test(none);
+        let p = panel(&m, true);
+        assert_eq!((&p["type"], &p["angle"]), (&json!("linear"), &json!(45.0)), "{p}");
     }
 
     /// W2b-15. The Concepts panel's `foreach source: "data.concepts"` reads the

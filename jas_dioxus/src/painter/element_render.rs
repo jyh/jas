@@ -375,16 +375,7 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
     // draw does not carry -- spacing, decoration, a glyph rotation -- and a
     // baseline shift that does not read (node 27 lowers the readable ones).
     if t.render_is_flat() && needs_layout(t) {
-        let has_measurer = crate::text_measure::try_make_measurer(
-            &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
-            t.font_size,
-        ).is_some();
-        return !has_measurer
-            || !t.letter_spacing.is_empty()
-            || !t.kerning.is_empty()
-            || !t.text_decoration.split_whitespace().all(|w| w == "none")
-            || text_transform(t).map_or(true, |(_, _, r)| r != 0.0)
-            || baseline_shift_of(t).is_none();
+        return flat_layout_route(t, flat_has_measurer(t)) == FlatLayoutRoute::Legacy;
     }
     // ⭐ ROW DR NARROWS THIS AGAIN: SEGMENTED text lowers now, provided every
     // tspan is feature-free AND a real measurer exists for the font.
@@ -453,6 +444,52 @@ pub fn text_needs_legacy(t: &crate::geometry::element::TextElem) -> bool {
         }
     }
     !t.baseline_shift.is_empty() || decoration_needs_legacy(t)
+}
+
+/// How flat text that the legacy renderer lays out (`needs_layout`) is drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FlatLayoutRoute {
+    /// The per-line draw (`emit_laid_out_text`), node 25.
+    Lines,
+    /// The shared plan (`emit_laid_out_runs`), for what the line draw lacks.
+    Runs,
+    /// Neither: the legacy renderer.
+    Legacy,
+}
+
+/// ⭐ THE 10-20 FEEL SITTING, FINDING 10. The per-line draw carries no
+/// spacing, decoration or glyph rotation, so superscript + underline (a shift
+/// is what makes the text `needs_layout`, node 27) went to legacy, and the
+/// Windows walk refused the WHOLE frame: 1,223 `DOCUMENT INCOMPLETE` repaints
+/// in his sitting. What the line draw lacks now takes the shared plan, which
+/// draws all three (its decoration lines, its letter spacing, each glyph
+/// turned), provided the plan takes the element at all (`runs_plan_excludes`).
+/// What the line draw carries keeps it, so no frame at a single style moves.
+/// Stays legacy, by name: no real measurer (both draws break lines by measured
+/// widths), and a baseline shift that does not read. `has_measurer` is an
+/// argument so the decision can be driven where no real measurer exists.
+pub(crate) fn flat_layout_route(t: &crate::geometry::element::TextElem, has_measurer: bool) -> FlatLayoutRoute {
+    if !has_measurer || baseline_shift_of(t).is_none() {
+        return FlatLayoutRoute::Legacy;
+    }
+    let lines_lack = !t.letter_spacing.is_empty()
+        || !t.kerning.is_empty()
+        || !t.text_decoration.split_whitespace().all(|w| w == "none")
+        || text_transform(t).map_or(true, |(_, _, r)| r != 0.0);
+    if !lines_lack {
+        FlatLayoutRoute::Lines
+    } else if !runs_plan_excludes(t) {
+        FlatLayoutRoute::Runs
+    } else {
+        FlatLayoutRoute::Legacy
+    }
+}
+
+fn flat_has_measurer(t: &crate::geometry::element::TextElem) -> bool {
+    crate::text_measure::try_make_measurer(
+        &format!("{} {} {}", t.font_style, t.font_weight, t.font_family),
+        t.font_size,
+    ).is_some()
 }
 
 /// ⭐ NODE 20 (jas section 414): an underline or line-through lowers on flat,
@@ -561,14 +598,15 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 }
 
 /// NODE 33: what the runs path does not draw, so it stays legacy, by name:
-/// [`runs_plan_excludes`] (a tspan's rotate, transform, dx or own baseline
-/// shift; element spacing or a baseline shift that does not read; a scale or
-/// rotation; an anchor), and any tspan whose font has no real measurer (each
+/// [`runs_plan_excludes`] (a tspan's transform or dx; a shifted or rotated
+/// tspan's decoration; element spacing, a baseline shift, a scale or a
+/// rotation that does not read; an element rotation beside a decoration), and any tspan whose font has no real measurer (each
 /// character is measured in its own font). Drawn, so NOT excluded: a tspan's
 /// own size (each run at its size on the element's leading, as Swift draws
 /// it), readable tracking and kerning (in the layout's widths), a decoration
 /// (the element's or a tspan's), a case transform or small caps, a readable
-/// element baseline shift, and a justified or hyphenated paragraph (the plan
+/// element baseline shift, a tspan's own baseline shift and rotation, a point text's anchor (each line moved by its own
+/// width), and a justified or hyphenated paragraph (the plan
 /// cuts a stretched line into words and draws the synthetic hyphen).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     runs_plan_excludes(t) || t.tspans.iter().any(|s| {
@@ -583,19 +621,22 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 /// for the same elements.
 pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
-    // A tspan's decoration and its own size are drawn (the plan's decoration
-    // lines; each run at its tspan's size on the element's leading, Swift's
-    // law); its other per-tspan features are not.
-    if body().any(|s| tspan_needs_legacy(s) && !only_decoration(s)) {
+    // A tspan's decoration, its own size, baseline shift and rotation are
+    // drawn (the plan's decoration lines, each in its glyph's frame; each run
+    // at its tspan's size on the element's leading, Swift's law; a run's
+    // `dy`; a rotated run per glyph); its dx and transform are not.
+    if body().any(|s| tspan_needs_legacy(s) && !plan_draws_tspan(s)) {
         return true;
     }
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
-        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+        || text_transform(t).is_none()
         || crate::algorithms::text_runs::baseline_shift(t).is_none()
-        || !t.text_anchor.is_empty()
     {
         return true;
     }
+    // A readable scale is the renderer's frame around the plan, and the
+    // element's rotation is every glyph's (the plan cuts them, and turns each
+    // glyph's decoration piece with it).
     // A case transform or small caps is drawn (the plan measures and draws
     // each tspan's transformed text, Swift's per-run law), and so is a
     // readable element baseline shift (the plan scales and moves it). A justified or hyphenated paragraph is drawn: the plan cuts a
@@ -604,9 +645,11 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     false
 }
 
-/// A tspan whose ONLY per-tspan feature is a decoration override.
-fn only_decoration(s: &crate::geometry::tspan::Tspan) -> bool {
-    s.rotate.is_none() && s.transform.is_none() && s.dx.is_none() && s.baseline_shift.is_none()
+/// A tspan whose per-tspan features the plan draws: a decoration override,
+/// its own baseline shift and its own rotation, a decoration beside either
+/// (drawn in its glyph's frame); not its dx or transform.
+fn plan_draws_tspan(s: &crate::geometry::tspan::Tspan) -> bool {
+    s.transform.is_none() && s.dx.is_none()
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -625,12 +668,34 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
     let Some(plan) = crate::algorithms::text_runs::plan(e, &real) else { return };
     let (element_font, _) = walk_font(&crate::algorithms::text_runs::element_face(e));
     let brush = Brush::Solid(f.color);
+    // A scale is the flat arm's frame around the whole draw (node 19):
+    // `translate(x, y) · scale(h, v) · translate(-x, -y)` about the box's
+    // top-left. The router admits only readable values.
+    let (h, v, _) = text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+    let scaled = h != 1.0 || v != 1.0;
+    if scaled {
+        p.push_state(super::Transform { a: h, b: 0.0, c: 0.0, d: v, e: e.x - h * e.x, f: e.y - v * e.y });
+    }
     for line in plan.lines {
         for r in line.runs {
             // The plan resolves the run's size (a baseline shift scales it).
             let (font, _) = tspan_font(e, &e.tspans[r.tspan]);
+            let (x, y) = (e.x + r.x, e.y + line.baseline_y + r.dy);
+            if r.rotate != 0.0 {
+                // A rotated run is one glyph, drawn in the flat arm's frame:
+                // `translate(x, baseline) · rotate(θ)`.
+                let (sin, cos) = r.rotate.to_radians().sin_cos();
+                p.push_state(super::Transform { a: cos, b: sin, c: -sin, d: cos, e: x, f: y });
+                p.draw_text_run(
+                    &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: 0.0, x: 0.0, y: 0.0 },
+                    &brush,
+                    eff * f.opacity,
+                );
+                p.pop_state();
+                continue;
+            }
             p.draw_text_run(
-                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x: e.x + r.x, y: e.y + line.baseline_y },
+                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x, y },
                 &brush,
                 eff * f.opacity,
             );
@@ -646,6 +711,21 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             miter: 10.0,
             dash: Vec::new(),
         };
+        if d.rotate != 0.0 {
+            // A turned glyph's piece, in its run's frame: `translate(x0,
+            // baseline) · rotate(θ)`, the stroke at its offset from there.
+            let (sin, cos) = d.rotate.to_radians().sin_cos();
+            p.push_state(super::Transform { a: cos, b: sin, c: -sin, d: cos, e: e.x + d.x0, f: e.y + d.origin_y });
+            let off = d.y - d.origin_y;
+            p.stroke_path(
+                &[PathCommand::MoveTo { x: 0.0, y: off }, PathCommand::LineTo { x: d.x1 - d.x0, y: off }],
+                &brush,
+                &line,
+                eff * f.opacity,
+            );
+            p.pop_state();
+            continue;
+        }
         p.stroke_path(
             &[PathCommand::MoveTo { x: e.x + d.x0, y: e.y + d.y }, PathCommand::LineTo { x: e.x + d.x1, y: e.y + d.y }],
             &brush,
@@ -662,6 +742,9 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             &brush,
             eff * f.opacity,
         );
+    }
+    if scaled {
+        p.pop_state();
     }
 }
 
@@ -701,6 +784,14 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
         || t.text_transform == "uppercase"
         || t.text_transform == "lowercase"
         || t.font_variant == "small-caps"
+        // STYLED text with a turn (a range's `rotate`, or the element's): the
+        // plan turns EACH glyph about its own origin (TSPAN.md "Rotation"),
+        // where the segmented path turned a range as one block about its
+        // first glyph and ignored the element's turn. Flat text is not routed
+        // here.
+        || (!t.render_is_flat()
+            && (t.tspans.iter().any(|s| s.rotate.is_some_and(|a| a != 0.0))
+                || crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0)))
         || t.tspans.iter().any(|w| {
             w.jas_role.as_deref() == Some("paragraph")
                 && ((is_area && (w.text_align.is_some() || w.text_align_last.is_some()))
@@ -1776,6 +1867,9 @@ fn emit_element_body(p: &mut dyn Painter, elem: &Element, eff: f64, vis: Visibil
         // NODE 33: non-flat text the legacy renderer lays out takes the runs
         // path; the rest keeps the single-baseline segmented lowering.
         Element::Text(e) if !e.render_is_flat() && needs_layout(e) => emit_laid_out_runs(p, e, eff),
+        // Finding 10: flat laid-out text with what the line draw lacks.
+        Element::Text(e) if e.render_is_flat() && needs_layout(e)
+            && flat_layout_route(e, flat_has_measurer(e)) == FlatLayoutRoute::Runs => emit_laid_out_runs(p, e, eff),
         Element::Text(e) if !e.render_is_flat() => emit_segmented_text(p, e, eff),
         Element::Text(e) => {
             // A simplified flat FastRun — proves the text op interleaves in

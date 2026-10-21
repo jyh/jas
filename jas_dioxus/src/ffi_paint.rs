@@ -519,11 +519,11 @@ pub unsafe extern "C" fn jas_load_svg(engine: *mut c_void, svg: *const u8, len: 
         return JAS_PAINT_BAD_SVG;
     };
     // OPENED, not merely decoded: the pages and the at-least-one-artboard
-    // invariant, as every app's open does (flask STATUS § 313).
-    let Some(doc) = crate::geometry::svg::try_open_svg_document(text) else {
+    // invariant, as every app's open does (flask STATUS § 313); and the text
+    // kept as what File > Revert returns to (`JasEngine::open_svg`).
+    if !engine.open_svg(text) {
         return JAS_PAINT_BAD_SVG;
-    };
-    engine.replace_document(doc);
+    }
     JAS_PAINT_OK
 }
 
@@ -743,9 +743,13 @@ unsafe fn paint_frame_into(surface: *mut c_void, engine: &crate::ffi::JasEngine)
         return JAS_PAINT_DOCUMENT_INCOMPLETE;
     }
 
+    // The pasteboard: the theme's `pane_bg` under everything, in screen space,
+    // as the web canvas fills its viewport (layer 1), so the page's white shows
+    // against it. Transparent, as before, when the workspace states none.
+    let (r, g, b, a) = crate::ffi_pointer::pasteboard_color().map_or((0.0, 0.0, 0.0, 0.0), |c| c.to_rgba());
     unsafe {
         rt.BeginDraw();
-        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        rt.Clear(Some(&D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: a as f32 }));
         let mut painter = Direct2DPainter::new(rt);
         crate::ffi_pointer::emit_frame(engine, &mut painter);
         if let Err(e) = rt.EndDraw(None, None) {
@@ -2035,6 +2039,42 @@ mod tests {
         assert_ne!(plain, paint("underline"), "an underline must change the frame");
     }
 
+    /// ⭐ A STACKED STYLE PAINTS (the 10-20 feel sitting, finding 10: every
+    /// repaint after superscript + underline read DOCUMENT INCOMPLETE). The
+    /// shift lays the text out, and what the line draw lacks now takes the
+    /// shared plan, so the frame paints, and the underline changes it.
+    #[test]
+    fn a_superscript_underlined_text_paints_and_differs_from_superscript_alone() {
+        let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+        let paint = |decoration: &str| {
+            let mut doc = crate::geometry::svg::svg_to_document(&svg);
+            fn style(e: &mut Element, decoration: &str) {
+                match e {
+                    Element::Text(t) => {
+                        t.baseline_shift = "super".into();
+                        t.text_decoration = decoration.into();
+                        t.fill = Some(crate::geometry::element::Fill {
+                            color: crate::geometry::element::Color::rgb(1.0, 0.0, 0.0), opacity: 1.0,
+                        });
+                    }
+                    Element::Layer(l) => for c in l.children.iter_mut() { style(std::rc::Rc::make_mut(c), decoration) },
+                    _ => {}
+                }
+            }
+            for l in doc.layers.iter_mut() { style(l, decoration); }
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            let surface: IDXGISurface = t.cast().expect("surface");
+            let rc = unsafe { jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32) };
+            assert_eq!(rc, JAS_PAINT_OK, "superscript text must paint, not refuse ({decoration:?})");
+            read(&dev, &ctx, &t)
+        };
+        let blank = { let (dev, ctx) = warp(); let t = tex(&dev, false); read(&dev, &ctx, &t) };
+        let sup = paint("none");
+        assert_ne!(blank, sup, "control: the superscript text must reach the surface at all");
+        assert_ne!(sup, paint("underline"), "the underline must change the frame");
+    }
+
     /// An EMPTY document is complete, not incomplete. Nothing to draw is a
     /// legitimate state (a new file), and refusing it would make the app unable
     /// to open one.
@@ -2307,7 +2347,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 97, "the fixture corpus changed size");
+        assert_eq!(total, 98, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2453,6 +2493,17 @@ mod tests {
         // walk's segmented lowering carries where a measurer exists, so it
         // presents (on one line, which is the point of the fixture); that it
         // does is read, not measured here. Both pins bumped in the same edit.
+        // ⛔ 97 → 98 (jas, 2026-10-19, save keeps every tspan field):
+        // `text_tspan_character_attrs.svg`, AREA text whose middle tspan
+        // carries a baseline shift, case, small caps, tracking, leading,
+        // language and the jas: text modes, and whose last carries a bare
+        // (px) shift. It is area text on purpose: a POINT text tspan with a
+        // shift takes `tspan_needs_legacy` and would refuse, while the plan
+        // (`runs_plan_excludes`) admits a tspan's shift with no decoration.
+        // No `dx` or `transform` for the same reason (the plan refuses both);
+        // the two ports' every-field arms carry those. Expected to present;
+        // that it does is read, not measured here. Both pins bumped in the
+        // same edit.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2464,6 +2515,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 97, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 98, "the whole corpus presents");
     }
 }

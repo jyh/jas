@@ -2060,13 +2060,15 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
     };
     underlined.text_decoration = "underline".into();
     // In a box, as this arm always was: since node 20 an underlined POINT text
-    // lowers where a real measurer exists, while decorated AREA text stays
-    // legacy on every lane.
+    // lowers where a real measurer exists, and since 2026-10-20 decorated AREA
+    // text does too (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)). The clause narrowed again; what still refuses is
+    // what the plan cannot read.
     (underlined.width, underlined.height) = (10.0, 12.0);
-    assert!(
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(
         element_needs_legacy(&Element::Text(underlined), caps),
-        "a REAL decoration is an extra primitive and stays legacy -- the clause \
-         narrowed, it did not vanish"
+        !has_real,
+        "decorated AREA text takes the plan where a real measurer exists"
     );
 
     let _ = flat;
@@ -2310,7 +2312,11 @@ fn flat_decoration_lowers_only_where_its_length_is_measured() {
     );
     area.fill = fill(Color::BLACK);
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area), "decorated AREA text stays legacy");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): area text is laid out, so its decoration takes
+    // the plan's decoration lines. Point text above is not laid out and keeps
+    // node 20's rules.
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "decorated AREA text takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 20: the lines, as `canvas/render.rs::draw_text_decorations` draws
@@ -2366,8 +2372,11 @@ fn unreadable_or_anchored_tracking_stays_legacy() {
     );
     area.letter_spacing = "0.1em".into();
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area),
-            "tracked AREA text stays legacy: it wraps by widths the spacing changes");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): the plan wraps by widths that carry the spacing
+    // (`text_runs::plan`, each character's width plus the spacing).
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "tracked AREA text takes the plan where a real measurer exists");
     let mut kern_word = flat_text(20.0);
     kern_word.kerning = "auto".into();
     assert!(crate::painter::element_render::text_needs_legacy(&kern_word),
@@ -2929,10 +2938,27 @@ fn the_pen_advances_by_each_tspans_own_font_not_the_parents() {
 /// The clause narrowed; it did not vanish.
 #[test]
 fn a_tspan_feature_row_dr_did_not_take_still_stays_legacy() {
+    // ⭐ `rotate` LEFT THIS LIST ON 2026-10-20: styled text carrying a turn
+    // takes the shared plan now (`needs_layout`, TSPAN.md "Rotation"), which
+    // turns each glyph about its own origin, so it is no longer legacy. The
+    // assertion below holds it to that, where the plan has a real measurer.
+    {
+        let mut turned = tspan("world", Some("bold"), None);
+        turned.rotate = Some(15.0);
+        let elem = segmented(vec![tspan("Hello ", None, None), turned]);
+        let Element::Text(t) = &elem else { panic!("segmented builds a Text") };
+        assert!(super::needs_layout(t), "a turned styled text is laid out by the plan");
+        // The plan lays out by measured widths, so this half is the platform's
+        // with a real measurer; without one it stays legacy, as everything does.
+        #[cfg(all(feature = "d2d", windows))]
+        assert!(!element_needs_legacy(&elem, all_caps()),
+                "a tspan carrying rotate takes the plan, not legacy");
+        #[cfg(not(all(feature = "d2d", windows)))]
+        assert!(element_needs_legacy(&elem, all_caps()), "no real measurer here, so legacy");
+    }
     for (label, mutate) in [
-        ("rotate", (|t: &mut crate::geometry::tspan::Tspan| t.rotate = Some(15.0))
+        ("dx", (|t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5))
             as fn(&mut crate::geometry::tspan::Tspan)),
-        ("dx", |t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5)),
         ("baseline_shift", |t: &mut crate::geometry::tspan::Tspan| t.baseline_shift = Some(2.0)),
         ("decoration", |t: &mut crate::geometry::tspan::Tspan| {
             t.text_decoration = Some(vec!["underline".to_string()])
@@ -3780,26 +3806,29 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
     assert_eq!(text_needs_legacy(&listed), !has_real, "a list marker lowers exactly where a real measurer exists");
     let mut rotated = indented.clone();
     rotated.rotate = "30".into();
-    assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
-    // jas section 432: each feature the per-line draw does not carry REFUSES on
-    // laid-out text, never drops. Area text and an indented POINT text both,
-    // since only the area case was refused before node 25.
+    assert_eq!(text_needs_legacy(&rotated), !has_real, "a laid-out rotation takes the plan where a real measurer exists");
+    // jas section 432: each feature the per-line draw does not carry never
+    // drops. Until 2026-10-20 each REFUSED; since then (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)) each takes the
+    // plan, which carries them, and only what the plan cannot read refuses.
+    // Area text and an indented POINT text both.
     let indented_point = with_paragraph(flat_text(20.0), |w| w.jas_left_indent = Some(12.0));
     for (label, t) in [("area", area_text("Hello World", 120.0)), ("indented point", indented_point)] {
         type Set = fn(&mut crate::geometry::element::TextElem);
-        let cases: [(&str, Set); 6] = [
+        let plan_carries: [(&str, Set); 5] = [
             ("tracking", |t| t.letter_spacing = "0.1em".into()),
             ("kerning", |t| t.kerning = "20".into()),
             ("underline", |t| t.text_decoration = "underline".into()),
             ("line-through", |t| t.text_decoration = "line-through".into()),
             ("rotation", |t| t.rotate = "30".into()),
-            ("an unreadable baseline shift", |t| t.baseline_shift = "high".into()),
         ];
-        for (name, set) in cases {
+        for (name, set) in plan_carries {
             let mut x = t.clone();
             set(&mut x);
-            assert!(text_needs_legacy(&x), "laid-out {label} text with {name} stays legacy");
+            assert_eq!(text_needs_legacy(&x), !has_real, "laid-out {label} text with {name} takes the plan");
         }
+        let mut x = t.clone();
+        x.baseline_shift = "high".into();
+        assert!(text_needs_legacy(&x), "laid-out {label} text with an unreadable baseline shift stays legacy");
     }
 }
 
@@ -3954,7 +3983,8 @@ fn a_readable_baseline_shift_lowers_with_a_real_measurer() {
     let mut decorated = flat_text(20.0);
     decorated.baseline_shift = "super".into();
     decorated.text_decoration = "underline".into();
-    assert!(text_needs_legacy(&decorated), "a shifted decoration stays legacy (its line sits on the shifted baseline)");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)), whose decoration lines sit on the shifted baseline.
+    assert_eq!(text_needs_legacy(&decorated), !has_real, "a shifted decoration takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass
@@ -4082,13 +4112,46 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
-        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
-        ("an anchor", |e| e.text_anchor = "middle".into()),
+        ("a scale that does not read", |e| e.horizontal_scale = "wide".into()),
+        ("a rotation that does not read", |e| e.rotate = "tilt".into()),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 11] = [
+    let admitted: [(&str, Admit); 23] = [
+        // A decoration beside a shift or a turn: it is drawn in its glyph's
+        // frame (TSPAN.md "Decoration beside a shift or a turn"), which the
+        // plan's decoration lines draw.
+        ("a shifted tspan's own decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("a shifted tspan's inherited decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.text_decoration = "line-through".into();
+        }),
+        ("a rotated tspan's decoration", |e| {
+            e.tspans[2].rotate = Some(10.0);
+            e.text_decoration = "underline".into();
+        }),
+        ("an element rotation with a tspan's decoration", |e| {
+            e.rotate = "20".into();
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("an element rotation with its own decoration", |e| {
+            e.rotate = "20".into();
+            e.text_decoration = "line-through".into();
+        }),
+        ("a horizontal scale", |e| e.horizontal_scale = "150".into()),
+        ("a vertical scale", |e| e.vertical_scale = "80".into()),
+        ("an element rotation", |e| e.rotate = "20".into()),
+        ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
+        ("an anchor", |e| e.text_anchor = "middle".into()),
+        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
+        ("a shifted tspan beside a decorated one", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("numeric kerning", |e| e.kerning = "0.05em".into()),
         ("a super baseline shift", |e| e.baseline_shift = "super".into()),
@@ -4111,6 +4174,47 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
         set(&mut e);
         assert!(runs_plan_excludes(&e), "styled area text with {name} is excluded from the plan");
     }
+    // An anchor on POINT text is drawn too (the plan moves each line by its
+    // width): two lines of styled point text, centred.
+    let mut point = styled_area(140.0);
+    (point.width, point.height) = (0.0, 0.0);
+    point.tspans[1].content = "One\nfine day ".into();
+    point.text_anchor = "middle".into();
+    assert!(needs_layout(&point) && !runs_plan_excludes(&point), "anchored point text takes the plan");
+}
+
+/// Styled POINT text with a turn takes the plan, which turns EACH glyph about
+/// its own origin (TSPAN.md "Rotation"); the segmented path turned a range as
+/// ONE block about its first glyph, and ignored the element's rotation. Only
+/// the turned case moves: styled point text without a turn keeps the
+/// segmented path, and FLAT text is not touched.
+#[test]
+fn styled_point_text_with_a_turn_takes_the_plan() {
+    use crate::painter::element_render::{needs_layout, runs_plan_excludes};
+    let point = || {
+        let mut e = styled_area(140.0);
+        (e.width, e.height) = (0.0, 0.0);
+        e
+    };
+    let plain = point();
+    assert!(!plain.is_area_text() && !plain.render_is_flat(), "precondition: styled point text");
+    assert!(!needs_layout(&plain), "CONTROL: styled point text without a turn keeps the segmented path");
+    let mut range = point();
+    range.tspans[2].rotate = Some(30.0);
+    assert!(needs_layout(&range) && !runs_plan_excludes(&range), "a turned range takes the plan");
+    let mut whole = point();
+    whole.rotate = "20".into();
+    assert!(needs_layout(&whole) && !runs_plan_excludes(&whole), "a turned element takes the plan");
+    let mut zero = point();
+    zero.tspans[2].rotate = Some(0.0);
+    assert!(!needs_layout(&zero), "a zero turn is no turn");
+    // FLAT text with a turn is not routed by this clause.
+    let mut flat = crate::geometry::element::TextElem::from_string(
+        1.0, 2.0, "flat", "Arial", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+        Default::default(),
+    );
+    flat.rotate = "20".into();
+    assert!(flat.render_is_flat() && !needs_layout(&flat), "flat text is untouched");
 }
 
 /// The walk strokes the plan's decoration lines: a tspan's underline is one
@@ -4137,4 +4241,212 @@ fn a_styled_runs_underline_is_stroked_under_it() {
     let w: f64 = "extraordinarily patiently".chars().map(|c| m(&c.to_string())).sum();
     assert!((strokes[0].0 - bold.2).abs() < 1e-6 && (strokes[0].1 - (bold.2 + w)).abs() < 1e-6, "{strokes:?} vs {bold:?}");
     assert!((strokes[0].2 - (bold.3 + 20.0 * 0.12)).abs() < 1e-6, "{strokes:?}");
+}
+
+/// The walk draws a tspan's own baseline shift: its run sits `shift` above the
+/// line's baseline (y down), the other runs on it, and the x does not move.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_baseline_shift_raises_its_run() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.tspans[2].baseline_shift = Some(3.0);
+    let runs = font_runs(e);
+    assert_eq!(runs.len(), plain.len(), "{runs:?}");
+    assert!(runs.iter().any(|r| r.0 == "extraordinarily patiently"), "the shifted run is drawn: {runs:?}");
+    for (r, p) in runs.iter().zip(&plain) {
+        let want = if r.0 == "extraordinarily patiently" { p.3 - 3.0 } else { p.3 };
+        assert!((r.2 - p.2).abs() < 1e-9 && (r.3 - want).abs() < 1e-9, "{r:?} vs {p:?}");
+    }
+}
+
+/// The walk draws a tspan's own rotation one glyph per frame: " sat" rotated
+/// 15 degrees draws four glyphs, each a run at (0, 0) inside a
+/// `translate(x, baseline) · rotate(15°)` frame, the frames' x increasing and
+/// sharing the line's baseline; the unrotated runs draw outside any frame.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
+    let mut e = styled_area(2000.0);
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let mut frames = Vec::new();
+    let cmds = rec.commands();
+    for (i, c) in cmds.iter().enumerate() {
+        if let Command::PushState { transform: t } = c {
+            if (t.a - cos).abs() < 1e-12 && (t.b - sin).abs() < 1e-12 {
+                match &cmds[i + 1] {
+                    Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, x, y, .. }, .. } => {
+                        assert_eq!((*x, *y), (0.0, 0.0));
+                        frames.push((text.clone(), t.e, t.f));
+                    }
+                    other => panic!("a rotated frame draws its glyph next: {other:?}"),
+                }
+                assert!(matches!(cmds[i + 2], Command::PopState), "and closes");
+            }
+        }
+    }
+    let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
+    assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
+}
+
+/// The walk strokes a decoration in its glyph's frame (TSPAN.md
+/// "Decoration beside a shift or a turn"): under " sat" turned 15 degrees, the
+/// element's underline is four pieces, each a stroke at (0, 0.12 x size) in a
+/// `translate(x, baseline) · rotate(15°)` frame at its glyph's own origin; and
+/// under a tspan raised 3 pt, that run's piece is 3 above the others.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_decoration_is_stroked_in_its_glyphs_frame() {
+    let mut e = styled_area(2000.0);
+    e.text_decoration = "underline".into();
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let cmds = rec.commands();
+    let (mut glyphs, mut pieces) = (Vec::new(), Vec::new());
+    for (i, c) in cmds.iter().enumerate() {
+        let Command::PushState { transform: t } = c else { continue };
+        if (t.a - cos).abs() > 1e-12 || (t.b - sin).abs() > 1e-12 { continue; }
+        match &cmds[i + 1] {
+            Command::DrawTextRun { .. } => glyphs.push((t.e, t.f)),
+            Command::StrokePath { path, .. } => match path.as_slice() {
+                [PathCommand::MoveTo { x: x0, y: y0 }, PathCommand::LineTo { x: w, y: y1 }] => {
+                    assert!(*x0 == 0.0 && (y0 - 20.0 * 0.12).abs() < 1e-9 && y0 == y1 && *w > 0.0, "{path:?}");
+                    pieces.push((t.e, t.f));
+                }
+                other => panic!("a turned piece is one stroke from its origin: {other:?}"),
+            },
+            other => panic!("a turned frame draws a glyph or a piece: {other:?}"),
+        }
+        assert!(matches!(cmds[i + 2], Command::PopState), "and closes");
+    }
+    assert_eq!(glyphs.len(), 4, "{glyphs:?}");
+    assert_eq!(pieces, glyphs, "each piece turns about its own glyph's origin");
+    // CONTROL beside it: a tspan raised 3 pt; its piece is 3 above the others.
+    let mut raised = styled_area(2000.0);
+    raised.text_decoration = "underline".into();
+    raised.tspans[2].baseline_shift = Some(3.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(raised), 1.0);
+    let ys: Vec<f64> = rec.commands().iter().filter_map(|c| match c {
+        Command::StrokePath { path, .. } => match path.as_slice() {
+            [PathCommand::MoveTo { y, .. }, PathCommand::LineTo { .. }] => Some(*y),
+            _ => None,
+        },
+        _ => None,
+    }).collect();
+    assert_eq!(ys.len(), 3, "three pieces: {ys:?}");
+    assert!((ys[0] - ys[2]).abs() < 1e-9 && (ys[1] - (ys[0] - 3.0)).abs() < 1e-9, "{ys:?}");
+}
+
+/// The walk turns EACH glyph of a turned range on POINT text in its own
+/// frame, as it does on area text: " sat" turned 15 degrees on point text
+/// draws four glyph frames, x increasing on one baseline. (The segmented
+/// lowering refused a tspan's `rotate`; the web canvas's legacy path turned
+/// the range as one block, measured in pixels by
+/// `a_turned_range_on_point_text_turns_each_glyph`.)
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_turned_range_on_point_text_draws_each_glyph_in_its_own_frame() {
+    let mut e = styled_area(2000.0);
+    (e.width, e.height) = (0.0, 0.0);
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let cmds = rec.commands();
+    let mut frames = Vec::new();
+    for (i, c) in cmds.iter().enumerate() {
+        if let Command::PushState { transform: t } = c {
+            if (t.a - cos).abs() < 1e-12 && (t.b - sin).abs() < 1e-12 {
+                if let Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, .. }, .. } = &cmds[i + 1] {
+                    frames.push((text.clone(), t.e, t.f));
+                }
+            }
+        }
+    }
+    let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
+    assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
+}
+
+/// The walk draws styled text's scale in the flat arm's frame around the whole
+/// plan: a 150 % x 80 % scale pushes `scale(1.5, 0.8)` about the box's
+/// top-left before the first run, every run inside it at its unscaled
+/// position, and pops it after the last.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn styled_texts_scale_is_one_frame_around_the_plan() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.horizontal_scale = "150".into();
+    e.vertical_scale = "80".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e.clone()), 1.0);
+    let cmds = rec.commands();
+    let first_run = cmds.iter().position(|c| matches!(c, Command::DrawTextRun { .. })).expect("a run is drawn");
+    let push = cmds[..first_run].iter().rposition(|c| matches!(c, Command::PushState { .. })).expect("a frame before the runs");
+    match &cmds[push] {
+        Command::PushState { transform: t } => {
+            assert_eq!((t.a, t.b, t.c, t.d), (1.5, 0.0, 0.0, 0.8));
+            assert!((t.e - (e.x - 1.5 * e.x)).abs() < 1e-12 && (t.f - (e.y - 0.8 * e.y)).abs() < 1e-12, "{t:?}");
+        }
+        _ => unreachable!(),
+    }
+    let last_run = cmds.iter().rposition(|c| matches!(c, Command::DrawTextRun { .. })).unwrap();
+    assert!(cmds[last_run..].iter().any(|c| matches!(c, Command::PopState)), "the frame closes after the last run");
+    assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
+}
+
+/// ⭐ A STACKED STYLE TAKES THE PLAN (the 10-20 feel sitting, finding 10,
+/// measured on the box as 1,223 `DOCUMENT INCOMPLETE` repaints). A baseline
+/// shift, a case or a leading makes flat text `needs_layout`, and the per-line
+/// draw that lays it out carries no decoration, spacing or glyph rotation, so
+/// superscript + underline went to legacy and the Windows walk refused the
+/// WHOLE frame. What the line draw cannot carry now takes the shared plan,
+/// which draws all three; what it can carry keeps the line draw, so no frame
+/// at a single style moves. The measurer is the argument, because off
+/// Direct2D there is none and the router could not be driven here at all.
+#[test]
+fn a_flat_laid_out_text_with_what_the_line_draw_lacks_takes_the_plan() {
+    use super::{flat_layout_route, FlatLayoutRoute as R};
+    let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+    let doc = crate::geometry::svg::svg_to_document(&svg);
+    let base = match &doc.layers[0] {
+        Element::Layer(l) => match &*l.children[0] {
+            Element::Text(t) => t.clone(),
+            other => panic!("expected Text, got {other:?}"),
+        },
+        other => panic!("expected Layer, got {other:?}"),
+    };
+    let with = |f: &dyn Fn(&mut crate::geometry::element::TextElem)| { let mut t = base.clone(); f(&mut t); t };
+    let sup = with(&|t| t.baseline_shift = "super".into());
+    assert!(super::needs_layout(&sup) && sup.render_is_flat(), "the subject: flat text the shift lays out");
+    // What the line draw carries keeps it: superscript alone, all caps under a shift.
+    assert_eq!(flat_layout_route(&sup, true), R::Lines);
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "super".into(); t.text_transform = "uppercase".into(); }), true), R::Lines);
+    // What it lacks takes the plan: a decoration, a glyph rotation, tracking.
+    for (name, t) in [
+        ("super + underline", with(&|t| { t.baseline_shift = "super".into(); t.text_decoration = "underline".into(); })),
+        ("sub + line-through", with(&|t| { t.baseline_shift = "sub".into(); t.text_decoration = "line-through".into(); })),
+        ("shift + rotation", with(&|t| { t.baseline_shift = "4pt".into(); t.rotate = "30".into(); })),
+        ("caps + underline", with(&|t| { t.text_transform = "uppercase".into(); t.text_decoration = "underline".into(); })),
+        ("super + tracking", with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "0.1em".into(); })),
+    ] {
+        assert_eq!(flat_layout_route(&t, true), R::Runs, "{name}");
+        // And without a real measurer nothing lowers: the layout breaks by widths.
+        assert_eq!(flat_layout_route(&t, false), R::Legacy, "{name}, no measurer");
+    }
+    // What neither draws stays legacy: a shift that does not read.
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "high".into(); t.text_decoration = "underline".into(); }), true), R::Legacy);
+    // Nor tracking the plan cannot read (`runs_plan_excludes`), which the line
+    // draw lacks too.
+    let unread = with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "wide".into(); });
+    assert!(super::runs_plan_excludes(&unread), "the subject: the plan refuses it");
+    assert_eq!(flat_layout_route(&unread, true), R::Legacy);
 }

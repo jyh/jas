@@ -1,9 +1,9 @@
 {
     "item":  "gradient.angle",
     "surface":  "2379x1333",
-    "frame_hash":  "21fe0f5f2d6111823b2215e498a745f6b782d72ba29821da32fe678492fa6972",
+    "frame_hash":  "79e9a994cdae8e8f60aaab32e1d0dfaf19a2d2e67b4f71104a9a0ade6501adef",
     "plan_panel":  "gradient_panel_content",
-    "plan_sha":  "ebb77615a22cde0e",
+    "plan_sha":  "f5bf16cb9bb408a8",
     "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
     "tab_sha":  "bf94097025b37fd6",
     "selection_count":  1

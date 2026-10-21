@@ -24,7 +24,7 @@ use crate::document::controller::Controller;
 use crate::document::document::Document;
 use crate::document::model::Model;
 use crate::geometry::element::{Color, Gradient, GradientStop};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// The Gradient panel's id: the store scope its fields live in.
 pub const GRADIENT_PANEL: &str = "gradient_panel_content";
@@ -165,6 +165,36 @@ pub fn gradient_from_store(store: &crate::interpreter::state_store::StateStore, 
         g.stops = stops;
     }
     g
+}
+
+/// The Gradient panel's fields as the SELECTION holds them, for the engine's
+/// panel scope (the role `stroke_host::live_values` plays for Stroke). A
+/// uniform gradient reads as itself; a solid/none selection reads as the seed
+/// its first edit will promote from. Nothing selected, or a mixed selection,
+/// returns nothing, so the store's panel stands, as the web's
+/// `sync_gradient_panel_from_selection` leaves it. `stops` is the YAML's shape,
+/// the one [`gradient_from_store`] parses back.
+pub fn live_values(doc: &Document, fill_on_top: bool) -> serde_json::Map<String, Value> {
+    let mut m = serde_json::Map::new();
+    let g = match selection_gradient(doc, fill_on_top) {
+        SelectionGradient::Empty | SelectionGradient::Mixed => return m,
+        SelectionGradient::Uniform(g) => g,
+        SelectionGradient::Solid(c) => seed_gradient(c),
+    };
+    fn name(v: impl serde::Serialize) -> Value { serde_json::to_value(v).unwrap_or(Value::Null) }
+    m.insert("type".into(), name(g.gtype));
+    m.insert("angle".into(), json!(g.angle));
+    m.insert("aspect_ratio".into(), json!(g.aspect_ratio));
+    m.insert("method".into(), name(g.method));
+    m.insert("dither".into(), json!(g.dither));
+    m.insert("stroke_sub_mode".into(), name(g.stroke_sub_mode));
+    m.insert("stops".into(), Value::Array(g.stops.iter().map(|s| json!({
+        "color": format!("#{}", s.color.to_hex()),
+        "opacity": s.opacity,
+        "location": s.location,
+        "midpoint_to_next": s.midpoint_to_next,
+    })).collect()));
+    m
 }
 
 /// The global keys the two stop combos `set` (their bind is an indexed path,
@@ -357,5 +387,69 @@ mod tests {
                 assert_ne!(outs[i], outs[j], "{} and {} set the same field", GRADIENT_RENDER_KEYS[i], GRADIENT_RENDER_KEYS[j]);
             }
         }
+    }
+    /// The Gradient panel's scope describes the SELECTION (W2b-7's law, the
+    /// Gradient panel): a selected radial gradient reads as `radial`, with its
+    /// own stops in the YAML's shape, not the store's black→white default.
+    #[test]
+    fn live_values_read_the_selected_gradient() {
+        let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        let v = live_values(m.document(), true);
+        assert_eq!(v["type"], json!("radial"), "{v:?}");
+        assert_eq!(v["angle"], json!(0.0));
+        assert_eq!(v["aspect_ratio"], json!(100.0));
+        assert_eq!(v["method"], json!("classic"));
+        assert_eq!(v["dither"], json!(false));
+        assert_eq!(v["stroke_sub_mode"], json!("within"));
+        assert_eq!(v["stops"], json!([
+            {"color": "#0000ff", "opacity": 100.0, "location": 0.0, "midpoint_to_next": 50.0},
+            {"color": "#ffffff", "opacity": 100.0, "location": 100.0, "midpoint_to_next": 50.0},
+        ]));
+    }
+
+    /// The other attribute is read when the stroke is on top, and a solid
+    /// selection reads as the seed (what the first edit will promote from).
+    #[test]
+    fn live_values_follow_fill_on_top_and_seed_a_solid_selection() {
+        let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        let stroke = live_values(m.document(), false);
+        assert_eq!(stroke["type"], json!("linear"), "no stroke ⇒ the black seed: {stroke:?}");
+        assert_eq!(stroke["stops"][0]["color"], json!("#000000"));
+        let solid = model_with(vec![rect(Some(RED))], &[0]);
+        let v = live_values(solid.document(), true);
+        assert_eq!(v["stops"][0]["color"], json!("#ff0000"), "{v:?}");
+    }
+
+    /// Nothing selected, or a mixed selection, contributes NOTHING, so the
+    /// panel keeps the store's values exactly as the web sync leaves them.
+    #[test]
+    fn live_values_are_empty_with_no_selection_or_a_mixed_one() {
+        assert!(live_values(model_with(vec![rect(Some(BLUE))], &[]).document(), true).is_empty());
+        let mut m = model_with(vec![rect(Some(BLUE)), rect(Some(RED))], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_type", &json!("radial"), || panic!("not mixed")));
+        select(&mut m, &[0, 1]);
+        assert!(matches!(selection_gradient(m.document(), true), SelectionGradient::Mixed));
+        assert!(live_values(m.document(), true).is_empty());
+    }
+
+    /// Every key is a declared Gradient panel state field, and the stops are
+    /// the shape the write side's reader (`gradient_from_store`) parses back.
+    #[test]
+    fn live_values_name_declared_fields_and_round_trip_through_the_store_reader() {
+        let ws = crate::interpreter::workspace::Workspace::load().expect("workspace");
+        let spec = ws.panel(GRADIENT_PANEL).expect("gradient panel");
+        let declared = spec["state"].as_object().expect("declared state");
+        let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0), || panic!("not mixed")));
+        let v = live_values(m.document(), true);
+        assert_eq!(v.len(), 7, "{v:?}");
+        for k in v.keys() {
+            assert!(declared.contains_key(k), "{k} is not a declared Gradient panel field");
+        }
+        let mut store = crate::interpreter::state_store::StateStore::new();
+        store.init_panel(GRADIENT_PANEL, v.clone().into_iter().collect());
+        assert_eq!(gradient_from_store(&store, GRADIENT_PANEL).stops, fill_gradient(&m, 0).unwrap().stops);
     }
 }

@@ -1,7 +1,7 @@
 {
     "item":  "character.all_caps",
     "surface":  "2379x1333",
-    "frame_hash":  "90b3524e53e9a331514023855cee592308c42974541ec87d83f51fa4ae3feafe",
+    "frame_hash":  "dec5b7b4fad99e4c3fa307b1af1be4d3d006431ee0e9f399d40604b3d114e204",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "01f0a4fb57487e07",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

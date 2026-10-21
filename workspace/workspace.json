@@ -6566,6 +6566,38 @@
       "viewbox": "0 0 16 16",
       "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/> <rect x=\"2\" y=\"2\" width=\"6\" height=\"12\" fill=\"currentColor\"/>\n"
     },
+    "gradient_linear": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"3\" width=\"3\" height=\"10\" fill=\"currentColor\"/> <rect x=\"5\" y=\"3\" width=\"3\" height=\"10\" fill=\"currentColor\" opacity=\"0.7\"/> <rect x=\"8\" y=\"3\" width=\"3\" height=\"10\" fill=\"currentColor\" opacity=\"0.4\"/> <rect x=\"11\" y=\"3\" width=\"3\" height=\"10\" fill=\"currentColor\" opacity=\"0.15\"/> <rect x=\"2\" y=\"3\" width=\"12\" height=\"10\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "gradient_radial": {
+      "viewbox": "0 0 16 16",
+      "svg": "<circle cx=\"8\" cy=\"8\" r=\"6\" fill=\"currentColor\" opacity=\"0.15\"/> <circle cx=\"8\" cy=\"8\" r=\"4\" fill=\"currentColor\" opacity=\"0.4\"/> <circle cx=\"8\" cy=\"8\" r=\"2\" fill=\"currentColor\"/> <circle cx=\"8\" cy=\"8\" r=\"6\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/>\n"
+    },
+    "gradient_freeform": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"2\" y=\"2\" width=\"12\" height=\"12\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/> <circle cx=\"5\" cy=\"5\" r=\"1.75\" fill=\"currentColor\"/> <circle cx=\"11\" cy=\"6.5\" r=\"1.75\" fill=\"currentColor\" opacity=\"0.6\"/> <circle cx=\"6.5\" cy=\"11\" r=\"1.75\" fill=\"currentColor\" opacity=\"0.35\"/>\n"
+    },
+    "gradient_within_stroke": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M8,2.5 L2.5,2.5 L2.5,13.5 L8,13.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\"/> <path d=\"M8,2.5 L13.5,2.5 L13.5,13.5 L8,13.5\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" opacity=\"0.3\"/>\n"
+    },
+    "gradient_along_stroke": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M2,12 Q4,4 8,8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\"/> <path d=\"M8,8 Q12,12 14,4\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" opacity=\"0.3\"/>\n"
+    },
+    "gradient_across_stroke": {
+      "viewbox": "0 0 16 16",
+      "svg": "<line x1=\"2\" y1=\"5\" x2=\"14\" y2=\"5\" stroke=\"currentColor\" stroke-width=\"2\"/> <line x1=\"2\" y1=\"8\" x2=\"14\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"2\" opacity=\"0.6\"/> <line x1=\"2\" y1=\"11\" x2=\"14\" y2=\"11\" stroke=\"currentColor\" stroke-width=\"2\" opacity=\"0.25\"/>\n"
+    },
+    "add_to_swatches": {
+      "viewbox": "0 0 16 16",
+      "svg": "<rect x=\"1.5\" y=\"1.5\" width=\"4\" height=\"9\" fill=\"currentColor\"/> <rect x=\"5.5\" y=\"1.5\" width=\"4\" height=\"9\" fill=\"currentColor\" opacity=\"0.35\"/> <rect x=\"1.5\" y=\"1.5\" width=\"8\" height=\"9\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\"/> <line x1=\"12.5\" y1=\"9\" x2=\"12.5\" y2=\"15\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/> <line x1=\"9.5\" y1=\"12\" x2=\"15.5\" y2=\"12\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\"/>\n"
+    },
+    "disclosure_right": {
+      "viewbox": "0 0 16 16",
+      "svg": "<path d=\"M6,4 L11,8 L6,12 Z\" fill=\"currentColor\"/>\n"
+    },
     "cap_butt": {
       "viewbox": "0 0 16 16",
       "svg": "<line x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"currentColor\" stroke-width=\"6\" stroke-linecap=\"butt\"/> <line x1=\"3\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"none\" stroke-width=\"0\"/> <line x1=\"3\" y1=\"3\" x2=\"3\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"0.5\" opacity=\"0.5\"/> <line x1=\"13\" y1=\"3\" x2=\"13\" y2=\"13\" stroke=\"currentColor\" stroke-width=\"0.5\" opacity=\"0.5\"/>\n"
@@ -12428,7 +12460,7 @@
       "id": "character_panel_content",
       "type": "panel",
       "summary": "Character",
-      "description": "Character formatting panel \u2014 initial placeholder implementation. Provides font family, style-name, font size, leading, kerning, tracking, vertical and horizontal scale, baseline shift, character rotation, six character toggle buttons (All Caps, Small Caps, Superscript, Subscript, Underline, Strikethrough), language, and anti-aliasing mode, all bound to panel-local state.\nEverything here is a placeholder bound to panel-local state \u2014 no control is yet wired to per-tspan attributes on the selection. Real editing arrives alongside the tspan-aware Character panel work (set_character_attribute via the unified TSPAN.md algorithm, mixed-value display for character-range selections, parens-default display for computed defaults, and the Snap to Glyph section) once that plumbing is in place across all four native apps.\n",
+      "description": "Character formatting panel: font family, style name, font size, leading, kerning, tracking, vertical and horizontal scale, baseline shift, character rotation, six character toggle buttons (All Caps, Small Caps, Superscript, Subscript, Underline, Strikethrough), language, and anti-aliasing mode.\nIts controls display panel state, and a committed edit writes to the selected text by the field-scoped apply law (transcripts/CHARACTER.md \"The field-scoped apply law\"; the reference's field-to-group table is workspace_interpreter/character_law.py): the edited field writes only the attribute group it owns, and every other character attribute is kept as each element has it. A field that owns no attribute (the Snap to Glyph flags, the section toggles) writes nothing, not even an undo step. With a text element selected as an object, the edit writes that element's attributes, element by element. With a character range selected in an editing session, it writes per-tspan overrides on the range (TSPAN.md), so a range can carry its own rotation or baseline shift; kerning and the two glyph scales have no per-tspan form and write nothing on a range. With a bare caret, it sets the formatting of the next typed character and changes no document. With no text selected, the panel is disabled.\n",
       "state": {
         "font_family": {
           "type": "string",
@@ -15637,9 +15669,195 @@
             "id": "grad_main_row",
             "children": [
               {
-                "id": "grad_fill_stroke_widget",
-                "type": "fill_stroke_widget",
-                "col": 3
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "width": 48,
+                  "height": 59.52,
+                  "min_height": 60
+                },
+                "children": [
+                  {
+                    "id": "grad_fill_swatch",
+                    "type": "color_swatch",
+                    "summary": "Fill color",
+                    "style": {
+                      "size": 26.4,
+                      "position": {
+                        "x": 4.32,
+                        "y": 4.32
+                      }
+                    },
+                    "bind": {
+                      "color": "state.fill_color",
+                      "z_index": "if state.fill_on_top then 2 else 1"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "set": {
+                              "fill_on_top": "true"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "event": "double_click",
+                        "action": "open_color_picker",
+                        "params": {
+                          "target": "fill"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_stroke_swatch",
+                    "type": "color_swatch",
+                    "summary": "Stroke color",
+                    "hollow": true,
+                    "style": {
+                      "size": 26.4,
+                      "position": {
+                        "x": 15.84,
+                        "y": 15.84
+                      }
+                    },
+                    "bind": {
+                      "color": "state.stroke_color",
+                      "z_index": "if state.fill_on_top then 1 else 2"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "set": {
+                              "fill_on_top": "false"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "event": "double_click",
+                        "action": "open_color_picker",
+                        "params": {
+                          "target": "stroke"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_swap_btn",
+                    "type": "icon_button",
+                    "summary": "Swap",
+                    "icon": "swap_arrows",
+                    "style": {
+                      "size": 14.4,
+                      "position": {
+                        "x": 30.72,
+                        "y": 1.44
+                      }
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "swap_fill_stroke"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_reset_btn",
+                    "type": "icon_button",
+                    "summary": "Default",
+                    "icon": "default_colors",
+                    "style": {
+                      "size": 14.4,
+                      "position": {
+                        "x": 1.44,
+                        "y": 32.64
+                      }
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "reset_fill_stroke"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_mode_btns",
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "position": {
+                        "x": 2.88,
+                        "y": 45.12
+                      },
+                      "gap": 2
+                    },
+                    "children": [
+                      {
+                        "id": "grad_solid_btn",
+                        "type": "icon_button",
+                        "summary": "Color",
+                        "icon": "fill_solid",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_type_solid"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "grad_gradient_btn",
+                        "type": "icon_button",
+                        "summary": "Gradient",
+                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "icon": "fill_gradient",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "bind": {
+                          "disabled": "true"
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_type_gradient"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "grad_none_btn",
+                        "type": "icon_button",
+                        "summary": "None",
+                        "icon": "color_none",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_none",
+                            "condition": "state.fill_on_top"
+                          },
+                          {
+                            "event": "click",
+                            "action": "set_stroke_none",
+                            "condition": "not state.fill_on_top"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "col": 3,
+                "_template": "fill_stroke_widget"
               },
               {
                 "type": "container",

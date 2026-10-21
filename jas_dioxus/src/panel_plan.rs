@@ -1677,7 +1677,8 @@ mod tests {
     fn static_and_icons_are_complete_and_exact_on_every_panel() {
         let ws = Workspace::load().expect("workspace");
         let defs = ws.icons().as_object().expect("icons map");
-        let (mut carried, mut icons_seen, mut missing_seen) = (0usize, 0usize, 0usize);
+        let (mut carried, mut icons_seen) = (0usize, 0usize);
+        let mut missing_seen = BTreeSet::new();
         // ⛔ ITS OWN counter, NOT `carried`: the existing floor is satisfied by the
         // STATIC keys alone, so folding flags into it would give the new
         // assertions no anti-vacuity floor at all — they could carry ZERO and
@@ -1772,7 +1773,7 @@ mod tests {
                             }
                             (None, true) => {
                                 assert!(!defs.contains_key(n), "{at}: {n} is defined");
-                                missing_seen += 1;
+                                missing_seen.insert(n.clone());
                             }
                             other => panic!("{at}: {n} is {other:?}"),
                         }
@@ -1781,8 +1782,13 @@ mod tests {
                 }
             }
         }
-        assert!(carried > 0 && icons_seen > 0 && missing_seen > 0,
-            "vacuous: carried={carried} icons={icons_seen} missing={missing_seen}");
+        assert!(carried > 0 && icons_seen > 0, "vacuous: carried={carried} icons={icons_seen}");
+        // ⛔ No panel names an icon the workspace does not define. A shell
+        // keeps an undefined icon's `summary` as a text face in an icon-sized
+        // button, so the person reads "Lin…" (flask §496: seven Gradient
+        // buttons). The missing branch itself is witnessed by the synthetic
+        // `zz_nowhere` arm above, so this real-workspace walk needs none.
+        assert!(missing_seen.is_empty(), "panels name undefined icons: {missing_seen:?}");
         assert!(numbers_carried > 0,
             "vacuous: not one NUMBER_KEYS number was carried, so the number \
              assertions above never ran");

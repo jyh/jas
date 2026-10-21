@@ -2421,6 +2421,19 @@ fn draw_laid_out_runs(
         Some(crate::tools::text_measure::make_measurer(&css(f), f.size))
     };
     let Some(plan) = crate::algorithms::text_runs::plan(e, &canvas) else { return };
+    // A scale is the flat path's frame around the whole draw, about the box's
+    // top-left; the router admits only readable values. Dropping the guard
+    // at the end of this function restores it.
+    let (h_scale, v_scale, _) = crate::painter::element_render::text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+    let _scale_guard = if h_scale != 1.0 || v_scale != 1.0 {
+        let guard = CtxSaveGuard::new(ctx);
+        ctx.translate(e.x, e.y).ok();
+        ctx.scale(h_scale, v_scale).ok();
+        ctx.translate(-e.x, -e.y).ok();
+        Some(guard)
+    } else {
+        None
+    };
     // Tracking and kerning: the plan's widths carry the advance, so every run
     // draws with it, as the flat path sets `letterSpacing`.
     let spaced = plan.letter_spacing != 0.0;
@@ -2433,7 +2446,17 @@ fn draw_laid_out_runs(
             // The plan resolves the run's size (a baseline shift scales it).
             let face = crate::algorithms::text_runs::tspan_face(e, &e.tspans[r.tspan]);
             ctx.set_font(&css(&crate::algorithms::text_runs::RunFace { size: r.size, ..face }));
-            ctx.fill_text(&r.text, e.x + r.x, e.y + line.baseline_y).ok();
+            let (x, y) = (e.x + r.x, e.y + line.baseline_y + r.dy);
+            if r.rotate != 0.0 {
+                // A rotated run is one glyph, turned about its baseline origin.
+                ctx.save();
+                ctx.translate(x, y).ok();
+                ctx.rotate(r.rotate.to_radians()).ok();
+                ctx.fill_text(&r.text, 0.0, 0.0).ok();
+                ctx.restore();
+            } else {
+                ctx.fill_text(&r.text, x, y).ok();
+            }
         }
     }
     if spaced {
@@ -2447,6 +2470,17 @@ fn draw_laid_out_runs(
         ctx.set_stroke_style_str(&color);
         ctx.set_line_width(d.thickness);
         ctx.begin_path();
+        if d.rotate != 0.0 {
+            // A turned glyph's piece, in its run's frame.
+            ctx.save();
+            ctx.translate(e.x + d.x0, e.y + d.origin_y).ok();
+            ctx.rotate(d.rotate.to_radians()).ok();
+            ctx.move_to(0.0, d.y - d.origin_y);
+            ctx.line_to(d.x1 - d.x0, d.y - d.origin_y);
+            ctx.stroke();
+            ctx.restore();
+            continue;
+        }
         ctx.move_to(e.x + d.x0, e.y + d.y);
         ctx.line_to(e.x + d.x1, e.y + d.y);
         ctx.stroke();
@@ -5262,6 +5296,45 @@ mod laid_out_runs_pixel_tests {
         assert!(inks(&styled_area(140.0), 5, 18), "control: the narrow box draws line 1");
         assert!(!inks(&styled_area(2000.0), 26, 40), "control: a wide box has no second line");
         assert!(inks(&styled_area(140.0), 26, 40), "a narrow box wraps the styled text onto a second line");
+    }
+
+    /// The columns of a 300 x 150 surface that carry any ink, as (first, last).
+    fn ink_extent(elem: &Element) -> Option<(u32, u32)> {
+        let s = WebSurface::offscreen(300, 150).expect("a DOM is present in the browser lane");
+        let ctx = s.ctx().clone();
+        draw_element_scaled(&ctx, TargetSize::of(&s), elem, Visibility::Preview, 1.0, 1.0);
+        let px = s.read_rgba(0, 0, 300, 150).expect("in bounds");
+        let cols: Vec<u32> = (0..300u32)
+            .filter(|&x| (0..150u32).any(|y| px[((y * 300 + x) * 4 + 3) as usize] > 0))
+            .collect();
+        Some((*cols.first()?, *cols.last()?))
+    }
+
+    /// A TURNED range on POINT text turns EACH glyph about its own origin
+    /// (TSPAN.md "Rotation"), so "MMMM" turned 90 degrees stays spread along
+    /// the line: about three advances plus a cap height wide (~64 px at size
+    /// 20). Turned as ONE block about its first glyph, which is what the
+    /// segmented path drew, it stands in a column one cap height wide
+    /// (~15 px). Margin: 40 px against ~64 and ~15. The control is the same
+    /// run unturned (four advances, ~67 px).
+    #[wasm_bindgen_test]
+    fn a_turned_range_on_point_text_turns_each_glyph() {
+        let point = |rotate: Option<f64>| {
+            let mut e = TextElem::from_string(
+                10.0, 30.0, "", "sans-serif", 20.0, "normal", "normal", "none", 0.0, 0.0, None, None,
+                CommonProps::default(),
+            );
+            e.fill = Some(Fill { color: Color::BLACK, opacity: 1.0 });
+            let mut t = Tspan::default_tspan();
+            t.content = "MMMM".into();
+            t.rotate = rotate;
+            e.tspans = vec![t];
+            Element::Text(e)
+        };
+        let (a, b) = ink_extent(&point(None)).expect("control: the unturned run inks");
+        assert!(b - a > 40, "control: the unturned run is wide ({a}..{b})");
+        let (a, b) = ink_extent(&point(Some(90.0))).expect("the turned run inks");
+        assert!(b - a > 40, "each glyph turned at its own x keeps the run wide ({a}..{b}); a block turn is one cap height wide");
     }
 
     /// Whether any pixel in the box (x0..x1, y0..y1) carries ink.
