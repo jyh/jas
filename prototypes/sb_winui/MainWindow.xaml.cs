@@ -1425,8 +1425,11 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.Enter => JasCore.KeyEnter,
             Windows.System.VirtualKey.Delete => JasCore.KeyDelete,
             Windows.System.VirtualKey.Back => JasCore.KeyBackspace,
-            // The caret keys (the Type tool's #596 gaps). Tab is NOT sent: it is
-            // WinUI's focus key, and taking it is a behaviour for the box to judge.
+            // The caret keys (the Type tool's #596 gaps). Tab is WinUI's focus
+            // key, so it is the engine's only from the canvas's own focus
+            // (`KeyWire.TakesTab`), and then it is kept from the traversal.
+            Windows.System.VirtualKey.Tab when KeyWire.TakesTab(ReferenceEquals(e.OriginalSource, CanvasFocus))
+                => JasCore.KeyTab,
             Windows.System.VirtualKey.Up => JasCore.KeyArrowUp,
             Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
             Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
@@ -1435,6 +1438,8 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.End => JasCore.KeyEnd,
             _ => 0,
         };
+        // A Tab left unhandled moves focus off the canvas, out of a text session.
+        if (code == JasCore.KeyTab) { e.Handled = true; }
         var mods = KeyMods();
         // W5-3d, his "Ctrl-Z is not working": a COMMAND chord's character never
         // reaches `OnCharacterReceived` as a letter (Ctrl+Z arrives there as the

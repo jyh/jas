@@ -1220,6 +1220,31 @@ internal static class KeyWire
         return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
     }
 
+    /// <summary>The key name for a code `OnKeyDown` or `OnCharacterReceived`
+    /// sent (`JasCore.Key*`): a named key by its table, else the character.
+    /// Tab (0x09) is a control character, so only the table names it.</summary>
+    internal static string? Name(uint code) => code switch
+    {
+        0x08 => "Backspace",
+        0x09 => "Tab",
+        0x0D => "Enter",
+        0x1B => "Escape",
+        0x7F => "Delete",
+        0xF700 => "ArrowUp",
+        0xF701 => "ArrowDown",
+        0xF702 => "ArrowLeft",
+        0xF703 => "ArrowRight",
+        0xF729 => "Home",
+        0xF72B => "End",
+        _ => CharName(code),
+    };
+
+    /// <summary>Whether the shell sends Tab to the engine and keeps it from
+    /// the platform's focus traversal: only from the canvas's own focus, as on
+    /// the web, where Tab on a widget walks the widgets (`keyboard.rs`). From
+    /// the canvas the engine's tool takes it, so a text session keeps focus.</summary>
+    internal static bool TakesTab(bool fromCanvas) => fromCanvas;
+
     /// <summary>A typed character's key name: the character itself, or null
     /// for a control character (the named keys arrive by their own codes).</summary>
     internal static string? CharName(uint c) =>

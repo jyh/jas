@@ -1083,20 +1083,7 @@ internal sealed unsafe class Canvas : IDisposable
     private bool ApplyKey(KeyCmd k)
     {
         if (_engine == IntPtr.Zero) { return false; }
-        var name = k.Code switch
-        {
-            JasCore.KeyEscape => "Escape",
-            JasCore.KeyEnter => "Enter",
-            JasCore.KeyDelete => "Delete",
-            JasCore.KeyBackspace => "Backspace",
-            JasCore.KeyArrowUp => "ArrowUp",
-            JasCore.KeyArrowDown => "ArrowDown",
-            JasCore.KeyArrowLeft => "ArrowLeft",
-            JasCore.KeyArrowRight => "ArrowRight",
-            JasCore.KeyHome => "Home",
-            JasCore.KeyEnd => "End",
-            _ => KeyWire.CharName(k.Code),
-        };
+        var name = KeyWire.Name(k.Code);
         if (name is null)
         {
             _report($"RUSTFAIL KEY UNNAMED code=0x{k.Code:X} -- no key name to send {Tids()}");
