@@ -422,7 +422,7 @@ public sealed partial class MainWindow
                     case "checkbox":
                         toggles++;
                         if (leaf.Id.Length == 0) { unaddressable++; }
-                        el = BuildToggle(leaf);
+                        el = BuildToggle(leaf, icons);
                         break;
 
                     // §1.2: a `dropdown` is a MENU BUTTON (`items` + a `behavior`),
@@ -1259,7 +1259,9 @@ public sealed partial class MainWindow
                     break;
                 }
 
-                case CheckBox toggle:
+                // A `CheckBox` IS a `ToggleButton`, so one case holds both faces
+                // `BuildToggle` makes.
+                case ToggleButton toggle:
                     off = off || leaf.Id.Length == 0;
                     toggle.Tag = on;
                     toggle.IsChecked = on;
@@ -1359,20 +1361,53 @@ public sealed partial class MainWindow
         }
 
         /// <summary>
-        /// A `toggle`: a check box labelled with the plan's `label`. A press is a
-        /// `click`; what it writes is the core's, which is why the box is put back
-        /// to the core's value before the press is sent.
+        /// A `toggle` or `checkbox`. With no icon it is a check box labelled with
+        /// the plan's `label`. With an `icon` the workspace defines (Paragraph's
+        /// alignment buttons, Character's six styles) it is a toggle BUTTON whose
+        /// face is that icon, as `BuildIconButton` draws one; a check box has no
+        /// room for a picture at the plan's 24 x 24, and until 2026-10-20 the icon
+        /// was never read here, so those buttons drew blank (the 10-20 sitting,
+        /// finding 5). A press is a `click`; what it writes is the core's, which
+        /// is why the control is put back to the core's value before the press
+        /// is sent.
         /// </summary>
-        private CheckBox BuildToggle(PaneLeaf leaf)
+        private ToggleButton BuildToggle(PaneLeaf leaf, Dictionary<string, (string Viewbox, string Svg)> icons)
         {
-            var box = new CheckBox
+            ToggleButton box;
+            var name = leaf.IconName;
+            if (name is not null && icons.TryGetValue(name, out var def))
             {
-                Content = leaf.Literal("label") ?? leaf.Id,
-                FontSize = 12,
-                MinWidth = 0,
-                MinHeight = 0,
-                IsThreeState = false,
-            };
+                box = new ToggleButton
+                {
+                    Padding = new Thickness(0),
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    HorizontalContentAlignment = HorizontalAlignment.Center,
+                    VerticalContentAlignment = VerticalAlignment.Center,
+                    IsThreeState = false,
+                };
+                var summary = leaf.Literal("summary") ?? leaf.Literal("label") ?? leaf.Id;
+                ToolTipService.SetToolTip(box, summary);
+                // Its face is a picture, so without this an assistive reader
+                // (and the harness's UIA hand) finds a button with no name.
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(box, summary);
+                _paneIconsPending++;
+                LoadIcon(box, def.Viewbox, def.Svg, leaf.W < leaf.H ? leaf.W : leaf.H, _paneBuild);
+            }
+            else
+            {
+                box = new CheckBox
+                {
+                    Content = leaf.Literal("label") ?? leaf.Id,
+                    FontSize = 12,
+                    MinWidth = 0,
+                    MinHeight = 0,
+                    IsThreeState = false,
+                };
+                // An icon named but not defined (`icons_missing`) keeps the text
+                // face, and is counted as one, as `BuildIconButton` counts it.
+                if (name is not null) { _paneIconsText++; }
+            }
             var id = leaf.Id;
             box.Click += (_, _) =>
             {
