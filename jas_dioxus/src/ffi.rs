@@ -1001,8 +1001,9 @@ pub unsafe extern "C" fn jas_layout_load(e: *mut JasEngine, name: *const u8, len
 
 /// **The dock layout** the engine holds, as a shell draws it:
 /// `{"name", "anchored":[{"id","edge","collapsed","width","groups":[{"panels":
-/// ["<content id>"...],"active","collapsed"}]}], "floating":[{... "x","y"}],
-/// "z_order":[<dock id>...]}`. The empty span with `NoLayout` before a load.
+/// ["<content id>"...],"active","collapsed"}]}], "floating":[{... "x","y","z"}],
+/// "z_order":[<dock id>...]}`; a floating dock also carries `z`, its stacking
+/// index (draw in ascending `z`). The empty span with `NoLayout` before a load.
 /// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
 ///
 /// # Safety
