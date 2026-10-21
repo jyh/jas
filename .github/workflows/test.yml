@@ -797,6 +797,15 @@ jobs:
           python scripts/check_verification_claims.py --self-test
           python scripts/check_verification_claims.py
 
+      # Council 2026-10-20 ruling 1(b): the prose-claim gate runs here as well as in Scrub, because
+      # check_lane_coverage.py requires every scripts/check_*.py on both platform families and the gate
+      # reads README and paper prose written on this platform. Its verdict forces UTF-8 on its own stdout.
+      - name: Every prose claim about a machine-checked result names its Lean statement and a non-author read
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_prose_lean.py --self-test
+          python scripts/check_prose_lean.py
+
       # Council 2026-10-07 ruling 3 ("ratchet only"): the infrastructure-name gate runs here as well as in
       # Scrub, because check_lane_coverage.py requires every scripts/check_*.py on both platform families.
       # Its verdict lines are ASCII (driven under PYTHONIOENCODING=ascii:strict before wiring) and it reads
