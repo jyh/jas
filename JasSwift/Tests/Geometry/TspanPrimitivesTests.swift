@@ -468,6 +468,21 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
     #expect(back[1].fontWeight == "bold")
 }
 
+/// A range's scale (the tspan's `transform`) survives Copy/Paste inside the
+/// app, as Rust's clipboard keeps it: the payload carries it in Rust's serde
+/// shape, `"transform":{"a":…,"f":…}`, and a payload in that shape reads back.
+/// It was dropped on both write and read ("not part of the clipboard
+/// payload"), so a Swift paste lost a range's horizontal and vertical scale.
+@Test func jsonClipboardKeepsARangesScale() {
+    let scale = Transform(a: 1.5, b: 0, c: 0, d: 0.8, e: 0, f: 0)
+    let back = tspansFromJsonClipboard(tspansToJsonClipboard([Tspan(content: "x", transform: scale)])) ?? []
+    #expect(back.first?.transform == scale, "round trip")
+    let rust = #"{"tspans":[{"content":"x","transform":{"a":1.5,"b":0.0,"c":0.0,"d":0.8,"e":0.0,"f":0.0}}]}"#
+    #expect(tspansFromJsonClipboard(rust)?.first?.transform == scale, "Rust's payload")
+    // CONTROL: no transform, none read.
+    #expect(tspansFromJsonClipboard(#"{"tspans":[{"content":"x"}]}"#)?.first?.transform == nil)
+}
+
 @Test func jsonClipboardStripsId() {
     let src = [Tspan(id: 42, content: "x")]
     let json = tspansToJsonClipboard(src)
