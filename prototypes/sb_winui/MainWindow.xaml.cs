@@ -1159,6 +1159,14 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.Enter => JasCore.KeyEnter,
             Windows.System.VirtualKey.Delete => JasCore.KeyDelete,
             Windows.System.VirtualKey.Back => JasCore.KeyBackspace,
+            // The caret keys (the Type tool's #596 gaps). Tab is NOT sent: it is
+            // WinUI's focus key, and taking it is a behaviour for the box to judge.
+            Windows.System.VirtualKey.Up => JasCore.KeyArrowUp,
+            Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
+            Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
+            Windows.System.VirtualKey.Right => JasCore.KeyArrowRight,
+            Windows.System.VirtualKey.Home => JasCore.KeyHome,
+            Windows.System.VirtualKey.End => JasCore.KeyEnd,
             _ => 0,
         };
         var mods = KeyMods();

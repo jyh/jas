@@ -1,7 +1,7 @@
 {
     "item":  "character.tracking",
     "surface":  "2379x1333",
-    "frame_hash":  "6cb9c4390f2f876422e15a92e8322f0480afb7c71813043fa9e4c463e7d3aba8",
+    "frame_hash":  "81188dd7234a003f6b135f4170f84ce4756f539a56e0e15ff8ea9d2cdd395d4f",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "71a20a0b018899cd",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

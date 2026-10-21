@@ -1,7 +1,7 @@
 {
     "item":  "shortcut.delete",
     "surface":  "2379x1333",
-    "frame_hash":  "d04ce7709c8739abc8e5c60fd3b4a3b5b8bf9df0fb038dfcd3ee52d21af63cb5",
+    "frame_hash":  "e6120f716dcd3c5ee7059000b95abae5d6c8b8ecac9d0320072423f3e27f70e7",
     "plan_panel":  "align_panel_content",
     "plan_sha":  "b7227f4d30f7b39b",
     "tab":  "[0,0]=on:\"complex_document.svg\"",
