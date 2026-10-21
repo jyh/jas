@@ -1254,6 +1254,34 @@ func gradientFromStore(_ store: StateStore) -> Gradient {
     return g
 }
 
+/// The Gradient panel's fields as the SELECTION holds them, for the dock's
+/// panel scope (the role `strokePanelLiveOverrides` plays for Stroke). A
+/// uniform gradient reads as itself; a solid/none selection reads as the seed
+/// its first edit will promote from; nothing selected, or a mixed selection,
+/// contributes nothing, so the stored panel stands. Mirrors
+/// `gradient_host::live_values`.
+public func gradientPanelLiveOverrides(model: Model) -> [String: Any] {
+    let fillOnTop = (model.stateStore.get("fill_on_top") as? Bool) ?? true
+    let g: Gradient
+    switch selectionGradient(model.document, fillOnTop: fillOnTop) {
+    case .empty, .mixed: return [:]
+    case .uniform(let u): g = u
+    case .solid(let c): g = seedGradient(c)
+    }
+    return [
+        "type": g.type.rawValue,
+        "angle": g.angle,
+        "aspect_ratio": g.aspectRatio,
+        "method": g.method.rawValue,
+        "dither": g.dither,
+        "stroke_sub_mode": g.strokeSubMode.rawValue,
+        "stops": g.stops.map { s -> [String: Any] in
+            ["color": s.color, "opacity": s.opacity, "location": s.location,
+             "midpoint_to_next": s.midpointToNext]
+        },
+    ]
+}
+
 /// Apply a Gradient panel write to the selected element(s), per GRADIENT.md
 /// §Fill-type coupling. The base is what the selection holds — its shared
 /// gradient, or the seed when it is solid/none (the promotion) — and the
