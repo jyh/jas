@@ -1756,6 +1756,10 @@ public sealed partial class MainWindow
             // § 500: a pick in the list may raise SelectionChanged after the list
             // has closed, so "just closed" lasts one dispatcher turn past it.
             var listJustClosed = false;
+            // § 501: the text a person last TYPED (read at each key), so undoing a
+            // completion can give it back. Cleared at every commit, so it is never
+            // older than the core's own value.
+            string? typed = null;
             combo.DropDownOpened += (_, _) => listJustClosed = false;
             combo.DropDownClosed += (_, _) =>
             {
@@ -1770,6 +1774,17 @@ public sealed partial class MainWindow
                 // pick, and the typed text goes by Enter or blur instead.
                 if (combo.IsEditable && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, listJustClosed))
                 {
+                    // § 501: refusing to SEND the completion was not enough. Its
+                    // selection stayed on the option, so Enter took the selection
+                    // path and the box showed a value the core never got. UNDO it:
+                    // the core's own index, and the typed text (else the core's).
+                    // The put-back raises SelectionChanged again, at the core's
+                    // index, which lands here and changes nothing.
+                    if (combo.SelectedIndex != (state?.Index ?? -1))
+                    {
+                        combo.SelectedIndex = state?.Index ?? -1;
+                        if ((state?.Index ?? -1) < 0) { combo.Text = typed ?? state?.Text ?? ""; }
+                    }
                     return;
                 }
                 var send = PanelWire.ChoiceCommit(combo.SelectedIndex, items, state?.Shown);
@@ -1778,6 +1793,7 @@ public sealed partial class MainWindow
                 // own index, and `ChoiceCommit` sends nothing for that.
                 combo.SelectedIndex = state?.Index ?? -1;
                 if (combo.IsEditable && (state?.Index ?? -1) < 0) { combo.Text = state?.Text ?? ""; }
+                typed = null;
                 SendPane(id, "commit", send, leaf.Path);
             };
             if (combo.IsEditable)
@@ -1794,6 +1810,7 @@ public sealed partial class MainWindow
                     text.MinHeight = 0;
                     text.Padding = new Thickness(4, 0, 4, 0);
                     text.VerticalContentAlignment = VerticalAlignment.Center;
+                    text.KeyUp += (_, _) => typed = text.Text;
                 };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text
                 // that names an item is left to SelectionChanged above.
@@ -1803,6 +1820,7 @@ public sealed partial class MainWindow
                     if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
                     e.Handled = true;
                     if (PanelWire.CommitOnBlur(e.Text, state?.Shown ?? "")) { SendPane(id, "commit", e.Text, leaf.Path); }
+                    typed = null;
                     combo.Text = state?.Text ?? "";
                 };
                 // Leaving the combo commits what was typed, as a text box's blur
@@ -1817,6 +1835,7 @@ public sealed partial class MainWindow
                     var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
                         items.Select(PanelWire.ChoiceText), focusStays);
                     if (send is null) { return; }
+                    typed = null;
                     SendPane(id, "commit", send, leaf.Path);
                     combo.Text = state?.Text ?? "";
                 }
