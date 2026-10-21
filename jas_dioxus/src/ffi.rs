@@ -1287,6 +1287,17 @@ fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::C
         }
         ClipVerb::Paste { offset, preserve_layers } => {
             let text = clipboard.and_then(serde_json::Value::as_str);
+            // A tool editing text takes the clipboard's TEXT at its caret
+            // (the web's `paste_clipboard`, before the element paste), so a
+            // paste into a session adds no element.
+            if let Some(text) = text.filter(|t| !t.is_empty()) {
+                let mut slot = engine.tool_slot();
+                if let Some((_, tool)) = slot.as_mut().filter(|(_, t)| t.is_editing()) {
+                    if engine.with_model_mut(|m| tool.paste_text(m, text)) {
+                        return (Ran { doc_changed: true, state_changed: false }, Named::default());
+                    }
+                }
+            }
             let pasted = engine.with_model_mut(|m| {
                 crate::document::op_apply::apply_paste_clipboard_text(m, text, offset, preserve_layers)
             });
@@ -1346,12 +1357,21 @@ impl Named {
 /// its own default.
 unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, name: &str,
                        mods: Option<&serde_json::Value>, clipboard: Option<&serde_json::Value>) -> JasBytes {
-    use crate::ffi_pointer::{KEY_BACKSPACE, KEY_DELETE, KEY_ENTER, KEY_ESCAPE, MOD_ALT, MOD_CMD, MOD_SHIFT};
+    use crate::ffi_pointer::{KEY_ARROW_DOWN, KEY_ARROW_LEFT, KEY_ARROW_RIGHT, KEY_ARROW_UP, KEY_BACKSPACE,
+                             KEY_DELETE, KEY_END, KEY_ENTER, KEY_ESCAPE, KEY_HOME, KEY_TAB,
+                             MOD_ALT, MOD_CMD, MOD_SHIFT};
     let code = match name {
         "Delete" => KEY_DELETE,
         "Backspace" => KEY_BACKSPACE,
         "Enter" => KEY_ENTER,
         "Escape" => KEY_ESCAPE,
+        "ArrowUp" => KEY_ARROW_UP,
+        "ArrowDown" => KEY_ARROW_DOWN,
+        "ArrowLeft" => KEY_ARROW_LEFT,
+        "ArrowRight" => KEY_ARROW_RIGHT,
+        "Home" => KEY_HOME,
+        "End" => KEY_END,
+        "Tab" => KEY_TAB,
         _ => {
             let mut chars = name.chars();
             match (chars.next(), chars.next()) {
@@ -4337,6 +4357,48 @@ mod tests {
     /// Delete deletes, one undo step; an orphaning Delete names
     /// `delete_orphan_confirm` and deletes nothing; Ctrl+Z undoes; a key name
     /// the engine does not know is refused by name.
+    /// The Type tool's named gaps (#596), through the route a shell sends
+    /// keys by: in a text session the caret keys move the caret, and Cmd+V
+    /// pastes the clipboard's TEXT at it (the web's `tool.paste_text`, before
+    /// the element paste), so a paste adds no element. With no session a caret
+    /// key is `KeyUnhandled` (the shell's own default), never `BadKey`.
+    #[test]
+    fn a_text_session_takes_the_caret_keys_and_a_paste_of_text() {
+        use crate::ffi_pointer::{jas_pointer_event, jas_set_tool, KIND_PRESS, KIND_RELEASE, TOOL_IDS};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"key":"ArrowLeft"}"#);
+        assert_eq!(reply, "", "no session: nothing took it");
+        assert!(err.contains("KeyUnhandled"), "unhandled, not a bad name: {err}");
+        let texts = || engine_of(e).with_model(|m| {
+            fn walk(el: &crate::geometry::element::Element, out: &mut Vec<String>) {
+                if let crate::geometry::element::Element::Text(t) = el { out.push(t.content()); }
+                for c in el.children().unwrap_or(&[]) { walk(c, out); }
+            }
+            let mut out = vec![];
+            for l in &m.document().layers { walk(l, &mut out); }
+            out
+        });
+        let elements = || engine_of(e).with_model(|m| m.document().layers.iter()
+            .map(|l| l.children().map_or(0, |c| c.len())).sum::<usize>());
+        let ty = TOOL_IDS.iter().position(|t| *t == "type").expect("the Type tool");
+        unsafe {
+            assert_eq!(jas_set_tool(e, ty), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 500.0, 500.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 500.0, 500.0, 0);
+        }
+        for k in ["H", "i", "ArrowLeft"] {
+            let (_, err) = dispatch(e, &format!(r#"{{"key":"{k}"}}"#));
+            assert!(!err.contains("BadKey") && !err.contains("KeyUnhandled"), "{k}: {err}");
+        }
+        let count = elements();
+        let (_, err) = dispatch(e, r#"{"key":"v","mods":{"ctrl":true},"clipboard":"XY"}"#);
+        assert!(!err.contains("NeedsClipboard") && !err.contains("Unchanged"), "the paste ran: {err}");
+        assert_eq!(texts(), vec!["HXYi".to_string()], "the text went in at the caret");
+        assert_eq!(elements(), count, "a paste into a session adds no element");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_key_by_dispatch_is_resolved_in_the_engine_and_replies() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -5119,19 +5181,20 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The Type button names a tool no shell tool answers yet (the type tools
-    /// are native). Its checked state must not claim a tool the pointer is not
-    /// driving: `active_tool` stays the real tool, and the click says Unchanged.
+    /// The Type button selects the Type tool. Until 2026-10-20 no shell tool
+    /// answered `type`, so this click said Unchanged and the checked button
+    /// stayed the real tool; all ten of his clicks in the 10-20 feel sitting
+    /// read `outcome=unchanged` (finding 3). Now the pointer drives it, and the
+    /// checked state says so.
     #[test]
-    fn a_toolbar_click_on_a_tool_the_shell_lacks_changes_nothing() {
+    fn a_toolbar_click_on_the_type_button_selects_the_type_tool() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         assert_eq!(unsafe { crate::ffi_pointer::jas_set_tool(e, 0) }, JasStatus::Ok);
-        let (_, err) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
-        assert_eq!(slot_tool(e), Some("selection"));
-        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"),
-                   "the toolbar's checked button stays the tool the pointer drives");
-        assert!(err.contains("Unchanged"), "{err}");
+        let (reply, _) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
+        assert!(!reply.is_empty(), "the click ran: {}", take(unsafe { jas_last_error_json(e) }));
+        assert_eq!(slot_tool(e), Some("type"), "the pointer now drives the Type tool");
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("type"));
         unsafe { jas_engine_free(e) };
     }
 
