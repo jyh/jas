@@ -1016,6 +1016,25 @@ pub(crate) fn panel_body_eval_ctx(
     serde_json::Value::Object(eval_map)
 }
 
+/// The per-panel table the panel bodies read LAST, with the Gradient panel's
+/// selection-derived fields laid over its own entry, so they beat a stale
+/// `set_panel_state` write the way `panel_scope::engine_scope` lets them beat
+/// the engine's store. `grad_dither_checkbox` writes `dither` there, and a
+/// boolean writes the negation of what it reads (W2b-7). Nothing selected, or
+/// a mixed selection, lays nothing, so the table stands.
+pub(crate) fn live_panel_state_table(st: &AppState)
+    -> std::collections::HashMap<String, serde_json::Map<String, serde_json::Value>> {
+    use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+    let mut table = st.panel_state.clone();
+    if let Some(tab) = st.tab() {
+        let live = gradient_host::live_values(tab.model.document(), st.fill_on_top);
+        if !live.is_empty() {
+            table.entry(GRADIENT_PANEL.to_string()).or_default().extend(live);
+        }
+    }
+    table
+}
+
 /// [`panel_body_eval_ctx`] with its inputs read from `st`, as the dock reads
 /// them before rendering.
 pub(crate) fn panel_body_eval_ctx_for(st: &AppState, content_id: &str) -> Option<serde_json::Value> {
@@ -1024,7 +1043,7 @@ pub(crate) fn panel_body_eval_ctx_for(st: &AppState, content_id: &str) -> Option
         content_id,
         &ws,
         &build_live_panel_overrides(st),
-        &st.panel_state,
+        &live_panel_state_table(st),
         &build_live_state_map(st),
         &build_selection_predicates(st),
         &crate::interpreter::renderer::build_active_document_view(st),
@@ -1452,7 +1471,7 @@ pub(crate) fn DockGroupsView() -> Element {
         let focused = st.workspace_layout.focused_panel();
         let dock = st.workspace_layout.anchored_dock(DockEdge::Right).cloned();
         let panel_ov = build_live_panel_overrides(&st);
-        let panel_table = st.panel_state.clone();
+        let panel_table = live_panel_state_table(&st);
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
         let active_doc = crate::interpreter::renderer::build_active_document_view(&st);
@@ -1546,7 +1565,7 @@ pub(crate) fn FloatingDocksView() -> Element {
         let focused = st.workspace_layout.focused_panel();
         let floating = st.workspace_layout.floating.clone();
         let panel_ov = build_live_panel_overrides(&st);
-        let panel_table = st.panel_state.clone();
+        let panel_table = live_panel_state_table(&st);
         let state_map = build_live_state_map(&st);
         let preds = build_selection_predicates(&st);
         let z = st.workspace_layout.z_order.clone();
@@ -2133,5 +2152,71 @@ mod paragraph_gating_tests {
         t.tspans = vec![w1, c1, w2, c2];
         let st = state_with(vec![GeoEl::Text(t)], vec![vec![0, 0]]);
         assert_eq!(get_f64(&st, "left_indent"), 0.0);
+    }
+}
+
+#[cfg(test)]
+mod gradient_scope_tests {
+    use super::*;
+    use crate::document::document::ElementSelection;
+    use crate::geometry::element::{CommonProps, Color, Element as GeoEl, Fill, RectElem};
+    use crate::interpreter::gradient_host::{self, GRADIENT_PANEL};
+    use crate::workspace::app_state::{AppState, TabState};
+    use serde_json::json;
+
+    /// A blue rect under layer 0, selected when `selected`, with its fill
+    /// promoted to a radial gradient.
+    fn radial_state(selected: bool) -> AppState {
+        let mut st = AppState::new();
+        st.tabs.push(TabState::new());
+        st.active_tab = 0;
+        let mut doc = st.tabs[0].model.document().clone();
+        if let Some(GeoEl::Layer(layer)) = doc.layers.get_mut(0) {
+            layer.children = vec![std::rc::Rc::new(GeoEl::Rect(RectElem {
+                x: 0.0, y: 0.0, width: 10.0, height: 10.0, rx: 0.0, ry: 0.0,
+                fill: Some(Fill::new(Color::rgb(0.0, 0.0, 1.0))), stroke: None,
+                common: CommonProps::default(),
+                fill_gradient: None, stroke_gradient: None,
+            }))];
+        }
+        doc.selection = vec![ElementSelection::all(vec![0, 0])];
+        st.tabs[0].model.set_document_for_test(doc);
+        assert!(gradient_host::apply_render_key(&mut st.tabs[0].model, true, "gradient_type",
+                                                &json!("radial"), || panic!("not mixed")));
+        if !selected {
+            let mut doc = st.tabs[0].model.document().clone();
+            doc.selection.clear();
+            st.tabs[0].model.set_document_for_test(doc);
+        }
+        st
+    }
+
+    /// The web Gradient panel's body reads the SELECTION, as the engine's does
+    /// (`panel_scope::engine_scope`), and it does so OVER the per-panel table:
+    /// `grad_dither_checkbox` writes `set_panel_state dither`, and a boolean
+    /// writes the negation of what it reads (W2b-7), so a stale table `dither`
+    /// would negate the wrong value. Until this the body drew the declared
+    /// black→white linear over a selected blue radial.
+    #[test]
+    fn the_gradient_body_reads_the_selection_over_the_table() {
+        let mut st = radial_state(true);
+        st.panel_state.insert(GRADIENT_PANEL.to_string(),
+            serde_json::Map::from_iter([("dither".to_string(), json!(true)),
+                                        ("type".to_string(), json!("linear"))]));
+        let ctx = panel_body_eval_ctx_for(&st, GRADIENT_PANEL).expect("the body context");
+        let p = &ctx["panel"];
+        assert_eq!((&p["type"], &p["dither"]), (&json!("radial"), &json!(false)), "{p}");
+        assert_eq!(p["stops"][0]["color"], json!("#0000ff"), "{p}");
+    }
+
+    /// Nothing selected: the table stands, as in the engine.
+    #[test]
+    fn with_nothing_selected_the_gradient_body_keeps_the_table() {
+        let mut st = radial_state(false);
+        st.panel_state.insert(GRADIENT_PANEL.to_string(),
+            serde_json::Map::from_iter([("dither".to_string(), json!(true))]));
+        let ctx = panel_body_eval_ctx_for(&st, GRADIENT_PANEL).expect("the body context");
+        assert_eq!(ctx["panel"]["dither"], json!(true));
+        assert_eq!(ctx["panel"]["type"], json!("linear"), "the declared default");
     }
 }
