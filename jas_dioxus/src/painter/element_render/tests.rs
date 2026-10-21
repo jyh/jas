@@ -2929,10 +2929,27 @@ fn the_pen_advances_by_each_tspans_own_font_not_the_parents() {
 /// The clause narrowed; it did not vanish.
 #[test]
 fn a_tspan_feature_row_dr_did_not_take_still_stays_legacy() {
+    // ⭐ `rotate` LEFT THIS LIST ON 2026-10-20: styled text carrying a turn
+    // takes the shared plan now (`needs_layout`, TSPAN.md "Rotation"), which
+    // turns each glyph about its own origin, so it is no longer legacy. The
+    // assertion below holds it to that, where the plan has a real measurer.
+    {
+        let mut turned = tspan("world", Some("bold"), None);
+        turned.rotate = Some(15.0);
+        let elem = segmented(vec![tspan("Hello ", None, None), turned]);
+        let Element::Text(t) = &elem else { panic!("segmented builds a Text") };
+        assert!(super::needs_layout(t), "a turned styled text is laid out by the plan");
+        // The plan lays out by measured widths, so this half is the platform's
+        // with a real measurer; without one it stays legacy, as everything does.
+        #[cfg(all(feature = "d2d", windows))]
+        assert!(!element_needs_legacy(&elem, all_caps()),
+                "a tspan carrying rotate takes the plan, not legacy");
+        #[cfg(not(all(feature = "d2d", windows)))]
+        assert!(element_needs_legacy(&elem, all_caps()), "no real measurer here, so legacy");
+    }
     for (label, mutate) in [
-        ("rotate", (|t: &mut crate::geometry::tspan::Tspan| t.rotate = Some(15.0))
+        ("dx", (|t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5))
             as fn(&mut crate::geometry::tspan::Tspan)),
-        ("dx", |t: &mut crate::geometry::tspan::Tspan| t.dx = Some(0.5)),
         ("baseline_shift", |t: &mut crate::geometry::tspan::Tspan| t.baseline_shift = Some(2.0)),
         ("decoration", |t: &mut crate::geometry::tspan::Tspan| {
             t.text_decoration = Some(vec!["underline".to_string()])
