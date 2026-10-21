@@ -2060,13 +2060,15 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
     };
     underlined.text_decoration = "underline".into();
     // In a box, as this arm always was: since node 20 an underlined POINT text
-    // lowers where a real measurer exists, while decorated AREA text stays
-    // legacy on every lane.
+    // lowers where a real measurer exists, and since 2026-10-20 decorated AREA
+    // text does too (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)). The clause narrowed again; what still refuses is
+    // what the plan cannot read.
     (underlined.width, underlined.height) = (10.0, 12.0);
-    assert!(
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(
         element_needs_legacy(&Element::Text(underlined), caps),
-        "a REAL decoration is an extra primitive and stays legacy -- the clause \
-         narrowed, it did not vanish"
+        !has_real,
+        "decorated AREA text takes the plan where a real measurer exists"
     );
 
     let _ = flat;
@@ -2310,7 +2312,11 @@ fn flat_decoration_lowers_only_where_its_length_is_measured() {
     );
     area.fill = fill(Color::BLACK);
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area), "decorated AREA text stays legacy");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): area text is laid out, so its decoration takes
+    // the plan's decoration lines. Point text above is not laid out and keeps
+    // node 20's rules.
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "decorated AREA text takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 20: the lines, as `canvas/render.rs::draw_text_decorations` draws
@@ -2366,8 +2372,11 @@ fn unreadable_or_anchored_tracking_stays_legacy() {
     );
     area.letter_spacing = "0.1em".into();
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area),
-            "tracked AREA text stays legacy: it wraps by widths the spacing changes");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): the plan wraps by widths that carry the spacing
+    // (`text_runs::plan`, each character's width plus the spacing).
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "tracked AREA text takes the plan where a real measurer exists");
     let mut kern_word = flat_text(20.0);
     kern_word.kerning = "auto".into();
     assert!(crate::painter::element_render::text_needs_legacy(&kern_word),
@@ -3797,26 +3806,29 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
     assert_eq!(text_needs_legacy(&listed), !has_real, "a list marker lowers exactly where a real measurer exists");
     let mut rotated = indented.clone();
     rotated.rotate = "30".into();
-    assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
-    // jas section 432: each feature the per-line draw does not carry REFUSES on
-    // laid-out text, never drops. Area text and an indented POINT text both,
-    // since only the area case was refused before node 25.
+    assert_eq!(text_needs_legacy(&rotated), !has_real, "a laid-out rotation takes the plan where a real measurer exists");
+    // jas section 432: each feature the per-line draw does not carry never
+    // drops. Until 2026-10-20 each REFUSED; since then (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)) each takes the
+    // plan, which carries them, and only what the plan cannot read refuses.
+    // Area text and an indented POINT text both.
     let indented_point = with_paragraph(flat_text(20.0), |w| w.jas_left_indent = Some(12.0));
     for (label, t) in [("area", area_text("Hello World", 120.0)), ("indented point", indented_point)] {
         type Set = fn(&mut crate::geometry::element::TextElem);
-        let cases: [(&str, Set); 6] = [
+        let plan_carries: [(&str, Set); 5] = [
             ("tracking", |t| t.letter_spacing = "0.1em".into()),
             ("kerning", |t| t.kerning = "20".into()),
             ("underline", |t| t.text_decoration = "underline".into()),
             ("line-through", |t| t.text_decoration = "line-through".into()),
             ("rotation", |t| t.rotate = "30".into()),
-            ("an unreadable baseline shift", |t| t.baseline_shift = "high".into()),
         ];
-        for (name, set) in cases {
+        for (name, set) in plan_carries {
             let mut x = t.clone();
             set(&mut x);
-            assert!(text_needs_legacy(&x), "laid-out {label} text with {name} stays legacy");
+            assert_eq!(text_needs_legacy(&x), !has_real, "laid-out {label} text with {name} takes the plan");
         }
+        let mut x = t.clone();
+        x.baseline_shift = "high".into();
+        assert!(text_needs_legacy(&x), "laid-out {label} text with an unreadable baseline shift stays legacy");
     }
 }
 
@@ -3971,7 +3983,8 @@ fn a_readable_baseline_shift_lowers_with_a_real_measurer() {
     let mut decorated = flat_text(20.0);
     decorated.baseline_shift = "super".into();
     decorated.text_decoration = "underline".into();
-    assert!(text_needs_legacy(&decorated), "a shifted decoration stays legacy (its line sits on the shifted baseline)");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)), whose decoration lines sit on the shifted baseline.
+    assert_eq!(text_needs_legacy(&decorated), !has_real, "a shifted decoration takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass
