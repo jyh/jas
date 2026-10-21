@@ -247,11 +247,25 @@ fn f(op: &serde_json::Value, key: &str) -> f64 {
 
 /// Apply one primitive LAYOUT op to `layout`. The SINGLE per-verb mutation body
 /// shared by production and the cross-language harness. Hardened: an unknown
-/// verb or a missing required `kind`/`op` string SKIPS (no panic, no mutation).
+/// verb or a missing required `kind`/`op`/`edge` string SKIPS (no panic, no
+/// mutation).
+///
+/// Production sites call this; [`layout_apply_checked`] is the same body and
+/// also says whether it recognised the op.
 pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
+    layout_apply_checked(layout, op);
+}
+
+/// [`layout_apply`], answering whether the op was one the dispatcher
+/// RECOGNISES: `false` for a skip (no `op`, an unknown verb, a required field
+/// missing), `true` otherwise, including a pane verb on a layout with no pane
+/// layout, which is well formed with nothing to act on (that guard runs before
+/// the verb's own fields are read). The FFI's `jas_layout_apply` refuses on
+/// `false`, because a shell would read an unchanged layout as an answer.
+pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value) -> bool {
     let name = match op["op"].as_str() {
         Some(n) => n,
-        None => return, // malformed op envelope: skip
+        None => return false, // malformed op envelope: skip
     };
     match name {
         // ---- Panel / dock operations (mutate WorkspaceLayout directly) ----
@@ -282,7 +296,7 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "show_panel" => {
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_panel_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             layout.show_panel(kind);
         }
@@ -348,7 +362,7 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "snap_to_edge" => {
             let edge = match op["edge"].as_str().and_then(parse_dock_edge) {
                 Some(e) => e,
-                None => return, // required field missing or unknown: skip
+                None => return false, // required field missing or unknown: skip
             };
             layout.snap_to_edge(DockId(u(op, "dock_id")), edge);
         }
@@ -361,14 +375,14 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "set_pane_position" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.set_pane_position(PaneId(u(op, "pane_id")), f(op, "x"), f(op, "y"));
         }
         "tile_panes" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             // The menu "Tile" handler clears canvas maximization before tiling;
             // it is opt-in via the explicit `set_canvas_maximized` bool param so
@@ -389,14 +403,14 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "toggle_canvas_maximized" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.toggle_canvas_maximized();
         }
         "resize_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.resize_pane(
                 PaneId(u(op, "pane_id")),
@@ -407,34 +421,35 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "hide_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_pane_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             pl.hide_pane(kind);
         }
         "show_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_pane_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             pl.show_pane(kind);
         }
         "bring_pane_to_front" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.bring_pane_to_front(PaneId(u(op, "pane_id")));
         }
         // Unknown verb: skip rather than panic (a malformed/forward-compat op
         // must not crash production; the corpus only ever sends known verbs).
-        _ => {}
+        _ => return false,
     }
+    true
 }
