@@ -558,6 +558,16 @@ internal static class PanelWire
         dropDownOpen || listJustClosed;
 
     /// <summary>
+    /// The text an editable combo's blur commits: the editor's, unless the
+    /// platform has BLANKED it, when it is what the person last typed. flask
+    /// § 504: putting the selection back to -1 blanked the editor after the
+    /// undo had written the typed `13`, so the blur read `''` and the entry was
+    /// lost. A box the person emptied themselves types `''`, which stays blank.
+    /// </summary>
+    internal static string? BlurText(string? box, string? typed) =>
+        string.IsNullOrEmpty(box) ? typed : box;
+
+    /// <summary>
     /// What Enter in an editable combo sends, from the EDITOR's text: the value
     /// of the item it names, or the text itself when it names none; nothing
     /// when it is the core's own value or text, or blank. The shell takes Enter
