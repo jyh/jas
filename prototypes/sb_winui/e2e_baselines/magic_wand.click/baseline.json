@@ -1,7 +1,7 @@
 {
     "item":  "magic_wand.click",
     "surface":  "2379x1333",
-    "frame_hash":  "c7bbf5e565c60c0f9b7684e58b66008638570df5b63f593db9723e4cffe9c121",
+    "frame_hash":  "8a18ba7eff266f4111cf16c3df55a2c1ba67afadee2aa495c999ad12c259da47",
     "plan_panel":  "align_panel_content",
     "plan_sha":  "b7227f4d30f7b39b",
     "tab":  "[0,0]=on:\"three_rects.svg\"",

@@ -1,0 +1,10 @@
+{
+    "item":  "character.stack_rotation_shift",
+    "surface":  "2379x1333",
+    "frame_hash":  "e6bb9e1cb3b0200b46786c572c6d792fbb23d562627d22300ec385d8a6998a0f",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "56fe464f95b46612",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}
