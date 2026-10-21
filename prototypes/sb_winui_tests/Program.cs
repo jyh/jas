@@ -382,6 +382,19 @@ static class Program
             PanelWire.EditablePickIsReal(false, true), "a closing pick was refused");
         Check("editable pick: a selection moved with the list shut is NOT a pick",
             !PanelWire.EditablePickIsReal(false, false), "a completion read as a pick");
+        // flask § 503: the shell takes Enter, from the EDITOR's text.
+        var angleItems = new List<PaneOption> {
+            new(false, "0", "0", null, true), new(false, "45", "45", null, false), new(false, "135", "135", null, false) };
+        Eq("enter: typed text that names no item sends as typed (31, not the completed 135)",
+            "31", PanelWire.EnterCommit("31", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: an item's text sends that item's VALUE",
+            "45", PanelWire.EnterCommit("45", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: CONTROL: the core's own value sends nothing",
+            "(null)", PanelWire.EnterCommit("13", "13", "13", angleItems) ?? "(null)");
+        Eq("enter: CONTROL: the item the core shows sends nothing",
+            "(null)", PanelWire.EnterCommit("0", "0", "0", angleItems) ?? "(null)");
+        Eq("enter: a blank editor sends nothing",
+            "(null)", PanelWire.EnterCommit(" ", "13", "13", angleItems) ?? "(null)");
         Eq("combo blur: an item's text is a pick, left to the selection path",
             "(null)", PanelWire.ComboBlurCommit("45°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: focus moving into the combo's own dropdown is not leaving",
