@@ -15637,9 +15637,195 @@
             "id": "grad_main_row",
             "children": [
               {
-                "id": "grad_fill_stroke_widget",
-                "type": "fill_stroke_widget",
-                "col": 3
+                "type": "container",
+                "layout": "column",
+                "style": {
+                  "width": 48,
+                  "height": 59.52,
+                  "min_height": 60
+                },
+                "children": [
+                  {
+                    "id": "grad_fill_swatch",
+                    "type": "color_swatch",
+                    "summary": "Fill color",
+                    "style": {
+                      "size": 26.4,
+                      "position": {
+                        "x": 4.32,
+                        "y": 4.32
+                      }
+                    },
+                    "bind": {
+                      "color": "state.fill_color",
+                      "z_index": "if state.fill_on_top then 2 else 1"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "set": {
+                              "fill_on_top": "true"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "event": "double_click",
+                        "action": "open_color_picker",
+                        "params": {
+                          "target": "fill"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_stroke_swatch",
+                    "type": "color_swatch",
+                    "summary": "Stroke color",
+                    "hollow": true,
+                    "style": {
+                      "size": 26.4,
+                      "position": {
+                        "x": 15.84,
+                        "y": 15.84
+                      }
+                    },
+                    "bind": {
+                      "color": "state.stroke_color",
+                      "z_index": "if state.fill_on_top then 1 else 2"
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "effects": [
+                          {
+                            "set": {
+                              "fill_on_top": "false"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "event": "double_click",
+                        "action": "open_color_picker",
+                        "params": {
+                          "target": "stroke"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_swap_btn",
+                    "type": "icon_button",
+                    "summary": "Swap",
+                    "icon": "swap_arrows",
+                    "style": {
+                      "size": 14.4,
+                      "position": {
+                        "x": 30.72,
+                        "y": 1.44
+                      }
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "swap_fill_stroke"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_reset_btn",
+                    "type": "icon_button",
+                    "summary": "Default",
+                    "icon": "default_colors",
+                    "style": {
+                      "size": 14.4,
+                      "position": {
+                        "x": 1.44,
+                        "y": 32.64
+                      }
+                    },
+                    "behavior": [
+                      {
+                        "event": "click",
+                        "action": "reset_fill_stroke"
+                      }
+                    ]
+                  },
+                  {
+                    "id": "grad_mode_btns",
+                    "type": "container",
+                    "layout": "row",
+                    "style": {
+                      "position": {
+                        "x": 2.88,
+                        "y": 45.12
+                      },
+                      "gap": 2
+                    },
+                    "children": [
+                      {
+                        "id": "grad_solid_btn",
+                        "type": "icon_button",
+                        "summary": "Color",
+                        "icon": "fill_solid",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_type_solid"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "grad_gradient_btn",
+                        "type": "icon_button",
+                        "summary": "Gradient",
+                        "description": "Switches the active attribute (fill or stroke, per fill_on_top) to gradient fill mode. DISABLED: gradient fill mode is not yet implemented, so set_fill_type_gradient declares no effects and a click could only be a silent no-op. An enabled control that can never do anything is a dead control \u2014 it renders with a pointer cursor and full contrast, and a user who clicks it learns nothing. Greyed out until gradient fill lands, following the house treatment of a deferred control: the \"Coming soon\" state of the Artboards panel's Rearrange button, and the disabled \"Create New Swatch...\" row in the Color panel's own menu. The click behavior stays declared so the wiring is already in place when the action grows effects.\n",
+                        "icon": "fill_gradient",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "bind": {
+                          "disabled": "true"
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_type_gradient"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "grad_none_btn",
+                        "type": "icon_button",
+                        "summary": "None",
+                        "icon": "color_none",
+                        "style": {
+                          "size": 11.52
+                        },
+                        "behavior": [
+                          {
+                            "event": "click",
+                            "action": "set_fill_none",
+                            "condition": "state.fill_on_top"
+                          },
+                          {
+                            "event": "click",
+                            "action": "set_stroke_none",
+                            "condition": "not state.fill_on_top"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "col": 3,
+                "_template": "fill_stroke_widget"
               },
               {
                 "type": "container",

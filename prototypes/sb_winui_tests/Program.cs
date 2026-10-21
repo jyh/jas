@@ -722,6 +722,24 @@ static class Program
         Eq("key: a quote is escaped as JSON", """{"key":"\"","mods":{"shift":false,"alt":true,"ctrl":false}}""",
             KeyWire.Request("\"", shift: false, alt: true, ctrl: false));
         Eq("key: an empty name is no request", "(null)", KeyWire.Request("", false, false, false) ?? "(null)");
+        // The gradient slider's picture (gradient.yaml grad_slider), DISPLAY ONLY
+        // as in every port: `bind.stops` is the plan's JSON text, each stop
+        // {color, location, midpoint_to_next?, opacity}, keys in any order.
+        const string twoStops = """[{"color":"#000000","location":0,"midpoint_to_next":50,"opacity":100},{"color":"#ffffff","location":100,"opacity":100}]""";
+        Eq("gradient: two stops parse with their fields", "#000000@0/50/100|#ffffff@100/50/100",
+            string.Join("|", GradientSliderWire.Stops(twoStops)!.Select(st => $"{st.Color}@{st.Location}/{st.Midpoint}/{st.Opacity}")));
+        Eq("gradient: a midpoint sits between its pair, at midpoint_to_next %", "0|25|80",
+            string.Join("|", new[] { (0.0, 100.0, 0.0), (0.0, 50.0, 50.0), (60.0, 100.0, 50.0) }
+                .Select(t => GradientSliderWire.MidpointLocation(new GradientSliderWire.Stop("#000000", 100, t.Item1, t.Item3),
+                                                                 new GradientSliderWire.Stop("#000000", 100, t.Item2, 50)).ToString())));
+        Eq("gradient: a percentage outside 0..100 is REFUSED, never clamped, and so is an unparsable list", "(null)|(null)|(null)|(null)|(null)",
+            (GradientSliderWire.Stops("""[{"color":"#000000","location":-5},{"color":"#000000","location":40}]""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""[{"color":"#000000","location":0,"opacity":140},{"color":"#000000","location":40}]""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("not json")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""{"color":"#000000"}""")?.Count.ToString() ?? "(null)")
+            + "|" + (GradientSliderWire.Stops("""[{"location":5}]""")?.Count.ToString() ?? "(null)"));
+        Eq("gradient: the selected index reads -1 when absent or not a number", "0|-1|-1|2",
+            $"{GradientSliderWire.Index("0")}|{GradientSliderWire.Index("-1")}|{GradientSliderWire.Index(null)}|{GradientSliderWire.Index("2")}");
         Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",
             (KeyWire.CharName('O') ?? "(null)") + "|" + (KeyWire.CharName('=') ?? "(null)") + "|"
             + (KeyWire.CharName(0x07) ?? "(null)") + "|" + (KeyWire.CharName(0x7F) ?? "(null)"));
