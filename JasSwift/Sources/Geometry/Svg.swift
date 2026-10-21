@@ -479,6 +479,40 @@ private func tspanSvg(_ t: Tspan) -> String {
     if let v = t.rotate {
         attrs += " rotate=\"\(fmt(v))\""
     }
+    // The per-range character attributes, in Rust's `tspan_svg` order. Each
+    // length carries the model's unit, which SVG reads as written and which
+    // reopens exactly: a baseline shift in pt (+ is up), tracking and a dx in
+    // em; leading is a multiplier, as CSS's unitless `line-height` is.
+    if let v = t.baselineShift {
+        attrs += " baseline-shift=\"\(fmt(v))pt\""
+    }
+    if let v = t.dx {
+        attrs += " dx=\"\(fmt(v))em\""
+    }
+    if let v = t.letterSpacing {
+        attrs += " letter-spacing=\"\(fmt(v))em\""
+    }
+    if let v = t.lineHeight {
+        attrs += " line-height=\"\(fmt(v))\""
+    }
+    for (name, v) in [
+        ("font-variant", t.fontVariant),
+        ("text-transform", t.textTransform),
+        ("text-rendering", t.textRendering),
+        ("xml:lang", t.xmlLang),
+        ("jas:style-name", t.styleName),
+        ("jas:aa-mode", t.jasAaMode),
+        ("jas:kerning-mode", t.jasKerningMode),
+    ] {
+        if let v { attrs += " \(name)=\"\(escapeXml(v))\"" }
+    }
+    if let v = t.jasFractionalWidths {
+        attrs += " jas:fractional-widths=\"\(v)\""
+    }
+    if let v = t.jasNoBreak {
+        attrs += " jas:no-break=\"\(v)\""
+    }
+    attrs += transformAttr(t.transform)
     if let v = t.jasRole {
         attrs += " jas:role=\"\(escapeXml(v))\""
     }
@@ -1483,7 +1517,47 @@ private func parseColor(_ s: String) -> Color? {
 /// angle). The single-value case returns a one-element array. Ids
 /// are left at `0`; the caller assigns fresh sequential ids across
 /// the whole tspan list.
+/// A tspan's own baseline shift in pt (+ is up): `3.5pt` as `tspanSvg`
+/// writes it, or a bare number in user units (px), as another application
+/// writes it. A keyword or a percentage is not a tspan's numeric shift.
+private func tspanBaselineShift(_ raw: String) -> Double? {
+    let s = raw.trimmingCharacters(in: .whitespaces)
+    if s.hasSuffix("pt") { return Double(s.dropLast(2).trimmingCharacters(in: .whitespaces)) }
+    let n = s.hasSuffix("px") ? String(s.dropLast(2)) : s
+    return Double(n.trimmingCharacters(in: .whitespaces)).map(toPt)
+}
+
+/// A length in em (`0.1em`), the unit tracking and a dx are stored in.
+private func emValue(_ raw: String) -> Double? {
+    let s = raw.trimmingCharacters(in: .whitespaces)
+    guard s.hasSuffix("em") else { return nil }
+    return Double(s.dropLast(2).trimmingCharacters(in: .whitespaces))
+}
+
+/// A `<tspan>` as one or more Tspans (a multi-value `rotate` splits it), each
+/// carrying the per-range character attributes `tspanSvg` writes.
 private func parseTspan(_ node: XMLElement) -> [Tspan] {
+    let a = { (name: String) in node.attribute(forName: name)?.stringValue }
+    return parseTspanLayout(node).map { t in
+        mergeFields(t,
+            baselineShift: .some(a("baseline-shift").flatMap(tspanBaselineShift)),
+            dx: .some(a("dx").flatMap(emValue)),
+            fontVariant: .some(a("font-variant")),
+            jasAaMode: .some(a("jas:aa-mode")),
+            jasFractionalWidths: .some(a("jas:fractional-widths").map { $0 == "true" }),
+            jasKerningMode: .some(a("jas:kerning-mode")),
+            jasNoBreak: .some(a("jas:no-break").map { $0 == "true" }),
+            letterSpacing: .some(a("letter-spacing").flatMap(emValue)),
+            lineHeight: .some(a("line-height").flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }),
+            styleName: .some(a("jas:style-name")),
+            textRendering: .some(a("text-rendering")),
+            textTransform: .some(a("text-transform")),
+            transform: .some(parseTransform(node)),
+            xmlLang: .some(a("xml:lang")))
+    }
+}
+
+private func parseTspanLayout(_ node: XMLElement) -> [Tspan] {
     let content = node.stringValue ?? ""
     let fontFamily = node.attribute(forName: "font-family")?.stringValue
     let fontSize = (node.attribute(forName: "font-size")?.stringValue)

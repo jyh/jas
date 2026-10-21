@@ -1691,6 +1691,42 @@ fn tspan_svg(t: &crate::geometry::tspan::Tspan) -> String {
     if let Some(v) = t.rotate {
         attrs.push_str(&format!(" rotate=\"{}\"", fmt(v)));
     }
+    // The per-range character attributes. Each length carries the model's
+    // unit, which SVG reads as written and which reopens exactly: a baseline
+    // shift in pt (+ is up), tracking and a dx in em; leading is a
+    // multiplier, as CSS's unitless `line-height` is.
+    if let Some(v) = t.baseline_shift {
+        attrs.push_str(&format!(" baseline-shift=\"{}pt\"", fmt(v)));
+    }
+    if let Some(v) = t.dx {
+        attrs.push_str(&format!(" dx=\"{}em\"", fmt(v)));
+    }
+    if let Some(v) = t.letter_spacing {
+        attrs.push_str(&format!(" letter-spacing=\"{}em\"", fmt(v)));
+    }
+    if let Some(v) = t.line_height {
+        attrs.push_str(&format!(" line-height=\"{}\"", fmt(v)));
+    }
+    for (name, v) in [
+        ("font-variant", &t.font_variant),
+        ("text-transform", &t.text_transform),
+        ("text-rendering", &t.text_rendering),
+        ("xml:lang", &t.xml_lang),
+        ("jas:style-name", &t.style_name),
+        ("jas:aa-mode", &t.jas_aa_mode),
+        ("jas:kerning-mode", &t.jas_kerning_mode),
+    ] {
+        if let Some(v) = v {
+            attrs.push_str(&format!(" {}=\"{}\"", name, escape_xml(v)));
+        }
+    }
+    if let Some(v) = t.jas_fractional_widths {
+        attrs.push_str(&format!(" jas:fractional-widths=\"{}\"", v));
+    }
+    if let Some(v) = t.jas_no_break {
+        attrs.push_str(&format!(" jas:no-break=\"{}\"", v));
+    }
+    attrs.push_str(&transform_attr(&t.transform));
     if let Some(v) = &t.jas_role {
         attrs.push_str(&format!(" jas:role=\"{}\"", escape_xml(v)));
     }
@@ -1795,6 +1831,22 @@ fn jas_attr<'a>(attrs: &'a HashMap<String, String>, name: &str) -> Option<&'a St
 /// angle). The single-value case returns a one-element vec. Ids are
 /// left at `0`; the caller assigns fresh sequential ids across the
 /// whole tspan list.
+/// A tspan's own baseline shift in pt (+ is up): `3.5pt` as `tspan_svg`
+/// writes it, or a bare number in user units (px), as another application
+/// writes it. A keyword or a percentage is not a tspan's numeric shift.
+fn tspan_baseline_shift(s: &str) -> Option<f64> {
+    let s = s.trim();
+    match s.strip_suffix("pt") {
+        Some(v) => v.trim().parse::<f64>().ok(),
+        None => s.strip_suffix("px").unwrap_or(s).trim().parse::<f64>().ok().map(pt),
+    }
+}
+
+/// A length in em (`0.1em`), the unit tracking and a dx are stored in.
+fn em_value(s: &str) -> Option<f64> {
+    s.trim().strip_suffix("em")?.trim().parse::<f64>().ok()
+}
+
 fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
     use crate::geometry::tspan::Tspan;
     let base = Tspan {
@@ -1817,6 +1869,21 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
             parts.sort();
             parts
         }),
+        // The per-range character attributes, as `tspan_svg` writes them.
+        baseline_shift: node.attrs.get("baseline-shift").and_then(|s| tspan_baseline_shift(s)),
+        dx: node.attrs.get("dx").and_then(|s| em_value(s)),
+        letter_spacing: node.attrs.get("letter-spacing").and_then(|s| em_value(s)),
+        line_height: node.attrs.get("line-height").and_then(|s| s.trim().parse::<f64>().ok()),
+        font_variant: node.attrs.get("font-variant").cloned(),
+        text_transform: node.attrs.get("text-transform").cloned(),
+        text_rendering: node.attrs.get("text-rendering").cloned(),
+        xml_lang: node.attrs.get("xml:lang").cloned(),
+        style_name: jas_attr(&node.attrs, "style-name").cloned(),
+        jas_aa_mode: jas_attr(&node.attrs, "aa-mode").cloned(),
+        jas_kerning_mode: jas_attr(&node.attrs, "kerning-mode").cloned(),
+        jas_fractional_widths: jas_attr(&node.attrs, "fractional-widths").map(|v| v == "true"),
+        jas_no_break: jas_attr(&node.attrs, "no-break").map(|v| v == "true"),
+        transform: parse_transform(node),
         jas_role: jas_attr(&node.attrs, "role").cloned(),
         jas_left_indent: jas_attr(&node.attrs, "left-indent")
             .and_then(|s| s.parse::<f64>().ok()),
@@ -5123,6 +5190,94 @@ mod tests {
             r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="0" y="20" font-size="12">{}</text></svg>"#,
             tspan_markup
         )
+    }
+
+    /// EVERY tspan field survives a save and reopen (SVG is the save format,
+    /// and the clipboard's): a range's baseline shift, case, small caps,
+    /// tracking, leading, language and the rest were written by nothing and
+    /// read by nothing, so they vanished on Save. The literal names every
+    /// field and has no `..`, so a NEW field does not compile here until it
+    /// is given a value and so a round trip; `id` is the only field the file
+    /// does not carry (it is in-memory, renumbered on load).
+    #[test]
+    fn every_tspan_field_survives_a_save_and_reopen() {
+        use crate::geometry::tspan::Tspan;
+        let t = Tspan {
+            id: 0,
+            content: "Word".into(),
+            baseline_shift: Some(3.5),
+            dx: Some(0.25),
+            font_family: Some("Helvetica".into()),
+            font_size: Some(12.0),
+            font_style: Some("italic".into()),
+            font_variant: Some("small-caps".into()),
+            font_weight: Some("bold".into()),
+            jas_aa_mode: Some("crisp".into()),
+            jas_fractional_widths: Some(false),
+            jas_kerning_mode: Some("optical".into()),
+            jas_no_break: Some(true),
+            jas_role: Some("paragraph".into()),
+            jas_left_indent: Some(4.0),
+            jas_right_indent: Some(5.0),
+            jas_hyphenate: Some(true),
+            jas_hanging_punctuation: Some(true),
+            jas_list_style: Some("bullet-disc".into()),
+            text_align: Some("center".into()),
+            text_align_last: Some("left".into()),
+            text_indent: Some(6.0),
+            jas_space_before: Some(7.0),
+            jas_space_after: Some(8.0),
+            jas_word_spacing_min: Some(80.0),
+            jas_word_spacing_desired: Some(100.0),
+            jas_word_spacing_max: Some(133.0),
+            jas_letter_spacing_min: Some(-5.0),
+            jas_letter_spacing_desired: Some(0.0),
+            jas_letter_spacing_max: Some(5.0),
+            jas_glyph_scaling_min: Some(98.0),
+            jas_glyph_scaling_desired: Some(100.0),
+            jas_glyph_scaling_max: Some(102.0),
+            jas_auto_leading: Some(120.0),
+            jas_single_word_justify: Some("left".into()),
+            jas_hyphenate_min_word: Some(6.0),
+            jas_hyphenate_min_before: Some(2.0),
+            jas_hyphenate_min_after: Some(3.0),
+            jas_hyphenate_limit: Some(2.0),
+            jas_hyphenate_zone: Some(36.0),
+            jas_hyphenate_bias: Some(1.0),
+            jas_hyphenate_capitalized: Some(false),
+            letter_spacing: Some(0.1),
+            line_height: Some(1.5),
+            rotate: Some(15.0),
+            style_name: Some("Condensed Bold".into()),
+            text_decoration: Some(vec!["line-through".into(), "underline".into()]),
+            text_rendering: Some("optimizeLegibility".into()),
+            text_transform: Some("uppercase".into()),
+            transform: Some(Transform { a: 1.5, b: 0.0, c: 0.0, d: 0.8, e: 0.0, f: 0.0 }),
+            xml_lang: Some("fr".into()),
+        };
+        let doc = svg_to_document(&tspan_svg_doc(&tspan_svg(&t)));
+        let children = doc.layers[0].children().unwrap();
+        let Element::Text(back) = &*children[0] else { panic!("expected Text") };
+        assert_eq!(back.tspans.len(), 1, "{:?}", back.tspans);
+        let got = Tspan { id: t.id, ..back.tspans[0].clone() };
+        assert_eq!(got, t, "written: {}", tspan_svg(&t));
+        // Through the DOCUMENT writer Save uses, and back again.
+        let again = svg_to_document(&document_to_svg(&doc));
+        let Element::Text(saved) = &*again.layers[0].children().unwrap()[0] else { panic!("expected Text") };
+        assert_eq!(Tspan { id: t.id, ..saved.tspans[0].clone() }, t, "saved: {}", document_to_svg(&doc));
+        // And ONE field alone on a text's only tspan, which the writer could
+        // otherwise take for an override-free flat text: each survives.
+        let alone: [(&str, Tspan); 3] = [
+            ("baseline shift", Tspan { content: "W".into(), baseline_shift: Some(-2.0), ..Tspan::default_tspan() }),
+            ("all caps", Tspan { content: "W".into(), text_transform: Some("uppercase".into()), ..Tspan::default_tspan() }),
+            ("language", Tspan { content: "W".into(), xml_lang: Some("de".into()), ..Tspan::default_tspan() }),
+        ];
+        for (name, one) in alone {
+            let d = svg_to_document(&tspan_svg_doc(&tspan_svg(&one)));
+            let d2 = svg_to_document(&document_to_svg(&d));
+            let Element::Text(x) = &*d2.layers[0].children().unwrap()[0] else { panic!("expected Text") };
+            assert_eq!(Tspan { id: one.id, ..x.tspans[0].clone() }, one, "{name} alone");
+        }
     }
 
     #[test]

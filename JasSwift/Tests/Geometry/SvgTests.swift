@@ -1870,3 +1870,62 @@ private func spelledMultiplier(_ v: Double) -> String {
     #expect(opened.layers.first?.children.count == 1,
             "and the repair must not disturb the artwork")
 }
+
+// MARK: - Every tspan field survives a save and reopen
+
+/// SVG is the save format (and the clipboard's): a range's baseline shift,
+/// case, small caps, tracking, leading, language and the rest were written by
+/// nothing and read by nothing, so they vanished on Save. Every field is given
+/// a value here and the tspan must reopen equal. Twin of Rust's
+/// `every_tspan_field_survives_a_save_and_reopen`; the cross-port spelling is
+/// the `text_tspan_character_attrs` cell of `cross_language_commutativity.py`.
+@Test func everyTspanFieldSurvivesASaveAndReopen() {
+    let t = Tspan(
+        id: 0, content: "Word",
+        baselineShift: 3.5, dx: 0.25,
+        fontFamily: "Helvetica", fontSize: 12,
+        fontStyle: "italic", fontVariant: "small-caps",
+        fontWeight: "bold",
+        jasAaMode: "crisp", jasFractionalWidths: false,
+        jasKerningMode: "optical", jasNoBreak: true,
+        jasRole: "paragraph",
+        jasLeftIndent: 4, jasRightIndent: 5,
+        jasHyphenate: true, jasHangingPunctuation: true,
+        jasListStyle: "bullet-disc",
+        textAlign: "center", textAlignLast: "left",
+        textIndent: 6,
+        jasSpaceBefore: 7, jasSpaceAfter: 8,
+        jasWordSpacingMin: 80, jasWordSpacingDesired: 100, jasWordSpacingMax: 133,
+        jasLetterSpacingMin: -5, jasLetterSpacingDesired: 0, jasLetterSpacingMax: 5,
+        jasGlyphScalingMin: 98, jasGlyphScalingDesired: 100, jasGlyphScalingMax: 102,
+        jasAutoLeading: 120,
+        jasSingleWordJustify: "left",
+        jasHyphenateMinWord: 6, jasHyphenateMinBefore: 2, jasHyphenateMinAfter: 3,
+        jasHyphenateLimit: 2, jasHyphenateZone: 36, jasHyphenateBias: 1,
+        jasHyphenateCapitalized: false,
+        letterSpacing: 0.1, lineHeight: 1.5,
+        rotate: 15, styleName: "Condensed Bold",
+        textDecoration: ["line-through", "underline"], textRendering: "optimizeLegibility",
+        textTransform: "uppercase", transform: Transform(a: 1.5, b: 0, c: 0, d: 0.8, e: 0, f: 0),
+        xmlLang: "fr")
+    let doc = Document(layers: [Layer(children: [
+        .text(Text(x: 0, y: 20, tspans: [t], fontFamily: "sans-serif", fontSize: 16)),
+    ])])
+    let svg = documentToSvg(doc)
+    let back = svgToDocument(svg)
+    guard case .text(let x) = back.layers[0].children[0] else {
+        Issue.record("expected Text"); return
+    }
+    #expect(x.tspans.count == 1)
+    #expect(x.tspans.first == t, "written: \(svg)")
+    // ONE field alone on a text's only tspan, which the writer could take for
+    // an override-free flat text: each survives.
+    for one in [Tspan(content: "W", baselineShift: -2), Tspan(content: "W", textTransform: "uppercase"),
+                Tspan(content: "W", xmlLang: "de")] {
+        let d = svgToDocument(documentToSvg(Document(layers: [Layer(children: [
+            .text(Text(x: 0, y: 20, tspans: [one], fontFamily: "sans-serif", fontSize: 16)),
+        ])])))
+        guard case .text(let y) = d.layers[0].children[0] else { Issue.record("expected Text"); return }
+        #expect(y.tspans.first == one, "\(one)")
+    }
+}

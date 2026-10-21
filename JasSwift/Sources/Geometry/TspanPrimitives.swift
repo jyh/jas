@@ -75,6 +75,10 @@ public func tspansToJsonClipboard(_ tspans: [Tspan]) -> String {
         if let v = t.textDecoration { obj["text_decoration"] = v }
         if let v = t.textRendering { obj["text_rendering"] = v }
         if let v = t.textTransform { obj["text_transform"] = v }
+        // A range's scale, in Rust's serde shape for `Transform`.
+        if let m = t.transform {
+            obj["transform"] = ["a": m.a, "b": m.b, "c": m.c, "d": m.d, "e": m.e, "f": m.f]
+        }
         if let v = t.xmlLang { obj["xml_lang"] = v }
         arr.append(obj)
     }
@@ -143,7 +147,10 @@ public func tspansFromJsonClipboard(_ jsonStr: String) -> [Tspan]? {
             textDecoration: obj["text_decoration"] as? [String],
             textRendering: obj["text_rendering"] as? String,
             textTransform: obj["text_transform"] as? String,
-            transform: nil,  // transform isn't part of the clipboard payload
+            transform: (obj["transform"] as? [String: Any]).flatMap { m -> Transform? in
+                let k = ["a", "b", "c", "d", "e", "f"].compactMap { (m[$0] as? NSNumber)?.doubleValue }
+                return k.count == 6 ? Transform(a: k[0], b: k[1], c: k[2], d: k[3], e: k[4], f: k[5]) : nil
+            },
             xmlLang: obj["xml_lang"] as? String)
         out.append(t)
     }
@@ -327,8 +334,10 @@ public func tspansFromSvgFragment(_ svgStr: String) -> [Tspan]? {
 
 /// Return a new Tspan derived from `t` with the supplied fields
 /// replacing the existing values. Fields default to the current
-/// value, so only the one(s) you name change.
-private func mergeFields(_ t: Tspan,
+/// value, so only the one(s) you name change. Internal, not private:
+/// the document reader (`Svg.swift` `parseTspan`) overlays a tspan's
+/// character attributes with it too.
+func mergeFields(_ t: Tspan,
                          baselineShift: Double?? = .some(nil),
                          dx: Double?? = .some(nil),
                          fontFamily: String?? = .some(nil),
@@ -376,6 +385,7 @@ private func mergeFields(_ t: Tspan,
                          textDecoration: [String]?? = .some(nil),
                          textRendering: String?? = .some(nil),
                          textTransform: String?? = .some(nil),
+                         transform: Transform?? = .some(nil),
                          xmlLang: String?? = .some(nil)) -> Tspan {
     // Each double-optional parameter has three possible states:
     //   .some(.some(v)) — explicit new value
@@ -437,7 +447,7 @@ private func mergeFields(_ t: Tspan,
         textDecoration: pick(textDecoration, t.textDecoration),
         textRendering: pick(textRendering, t.textRendering),
         textTransform: pick(textTransform, t.textTransform),
-        transform: t.transform,
+        transform: pick(transform, t.transform),
         xmlLang: pick(xmlLang, t.xmlLang))
 }
 

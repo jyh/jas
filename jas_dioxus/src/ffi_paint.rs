@@ -2307,7 +2307,7 @@ mod tests {
             }
         }
 
-        assert_eq!(total, 97, "the fixture corpus changed size");
+        assert_eq!(total, 98, "the fixture corpus changed size");
 
         // ⭐⭐ ROW DR CAPABILITY 2 (2026-09-02): THE SET IS EMPTY. Every document
         // in the SVG corpus now presents through the Windows surface — 71 of 71.
@@ -2453,6 +2453,17 @@ mod tests {
         // walk's segmented lowering carries where a measurer exists, so it
         // presents (on one line, which is the point of the fixture); that it
         // does is read, not measured here. Both pins bumped in the same edit.
+        // ⛔ 97 → 98 (jas, 2026-10-19, save keeps every tspan field):
+        // `text_tspan_character_attrs.svg`, AREA text whose middle tspan
+        // carries a baseline shift, case, small caps, tracking, leading,
+        // language and the jas: text modes, and whose last carries a bare
+        // (px) shift. It is area text on purpose: a POINT text tspan with a
+        // shift takes `tspan_needs_legacy` and would refuse, while the plan
+        // (`runs_plan_excludes`) admits a tspan's shift with no decoration.
+        // No `dx` or `transform` for the same reason (the plan refuses both);
+        // the two ports' every-field arms carry those. Expected to present;
+        // that it does is read, not measured here. Both pins bumped in the
+        // same edit.
         //
         // ⛔ EMPTY IS STILL ASSERTED AS A SET, NOT A COUNT, and the message
         // matters MORE now than when the list had entries: a later change that
@@ -2464,6 +2475,6 @@ mod tests {
             Vec::<(String, &'static str)>::new(),
             "a document left the presentable set. The Windows app drew EVERY one              of the 70 SVG fixtures as of row DR capability 2; an entry here              names the document and the capability it regressed on."
         );
-        assert_eq!(total - refusing.len(), 97, "the whole corpus presents");
+        assert_eq!(total - refusing.len(), 98, "the whole corpus presents");
     }
 }

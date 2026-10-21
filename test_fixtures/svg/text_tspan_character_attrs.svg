@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:jas="urn:jas:1" viewBox="0 0 256 64" width="256" height="64">
+  <g inkscape:groupmode="layer" inkscape:label="Layer 1">
+    <text fill="rgb(0,0,0)" stroke="none" font-family="sans-serif" font-size="16" x="0" y="12.8" style="inline-size: 240px; white-space: pre-wrap;" xml:space="preserve"><tspan jas:role="paragraph"></tspan><tspan>Plain </tspan><tspan baseline-shift="3.5pt" letter-spacing="0.1em" line-height="1.5" font-variant="small-caps" text-transform="uppercase" text-rendering="optimizeLegibility" xml:lang="fr" jas:style-name="Condensed Bold" jas:aa-mode="crisp" jas:kerning-mode="optical" jas:fractional-widths="false" jas:no-break="true">ranged</tspan><tspan baseline-shift="-3">px</tspan></text>
+  </g>
+</svg>
