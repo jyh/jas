@@ -519,11 +519,11 @@ pub unsafe extern "C" fn jas_load_svg(engine: *mut c_void, svg: *const u8, len: 
         return JAS_PAINT_BAD_SVG;
     };
     // OPENED, not merely decoded: the pages and the at-least-one-artboard
-    // invariant, as every app's open does (flask STATUS § 313).
-    let Some(doc) = crate::geometry::svg::try_open_svg_document(text) else {
+    // invariant, as every app's open does (flask STATUS § 313); and the text
+    // kept as what File > Revert returns to (`JasEngine::open_svg`).
+    if !engine.open_svg(text) {
         return JAS_PAINT_BAD_SVG;
-    };
-    engine.replace_document(doc);
+    }
     JAS_PAINT_OK
 }
 
