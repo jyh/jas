@@ -1315,6 +1315,21 @@ internal static class LayoutWire
 
     internal static string Redock(int dockId) => Op(new() { ["op"] = "redock", ["dock_id"] = dockId });
 
+    internal static string DetachPanel(int dockId, int groupIdx, int panelIdx, double x, double y) =>
+        Op(new() { ["op"] = "detach_panel", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["panel_idx"] = panelIdx, ["x"] = x, ["y"] = y });
+
+    /// <summary>The distance in DIPs a press must travel before it is a drag, not a click.</summary>
+    internal const double TearOutThreshold = 8;
+
+    /// <summary>
+    /// Whether a drag out of the dock tears its tab or group out (FP-5): it moved
+    /// past <see cref="TearOutThreshold"/> and was released INSIDE the canvas cell
+    /// (`x`, `y` relative to it, `w` by `h`). A release back over the dock, or
+    /// anywhere outside the cell, is no drop.
+    /// </summary>
+    internal static bool TearsOut(double dx, double dy, double x, double y, double w, double h) =>
+        Math.Sqrt(dx * dx + dy * dy) >= TearOutThreshold && x >= 0 && y >= 0 && x <= w && y <= h;
+
     internal static string DetachGroup(int dockId, int groupIdx, double x, double y) =>
         Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
 }

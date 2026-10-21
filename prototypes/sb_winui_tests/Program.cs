@@ -822,6 +822,23 @@ static class Program
         Eq("floating: the four ops are the engine's verbs, addressed by dock id",
             """{"op":"bring_to_front","dock_id":2}|{"op":"set_floating_position","dock_id":2,"x":12.5,"y":-3}|{"op":"redock","dock_id":2}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":300,"y":40}""",
             string.Join("|", LayoutWire.BringToFront(2), LayoutWire.SetFloatingPosition(2, 12.5, -3), LayoutWire.Redock(2), LayoutWire.DetachGroup(0, 1, 300, 40)));
+        // FP-5: a tab or a group strip dragged out of the dock and released over
+        // the canvas tears out. A press that barely moved is a click, and a release
+        // outside the canvas cell (back over the dock) is no drop.
+        Eq("tear-out: past the threshold and inside the canvas, and not otherwise",
+            "True|False|False|False|False|True",
+            string.Join("|", new[]
+            {
+                LayoutWire.TearsOut(dx: 30, dy: 0, x: 400, y: 300, w: 800, h: 600),
+                LayoutWire.TearsOut(dx: 3, dy: 4, x: 400, y: 300, w: 800, h: 600),
+                LayoutWire.TearsOut(dx: 30, dy: 0, x: 801, y: 300, w: 800, h: 600),
+                LayoutWire.TearsOut(dx: 30, dy: 0, x: -1, y: 300, w: 800, h: 600),
+                LayoutWire.TearsOut(dx: 30, dy: 0, x: 400, y: 601, w: 800, h: 600),
+                LayoutWire.TearsOut(dx: 0, dy: -9, x: 0, y: 0, w: 800, h: 600),
+            }));
+        Eq("tear-out: a tab's op is detach_panel, with no viewport (the shell draws one anchored dock, so it never snaps)",
+            """{"op":"detach_panel","dock_id":0,"group_idx":2,"panel_idx":1,"x":350.5,"y":40}""",
+            LayoutWire.DetachPanel(0, 2, 1, 350.5, 40));
         Eq("floating: a floating group's pane key never starts with `dock`", "float2g0|float13g4",
             LayoutWire.FloatKey(2, 0) + "|" + LayoutWire.FloatKey(13, 4));
         Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
