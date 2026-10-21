@@ -1,7 +1,7 @@
 {
     "item":  "pencil.draw",
     "surface":  "2379x1333",
-    "frame_hash":  "661135fbebb01b462adda2ca6ca4f3dba5bdb4d11f132c405120b242bccfcfdc",
+    "frame_hash":  "9baccb09493f1ae1cddcaabfaae6929a90f1e2bb03b6ab20d638f129abc7cec1",
     "plan_panel":  "align_panel_content",
     "plan_sha":  "b7227f4d30f7b39b",
     "tab":  "[0,0]=on:\"circle_basic.svg\"",

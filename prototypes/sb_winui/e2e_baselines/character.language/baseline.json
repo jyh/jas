@@ -1,7 +1,7 @@
 {
     "item":  "character.language",
     "surface":  "2379x1333",
-    "frame_hash":  "8d522dac7da3e3d3967f09606700dbaa47ee1526e07da86acf849b0644d7fa68",
+    "frame_hash":  "1dc90f86a167dffa10ba4641fbdc9d89a1b2606976ab56a7d7a24a127f4a53c6",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "58b18d2c6bb868c3",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

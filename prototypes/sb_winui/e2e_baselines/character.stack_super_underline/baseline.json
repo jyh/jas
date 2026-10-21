@@ -1,0 +1,10 @@
+{
+    "item":  "character.stack_super_underline",
+    "surface":  "2379x1333",
+    "frame_hash":  "ddbe3d0d320431ec1fe09ef846fd17e002b482dd8809529de3f01aa3234276cf",
+    "plan_panel":  "character_panel_content",
+    "plan_sha":  "19791c998b7d7aaf",
+    "tab":  "[0,0]=on:\"text_basic.svg\"",
+    "tab_sha":  "ccf90ce37f04f2a3",
+    "selection_count":  1
+}

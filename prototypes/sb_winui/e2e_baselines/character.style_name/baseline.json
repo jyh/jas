@@ -1,7 +1,7 @@
 {
     "item":  "character.style_name",
     "surface":  "2379x1333",
-    "frame_hash":  "e9a152b37845a0ea10096786b3a9068aa56c9c41c7d661a7635d90ddbd74f22b",
+    "frame_hash":  "59c2366f7d6721e8aadbf2ff206f513818158caac5bb310ba328764e666b9fa2",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "0da09f2f5aec4306",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

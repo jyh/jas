@@ -506,8 +506,47 @@ pub unsafe extern "C" fn jas_selection_len(e: *mut JasEngine) -> usize {
 /// frame with no tool is a document, which is what `jas_paint_document` has
 /// always drawn.
 pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter) {
+    // THE VIEW, as the web canvas applies it (`app_state.rs`:
+    // `translate(view_offset) . scale(zoom)` around `render::render`): the
+    // document and the selection draw under it, and the tool's overlay after
+    // the pop, because a tool's state is in viewport pixels already. Every tool
+    // converts the pointer through this same view, so without it a pan moved
+    // the hit mapping and not the picture (the 10-20 feel sitting, finding 1).
+    // The identity view pushes nothing, so a frame at it is byte-identical to
+    // what it was.
+    let (z, ox, oy) = engine.with_model(|m| (m.zoom_level, m.view_offset_x, m.view_offset_y));
+    let viewed = (z, ox, oy) != (1.0, 0.0, 0.0) && z > 0.0;
+    if viewed {
+        p.push_state(crate::painter::Transform { a: z, b: 0.0, c: 0.0, d: z, e: ox, f: oy });
+    }
+    // The artboards, the web canvas's layers 2 and 5 (`render::render`): each
+    // fill under the document, each 1 px border above it so no element covers
+    // the edge (the sitting, finding 11). The pasteboard behind them is the
+    // shell's, in screen space, as it is the web canvas's.
     engine.with_document(|doc| {
+        for ab in &doc.artboards {
+            let fill = match &ab.fill {
+                // A Transparent artboard shows white (`artboard_fill_css`).
+                crate::document::artboard::ArtboardFill::Transparent => Some(crate::geometry::element::Color::rgb(1.0, 1.0, 1.0)),
+                crate::document::artboard::ArtboardFill::Color(hex) => crate::geometry::element::Color::from_hex(hex),
+            };
+            if let Some(c) = fill {
+                p.fill_rect(artboard_rect(ab), &crate::painter::Brush::Solid(c), 1.0);
+            }
+        }
         crate::document::paint::emit_document(p, doc, crate::geometry::live::DEFAULT_PRECISION);
+        let border = crate::painter::StrokeStyle {
+            width: 1.0,
+            cap: crate::geometry::element::LineCap::Butt,
+            join: crate::geometry::element::LineJoin::Miter,
+            miter: 10.0,
+            dash: Vec::new(),
+        };
+        // `ARTBOARD_BORDER_COLOR`, rgb(48,48,48).
+        let ink = crate::painter::Brush::Solid(crate::geometry::element::Color::rgb(48.0 / 255.0, 48.0 / 255.0, 48.0 / 255.0));
+        for ab in &doc.artboards {
+            p.stroke_rect(artboard_rect(ab), &ink, &border, 1.0);
+        }
     });
     // The SELECTION HIGHLIGHT, between the document and the tool's overlay --
     // the web canvas's order. Drawn whether or not a tool is set (a selection
@@ -518,12 +557,19 @@ pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter
         crate::painter::selection_overlay::draw_selection_overlays(&mut ctx, doc);
         ctx.finish();
     });
+    if viewed {
+        p.pop_state();
+    }
     let mut slot = engine.tool_slot();
     if let Some((_, tool)) = slot.as_mut() {
         let mut ctx = crate::painter::overlay_ctx::OverlayCtx::new(p);
         engine.with_model(|m| tool.draw_overlay(m, &mut ctx));
         ctx.finish();
     }
+}
+
+fn artboard_rect(ab: &crate::document::artboard::Artboard) -> crate::painter::Rect {
+    crate::painter::Rect { x: ab.x, y: ab.y, w: ab.width, h: ab.height }
 }
 
 /// Build a `YamlTool` from the embedded workspace bundle -- the same path the
@@ -1019,6 +1065,92 @@ mod tests {
         assert_eq!(texts(e), vec!["AHXiZ".to_string()], "End moved it to the end");
         typed(e, KEY_ARROW_RIGHT, 'Y');
         assert_eq!(texts(e), vec!["AHXiZY".to_string()], "Right at the end stays at the end");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⭐ THE FRAME DRAWS THE VIEW. The 10-20 feel sitting, findings 1 and 11:
+    /// a Hand drag moved the pointer's hit mapping and not the picture, and
+    /// zoom and fit changed nothing he could see, because this frame drew in
+    /// document space while every tool converts the pointer through the view
+    /// (`yaml_tool::pointer_event_payload`). The web canvas's law
+    /// (`app_state.rs`, `translate(view_offset) . scale(zoom)` around
+    /// `render::render`, restored before the tool overlay): the document and
+    /// the selection draw under the view; the tool's overlay draws after the
+    /// pop, in viewport pixels, because a tool's state is already in them.
+    #[test]
+    fn a_frame_draws_the_document_and_selection_under_the_view_and_the_overlay_outside_it() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::painter::recording::{Command, RecordingPainter};
+
+        let e = jas_engine_new();
+        seed(e);
+        // The identity view pushes nothing: a frame is exactly what it was, so
+        // no baseline frozen at the identity view can move.
+        let mut identity = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut identity);
+        assert!(!identity.commands().iter().any(|c| matches!(c, Command::PushState { .. })),
+                "the seeded rect draws no state of its own, so a push here is the view's");
+
+        // The sitting's own pan, (+32, -12) DIPs, at a zoom that is not 1.
+        unsafe { &*e }.with_model_mut(|m| {
+            m.view_offset_x = 32.0;
+            m.view_offset_y = -12.0;
+            m.zoom_level = 1.5;
+        });
+        unsafe {
+            jas_set_tool(e, 0);
+            jas_pointer_event(e, KIND_PRESS, 10.0, 20.0, 0);
+            jas_pointer_event(e, KIND_MOVE, 140.0, 120.0, MOD_DRAGGING);
+        }
+        let mut framed = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut framed);
+        let cmds = framed.commands();
+        let Some(Command::PushState { transform: t }) = cmds.first() else {
+            panic!("the frame must open with the view: {:?}", cmds.first());
+        };
+        assert_eq!((t.a, t.b, t.c, t.d, t.e, t.f), (1.5, 0.0, 0.0, 1.5, 32.0, -12.0),
+                   "translate(view_offset) . scale(zoom), as the web canvas pushes it");
+        // The document between the push and its pop is the identity frame's.
+        let n = identity.commands().len();
+        assert_eq!(&cmds[1..=n], identity.commands(), "the document draws unchanged, inside the view");
+        assert!(matches!(cmds[n + 1], Command::PopState), "the view closes after the document: {:?}", cmds[n + 1]);
+        assert!(cmds.len() > n + 2, "the marquee draws after the pop, in viewport pixels");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// ⭐ THE FRAME DRAWS THE ARTBOARD. The 10-20 feel sitting, finding 11: no
+    /// artboard was drawn, so Align To: Artboard moved shapes to an edge he
+    /// could not see. The web canvas's layers (`render::render`, layers 2 and
+    /// 5): each artboard's fill BEFORE the document (a Transparent one shows
+    /// white, `artboard_fill_css`), its 1 px rgb(48,48,48) border AFTER it, so
+    /// no element covers the edge; both under the view.
+    #[test]
+    fn a_frame_fills_the_artboard_under_the_document_and_borders_it_above() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::geometry::element::Color;
+        use crate::painter::recording::{Command, RecordingPainter};
+        use crate::painter::{Brush, Rect};
+
+        let e = jas_engine_new();
+        seed(e);
+        let ab = unsafe { &*e }.with_model(|m| m.document().artboards.clone());
+        assert_eq!(ab.len(), 1, "the seeded document carries the invariant's one artboard");
+        let r = Rect { x: ab[0].x, y: ab[0].y, w: ab[0].width, h: ab[0].height };
+        assert_eq!((r.w, r.h), (612.0, 792.0), "the default artboard, which no rect of the seed fills");
+        let mut p = RecordingPainter::new();
+        emit_frame(unsafe { &*e }, &mut p);
+        let cmds = p.commands();
+        let fill = cmds.iter().position(|c| matches!(c,
+            Command::FillRect { rect, brush: Brush::Solid(col), .. } if *rect == r && *col == Color::rgb(1.0, 1.0, 1.0)));
+        let rect = cmds.iter().position(|c| matches!(c,
+            Command::FillRect { rect, .. } if (rect.x, rect.y, rect.w, rect.h) == (20.0, 30.0, 100.0, 80.0)));
+        let border = cmds.iter().position(|c| matches!(c,
+            Command::StrokeRect { rect, brush: Brush::Solid(col), stroke, .. }
+                if *rect == r && *col == Color::from_hex("303030").unwrap() && stroke.width == 1.0));
+        let (Some(fill), Some(rect), Some(border)) = (fill, rect, border) else {
+            panic!("the artboard fill {fill:?}, the seeded rect {rect:?} and the artboard border {border:?} must all draw: {cmds:?}");
+        };
+        assert!(fill < rect && rect < border, "fill {fill} < document {rect} < border {border}");
         unsafe { jas_engine_free(e) };
     }
 
