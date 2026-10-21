@@ -411,8 +411,65 @@ public sealed partial class MainWindow : Window
             };
             FloatLayer.Children.Add(frame);
             _floatFrames[f.DockId] = frame;
+            WireFloatGestures(f.DockId, frame, title);
         }
         PlaceFloating(floating, "draw");
+    }
+
+    /// <summary>The title drag in progress: the dock, and the press's offset inside its frame.</summary>
+    private (int DockId, double Dx, double Dy, double X0, double Y0)? _floatDrag;
+
+    /// <summary>
+    /// A floating dock's gestures (FP-4b), as the web's `FloatingDocksView` has
+    /// them: a press on the dock raises it (`bring_to_front`); a press on the
+    /// TITLE starts a drag instead (the web's title handler stops propagation,
+    /// so it does not raise); the frame follows the pointer and the release sends
+    /// ONE `set_floating_position`; a title double-tap redocks (`redock`). Every
+    /// change is the engine's, drawn from its answer.
+    /// </summary>
+    private void WireFloatGestures(int dockId, Border frame, Border title)
+    {
+        var group = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"float{dockId}");
+        frame.PointerPressed += (_, e) =>
+        {
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.BringToFront(dockId), Group = group, Via = "hand" });
+        };
+        title.PointerPressed += (_, e) =>
+        {
+            e.Handled = true;
+            var at = e.GetCurrentPoint(FloatLayer).Position;
+            var x0 = Microsoft.UI.Xaml.Controls.Canvas.GetLeft(frame);
+            var y0 = Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame);
+            _floatDrag = (dockId, at.X - x0, at.Y - y0, x0, y0);
+            title.CapturePointer(e.Pointer);
+        };
+        title.PointerMoved += (_, e) =>
+        {
+            if (_floatDrag is not { } d || d.DockId != dockId) { return; }
+            var at = e.GetCurrentPoint(FloatLayer).Position;
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(frame, at.X - d.Dx);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, at.Y - d.Dy);
+        };
+        title.PointerReleased += (_, e) =>
+        {
+            if (_floatDrag is not { } d || d.DockId != dockId) { return; }
+            _floatDrag = null;
+            title.ReleasePointerCapture(e.Pointer);
+            var x = Microsoft.UI.Xaml.Controls.Canvas.GetLeft(frame);
+            var y = Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame);
+            // A press released where it began (half of a double-tap) moved nothing.
+            if (x == d.X0 && y == d.Y0) { return; }
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"FLOAT DOCK DRAG id={dockId} x={x} y={y} via=hand"));
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.SetFloatingPosition(dockId, x, y), Group = group, Via = "hand" });
+        };
+        title.PointerCaptureLost += (_, _) => _floatDrag = null;
+        title.DoubleTapped += (_, e) =>
+        {
+            e.Handled = true;
+            _floatDrag = null;
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.Redock(dockId), Group = group, Via = "hand" });
+        };
     }
 
     /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
