@@ -260,8 +260,20 @@ internal sealed class DockOpenCmd : Cmd
     internal long AvailW;
 }
 
-/// <summary>A dock layout as the core answered it, with the panel list its tabs are labelled from.</summary>
-internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson);
+/// <summary>A dock layout as the core answered it (`jas_layout_state`'s JSON), with the panel list its tabs are labelled from.</summary>
+internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson, string Cause = "open");
+
+/// <summary>
+/// One `layout_apply` verb for the engine's dock layout (FP-3): the chevron's
+/// `toggle_group_collapsed`. `Group` is the dock group's key, so the answer is
+/// drawn on the group the person touched; `Via` is `hand` or `synth`.
+/// </summary>
+internal sealed class LayoutOpCmd : Cmd
+{
+    internal string Op = "";
+    internal string Group = "";
+    internal string Via = "hand";
+}
 
 internal sealed class PaneOpenCmd : Cmd
 {
@@ -1071,20 +1083,7 @@ internal sealed unsafe class Canvas : IDisposable
     private bool ApplyKey(KeyCmd k)
     {
         if (_engine == IntPtr.Zero) { return false; }
-        var name = k.Code switch
-        {
-            JasCore.KeyEscape => "Escape",
-            JasCore.KeyEnter => "Enter",
-            JasCore.KeyDelete => "Delete",
-            JasCore.KeyBackspace => "Backspace",
-            JasCore.KeyArrowUp => "ArrowUp",
-            JasCore.KeyArrowDown => "ArrowDown",
-            JasCore.KeyArrowLeft => "ArrowLeft",
-            JasCore.KeyArrowRight => "ArrowRight",
-            JasCore.KeyHome => "Home",
-            JasCore.KeyEnd => "End",
-            _ => KeyWire.CharName(k.Code),
-        };
+        var name = KeyWire.Name(k.Code);
         if (name is null)
         {
             _report($"RUSTFAIL KEY UNNAMED code=0x{k.Code:X} -- no key name to send {Tids()}");
@@ -1732,6 +1731,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case DockOpenCmd dk:
                     ApplyDockOpen(dk);
+                    break;
+
+                case LayoutOpCmd lo:
+                    ApplyLayoutOp(lo);
                     break;
 
                 case PanelClickCmd pc:
@@ -4776,49 +4779,86 @@ internal sealed unsafe class Canvas : IDisposable
             _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- no engine {Tids()}");
             return;
         }
+        // FP-3: the ENGINE holds the dock layout (`jas_layout_load`, seeded from
+        // the same `default_layouts.yaml` dock `jas_dock_layout` answers), so a
+        // chevron or a tab changes it there and the shell draws what it answers.
         var name = System.Text.Encoding.UTF8.GetBytes(open.Name);
-        var layout = JasCore.TakeString(JasCore.jas_dock_layout(name, (nuint)name.Length));
+        var layout = JasCore.TakeString(JasCore.jas_layout_load(_engine, name, (nuint)name.Length));
         if (layout.Length == 0)
         {
-            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- jas_dock_layout returned the empty span {Tids()}");
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- jas_layout_load returned the empty span channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
             return;
         }
         if (PanelList is null) { PanelList = JasCore.TakeString(JasCore.jas_panel_list()); }
-        var groups = new List<(string Active, int Count)>();
-        var tabsRead = new List<List<string>>();
-        try
+        _dockName = open.Name;
+        _dockAvailW = open.AvailW;
+        PublishLayout(layout, "open");
+    }
+
+    private string _dockName = "";
+    private long _dockAvailW;
+    /// <summary>Every group's pane key and panels, anchored then floating, as last published.</summary>
+    private List<(string Key, List<string> Panels)> _layoutGroups = new();
+
+    /// <summary>
+    /// Publish a layout the engine answered (FP-3 / FP-4a): the anchored groups
+    /// as `dock{i}`, each floating group as `float{id}g{i}`, the snapshot the UI
+    /// builds its frames from FIRST, then one pane per group on its active panel.
+    /// A key no longer in the layout has its pane closed. `cause` is `open` for a
+    /// load and `op` for a verb that changed the dock's structure.
+    /// </summary>
+    private void PublishLayout(string layout, string cause)
+    {
+        // The core refuses an empty group or an out-of-range `active`, so a reply
+        // the strict reader refuses is a broken reply, refused by name.
+        var read = LayoutWire.Dock(layout);
+        var floating = LayoutWire.Floating(layout);
+        if (read is null || floating is null)
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(layout);
-            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
-            {
-                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
-                // The core refuses an empty group or an out-of-range `active`
-                // (`dock_layout`), so one here is a broken reply, refused by name.
-                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
-                if (ids.Count == 0 || active < 0 || active >= ids.Count)
-                {
-                    _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} -- a group with {ids.Count} panel(s) "
-                          + $"and active={active} {Tids()}");
-                    return;
-                }
-                groups.Add((ids[active], ids.Count));
-                tabsRead.Add(ids);
-            }
-        }
-        catch (Exception ex)
-        {
-            _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} {ex.GetType().Name} {Tids()}");
+            _report($"RUSTFAIL DOCK UNREADABLE name={_dockName} cause={cause} -- the engine's layout {Tids()}");
             return;
+        }
+        var keyed = new List<(string Key, List<string> Panels, string Active)>();
+        for (var i = 0; i < read.Groups.Count; i++)
+        {
+            var g = read.Groups[i];
+            keyed.Add((DockPaneKey(i), g.Panels.ToList(), g.Panels[g.Active]));
+        }
+        foreach (var f in floating)
+        {
+            for (var i = 0; i < f.Groups.Count; i++)
+            {
+                var g = f.Groups[i];
+                keyed.Add((LayoutWire.FloatKey(f.DockId, i), g.Panels.ToList(), g.Panels[g.Active]));
+            }
         }
         // Published FIRST, so the UI has built every group's frame before any
         // group's plan arrives (one thread, one dispatcher queue: in order).
-        _dockTabs = tabsRead;
-        Dock = new DockSnapshot(open.Name, layout, PanelList);
+        _dockTabs = read.Groups.Select(g => g.Panels.ToList()).ToList();
+        _layoutGroups = keyed.Select(k => (k.Key, k.Panels)).ToList();
+        Dock = new DockSnapshot(_dockName, layout, PanelList ?? "", cause);
         PostToUi(() => DockChanged?.Invoke());
-        _report($"DOCK OPEN name={open.Name} groups={groups.Count} panels={groups.Sum(g => g.Count)} {Tids()}");
-        for (var i = 0; i < groups.Count; i++)
+        var live = keyed.Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
+        foreach (var stale in _panes.Keys.Where(k => (k.StartsWith("dock", StringComparison.Ordinal)
+                                                      || k.StartsWith("float", StringComparison.Ordinal)) && !live.Contains(k)).ToList())
         {
-            ApplyPaneOpen(new PaneOpenCmd { Key = DockPaneKey(i), PanelId = groups[i].Active, AvailW = open.AvailW });
+            _panes.Remove(stale);
+            Panes.TryRemove(stale, out _);
+            _report($"PANE CLOSED key={stale} cause={cause} {Tids()}");
+        }
+        if (cause == "open")
+        {
+            _report($"DOCK OPEN name={_dockName} groups={read.Groups.Count} panels={read.Groups.Sum(g => g.Panels.Count)} {Tids()}");
+        }
+        else
+        {
+            _report($"DOCK LAYOUT name={_dockName} groups={read.Groups.Count} floating={floating.Count} "
+                  + $"floating-groups={floating.Sum(f => f.Groups.Count)} cause={cause} {Tids()}");
+        }
+        foreach (var (key, _, active) in keyed)
+        {
+            ApplyPaneOpen(new PaneOpenCmd { Key = key, PanelId = active, AvailW = _dockAvailW });
         }
     }
 
@@ -4847,6 +4887,49 @@ internal sealed unsafe class Canvas : IDisposable
     internal void MenuAction(MenuActionCmd cmd) => _queue.Add(cmd);
 
     internal void PanelMenu(PanelMenuCmd cmd) => _queue.Add(cmd);
+
+    internal void LayoutOp(LayoutOpCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>Raised on the UI thread with a verb's group key, via and the
+    /// layout the engine answered (`jas_layout_state`'s JSON).</summary>
+    internal Action<string, string, string>? LayoutChanged { get; set; }
+
+    /// <summary>
+    /// A layout verb, run in the engine (FP-3). Every outcome is a row: a refusal
+    /// is `RUSTFAIL DOCK OP REFUSED` with the channel, never a silent no-op; an
+    /// answer is posted to the UI to draw.
+    /// </summary>
+    private void ApplyLayoutOp(LayoutOpCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var op = System.Text.Encoding.UTF8.GetBytes(cmd.Op);
+        var answer = JasCore.TakeString(JasCore.jas_layout_apply(_engine, op, (nuint)op.Length));
+        if (answer.Length == 0)
+        {
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL DOCK OP REFUSED group={cmd.Group} via={cmd.Via} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+            return;
+        }
+        // A verb that changed WHICH panels sit in WHICH group (a detach, a
+        // redock) re-indexes `dock{i}`, so the dock is republished whole; a
+        // collapse, a move or a raise keeps every key and is drawn in place.
+        var before = _layoutGroups;
+        var read = LayoutWire.Dock(answer);
+        var floating = LayoutWire.Floating(answer);
+        var after = read is null || floating is null ? null
+            : read.Groups.Select((g, i) => (Key: DockPaneKey(i), Panels: g.Panels.ToList()))
+                .Concat(floating.SelectMany(f => f.Groups.Select((g, i) => (Key: LayoutWire.FloatKey(f.DockId, i), Panels: g.Panels.ToList()))))
+                .ToList();
+        var same = after is not null && after.Count == before.Count
+            && after.Zip(before).All(p => p.First.Key == p.Second.Key && p.First.Panels.SequenceEqual(p.Second.Panels));
+        if (!same)
+        {
+            PublishLayout(answer, "op");
+            return;
+        }
+        var g = cmd.Group; var v = cmd.Via;
+        PostToUi(() => LayoutChanged?.Invoke(g, v, answer));
+    }
 
     /// <summary>Raised on the UI thread with a READ's group, panel, via and rows
     /// (`jas_panel_menu`'s JSON), for the window to draw the flyout.</summary>

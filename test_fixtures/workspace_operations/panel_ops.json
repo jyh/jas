@@ -223,5 +223,54 @@
    }
   ],
   "expected_json": "panel_clamp_floating.json"
+ },
+ {
+  "name": "detach_group_near_the_left_edge_snaps",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 5.0,
+    "y": 200.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_group_snap_left.json"
+ },
+ {
+  "name": "detach_panel_near_the_bottom_edge_snaps",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_panel",
+    "dock_id": 0,
+    "group_idx": 0,
+    "panel_idx": 1,
+    "x": 600.0,
+    "y": 790.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_panel_snap_bottom.json"
+ },
+ {
+  "name": "detach_group_away_from_every_edge_floats",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 500.0,
+    "y": 300.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_group_viewport_floats.json"
  }
 ]

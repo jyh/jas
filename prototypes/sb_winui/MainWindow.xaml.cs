@@ -251,7 +251,7 @@ public sealed partial class MainWindow : Window
 
     // =======================================================================
     // THE DOCK (2026-10-10): `default_layouts.yaml`'s tab groups, under SB_DOCK.
-    // The core answers the groups (`jas_dock_layout`); each group is a
+    // The engine holds the layout (`jas_layout_load`, FP-3); each group is a
     // PaneView with a tab strip, and a tab re-opens that group's pane on the
     // chosen panel. Nothing here names a panel: the ids and the tab labels are
     // the core's (`jas_panel_list` summaries, the id where it sends none).
@@ -259,11 +259,14 @@ public sealed partial class MainWindow : Window
 
     private bool _dockWanted;
     private bool _dockCollapseDone;
+    private bool _dockFloatDone;
     private bool _panelMenuSynthDone;
     /// <summary>The group whose SB_PANEL_MENU_SYNTH run waits on its menu read.</summary>
     private (string Group, int Index)? _panelMenuSynth;
     private string _dockName = "";
     private StackPanel? _dockStack;
+    /// <summary>The engine's id for the anchored dock the groups belong to (FP-3).</summary>
+    private int _dockId;
 
     private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron, Button Menu);
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
@@ -326,9 +329,10 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// A group's collapse chevron (the owner's note 3, 2026-10-11): collapsed hides
     /// the group's body and keeps its header, as the dock model's
-    /// `panel_group.collapsed` does on the Mac. The state is the dock model's, the
-    /// shell's own, never the core's. The row READS the body's visibility after
-    /// the toggle, so a chevron that hides nothing says so (Q6.DC).
+    /// `panel_group.collapsed` does on the Mac. Since FP-3 the state is the
+    /// ENGINE's: the chevron sends `toggle_group_collapsed` and this draws what the
+    /// engine answered (<see cref="OnLayoutChanged"/>). The row READS the body's
+    /// visibility after drawing, so a chevron that hides nothing says so (Q6.DC).
     /// </summary>
     private void SetDockCollapsed(string key, bool collapsed, string via)
     {
@@ -337,6 +341,151 @@ public sealed partial class MainWindow : Window
         g.Chevron.Content = collapsed ? "▸" : "▾";
         var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
         Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
+    }
+
+    /// <summary>Send a group's collapse toggle to the engine; the answer is drawn by <see cref="OnLayoutChanged"/>.</summary>
+    private void ToggleDockGroup(string key, string via)
+    {
+        if (_canvas is null || !_dockGroups.ContainsKey(key) || !key.StartsWith("dock", StringComparison.Ordinal)
+            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
+                             System.Globalization.CultureInfo.InvariantCulture, out var idx)) { return; }
+        _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.ToggleCollapsed(_dockId, idx), Group = key, Via = via });
+    }
+
+    /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
+    private void OnLayoutChanged(string key, string via, string stateJson)
+    {
+        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via); }
+        if (!key.StartsWith("dock", StringComparison.Ordinal)) { return; }
+        var read = LayoutWire.Dock(stateJson);
+        if (read is null || !key.StartsWith("dock", StringComparison.Ordinal)
+            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
+                             System.Globalization.CultureInfo.InvariantCulture, out var idx)
+            || idx >= read.Groups.Count)
+        {
+            Report($"RUSTFAIL DOCK OP UNREADABLE group={key} via={via} -- the engine's answer");
+            return;
+        }
+        SetDockCollapsed(key, read.Groups[idx].Collapsed, via);
+    }
+
+    /// <summary>Each floating dock's frame on <c>FloatLayer</c>, by the engine's dock id.</summary>
+    private readonly Dictionary<int, Border> _floatFrames = new();
+
+    /// <summary>
+    /// Draw the floating docks (FP-4a): one frame per dock on the overlay, its
+    /// groups built as the anchored ones are, at the engine's (x, y) and `z`.
+    /// </summary>
+    private void DrawFloating(string stateJson, Action<string, LayoutWire.Group, Panel> buildGroup)
+    {
+        FloatLayer.Children.Clear();
+        _floatFrames.Clear();
+        var floating = LayoutWire.Floating(stateJson);
+        if (floating is null)
+        {
+            Report("RUSTFAIL FLOAT DOCK DRAW refused -- the engine's floating docks are unreadable");
+            return;
+        }
+        foreach (var f in floating)
+        {
+            var stack = new StackPanel();
+            var title = new Border
+            {
+                Height = 14,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xB4, 0xB4, 0xB4)),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(title, string.Create(
+                System.Globalization.CultureInfo.InvariantCulture, $"float{f.DockId}_title"));
+            stack.Children.Add(title);
+            for (var gi = 0; gi < f.Groups.Count; gi++) { buildGroup(LayoutWire.FloatKey(f.DockId, gi), f.Groups[gi], stack); }
+            var frame = new Border
+            {
+                Width = f.Width,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3)),
+                BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x80, 0x80, 0x80)),
+                BorderThickness = new Thickness(1),
+                Child = stack,
+            };
+            FloatLayer.Children.Add(frame);
+            _floatFrames[f.DockId] = frame;
+            WireFloatGestures(f.DockId, frame, title);
+        }
+        PlaceFloating(floating, "draw");
+    }
+
+    /// <summary>The title drag in progress: the dock, and the press's offset inside its frame.</summary>
+    private (int DockId, double Dx, double Dy, double X0, double Y0)? _floatDrag;
+
+    /// <summary>
+    /// A floating dock's gestures (FP-4b), as the web's `FloatingDocksView` has
+    /// them: a press on the dock raises it (`bring_to_front`); a press on the
+    /// TITLE starts a drag instead (the web's title handler stops propagation,
+    /// so it does not raise); the frame follows the pointer and the release sends
+    /// ONE `set_floating_position`; a title double-tap redocks (`redock`). Every
+    /// change is the engine's, drawn from its answer.
+    /// </summary>
+    private void WireFloatGestures(int dockId, Border frame, Border title)
+    {
+        var group = string.Create(System.Globalization.CultureInfo.InvariantCulture, $"float{dockId}");
+        frame.PointerPressed += (_, e) =>
+        {
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.BringToFront(dockId), Group = group, Via = "hand" });
+        };
+        title.PointerPressed += (_, e) =>
+        {
+            e.Handled = true;
+            var at = e.GetCurrentPoint(FloatLayer).Position;
+            var x0 = Microsoft.UI.Xaml.Controls.Canvas.GetLeft(frame);
+            var y0 = Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame);
+            _floatDrag = (dockId, at.X - x0, at.Y - y0, x0, y0);
+            title.CapturePointer(e.Pointer);
+        };
+        title.PointerMoved += (_, e) =>
+        {
+            if (_floatDrag is not { } d || d.DockId != dockId) { return; }
+            var at = e.GetCurrentPoint(FloatLayer).Position;
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(frame, at.X - d.Dx);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, at.Y - d.Dy);
+        };
+        title.PointerReleased += (_, e) =>
+        {
+            if (_floatDrag is not { } d || d.DockId != dockId) { return; }
+            _floatDrag = null;
+            title.ReleasePointerCapture(e.Pointer);
+            var x = Microsoft.UI.Xaml.Controls.Canvas.GetLeft(frame);
+            var y = Microsoft.UI.Xaml.Controls.Canvas.GetTop(frame);
+            // A press released where it began (half of a double-tap) moved nothing.
+            if (x == d.X0 && y == d.Y0) { return; }
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"FLOAT DOCK DRAG id={dockId} x={x} y={y} via=hand"));
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.SetFloatingPosition(dockId, x, y), Group = group, Via = "hand" });
+        };
+        title.PointerCaptureLost += (_, _) => _floatDrag = null;
+        title.DoubleTapped += (_, e) =>
+        {
+            e.Handled = true;
+            _floatDrag = null;
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = LayoutWire.Redock(dockId), Group = group, Via = "hand" });
+        };
+    }
+
+    /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
+    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
+    {
+        var placed = new List<string>();
+        foreach (var f in floating)
+        {
+            if (!_floatFrames.TryGetValue(f.DockId, out var frame)) { continue; }
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(frame, f.X);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, f.Y);
+            Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(frame, f.Z);
+            placed.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{f.DockId}@{f.X},{f.Y}z{f.Z}"));
+        }
+        Report($"FLOAT DOCK PLACED docks={floating.Count} groups={floating.Sum(f => f.Groups.Count)} "
+             + $"at=[{string.Join(";", placed)}] via={via}");
     }
 
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
@@ -357,15 +506,19 @@ public sealed partial class MainWindow : Window
                     labels[id] = sum.ValueKind == System.Text.Json.JsonValueKind.String ? sum.GetString() ?? id : id;
                 }
             }
-            using var doc = System.Text.Json.JsonDocument.Parse(snap.LayoutJson);
+            var read = LayoutWire.Dock(snap.LayoutJson);
+            if (read is null)
+            {
+                Report($"RUSTFAIL DOCK DRAW refused -- the layout for {snap.Name} is unreadable");
+                return;
+            }
+            _dockId = read.DockId;
             _dockStack.Children.Clear();
             _dockGroups.Clear();
-            var i = 0;
-            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
+            // One builder for a group's frame, anchored or floating (FP-4a).
+            void BuildGroup(string key, LayoutWire.Group g, Panel host)
             {
-                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
-                if (ids.Count == 0) { continue; }
-                var key = SbWinUi.Canvas.DockPaneKey(i++);
+                var ids = g.Panels.ToList();
                 var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 4, 4, 0) };
                 var tabList = new List<(string, Button)>();
                 foreach (var id in ids)
@@ -400,7 +553,7 @@ public sealed partial class MainWindow : Window
                 };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
                 ToolTipService.SetToolTip(chevron, "Collapse/Expand");
-                chevron.Click += (_, _) => SetDockCollapsed(groupKey, scroll.Visibility == Visibility.Visible, "hand");
+                chevron.Click += (_, _) => ToggleDockGroup(groupKey, "hand");
                 tabs.Children.Add(chevron);
                 // The panel menu (the owner's note 3, 2026-10-12): the core's rows
                 // for the group's CURRENT panel, read when it is opened.
@@ -426,21 +579,48 @@ public sealed partial class MainWindow : Window
                     BorderThickness = new Thickness(0, 0, 0, 1),
                     Child = body,
                 };
-                _dockStack.Children.Add(frame);
-                // In range by construction: the render thread refused the dock otherwise.
-                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
-                if (active < 0 || active >= ids.Count)
-                {
-                    Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
-                    continue;
-                }
+                host.Children.Add(frame);
+                // In range by construction: `LayoutWire.Dock` refuses an `active` outside its group.
+                var active = g.Active;
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
+                // The engine's collapse, drawn silently at build (the YAML seeds every group open).
+                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; }
+                // A floating group's collapse is addressed by its own dock id,
+                // which FP-4a does not send; its chevron is hidden, not inert.
+                if (!key.StartsWith("dock", StringComparison.Ordinal)) { chevron.Visibility = Visibility.Collapsed; }
             }
-            Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
-                 + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
+            var i = 0;
+            foreach (var g in read.Groups) { BuildGroup(SbWinUi.Canvas.DockPaneKey(i++), g, _dockStack); }
+            // DOCK DRAWN counts the ANCHORED groups only: Q6.D compares it with the
+            // `dock{i}` panes, and a floating group is not one.
+            var docked = _dockGroups.Where(d => d.Key.StartsWith("dock", StringComparison.Ordinal)).ToList();
+            // A republish after a verb (FP-4a) is REDRAWN, so Q6.D's DOCK DRAWN stays the load's.
+            Report($"{(snap.Cause == "open" ? "DOCK DRAWN" : "DOCK REDRAWN")} name={snap.Name} groups={docked.Count} "
+                 + $"tabs={docked.Sum(d => d.Value.Tabs.Count)}");
+            DrawFloating(snap.LayoutJson, BuildGroup);
             // SB_DOCK_COLLAPSE=<group key>: the chevron replayed through its own
             // method, collapse then expand (Q6.DC). An unknown key is refused by name.
+            // SB_DOCK_FLOAT=<dock key>:<x>,<y> (FP-4a): that anchored group detached to
+            // a floating dock at (x, y), through the engine's `detach_group`, once.
+            var floatKnob = Environment.GetEnvironmentVariable("SB_DOCK_FLOAT");
+            if (!_dockFloatDone && !string.IsNullOrWhiteSpace(floatKnob))
+            {
+                _dockFloatDone = true;
+                var parts = floatKnob.Trim().Split(':', ',');
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                if (parts.Length == 3 && _dockGroups.ContainsKey(parts[0]) && parts[0].StartsWith("dock", StringComparison.Ordinal)
+                    && int.TryParse(parts[0].AsSpan(4), System.Globalization.NumberStyles.None, inv, out var fi)
+                    && double.TryParse(parts[1], System.Globalization.NumberStyles.Float, inv, out var fx)
+                    && double.TryParse(parts[2], System.Globalization.NumberStyles.Float, inv, out var fy))
+                {
+                    _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.DetachGroup(_dockId, fi, fx, fy), Group = parts[0], Via = "synth" });
+                }
+                else
+                {
+                    Report($"RUSTFAIL DOCK FLOAT REFUSED value={floatKnob.Trim()} -- want <dock key>:<x>,<y> with a key of the {docked.Count} anchored group(s)");
+                }
+            }
             var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");
             if (!_dockCollapseDone && !string.IsNullOrWhiteSpace(collapseKnob))
             {
@@ -448,8 +628,9 @@ public sealed partial class MainWindow : Window
                 var ck = collapseKnob.Trim();
                 if (_dockGroups.ContainsKey(ck))
                 {
-                    SetDockCollapsed(ck, true, "synth");
-                    SetDockCollapsed(ck, false, "synth");
+                    // Through the engine, as the chevron goes: toggle, then toggle back.
+                    ToggleDockGroup(ck, "synth");
+                    ToggleDockGroup(ck, "synth");
                 }
                 else
                 {
@@ -576,7 +757,7 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL {(key == SbWinUi.Canvas.ToolbarPaneKey ? "TOOLBAR" : $"PANE key={key}")} DRAW threw "
                  + $"{ex.GetType().Name}: {ex.Message}");
         }
-        if (key.StartsWith("dock", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
+        if (key.StartsWith("dock", StringComparison.Ordinal) || key.StartsWith("float", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
     }
 
     /// <summary>
@@ -630,6 +811,7 @@ public sealed partial class MainWindow : Window
         _canvas.PaneChanged = OnPaneChanged;
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
+        _canvas.LayoutChanged = OnLayoutChanged;
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);
@@ -1164,8 +1346,11 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.Enter => JasCore.KeyEnter,
             Windows.System.VirtualKey.Delete => JasCore.KeyDelete,
             Windows.System.VirtualKey.Back => JasCore.KeyBackspace,
-            // The caret keys (the Type tool's #596 gaps). Tab is NOT sent: it is
-            // WinUI's focus key, and taking it is a behaviour for the box to judge.
+            // The caret keys (the Type tool's #596 gaps). Tab is WinUI's focus
+            // key, so it is the engine's only from the canvas's own focus
+            // (`KeyWire.TakesTab`), and then it is kept from the traversal.
+            Windows.System.VirtualKey.Tab when KeyWire.TakesTab(ReferenceEquals(e.OriginalSource, CanvasFocus))
+                => JasCore.KeyTab,
             Windows.System.VirtualKey.Up => JasCore.KeyArrowUp,
             Windows.System.VirtualKey.Down => JasCore.KeyArrowDown,
             Windows.System.VirtualKey.Left => JasCore.KeyArrowLeft,
@@ -1174,6 +1359,8 @@ public sealed partial class MainWindow : Window
             Windows.System.VirtualKey.End => JasCore.KeyEnd,
             _ => 0,
         };
+        // A Tab left unhandled moves focus off the canvas, out of a text session.
+        if (code == JasCore.KeyTab) { e.Handled = true; }
         var mods = KeyMods();
         // W5-3d, his "Ctrl-Z is not working": a COMMAND chord's character never
         // reaches `OnCharacterReceived` as a letter (Ctrl+Z arrives there as the
