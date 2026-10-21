@@ -46,11 +46,26 @@ pub(crate) const KEY_BACKSPACE: u32 = 0x08;
 pub(crate) const KEY_ENTER: u32 = 0x0D;
 pub(crate) const KEY_ESCAPE: u32 = 0x1B;
 pub(crate) const KEY_DELETE: u32 = 0x7F;
+// The caret keys, as the AppKit function-key code points (NSUpArrowFunctionKey
+// and its neighbours, Unicode private use), so no printable character collides.
+pub(crate) const KEY_ARROW_UP: u32 = 0xF700;
+pub(crate) const KEY_ARROW_DOWN: u32 = 0xF701;
+pub(crate) const KEY_ARROW_LEFT: u32 = 0xF702;
+pub(crate) const KEY_ARROW_RIGHT: u32 = 0xF703;
+pub(crate) const KEY_HOME: u32 = 0xF729;
+pub(crate) const KEY_END: u32 = 0xF72B;
+pub(crate) const KEY_TAB: u32 = 0x09;
 
 /// `select_tool` targets in `workspace/shortcuts.yaml` the shell CANNOT select,
-/// by declaration: `type` is the native Type tool, which `TOOL_IDS` does not
-/// carry (it needs text input, W4 class G). A key bound to one is not handled.
-pub(crate) const KEY_NOT_SELECTABLE: &[&str] = &["type"];
+/// by declaration. A key bound to one is not handled. Empty since 2026-10-20:
+/// `type`, the native Type tool, is in `TOOL_IDS` and takes the keys typed
+/// (the 10-20 feel sitting, finding 3), so its `T` selects it.
+pub(crate) const KEY_NOT_SELECTABLE: &[&str] = &[];
+
+/// Tools in `TOOL_IDS` that are NATIVE, not workspace YAML tools, so the
+/// workspace's tool table does not list them: built by name in `build_tool`.
+#[cfg(test)]
+const NATIVE_TOOL_IDS: &[&str] = &["type"];
 
 /// The tools the shell may select, by index. Order is ABI.
 ///
@@ -93,6 +108,11 @@ pub const TOOL_IDS: &[&str] = &[
     "shear",
     "smooth",
     "star",
+    // 2026-10-20 (the 10-20 feel sitting, finding 3): the Type tool, APPENDED
+    // so every index above keeps its meaning. It is native, not a workspace
+    // YAML tool, so `build_tool` builds it by name. Type on a Path is not
+    // here yet: it needs a path to place on, and is its own node.
+    "type",
 ];
 
 /// How many tools the shell may select. Pairs with [`jas_tool_name`].
@@ -366,6 +386,13 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
         KEY_ENTER => "Enter".into(),
         KEY_DELETE => "Delete".into(),
         KEY_BACKSPACE => "Backspace".into(),
+        KEY_ARROW_UP => "ArrowUp".into(),
+        KEY_ARROW_DOWN => "ArrowDown".into(),
+        KEY_ARROW_LEFT => "ArrowLeft".into(),
+        KEY_ARROW_RIGHT => "ArrowRight".into(),
+        KEY_HOME => "Home".into(),
+        KEY_END => "End".into(),
+        KEY_TAB => "Tab".into(),
         _ => match char::from_u32(code) {
             Some(ch) => ch.to_string(),
             None => return JasStatus::BadParamType,
@@ -384,6 +411,12 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
     };
     match route {
         KeyRoute::DeleteSelection => delete_selection_key(engine),
+        KeyRoute::ToolChar(ch) => {
+            let mut slot = engine.tool_slot();
+            let Some((_, tool)) = slot.as_mut() else { return JasStatus::UnknownVerb };
+            let handled = engine.with_model_mut(|m| tool.on_key_event(m, &ch, km));
+            if handled { JasStatus::Ok } else { JasStatus::UnknownVerb }
+        }
         KeyRoute::ToolKey(key) => {
             // A claimed Delete reaches a tool that runs on its own store, so
             // hand it the Artboards panel's selection the engine's store holds
@@ -542,6 +575,9 @@ fn artboard_rect(ab: &crate::document::artboard::Artboard) -> crate::painter::Re
 /// Build a `YamlTool` from the embedded workspace bundle -- the same path the
 /// running app uses.
 fn build_tool(id: &str) -> Option<Box<dyn CanvasTool>> {
+    if id == "type" {
+        return Some(Box::new(crate::tools::type_tool::TypeTool::new()));
+    }
     let ws = crate::interpreter::workspace::Workspace::load()?;
     let spec = ws.data().get("tools")?.get(id)?;
     Some(Box::new(crate::tools::yaml_tool::YamlTool::from_workspace_tool(spec)?))
@@ -765,11 +801,15 @@ mod tests {
     fn the_tool_list_is_every_workspace_tool_and_appends_only() {
         let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace bundle");
         let mut want: Vec<String> = ws.data()["tools"].as_object().expect("tools").keys().cloned().collect();
+        for id in NATIVE_TOOL_IDS {
+            assert!(!want.iter().any(|w| w == id), "`{id}` is declared native but the workspace lists it");
+            want.push(id.to_string());
+        }
         want.sort();
         let mut got: Vec<String> = TOOL_IDS.iter().map(|s| s.to_string()).collect();
         got.sort();
         assert!(want.len() >= 20, "the workspace's tool set is not vacuous: {}", want.len());
-        assert_eq!(got, want, "TOOL_IDS is exactly the workspace's tools");
+        assert_eq!(got, want, "TOOL_IDS is exactly the workspace's tools and the declared native ones");
         assert_eq!(TOOL_IDS.len(), want.len(), "no id twice");
         assert_eq!(&TOOL_IDS[..9],
                    &["selection", "interior_selection", "partial_selection", "rect", "ellipse", "line", "pen", "pencil", "zoom"],
@@ -977,6 +1017,57 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// ⭐ THE TYPE TOOL TYPES. The 10-20 feel sitting, finding 3: all ten of
+    /// his clicks on the Type button answered `unchanged`, because no shell
+    /// tool answered `type`, so he could not place a caret or type a word.
+    /// Through the exports a shell calls: select it, click empty canvas, type
+    /// two keys, and the document holds a text that says what was typed.
+    #[test]
+    fn the_type_tool_places_a_text_and_takes_the_keys_typed() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        seed(e);
+        let texts = |e: *mut JasEngine| -> Vec<String> {
+            unsafe { &*e }.with_model(|m| {
+                fn walk(el: &crate::geometry::element::Element, out: &mut Vec<String>) {
+                    if let crate::geometry::element::Element::Text(t) = el { out.push(t.content()); }
+                    for c in el.children().unwrap_or(&[]) { walk(c, out); }
+                }
+                let mut out = vec![];
+                for l in &m.document().layers { walk(l, &mut out); }
+                out
+            })
+        };
+        assert!(texts(e).is_empty(), "control: the seed holds no text");
+        let ty = TOOL_IDS.iter().position(|t| *t == "type").expect("the Type tool is a shell tool");
+        assert_eq!(unsafe { jas_set_tool(e, ty) }, JasStatus::Ok, "the Type tool builds in this engine");
+        unsafe {
+            // Empty canvas, clear of the seeded rect at (20,30)+100x80.
+            jas_pointer_event(e, KIND_PRESS, 300.0, 300.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 300.0, 300.0, 0);
+        }
+        // The route a shell's `{"key": …}` ends in (`ffi::dispatch_key`).
+        for k in ['H', 'i'] {
+            assert_eq!(unsafe { jas_key_event(e, k as u32, 0) }, JasStatus::Ok, "the key {k} reached the tool");
+        }
+        assert_eq!(texts(e), vec!["Hi".to_string()], "one text, holding what was typed");
+        // The caret keys (#596's named gaps): Left, Home and End move the
+        // caret the next key types at.
+        let typed = |e: *mut JasEngine, key: u32, ch: char| unsafe {
+            assert_eq!(jas_key_event(e, key, 0), JasStatus::Ok, "the caret key {key:#x} reached the tool");
+            assert_eq!(jas_key_event(e, ch as u32, 0), JasStatus::Ok);
+        };
+        typed(e, KEY_ARROW_LEFT, 'X');
+        assert_eq!(texts(e), vec!["HXi".to_string()], "Left moved the caret back one");
+        typed(e, KEY_HOME, 'A');
+        assert_eq!(texts(e), vec!["AHXi".to_string()], "Home moved it to the start");
+        typed(e, KEY_END, 'Z');
+        assert_eq!(texts(e), vec!["AHXiZ".to_string()], "End moved it to the end");
+        typed(e, KEY_ARROW_RIGHT, 'Y');
+        assert_eq!(texts(e), vec!["AHXiZY".to_string()], "Right at the end stays at the end");
+        unsafe { jas_engine_free(e) };
+    }
+
     /// ⭐ THE FRAME DRAWS THE VIEW. The 10-20 feel sitting, findings 1 and 11:
     /// a Hand drag moved the pointer's hit mapping and not the picture, and
     /// zoom and fit changed nothing he could see, because this frame drew in
@@ -1114,7 +1205,10 @@ mod tests {
         }
         assert_eq!(selectable_index("add_anchor"), idx("add_anchor_point"));
         assert_eq!(selectable_index("delete_anchor"), idx("delete_anchor_point"));
-        assert_eq!(selectable_index("type"), None, "the type tools are native, not built here");
+        // The Type tool is a shell tool since 2026-10-20 (the 10-20 feel
+        // sitting, finding 3: he could not select it, so he could not type).
+        assert_eq!(selectable_index("type"), idx("type"));
+        assert!(idx("type").is_some(), "the Type tool is selectable");
         assert_eq!(selectable_index("no_such_tool"), None);
     }
 
@@ -1149,7 +1243,8 @@ mod tests {
         let e = jas_engine_new();
         let engine = unsafe { &*e };
         assert_eq!(unsafe { jas_set_tool(e, 0) }, JasStatus::Ok);
-        engine.set_active_tool_state("type");
+        // Type on a Path is native and not a shell tool yet.
+        engine.set_active_tool_state("type_on_path");
         assert_eq!(sync_tool_to_state(engine), ToolSync::Refused);
         assert_eq!(engine.tool_slot().as_ref().map(|(i, _)| *i), Some(0));
         assert_eq!(engine.active_tool_state().as_deref(), Some("selection"), "written back");
