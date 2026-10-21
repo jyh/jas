@@ -251,7 +251,7 @@ public sealed partial class MainWindow : Window
 
     // =======================================================================
     // THE DOCK (2026-10-10): `default_layouts.yaml`'s tab groups, under SB_DOCK.
-    // The core answers the groups (`jas_dock_layout`); each group is a
+    // The engine holds the layout (`jas_layout_load`, FP-3); each group is a
     // PaneView with a tab strip, and a tab re-opens that group's pane on the
     // chosen panel. Nothing here names a panel: the ids and the tab labels are
     // the core's (`jas_panel_list` summaries, the id where it sends none).
@@ -264,6 +264,8 @@ public sealed partial class MainWindow : Window
     private (string Group, int Index)? _panelMenuSynth;
     private string _dockName = "";
     private StackPanel? _dockStack;
+    /// <summary>The engine's id for the anchored dock the groups belong to (FP-3).</summary>
+    private int _dockId;
 
     private sealed record DockGroup(PaneView View, List<(string Id, Button Tab)> Tabs, UIElement Body, Button Chevron, Button Menu);
     private readonly Dictionary<string, DockGroup> _dockGroups = new(StringComparer.Ordinal);
@@ -326,9 +328,10 @@ public sealed partial class MainWindow : Window
     /// <summary>
     /// A group's collapse chevron (the owner's note 3, 2026-10-11): collapsed hides
     /// the group's body and keeps its header, as the dock model's
-    /// `panel_group.collapsed` does on the Mac. The state is the dock model's, the
-    /// shell's own, never the core's. The row READS the body's visibility after
-    /// the toggle, so a chevron that hides nothing says so (Q6.DC).
+    /// `panel_group.collapsed` does on the Mac. Since FP-3 the state is the
+    /// ENGINE's: the chevron sends `toggle_group_collapsed` and this draws what the
+    /// engine answered (<see cref="OnLayoutChanged"/>). The row READS the body's
+    /// visibility after drawing, so a chevron that hides nothing says so (Q6.DC).
     /// </summary>
     private void SetDockCollapsed(string key, bool collapsed, string via)
     {
@@ -337,6 +340,30 @@ public sealed partial class MainWindow : Window
         g.Chevron.Content = collapsed ? "▸" : "▾";
         var body = g.Body.Visibility == Visibility.Collapsed ? "hidden" : "visible";
         Report($"DOCK GROUP key={key} collapsed={(collapsed ? "true" : "false")} body={body} via={via}");
+    }
+
+    /// <summary>Send a group's collapse toggle to the engine; the answer is drawn by <see cref="OnLayoutChanged"/>.</summary>
+    private void ToggleDockGroup(string key, string via)
+    {
+        if (_canvas is null || !_dockGroups.ContainsKey(key) || !key.StartsWith("dock", StringComparison.Ordinal)
+            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
+                             System.Globalization.CultureInfo.InvariantCulture, out var idx)) { return; }
+        _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.ToggleCollapsed(_dockId, idx), Group = key, Via = via });
+    }
+
+    /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
+    private void OnLayoutChanged(string key, string via, string stateJson)
+    {
+        var read = LayoutWire.Dock(stateJson);
+        if (read is null || !key.StartsWith("dock", StringComparison.Ordinal)
+            || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
+                             System.Globalization.CultureInfo.InvariantCulture, out var idx)
+            || idx >= read.Groups.Count)
+        {
+            Report($"RUSTFAIL DOCK OP UNREADABLE group={key} via={via} -- the engine's answer");
+            return;
+        }
+        SetDockCollapsed(key, read.Groups[idx].Collapsed, via);
     }
 
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
@@ -357,14 +384,19 @@ public sealed partial class MainWindow : Window
                     labels[id] = sum.ValueKind == System.Text.Json.JsonValueKind.String ? sum.GetString() ?? id : id;
                 }
             }
-            using var doc = System.Text.Json.JsonDocument.Parse(snap.LayoutJson);
+            var read = LayoutWire.Dock(snap.LayoutJson);
+            if (read is null)
+            {
+                Report($"RUSTFAIL DOCK DRAW refused -- the layout for {snap.Name} is unreadable");
+                return;
+            }
+            _dockId = read.DockId;
             _dockStack.Children.Clear();
             _dockGroups.Clear();
             var i = 0;
-            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
+            foreach (var g in read.Groups)
             {
-                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
-                if (ids.Count == 0) { continue; }
+                var ids = g.Panels.ToList();
                 var key = SbWinUi.Canvas.DockPaneKey(i++);
                 var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 4, 4, 0) };
                 var tabList = new List<(string, Button)>();
@@ -400,7 +432,7 @@ public sealed partial class MainWindow : Window
                 };
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(chevron, key + "_collapse");
                 ToolTipService.SetToolTip(chevron, "Collapse/Expand");
-                chevron.Click += (_, _) => SetDockCollapsed(groupKey, scroll.Visibility == Visibility.Visible, "hand");
+                chevron.Click += (_, _) => ToggleDockGroup(groupKey, "hand");
                 tabs.Children.Add(chevron);
                 // The panel menu (the owner's note 3, 2026-10-12): the core's rows
                 // for the group's CURRENT panel, read when it is opened.
@@ -427,15 +459,12 @@ public sealed partial class MainWindow : Window
                     Child = body,
                 };
                 _dockStack.Children.Add(frame);
-                // In range by construction: the render thread refused the dock otherwise.
-                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
-                if (active < 0 || active >= ids.Count)
-                {
-                    Report($"RUSTFAIL DOCK DRAW refused -- {key} has {ids.Count} panel(s) and active={active}");
-                    continue;
-                }
+                // In range by construction: `LayoutWire.Dock` refuses an `active` outside its group.
+                var active = g.Active;
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
+                // The engine's collapse, drawn silently at build (the YAML seeds every group open).
+                if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; }
             }
             Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
                  + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
@@ -448,8 +477,9 @@ public sealed partial class MainWindow : Window
                 var ck = collapseKnob.Trim();
                 if (_dockGroups.ContainsKey(ck))
                 {
-                    SetDockCollapsed(ck, true, "synth");
-                    SetDockCollapsed(ck, false, "synth");
+                    // Through the engine, as the chevron goes: toggle, then toggle back.
+                    ToggleDockGroup(ck, "synth");
+                    ToggleDockGroup(ck, "synth");
                 }
                 else
                 {
@@ -630,6 +660,7 @@ public sealed partial class MainWindow : Window
         _canvas.PaneChanged = OnPaneChanged;
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
+        _canvas.LayoutChanged = OnLayoutChanged;
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);

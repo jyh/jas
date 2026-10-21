@@ -1226,6 +1226,51 @@ internal static class KeyWire
         c < 0x20 || c == 0x7F || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF) ? null : char.ConvertFromUtf32((int)c);
 }
 
+/// <summary>
+/// The engine's dock layout (`jas_layout_state`, floating panels FP-3): the
+/// shell draws the dock from it and sends `layout_apply` verbs back, holding
+/// no dock state of its own. Read strictly: a reply the engine would never
+/// send (an `active` outside its group, an empty group, a missing flag) is
+/// refused whole, never repaired, so the shell is never handed a value to clamp.
+/// </summary>
+internal static class LayoutWire
+{
+    internal sealed record Group(IReadOnlyList<string> Panels, int Active, bool Collapsed);
+    internal sealed record Anchored(int DockId, IReadOnlyList<Group> Groups);
+
+    /// <summary>The first anchored dock of a layout state, or null.</summary>
+    internal static Anchored? Dock(string stateJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(stateJson);
+            var anchored = doc.RootElement.GetProperty("anchored");
+            if (anchored.GetArrayLength() == 0) { return null; }
+            var d = anchored[0];
+            var groups = new List<Group>();
+            foreach (var g in d.GetProperty("groups").EnumerateArray())
+            {
+                var panels = g.GetProperty("panels").EnumerateArray().Select(p => p.GetString() ?? "").ToList();
+                var active = g.GetProperty("active").GetInt32();
+                var collapsed = g.GetProperty("collapsed").GetBoolean();
+                if (panels.Count == 0 || panels.Any(p => p.Length == 0) || active < 0 || active >= panels.Count) { return null; }
+                groups.Add(new Group(panels, active, collapsed));
+            }
+            return new Anchored(d.GetProperty("id").GetInt32(), groups);
+        }
+        catch (Exception ex) when (ex is System.Text.Json.JsonException or KeyNotFoundException
+                                     or InvalidOperationException or FormatException or IndexOutOfRangeException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The chevron's verb: toggle a group's collapse in the engine.</summary>
+    internal static string ToggleCollapsed(int dockId, int groupIdx) =>
+        System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+            { ["op"] = "toggle_group_collapsed", ["dock_id"] = dockId, ["group_idx"] = groupIdx });
+}
+
 /// <summary>The keys an action reply carries for the shell to act on.</summary>
 internal static class ActWire
 {

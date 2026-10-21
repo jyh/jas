@@ -260,8 +260,20 @@ internal sealed class DockOpenCmd : Cmd
     internal long AvailW;
 }
 
-/// <summary>A dock layout as the core answered it, with the panel list its tabs are labelled from.</summary>
+/// <summary>A dock layout as the core answered it (`jas_layout_state`'s JSON), with the panel list its tabs are labelled from.</summary>
 internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson);
+
+/// <summary>
+/// One `layout_apply` verb for the engine's dock layout (FP-3): the chevron's
+/// `toggle_group_collapsed`. `Group` is the dock group's key, so the answer is
+/// drawn on the group the person touched; `Via` is `hand` or `synth`.
+/// </summary>
+internal sealed class LayoutOpCmd : Cmd
+{
+    internal string Op = "";
+    internal string Group = "";
+    internal string Via = "hand";
+}
 
 internal sealed class PaneOpenCmd : Cmd
 {
@@ -1732,6 +1744,10 @@ internal sealed unsafe class Canvas : IDisposable
 
                 case DockOpenCmd dk:
                     ApplyDockOpen(dk);
+                    break;
+
+                case LayoutOpCmd lo:
+                    ApplyLayoutOp(lo);
                     break;
 
                 case PanelClickCmd pc:
@@ -4776,40 +4792,28 @@ internal sealed unsafe class Canvas : IDisposable
             _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- no engine {Tids()}");
             return;
         }
+        // FP-3: the ENGINE holds the dock layout (`jas_layout_load`, seeded from
+        // the same `default_layouts.yaml` dock `jas_dock_layout` answers), so a
+        // chevron or a tab changes it there and the shell draws what it answers.
         var name = System.Text.Encoding.UTF8.GetBytes(open.Name);
-        var layout = JasCore.TakeString(JasCore.jas_dock_layout(name, (nuint)name.Length));
+        var layout = JasCore.TakeString(JasCore.jas_layout_load(_engine, name, (nuint)name.Length));
         if (layout.Length == 0)
         {
-            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- jas_dock_layout returned the empty span {Tids()}");
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL DOCK REFUSED name={open.Name} -- jas_layout_load returned the empty span channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
             return;
         }
         if (PanelList is null) { PanelList = JasCore.TakeString(JasCore.jas_panel_list()); }
-        var groups = new List<(string Active, int Count)>();
-        var tabsRead = new List<List<string>>();
-        try
+        // The core refuses an empty group or an out-of-range `active`, so a reply
+        // the strict reader refuses is a broken reply, refused by name.
+        var read = LayoutWire.Dock(layout);
+        if (read is null)
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(layout);
-            foreach (var g in doc.RootElement.GetProperty("groups").EnumerateArray())
-            {
-                var ids = g.GetProperty("panels").EnumerateArray().Select(v => v.GetString() ?? "").ToList();
-                // The core refuses an empty group or an out-of-range `active`
-                // (`dock_layout`), so one here is a broken reply, refused by name.
-                var active = g.TryGetProperty("active", out var a) ? a.GetInt32() : 0;
-                if (ids.Count == 0 || active < 0 || active >= ids.Count)
-                {
-                    _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} -- a group with {ids.Count} panel(s) "
-                          + $"and active={active} {Tids()}");
-                    return;
-                }
-                groups.Add((ids[active], ids.Count));
-                tabsRead.Add(ids);
-            }
-        }
-        catch (Exception ex)
-        {
-            _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} {ex.GetType().Name} {Tids()}");
+            _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} -- jas_layout_load's reply {Tids()}");
             return;
         }
+        var groups = read.Groups.Select(g => (Active: g.Panels[g.Active], Count: g.Panels.Count)).ToList();
+        var tabsRead = read.Groups.Select(g => g.Panels.ToList()).ToList();
         // Published FIRST, so the UI has built every group's frame before any
         // group's plan arrives (one thread, one dispatcher queue: in order).
         _dockTabs = tabsRead;
@@ -4847,6 +4851,32 @@ internal sealed unsafe class Canvas : IDisposable
     internal void MenuAction(MenuActionCmd cmd) => _queue.Add(cmd);
 
     internal void PanelMenu(PanelMenuCmd cmd) => _queue.Add(cmd);
+
+    internal void LayoutOp(LayoutOpCmd cmd) => _queue.Add(cmd);
+
+    /// <summary>Raised on the UI thread with a verb's group key, via and the
+    /// layout the engine answered (`jas_layout_state`'s JSON).</summary>
+    internal Action<string, string, string>? LayoutChanged { get; set; }
+
+    /// <summary>
+    /// A layout verb, run in the engine (FP-3). Every outcome is a row: a refusal
+    /// is `RUSTFAIL DOCK OP REFUSED` with the channel, never a silent no-op; an
+    /// answer is posted to the UI to draw.
+    /// </summary>
+    private void ApplyLayoutOp(LayoutOpCmd cmd)
+    {
+        if (_engine == IntPtr.Zero) { return; }
+        var op = System.Text.Encoding.UTF8.GetBytes(cmd.Op);
+        var answer = JasCore.TakeString(JasCore.jas_layout_apply(_engine, op, (nuint)op.Length));
+        if (answer.Length == 0)
+        {
+            var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
+            _report($"RUSTFAIL DOCK OP REFUSED group={cmd.Group} via={cmd.Via} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+            return;
+        }
+        var g = cmd.Group; var v = cmd.Via;
+        PostToUi(() => LayoutChanged?.Invoke(g, v, answer));
+    }
 
     /// <summary>Raised on the UI thread with a READ's group, panel, via and rows
     /// (`jas_panel_menu`'s JSON), for the window to draw the flyout.</summary>

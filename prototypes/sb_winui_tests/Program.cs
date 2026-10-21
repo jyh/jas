@@ -780,6 +780,29 @@ static class Program
             + "|" + (GradientSliderWire.Stops("""[{"location":5}]""")?.Count.ToString() ?? "(null)"));
         Eq("gradient: the selected index reads -1 when absent or not a number", "0|-1|-1|2",
             $"{GradientSliderWire.Index("0")}|{GradientSliderWire.Index("-1")}|{GradientSliderWire.Index(null)}|{GradientSliderWire.Index("2")}");
+        // FP-3: the dock is drawn from the ENGINE's layout (`jas_layout_state`),
+        // its first anchored dock read strictly: a group is its panels (content
+        // ids), its active index and its collapsed flag, all the engine's.
+        const string state = """{"name":"Default","anchored":[{"id":0,"edge":"right","collapsed":false,"width":240.0,"groups":[{"panels":["color_panel_content","swatches_panel_content"],"active":1,"collapsed":false},{"panels":["layers_panel_content"],"active":0,"collapsed":true}]}],"floating":[],"z_order":[]}""";
+        var dock = LayoutWire.Dock(state);
+        Eq("layout: the anchored dock's id and groups read back", "0|color_panel_content,swatches_panel_content@1/False|layers_panel_content@0/True",
+            dock is null ? "(null)" : dock.DockId + "|" + string.Join("|", dock.Groups.Select(g => $"{string.Join(",", g.Panels)}@{g.Active}/{g.Collapsed}")));
+        // Each refusal is the control with ONE defect, so a reader that refused
+        // everything could not pass (the control above reads).
+        var defects = new[]
+        {
+            state.Replace("\"active\":1", "\"active\":2"),
+            state.Replace("[\"layers_panel_content\"]", "[]"),
+            state.Replace(",\"collapsed\":true}", "}"),
+            state.Replace("\"anchored\":[{", "\"anchored\":[],\"x\":[{"),
+            "not json",
+            "",
+        };
+        Eq("layout: an out-of-range active, an empty group, a missing flag, no dock, bad JSON are each refused",
+            string.Join("|", defects.Select(_ => "(null)")),
+            string.Join("|", defects.Select(d => LayoutWire.Dock(d) is null ? "(null)" : "read")));
+        Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
+            """{"op":"toggle_group_collapsed","dock_id":3,"group_idx":1}""", LayoutWire.ToggleCollapsed(3, 1));
         Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",
             (KeyWire.CharName('O') ?? "(null)") + "|" + (KeyWire.CharName('=') ?? "(null)") + "|"
             + (KeyWire.CharName(0x07) ?? "(null)") + "|" + (KeyWire.CharName(0x7F) ?? "(null)"));
