@@ -512,7 +512,7 @@ private func plainTspan(_ s: String, id: UInt32 = 0) -> Tspan {
 @Test func svgFragmentRoundtrip() {
     let src = [plainTspan("hello "), boldTspan("world", id: 1)]
     let svg = tspansToSvgFragment(src)
-    #expect(svg.contains(#"<text xmlns="http://www.w3.org/2000/svg">"#))
+    #expect(svg.hasPrefix(#"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#), "\(svg)")
     #expect(svg.contains("<tspan>hello </tspan>"))
     #expect(svg.contains(#"<tspan font-weight="bold">world</tspan>"#))
     let back = tspansFromSvgFragment(svg)!

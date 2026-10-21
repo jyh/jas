@@ -1007,6 +1007,33 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
 """
 }
 
+/// A font size reads its unit: `16px` is 16 user units, as a bare `16` is,
+/// and `12pt` is 16 px. Mirrors Rust
+/// `a_font_size_with_a_unit_reads_as_the_same_length_without_one`; each
+/// expectation is the unitless reading of the same length.
+@Test func aFontSizeWithAUnitReadsAsTheSameLengthWithoutOne() {
+    struct Sizes: Equatable { let element: Double; let tspan: Double? }
+    func sizes(_ el: String, _ ts: String) -> Sizes? {
+        let svg = """
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+<text x="0" y="20" font-size="\(el)"><tspan font-size="\(ts)">a</tspan><tspan>b</tspan></text>
+</svg>
+"""
+        guard case .text(let t) = svgToDocument(svg).layers[0].children[0] else { return nil }
+        return Sizes(element: t.fontSize, tspan: t.tspans[0].fontSize)
+    }
+    let bare = sizes("16", "16")
+    #expect(bare != nil)
+    #expect(sizes("9", "9") != bare, "the reader must see the attribute at all")
+    #expect(sizes("16px", "16px") == bare, "px is a user unit")
+    #expect(sizes("12pt", "12pt") == bare, "12pt is 16px")
+    #expect(sizes(" 16px ", "16 px") == bare, "whitespace around and inside")
+    #expect(sizes("12px", "12px") == sizes("12", "12"), "px off the default")
+    #expect(sizes("9pt", "9pt") == sizes("12", "12"), "9pt is 12px, off the default")
+    #expect(sizes("1.2em", "1.2em") == Sizes(element: bare!.element, tspan: nil))
+}
+
 @Test func svgSingleValueTspanRotateRoundtrip() {
     let svg = svgWithTspanMarkup(#"<tspan rotate="30">abc</tspan>"#)
     let doc = svgToDocument(svg)
@@ -1879,8 +1906,9 @@ private func spelledMultiplier(_ v: Double) -> String {
 /// a value here and the tspan must reopen equal. Twin of Rust's
 /// `every_tspan_field_survives_a_save_and_reopen`; the cross-port spelling is
 /// the `text_tspan_character_attrs` cell of `cross_language_commutativity.py`.
-@Test func everyTspanFieldSurvivesASaveAndReopen() {
-    let t = Tspan(
+/// A tspan with EVERY field set, shared by the save arm and the clipboard arm.
+private func everyFieldTspan() -> Tspan {
+    Tspan(
         id: 0, content: "Word",
         baselineShift: 3.5, dx: 0.25,
         fontFamily: "Helvetica", fontSize: 12,
@@ -1908,6 +1936,10 @@ private func spelledMultiplier(_ v: Double) -> String {
         textDecoration: ["line-through", "underline"], textRendering: "optimizeLegibility",
         textTransform: "uppercase", transform: Transform(a: 1.5, b: 0, c: 0, d: 0.8, e: 0, f: 0),
         xmlLang: "fr")
+}
+
+@Test func everyTspanFieldSurvivesASaveAndReopen() {
+    let t = everyFieldTspan()
     let doc = Document(layers: [Layer(children: [
         .text(Text(x: 0, y: 20, tspans: [t], fontFamily: "sans-serif", fontSize: 16)),
     ])])
@@ -1928,4 +1960,47 @@ private func spelledMultiplier(_ v: Double) -> String {
         guard case .text(let y) = d.layers[0].children[0] else { Issue.record("expected Text"); return }
         #expect(y.tspans.first == one, "\(one)")
     }
+}
+
+// MARK: - The clipboard fragment is the document's tspans
+
+/// The clipboard's `image/svg+xml` fragment carries "the same tspans
+/// serialized per the SVG serialization rules" (TSPAN.md "Cut / copy"): each
+/// tspan exactly as the DOCUMENT writes it, under a `<text>` root that declares
+/// the `jas:` prefix its attributes use. The fragment had its own writer: a
+/// font size in pt where the document writes px, lengths with no unit, no
+/// `transform`, and `jas:` with no declaration, which XMLDocument refuses.
+/// Twin of Rust's `the_clipboard_fragment_is_the_documents_tspans`.
+@Test func theClipboardFragmentIsTheDocumentsTspans() {
+    let t = everyFieldTspan()
+    // id 1: the reader renumbers from 0, and the file does not carry ids.
+    let plain = Tspan(id: 1, content: "<&> next")
+    let frag = tspansToSvgFragment([t, plain])
+    let root = #"<text xmlns="http://www.w3.org/2000/svg" xmlns:jas="urn:jas:1" xml:space="preserve">"#
+    #expect(frag == root + tspanSvg(t) + tspanSvg(plain) + "</text>")
+    guard let back = tspansFromSvgFragment(frag) else {
+        Issue.record("the fragment does not read: \(frag)"); return
+    }
+    #expect(back.count == 2)
+    #expect(back.map(\.id) == [0, 1])
+    #expect(back.first == t, "fragment: \(frag)")
+    #expect(back.last == plain, "fragment: \(frag)")
+}
+
+/// A fragment another application writes is read as the document reader reads
+/// a file: a bare length is in user units (px), so 16 is a 12 pt size and a
+/// 4 px raise is 3 pt; a tracking in em is read. Twin of Rust's
+/// `a_foreign_clipboard_fragment_reads_its_lengths_as_a_file_does`.
+@Test func aForeignClipboardFragmentReadsItsLengthsAsAFileDoes() {
+    let frag = #"<svg xmlns="http://www.w3.org/2000/svg"><text><tspan font-size="16" baseline-shift="4" letter-spacing="0.1em">A</tspan></text></svg>"#
+    guard let back = tspansFromSvgFragment(frag) else {
+        Issue.record("the fragment does not read"); return
+    }
+    #expect(back.count == 1)
+    #expect(back.first?.content == "A")
+    #expect(back.first?.fontSize == 12)
+    #expect(back.first?.baselineShift == 3)
+    #expect(back.first?.letterSpacing == 0.1)
+    #expect(tspansFromSvgFragment("<span>hi</span>") == nil)
+    #expect(tspansFromSvgFragment(#"<text xmlns="http://www.w3.org/2000/svg">hi</text>"#) == nil)
 }

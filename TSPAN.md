@@ -517,7 +517,14 @@ It is extended as follows:
     cross elements). Preferred by jas apps.
   - `image/svg+xml` — an SVG fragment `<text><tspan>…</tspan>…</text>`
     with the same tspans serialized per the SVG serialization
-    rules. Preferred by other SVG-aware apps.
+    rules: each `<tspan>` is byte-for-byte what the document writer
+    emits (lengths in their units, a size in px, `transform`), under a
+    root `<text xmlns="http://www.w3.org/2000/svg"
+    xmlns:jas="urn:jas:1" xml:space="preserve">` that declares the
+    `jas:` prefix (a namespace-aware reader refuses an undeclared
+    one). It is read as a document is: the first `<text>` at or under
+    the root, a bare length in user units (px). Preferred by other
+    SVG-aware apps.
   - `text/plain` — the concatenated `content` of the selected
     range. Used as a last resort by unrelated text editors.
 - **Paste.** On paste, the session reads the clipboard in
