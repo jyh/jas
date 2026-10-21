@@ -261,7 +261,7 @@ internal sealed class DockOpenCmd : Cmd
 }
 
 /// <summary>A dock layout as the core answered it (`jas_layout_state`'s JSON), with the panel list its tabs are labelled from.</summary>
-internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson);
+internal sealed record DockSnapshot(string Name, string LayoutJson, string PanelListJson, string Cause = "open");
 
 /// <summary>
 /// One `layout_apply` verb for the engine's dock layout (FP-3): the chevron's
@@ -4804,25 +4804,74 @@ internal sealed unsafe class Canvas : IDisposable
             return;
         }
         if (PanelList is null) { PanelList = JasCore.TakeString(JasCore.jas_panel_list()); }
+        _dockName = open.Name;
+        _dockAvailW = open.AvailW;
+        PublishLayout(layout, "open");
+    }
+
+    private string _dockName = "";
+    private long _dockAvailW;
+    /// <summary>Every group's pane key and panels, anchored then floating, as last published.</summary>
+    private List<(string Key, List<string> Panels)> _layoutGroups = new();
+
+    /// <summary>
+    /// Publish a layout the engine answered (FP-3 / FP-4a): the anchored groups
+    /// as `dock{i}`, each floating group as `float{id}g{i}`, the snapshot the UI
+    /// builds its frames from FIRST, then one pane per group on its active panel.
+    /// A key no longer in the layout has its pane closed. `cause` is `open` for a
+    /// load and `op` for a verb that changed the dock's structure.
+    /// </summary>
+    private void PublishLayout(string layout, string cause)
+    {
         // The core refuses an empty group or an out-of-range `active`, so a reply
         // the strict reader refuses is a broken reply, refused by name.
         var read = LayoutWire.Dock(layout);
-        if (read is null)
+        var floating = LayoutWire.Floating(layout);
+        if (read is null || floating is null)
         {
-            _report($"RUSTFAIL DOCK UNREADABLE name={open.Name} -- jas_layout_load's reply {Tids()}");
+            _report($"RUSTFAIL DOCK UNREADABLE name={_dockName} cause={cause} -- the engine's layout {Tids()}");
             return;
         }
-        var groups = read.Groups.Select(g => (Active: g.Panels[g.Active], Count: g.Panels.Count)).ToList();
-        var tabsRead = read.Groups.Select(g => g.Panels.ToList()).ToList();
+        var keyed = new List<(string Key, List<string> Panels, string Active)>();
+        for (var i = 0; i < read.Groups.Count; i++)
+        {
+            var g = read.Groups[i];
+            keyed.Add((DockPaneKey(i), g.Panels.ToList(), g.Panels[g.Active]));
+        }
+        foreach (var f in floating)
+        {
+            for (var i = 0; i < f.Groups.Count; i++)
+            {
+                var g = f.Groups[i];
+                keyed.Add((LayoutWire.FloatKey(f.DockId, i), g.Panels.ToList(), g.Panels[g.Active]));
+            }
+        }
         // Published FIRST, so the UI has built every group's frame before any
         // group's plan arrives (one thread, one dispatcher queue: in order).
-        _dockTabs = tabsRead;
-        Dock = new DockSnapshot(open.Name, layout, PanelList);
+        _dockTabs = read.Groups.Select(g => g.Panels.ToList()).ToList();
+        _layoutGroups = keyed.Select(k => (k.Key, k.Panels)).ToList();
+        Dock = new DockSnapshot(_dockName, layout, PanelList ?? "", cause);
         PostToUi(() => DockChanged?.Invoke());
-        _report($"DOCK OPEN name={open.Name} groups={groups.Count} panels={groups.Sum(g => g.Count)} {Tids()}");
-        for (var i = 0; i < groups.Count; i++)
+        var live = keyed.Select(k => k.Key).ToHashSet(StringComparer.Ordinal);
+        foreach (var stale in _panes.Keys.Where(k => (k.StartsWith("dock", StringComparison.Ordinal)
+                                                      || k.StartsWith("float", StringComparison.Ordinal)) && !live.Contains(k)).ToList())
         {
-            ApplyPaneOpen(new PaneOpenCmd { Key = DockPaneKey(i), PanelId = groups[i].Active, AvailW = open.AvailW });
+            _panes.Remove(stale);
+            Panes.TryRemove(stale, out _);
+            _report($"PANE CLOSED key={stale} cause={cause} {Tids()}");
+        }
+        if (cause == "open")
+        {
+            _report($"DOCK OPEN name={_dockName} groups={read.Groups.Count} panels={read.Groups.Sum(g => g.Panels.Count)} {Tids()}");
+        }
+        else
+        {
+            _report($"DOCK LAYOUT name={_dockName} groups={read.Groups.Count} floating={floating.Count} "
+                  + $"floating-groups={floating.Sum(f => f.Groups.Count)} cause={cause} {Tids()}");
+        }
+        foreach (var (key, _, active) in keyed)
+        {
+            ApplyPaneOpen(new PaneOpenCmd { Key = key, PanelId = active, AvailW = _dockAvailW });
         }
     }
 
@@ -4872,6 +4921,23 @@ internal sealed unsafe class Canvas : IDisposable
         {
             var ch = JasCore.TakeString(JasCore.jas_last_error_json(_engine));
             _report($"RUSTFAIL DOCK OP REFUSED group={cmd.Group} via={cmd.Via} channel={(ch.Length == 0 ? "(clear)" : ch)} {Tids()}");
+            return;
+        }
+        // A verb that changed WHICH panels sit in WHICH group (a detach, a
+        // redock) re-indexes `dock{i}`, so the dock is republished whole; a
+        // collapse, a move or a raise keeps every key and is drawn in place.
+        var before = _layoutGroups;
+        var read = LayoutWire.Dock(answer);
+        var floating = LayoutWire.Floating(answer);
+        var after = read is null || floating is null ? null
+            : read.Groups.Select((g, i) => (Key: DockPaneKey(i), Panels: g.Panels.ToList()))
+                .Concat(floating.SelectMany(f => f.Groups.Select((g, i) => (Key: LayoutWire.FloatKey(f.DockId, i), Panels: g.Panels.ToList()))))
+                .ToList();
+        var same = after is not null && after.Count == before.Count
+            && after.Zip(before).All(p => p.First.Key == p.Second.Key && p.First.Panels.SequenceEqual(p.Second.Panels));
+        if (!same)
+        {
+            PublishLayout(answer, "op");
             return;
         }
         var g = cmd.Group; var v = cmd.Via;

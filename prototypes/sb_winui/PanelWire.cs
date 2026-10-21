@@ -1237,26 +1237,29 @@ internal static class LayoutWire
 {
     internal sealed record Group(IReadOnlyList<string> Panels, int Active, bool Collapsed);
     internal sealed record Anchored(int DockId, IReadOnlyList<Group> Groups);
+    internal sealed record Floated(int DockId, double X, double Y, double Width, int Z, IReadOnlyList<Group> Groups);
 
-    /// <summary>The first anchored dock of a layout state, or null.</summary>
-    internal static Anchored? Dock(string stateJson)
+    /// <summary>A dock's groups, or null for any group the engine would never send.</summary>
+    private static List<Group>? Groups(System.Text.Json.JsonElement dock)
+    {
+        var groups = new List<Group>();
+        foreach (var g in dock.GetProperty("groups").EnumerateArray())
+        {
+            var panels = g.GetProperty("panels").EnumerateArray().Select(p => p.GetString() ?? "").ToList();
+            var active = g.GetProperty("active").GetInt32();
+            var collapsed = g.GetProperty("collapsed").GetBoolean();
+            if (panels.Count == 0 || panels.Any(p => p.Length == 0) || active < 0 || active >= panels.Count) { return null; }
+            groups.Add(new Group(panels, active, collapsed));
+        }
+        return groups;
+    }
+
+    private static T? Read<T>(string stateJson, Func<System.Text.Json.JsonElement, T?> read) where T : class
     {
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(stateJson);
-            var anchored = doc.RootElement.GetProperty("anchored");
-            if (anchored.GetArrayLength() == 0) { return null; }
-            var d = anchored[0];
-            var groups = new List<Group>();
-            foreach (var g in d.GetProperty("groups").EnumerateArray())
-            {
-                var panels = g.GetProperty("panels").EnumerateArray().Select(p => p.GetString() ?? "").ToList();
-                var active = g.GetProperty("active").GetInt32();
-                var collapsed = g.GetProperty("collapsed").GetBoolean();
-                if (panels.Count == 0 || panels.Any(p => p.Length == 0) || active < 0 || active >= panels.Count) { return null; }
-                groups.Add(new Group(panels, active, collapsed));
-            }
-            return new Anchored(d.GetProperty("id").GetInt32(), groups);
+            return read(doc.RootElement);
         }
         catch (Exception ex) when (ex is System.Text.Json.JsonException or KeyNotFoundException
                                      or InvalidOperationException or FormatException or IndexOutOfRangeException)
@@ -1265,10 +1268,55 @@ internal static class LayoutWire
         }
     }
 
+    /// <summary>The first anchored dock of a layout state, or null.</summary>
+    internal static Anchored? Dock(string stateJson) => Read(stateJson, root =>
+    {
+        var anchored = root.GetProperty("anchored");
+        if (anchored.GetArrayLength() == 0) { return null; }
+        var d = anchored[0];
+        var groups = Groups(d);
+        return groups is null ? null : new Anchored(d.GetProperty("id").GetInt32(), groups);
+    });
+
+    /// <summary>
+    /// The floating docks, back to front: ascending `z` (the engine's
+    /// `z_index_for`), ties in the engine's list order. Empty when there are
+    /// none; null when any dock is one the engine would never send.
+    /// </summary>
+    internal static IReadOnlyList<Floated>? Floating(string stateJson) => Read(stateJson, root =>
+    {
+        var docks = new List<Floated>();
+        foreach (var f in root.GetProperty("floating").EnumerateArray())
+        {
+            var groups = Groups(f);
+            if (groups is null) { return null; }
+            docks.Add(new Floated(f.GetProperty("id").GetInt32(), f.GetProperty("x").GetDouble(),
+                                  f.GetProperty("y").GetDouble(), f.GetProperty("width").GetDouble(),
+                                  f.GetProperty("z").GetInt32(), groups));
+        }
+        return (IReadOnlyList<Floated>)docks.OrderBy(d => d.Z).ToList();
+    });
+
+    /// <summary>A floating group's pane key. Never `dock…`: four sites parse a
+    /// `dock{i}` key back to an anchored group's index.</summary>
+    internal static string FloatKey(int dockId, int groupIdx) =>
+        string.Create(System.Globalization.CultureInfo.InvariantCulture, $"float{dockId}g{groupIdx}");
+
+    private static string Op(Dictionary<string, object> op) => System.Text.Json.JsonSerializer.Serialize(op);
+
     /// <summary>The chevron's verb: toggle a group's collapse in the engine.</summary>
     internal static string ToggleCollapsed(int dockId, int groupIdx) =>
-        System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
-            { ["op"] = "toggle_group_collapsed", ["dock_id"] = dockId, ["group_idx"] = groupIdx });
+        Op(new() { ["op"] = "toggle_group_collapsed", ["dock_id"] = dockId, ["group_idx"] = groupIdx });
+
+    internal static string BringToFront(int dockId) => Op(new() { ["op"] = "bring_to_front", ["dock_id"] = dockId });
+
+    internal static string SetFloatingPosition(int dockId, double x, double y) =>
+        Op(new() { ["op"] = "set_floating_position", ["dock_id"] = dockId, ["x"] = x, ["y"] = y });
+
+    internal static string Redock(int dockId) => Op(new() { ["op"] = "redock", ["dock_id"] = dockId });
+
+    internal static string DetachGroup(int dockId, int groupIdx, double x, double y) =>
+        Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
 }
 
 /// <summary>The keys an action reply carries for the shell to act on.</summary>

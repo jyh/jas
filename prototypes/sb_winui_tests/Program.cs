@@ -801,6 +801,29 @@ static class Program
         Eq("layout: an out-of-range active, an empty group, a missing flag, no dock, bad JSON are each refused",
             string.Join("|", defects.Select(_ => "(null)")),
             string.Join("|", defects.Select(d => LayoutWire.Dock(d) is null ? "(null)" : "read")));
+        // FP-4a: floating docks, drawn in the engine's stacking order (`z`
+        // ascending, ties in the engine's list order); the shell holds no law.
+        const string floats = """{"name":"Default","anchored":[{"id":0,"edge":"right","collapsed":false,"width":240.0,"groups":[{"panels":["color_panel_content"],"active":0,"collapsed":false}]}],"floating":[{"id":2,"collapsed":false,"width":240.0,"groups":[{"panels":["align_panel_content","boolean_panel_content"],"active":1,"collapsed":false}],"x":100.0,"y":50.5,"z":1},{"id":3,"collapsed":false,"width":200.0,"groups":[{"panels":["layers_panel_content"],"active":0,"collapsed":false}],"x":-20.0,"y":0.0,"z":0}],"z_order":[3,2]}""";
+        var fl = LayoutWire.Floating(floats);
+        Eq("floating: back to front by z, each with its position, width and groups", "3@-20,0w200:layers_panel_content|2@100,50.5w240:align_panel_content,boolean_panel_content",
+            fl is null ? "(null)" : string.Join("|", fl.Select(f => FormattableString.Invariant($"{f.DockId}@{f.X},{f.Y}w{f.Width}:{string.Join(",", f.Groups.SelectMany(g => g.Panels))}"))));
+        Eq("floating: no floating docks is an empty list, not a refusal", "0",
+            LayoutWire.Floating(state)?.Count.ToString() ?? "(null)");
+        var floatDefects = new[]
+        {
+            floats.Replace(",\"x\":100.0", ""),
+            floats.Replace(",\"z\":0}", "}"),
+            floats.Replace("\"active\":1", "\"active\":5"),
+            floats.Replace("\"floating\":[{", "\"floating\":{\"a\":[{").Replace("],\"z_order\"", "]},\"z_order\""),
+        };
+        Eq("floating: a missing x, a missing z, an active outside its group, a floating that is not a list are each refused",
+            string.Join("|", floatDefects.Select(_ => "(null)")),
+            string.Join("|", floatDefects.Select(d => LayoutWire.Floating(d) is null ? "(null)" : "read")));
+        Eq("floating: the four ops are the engine's verbs, addressed by dock id",
+            """{"op":"bring_to_front","dock_id":2}|{"op":"set_floating_position","dock_id":2,"x":12.5,"y":-3}|{"op":"redock","dock_id":2}|{"op":"detach_group","dock_id":0,"group_idx":1,"x":300,"y":40}""",
+            string.Join("|", LayoutWire.BringToFront(2), LayoutWire.SetFloatingPosition(2, 12.5, -3), LayoutWire.Redock(2), LayoutWire.DetachGroup(0, 1, 300, 40)));
+        Eq("floating: a floating group's pane key never starts with `dock`", "float2g0|float13g4",
+            LayoutWire.FloatKey(2, 0) + "|" + LayoutWire.FloatKey(13, 4));
         Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
             """{"op":"toggle_group_collapsed","dock_id":3,"group_idx":1}""", LayoutWire.ToggleCollapsed(3, 1));
         Eq("key: a character name is that one character, a control character none", "O|=|(null)|(null)",

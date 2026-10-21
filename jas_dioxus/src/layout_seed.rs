@@ -88,7 +88,8 @@ fn dock_json(d: &Dock) -> Value {
 
 /// The layout as a shell draws it: anchored docks with their edge, floating
 /// docks with their position, every panel by its CONTENT id (what
-/// `jas_panel_plan` takes), and `z_order` back to front. A shell reads this and
+/// `jas_panel_plan` takes), each floating dock's stacking index `z` (draw in
+/// ascending `z`), and `z_order` back to front. A shell reads this and
 /// sends `layout_apply` verbs; it holds no dock state of its own.
 pub fn shell_state(layout: &WorkspaceLayout) -> Value {
     let anchored: Vec<Value> = layout.anchored.iter().map(|(e, d)| {
@@ -100,6 +101,9 @@ pub fn shell_state(layout: &WorkspaceLayout) -> Value {
         let mut v = dock_json(&f.dock);
         v["x"] = json!(f.x);
         v["y"] = json!(f.y);
+        // The engine's own stacking law (`z_index_for`: 0 = back, and a dock
+        // missing from `z_order` reads 0), so a shell sorts and holds no law.
+        v["z"] = json!(layout.z_index_for(f.dock.id));
         v
     }).collect();
     json!({
@@ -216,5 +220,31 @@ mod tests {
         assert_eq!(f["groups"][0]["panels"], json!(["align_panel_content"]));
         assert_eq!(s["z_order"], json!([f["id"].clone()]));
         assert_ne!(f["id"], s["anchored"][0]["id"]);
+    }
+
+    /// Each floating dock carries its stacking index from the engine's own
+    /// `z_index_for`, so a shell sorts by it and holds no stacking law. Driven
+    /// both ways: the dock brought to the front reads the higher `z`, and the
+    /// other one does after it is brought forward in turn.
+    #[test]
+    fn a_floating_dock_carries_the_engines_stacking_index() {
+        let mut l = from_default_layout(&bundle(dock(json!([
+            {"panels": ["color"], "active": 0}, {"panels": ["align"], "active": 0},
+            {"panels": ["zzz"], "active": 0}]))), "L");
+        assert!(l.is_none(), "control: zzz names no kind");
+        l = from_default_layout(&bundle(dock(json!([
+            {"panels": ["color"], "active": 0}, {"panels": ["align"], "active": 0}]))), "L");
+        let mut l = l.unwrap();
+        let op = |g: usize| json!({"op": "detach_group", "dock_id": 0, "group_idx": g, "x": 1.0, "y": 2.0});
+        layout_apply(&mut l, &op(1));
+        layout_apply(&mut l, &op(0));
+        let z = |l: &WorkspaceLayout| shell_state(l)["floating"].as_array().unwrap().iter()
+            .map(|f| (f["id"].as_u64().unwrap(), f["z"].as_u64().unwrap())).collect::<Vec<_>>();
+        let first = z(&l);
+        assert_eq!(first.len(), 2);
+        assert!(first[1].1 > first[0].1, "the later detach is in front: {first:?}");
+        layout_apply(&mut l, &json!({"op": "bring_to_front", "dock_id": first[0].0}));
+        let after = z(&l);
+        assert!(after[0].1 > after[1].1, "brought forward: {after:?}");
     }
 }

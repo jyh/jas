@@ -259,6 +259,7 @@ public sealed partial class MainWindow : Window
 
     private bool _dockWanted;
     private bool _dockCollapseDone;
+    private bool _dockFloatDone;
     private bool _panelMenuSynthDone;
     /// <summary>The group whose SB_PANEL_MENU_SYNTH run waits on its menu read.</summary>
     private (string Group, int Index)? _panelMenuSynth;
@@ -354,6 +355,8 @@ public sealed partial class MainWindow : Window
     /// <summary>The engine answered a layout verb: draw the touched group's collapse as it now reads.</summary>
     private void OnLayoutChanged(string key, string via, string stateJson)
     {
+        if (LayoutWire.Floating(stateJson) is { } floating) { PlaceFloating(floating, via); }
+        if (!key.StartsWith("dock", StringComparison.Ordinal)) { return; }
         var read = LayoutWire.Dock(stateJson);
         if (read is null || !key.StartsWith("dock", StringComparison.Ordinal)
             || !int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
@@ -364,6 +367,68 @@ public sealed partial class MainWindow : Window
             return;
         }
         SetDockCollapsed(key, read.Groups[idx].Collapsed, via);
+    }
+
+    /// <summary>Each floating dock's frame on <c>FloatLayer</c>, by the engine's dock id.</summary>
+    private readonly Dictionary<int, Border> _floatFrames = new();
+
+    /// <summary>
+    /// Draw the floating docks (FP-4a): one frame per dock on the overlay, its
+    /// groups built as the anchored ones are, at the engine's (x, y) and `z`.
+    /// </summary>
+    private void DrawFloating(string stateJson, Action<string, LayoutWire.Group, Panel> buildGroup)
+    {
+        FloatLayer.Children.Clear();
+        _floatFrames.Clear();
+        var floating = LayoutWire.Floating(stateJson);
+        if (floating is null)
+        {
+            Report("RUSTFAIL FLOAT DOCK DRAW refused -- the engine's floating docks are unreadable");
+            return;
+        }
+        foreach (var f in floating)
+        {
+            var stack = new StackPanel();
+            var title = new Border
+            {
+                Height = 14,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xB4, 0xB4, 0xB4)),
+            };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(title, string.Create(
+                System.Globalization.CultureInfo.InvariantCulture, $"float{f.DockId}_title"));
+            stack.Children.Add(title);
+            for (var gi = 0; gi < f.Groups.Count; gi++) { buildGroup(LayoutWire.FloatKey(f.DockId, gi), f.Groups[gi], stack); }
+            var frame = new Border
+            {
+                Width = f.Width,
+                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0xF3, 0xF3, 0xF3)),
+                BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(
+                    Microsoft.UI.ColorHelper.FromArgb(0xFF, 0x80, 0x80, 0x80)),
+                BorderThickness = new Thickness(1),
+                Child = stack,
+            };
+            FloatLayer.Children.Add(frame);
+            _floatFrames[f.DockId] = frame;
+        }
+        PlaceFloating(floating, "draw");
+    }
+
+    /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
+    private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
+    {
+        var placed = new List<string>();
+        foreach (var f in floating)
+        {
+            if (!_floatFrames.TryGetValue(f.DockId, out var frame)) { continue; }
+            Microsoft.UI.Xaml.Controls.Canvas.SetLeft(frame, f.X);
+            Microsoft.UI.Xaml.Controls.Canvas.SetTop(frame, f.Y);
+            Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(frame, f.Z);
+            placed.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{f.DockId}@{f.X},{f.Y}z{f.Z}"));
+        }
+        Report($"FLOAT DOCK PLACED docks={floating.Count} groups={floating.Sum(f => f.Groups.Count)} "
+             + $"at=[{string.Join(";", placed)}] via={via}");
     }
 
     /// <summary>The core published the dock's groups: build one frame per group, on the UI thread.</summary>
@@ -393,11 +458,10 @@ public sealed partial class MainWindow : Window
             _dockId = read.DockId;
             _dockStack.Children.Clear();
             _dockGroups.Clear();
-            var i = 0;
-            foreach (var g in read.Groups)
+            // One builder for a group's frame, anchored or floating (FP-4a).
+            void BuildGroup(string key, LayoutWire.Group g, Panel host)
             {
                 var ids = g.Panels.ToList();
-                var key = SbWinUi.Canvas.DockPaneKey(i++);
                 var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 4, 4, 0) };
                 var tabList = new List<(string, Button)>();
                 foreach (var id in ids)
@@ -458,18 +522,48 @@ public sealed partial class MainWindow : Window
                     BorderThickness = new Thickness(0, 0, 0, 1),
                     Child = body,
                 };
-                _dockStack.Children.Add(frame);
+                host.Children.Add(frame);
                 // In range by construction: `LayoutWire.Dock` refuses an `active` outside its group.
                 var active = g.Active;
                 _dockGroups[key] = new DockGroup(new PaneView(this, frame, scroll, PaneAvailW, ids[active], topAligned: true), tabList, scroll, chevron, menuButton);
                 MarkDockTab(key, ids[active]);
                 // The engine's collapse, drawn silently at build (the YAML seeds every group open).
                 if (g.Collapsed) { scroll.Visibility = Visibility.Collapsed; chevron.Content = "▸"; }
+                // A floating group's collapse is addressed by its own dock id,
+                // which FP-4a does not send; its chevron is hidden, not inert.
+                if (!key.StartsWith("dock", StringComparison.Ordinal)) { chevron.Visibility = Visibility.Collapsed; }
             }
-            Report($"DOCK DRAWN name={snap.Name} groups={_dockGroups.Count} "
-                 + $"tabs={_dockGroups.Values.Sum(d => d.Tabs.Count)}");
+            var i = 0;
+            foreach (var g in read.Groups) { BuildGroup(SbWinUi.Canvas.DockPaneKey(i++), g, _dockStack); }
+            // DOCK DRAWN counts the ANCHORED groups only: Q6.D compares it with the
+            // `dock{i}` panes, and a floating group is not one.
+            var docked = _dockGroups.Where(d => d.Key.StartsWith("dock", StringComparison.Ordinal)).ToList();
+            // A republish after a verb (FP-4a) is REDRAWN, so Q6.D's DOCK DRAWN stays the load's.
+            Report($"{(snap.Cause == "open" ? "DOCK DRAWN" : "DOCK REDRAWN")} name={snap.Name} groups={docked.Count} "
+                 + $"tabs={docked.Sum(d => d.Value.Tabs.Count)}");
+            DrawFloating(snap.LayoutJson, BuildGroup);
             // SB_DOCK_COLLAPSE=<group key>: the chevron replayed through its own
             // method, collapse then expand (Q6.DC). An unknown key is refused by name.
+            // SB_DOCK_FLOAT=<dock key>:<x>,<y> (FP-4a): that anchored group detached to
+            // a floating dock at (x, y), through the engine's `detach_group`, once.
+            var floatKnob = Environment.GetEnvironmentVariable("SB_DOCK_FLOAT");
+            if (!_dockFloatDone && !string.IsNullOrWhiteSpace(floatKnob))
+            {
+                _dockFloatDone = true;
+                var parts = floatKnob.Trim().Split(':', ',');
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                if (parts.Length == 3 && _dockGroups.ContainsKey(parts[0]) && parts[0].StartsWith("dock", StringComparison.Ordinal)
+                    && int.TryParse(parts[0].AsSpan(4), System.Globalization.NumberStyles.None, inv, out var fi)
+                    && double.TryParse(parts[1], System.Globalization.NumberStyles.Float, inv, out var fx)
+                    && double.TryParse(parts[2], System.Globalization.NumberStyles.Float, inv, out var fy))
+                {
+                    _canvas.LayoutOp(new LayoutOpCmd { Op = LayoutWire.DetachGroup(_dockId, fi, fx, fy), Group = parts[0], Via = "synth" });
+                }
+                else
+                {
+                    Report($"RUSTFAIL DOCK FLOAT REFUSED value={floatKnob.Trim()} -- want <dock key>:<x>,<y> with a key of the {docked.Count} anchored group(s)");
+                }
+            }
             var collapseKnob = Environment.GetEnvironmentVariable("SB_DOCK_COLLAPSE");
             if (!_dockCollapseDone && !string.IsNullOrWhiteSpace(collapseKnob))
             {
@@ -606,7 +700,7 @@ public sealed partial class MainWindow : Window
             Report($"RUSTFAIL {(key == SbWinUi.Canvas.ToolbarPaneKey ? "TOOLBAR" : $"PANE key={key}")} DRAW threw "
                  + $"{ex.GetType().Name}: {ex.Message}");
         }
-        if (key.StartsWith("dock", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
+        if (key.StartsWith("dock", StringComparison.Ordinal) || key.StartsWith("float", StringComparison.Ordinal)) { MarkDockTab(key, snap.PanelId); }
     }
 
     /// <summary>
