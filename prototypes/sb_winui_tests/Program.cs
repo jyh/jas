@@ -395,6 +395,14 @@ static class Program
             "(null)", PanelWire.EnterCommit("0", "0", "0", angleItems) ?? "(null)");
         Eq("enter: a blank editor sends nothing",
             "(null)", PanelWire.EnterCommit(" ", "13", "13", angleItems) ?? "(null)");
+        // flask § 505: Up/Down with the list shut step from the CORE's item.
+        Eq("arrow: Down from 90 (index 5 of 8) picks 135 (6)", "6", PanelWire.ArrowPick(5, 8, true).ToString());
+        Eq("arrow: Up from 90 picks 45 (4)", "4", PanelWire.ArrowPick(5, 8, false).ToString());
+        Eq("arrow: Down at the last item stays there", "7", PanelWire.ArrowPick(7, 8, true).ToString());
+        Eq("arrow: Up at the first item stays there", "0", PanelWire.ArrowPick(0, 8, false).ToString());
+        Eq("arrow: Down from a free value picks the first", "0", PanelWire.ArrowPick(-1, 8, true).ToString());
+        Eq("arrow: Up from a free value picks the last", "7", PanelWire.ArrowPick(-1, 8, false).ToString());
+        Eq("arrow: an empty list picks nothing", "-1", PanelWire.ArrowPick(-1, 0, true).ToString());
         // flask § 504: the platform blanks the editor after the undo restored it.
         Eq("blur text: a blanked editor gives back what was typed",
             "13", PanelWire.BlurText("", "13") ?? "(null)");
