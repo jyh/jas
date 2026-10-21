@@ -879,6 +879,18 @@ public sealed partial class MainWindow : Window
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;
+        // FP-6: a resized canvas cell keeps every floating dock reachable, by the
+        // engine's `clamp_floating_docks`; sent only while something floats.
+        FloatLayer.SizeChanged += (_, e) =>
+        {
+            if (_floatDrawn == 0) { return; }
+            _canvas.LayoutOp(new LayoutOpCmd
+            {
+                Op = LayoutWire.ClampFloatingDocks(e.NewSize.Width, e.NewSize.Height),
+                Group = "float",
+                Via = "resize",
+            });
+        };
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);

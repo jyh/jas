@@ -1330,6 +1330,10 @@ internal static class LayoutWire
     internal static bool TearsOut(double dx, double dy, double x, double y, double w, double h) =>
         Math.Sqrt(dx * dx + dy * dy) >= TearOutThreshold && x >= 0 && y >= 0 && x <= w && y <= h;
 
+    /// <summary>The engine keeps every floating dock reachable in a resized canvas cell (FP-6).</summary>
+    internal static string ClampFloatingDocks(double w, double h) =>
+        Op(new() { ["op"] = "clamp_floating_docks", ["viewport_w"] = w, ["viewport_h"] = h });
+
     internal static string DetachGroup(int dockId, int groupIdx, double x, double y) =>
         Op(new() { ["op"] = "detach_group", ["dock_id"] = dockId, ["group_idx"] = groupIdx, ["x"] = x, ["y"] = y });
 }

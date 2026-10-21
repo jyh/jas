@@ -839,6 +839,8 @@ static class Program
         Eq("tear-out: a tab's op is detach_panel, with no viewport (the shell draws one anchored dock, so it never snaps)",
             """{"op":"detach_panel","dock_id":0,"group_idx":2,"panel_idx":1,"x":350.5,"y":40}""",
             LayoutWire.DetachPanel(0, 2, 1, 350.5, 40));
+        Eq("clamp: the window's resize sends the engine's clamp with the canvas cell's size",
+            """{"op":"clamp_floating_docks","viewport_w":1024.5,"viewport_h":600}""", LayoutWire.ClampFloatingDocks(1024.5, 600));
         Eq("floating: a floating group's pane key never starts with `dock`", "float2g0|float13g4",
             LayoutWire.FloatKey(2, 0) + "|" + LayoutWire.FloatKey(13, 4));
         Eq("layout: the chevron's op is the engine's toggle verb, addressed by dock and group",
