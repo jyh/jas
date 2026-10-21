@@ -560,8 +560,9 @@ So triaging the bare-prefix and Swatches-panel instances is mostly
 transcription, not fresh judgement — the occlusion geometry, the
 already-true `fill_on_top` identity, and the disabled gradient button are
 properties of the template. `gradient.yaml`'s `grad_fill_stroke_widget`
-is the one exception: it is `type: fill_stroke_widget`, a native widget
-render, not the template expansion.
+was the one exception: it was `type: fill_stroke_widget`, a native widget
+render, not the template expansion. (Since 2026-10-20 it is the template too,
+`id_prefix: "grad_"`, so there is no exception.)
 
 ### Promoting `cp_` into the gate is a HANDOFF
 
