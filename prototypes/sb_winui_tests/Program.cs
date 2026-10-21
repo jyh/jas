@@ -372,17 +372,16 @@ static class Program
             "(null)", PanelWire.ComboBlurCommit("0°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: CONTROL: the core's value typed back does not commit",
             "(null)", PanelWire.ComboBlurCommit("0", "0", "0°", comboItems, false) ?? "(null)");
-        // flask § 499: a selection the platform moved by COMPLETING typed text
-        // (13 to 135) is not a pick; one in the open list, or one whose text
-        // the box shows, is.
+        // flask § 499 / § 500: a selection the platform moved by COMPLETING typed
+        // text (13 to 135) is not a pick. Only the list picks, open or closed by
+        // the pick itself; a completion writes the item's text into the box, so
+        // the box text cannot tell them apart.
         Check("editable pick: a pick in the open dropdown is real",
-            PanelWire.EditablePickIsReal(true, "31", "135°"), "an open-list pick was refused");
-        Check("editable pick: the box showing the item's text is a pick",
-            PanelWire.EditablePickIsReal(false, "135°", "135°"), "a shown item was refused");
-        Check("editable pick: a completion under typed text is NOT a pick",
-            !PanelWire.EditablePickIsReal(false, "31", "135°"), "31 over 135° read as a pick");
-        Check("editable pick: no readable box with the list closed is NOT a pick",
-            !PanelWire.EditablePickIsReal(false, null, "135°"), "a null box read as a pick");
+            PanelWire.EditablePickIsReal(true, false), "an open-list pick was refused");
+        Check("editable pick: a pick that has just closed the list is real",
+            PanelWire.EditablePickIsReal(false, true), "a closing pick was refused");
+        Check("editable pick: a selection moved with the list shut is NOT a pick",
+            !PanelWire.EditablePickIsReal(false, false), "a completion read as a pick");
         Eq("combo blur: an item's text is a pick, left to the selection path",
             "(null)", PanelWire.ComboBlurCommit("45°", "0", "0°", comboItems, false) ?? "(null)");
         Eq("combo blur: focus moving into the combo's own dropdown is not leaving",
