@@ -220,6 +220,23 @@ so round-trips are byte-stable:
 - Text elements with a single tspan that overrides nothing round-
   trip to SVG without a `<tspan>` element, so pre-Tspan documents
   serialize identically.
+- **Every field round-trips.** The per-range character attributes
+  are written with the model's own unit, which SVG reads as written
+  and which reopens exactly: `baseline-shift="3.5pt"` (pt, + = up),
+  `dx="0.25em"` and `letter-spacing="0.1em"` (em), `line-height="1.5"`
+  (a multiplier, as CSS's unitless `line-height`), `font-variant`,
+  `text-transform`, `text-rendering`, `xml:lang`, `transform` (the
+  tspan's scale, as a matrix), and `jas:style-name`, `jas:aa-mode`,
+  `jas:kerning-mode`, `jas:fractional-widths`, `jas:no-break`. On
+  import a bare `baseline-shift` number is user units (px), as
+  another application writes it, and a keyword or percentage is
+  not a tspan's numeric shift. Until 2026-10-19 both active ports'
+  document writers and readers dropped all fourteen, in agreement,
+  so Save and Copy/Paste lost them. The guards are
+  `every_tspan_field_survives_a_save_and_reopen` (Rust; its literal
+  names every field, so a new field does not compile until it
+  round-trips), its Swift twin, and the cross-port cell
+  `text_tspan_character_attrs` in `cross_language_commutativity.py`.
 
 ### Known limitation (2026-07-22)
 
@@ -426,6 +443,29 @@ the un-rotated direction, matching SVG's `rotate` attribute
 semantics. This is distinct from `transform: rotate(...)`, which
 applies the rotation to the tspan as a whole.
 
+### Decoration beside a shift or a turn
+
+An underline or strike-through is drawn in its **glyph's frame**. The
+glyph's baseline shift moves it, whether the element or the tspan
+declares the decoration. A shift can be a range's own `baseline-shift`
+or an element's super, sub or numeric shift. Under turned glyphs (a
+range's or the element's character rotation), each glyph's piece of the
+decoration turns with that glyph, about the glyph's baseline origin, so
+the line breaks into one short stroke per glyph. A stroke is cut
+wherever the size, the shift or the angle changes. Its offset and
+thickness come from its own run's size: an underline at baseline +
+0.12 × size, a strike-through at baseline − 0.3 × size, max(0.07 × size,
+1) wide.
+
+This is what both browser engines draw for the same SVG (Blink and
+WebKit, measured 2026-10-19 on one fixture: an element underline over a
+`baseline-shift` tspan, a tspan's own underline with the same shift, an
+element underline over a `rotate` tspan, and over a `dy` tspan; the
+engines agreed on all four; the SVG and both renders are in
+`docs/evidence/decoration_browser/`). CSS's rule for HTML, where a decoration
+stays at the position of the box that declares it, does **not** apply
+to SVG's `baseline-shift` in either engine.
+
 ### Wrapping (area text only)
 
 Word-wrap uses the same whitespace-run break model as today. The
@@ -500,7 +540,14 @@ It is extended as follows:
     cross elements). Preferred by jas apps.
   - `image/svg+xml` — an SVG fragment `<text><tspan>…</tspan>…</text>`
     with the same tspans serialized per the SVG serialization
-    rules. Preferred by other SVG-aware apps.
+    rules: each `<tspan>` is byte-for-byte what the document writer
+    emits (lengths in their units, a size in px, `transform`), under a
+    root `<text xmlns="http://www.w3.org/2000/svg"
+    xmlns:jas="urn:jas:1" xml:space="preserve">` that declares the
+    `jas:` prefix (a namespace-aware reader refuses an undeclared
+    one). It is read as a document is: the first `<text>` at or under
+    the root, a bare length in user units (px). Preferred by other
+    SVG-aware apps.
   - `text/plain` — the concatenated `content` of the selected
     range. Used as a last resort by unrelated text editors.
 - **Paste.** On paste, the session reads the clipboard in

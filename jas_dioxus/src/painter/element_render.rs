@@ -585,12 +585,10 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
     // A tspan's decoration, its own size, baseline shift and rotation are
-    // drawn (the plan's decoration lines; each run at its tspan's size on the
-    // element's leading, Swift's law; a run's `dy`; a rotated run per glyph);
-    // its dx and transform are not, nor a shifted or rotated tspan's
-    // decoration, because whether a decoration follows them is measured on
-    // neither port.
-    if body().any(|s| tspan_needs_legacy(s) && !plan_draws_tspan(t, s)) {
+    // drawn (the plan's decoration lines, each in its glyph's frame; each run
+    // at its tspan's size on the element's leading, Swift's law; a run's
+    // `dy`; a rotated run per glyph); its dx and transform are not.
+    if body().any(|s| tspan_needs_legacy(s) && !plan_draws_tspan(s)) {
         return true;
     }
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
@@ -600,12 +598,8 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
         return true;
     }
     // A readable scale is the renderer's frame around the plan, and the
-    // element's rotation is every glyph's (the plan cuts them); but not a
-    // rotation beside a decoration, which neither port has measured.
-    let rotated = crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0);
-    if rotated && body().any(|s| draws_decoration_of(t, s)) {
-        return true;
-    }
+    // element's rotation is every glyph's (the plan cuts them, and turns each
+    // glyph's decoration piece with it).
     // A case transform or small caps is drawn (the plan measures and draws
     // each tspan's transformed text, Swift's per-run law), and so is a
     // readable element baseline shift (the plan scales and moves it). A justified or hyphenated paragraph is drawn: the plan cuts a
@@ -615,20 +609,10 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
 }
 
 /// A tspan whose per-tspan features the plan draws: a decoration override,
-/// its own baseline shift and its own rotation, but not a shift or rotation
-/// together with a decoration (its own or the element's).
-fn plan_draws_tspan(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
+/// its own baseline shift and its own rotation, a decoration beside either
+/// (drawn in its glyph's frame); not its dx or transform.
+fn plan_draws_tspan(s: &crate::geometry::tspan::Tspan) -> bool {
     s.transform.is_none() && s.dx.is_none()
-        && !((s.baseline_shift.is_some() || s.rotate.is_some()) && draws_decoration_of(e, s))
-}
-
-/// Whether tspan `s` draws an underline or line-through: its own tokens when
-/// it overrides, else the element's.
-fn draws_decoration_of(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
-    match &s.text_decoration {
-        Some(own) => own.iter().any(|w| w == "underline" || w == "line-through"),
-        None => e.text_decoration.split_whitespace().any(|w| w == "underline" || w == "line-through"),
-    }
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -690,6 +674,21 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             miter: 10.0,
             dash: Vec::new(),
         };
+        if d.rotate != 0.0 {
+            // A turned glyph's piece, in its run's frame: `translate(x0,
+            // baseline) · rotate(θ)`, the stroke at its offset from there.
+            let (sin, cos) = d.rotate.to_radians().sin_cos();
+            p.push_state(super::Transform { a: cos, b: sin, c: -sin, d: cos, e: e.x + d.x0, f: e.y + d.origin_y });
+            let off = d.y - d.origin_y;
+            p.stroke_path(
+                &[PathCommand::MoveTo { x: 0.0, y: off }, PathCommand::LineTo { x: d.x1 - d.x0, y: off }],
+                &brush,
+                &line,
+                eff * f.opacity,
+            );
+            p.pop_state();
+            continue;
+        }
         p.stroke_path(
             &[PathCommand::MoveTo { x: e.x + d.x0, y: e.y + d.y }, PathCommand::LineTo { x: e.x + d.x1, y: e.y + d.y }],
             &brush,
@@ -748,6 +747,14 @@ pub fn needs_layout(t: &crate::geometry::element::TextElem) -> bool {
         || t.text_transform == "uppercase"
         || t.text_transform == "lowercase"
         || t.font_variant == "small-caps"
+        // STYLED text with a turn (a range's `rotate`, or the element's): the
+        // plan turns EACH glyph about its own origin (TSPAN.md "Rotation"),
+        // where the segmented path turned a range as one block about its
+        // first glyph and ignored the element's turn. Flat text is not routed
+        // here.
+        || (!t.render_is_flat()
+            && (t.tspans.iter().any(|s| s.rotate.is_some_and(|a| a != 0.0))
+                || crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0)))
         || t.tspans.iter().any(|w| {
             w.jas_role.as_deref() == Some("paragraph")
                 && ((is_area && (w.text_align.is_some() || w.text_align_last.is_some()))
