@@ -1756,6 +1756,15 @@ public sealed partial class MainWindow
             combo.SelectionChanged += (_, _) =>
             {
                 var state = combo.Tag as ChoiceState;
+                // flask § 499: in an editable combo the platform completes typed
+                // text to an option and moves the selection there; that is not a
+                // pick, and the typed text goes by Enter or blur instead.
+                if (combo.IsEditable && combo.SelectedIndex >= 0 && combo.SelectedIndex < items.Count
+                    && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, EditableText(combo),
+                                                     PanelWire.ChoiceText(items[combo.SelectedIndex])))
+                {
+                    return;
+                }
                 var send = PanelWire.ChoiceCommit(combo.SelectedIndex, items, state?.Shown);
                 if (send is null) { return; }
                 // Put back first: this raises SelectionChanged again, at the core's
