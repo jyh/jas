@@ -4078,17 +4078,49 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
     use crate::painter::element_render::{needs_layout, runs_plan_excludes};
     assert!(needs_layout(&styled_area(140.0)) && !runs_plan_excludes(&styled_area(140.0)), "styled area text takes the plan");
     type Set = fn(&mut crate::geometry::element::TextElem);
-    let cases: [(&str, Set); 5] = [
+    let cases: [(&str, Set); 10] = [
         ("a kerning mode word", |e| e.kerning = "auto".into()),
         ("a tspan's dx", |e| e.tspans[2].dx = Some(0.5)),
         ("a baseline shift that does not read", |e| e.baseline_shift = "high".into()),
-        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
-        ("an anchor", |e| e.text_anchor = "middle".into()),
+        // Whether a decoration follows a run's own shift is not measured on
+        // either port (Swift's is CoreText's), so the pair stays out.
+        ("a shifted tspan's own decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("a shifted tspan's inherited decoration", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.text_decoration = "line-through".into();
+        }),
+        ("a rotated tspan's decoration", |e| {
+            e.tspans[2].rotate = Some(10.0);
+            e.text_decoration = "underline".into();
+        }),
+        ("a scale that does not read", |e| e.horizontal_scale = "wide".into()),
+        ("a rotation that does not read", |e| e.rotate = "tilt".into()),
+        ("an element rotation with a tspan's decoration", |e| {
+            e.rotate = "20".into();
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
+        ("an element rotation with its own decoration", |e| {
+            e.rotate = "20".into();
+            e.text_decoration = "line-through".into();
+        }),
     ];
     // The plan draws a justified or hyphenated paragraph (it cuts a
     // stretched line into words and adds the hyphen), so neither excludes.
     type Admit = fn(&mut crate::geometry::element::TextElem);
-    let admitted: [(&str, Admit); 11] = [
+    let admitted: [(&str, Admit); 18] = [
+        ("a horizontal scale", |e| e.horizontal_scale = "150".into()),
+        ("a vertical scale", |e| e.vertical_scale = "80".into()),
+        ("an element rotation", |e| e.rotate = "20".into()),
+        ("a tspan's rotate", |e| e.tspans[2].rotate = Some(10.0)),
+        ("an anchor", |e| e.text_anchor = "middle".into()),
+        ("a tspan's baseline shift", |e| e.tspans[2].baseline_shift = Some(3.0)),
+        ("a shifted tspan beside a decorated one", |e| {
+            e.tspans[2].baseline_shift = Some(3.0);
+            e.tspans[1].text_decoration = Some(vec!["underline".into()]);
+        }),
         ("tracking", |e| e.letter_spacing = "0.1em".into()),
         ("numeric kerning", |e| e.kerning = "0.05em".into()),
         ("a super baseline shift", |e| e.baseline_shift = "super".into()),
@@ -4111,6 +4143,13 @@ fn the_plan_excludes_the_same_cases_on_every_platform() {
         set(&mut e);
         assert!(runs_plan_excludes(&e), "styled area text with {name} is excluded from the plan");
     }
+    // An anchor on POINT text is drawn too (the plan moves each line by its
+    // width): two lines of styled point text, centred.
+    let mut point = styled_area(140.0);
+    (point.width, point.height) = (0.0, 0.0);
+    point.tspans[1].content = "One\nfine day ".into();
+    point.text_anchor = "middle".into();
+    assert!(needs_layout(&point) && !runs_plan_excludes(&point), "anchored point text takes the plan");
 }
 
 /// The walk strokes the plan's decoration lines: a tspan's underline is one
@@ -4137,4 +4176,82 @@ fn a_styled_runs_underline_is_stroked_under_it() {
     let w: f64 = "extraordinarily patiently".chars().map(|c| m(&c.to_string())).sum();
     assert!((strokes[0].0 - bold.2).abs() < 1e-6 && (strokes[0].1 - (bold.2 + w)).abs() < 1e-6, "{strokes:?} vs {bold:?}");
     assert!((strokes[0].2 - (bold.3 + 20.0 * 0.12)).abs() < 1e-6, "{strokes:?}");
+}
+
+/// The walk draws a tspan's own baseline shift: its run sits `shift` above the
+/// line's baseline (y down), the other runs on it, and the x does not move.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_baseline_shift_raises_its_run() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.tspans[2].baseline_shift = Some(3.0);
+    let runs = font_runs(e);
+    assert_eq!(runs.len(), plain.len(), "{runs:?}");
+    assert!(runs.iter().any(|r| r.0 == "extraordinarily patiently"), "the shifted run is drawn: {runs:?}");
+    for (r, p) in runs.iter().zip(&plain) {
+        let want = if r.0 == "extraordinarily patiently" { p.3 - 3.0 } else { p.3 };
+        assert!((r.2 - p.2).abs() < 1e-9 && (r.3 - want).abs() < 1e-9, "{r:?} vs {p:?}");
+    }
+}
+
+/// The walk draws a tspan's own rotation one glyph per frame: " sat" rotated
+/// 15 degrees draws four glyphs, each a run at (0, 0) inside a
+/// `translate(x, baseline) · rotate(15°)` frame, the frames' x increasing and
+/// sharing the line's baseline; the unrotated runs draw outside any frame.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn a_tspans_own_rotation_draws_each_glyph_in_a_rotated_frame() {
+    let mut e = styled_area(2000.0);
+    e.tspans[3].rotate = Some(15.0);
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e), 1.0);
+    let (sin, cos) = 15f64.to_radians().sin_cos();
+    let mut frames = Vec::new();
+    let cmds = rec.commands();
+    for (i, c) in cmds.iter().enumerate() {
+        if let Command::PushState { transform: t } = c {
+            if (t.a - cos).abs() < 1e-12 && (t.b - sin).abs() < 1e-12 {
+                match &cmds[i + 1] {
+                    Command::DrawTextRun { run: crate::painter::TextRun::FastRun { text, x, y, .. }, .. } => {
+                        assert_eq!((*x, *y), (0.0, 0.0));
+                        frames.push((text.clone(), t.e, t.f));
+                    }
+                    other => panic!("a rotated frame draws its glyph next: {other:?}"),
+                }
+                assert!(matches!(cmds[i + 2], Command::PopState), "and closes");
+            }
+        }
+    }
+    let texts: Vec<&str> = frames.iter().map(|f| f.0.as_str()).collect();
+    assert_eq!(texts, [" ", "s", "a", "t"], "{frames:?}");
+    assert!(frames.windows(2).all(|w| w[1].1 > w[0].1 && w[1].2 == w[0].2), "{frames:?}");
+}
+
+/// The walk draws styled text's scale in the flat arm's frame around the whole
+/// plan: a 150 % x 80 % scale pushes `scale(1.5, 0.8)` about the box's
+/// top-left before the first run, every run inside it at its unscaled
+/// position, and pops it after the last.
+#[cfg(all(feature = "d2d", windows))]
+#[test]
+fn styled_texts_scale_is_one_frame_around_the_plan() {
+    let plain = font_runs(styled_area(2000.0));
+    let mut e = styled_area(2000.0);
+    e.horizontal_scale = "150".into();
+    e.vertical_scale = "80".into();
+    let mut rec = RecordingPainter::new();
+    emit_element(&mut rec, &Element::Text(e.clone()), 1.0);
+    let cmds = rec.commands();
+    let first_run = cmds.iter().position(|c| matches!(c, Command::DrawTextRun { .. })).expect("a run is drawn");
+    let push = cmds[..first_run].iter().rposition(|c| matches!(c, Command::PushState { .. })).expect("a frame before the runs");
+    match &cmds[push] {
+        Command::PushState { transform: t } => {
+            assert_eq!((t.a, t.b, t.c, t.d), (1.5, 0.0, 0.0, 0.8));
+            assert!((t.e - (e.x - 1.5 * e.x)).abs() < 1e-12 && (t.f - (e.y - 0.8 * e.y)).abs() < 1e-12, "{t:?}");
+        }
+        _ => unreachable!(),
+    }
+    let last_run = cmds.iter().rposition(|c| matches!(c, Command::DrawTextRun { .. })).unwrap();
+    assert!(cmds[last_run..].iter().any(|c| matches!(c, Command::PopState)), "the frame closes after the last run");
+    assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
 }
