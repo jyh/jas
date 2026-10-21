@@ -1892,7 +1892,7 @@ fn parse_tspan(node: &XmlNode) -> Vec<crate::geometry::tspan::Tspan> {
         font_size: node
             .attrs
             .get("font-size")
-            .and_then(|s| s.parse::<f64>().ok())
+            .and_then(|s| absolute_length_px(s))
             .map(pt),
         font_weight: node.attrs.get("font-weight").cloned(),
         font_style: node.attrs.get("font-style").cloned(),
@@ -2680,7 +2680,9 @@ fn parse_element_body(node: &XmlNode) -> Option<Element> {
         }
         "text" => {
             let ff = get_s(node, "font-family", "sans-serif").to_string();
-            let fs = pt(get_f(node, "font-size", 16.0));
+            // A CSS px is one user unit, so `16px` and `12pt` read as `16`
+            // does; a relative size (`em`, `%`) keeps the default.
+            let fs = pt(node.attrs.get("font-size").and_then(|s| absolute_length_px(s)).unwrap_or(16.0));
             let fw = get_s(node, "font-weight", "normal").to_string();
             let fst = get_s(node, "font-style", "normal").to_string();
             let td = get_s(node, "text-decoration", "none").to_string();
@@ -5215,6 +5217,38 @@ mod tests {
         } else {
             panic!("expected Rect");
         }
+    }
+
+    /// ⭐ A FONT SIZE READS ITS UNIT. `font-size="16px"` is 16 user units, as
+    /// a bare `16` is, and `12pt` is 16 px; both readers took the attribute
+    /// with a bare number parse, so a unit made the element's size the 16
+    /// default and a tspan's size none. Each expectation is the unitless
+    /// reading of the same length, so no number here is typed by hand.
+    #[test]
+    fn a_font_size_with_a_unit_reads_as_the_same_length_without_one() {
+        let text = |el: &str, ts: &str| {
+            let doc = svg_to_document(&format!(
+                r#"<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><text x="0" y="20" font-size="{el}"><tspan font-size="{ts}">a</tspan><tspan>b</tspan></text></svg>"#));
+            match &doc.layers[0] {
+                Element::Layer(l) => match &*l.children[0] {
+                    Element::Text(t) => (t.font_size, t.tspans[0].font_size),
+                    other => panic!("expected Text, got {other:?}"),
+                },
+                other => panic!("expected Layer, got {other:?}"),
+            }
+        };
+        let bare = text("16", "16");
+        // The control moves: a different bare number reads differently.
+        assert_ne!(text("9", "9"), bare, "the reader must see the attribute at all");
+        assert_eq!(text("16px", "16px"), bare, "px is a user unit");
+        assert_eq!(text("12pt", "12pt"), bare, "12pt is 16px");
+        assert_eq!(text(" 16px ", "16 px"), bare, "whitespace around and inside");
+        // Off the element's 16 default, which a dropped unit falls back to.
+        assert_eq!(text("12px", "12px"), text("12", "12"), "px off the default");
+        assert_eq!(text("9pt", "9pt"), text("12", "12"), "9pt is 12px, off the default");
+        // A relative size says nothing absolute: the element keeps its default,
+        // the tspan reads none, as before.
+        assert_eq!(text("1.2em", "1.2em"), (bare.0, None));
     }
 
     // ── tspan rotate roundtrip ───────────────────────────────────────

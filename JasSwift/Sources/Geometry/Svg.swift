@@ -1591,7 +1591,7 @@ private func parseTspanLayout(_ node: XMLElement) -> [Tspan] {
     let content = node.stringValue ?? ""
     let fontFamily = node.attribute(forName: "font-family")?.stringValue
     let fontSize = (node.attribute(forName: "font-size")?.stringValue)
-        .flatMap(Double.init).map(toPt)
+        .flatMap(absoluteLengthPx).map(toPt)
     let fontWeight = node.attribute(forName: "font-weight")?.stringValue
     let fontStyle = node.attribute(forName: "font-style")?.stringValue
     let decoration = (node.attribute(forName: "text-decoration")?.stringValue).map { raw -> [String] in
@@ -2257,7 +2257,9 @@ private func parseElementBody(_ node: XMLNode) -> Element? {
 
     case "text":
         let ff = elem.attribute(forName: "font-family")?.stringValue ?? "sans-serif"
-        let fs = toPt(attrF(elem, "font-size", 16.0))
+        // A CSS px is one user unit, so `16px` and `12pt` read as `16` does;
+        // a relative size (`em`, `%`) keeps the default. Mirrors Rust.
+        let fs = toPt((elem.attribute(forName: "font-size")?.stringValue).flatMap(absoluteLengthPx) ?? 16.0)
         let fw = elem.attribute(forName: "font-weight")?.stringValue ?? "normal"
         let fst = elem.attribute(forName: "font-style")?.stringValue ?? "normal"
         let td = elem.attribute(forName: "text-decoration")?.stringValue ?? "none"

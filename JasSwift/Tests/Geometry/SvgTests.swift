@@ -1007,6 +1007,33 @@ private func svgWithTspanMarkup(_ markup: String) -> String {
 """
 }
 
+/// A font size reads its unit: `16px` is 16 user units, as a bare `16` is,
+/// and `12pt` is 16 px. Mirrors Rust
+/// `a_font_size_with_a_unit_reads_as_the_same_length_without_one`; each
+/// expectation is the unitless reading of the same length.
+@Test func aFontSizeWithAUnitReadsAsTheSameLengthWithoutOne() {
+    struct Sizes: Equatable { let element: Double; let tspan: Double? }
+    func sizes(_ el: String, _ ts: String) -> Sizes? {
+        let svg = """
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+<text x="0" y="20" font-size="\(el)"><tspan font-size="\(ts)">a</tspan><tspan>b</tspan></text>
+</svg>
+"""
+        guard case .text(let t) = svgToDocument(svg).layers[0].children[0] else { return nil }
+        return Sizes(element: t.fontSize, tspan: t.tspans[0].fontSize)
+    }
+    let bare = sizes("16", "16")
+    #expect(bare != nil)
+    #expect(sizes("9", "9") != bare, "the reader must see the attribute at all")
+    #expect(sizes("16px", "16px") == bare, "px is a user unit")
+    #expect(sizes("12pt", "12pt") == bare, "12pt is 16px")
+    #expect(sizes(" 16px ", "16 px") == bare, "whitespace around and inside")
+    #expect(sizes("12px", "12px") == sizes("12", "12"), "px off the default")
+    #expect(sizes("9pt", "9pt") == sizes("12", "12"), "9pt is 12px, off the default")
+    #expect(sizes("1.2em", "1.2em") == Sizes(element: bare!.element, tspan: nil))
+}
+
 @Test func svgSingleValueTspanRotateRoundtrip() {
     let svg = svgWithTspanMarkup(#"<tspan rotate="30">abc</tspan>"#)
     let doc = svgToDocument(svg)
