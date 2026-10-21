@@ -743,9 +743,13 @@ unsafe fn paint_frame_into(surface: *mut c_void, engine: &crate::ffi::JasEngine)
         return JAS_PAINT_DOCUMENT_INCOMPLETE;
     }
 
+    // The pasteboard: the theme's `pane_bg` under everything, in screen space,
+    // as the web canvas fills its viewport (layer 1), so the page's white shows
+    // against it. Transparent, as before, when the workspace states none.
+    let (r, g, b, a) = crate::ffi_pointer::pasteboard_color().map_or((0.0, 0.0, 0.0, 0.0), |c| c.to_rgba());
     unsafe {
         rt.BeginDraw();
-        rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+        rt.Clear(Some(&D2D1_COLOR_F { r: r as f32, g: g as f32, b: b as f32, a: a as f32 }));
         let mut painter = Direct2DPainter::new(rt);
         crate::ffi_pointer::emit_frame(engine, &mut painter);
         if let Err(e) = rt.EndDraw(None, None) {
