@@ -89,6 +89,20 @@ pub fn panel_kind_str(k: PanelKind) -> &'static str {
     }
 }
 
+/// A detach that carries the drop's viewport (`viewport_w`, `viewport_h`)
+/// snaps the new dock to the edge it was dropped near, in the same op, as the
+/// web's dock-tab drop does (`is_near_edge`, then `snap_to_edge`). With no
+/// viewport, or away from every edge, the dock floats. One op, so a shell
+/// never needs the new dock's id to finish its own drop.
+fn snap_if_dropped_near_an_edge(layout: &mut WorkspaceLayout, op: &serde_json::Value, fid: Option<DockId>) {
+    let (Some(fid), Some(vw), Some(vh)) = (fid, op["viewport_w"].as_f64(), op["viewport_h"].as_f64()) else {
+        return;
+    };
+    if let Some(edge) = WorkspaceLayout::is_near_edge(f(op, "x"), f(op, "y"), vw, vh) {
+        layout.snap_to_edge(fid, edge);
+    }
+}
+
 /// Parse a dock-edge string (`left` / `right` / `bottom`, as `test_json`
 /// writes it). Unknown is `None`, so `snap_to_edge` skips rather than guess
 /// an edge.
@@ -326,7 +340,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
             );
         }
         "detach_group" => {
-            layout.detach_group(
+            let fid = layout.detach_group(
                 GroupAddr {
                     dock_id: DockId(u(op, "dock_id")),
                     group_idx: u(op, "group_idx"),
@@ -334,6 +348,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                 f(op, "x"),
                 f(op, "y"),
             );
+            snap_if_dropped_near_an_edge(layout, op, fid);
         }
         "redock" => {
             layout.redock(DockId(u(op, "dock_id")));
@@ -341,7 +356,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
         // ---- Floating docks (the floating-panels node: one verb per
         // `WorkspaceLayout` method a shell drives, so no shell forks the law) ----
         "detach_panel" => {
-            layout.detach_panel(
+            let fid = layout.detach_panel(
                 PanelAddr {
                     group: GroupAddr {
                         dock_id: DockId(u(op, "dock_id")),
@@ -352,6 +367,7 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
                 f(op, "x"),
                 f(op, "y"),
             );
+            snap_if_dropped_near_an_edge(layout, op, fid);
         }
         "set_floating_position" => {
             layout.set_floating_position(DockId(u(op, "dock_id")), f(op, "x"), f(op, "y"));
@@ -452,4 +468,57 @@ pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value
         _ => return false,
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::workspace::DockEdge;
+    use serde_json::json;
+
+    fn edges(l: &WorkspaceLayout) -> Vec<DockEdge> {
+        l.anchored.iter().map(|(e, _)| *e).collect()
+    }
+
+    /// A detach carrying the viewport snaps the new dock to the edge it was
+    /// dropped near, in the same op, as the web's dock-tab drop does (detach,
+    /// then `snap_to_edge` on `is_near_edge`); away from every edge, or with no
+    /// viewport, it floats. Each case is driven against the plain detach. An
+    /// edge that already holds an anchored dock takes the group INTO that dock
+    /// (`snap_to_edge` merges, as `redock` does), so the right edge adds no dock:
+    /// the detached group lands last in the right dock.
+    #[test]
+    fn a_detach_dropped_near_an_edge_snaps_there() {
+        let vp = |mut op: serde_json::Value| { op["viewport_w"] = json!(1200.0); op["viewport_h"] = json!(800.0); op };
+        let group = |x: f64, y: f64| json!({"op": "detach_group", "dock_id": 0, "group_idx": 0, "x": x, "y": y});
+        let panel = |x: f64, y: f64| json!({"op": "detach_panel", "dock_id": 0, "group_idx": 0, "panel_idx": 1, "x": x, "y": y});
+        for (op, want_edge) in [
+            (vp(group(5.0, 200.0)), Some(DockEdge::Left)),
+            (vp(panel(600.0, 790.0)), Some(DockEdge::Bottom)),
+            (vp(group(500.0, 300.0)), None),
+            (group(5.0, 200.0), None),
+        ] {
+            let mut l = WorkspaceLayout::default_layout();
+            assert!(layout_apply_checked(&mut l, &op), "{op}");
+            match want_edge {
+                Some(e) => {
+                    assert!(l.floating.is_empty(), "{op}: snapped, so nothing floats");
+                    assert_eq!(edges(&l).len(), 2, "{op}: a second anchored dock");
+                    assert_eq!(edges(&l)[1], e, "{op}");
+                }
+                None => {
+                    assert_eq!(l.floating.len(), 1, "{op}: it floats");
+                    assert_eq!(edges(&l), vec![DockEdge::Right], "{op}: no new anchored dock");
+                }
+            }
+        }
+        let mut l = WorkspaceLayout::default_layout();
+        let first = l.anchored[0].1.groups[0].panels.clone();
+        let n = l.anchored[0].1.groups.len();
+        assert!(layout_apply_checked(&mut l, &vp(group(1195.0, 200.0))));
+        assert!(l.floating.is_empty(), "snapped right, so nothing floats");
+        assert_eq!(edges(&l), vec![DockEdge::Right], "merged into the right dock, no second one");
+        assert_eq!(l.anchored[0].1.groups.len(), n, "the group left and came back");
+        assert_eq!(l.anchored[0].1.groups[n - 1].panels, first, "it lands last");
+    }
 }
