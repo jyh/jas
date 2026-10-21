@@ -1760,14 +1760,27 @@ public sealed partial class MainWindow
             // completion can give it back. Cleared at every commit, so it is never
             // older than the core's own value.
             string? typed = null;
-            combo.DropDownOpened += (_, _) => listJustClosed = false;
+            // § 502: the editable combo's event ORDER is the open question (which
+            // event moves the selection, and when the box text changes), and it
+            // cannot be read from outside the process. One row per event, with
+            // the box, the selection, the core's index, the list and `typed`.
+            void Trace(string ev)
+            {
+                if (!combo.IsEditable) { return; }
+                var state = combo.Tag as ChoiceState;
+                _w.Report($"COMBO TRACE id={id} ev={ev} box='{EditableText(combo)}' sel={combo.SelectedIndex} "
+                    + $"core={state?.Index ?? -1} open={combo.IsDropDownOpen} just={listJustClosed} typed='{typed}'");
+            }
+            combo.DropDownOpened += (_, _) => { listJustClosed = false; Trace("list-open"); };
             combo.DropDownClosed += (_, _) =>
             {
+                Trace("list-closed");
                 listJustClosed = true;
                 combo.DispatcherQueue.TryEnqueue(() => listJustClosed = false);
             };
             combo.SelectionChanged += (_, _) =>
             {
+                Trace("selection");
                 var state = combo.Tag as ChoiceState;
                 // flask § 499: in an editable combo the platform completes typed
                 // text to an option and moves the selection there; that is not a
@@ -1784,6 +1797,7 @@ public sealed partial class MainWindow
                     {
                         combo.SelectedIndex = state?.Index ?? -1;
                         if ((state?.Index ?? -1) < 0) { combo.Text = typed ?? state?.Text ?? ""; }
+                        Trace("undone");
                     }
                     return;
                 }
@@ -1810,12 +1824,14 @@ public sealed partial class MainWindow
                     text.MinHeight = 0;
                     text.Padding = new Thickness(4, 0, 4, 0);
                     text.VerticalContentAlignment = VerticalAlignment.Center;
-                    text.KeyUp += (_, _) => typed = text.Text;
+                    text.KeyUp += (_, e) => { typed = text.Text; Trace($"key-up:{e.Key}"); };
+                    text.KeyDown += (_, e) => Trace($"key-down:{e.Key}");
                 };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text
                 // that names an item is left to SelectionChanged above.
                 combo.TextSubmitted += (_, e) =>
                 {
+                    Trace($"submitted:'{e.Text}'");
                     var state = combo.Tag as ChoiceState;
                     if (items.Any(r => string.Equals(PanelWire.ChoiceText(r), e.Text, StringComparison.Ordinal))) { return; }
                     e.Handled = true;
@@ -1839,7 +1855,8 @@ public sealed partial class MainWindow
                     SendPane(id, "commit", send, leaf.Path);
                     combo.Text = state?.Text ?? "";
                 }
-                combo.LostFocus += (_, _) => Blur(combo.IsDropDownOpen || FocusStaysIn(combo));
+                combo.LostFocus += (_, _) => { Trace("lost-focus"); Blur(combo.IsDropDownOpen || FocusStaysIn(combo)); };
+                combo.GotFocus += (_, _) => Trace("got-focus");
                 // From the canvas press, focus IS leaving, though it has not left yet.
                 _blurCommits.AddOrUpdate(combo, () => Blur(false));
             }
