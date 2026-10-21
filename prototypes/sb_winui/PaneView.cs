@@ -1835,25 +1835,18 @@ public sealed partial class MainWindow
                     text.MinHeight = 0;
                     text.Padding = new Thickness(4, 0, 4, 0);
                     text.VerticalContentAlignment = VerticalAlignment.Center;
-                    text.KeyUp += (_, _) => typed = text.Text;
+                    // Arrows and Enter are not typing: they never change what `typed` holds.
+                    text.KeyUp += (_, e) =>
+                    {
+                        if (e.Key is Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down
+                                  or Windows.System.VirtualKey.Enter) { return; }
+                        typed = text.Text;
+                    };
                     // § 503: Enter is the SHELL's. The platform's own Enter resolved
                     // its stale `Text` (a completed `135`) over the editor's `31`
                     // and raised no TextSubmitted. Handled here, it never runs.
                     text.PreviewKeyDown += (_, e) =>
                     {
-                        if (!combo.IsDropDownOpen && (e.Key == Windows.System.VirtualKey.Down || e.Key == Windows.System.VirtualKey.Up))
-                        {
-                            // § 505: with the list shut the platform's arrow stepped
-                            // the box and sent nothing. The shell picks, from the
-                            // core's own item, and commits it as a pick.
-                            e.Handled = true;
-                            var at = combo.Tag as ChoiceState;
-                            var next = PanelWire.ArrowPick(at?.Index ?? -1, items.Count, e.Key == Windows.System.VirtualKey.Down);
-                            var pick = PanelWire.ChoiceCommit(next, items, at?.Shown);
-                            typed = null;
-                            if (pick is not null) { SendPane(id, "commit", pick, leaf.Path); }
-                            return;
-                        }
                         if (e.Key != Windows.System.VirtualKey.Enter) { return; }
                         e.Handled = true;
                         var state = combo.Tag as ChoiceState;
@@ -1891,6 +1884,24 @@ public sealed partial class MainWindow
                     combo.Text = state?.Text ?? "";
                 }
                 combo.LostFocus += (_, _) => Blur(combo.IsDropDownOpen || FocusStaysIn(combo));
+                // § 505 / § 506: with the list shut, Up/Down are the shell's. The
+                // ComboBox's own class handler takes them FIRST, at this level, and
+                // marks them handled, so an editor `+=` handler never saw them (§ 506:
+                // no row). Registered here with handledEventsToo, this runs after the
+                // platform has moved the box, and commits the step from the CORE's
+                // item. The re-read then shows the committed value.
+                combo.AddHandler(UIElement.PreviewKeyDownEvent, new KeyEventHandler((_, e) =>
+                {
+                    if (combo.IsDropDownOpen) { return; }
+                    if (e.Key is not (Windows.System.VirtualKey.Down or Windows.System.VirtualKey.Up)) { return; }
+                    e.Handled = true;
+                    var at = combo.Tag as ChoiceState;
+                    var next = PanelWire.ArrowPick(at?.Index ?? -1, items.Count, e.Key == Windows.System.VirtualKey.Down);
+                    var pick = PanelWire.ChoiceCommit(next, items, at?.Shown);
+                    _w.Report($"COMBO ARROW id={id} key={e.Key} core={at?.Index ?? -1} next={next} sent={pick ?? "-"}");
+                    typed = null;
+                    if (pick is not null) { SendPane(id, "commit", pick, leaf.Path); }
+                }), true);
                 // § 504 row 15: on RE-ENTRY the platform completes a free value
                 // (`13` showed `135`) after the put-back has written it, and an
                 // Enter on that untouched box would commit `135`. One turn after
