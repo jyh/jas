@@ -2,20 +2,27 @@ id: character_panel_content
 type: panel
 summary: "Character"
 description: >
-  Character formatting panel — initial placeholder implementation.
-  Provides font family, style-name, font size, leading, kerning,
-  tracking, vertical and horizontal scale, baseline shift, character
-  rotation, six character toggle buttons (All Caps, Small Caps,
-  Superscript, Subscript, Underline, Strikethrough), language, and
-  anti-aliasing mode, all bound to panel-local state.
+  Character formatting panel: font family, style name, font size,
+  leading, kerning, tracking, vertical and horizontal scale, baseline
+  shift, character rotation, six character toggle buttons (All Caps,
+  Small Caps, Superscript, Subscript, Underline, Strikethrough),
+  language, and anti-aliasing mode.
 
-  Everything here is a placeholder bound to panel-local state — no
-  control is yet wired to per-tspan attributes on the selection.
-  Real editing arrives alongside the tspan-aware Character panel
-  work (set_character_attribute via the unified TSPAN.md algorithm,
-  mixed-value display for character-range selections, parens-default
-  display for computed defaults, and the Snap to Glyph section) once
-  that plumbing is in place across all four native apps.
+  Its controls display panel state, and a committed edit writes to the
+  selected text by the field-scoped apply law (transcripts/CHARACTER.md
+  "The field-scoped apply law"; the reference's field-to-group table is
+  workspace_interpreter/character_law.py): the edited field writes only
+  the attribute group it owns, and every other character attribute is
+  kept as each element has it. A field that owns no attribute (the
+  Snap to Glyph flags, the section toggles) writes nothing, not even an
+  undo step. With a text element selected as an object, the edit
+  writes that element's attributes, element by element. With a
+  character range selected in an editing session, it writes per-tspan
+  overrides on the range (TSPAN.md), so a range can carry its own
+  rotation or baseline shift; kerning and the two glyph scales have no
+  per-tspan form and write nothing on a range. With a bare caret, it
+  sets the formatting of the next typed character and changes no
+  document. With no text selected, the panel is disabled.
 
 state:
   font_family:
