@@ -136,6 +136,9 @@ pub enum KeyRoute {
     DeleteSelection,
     /// The active tool's `on_key_event`, with this named key.
     ToolKey(&'static str),
+    /// The active tool's `on_key_event`, with this character: a tool that
+    /// captures the keyboard takes every key first (the web's law).
+    ToolChar(String),
     /// The model's undo.
     Undo,
     /// The model's redo.
@@ -176,6 +179,13 @@ pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
     }
     let mut chars = name.chars();
     let (Some(ch), None) = (chars.next(), chars.next()) else { return KeyRoute::BadKey };
+    // A tool editing text takes every character and chord first, as on the
+    // web (`workspace/keyboard.rs`), except Cmd+V: the paste takes the
+    // clipboard path so the tool receives the clipboard's text.
+    let paste = mods.ctrl && (ch == 'v' || ch == 'V');
+    if !paste && tool_takes(name) {
+        return KeyRoute::ToolChar(name.to_string());
+    }
     let chord = KeyChord::new(&ch.to_string(), mods.ctrl, mods.shift, mods.alt, false);
     let Some(cmd) = resolve_key(&chord) else { return KeyRoute::Unhandled };
     // W5-3c: a COMMAND chord acts only where the engine can do the action
@@ -211,6 +221,22 @@ mod route_key_tests {
     fn an_unclaimed_delete_or_backspace_deletes_the_selection() {
         assert_eq!(route_key("Delete", m(false, false), free), KeyRoute::DeleteSelection);
         assert_eq!(route_key("Backspace", m(false, false), free), KeyRoute::DeleteSelection);
+    }
+
+    /// The web's law (`workspace/keyboard.rs`): while a tool captures the
+    /// keyboard (a text-editing session), every key goes to it first, a
+    /// character and a command chord alike, except Cmd+V, which takes the
+    /// clipboard path so the tool receives the clipboard's text. Without this
+    /// a typed `H` selected the Hand tool (the 10-20 feel sitting, finding 3).
+    #[test]
+    fn a_tool_that_captures_the_keyboard_takes_characters_and_chords_but_not_paste() {
+        assert_eq!(route_key("H", m(false, false), takes), KeyRoute::ToolChar("H".into()));
+        assert_eq!(route_key("i", m(false, true), takes), KeyRoute::ToolChar("i".into()));
+        assert_eq!(route_key("z", m(true, false), takes), KeyRoute::ToolChar("z".into()));
+        assert_eq!(route_key("v", m(true, false), takes), route_key("v", m(true, false), free),
+                   "Cmd+V takes the clipboard path whether or not a tool captures");
+        // Control: without a capturing tool, `H` is the Hand tool's shortcut.
+        assert_eq!(route_key("H", m(false, false), free), KeyRoute::SelectTool("hand".into()));
     }
 
     #[test]

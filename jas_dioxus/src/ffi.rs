@@ -4953,19 +4953,20 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The Type button names a tool no shell tool answers yet (the type tools
-    /// are native). Its checked state must not claim a tool the pointer is not
-    /// driving: `active_tool` stays the real tool, and the click says Unchanged.
+    /// The Type button selects the Type tool. Until 2026-10-20 no shell tool
+    /// answered `type`, so this click said Unchanged and the checked button
+    /// stayed the real tool; all ten of his clicks in the 10-20 feel sitting
+    /// read `outcome=unchanged` (finding 3). Now the pointer drives it, and the
+    /// checked state says so.
     #[test]
-    fn a_toolbar_click_on_a_tool_the_shell_lacks_changes_nothing() {
+    fn a_toolbar_click_on_the_type_button_selects_the_type_tool() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         assert_eq!(unsafe { crate::ffi_pointer::jas_set_tool(e, 0) }, JasStatus::Ok);
-        let (_, err) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
-        assert_eq!(slot_tool(e), Some("selection"));
-        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"),
-                   "the toolbar's checked button stays the tool the pointer drives");
-        assert!(err.contains("Unchanged"), "{err}");
+        let (reply, _) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
+        assert!(!reply.is_empty(), "the click ran: {}", take(unsafe { jas_last_error_json(e) }));
+        assert_eq!(slot_tool(e), Some("type"), "the pointer now drives the Type tool");
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("type"));
         unsafe { jas_engine_free(e) };
     }
 

@@ -205,6 +205,7 @@ fn replay_key(model: &mut Model, tool: &mut crate::tools::yaml_tool::YamlTool, e
             let _ = crate::workspace::menu_native::delete_selection(model);
         }
         KeyRoute::ToolKey(k) => { tool.on_key_event(model, k, km); }
+        KeyRoute::ToolChar(c) => { tool.on_key_event(model, &c, km); }
         KeyRoute::Undo => model.undo(),
         KeyRoute::Redo => model.redo(),
         KeyRoute::SelectTool(id) => {
