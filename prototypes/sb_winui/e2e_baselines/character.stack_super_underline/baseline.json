@@ -1,7 +1,7 @@
 {
     "item":  "character.stack_super_underline",
     "surface":  "2379x1333",
-    "frame_hash":  "ddbe3d0d320431ec1fe09ef846fd17e002b482dd8809529de3f01aa3234276cf",
+    "frame_hash":  "c85f4d5c2656b850287604c05c72a60fd56c315733d7b61502187d601638ed2e",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "19791c998b7d7aaf",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

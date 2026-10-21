@@ -1,7 +1,7 @@
 {
     "item":  "character.horizontal_scale",
     "surface":  "2379x1333",
-    "frame_hash":  "265f98e6ca5281118e37db69872b45e7ff89f3f2369023b292cad23cbadacf5c",
+    "frame_hash":  "eead8ab61c13540504208df678aa852d64ed517e09966241f1b03a8de83f4660",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "cf24258814279922",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

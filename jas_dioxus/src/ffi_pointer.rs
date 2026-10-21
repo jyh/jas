@@ -505,6 +505,23 @@ pub unsafe extern "C" fn jas_selection_len(e: *mut JasEngine) -> usize {
 /// The overlay is skipped, not faked, when no tool has been selected -- a
 /// frame with no tool is a document, which is what `jas_paint_document` has
 /// always drawn.
+/// THE PASTEBOARD: the colour a native frame clears to, under everything,
+/// in screen space -- the web canvas's layer 1 (`app_state.rs`), which fills
+/// the viewport with the theme's `pane_bg` before the view transform, so a
+/// white page shows against it. The active appearance's colour wins over the
+/// base's. `None` when the workspace states none (the caller keeps its clear).
+pub(crate) fn pasteboard_color() -> Option<crate::geometry::element::Color> {
+    crate::interpreter::workspace::Workspace::load().and_then(|ws| pasteboard_color_of(ws.theme()))
+}
+
+/// [`pasteboard_color`] of a theme value (`workspace.json`'s `theme`).
+pub(crate) fn pasteboard_color_of(theme: &serde_json::Value) -> Option<crate::geometry::element::Color> {
+    let active = theme.get("active").and_then(serde_json::Value::as_str);
+    let own = active.and_then(|a| theme.get("appearances")?.get(a)?.get("colors")?.get("pane_bg"));
+    let base = || theme.get("base")?.get("colors")?.get("pane_bg");
+    own.or_else(base)?.as_str().and_then(crate::geometry::element::Color::from_hex)
+}
+
 pub(crate) fn emit_frame(engine: &JasEngine, p: &mut dyn crate::painter::Painter) {
     // THE VIEW, as the web canvas applies it (`app_state.rs`:
     // `translate(view_offset) . scale(zoom)` around `render::render`): the
@@ -586,6 +603,33 @@ fn build_tool(id: &str) -> Option<Box<dyn CanvasTool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// THE PASTEBOARD (flask's ⚠️(1) on #595: the white page was invisible on a
+    /// white canvas). The web fills the viewport with the theme's `pane_bg`
+    /// before the view (`app_state.rs`, layer 1); the native frame clears to it.
+    /// The ACTIVE appearance's colours win over the base's, as a theme reads.
+    #[test]
+    fn the_pasteboard_is_the_active_appearances_pane_bg_over_the_base() {
+        let base = serde_json::json!({"active": "dark", "base": {"colors": {"pane_bg": "#3c3c3c"}},
+                                      "appearances": {"dark": {"label": "Dark"}}});
+        assert_eq!(pasteboard_color_of(&base), crate::geometry::element::Color::from_hex("#3c3c3c"),
+                   "an appearance with no colours reads the base");
+        let light = serde_json::json!({"active": "light", "base": {"colors": {"pane_bg": "#3c3c3c"}},
+                                       "appearances": {"light": {"colors": {"pane_bg": "#f0f0f0"}}}});
+        assert_eq!(pasteboard_color_of(&light), crate::geometry::element::Color::from_hex("#f0f0f0"),
+                   "the active appearance's own colour wins");
+        assert_eq!(pasteboard_color_of(&serde_json::json!({})), None, "no theme, no colour: the caller keeps its clear");
+        assert_eq!(pasteboard_color_of(&serde_json::json!({"base": {"colors": {"pane_bg": "nope"}}})), None,
+                   "a colour that does not parse is none, never black");
+        // The shipped workspace has one, and it is what the theme file states
+        // for its active appearance, read here by the same two keys.
+        let ws = crate::interpreter::workspace::Workspace::load().expect("the workspace");
+        let t = ws.theme();
+        let active = t["active"].as_str().expect("an active appearance");
+        let want = t["appearances"][active]["colors"]["pane_bg"].as_str()
+            .or_else(|| t["base"]["colors"]["pane_bg"].as_str()).expect("a pane_bg");
+        assert_eq!(pasteboard_color(), crate::geometry::element::Color::from_hex(want));
+    }
     use crate::document::document::{Document, ElementSelection};
     use crate::geometry::element::{CommonProps, Element, LayerElem, RectElem};
     use crate::ffi::{jas_engine_free, jas_engine_new};

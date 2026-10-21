@@ -1,7 +1,7 @@
 {
     "item":  "character.font_family",
     "surface":  "2379x1333",
-    "frame_hash":  "2947a63beb13fc1af900358b51b02d511c5f64fa6e41f9aa0da8cc56b0a93fae",
+    "frame_hash":  "6c61d98e64a545ab60e6cf34099cf74eff1c388d86588423ac8c481b9fe9f9f6",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "29d6afa4b275f818",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

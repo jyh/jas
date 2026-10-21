@@ -1,7 +1,7 @@
 {
     "item":  "character.superscript",
     "surface":  "2379x1333",
-    "frame_hash":  "56655f4153f9cf2ed9f34ca26291d4e5a39b0481aa8ba089ed72c8f54fea079a",
+    "frame_hash":  "388b471bfaa6b975846cf2adc6426ee8fe27bcb5f2f859f9d7491ede109b46e9",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "d47db5fa8678bbe3",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

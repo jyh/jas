@@ -1,7 +1,7 @@
 {
     "item":  "gradient.dither",
     "surface":  "2379x1333",
-    "frame_hash":  "20691342b7648e84dcdbc826831705bb0a586b2c5fb49d95c80c7ed157234d1f",
+    "frame_hash":  "fa4e76e83f0e7a21ef07c6400209a25749ce412c630b3d3ed048d74940b8ea22",
     "plan_panel":  "gradient_panel_content",
     "plan_sha":  "42e9cb394cea5aa2",
     "tab":  "[0,0]=on:\"rect_with_stroke.svg\"",
