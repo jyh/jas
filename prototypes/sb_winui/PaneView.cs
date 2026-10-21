@@ -1272,7 +1272,13 @@ public sealed partial class MainWindow
                     {
                         combo.SelectedIndex = index;
                         // A value no item carries (a free entry) is shown as text.
-                        if (combo.IsEditable && index < 0) { combo.Text = shownText; }
+                        if (combo.IsEditable && index < 0)
+                        {
+                            combo.Text = shownText;
+                            // § 503 row 15: setting `combo.Text` COMPLETES it (`13`
+                            // showed `135`), so the editor is given the shown text too.
+                            if (EditableTextBox(combo) is { } box && box.Text != shownText) { box.Text = shownText; }
+                        }
                     }
                     off = off || leaf.Id.Length == 0;
                     combo.IsEnabled = !off;
@@ -1760,6 +1766,7 @@ public sealed partial class MainWindow
             // completion can give it back. Cleared at every commit, so it is never
             // older than the core's own value.
             string? typed = null;
+            var undoing = false;
             // § 502: the editable combo's event ORDER is the open question (which
             // event moves the selection, and when the box text changes), and it
             // cannot be read from outside the process. One row per event, with
@@ -1793,10 +1800,19 @@ public sealed partial class MainWindow
                     // the core's own index, and the typed text (else the core's).
                     // The put-back raises SelectionChanged again, at the core's
                     // index, which lands here and changes nothing.
-                    if (combo.SelectedIndex != (state?.Index ?? -1))
+                    // § 503: the put-back raises SelectionChanged again; `undoing`
+                    // keeps that nested event from undoing the undo. Typed text
+                    // goes back through the EDITOR, never `combo.Text`: setting
+                    // `combo.Text` is itself what completes (§ 503 row 15), and a
+                    // core value that IS an item (index 3, `0`) must not win over
+                    // what the person typed (§ 503 measurement 4).
+                    if (!undoing && combo.SelectedIndex != (typed is null ? state?.Index ?? -1 : -1))
                     {
-                        combo.SelectedIndex = state?.Index ?? -1;
-                        if ((state?.Index ?? -1) < 0) { combo.Text = typed ?? state?.Text ?? ""; }
+                        undoing = true;
+                        combo.SelectedIndex = typed is null ? state?.Index ?? -1 : -1;
+                        var back = typed ?? ((state?.Index ?? -1) < 0 ? state?.Text : null);
+                        if (back is not null && EditableTextBox(combo) is { } box) { box.Text = back; }
+                        undoing = false;
                         Trace("undone");
                     }
                     return;
@@ -1825,6 +1841,19 @@ public sealed partial class MainWindow
                     text.Padding = new Thickness(4, 0, 4, 0);
                     text.VerticalContentAlignment = VerticalAlignment.Center;
                     text.KeyUp += (_, e) => { typed = text.Text; Trace($"key-up:{e.Key}"); };
+                    // § 503: Enter is the SHELL's. The platform's own Enter resolved
+                    // its stale `Text` (a completed `135`) over the editor's `31`
+                    // and raised no TextSubmitted. Handled here, it never runs.
+                    text.PreviewKeyDown += (_, e) =>
+                    {
+                        if (e.Key != Windows.System.VirtualKey.Enter) { return; }
+                        e.Handled = true;
+                        var state = combo.Tag as ChoiceState;
+                        var send = PanelWire.EnterCommit(text.Text, state?.Shown ?? "", state?.Text ?? "", items);
+                        Trace($"enter:'{send}'");
+                        typed = null;
+                        if (send is not null) { SendPane(id, "commit", send, leaf.Path); }
+                    };
                     text.KeyDown += (_, e) => Trace($"key-down:{e.Key}");
                 };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text

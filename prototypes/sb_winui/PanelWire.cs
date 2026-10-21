@@ -558,6 +558,21 @@ internal static class PanelWire
         dropDownOpen || listJustClosed;
 
     /// <summary>
+    /// What Enter in an editable combo sends, from the EDITOR's text: the value
+    /// of the item it names, or the text itself when it names none; nothing
+    /// when it is the core's own value or text, or blank. The shell takes Enter
+    /// itself (flask § 503: the platform's Enter resolved its own stale text,
+    /// `135`, over the editor's `31`, and raised no TextSubmitted).
+    /// </summary>
+    internal static string? EnterCommit(string? typed, string shownValue, string shownText, List<PaneOption> items)
+    {
+        if (string.IsNullOrWhiteSpace(typed)) { return null; }
+        var named = items.FindIndex(r => string.Equals(ChoiceText(r), typed, StringComparison.Ordinal));
+        if (named >= 0) { return ChoiceCommit(named, items, shownValue); }
+        return CommitOnBlur(typed, shownValue) && CommitOnBlur(typed, shownText) ? typed : null;
+    }
+
+    /// <summary>
     /// W-b: the text an item shows in the list. An `icon_select` row carries a
     /// `glyph` (a single mark, "•") beside its label, and both are shown; any
     /// other row shows its label.
