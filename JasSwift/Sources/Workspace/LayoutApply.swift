@@ -238,6 +238,18 @@ private func stringOf(_ op: [String: Any], _ key: String) -> String? {
     op[key] as? String
 }
 
+/// Parse a dock-edge string (`left` / `right` / `bottom`). Unknown or absent
+/// is `nil`, so `snap_to_edge` skips rather than guess an edge (Rust's
+/// `layout_apply::parse_dock_edge`).
+func layoutParseDockEdge(_ s: String?) -> DockEdge? {
+    switch s {
+    case "left": return .left
+    case "right": return .right
+    case "bottom": return .bottom
+    default: return nil
+    }
+}
+
 // MARK: - The dispatcher
 
 /// Apply one primitive LAYOUT op to `layout`. The SINGLE per-verb mutation body
@@ -299,6 +311,34 @@ public func layoutApply(_ layout: inout WorkspaceLayout, _ op: [String: Any]) {
 
     case "redock":
         layout.redock(DockId(intOf(op, "dock_id")))
+
+    // ---- Floating docks (the floating-panels node: one verb per
+    // `WorkspaceLayout` method a shell drives, so no shell forks the law) ----
+    case "detach_panel":
+        _ = layout.detachPanel(
+            PanelAddr(
+                group: GroupAddr(
+                    dockId: DockId(intOf(op, "dock_id")),
+                    groupIdx: intOf(op, "group_idx")),
+                panelIdx: intOf(op, "panel_idx")),
+            x: doubleOf(op, "x"),
+            y: doubleOf(op, "y"))
+
+    case "set_floating_position":
+        layout.setFloatingPosition(DockId(intOf(op, "dock_id")),
+                                   x: doubleOf(op, "x"), y: doubleOf(op, "y"))
+
+    case "bring_to_front":
+        layout.bringToFront(DockId(intOf(op, "dock_id")))
+
+    case "snap_to_edge":
+        // Unknown or missing edge SKIPS, as the Rust twin does.
+        guard let edge = layoutParseDockEdge(stringOf(op, "edge")) else { return }
+        layout.snapToEdge(DockId(intOf(op, "dock_id")), edge: edge)
+
+    case "clamp_floating_docks":
+        layout.clampFloatingDocks(viewportW: doubleOf(op, "viewport_w"),
+                                  viewportH: doubleOf(op, "viewport_h"))
 
     // ---- Pane operations (mutate the inner PaneLayout) ----
     // `panesMut` is itself the `if let Some(pl) = pane_layout` guard: it

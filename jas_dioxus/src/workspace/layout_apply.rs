@@ -31,7 +31,7 @@
 //! always carry well-formed params) replay byte-identically.
 
 use crate::workspace::workspace::{
-    DockId, GroupAddr, PanelAddr, PanelKind, WorkspaceLayout,
+    DockEdge, DockId, GroupAddr, PanelAddr, PanelKind, WorkspaceLayout,
 };
 use crate::workspace::pane::PaneId;
 use crate::workspace::workspace::PaneKind;
@@ -86,6 +86,18 @@ pub fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::MagicWand => "magic_wand",
         PanelKind::Symbols => "symbols",
         PanelKind::Concepts => "concepts",
+    }
+}
+
+/// Parse a dock-edge string (`left` / `right` / `bottom`, as `test_json`
+/// writes it). Unknown is `None`, so `snap_to_edge` skips rather than guess
+/// an edge.
+fn parse_dock_edge(s: &str) -> Option<DockEdge> {
+    match s {
+        "left" => Some(DockEdge::Left),
+        "right" => Some(DockEdge::Right),
+        "bottom" => Some(DockEdge::Bottom),
+        _ => None,
     }
 }
 
@@ -311,6 +323,37 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         }
         "redock" => {
             layout.redock(DockId(u(op, "dock_id")));
+        }
+        // ---- Floating docks (the floating-panels node: one verb per
+        // `WorkspaceLayout` method a shell drives, so no shell forks the law) ----
+        "detach_panel" => {
+            layout.detach_panel(
+                PanelAddr {
+                    group: GroupAddr {
+                        dock_id: DockId(u(op, "dock_id")),
+                        group_idx: u(op, "group_idx"),
+                    },
+                    panel_idx: u(op, "panel_idx"),
+                },
+                f(op, "x"),
+                f(op, "y"),
+            );
+        }
+        "set_floating_position" => {
+            layout.set_floating_position(DockId(u(op, "dock_id")), f(op, "x"), f(op, "y"));
+        }
+        "bring_to_front" => {
+            layout.bring_to_front(DockId(u(op, "dock_id")));
+        }
+        "snap_to_edge" => {
+            let edge = match op["edge"].as_str().and_then(parse_dock_edge) {
+                Some(e) => e,
+                None => return, // required field missing or unknown: skip
+            };
+            layout.snap_to_edge(DockId(u(op, "dock_id")), edge);
+        }
+        "clamp_floating_docks" => {
+            layout.clamp_floating_docks(f(op, "viewport_w"), f(op, "viewport_h"));
         }
         // ---- Pane operations (mutate the inner PaneLayout) ----
         // Each early-returns (skips) when there is no pane layout, matching the
