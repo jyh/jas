@@ -410,6 +410,16 @@ content:
             stops: "panel.stops"
             selected_stop_index: "panel.selected_stop_index"
             selected_midpoint_index: "panel.selected_midpoint_index"
+          behavior:
+            - event: commit
+              description: >-
+                A slider gesture finished: a stop or midpoint released after a drag, a
+                stop added by a click on the bar, or a key (WIDGET_EVENTS.md §The stops
+                kind). The procedure has already written panel.stops by the slider law
+                (GRADIENT.md, The slider law (precisely)); event.value is the new stops
+                list, and gradient_stops writes it to the selection's gradient.
+              effects:
+                - set: { gradient_stops: "event.value" }
         - id: grad_trash_button
           type: icon_button
           col: 2

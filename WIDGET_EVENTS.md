@@ -49,7 +49,7 @@ the field. They now write `event.value`, and Dither's behavior also writes
 
 ## The event table
 
-The table below is the whole vocabulary for the seventeen kinds it names. A
+The table below is the whole vocabulary for the eighteen kinds it names. A
 behavior on one of these kinds whose `event` is not listed for that kind
 is refused by the lint.
 
@@ -72,6 +72,7 @@ dropdown: toggle, alt_toggle
 radio_group: toggle
 button: click, mouse_down, mouse_up
 icon_button: click, mouse_down, mouse_up
+gradient_slider: commit
 ```
 <!-- widget-event-table:end -->
 
@@ -98,11 +99,68 @@ icon_button: click, mouse_down, mouse_up
   click never runs them, and this document does not define them beyond
   naming them.
 
+- **The stops kind** is `gradient_slider`. Its one behavior event,
+  `commit`, names "a gesture finished". A shell reports gestures, not
+  values (see §The stops kind).
+
 **Outside this contract, deliberately:** every other widget kind. That
 includes the color widgets other than `color_bar`. Their events are not
 ruled here, and there is nothing missing from this section: extending the
 contract to a kind is a change to this document, the module and the lint
 together.
+
+## The stops kind
+
+A `gradient_slider` edits a list of colour stops, and its gestures need the
+slider law (`transcripts/GRADIENT.md`, *The slider law (precisely)*;
+executable in `workspace_interpreter/gradient_law.py`). No shell computes
+that law, so a shell reports each gesture with its RAW parameters, and the
+procedure (`widget_event.gesture`) applies it. The parameters are a stop or
+pair index, a `location` in percent along the bar, and `dy`, the pointer's
+distance in pixels from the bar's centre line.
+
+The widget's three binds (`stops`, `selected_stop_index`,
+`selected_midpoint_index`) must each be a `panel.` field, or every gesture is
+refused `NotWritable`.
+
+| gesture | parameters | what it does |
+|---|---|---|
+| `press` | `index` | selects the stop (the midpoint becomes −1) and snapshots the stops into `panel.<stops key>__press` |
+| `drag` | `location`, `dy` | `drag_stop` over the SNAPSHOT; writes the stops and the selection |
+| `release` | `location`, `dy` | as `drag`, then clears the snapshot and runs the `commit` behaviors |
+| `press_midpoint` | `pair` | selects the midpoint (the stop becomes −1) and snapshots |
+| `drag_midpoint` | `location` | `drag_midpoint` over the snapshot; writes the stops |
+| `release_midpoint` | `location` | as `drag_midpoint`, then clears the snapshot and runs the `commit` behaviors |
+| `add` | `location` | `add_stop` over the current stops; selects the new stop; runs the `commit` behaviors |
+| `key` | `key`, `shift` | GRADIENT.md's keyboard table over the current stops; runs the `commit` behaviors |
+
+- **A drag is computed from the press, never from the last preview**, and it
+  runs NO behavior. The behaviors (which write the document) run once per
+  gesture, so a drag is one undo step. The slider redraws from the store
+  while it moves.
+- **While a snapshot exists, the panel shows the STORE's stops and
+  selection.** A port whose panel scope is derived from the document (the
+  engine's, `panel_scope::engine_scope`, after W2b-7) must let the store's
+  `stops`, `selected_stop_index` and `selected_midpoint_index` stand over the
+  document's for as long as `panel.<stops key>__press` is set. Otherwise a
+  drag's preview is invisible whenever the selection holds a gradient, which
+  is the only case a preview is for. In the reference the store IS the
+  scope, so the rule changes nothing there. Once the snapshot is cleared,
+  the scope derives from the document again, which by then holds what the
+  release committed.
+- **The current stops are the panel SCOPE's** (in the engine, the
+  selection's gradient), not a store copy that the scope overrides. A press,
+  an add and a key read them there.
+- **`event.value` in a `commit` behavior is the new stops list.**
+- **A `drag` or `release` with no snapshot of its kind is refused
+  `NoPress`**, never read as a press and release at one point.
+- **A gesture the law refuses writes nothing** and is refused `LawRefused`
+  (an index naming no stop, an add outside [0, 100], a delete at the
+  two-stop floor).
+- **A key that names nothing is `inert`**: no stop or midpoint is selected,
+  the key is not in the table, or it is Delete on a midpoint (midpoints
+  cannot be deleted).
+- A disabled widget refuses every gesture (`Disabled`), as every kind does.
 
 ## Picking a dropdown item (item kinds)
 
