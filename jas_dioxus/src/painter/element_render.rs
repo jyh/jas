@@ -561,14 +561,15 @@ fn walk_font(f: &crate::algorithms::text_runs::RunFace) -> (String, f64) {
 }
 
 /// NODE 33: what the runs path does not draw, so it stays legacy, by name:
-/// [`runs_plan_excludes`] (a tspan's rotate, transform, dx or own baseline
-/// shift; element spacing or a baseline shift that does not read; a scale or
-/// rotation; an anchor), and any tspan whose font has no real measurer (each
+/// [`runs_plan_excludes`] (a tspan's transform or dx; a shifted or rotated
+/// tspan's decoration; element spacing, a baseline shift, a scale or a
+/// rotation that does not read; an element rotation beside a decoration), and any tspan whose font has no real measurer (each
 /// character is measured in its own font). Drawn, so NOT excluded: a tspan's
 /// own size (each run at its size on the element's leading, as Swift draws
 /// it), readable tracking and kerning (in the layout's widths), a decoration
 /// (the element's or a tspan's), a case transform or small caps, a readable
-/// element baseline shift, and a justified or hyphenated paragraph (the plan
+/// element baseline shift, a tspan's own baseline shift and rotation, a point text's anchor (each line moved by its own
+/// width), and a justified or hyphenated paragraph (the plan
 /// cuts a stretched line into words and draws the synthetic hyphen).
 fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
     runs_plan_excludes(t) || t.tspans.iter().any(|s| {
@@ -583,17 +584,26 @@ fn runs_need_legacy(t: &crate::geometry::element::TextElem) -> bool {
 /// for the same elements.
 pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     let body = || t.tspans.iter().filter(|s| s.jas_role.as_deref() != Some("paragraph"));
-    // A tspan's decoration and its own size are drawn (the plan's decoration
-    // lines; each run at its tspan's size on the element's leading, Swift's
-    // law); its other per-tspan features are not.
-    if body().any(|s| tspan_needs_legacy(s) && !only_decoration(s)) {
+    // A tspan's decoration, its own size, baseline shift and rotation are
+    // drawn (the plan's decoration lines; each run at its tspan's size on the
+    // element's leading, Swift's law; a run's `dy`; a rotated run per glyph);
+    // its dx and transform are not, nor a shifted or rotated tspan's
+    // decoration, because whether a decoration follows them is measured on
+    // neither port.
+    if body().any(|s| tspan_needs_legacy(s) && !plan_draws_tspan(t, s)) {
         return true;
     }
     if crate::algorithms::text_runs::letter_spacing(t, t.font_size).is_none()
-        || draws_text_transform(&t.horizontal_scale, &t.vertical_scale, &t.rotate)
+        || text_transform(t).is_none()
         || crate::algorithms::text_runs::baseline_shift(t).is_none()
-        || !t.text_anchor.is_empty()
     {
+        return true;
+    }
+    // A readable scale is the renderer's frame around the plan, and the
+    // element's rotation is every glyph's (the plan cuts them); but not a
+    // rotation beside a decoration, which neither port has measured.
+    let rotated = crate::algorithms::text_runs::element_rotation(t).is_some_and(|a| a != 0.0);
+    if rotated && body().any(|s| draws_decoration_of(t, s)) {
         return true;
     }
     // A case transform or small caps is drawn (the plan measures and draws
@@ -604,9 +614,21 @@ pub fn runs_plan_excludes(t: &crate::geometry::element::TextElem) -> bool {
     false
 }
 
-/// A tspan whose ONLY per-tspan feature is a decoration override.
-fn only_decoration(s: &crate::geometry::tspan::Tspan) -> bool {
-    s.rotate.is_none() && s.transform.is_none() && s.dx.is_none() && s.baseline_shift.is_none()
+/// A tspan whose per-tspan features the plan draws: a decoration override,
+/// its own baseline shift and its own rotation, but not a shift or rotation
+/// together with a decoration (its own or the element's).
+fn plan_draws_tspan(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
+    s.transform.is_none() && s.dx.is_none()
+        && !((s.baseline_shift.is_some() || s.rotate.is_some()) && draws_decoration_of(e, s))
+}
+
+/// Whether tspan `s` draws an underline or line-through: its own tokens when
+/// it overrides, else the element's.
+fn draws_decoration_of(e: &crate::geometry::element::TextElem, s: &crate::geometry::tspan::Tspan) -> bool {
+    match &s.text_decoration {
+        Some(own) => own.iter().any(|w| w == "underline" || w == "line-through"),
+        None => e.text_decoration.split_whitespace().any(|w| w == "underline" || w == "line-through"),
+    }
 }
 
 /// ⭐ NODE 33 (jas section 454): the walk's half of the shared plan. Each
@@ -625,12 +647,34 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
     let Some(plan) = crate::algorithms::text_runs::plan(e, &real) else { return };
     let (element_font, _) = walk_font(&crate::algorithms::text_runs::element_face(e));
     let brush = Brush::Solid(f.color);
+    // A scale is the flat arm's frame around the whole draw (node 19):
+    // `translate(x, y) · scale(h, v) · translate(-x, -y)` about the box's
+    // top-left. The router admits only readable values.
+    let (h, v, _) = text_transform(e).unwrap_or((1.0, 1.0, 0.0));
+    let scaled = h != 1.0 || v != 1.0;
+    if scaled {
+        p.push_state(super::Transform { a: h, b: 0.0, c: 0.0, d: v, e: e.x - h * e.x, f: e.y - v * e.y });
+    }
     for line in plan.lines {
         for r in line.runs {
             // The plan resolves the run's size (a baseline shift scales it).
             let (font, _) = tspan_font(e, &e.tspans[r.tspan]);
+            let (x, y) = (e.x + r.x, e.y + line.baseline_y + r.dy);
+            if r.rotate != 0.0 {
+                // A rotated run is one glyph, drawn in the flat arm's frame:
+                // `translate(x, baseline) · rotate(θ)`.
+                let (sin, cos) = r.rotate.to_radians().sin_cos();
+                p.push_state(super::Transform { a: cos, b: sin, c: -sin, d: cos, e: x, f: y });
+                p.draw_text_run(
+                    &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: 0.0, x: 0.0, y: 0.0 },
+                    &brush,
+                    eff * f.opacity,
+                );
+                p.pop_state();
+                continue;
+            }
             p.draw_text_run(
-                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x: e.x + r.x, y: e.y + line.baseline_y },
+                &TextRun::FastRun { font, size: r.size, text: r.text, letter_spacing: plan.letter_spacing, x, y },
                 &brush,
                 eff * f.opacity,
             );
@@ -662,6 +706,9 @@ fn emit_laid_out_runs(p: &mut dyn Painter, e: &crate::geometry::element::TextEle
             &brush,
             eff * f.opacity,
         );
+    }
+    if scaled {
+        p.pop_state();
     }
 }
 
