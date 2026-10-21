@@ -544,17 +544,18 @@ internal static class PanelWire
 
     /// <summary>
     /// Whether an EDITABLE combo's selection change is a person's pick: one made
-    /// in the open dropdown, or one whose item the box now shows. Any other move
-    /// is the platform COMPLETING typed text to an option (`13` to `135`), and
-    /// it is not sent; the typed text goes by Enter or blur. flask § 499: after
-    /// a re-entry completed `13`, Enter committed the selected `135` over a
-    /// typed `31`.
+    /// in its list, open now or closed by that same pick. Any other move is the
+    /// platform COMPLETING typed text to an option (`13` to `135`), and it is not
+    /// sent; the typed text goes by Enter or blur. flask § 499: after a
+    /// re-entry completed `13`, Enter committed the selected `135` over a typed
+    /// `31`.
     ///
-    /// ⚠️ LIMIT: a completion that also rewrites the box (blur to another
-    /// control, which § 499 measured predating #607) reads as a pick here.
+    /// ⛔ NOT "the box shows the item's text": a completion WRITES that text, so
+    /// that test passed it (§ 500). And there is no pick with the list closed:
+    /// Down there changes nothing (§ 500, measured), so the list is the only door.
     /// </summary>
-    internal static bool EditablePickIsReal(bool dropDownOpen, string? boxText, string itemText) =>
-        dropDownOpen || string.Equals(boxText, itemText, StringComparison.Ordinal);
+    internal static bool EditablePickIsReal(bool dropDownOpen, bool listJustClosed) =>
+        dropDownOpen || listJustClosed;
 
     /// <summary>
     /// W-b: the text an item shows in the list. An `icon_select` row carries a

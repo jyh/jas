@@ -1753,15 +1753,22 @@ public sealed partial class MainWindow
             if (leaf.Id.Length == 0) { return combo; }
 
             var id = leaf.Id;
+            // § 500: a pick in the list may raise SelectionChanged after the list
+            // has closed, so "just closed" lasts one dispatcher turn past it.
+            var listJustClosed = false;
+            combo.DropDownOpened += (_, _) => listJustClosed = false;
+            combo.DropDownClosed += (_, _) =>
+            {
+                listJustClosed = true;
+                combo.DispatcherQueue.TryEnqueue(() => listJustClosed = false);
+            };
             combo.SelectionChanged += (_, _) =>
             {
                 var state = combo.Tag as ChoiceState;
                 // flask § 499: in an editable combo the platform completes typed
                 // text to an option and moves the selection there; that is not a
                 // pick, and the typed text goes by Enter or blur instead.
-                if (combo.IsEditable && combo.SelectedIndex >= 0 && combo.SelectedIndex < items.Count
-                    && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, EditableText(combo),
-                                                     PanelWire.ChoiceText(items[combo.SelectedIndex])))
+                if (combo.IsEditable && !PanelWire.EditablePickIsReal(combo.IsDropDownOpen, listJustClosed))
                 {
                     return;
                 }
