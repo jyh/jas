@@ -144,6 +144,11 @@ pub struct JasEngine {
     /// While it is clear, the scope reads no tab (`tab_count` 0, `active_tab`
     /// -1, an empty `open_documents`), which is `remove_tab`'s own spec.
     document_open: std::cell::Cell<bool>,
+    /// The bytes File > Revert returns to: the file last opened
+    /// ([`JasEngine::open_svg`]) or saved ([`jas_document_mark_saved`]), as
+    /// the web's `TabState::saved_svg`. `None` for a document the engine was
+    /// handed any other way, which has nothing on disk to return to.
+    saved_svg: RefCell<Option<String>>,
     last_error: RefCell<Option<String>>,
     /// The panel state a materialized panel binds to (S-C.1).
     ///
@@ -271,6 +276,35 @@ impl JasEngine {
     pub(crate) fn replace_document(&self, doc: crate::document::document::Document) {
         *self.model.borrow_mut() = Model::new(doc, None);
         self.document_open.set(true);
+        *self.saved_svg.borrow_mut() = None;
+    }
+
+    /// Open a file's text as the document, as File > Open does: OPENED, not
+    /// merely decoded (the pages and the at-least-one-artboard invariant), and
+    /// the text kept as what Revert returns to. `false`, and nothing changed,
+    /// when it does not open.
+    pub(crate) fn open_svg(&self, text: &str) -> bool {
+        let Some(doc) = crate::geometry::svg::try_open_svg_document(text) else { return false };
+        self.replace_document(doc);
+        *self.saved_svg.borrow_mut() = Some(text.to_string());
+        true
+    }
+
+    /// File > Revert, the web's `apply_revert`: re-open the saved bytes and
+    /// install them as ONE undoable transaction (so Undo takes a revert back),
+    /// then mark the document clean. Runs only when the document is modified
+    /// and there are bytes to return to; otherwise it changes nothing. Never
+    /// the shell's own open, which would not be one undo step.
+    fn revert(&self) -> crate::panel_behavior::Ran {
+        let baseline = self.saved_svg.borrow().clone();
+        let mut model = self.model.borrow_mut();
+        let Some(svg) = baseline.filter(|_| model.is_modified()) else {
+            return crate::panel_behavior::Ran { doc_changed: false, state_changed: false };
+        };
+        let doc = crate::geometry::svg::open_svg_document(&svg);
+        model.with_txn(|m| m.set_document(doc));
+        model.mark_saved();
+        crate::panel_behavior::Ran { doc_changed: true, state_changed: false }
     }
 
     fn new() -> Self {
@@ -292,6 +326,7 @@ impl JasEngine {
         JasEngine {
             model: RefCell::new(Model::default()),
             document_open: std::cell::Cell::new(true),
+            saved_svg: RefCell::new(None),
             last_error: RefCell::new(None),
             panel: RefCell::new(panel),
             registry: RefCell::new(PanelRegistry::default()),
@@ -1252,6 +1287,17 @@ fn run_clipboard_verb(engine: &JasEngine, verb: crate::workspace::menu_native::C
         }
         ClipVerb::Paste { offset, preserve_layers } => {
             let text = clipboard.and_then(serde_json::Value::as_str);
+            // A tool editing text takes the clipboard's TEXT at its caret
+            // (the web's `paste_clipboard`, before the element paste), so a
+            // paste into a session adds no element.
+            if let Some(text) = text.filter(|t| !t.is_empty()) {
+                let mut slot = engine.tool_slot();
+                if let Some((_, tool)) = slot.as_mut().filter(|(_, t)| t.is_editing()) {
+                    if engine.with_model_mut(|m| tool.paste_text(m, text)) {
+                        return (Ran { doc_changed: true, state_changed: false }, Named::default());
+                    }
+                }
+            }
             let pasted = engine.with_model_mut(|m| {
                 crate::document::op_apply::apply_paste_clipboard_text(m, text, offset, preserve_layers)
             });
@@ -1311,12 +1357,21 @@ impl Named {
 /// its own default.
 unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, name: &str,
                        mods: Option<&serde_json::Value>, clipboard: Option<&serde_json::Value>) -> JasBytes {
-    use crate::ffi_pointer::{KEY_BACKSPACE, KEY_DELETE, KEY_ENTER, KEY_ESCAPE, MOD_ALT, MOD_CMD, MOD_SHIFT};
+    use crate::ffi_pointer::{KEY_ARROW_DOWN, KEY_ARROW_LEFT, KEY_ARROW_RIGHT, KEY_ARROW_UP, KEY_BACKSPACE,
+                             KEY_DELETE, KEY_END, KEY_ENTER, KEY_ESCAPE, KEY_HOME, KEY_TAB,
+                             MOD_ALT, MOD_CMD, MOD_SHIFT};
     let code = match name {
         "Delete" => KEY_DELETE,
         "Backspace" => KEY_BACKSPACE,
         "Enter" => KEY_ENTER,
         "Escape" => KEY_ESCAPE,
+        "ArrowUp" => KEY_ARROW_UP,
+        "ArrowDown" => KEY_ARROW_DOWN,
+        "ArrowLeft" => KEY_ARROW_LEFT,
+        "ArrowRight" => KEY_ARROW_RIGHT,
+        "Home" => KEY_HOME,
+        "End" => KEY_END,
+        "Tab" => KEY_TAB,
         _ => {
             let mut chars = name.chars();
             match (chars.next(), chars.next()) {
@@ -1539,10 +1594,13 @@ pub unsafe extern "C" fn jas_dispatch_action(
             state_changed: false,
         })
     }).flatten();
+    // File > Revert (finding 12 of the 10-20 sitting): a `log` stub in
+    // `actions.yaml`, and its bytes are the engine's, so the engine runs it.
+    let revert = (panel.is_none() && action == "revert").then(|| engine.revert());
     let (ran, named) = if let Some(verb) = clip_verb {
         let (ran, named) = run_clipboard_verb(engine, verb, req.get("clipboard"));
         (Ok(ran), named)
-    } else if let Some(ran) = native {
+    } else if let Some(ran) = native.or(revert) {
         (Ok(ran), Named::default())
     } else {
         let mut store = engine.store.borrow_mut();
@@ -1615,6 +1673,8 @@ pub unsafe extern "C" fn jas_document_modified(e: *mut JasEngine) -> u8 {
 pub unsafe extern "C" fn jas_document_mark_saved(e: *mut JasEngine) -> u8 {
     let Some(engine) = (unsafe { e.as_ref() }) else { return 255 };
     engine.with_model_mut(Model::mark_saved);
+    // What the shell wrote is `jas_document_svg`'s bytes, so Revert returns here.
+    *engine.saved_svg.borrow_mut() = Some(engine.with_document(crate::geometry::svg::document_to_svg));
     1
 }
 
@@ -4297,6 +4357,48 @@ mod tests {
     /// Delete deletes, one undo step; an orphaning Delete names
     /// `delete_orphan_confirm` and deletes nothing; Ctrl+Z undoes; a key name
     /// the engine does not know is refused by name.
+    /// The Type tool's named gaps (#596), through the route a shell sends
+    /// keys by: in a text session the caret keys move the caret, and Cmd+V
+    /// pastes the clipboard's TEXT at it (the web's `tool.paste_text`, before
+    /// the element paste), so a paste adds no element. With no session a caret
+    /// key is `KeyUnhandled` (the shell's own default), never `BadKey`.
+    #[test]
+    fn a_text_session_takes_the_caret_keys_and_a_paste_of_text() {
+        use crate::ffi_pointer::{jas_pointer_event, jas_set_tool, KIND_PRESS, KIND_RELEASE, TOOL_IDS};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let (reply, err) = dispatch(e, r#"{"key":"ArrowLeft"}"#);
+        assert_eq!(reply, "", "no session: nothing took it");
+        assert!(err.contains("KeyUnhandled"), "unhandled, not a bad name: {err}");
+        let texts = || engine_of(e).with_model(|m| {
+            fn walk(el: &crate::geometry::element::Element, out: &mut Vec<String>) {
+                if let crate::geometry::element::Element::Text(t) = el { out.push(t.content()); }
+                for c in el.children().unwrap_or(&[]) { walk(c, out); }
+            }
+            let mut out = vec![];
+            for l in &m.document().layers { walk(l, &mut out); }
+            out
+        });
+        let elements = || engine_of(e).with_model(|m| m.document().layers.iter()
+            .map(|l| l.children().map_or(0, |c| c.len())).sum::<usize>());
+        let ty = TOOL_IDS.iter().position(|t| *t == "type").expect("the Type tool");
+        unsafe {
+            assert_eq!(jas_set_tool(e, ty), JasStatus::Ok);
+            jas_pointer_event(e, KIND_PRESS, 500.0, 500.0, 0);
+            jas_pointer_event(e, KIND_RELEASE, 500.0, 500.0, 0);
+        }
+        for k in ["H", "i", "ArrowLeft"] {
+            let (_, err) = dispatch(e, &format!(r#"{{"key":"{k}"}}"#));
+            assert!(!err.contains("BadKey") && !err.contains("KeyUnhandled"), "{k}: {err}");
+        }
+        let count = elements();
+        let (_, err) = dispatch(e, r#"{"key":"v","mods":{"ctrl":true},"clipboard":"XY"}"#);
+        assert!(!err.contains("NeedsClipboard") && !err.contains("Unchanged"), "the paste ran: {err}");
+        assert_eq!(texts(), vec!["HXYi".to_string()], "the text went in at the caret");
+        assert_eq!(elements(), count, "a paste into a session adds no element");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn a_key_by_dispatch_is_resolved_in_the_engine_and_replies() {
         let _counters = crate::ffi_instr::test_lock::lock();
@@ -4665,11 +4767,12 @@ mod tests {
             // `clipboard_write` in the reply, and the pastes refuse
             // `NeedsClipboard` (`clipboard_items_are_not_platform_effects`).
             // Files: the Windows shell runs open_file, save and save_as itself
-            // (`MainWindow.Invoke`); revert reads a file. `quit` left this list
+            // (`MainWindow.Invoke`). `revert` left this list on 2026-10-20: it
+            // re-opens the bytes the engine kept at the open or save
+            // (`JasEngine::revert`). `quit` left this list
             // on 2026-10-15: with nothing edited it names `close_window` in the
             // reply, and with an edit it opens Save Changes.
             "open_file -> Logged:open_file: show native file dialog",
-            "revert -> Logged:revert: reload {{active_document.filename}}",
             "save -> Logged:save_as: show native save dialog",
             "save_as -> Logged:save_as: show native save dialog",
             // Undo and redo: the shell sends them as ops (`{"op":"undo"}`).
@@ -4750,6 +4853,131 @@ mod tests {
         let op = r#"{"op":"redo"}"#;
         assert_eq!(unsafe { jas_dispatch_event(e, op.as_ptr(), op.len()) }, JasStatus::Ok);
         assert_eq!(modified(), 0, "Redo back to the saved state is not");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// The engine's document as JSON with every artboard id blanked: opening a
+    /// page-less file mints a fresh artboard id on each read, so two opens of
+    /// the same bytes differ only there (the web's `without_artboard_ids`).
+    fn doc_without_artboard_ids(e: *mut JasEngine) -> serde_json::Value {
+        let mut doc: serde_json::Value = serde_json::from_str(&doc_json(e)).unwrap();
+        for ab in doc["artboards"].as_array_mut().into_iter().flatten() {
+            ab["id"] = serde_json::json!("");
+        }
+        doc
+    }
+
+    /// Open `fixture` as the shell does (`jas_load_svg` is `open_svg`).
+    fn engine_loading(fixture: &str) -> *mut JasEngine {
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let svg = std::fs::read_to_string(format!("{root}/test_fixtures/svg/{fixture}")).unwrap();
+        let e = jas_engine_new();
+        assert!(engine_of(e).open_svg(&svg), "{fixture} opens");
+        e
+    }
+
+    /// REVERT (finding 12 of the 10-20 sitting: `revert` was `Logged:` here).
+    /// The web's `apply_revert`: re-open the bytes last opened or saved, install
+    /// them as ONE undoable step, then mark the document clean. So Undo takes
+    /// the revert back, and the reverted document reads unmodified.
+    #[test]
+    fn revert_reopens_the_opened_bytes_as_one_undoable_step_and_reads_clean() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_loading("rect_with_stroke.svg");
+        let modified = || unsafe { jas_document_modified(e) };
+        let opened = doc_without_artboard_ids(e);
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let (_, err) = dispatch(e, r#"{"action":"delete_selection"}"#);
+        assert!(err.is_empty(), "{err}");
+        let edited = doc_without_artboard_ids(e);
+        assert_ne!(edited, opened, "CONTROL: the delete is an edit");
+        assert_eq!(modified(), 1, "CONTROL: modified before the revert");
+        let (reply, err) = dispatch(e, r#"{"action":"revert"}"#);
+        assert!(err.is_empty(), "revert ran: {err}");
+        let reply: serde_json::Value = serde_json::from_str(&reply).unwrap();
+        assert_eq!(reply["doc_changed"], serde_json::json!(true), "{reply}");
+        assert_eq!(doc_without_artboard_ids(e), opened, "the document is the opened file again");
+        assert_eq!(modified(), 0, "a reverted document is clean");
+        undo(e);
+        assert_eq!(doc_without_artboard_ids(e), edited, "ONE undo step takes the revert back");
+        assert_eq!(modified(), 1, "and the edit is unsaved again");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A save moves what Revert returns to: the bytes the shell wrote, which
+    /// are `jas_document_svg`'s, not the bytes first opened.
+    #[test]
+    fn revert_after_a_save_returns_to_the_save_not_the_open() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_loading("rect_with_stroke.svg");
+        let opened = doc_without_artboard_ids(e);
+        // Two more rects, as one edit, then a save.
+        let svg = crate::geometry::svg::document_to_svg(
+            &model_with(vec![rect(10.0, 20.0, 30.0, 40.0), rect(50.0, 20.0, 30.0, 40.0)], &[]).document().clone());
+        assert!(engine_of(e).open_svg(&svg), "the two rects open");
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let _ = dispatch(e, r#"{"action":"group"}"#);
+        assert_eq!(unsafe { jas_document_mark_saved(e) }, 1);
+        let saved = doc_without_artboard_ids(e);
+        assert_ne!(saved, opened, "CONTROL: the save is not the first open");
+        let _ = dispatch(e, r#"{"action":"ungroup"}"#);
+        assert_ne!(doc_without_artboard_ids(e), saved, "CONTROL: the ungroup is an edit");
+        let (_, err) = dispatch(e, r#"{"action":"revert"}"#);
+        assert!(err.is_empty(), "revert ran: {err}");
+        // A revert RE-OPENS, and an open selects nothing (the web's, too), so
+        // the group selected at the save is not selected after it.
+        let mut want = saved.clone();
+        want["selection"] = serde_json::json!([]);
+        assert_ne!(saved["selection"], want["selection"], "CONTROL: the save had a selection");
+        assert_eq!(doc_without_artboard_ids(e), want, "the saved document, grouped, nothing selected");
+        assert_eq!(unsafe { jas_document_modified(e) }, 0);
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Nothing to revert: an unmodified document, and a modified one with no
+    /// bytes behind it (a document the engine was handed, never opened or
+    /// saved). Each changes nothing and reads `Unchanged`.
+    #[test]
+    fn revert_with_nothing_to_return_to_changes_nothing() {
+        use crate::document::test_fixture::{model_with, rect};
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_loading("rect_with_stroke.svg");
+        let before = doc_json(e);
+        let (_, err) = dispatch(e, r#"{"action":"revert"}"#);
+        assert!(err.contains("Unchanged"), "an unmodified document: {err}");
+        assert_eq!(doc_json(e), before);
+        unsafe { jas_engine_free(e) };
+
+        let e = engine_with(model_with(vec![rect(10.0, 20.0, 30.0, 40.0)], &[]));
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let _ = dispatch(e, r#"{"action":"delete_selection"}"#);
+        assert_eq!(unsafe { jas_document_modified(e) }, 1, "CONTROL: modified");
+        let before = doc_json(e);
+        let (_, err) = dispatch(e, r#"{"action":"revert"}"#);
+        assert!(err.contains("Unchanged"), "no baseline: {err}");
+        assert_eq!(doc_json(e), before, "nothing ran");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// A document installed any way but an open or a save has no file behind
+    /// it, even when a file was opened before it: Revert must not return to
+    /// THAT file's bytes, which belong to a different document.
+    #[test]
+    fn revert_never_returns_to_a_file_the_document_did_not_come_from() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_loading("rect_with_stroke.svg");
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+        let other = std::fs::read_to_string(format!("{root}/test_fixtures/svg/text_basic.svg")).unwrap();
+        engine_of(e).replace_document(crate::geometry::svg::try_open_svg_document(&other).unwrap());
+        let _ = dispatch(e, r#"{"menu_item":"menu_select_all"}"#);
+        let (_, err) = dispatch(e, r#"{"action":"delete_selection"}"#);
+        assert!(err.is_empty(), "{err}");
+        assert_eq!(unsafe { jas_document_modified(e) }, 1, "CONTROL: modified");
+        let before = doc_json(e);
+        let (_, err) = dispatch(e, r#"{"action":"revert"}"#);
+        assert!(err.contains("Unchanged"), "the opened file is not this document's: {err}");
+        assert_eq!(doc_json(e), before, "nothing ran");
         unsafe { jas_engine_free(e) };
     }
 
@@ -4953,19 +5181,20 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
-    /// The Type button names a tool no shell tool answers yet (the type tools
-    /// are native). Its checked state must not claim a tool the pointer is not
-    /// driving: `active_tool` stays the real tool, and the click says Unchanged.
+    /// The Type button selects the Type tool. Until 2026-10-20 no shell tool
+    /// answered `type`, so this click said Unchanged and the checked button
+    /// stayed the real tool; all ten of his clicks in the 10-20 feel sitting
+    /// read `outcome=unchanged` (finding 3). Now the pointer drives it, and the
+    /// checked state says so.
     #[test]
-    fn a_toolbar_click_on_a_tool_the_shell_lacks_changes_nothing() {
+    fn a_toolbar_click_on_the_type_button_selects_the_type_tool() {
         let _g = crate::ffi_instr::test_lock::lock();
         let e = jas_engine_new();
         assert_eq!(unsafe { crate::ffi_pointer::jas_set_tool(e, 0) }, JasStatus::Ok);
-        let (_, err) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
-        assert_eq!(slot_tool(e), Some("selection"));
-        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("selection"),
-                   "the toolbar's checked button stays the tool the pointer drives");
-        assert!(err.contains("Unchanged"), "{err}");
+        let (reply, _) = behave(e, TOOLBAR, r#"{"widget":"btn_text_slot","event":"click"}"#);
+        assert!(!reply.is_empty(), "the click ran: {}", take(unsafe { jas_last_error_json(e) }));
+        assert_eq!(slot_tool(e), Some("type"), "the pointer now drives the Type tool");
+        assert_eq!(unsafe { &*e }.active_tool_state().as_deref(), Some("type"));
         unsafe { jas_engine_free(e) };
     }
 

@@ -202,6 +202,15 @@ internal static unsafe class JasCore
     internal const uint KeyEnter = 0x0D;
     internal const uint KeyEscape = 0x1B;
     internal const uint KeyDelete = 0x7F;
+    // The caret keys, as the engine's own codes (`ffi_pointer::KEY_ARROW_*`):
+    // AppKit's function-key code points, Unicode private use, so no character
+    // a key produces collides with one. A text session moves its caret on them.
+    internal const uint KeyArrowUp = 0xF700;
+    internal const uint KeyArrowDown = 0xF701;
+    internal const uint KeyArrowLeft = 0xF702;
+    internal const uint KeyArrowRight = 0xF703;
+    internal const uint KeyHome = 0xF729;
+    internal const uint KeyEnd = 0xF72B;
 
     /// <summary>
     /// One pointer transition. <paramref name="x"/> and <paramref name="y"/>
