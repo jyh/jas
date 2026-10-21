@@ -27,6 +27,14 @@ public sealed partial class MainWindow
         private readonly long _availW;
         private readonly bool _topAligned;
 
+        /// <summary>
+        /// Finding 13 (flask § 497): each edit control's commit AS FOCUS LEAVES IT,
+        /// so a press on the canvas, which cannot take focus and so never blurs a
+        /// control, can run it first (<see cref="CommitFocusedEdit"/>). Weak, so a
+        /// rebuilt pane's controls are not kept alive by it.
+        /// </summary>
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<Control, Action> _blurCommits = new();
+
         internal PaneView(MainWindow w, Border host, ScrollViewer scroll, long availW, string firstPanel,
                           bool topAligned = false, double pad = PanePad, bool dialog = false)
         {
@@ -1346,10 +1354,12 @@ public sealed partial class MainWindow
                 e.Handled = true;
                 CommitBox(box, id, leaf.Path);
             };
-            box.LostFocus += (_, _) =>
+            void Blur()
             {
                 if (PanelWire.CommitOnBlur(box.Text, box.Tag as string ?? "")) { CommitBox(box, id, leaf.Path); }
-            };
+            }
+            box.LostFocus += (_, _) => Blur();
+            _blurCommits.AddOrUpdate(box, Blur);
             return box;
         }
 
@@ -1669,6 +1679,19 @@ public sealed partial class MainWindow
             };
             if (combo.IsEditable)
             {
+                // Item 7 (flask § 497): the template's own `EditableText` box keeps
+                // the platform's 32 DIP minimum height and its padding inside a
+                // 28 DIP combo, so its glyphs are clipped out of view (a committed
+                // `150` showed only its selection bar). Give it the metrics a
+                // number box already uses at the same height.
+                combo.Loaded += (_, _) =>
+                {
+                    var text = EditableTextBox(combo);
+                    if (text is null) { return; }
+                    text.MinHeight = 0;
+                    text.Padding = new Thickness(4, 0, 4, 0);
+                    text.VerticalContentAlignment = VerticalAlignment.Center;
+                };
                 // Typed text crosses as TEXT; the core parses it by the kind. Text
                 // that names an item is left to SelectionChanged above.
                 combo.TextSubmitted += (_, e) =>
@@ -1685,15 +1708,18 @@ public sealed partial class MainWindow
                 // template's `EditableText` box: `combo.Text` is still empty when
                 // focus leaves. Focus moving into the combo's own dropdown is not
                 // leaving it.
-                combo.LostFocus += (_, _) =>
+                void Blur(bool focusStays)
                 {
                     var state = combo.Tag as ChoiceState;
                     var send = PanelWire.ComboBlurCommit(EditableText(combo), state?.Shown ?? "", state?.Text ?? "",
-                        items.Select(PanelWire.ChoiceText), combo.IsDropDownOpen || FocusStaysIn(combo));
+                        items.Select(PanelWire.ChoiceText), focusStays);
                     if (send is null) { return; }
                     SendPane(id, "commit", send, leaf.Path);
                     combo.Text = state?.Text ?? "";
-                };
+                }
+                combo.LostFocus += (_, _) => Blur(combo.IsDropDownOpen || FocusStaysIn(combo));
+                // From the canvas press, focus IS leaving, though it has not left yet.
+                _blurCommits.AddOrUpdate(combo, () => Blur(false));
             }
             return combo;
         }
@@ -1702,14 +1728,38 @@ public sealed partial class MainWindow
         /// The text in an editable combo's own text box (the template part
         /// `EditableText`), or null when the template has none.
         /// </summary>
-        private static string? EditableText(ComboBox combo)
+        private static string? EditableText(ComboBox combo) => EditableTextBox(combo)?.Text;
+
+        /// <summary>
+        /// Finding 13: run the blur commit of the edit control holding keyboard
+        /// focus in this pane, if any, NOW, before a canvas press reaches the
+        /// engine. A press on empty canvas deselects, and the control's own
+        /// `LostFocus` is a queued event that would commit after it, onto nothing.
+        /// Its later `LostFocus` sends nothing: the box was put back to the core's
+        /// value, which `CommitOnBlur` does not send.
+        /// </summary>
+        internal void CommitFocusedEdit()
+        {
+            if (_host.XamlRoot is null) { return; }
+            for (var node = FocusManager.GetFocusedElement(_host.XamlRoot) as DependencyObject;
+                 node is not null; node = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(node))
+            {
+                if (node is Control c && _blurCommits.TryGetValue(c, out var commit)) { commit(); return; }
+            }
+        }
+
+        /// <summary>
+        /// An editable combo's own text box (the template part `EditableText`),
+        /// or null when the template has none (or is not yet applied).
+        /// </summary>
+        private static TextBox? EditableTextBox(ComboBox combo)
         {
             var pending = new Stack<DependencyObject>();
             pending.Push(combo);
             while (pending.Count > 0)
             {
                 var node = pending.Pop();
-                if (node is TextBox box && box.Name == "EditableText") { return box.Text; }
+                if (node is TextBox box && box.Name == "EditableText") { return box; }
                 var n = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(node);
                 for (var i = 0; i < n; i++) { pending.Push(Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(node, i)); }
             }

@@ -123,6 +123,28 @@
             Visibility="Collapsed" />
 
         <!--
+          THE CANVAS'S FOCUS (finding 13, flask STATUS 497): the SwapChainPanel
+          cannot take keyboard focus, so a press on it left a panel's edit box
+          focused, its typed value shown and never committed. A press moves focus
+          here, a one-pixel, invisible, unhittable control in the canvas's cell.
+          Keys still bubble to the root content, where they are read. Raw, so a
+          UI Automation reader does not meet a nameless control.
+        -->
+        <ContentControl
+            x:Name="CanvasFocus"
+            Grid.Row="1"
+            Grid.Column="1"
+            Width="1"
+            Height="1"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Opacity="0"
+            IsHitTestVisible="False"
+            IsTabStop="True"
+            UseSystemFocusVisuals="False"
+            AutomationProperties.AccessibilityView="Raw" />
+
+        <!--
           NO DOCUMENT (jas 274): after the engine closes its one document
           (jas_document_close, on a reply naming remove_tab 0), the surface is
           hidden behind this plain cover until a load opens a document again.
