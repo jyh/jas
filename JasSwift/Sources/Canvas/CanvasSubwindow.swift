@@ -1761,7 +1761,11 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                         pAttrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
                     }
                     if let bs = t.baselineShift, bs != 0 {
-                        pAttrs[.baselineOffset] = bs as NSNumber
+                        // + is UP (CHARACTER.md). CoreText's offset is in TEXT
+                        // space, which `textMatrix` (d = -1) flips against
+                        // this y-down canvas, so the offset is negated; a
+                        // positive one drew a raised range LOWERED.
+                        pAttrs[.baselineOffset] = -bs as NSNumber
                     }
                     if kernPx != 0 {
                         pAttrs[.kern] = kernPx as NSNumber
@@ -1835,7 +1839,18 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
             // `word_runs`, then `per_glyph`).
             let rotatedTspan = styled
                 && (rotRad != 0.0 || v.tspans.contains { ($0.rotate ?? 0) != 0 })
-            if rotatedTspan || planStretched {
+            // A decoration is drawn in its glyph's frame (TSPAN.md
+            // "Decoration beside a shift or a turn"), but CoreText strokes a
+            // line's underline at ONE position whatever a run's
+            // `.baselineOffset`. So a line holding a shifted, decorated tspan
+            // draws portion by portion, each at its own shifted baseline.
+            let shiftedDecorated = styled && v.tspans.contains { t in
+                (t.baselineShift ?? 0) != 0 && {
+                    let d = t.textDecoration ?? tdTokens
+                    return d.contains("underline") || d.contains("line-through")
+                }()
+            }
+            if rotatedTspan || planStretched || shiftedDecorated {
                 let glyphX = { (idx: Int) -> Double? in
                     lineGlyphs.first(where: { $0.idx == idx }).map { v.x + anchorDx + $0.x }
                 }
@@ -1852,7 +1867,14 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                         Array(t.content.unicodeScalars)[(s - tStart)..<(e - tStart)]))
                     let len = (applyTextTransform(t.textTransform ?? v.textTransform,
                         t.fontVariant ?? v.fontVariant, own) as NSString).length
-                    let piece = lineStr.attributedSubstring(from: NSRange(location: strPos, length: len))
+                    // The portion's own shift moves its baseline (y down), and
+                    // the attribute is dropped so CoreText draws the glyphs AND
+                    // their decoration there.
+                    let mPiece = NSMutableAttributedString(
+                        attributedString: lineStr.attributedSubstring(from: NSRange(location: strPos, length: len)))
+                    mPiece.removeAttribute(.baselineOffset, range: NSRange(location: 0, length: mPiece.length))
+                    let piece: NSAttributedString = mPiece
+                    let portionY = baselineY - (t.baselineShift ?? 0)
                     strPos += len
                     let angle = t.rotate.map { $0 * (Double.pi / 180) } ?? rotRad
                     // The portion's characters: (range in `piece`, index in
@@ -1885,14 +1907,14 @@ private func drawElementBody(_ ctx: CGContext, _ inElem: Element, ancestorVis: V
                             guard let x = glyphX(first.idx) else { continue }
                             let span = NSRange(location: first.r.location,
                                                length: last.r.location + last.r.length - first.r.location)
-                            ctx.textPosition = CGPoint(x: x, y: baselineY)
+                            ctx.textPosition = CGPoint(x: x, y: portionY)
                             CTLineDraw(CTLineCreateWithAttributedString(piece.attributedSubstring(from: span)), ctx)
                             continue
                         }
                         for g in p {
                             guard let x = glyphX(g.idx) else { continue }
                             ctx.saveGState()
-                            ctx.translateBy(x: x, y: baselineY)
+                            ctx.translateBy(x: x, y: portionY)
                             ctx.rotate(by: angle)
                             ctx.textPosition = .zero
                             CTLineDraw(CTLineCreateWithAttributedString(piece.attributedSubstring(from: g.r)), ctx)

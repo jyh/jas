@@ -193,6 +193,8 @@ pub enum DecorationKind {
 
 /// One decoration line, relative to the element's origin: a horizontal
 /// stroke from `x0` to `x1` at `y`, `thickness` wide, in the element's fill.
+/// Under a turned glyph the stroke is that one glyph's, turned by `rotate`
+/// degrees about the glyph's baseline origin `(x0, origin_y)`, as its run is.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decoration {
     pub kind: DecorationKind,
@@ -200,6 +202,11 @@ pub struct Decoration {
     pub x1: f64,
     pub y: f64,
     pub thickness: f64,
+    /// The glyph's angle in degrees (+ clockwise); 0 for an unturned stroke.
+    pub rotate: f64,
+    /// The baseline the stroke is offset from (its run's, after any shift):
+    /// the pivot's y when `rotate` is not 0.
+    pub origin_y: f64,
 }
 
 /// Whether tspan `t` draws `kind`: its own tokens when it overrides (an
@@ -214,7 +221,10 @@ fn decorated(e: &crate::geometry::element::TextElem, t: &crate::geometry::tspan:
 
 /// The decoration lines of a laid-out text: per line and per kind, each run
 /// of contiguous decorated characters from its first glyph's x to its last
-/// glyph's right. A soft wrap's trailing space and the synthetic hyphen are
+/// glyph's right. A decoration is drawn in its glyph's frame (TSPAN.md
+/// "Decoration beside a shift or a turn", the browsers' law): it moves with
+/// its tspan's own baseline shift, whoever declares it, and a turned glyph's
+/// piece is that glyph's alone, turned with it. A soft wrap's trailing space and the synthetic hyphen are
 /// not decorated; a justified line's stretched glue is, because the glyphs
 /// carry the stretch. A change of tspan size cuts a piece, and each piece is
 /// placed at its own size. Legacy's offsets and thickness
@@ -229,6 +239,7 @@ fn decorations(
     scale: f64,
     dy: f64,
     shifts: &[f64],
+    element_angle: f64,
 ) -> Vec<Decoration> {
     let owner = |i: usize| ranges.iter().position(|&(a, b)| a <= i && i < b);
     // A decoration line at `size`: its offset from the baseline and thickness.
@@ -240,12 +251,18 @@ fn decorations(
     for (line, &shift) in layout.lines.iter().zip(shifts) {
         let glyphs = &layout.glyphs[line.glyph_start.min(layout.glyphs.len())..line.glyph_end.min(layout.glyphs.len())];
         for kind in [DecorationKind::Underline, DecorationKind::LineThrough] {
-            // (x0, x1, size): one piece of contiguous decorated characters of
-            // one size; a change of size starts a new piece.
-            let mut span: Option<(f64, f64, f64)> = None;
-            let close = |span: &mut Option<(f64, f64, f64)>, out: &mut Vec<Decoration>| {
-                if let Some((x0, x1, size)) = span.take() {
-                    out.push(Decoration { kind, x0: x0 + shift, x1: x1 + shift, y: line.baseline_y + dy + place(kind, size), thickness: (size * 0.07).max(1.0) });
+            // (x0, x1, size, run dy, angle): one piece of contiguous decorated
+            // characters of one size and shift; a change of either starts a
+            // new piece, and a turned glyph is a piece of its own.
+            type Piece = (f64, f64, f64, f64, f64);
+            let mut span: Option<Piece> = None;
+            let close = |span: &mut Option<Piece>, out: &mut Vec<Decoration>| {
+                if let Some((x0, x1, size, rdy, angle)) = span.take() {
+                    let origin_y = line.baseline_y + dy + rdy;
+                    out.push(Decoration {
+                        kind, x0: x0 + shift, x1: x1 + shift, y: origin_y + place(kind, size),
+                        thickness: (size * 0.07).max(1.0), rotate: angle, origin_y,
+                    });
                 }
             };
             for g in glyphs {
@@ -258,11 +275,15 @@ fn decorations(
                     continue;
                 }
                 let size = t.map_or(e.font_size * scale, |t| run_face(e, &e.tspans[t], scale).size);
+                let rdy = t.map_or(0.0, |t| -e.tspans[t].baseline_shift.unwrap_or(0.0));
+                let angle = t.and_then(|t| e.tspans[t].rotate).unwrap_or(element_angle);
                 match span {
-                    Some((x0, x1, s)) if s == size => span = Some((x0, x1.max(g.right), s)),
+                    Some((x0, x1, s, d, 0.0)) if s == size && d == rdy && angle == 0.0 => {
+                        span = Some((x0, x1.max(g.right), s, d, 0.0))
+                    }
                     _ => {
                         close(&mut span, &mut out);
-                        span = Some((g.x, g.right, size));
+                        span = Some((g.x, g.right, size, rdy, angle));
                     }
                 }
             }
@@ -488,7 +509,7 @@ pub fn plan(
         .into_iter()
         .map(|m| PlacedMarker { baseline_y: layout.lines[m.line].baseline_y + dy, text: m.text, x: m.indent, size: base.size })
         .collect();
-    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy, &shifts);
+    let decorations = decorations(e, &layout, &chars, &ranges, scale, dy, &shifts, element_angle);
     Some(RunsPlan { lines, markers, decorations, letter_spacing: spacing })
 }
 
@@ -1032,6 +1053,60 @@ mod tests {
         let mut bad = styled_area(2000.0);
         bad.rotate = "tilt".into();
         assert!(plan(&bad, &faces(&seen)).is_none());
+    }
+
+    /// A decoration is drawn in its GLYPH's frame (TSPAN.md "Decoration beside
+    /// a shift or a turn"; measured in two browser engines, Blink and
+    /// WebKit, on the same SVG, which agree): it moves with its run's baseline
+    /// shift whether the element or the tspan declares it, and under a turned
+    /// glyph each glyph's piece turns with it about the glyph's baseline
+    /// origin. The stroke is cut wherever the shift or the angle changes.
+    #[test]
+    fn a_decoration_follows_its_glyphs_shift_and_turn() {
+        let seen = std::cell::RefCell::new(Vec::new());
+        let full = |p: &RunsPlan| -> Vec<(DecorationKind, f64, f64, f64, f64, f64)> {
+            p.decorations.iter().map(|d| (d.kind, d.x0, d.x1, d.y, d.rotate, d.origin_y)).collect()
+        };
+        let mut flat = styled_area(2000.0);
+        flat.text_decoration = "underline".into();
+        let flat_plan = plan(&flat, &faces(&seen)).unwrap();
+        let b = flat_plan.lines[0].baseline_y;
+        let u = 20.0 * 0.12;
+        assert_eq!(full(&flat_plan), vec![(DecorationKind::Underline, 0.0, 670.0, b + u, 0.0, b)], "control: one stroke");
+        // The ELEMENT's underline, the bold tspan raised 3 pt: its piece rises.
+        let mut inherited = flat.clone();
+        inherited.tspans[2].baseline_shift = Some(3.0);
+        assert_eq!(full(&plan(&inherited, &faces(&seen)).unwrap()), vec![
+            (DecorationKind::Underline, 0.0, 130.0, b + u, 0.0, b),
+            (DecorationKind::Underline, 130.0, 630.0, b - 3.0 + u, 0.0, b - 3.0),
+            (DecorationKind::Underline, 630.0, 670.0, b + u, 0.0, b),
+        ], "the element's underline follows a tspan's shift");
+        // The tspan's OWN underline, raised: it rises with its run.
+        let mut own = styled_area(2000.0);
+        own.tspans[2].text_decoration = Some(vec!["underline".into()]);
+        own.tspans[2].baseline_shift = Some(-2.0);
+        assert_eq!(full(&plan(&own, &faces(&seen)).unwrap()),
+            vec![(DecorationKind::Underline, 130.0, 630.0, b + 2.0 + u, 0.0, b + 2.0)]);
+        // A turned tspan (" sat", 630..670, each glyph 10 wide): one piece per
+        // glyph, each turned about its own baseline origin.
+        let mut turned = flat.clone();
+        turned.tspans[3].rotate = Some(-5.0);
+        let mut want = vec![(DecorationKind::Underline, 0.0, 630.0, b + u, 0.0, b)];
+        for k in 0..4 {
+            let x = 630.0 + 10.0 * k as f64;
+            want.push((DecorationKind::Underline, x, x + 10.0, b + u, -5.0, b));
+        }
+        assert_eq!(full(&plan(&turned, &faces(&seen)).unwrap()), want);
+        // A turned AND shifted glyph: its origin is the shifted baseline.
+        turned.tspans[3].baseline_shift = Some(4.0);
+        let got = full(&plan(&turned, &faces(&seen)).unwrap());
+        assert_eq!(got[1], (DecorationKind::Underline, 630.0, 640.0, b - 4.0 + u, -5.0, b - 4.0), "{got:?}");
+        // The element's own rotation turns every glyph's piece.
+        let mut all = flat.clone();
+        all.rotate = "20".into();
+        let got = full(&plan(&all, &faces(&seen)).unwrap());
+        assert_eq!(got.len(), 42, "one piece per glyph: {got:?}");
+        assert!(got.iter().all(|d| d.4 == 20.0 && d.5 == b));
     }
 
     /// A rotated glyph moves with its line's anchor: point text "ab" + "cd"
