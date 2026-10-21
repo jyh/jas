@@ -591,6 +591,30 @@ internal static unsafe class JasCore
     [DllImport(Lib)]
     internal static extern JasBytes jas_dock_layout(byte[] name, nuint len);
 
+    /// <summary>
+    /// Load the named layout of `default_layouts.yaml` into the engine and answer
+    /// it as <see cref="jas_layout_state"/> does (floating panels, FP-2). An empty
+    /// span is a refusal (`LayoutRefused`), and the held layout is kept.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_layout_load(IntPtr engine, byte[] name, nuint len);
+
+    /// <summary>
+    /// The engine's dock layout as the shell draws it: anchored docks with their
+    /// edge, floating docks with x and y, panels by content id, and `z_order`.
+    /// Empty (`NoLayout`) before a load.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_layout_state(IntPtr engine);
+
+    /// <summary>
+    /// One layout verb (`{"op":"detach_group",...}`), answered with the layout
+    /// after it. An empty span is a refusal that changed nothing; its class
+    /// (`BadLayoutOp`, `BadJson`, `NoLayout`) is in <see cref="jas_last_error_json"/>.
+    /// </summary>
+    [DllImport(Lib)]
+    internal static extern JasBytes jas_layout_apply(IntPtr engine, byte[] op, nuint len);
+
     // -- events (BL1: the shell sends events, never state) -------------------
 
     /// <summary>Status codes from `ffi.rs:77-87`. Mirrored, not guessed.</summary>

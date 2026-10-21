@@ -191,6 +191,8 @@ pub struct JasEngine {
     /// Built lazily: a `YamlTool` costs a workspace lookup and a state-store
     /// init, and most engines never take a pointer at all.
     tool: RefCell<Option<(usize, Box<dyn crate::tools::tool::CanvasTool>)>>,
+    /// The dock layout a shell draws (FP-2): `None` until `jas_layout_load`.
+    layout: RefCell<Option<crate::workspace::workspace::WorkspaceLayout>>,
 }
 
 impl JasEngine {
@@ -333,6 +335,7 @@ impl JasEngine {
             store: RefCell::new(store),
             dpi_scale: std::cell::Cell::new(1.0),
             tool: RefCell::new(None),
+            layout: RefCell::new(None),
         }
     }
 }
@@ -948,6 +951,116 @@ pub unsafe extern "C" fn jas_dock_layout(name: *const u8, len: usize) -> JasByte
     };
     let out = JasBytes::from_string(serde_json::to_string(&dock).unwrap_or_default());
     ffi_instr::record_out(Crossing::DockLayout, out.len);
+    out
+}
+
+/// The engine's layout as a shell draws it, or the empty span with
+/// `{"panel_event":"NoLayout"}` before a load.
+fn layout_reply(engine: &JasEngine) -> JasBytes {
+    match engine.layout.borrow().as_ref() {
+        Some(l) => JasBytes::from_string(crate::layout_seed::shell_state(l).to_string()),
+        None => {
+            set_panel_event_error(engine, "NoLayout", "");
+            JasBytes::empty()
+        }
+    }
+}
+
+/// **Load the dock layout** named `name` from `default_layouts.yaml` into the
+/// engine (floating panels, FP-2), replacing any layout it held, and answer it
+/// as [`jas_layout_state`] does. Seeded through the same strict reader as
+/// [`jas_dock_layout`], so the groups are the ones that call answers.
+///
+/// A refusal is the empty span and leaves any held layout unchanged:
+/// `BadUtf8`, or `LayoutRefused` (detail: the name) for a layout the bundle
+/// does not hold or declares defectively.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or an engine from [`jas_engine_new`]; `name` NULL or valid
+/// for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_layout_load(e: *mut JasEngine, name: *const u8, len: usize) -> JasBytes {
+    ffi_instr::record(Crossing::LayoutLoad, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(name) = (unsafe { utf8(name, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let seeded = crate::interpreter::workspace::Workspace::load()
+        .and_then(|ws| crate::layout_seed::from_default_layout(ws.data(), name));
+    let Some(layout) = seeded else {
+        set_panel_event_error(engine, "LayoutRefused", name);
+        return JasBytes::empty();
+    };
+    *engine.layout.borrow_mut() = Some(layout);
+    let out = layout_reply(engine);
+    ffi_instr::record_out(Crossing::LayoutLoad, out.len);
+    out
+}
+
+/// **The dock layout** the engine holds, as a shell draws it:
+/// `{"name", "anchored":[{"id","edge","collapsed","width","groups":[{"panels":
+/// ["<content id>"...],"active","collapsed"}]}], "floating":[{... "x","y","z"}],
+/// "z_order":[<dock id>...]}`; a floating dock also carries `z`, its stacking
+/// index (draw in ascending `z`). The empty span with `NoLayout` before a load.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or an engine from [`jas_engine_new`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_layout_state(e: *mut JasEngine) -> JasBytes {
+    ffi_instr::record(Crossing::LayoutState, 0, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let out = layout_reply(engine);
+    ffi_instr::record_out(Crossing::LayoutState, out.len);
+    out
+}
+
+/// **One layout verb** (`{"op":"detach_group","dock_id":0,"group_idx":1,
+/// "x":..,"y":..}`), run by the same `layout_apply` the cross-language corpus
+/// pins, answered with the layout after it as [`jas_layout_state`] does.
+///
+/// The dispatcher SKIPS what it does not know; this entry REFUSES it, because
+/// a shell would read an unchanged layout as an answer. A refusal is the empty
+/// span and changes nothing: `BadUtf8`, `BadJson`, `NoLayout`, or
+/// `BadLayoutOp` (detail: the verb) for an op that is not an object, has no
+/// `op`, names no verb, or lacks a field its verb requires.
+/// **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+///
+/// # Safety
+/// `e` must be NULL or an engine from [`jas_engine_new`]; `op` NULL or valid
+/// for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jas_layout_apply(e: *mut JasEngine, op: *const u8, len: usize) -> JasBytes {
+    ffi_instr::record(Crossing::LayoutApply, len, 0);
+    let Some(engine) = (unsafe { e.as_ref() }) else { return JasBytes::empty() };
+    let Ok(raw) = (unsafe { utf8(op, len) }) else {
+        set_panel_event_error(engine, "BadUtf8", "");
+        return JasBytes::empty();
+    };
+    let Ok(op) = serde_json::from_str::<serde_json::Value>(raw) else {
+        set_panel_event_error(engine, "BadJson", "");
+        return JasBytes::empty();
+    };
+    {
+        let mut held = engine.layout.borrow_mut();
+        let Some(layout) = held.as_mut() else {
+            drop(held);
+            set_panel_event_error(engine, "NoLayout", "");
+            return JasBytes::empty();
+        };
+        // Applied to a copy, so a refused op changes nothing.
+        let mut next = layout.clone();
+        if !crate::workspace::layout_apply::layout_apply_checked(&mut next, &op) {
+            drop(held);
+            set_panel_event_error(engine, "BadLayoutOp", op["op"].as_str().unwrap_or(""));
+            return JasBytes::empty();
+        }
+        *layout = next;
+    }
+    let out = layout_reply(engine);
+    ffi_instr::record_out(Crossing::LayoutApply, out.len);
     out
 }
 
@@ -5248,6 +5361,94 @@ mod tests {
 
     fn refusal(class: &str, detail: &str) -> String {
         format!(r#"{{"panel_event":"{class}","detail":"{detail}"}}"#)
+    }
+
+    // -----------------------------------------------------------------------
+    // THE ENGINE'S DOCK LAYOUT (floating panels, FP-2): seeded from the YAML,
+    // driven by `layout_apply`, refused by name where the dispatcher skips
+    // -----------------------------------------------------------------------
+
+    fn layout_op(e: *mut JasEngine, op: &str) -> String {
+        take(unsafe { jas_layout_apply(e, op.as_ptr(), op.len()) })
+    }
+
+    fn layout_load(e: *mut JasEngine, name: &str) -> String {
+        take(unsafe { jas_layout_load(e, name.as_ptr(), name.len()) })
+    }
+
+    fn json(s: &str) -> serde_json::Value {
+        serde_json::from_str(s).unwrap_or_else(|_| panic!("not JSON: {s:?}"))
+    }
+
+    /// The loaded layout's anchored groups are the groups `jas_dock_layout`
+    /// answers, so the shell can move onto the engine's layout (FP-3) without
+    /// its dock changing.
+    #[test]
+    fn a_loaded_layout_carries_the_dock_readers_groups() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let state = json(&layout_load(e, "Default"));
+        let dock = json(&dock_of("Default"));
+        let groups = state["anchored"][0]["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), dock["groups"].as_array().unwrap().len());
+        for (g, d) in groups.iter().zip(dock["groups"].as_array().unwrap()) {
+            assert_eq!((&g["panels"], &g["active"]), (&d["panels"], &d["active"]));
+        }
+        assert_eq!(state["floating"], serde_json::json!([]));
+        assert_eq!(take(unsafe { jas_layout_state(e) }), state.to_string(), "state reads back the load");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_verb_changes_the_held_layout_and_answers_it() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        layout_load(e, "Default");
+        let after = json(&layout_op(e, r#"{"op":"detach_group","dock_id":0,"group_idx":1,"x":40.0,"y":60.0}"#));
+        assert_eq!(after["floating"].as_array().unwrap().len(), 1, "{after}");
+        assert_eq!(after["floating"][0]["x"].as_f64(), Some(40.0));
+        assert_eq!(take(unsafe { jas_layout_state(e) }), after.to_string(), "the engine holds what it answered");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// Every refusal is the empty span, names its class, and leaves the held
+    /// layout byte-identical; the control op between them DOES change it, so an
+    /// entry that refused everything could not pass.
+    #[test]
+    fn a_layout_op_the_dispatcher_would_skip_is_refused_by_name() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        assert_eq!(take(unsafe { jas_layout_state(e) }), "", "nothing before a load");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("NoLayout", ""));
+        assert_eq!(layout_op(e, r#"{"op":"redock","dock_id":1}"#), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("NoLayout", ""));
+        let held = layout_load(e, "Default");
+        for (op, class, detail) in [
+            (r#"{"op":"no_such_verb"}"#, "BadLayoutOp", "no_such_verb"),
+            (r#"{"dock_id":0}"#, "BadLayoutOp", ""),
+            (r#"["detach_group"]"#, "BadLayoutOp", ""),
+            (r#"{"op":"show_panel"}"#, "BadLayoutOp", "show_panel"),
+            ("{not json", "BadJson", ""),
+        ] {
+            assert_eq!(layout_op(e, op), "", "{op} is refused");
+            assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal(class, detail), "{op}");
+            assert_eq!(take(unsafe { jas_layout_state(e) }), held, "{op} changed nothing");
+        }
+        assert_ne!(layout_op(e, r#"{"op":"toggle_group_collapsed","dock_id":0,"group_idx":0}"#), held,
+                   "the control op changes the layout");
+        unsafe { jas_engine_free(e) };
+    }
+
+    #[test]
+    fn a_layout_the_bundle_lacks_is_refused_and_the_held_one_kept() {
+        let _g = crate::ffi_instr::test_lock::lock();
+        let e = jas_engine_new();
+        let held = layout_load(e, "Minimal");
+        assert!(!held.is_empty());
+        assert_eq!(layout_load(e, "No Such Layout"), "");
+        assert_eq!(take(unsafe { jas_last_error_json(e) }), refusal("LayoutRefused", "No Such Layout"));
+        assert_eq!(take(unsafe { jas_layout_state(e) }), held);
+        unsafe { jas_engine_free(e) };
     }
 
     fn doc_json(e: *mut JasEngine) -> String {

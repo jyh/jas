@@ -662,6 +662,54 @@ struct JasBytes jas_panel_list(void);
 struct JasBytes jas_dock_layout(const uint8_t *name, uintptr_t len);
 
 /**
+ * **Load the dock layout** named `name` from `default_layouts.yaml` into the
+ * engine (floating panels, FP-2), replacing any layout it held, and answer it
+ * as [`jas_layout_state`] does. Seeded through the same strict reader as
+ * [`jas_dock_layout`], so the groups are the ones that call answers.
+ *
+ * A refusal is the empty span and leaves any held layout unchanged:
+ * `BadUtf8`, or `LayoutRefused` (detail: the name) for a layout the bundle
+ * does not hold or declares defectively.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or an engine from [`jas_engine_new`]; `name` NULL or valid
+ * for `len` bytes.
+ */
+struct JasBytes jas_layout_load(struct JasEngine *e, const uint8_t *name, uintptr_t len);
+
+/**
+ * **The dock layout** the engine holds, as a shell draws it:
+ * `{"name", "anchored":[{"id","edge","collapsed","width","groups":[{"panels":
+ * ["<content id>"...],"active","collapsed"}]}], "floating":[{... "x","y","z"}],
+ * "z_order":[<dock id>...]}`; a floating dock also carries `z`, its stacking
+ * index (draw in ascending `z`). The empty span with `NoLayout` before a load.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or an engine from [`jas_engine_new`].
+ */
+struct JasBytes jas_layout_state(struct JasEngine *e);
+
+/**
+ * **One layout verb** (`{"op":"detach_group","dock_id":0,"group_idx":1,
+ * "x":..,"y":..}`), run by the same `layout_apply` the cross-language corpus
+ * pins, answered with the layout after it as [`jas_layout_state`] does.
+ *
+ * The dispatcher SKIPS what it does not know; this entry REFUSES it, because
+ * a shell would read an unchanged layout as an answer. A refusal is the empty
+ * span and changes nothing: `BadUtf8`, `BadJson`, `NoLayout`, or
+ * `BadLayoutOp` (detail: the verb) for an op that is not an object, has no
+ * `op`, names no verb, or lacks a field its verb requires.
+ * **BL4**: the span is Rust-owned. Copy it, then release with [`jas_free`].
+ *
+ * # Safety
+ * `e` must be NULL or an engine from [`jas_engine_new`]; `op` NULL or valid
+ * for `len` bytes.
+ */
+struct JasBytes jas_layout_apply(struct JasEngine *e, const uint8_t *op, uintptr_t len);
+
+/**
  * **A widget's behavior**, run in the engine (wave 2, A6).
  *
  * `{"widget":"align_left_button","event":"click","alt":false}`: the shell

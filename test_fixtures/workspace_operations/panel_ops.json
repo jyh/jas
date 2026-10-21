@@ -125,5 +125,152 @@
    }
   ],
   "expected_json": "panel_show_background_tab.json"
+ },
+ {
+  "name": "detach_panel",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_panel",
+    "dock_id": 0,
+    "group_idx": 0,
+    "panel_idx": 1,
+    "x": 300.0,
+    "y": 150.0
+   }
+  ],
+  "expected_json": "panel_detach_panel.json"
+ },
+ {
+  "name": "set_floating_position",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 100.0,
+    "y": 200.0
+   },
+   {
+    "op": "set_floating_position",
+    "dock_id": 1,
+    "x": 400.0,
+    "y": 50.0
+   }
+  ],
+  "expected_json": "panel_set_floating_position.json"
+ },
+ {
+  "name": "bring_to_front",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 100.0,
+    "y": 200.0
+   },
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 300.0,
+    "y": 200.0
+   },
+   {
+    "op": "bring_to_front",
+    "dock_id": 1
+   }
+  ],
+  "expected_json": "panel_bring_to_front.json"
+ },
+ {
+  "name": "snap_to_edge_left",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 100.0,
+    "y": 200.0
+   },
+   {
+    "op": "snap_to_edge",
+    "dock_id": 1,
+    "edge": "left"
+   }
+  ],
+  "expected_json": "panel_snap_to_edge_left.json"
+ },
+ {
+  "name": "clamp_floating_docks",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 5000.0,
+    "y": -900.0
+   },
+   {
+    "op": "clamp_floating_docks",
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_clamp_floating.json"
+ },
+ {
+  "name": "detach_group_near_the_left_edge_snaps",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 5.0,
+    "y": 200.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_group_snap_left.json"
+ },
+ {
+  "name": "detach_panel_near_the_bottom_edge_snaps",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_panel",
+    "dock_id": 0,
+    "group_idx": 0,
+    "panel_idx": 1,
+    "x": 600.0,
+    "y": 790.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_panel_snap_bottom.json"
+ },
+ {
+  "name": "detach_group_away_from_every_edge_floats",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 500.0,
+    "y": 300.0,
+    "viewport_w": 1200.0,
+    "viewport_h": 800.0
+   }
+  ],
+  "expected_json": "panel_detach_group_viewport_floats.json"
  }
 ]

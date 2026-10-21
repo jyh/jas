@@ -159,6 +159,19 @@
             Visibility="Collapsed" />
 
         <!--
+          FLOATING DOCKS (floating panels, FP-4a): an in-window layer over the
+          canvas's cell, one framed dock per floating dock the engine holds, at
+          its (x, y), stacked by the engine's `z`. NO BACKGROUND on purpose: the
+          layer's empty area passes every press to the canvas; each frame has
+          its own background and takes its own. Declared before DialogLayer, so a
+          dialog stays on top (no ZIndex is set between siblings here).
+        -->
+        <Canvas
+            x:Name="FloatLayer"
+            Grid.Row="1"
+            Grid.Column="1" />
+
+        <!--
           THE PANEL PANE, AND IT IS A MOUNT POINT LIKE THE MENUBAR (W2-5).
 
           Every control inside it is materialized at runtime from the core's

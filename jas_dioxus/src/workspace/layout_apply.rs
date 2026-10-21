@@ -31,7 +31,7 @@
 //! always carry well-formed params) replay byte-identically.
 
 use crate::workspace::workspace::{
-    DockId, GroupAddr, PanelAddr, PanelKind, WorkspaceLayout,
+    DockEdge, DockId, GroupAddr, PanelAddr, PanelKind, WorkspaceLayout,
 };
 use crate::workspace::pane::PaneId;
 use crate::workspace::workspace::PaneKind;
@@ -86,6 +86,32 @@ pub fn panel_kind_str(k: PanelKind) -> &'static str {
         PanelKind::MagicWand => "magic_wand",
         PanelKind::Symbols => "symbols",
         PanelKind::Concepts => "concepts",
+    }
+}
+
+/// A detach that carries the drop's viewport (`viewport_w`, `viewport_h`)
+/// snaps the new dock to the edge it was dropped near, in the same op, as the
+/// web's dock-tab drop does (`is_near_edge`, then `snap_to_edge`). With no
+/// viewport, or away from every edge, the dock floats. One op, so a shell
+/// never needs the new dock's id to finish its own drop.
+fn snap_if_dropped_near_an_edge(layout: &mut WorkspaceLayout, op: &serde_json::Value, fid: Option<DockId>) {
+    let (Some(fid), Some(vw), Some(vh)) = (fid, op["viewport_w"].as_f64(), op["viewport_h"].as_f64()) else {
+        return;
+    };
+    if let Some(edge) = WorkspaceLayout::is_near_edge(f(op, "x"), f(op, "y"), vw, vh) {
+        layout.snap_to_edge(fid, edge);
+    }
+}
+
+/// Parse a dock-edge string (`left` / `right` / `bottom`, as `test_json`
+/// writes it). Unknown is `None`, so `snap_to_edge` skips rather than guess
+/// an edge.
+fn parse_dock_edge(s: &str) -> Option<DockEdge> {
+    match s {
+        "left" => Some(DockEdge::Left),
+        "right" => Some(DockEdge::Right),
+        "bottom" => Some(DockEdge::Bottom),
+        _ => None,
     }
 }
 
@@ -235,11 +261,25 @@ fn f(op: &serde_json::Value, key: &str) -> f64 {
 
 /// Apply one primitive LAYOUT op to `layout`. The SINGLE per-verb mutation body
 /// shared by production and the cross-language harness. Hardened: an unknown
-/// verb or a missing required `kind`/`op` string SKIPS (no panic, no mutation).
+/// verb or a missing required `kind`/`op`/`edge` string SKIPS (no panic, no
+/// mutation).
+///
+/// Production sites call this; [`layout_apply_checked`] is the same body and
+/// also says whether it recognised the op.
 pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
+    layout_apply_checked(layout, op);
+}
+
+/// [`layout_apply`], answering whether the op was one the dispatcher
+/// RECOGNISES: `false` for a skip (no `op`, an unknown verb, a required field
+/// missing), `true` otherwise, including a pane verb on a layout with no pane
+/// layout, which is well formed with nothing to act on (that guard runs before
+/// the verb's own fields are read). The FFI's `jas_layout_apply` refuses on
+/// `false`, because a shell would read an unchanged layout as an answer.
+pub fn layout_apply_checked(layout: &mut WorkspaceLayout, op: &serde_json::Value) -> bool {
     let name = match op["op"].as_str() {
         Some(n) => n,
-        None => return, // malformed op envelope: skip
+        None => return false, // malformed op envelope: skip
     };
     match name {
         // ---- Panel / dock operations (mutate WorkspaceLayout directly) ----
@@ -270,7 +310,7 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "show_panel" => {
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_panel_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             layout.show_panel(kind);
         }
@@ -300,7 +340,7 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
             );
         }
         "detach_group" => {
-            layout.detach_group(
+            let fid = layout.detach_group(
                 GroupAddr {
                     dock_id: DockId(u(op, "dock_id")),
                     group_idx: u(op, "group_idx"),
@@ -308,9 +348,42 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
                 f(op, "x"),
                 f(op, "y"),
             );
+            snap_if_dropped_near_an_edge(layout, op, fid);
         }
         "redock" => {
             layout.redock(DockId(u(op, "dock_id")));
+        }
+        // ---- Floating docks (the floating-panels node: one verb per
+        // `WorkspaceLayout` method a shell drives, so no shell forks the law) ----
+        "detach_panel" => {
+            let fid = layout.detach_panel(
+                PanelAddr {
+                    group: GroupAddr {
+                        dock_id: DockId(u(op, "dock_id")),
+                        group_idx: u(op, "group_idx"),
+                    },
+                    panel_idx: u(op, "panel_idx"),
+                },
+                f(op, "x"),
+                f(op, "y"),
+            );
+            snap_if_dropped_near_an_edge(layout, op, fid);
+        }
+        "set_floating_position" => {
+            layout.set_floating_position(DockId(u(op, "dock_id")), f(op, "x"), f(op, "y"));
+        }
+        "bring_to_front" => {
+            layout.bring_to_front(DockId(u(op, "dock_id")));
+        }
+        "snap_to_edge" => {
+            let edge = match op["edge"].as_str().and_then(parse_dock_edge) {
+                Some(e) => e,
+                None => return false, // required field missing or unknown: skip
+            };
+            layout.snap_to_edge(DockId(u(op, "dock_id")), edge);
+        }
+        "clamp_floating_docks" => {
+            layout.clamp_floating_docks(f(op, "viewport_w"), f(op, "viewport_h"));
         }
         // ---- Pane operations (mutate the inner PaneLayout) ----
         // Each early-returns (skips) when there is no pane layout, matching the
@@ -318,14 +391,14 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "set_pane_position" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.set_pane_position(PaneId(u(op, "pane_id")), f(op, "x"), f(op, "y"));
         }
         "tile_panes" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             // The menu "Tile" handler clears canvas maximization before tiling;
             // it is opt-in via the explicit `set_canvas_maximized` bool param so
@@ -346,14 +419,14 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "toggle_canvas_maximized" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.toggle_canvas_maximized();
         }
         "resize_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.resize_pane(
                 PaneId(u(op, "pane_id")),
@@ -364,34 +437,88 @@ pub fn layout_apply(layout: &mut WorkspaceLayout, op: &serde_json::Value) {
         "hide_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_pane_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             pl.hide_pane(kind);
         }
         "show_pane" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             let kind = match op["kind"].as_str() {
                 Some(s) => parse_pane_kind(s),
-                None => return, // required field missing: skip
+                None => return false, // required field missing: skip
             };
             pl.show_pane(kind);
         }
         "bring_pane_to_front" => {
             let pl = match layout.pane_layout.as_mut() {
                 Some(pl) => pl,
-                None => return,
+                None => return true, // no pane layout: nothing to act on
             };
             pl.bring_pane_to_front(PaneId(u(op, "pane_id")));
         }
         // Unknown verb: skip rather than panic (a malformed/forward-compat op
         // must not crash production; the corpus only ever sends known verbs).
-        _ => {}
+        _ => return false,
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workspace::workspace::DockEdge;
+    use serde_json::json;
+
+    fn edges(l: &WorkspaceLayout) -> Vec<DockEdge> {
+        l.anchored.iter().map(|(e, _)| *e).collect()
+    }
+
+    /// A detach carrying the viewport snaps the new dock to the edge it was
+    /// dropped near, in the same op, as the web's dock-tab drop does (detach,
+    /// then `snap_to_edge` on `is_near_edge`); away from every edge, or with no
+    /// viewport, it floats. Each case is driven against the plain detach. An
+    /// edge that already holds an anchored dock takes the group INTO that dock
+    /// (`snap_to_edge` merges, as `redock` does), so the right edge adds no dock:
+    /// the detached group lands last in the right dock.
+    #[test]
+    fn a_detach_dropped_near_an_edge_snaps_there() {
+        let vp = |mut op: serde_json::Value| { op["viewport_w"] = json!(1200.0); op["viewport_h"] = json!(800.0); op };
+        let group = |x: f64, y: f64| json!({"op": "detach_group", "dock_id": 0, "group_idx": 0, "x": x, "y": y});
+        let panel = |x: f64, y: f64| json!({"op": "detach_panel", "dock_id": 0, "group_idx": 0, "panel_idx": 1, "x": x, "y": y});
+        for (op, want_edge) in [
+            (vp(group(5.0, 200.0)), Some(DockEdge::Left)),
+            (vp(panel(600.0, 790.0)), Some(DockEdge::Bottom)),
+            (vp(group(500.0, 300.0)), None),
+            (group(5.0, 200.0), None),
+        ] {
+            let mut l = WorkspaceLayout::default_layout();
+            assert!(layout_apply_checked(&mut l, &op), "{op}");
+            match want_edge {
+                Some(e) => {
+                    assert!(l.floating.is_empty(), "{op}: snapped, so nothing floats");
+                    assert_eq!(edges(&l).len(), 2, "{op}: a second anchored dock");
+                    assert_eq!(edges(&l)[1], e, "{op}");
+                }
+                None => {
+                    assert_eq!(l.floating.len(), 1, "{op}: it floats");
+                    assert_eq!(edges(&l), vec![DockEdge::Right], "{op}: no new anchored dock");
+                }
+            }
+        }
+        let mut l = WorkspaceLayout::default_layout();
+        let first = l.anchored[0].1.groups[0].panels.clone();
+        let n = l.anchored[0].1.groups.len();
+        assert!(layout_apply_checked(&mut l, &vp(group(1195.0, 200.0))));
+        assert!(l.floating.is_empty(), "snapped right, so nothing floats");
+        assert_eq!(edges(&l), vec![DockEdge::Right], "merged into the right dock, no second one");
+        assert_eq!(l.anchored[0].1.groups.len(), n, "the group left and came back");
+        assert_eq!(l.anchored[0].1.groups[n - 1].panels, first, "it lands last");
     }
 }

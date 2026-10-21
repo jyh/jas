@@ -122,6 +122,15 @@ pub enum Crossing {
     /// One panel's menu, labels and state (the owner's note 3, 2026-10-12).
     /// Read when the shell opens a panel menu, so its count is the menus opened.
     PanelMenu = 19,
+    /// The engine's dock layout seeded from a named `default_layouts.yaml`
+    /// layout (floating panels, FP-2). Read once per layout, as `DockLayout`.
+    LayoutLoad = 20,
+    /// The engine's dock layout read back. A count that grows with frames is a
+    /// shell polling what it was already handed.
+    LayoutState = 21,
+    /// One `layout_apply` verb (a tab, a collapse, a drag of a floating dock),
+    /// so its count is the dock gestures the shell sent.
+    LayoutApply = 22,
 }
 
 impl Crossing {
@@ -148,6 +157,9 @@ impl Crossing {
         "jas_dock_layout",
         "jas_dispatch_action",
         "jas_panel_menu",
+        "jas_layout_load",
+        "jas_layout_state",
+        "jas_layout_apply",
     ];
 
     /// Deliberately NOT `pub`: this is the instrument's own internal shape, and
@@ -157,7 +169,7 @@ impl Crossing {
     /// dimensions of a Rust-side counter that will change whenever the surface
     /// grows. (It was `pub` on the first push, and the cbindgen freshness gate
     /// caught the resulting drift immediately.)
-    pub(crate) const COUNT: usize = 20;
+    pub(crate) const COUNT: usize = 23;
 
     /// Every variant, in discriminant order. Exists so the variant list is
     /// written ONCE: a test that re-listed the variants by hand went out of
@@ -185,6 +197,9 @@ impl Crossing {
         Crossing::DockLayout,
         Crossing::DispatchAction,
         Crossing::PanelMenu,
+        Crossing::LayoutLoad,
+        Crossing::LayoutState,
+        Crossing::LayoutApply,
     ];
 
     pub fn name(self) -> &'static str {

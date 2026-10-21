@@ -6933,7 +6933,8 @@ pub(crate) mod tests {
             &[
                 "toggle_group_collapsed", "set_active_panel", "close_panel",
                 "show_panel", "reorder_panel", "move_panel_to_group",
-                "detach_group", "redock", "set_pane_position", "tile_panes",
+                "detach_group", "redock", "detach_panel", "set_floating_position",
+                "bring_to_front", "snap_to_edge", "clamp_floating_docks", "set_pane_position", "tile_panes",
                 "toggle_canvas_maximized", "resize_pane", "hide_pane",
                 "show_pane", "bring_pane_to_front",
             ]
@@ -6997,6 +6998,29 @@ pub(crate) mod tests {
     #[test]
     fn workspace_panel_ops() {
         run_workspace_operation_fixture("workspace_operations/panel_ops.json");
+    }
+
+    /// Every op in the panel corpus CHANGES the layout. `layout_apply` skips an
+    /// unknown verb silently, so a row whose verb is not wired would replay as
+    /// a no-op, and a golden generated from that replay would pin the no-op.
+    #[test]
+    fn workspace_panel_ops_each_change_the_layout() {
+        let tests: serde_json::Value =
+            serde_json::from_str(&read_fixture("workspace_operations/panel_ops.json")).unwrap();
+        let mut ops_seen = 0;
+        for tc in tests.as_array().unwrap() {
+            let name = tc["name"].as_str().unwrap();
+            let setup = read_fixture(&format!("expected/{}", tc["setup"].as_str().unwrap()));
+            let mut layout = test_json_to_workspace(setup.trim());
+            for (i, op) in tc["ops"].as_array().unwrap().iter().enumerate() {
+                let before = workspace_to_test_json(&layout);
+                apply_workspace_op(&mut layout, op);
+                assert_ne!(workspace_to_test_json(&layout), before,
+                           "{name}: op {i} ({}) left the layout unchanged", op["op"]);
+                ops_seen += 1;
+            }
+        }
+        assert!(ops_seen >= 20, "the panel corpus replayed only {ops_seen} ops");
     }
 
     #[test]
