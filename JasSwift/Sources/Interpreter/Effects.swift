@@ -1102,8 +1102,8 @@ public let gradientStopKeys: [String: String] = [
 /// `gradient_host::edit_stop`.
 public func editStop(_ stops: [GradientStop], index: Int, field: String,
                      value: Any?) -> ([GradientStop], Int)? {
-    guard stops.indices.contains(index), !(value is Bool),
-          let v = (value as? NSNumber)?.doubleValue, (0...100).contains(v) else { return nil }
+    guard stops.indices.contains(index), let v = sliderNumber(value),
+          (0...100).contains(v) else { return nil }
     var out = stops
     let s = out[index]
     switch field {
@@ -1133,6 +1133,149 @@ public func editStop(_ stops: [GradientStop], index: Int, field: String,
     }
     guard let moved = order.firstIndex(of: index) else { return nil }
     return (order.map { out[$0] }, moved)
+}
+
+// MARK: - The slider law (GRADIENT.md, "The slider law (precisely)")
+//
+// The GRADIENT_SLIDER's five gestures, mirroring `gradient_law.py` and
+// `gradient_host.rs`, pinned by `test_fixtures/gradient_stop/slider.json`.
+// They share `editStop`'s two rules: a sort is stable, and a midpoint resets
+// to 50 exactly when its stop's NEXT stop changed, compared by identity.
+
+/// A stop drag released further than this from the bar's centre line, in
+/// pixels, deletes the stop. Strict: exactly this far is still on the bar.
+public let gradientOffBarPx: Double = 20
+
+/// `value` as a number, refusing a Bool as the reference does. Not `value is
+/// Bool`: a JSON 0 or 1 arrives as an NSNumber that answers `is Bool` true, so
+/// that test refused an opacity of 0. `isBool` reads the box's own type.
+private func sliderNumber(_ value: Any?) -> Double? {
+    guard let n = value as? NSNumber, !n.isBool else { return nil }
+    return n.doubleValue
+}
+
+private func clampPercent(_ v: Double) -> Double { min(max(v, 0), 100) }
+
+private func withMidpoint(_ s: GradientStop, _ m: Double) -> GradientStop {
+    GradientStop(color: s.color, opacity: s.opacity, location: s.location, midpointToNext: m)
+}
+
+/// `#rrggbb` as three 0–255 channels.
+private func hexChannels(_ hex: String) -> [Double]? {
+    guard hex.count == 7, hex.hasPrefix("#") else { return nil }
+    let body = Array(hex.dropFirst())
+    var out: [Double] = []
+    for i in stride(from: 0, to: 6, by: 2) {
+        guard let v = UInt8(String(body[i..<i + 2]), radix: 16) else { return nil }
+        out.append(Double(v))
+    }
+    return out
+}
+
+/// The output stops for `order` (each output position's index in `old`, or
+/// nil for a new stop, left as a placeholder for the caller to replace), with
+/// every OLD stop whose next stop changed reset to 50. A new stop as the next
+/// stop is always a change, even for the old last stop.
+private func resetChangedNexts(_ old: [GradientStop], _ order: [Int?]) -> [GradientStop] {
+    order.enumerated().map { k, src in
+        guard let p = src else { return old[0] }
+        let oldNext: Int? = p + 1 < old.count ? p + 1 : nil
+        let hasNext = k + 1 < order.count
+        let newNext: Int? = hasNext ? order[k + 1] : nil
+        let gainedNew = hasNext && newNext == nil
+        return gainedNew || oldNext != newNext ? withMidpoint(old[p], 50) : old[p]
+    }
+}
+
+/// Positions of `stops` in STABLE location order (Swift's sort is not
+/// stable, so ties break on position).
+private func locationOrder(_ stops: [GradientStop]) -> [Int] {
+    stops.indices.sorted { (stops[$0].location, $0) < (stops[$1].location, $1) }
+}
+
+/// The gradient's colour and opacity at `location`, over `stops` in location
+/// order, with the midpoint honoured and classic sRGB interpolation (channels
+/// rounded half UP). Mirrors `gradient_law.value_at`.
+public func gradientValueAt(_ stops: [GradientStop], _ location: Double) -> (String, Double)? {
+    let s = locationOrder(stops).map { stops[$0] }
+    guard let first = s.first else { return nil }
+    let below = s.filter { $0.location <= location }.count
+    let a: GradientStop, b: GradientStop?, u: Double
+    if below == 0 {
+        (a, b, u) = (first, nil, 0)
+    } else if below == s.count {
+        (a, b, u) = (s[s.count - 1], nil, 0)
+    } else {
+        a = s[below - 1]; b = s[below]
+        let t = (location - a.location) / (b!.location - a.location)
+        let m = a.midpointToNext / 100
+        u = t < m ? 0.5 * (t / m) : 0.5 + 0.5 * ((t - m) / (1 - m))
+    }
+    guard let ca = hexChannels(a.color) else { return nil }
+    guard let b else {
+        return (String(format: "#%02x%02x%02x", Int(ca[0]), Int(ca[1]), Int(ca[2])), a.opacity)
+    }
+    guard let cb = hexChannels(b.color) else { return nil }
+    let ch = (0..<3).map { Int((ca[$0] + u * (cb[$0] - ca[$0]) + 0.5).rounded(.down)) }
+    return (String(format: "#%02x%02x%02x", ch[0], ch[1], ch[2]),
+            a.opacity + u * (b.opacity - a.opacity))
+}
+
+/// A click on the empty bar: `stops` sorted stably by location, with a new
+/// stop inserted after every stop at or below `location`, carrying the
+/// gradient's value there and midpoint 50; and the new stop's index. Nil when
+/// `location` is not a number in [0, 100] or there are no stops.
+public func addStop(_ stops: [GradientStop], location: Any?) -> ([GradientStop], Int)? {
+    guard let loc = sliderNumber(location), (0...100).contains(loc),
+          let (color, opacity) = gradientValueAt(stops, loc) else { return nil }
+    let sorted = locationOrder(stops)
+    let at = sorted.filter { stops[$0].location <= loc }.count
+    var order: [Int?] = sorted.map { $0 }
+    order.insert(nil, at: at)
+    var out = resetChangedNexts(stops, order)
+    out[at] = GradientStop(color: color, opacity: opacity, location: loc, midpointToNext: 50)
+    return (out, at)
+}
+
+/// The trash button, Delete, or a drag off the bar: `stops` without stop
+/// `index` (stored order, no sort) and the selected stop afterwards, the
+/// deleted stop's left neighbour or 0. Nil at the two-stop floor.
+public func deleteStop(_ stops: [GradientStop], index: Int) -> ([GradientStop], Int)? {
+    guard stops.indices.contains(index), stops.count > 2 else { return nil }
+    let order: [Int?] = stops.indices.filter { $0 != index }
+    return (resetChangedNexts(stops, order), max(index - 1, 0))
+}
+
+/// A stop drag, computed from the stops at the PRESS: a delete when `|dy|`
+/// exceeds `gradientOffBarPx` and three or more stops remain, else the
+/// location (clamped to [0, 100]) applied by `editStop`.
+public func dragStop(_ pressStops: [GradientStop], index: Int, location: Any?,
+                     dy: Any?) -> ([GradientStop], Int)? {
+    guard pressStops.indices.contains(index), let loc = sliderNumber(location),
+          let d = sliderNumber(dy) else { return nil }
+    if abs(d) > gradientOffBarPx && pressStops.count > 2 {
+        return deleteStop(pressStops, index: index)
+    }
+    return editStop(pressStops, index: index, field: "location", value: clampPercent(loc))
+}
+
+/// `stops[pair].midpointToNext` set to `value` clamped to [0, 100]. Nil when
+/// `pair` names no stop with a next stop.
+public func setMidpoint(_ stops: [GradientStop], pair: Int, value: Any?) -> [GradientStop]? {
+    guard pair >= 0, pair + 1 < stops.count, let v = sliderNumber(value) else { return nil }
+    var out = stops
+    out[pair] = withMidpoint(stops[pair], clampPercent(v))
+    return out
+}
+
+/// A midpoint drag to absolute `location`: the pair's midpoint set to
+/// `(location - a) / (b - a) * 100`, clamped, for `a`, `b` the pair's two
+/// stops in stored order. Nil for a zero-width pair.
+public func dragMidpoint(_ stops: [GradientStop], pair: Int, location: Any?) -> [GradientStop]? {
+    guard pair >= 0, pair + 1 < stops.count, let loc = sliderNumber(location) else { return nil }
+    let (a, b) = (stops[pair].location, stops[pair + 1].location)
+    guard a != b else { return nil }
+    return setMidpoint(stops, pair: pair, value: ((loc - a) / (b - a)) * 100)
 }
 
 

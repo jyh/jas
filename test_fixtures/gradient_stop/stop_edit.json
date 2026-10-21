@@ -490,6 +490,106 @@
       "field": "location",
       "value": 120,
       "expected": null
+    },
+    {
+      "name": "opacity_zero_is_a_number",
+      "_comment": "0 and 1 are numbers, not booleans. A reader that tests 'is a bool' on a JSON number misreads 0 and 1 as false and true (Darwin's NSNumber bridge does), and would refuse this.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "field": "opacity",
+      "value": 0,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 0,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "location_one_is_a_number",
+      "_comment": "As opacity_zero_is_a_number, for a 1. Green moves to 1 and crosses nothing.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "field": "location",
+      "value": 1,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 1,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
     }
   ]
 }

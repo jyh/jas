@@ -7933,6 +7933,57 @@ pub(crate) mod tests {
         assert!(refused >= 3 && written >= 5, "corpus too thin: {} refused, {} written", refused, written);
     }
 
+    // Runs test_fixtures/gradient_stop/slider.json, the shared corpus for the
+    // Gradient slider's law (GRADIENT.md, "The slider law (precisely)"). The
+    // reference (`gradient_law.py`) and Swift read the same file.
+    #[test]
+    fn gradient_slider_corpus() {
+        use crate::geometry::element::{Color, GradientStop};
+        use crate::interpreter::gradient_host::{add_stop, delete_stop, drag_midpoint, drag_stop, set_midpoint};
+        fn stop(v: &serde_json::Value) -> GradientStop {
+            GradientStop {
+                color: Color::from_hex(v["color"].as_str().unwrap()).unwrap(),
+                opacity: v["opacity"].as_f64().unwrap(),
+                location: v["location"].as_f64().unwrap(),
+                midpoint_to_next: v["midpoint_to_next"].as_f64().unwrap(),
+            }
+        }
+        let raw = read_fixture("gradient_stop/slider.json");
+        let corpus: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let mut ran: std::collections::BTreeMap<String, (usize, usize)> = Default::default();
+        for vec in corpus["vectors"].as_array().unwrap() {
+            let name = vec["name"].as_str().unwrap();
+            let op = vec["op"].as_str().unwrap();
+            let stops: Vec<GradientStop> = vec["stops"].as_array().unwrap().iter().map(stop).collect();
+            let int = |k: &str| vec[k].as_i64().unwrap();
+            // Every op's result as (stops, selected stop or None).
+            let got: Option<(Vec<GradientStop>, Option<usize>)> = match op {
+                "add_stop" => add_stop(&stops, &vec["location"]).map(|(s, i)| (s, Some(i))),
+                "delete_stop" => delete_stop(&stops, int("index")).map(|(s, i)| (s, Some(i))),
+                "drag_stop" => drag_stop(&stops, int("index"), &vec["location"], &vec["dy"]).map(|(s, i)| (s, Some(i))),
+                "set_midpoint" => set_midpoint(&stops, int("pair"), &vec["value"]).map(|s| (s, None)),
+                "drag_midpoint" => drag_midpoint(&stops, int("pair"), &vec["location"]).map(|s| (s, None)),
+                other => panic!("gradient_slider '{}': unknown op {}", name, other),
+            };
+            let tally = ran.entry(op.to_string()).or_default();
+            if vec["expected"].is_null() {
+                assert!(got.is_none(), "gradient_slider '{}': must refuse", name);
+                tally.0 += 1;
+            } else {
+                let (out, idx) = got.unwrap_or_else(|| panic!("gradient_slider '{}': refused", name));
+                let want: Vec<GradientStop> = vec["expected"]["stops"].as_array().unwrap().iter().map(stop).collect();
+                assert_eq!(out, want, "gradient_slider '{}': stops", name);
+                assert_eq!(idx.map(|i| i as i64), vec["expected"]["index"].as_i64(), "gradient_slider '{}': index", name);
+                tally.1 += 1;
+            }
+        }
+        // Every op witnessed refusing and writing, as the reference requires.
+        assert_eq!(ran.len(), 5, "ops run: {:?}", ran);
+        for (op, (refused, written)) in &ran {
+            assert!(*refused >= 1 && *written >= 3, "corpus too thin for {}: {} refused, {} written", op, refused, written);
+        }
+    }
+
     #[cfg(feature = "web")]
     #[test]
     fn stroke_apply_panel_edit_corpus() {

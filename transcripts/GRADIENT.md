@@ -285,6 +285,58 @@ and the percentage.
   `workspace/dialogs/color_picker.yaml` dialog, seeded with the stop's
   color. OK writes the new color to the stop; Cancel discards.
 
+### The slider law (precisely)
+
+The pointer and keyboard gestures above change `stops[]` through five pure
+functions. The executable statement is `workspace_interpreter/gradient_law.py`,
+pinned for all three implementations by `test_fixtures/gradient_stop/slider.json`.
+Every function refuses (writes nothing) when an index names no stop or pair or
+an argument is not a number. Two rules are shared with the combo law below.
+The first is that a midpoint is reset to 50 exactly when its stop's NEXT stop
+changed, compared by identity. The second is that a sort is STABLE, so a tie
+does not cross.
+
+- `add_stop(stops, location)` is a click on the empty bar. `location` must be in
+  `[0, 100]`. The stops are sorted stably by location, and the new stop goes
+  AFTER every stop whose location is `<= location`. Its colour and opacity
+  are the gradient's value at `location` (below). Its midpoint is 50, and it
+  becomes the selected stop.
+- **The value at a location.** Below the first stop it is the first stop's
+  value, and from the last stop on it is the last stop's. Otherwise take `a`
+  (the last stop at or below the location) and `b` (the next stop), with
+  `t = (location − a.location) / (b.location − a.location)` and
+  `m = a.midpoint_to_next / 100`. If `t < m` then `u = 0.5 · (t / m)`, else
+  `u = 0.5 + 0.5 · ((t − m) / (1 − m))`. Each sRGB channel (0–255) is
+  `a + u · (b − a)`, rounded half up, and the opacity is
+  `a.opacity + u · (b.opacity − a.opacity)`, unrounded. The midpoint is
+  honoured, so the added stop sits on the curve the midpoint defines. The
+  interpolation is `classic` whatever the panel's method is.
+- `delete_stop(stops, index)` is the trash button, Delete, or a drag off the
+  bar. It is refused when the gradient has only two stops. The stop is removed
+  without sorting, and the selection moves to the stop on its left (or to stop
+  0 when the first stop was deleted).
+- `drag_stop(press_stops, index, location, dy)` is a stop drag. It is computed
+  from the stops AT THE PRESS, never from the previous preview, so a preview and
+  the commit are the same call. `dy` is the pointer's vertical distance from the
+  bar's centre line in pixels. If `|dy| > 20` and there are at least three
+  stops, the result is `delete_stop`. Otherwise the location is clamped to
+  `[0, 100]` and applied by the combo law's location edit, so the stops re-sort
+  and the selection follows the moved stop. With only two stops, a drag off
+  the bar is an ordinary move.
+- `set_midpoint(stops, pair, value)` sets `stops[pair].midpoint_to_next`, clamped
+  to `[0, 100]`. `pair` must name a stop that has a next stop. This is the
+  keyboard's midpoint nudge.
+- `drag_midpoint(stops, pair, location)` is a midpoint drag. It sets
+  `(location − a.location) / (b.location − a.location) · 100`, clamped to
+  `[0, 100]`, for the pair `a = stops[pair]`, `b = stops[pair + 1]` in stored
+  order. It is refused when the two stops share a location.
+
+The keyboard maps onto these: Left/Right is `drag_stop` at `location ± 1`
+(`± 10` with Shift) with `dy = 0`, and Home/End is the same call at 0 / 100.
+On a midpoint, they are `set_midpoint` at `value ± 1` / `± 10` / 0 / 100, and
+Delete is `delete_stop`. Selecting a stop clears the selected midpoint (−1),
+and selecting a midpoint clears the selected stop.
+
 ### Endpoints
 
 First and last stops are **not anchored** — they can sit anywhere in

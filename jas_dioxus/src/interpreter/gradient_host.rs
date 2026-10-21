@@ -263,6 +263,135 @@ pub fn edit_stop(stops: &[GradientStop], index: i64, field: &str, value: &Value)
     Some((order.iter().map(|&p| out[p]).collect(), moved))
 }
 
+// ── The slider law (GRADIENT.md, "The slider law (precisely)") ──────────
+//
+// The GRADIENT_SLIDER's five gestures, mirroring `gradient_law.py` and pinned
+// by `test_fixtures/gradient_stop/slider.json`. They share `edit_stop`'s two
+// rules: a sort is stable, and a midpoint resets to 50 exactly when its
+// stop's NEXT stop changed, compared by identity.
+
+/// A stop drag released further than this from the bar's centre line, in
+/// pixels, deletes the stop. Strict: exactly this far is still on the bar.
+const OFF_BAR_PX: f64 = 20.0;
+
+fn slider_index(index: i64, n: usize) -> Option<usize> {
+    usize::try_from(index).ok().filter(|&i| i < n)
+}
+
+fn clamp_percent(v: f64) -> f64 {
+    v.max(0.0).min(100.0)
+}
+
+/// The output stops for `order` (each output position's index in `old`, or
+/// `None` for a new stop, which is left as a placeholder copy for the caller
+/// to replace), with every OLD stop whose next stop changed reset to 50. A
+/// new stop as the next stop is always a change, even for the old last stop.
+fn reset_changed_nexts(old: &[GradientStop], order: &[Option<usize>]) -> Vec<GradientStop> {
+    order.iter().enumerate().map(|(k, src)| {
+        let Some(p) = *src else { return old[0] };
+        let mut s = old[p];
+        let old_next = (p + 1 < old.len()).then_some(p + 1);
+        let new_next = order.get(k + 1).copied();
+        let gained_new = matches!(new_next, Some(None));
+        if gained_new || old_next != new_next.flatten() {
+            s.midpoint_to_next = 50.0;
+        }
+        s
+    }).collect()
+}
+
+/// A colour's sRGB channels on the 0–255 scale.
+fn channels_255(c: &Color) -> [f64; 3] {
+    let (r, g, b, _) = c.to_rgba();
+    [(r * 255.0).round(), (g * 255.0).round(), (b * 255.0).round()]
+}
+
+/// The gradient's colour and opacity at `location`, over `stops` taken in
+/// location order, with the midpoint honoured and classic sRGB interpolation
+/// (channels rounded half UP). Mirrors `gradient_law.value_at`.
+pub fn value_at(stops: &[GradientStop], location: f64) -> Option<(Color, f64)> {
+    let mut s = stops.to_vec();
+    s.sort_by(|a, b| a.location.total_cmp(&b.location));
+    let below = s.iter().filter(|t| t.location <= location).count();
+    let (a, b, u) = if below == 0 {
+        (*s.first()?, None, 0.0)
+    } else if below == s.len() {
+        (s[s.len() - 1], None, 0.0)
+    } else {
+        let (a, b) = (s[below - 1], s[below]);
+        let t = (location - a.location) / (b.location - a.location);
+        let m = a.midpoint_to_next / 100.0;
+        let u = if t < m { 0.5 * (t / m) } else { 0.5 + 0.5 * ((t - m) / (1.0 - m)) };
+        (a, Some(b), u)
+    };
+    let Some(b) = b else { return Some((a.color, a.opacity)) };
+    let (ca, cb) = (channels_255(&a.color), channels_255(&b.color));
+    let ch = |i: usize| (ca[i] + u * (cb[i] - ca[i]) + 0.5).floor() / 255.0;
+    Some((Color::rgb(ch(0), ch(1), ch(2)), a.opacity + u * (b.opacity - a.opacity)))
+}
+
+/// A click on the empty bar: `stops` sorted stably by location, with a new
+/// stop inserted after every stop at or below `location`, carrying the
+/// gradient's value there and midpoint 50; and the new stop's index. `None`
+/// when `location` is not a number in [0, 100] or there are no stops.
+pub fn add_stop(stops: &[GradientStop], location: &Value) -> Option<(Vec<GradientStop>, usize)> {
+    let loc = location.as_f64().filter(|v| (0.0..=100.0).contains(v))?;
+    let (color, opacity) = value_at(stops, loc)?;
+    let mut order: Vec<usize> = (0..stops.len()).collect();
+    order.sort_by(|&a, &b| stops[a].location.total_cmp(&stops[b].location));
+    let at = order.iter().filter(|&&i| stops[i].location <= loc).count();
+    let mut order: Vec<Option<usize>> = order.into_iter().map(Some).collect();
+    order.insert(at, None);
+    let mut out = reset_changed_nexts(stops, &order);
+    out[at] = GradientStop { color, opacity, location: loc, midpoint_to_next: 50.0 };
+    Some((out, at))
+}
+
+/// The trash button, Delete, or a drag off the bar: `stops` without stop
+/// `index` (stored order, no sort) and the selected stop afterwards, the
+/// deleted stop's left neighbour or 0. `None` at the two-stop floor.
+pub fn delete_stop(stops: &[GradientStop], index: i64) -> Option<(Vec<GradientStop>, usize)> {
+    let i = slider_index(index, stops.len()).filter(|_| stops.len() > 2)?;
+    let order: Vec<Option<usize>> = (0..stops.len()).filter(|&k| k != i).map(Some).collect();
+    Some((reset_changed_nexts(stops, &order), i.saturating_sub(1)))
+}
+
+/// A stop drag, computed from the stops at the PRESS: a delete when `|dy|`
+/// exceeds [`OFF_BAR_PX`] and three or more stops remain, else the location
+/// (clamped to [0, 100]) applied by [`edit_stop`].
+pub fn drag_stop(press_stops: &[GradientStop], index: i64, location: &Value, dy: &Value)
+                 -> Option<(Vec<GradientStop>, usize)> {
+    slider_index(index, press_stops.len())?;
+    let (loc, d) = (location.as_f64()?, dy.as_f64()?);
+    if d.abs() > OFF_BAR_PX && press_stops.len() > 2 {
+        return delete_stop(press_stops, index);
+    }
+    edit_stop(press_stops, index, "location", &json!(clamp_percent(loc)))
+}
+
+/// `stops[pair].midpoint_to_next` set to `value` clamped to [0, 100]. `None`
+/// when `pair` names no stop with a next stop.
+pub fn set_midpoint(stops: &[GradientStop], pair: i64, value: &Value) -> Option<Vec<GradientStop>> {
+    let p = slider_index(pair, stops.len().saturating_sub(1))?;
+    let v = value.as_f64()?;
+    let mut out = stops.to_vec();
+    out[p].midpoint_to_next = clamp_percent(v);
+    Some(out)
+}
+
+/// A midpoint drag to absolute `location`: the pair's midpoint set to
+/// `(location - a) / (b - a) * 100`, clamped, for `a`, `b` the pair's two
+/// stops in stored order. `None` for a zero-width pair.
+pub fn drag_midpoint(stops: &[GradientStop], pair: i64, location: &Value) -> Option<Vec<GradientStop>> {
+    let p = slider_index(pair, stops.len().saturating_sub(1))?;
+    let loc = location.as_f64()?;
+    let (a, b) = (stops[p].location, stops[p + 1].location);
+    if a == b {
+        return None;
+    }
+    set_midpoint(stops, pair, &json!(((loc - a) / (b - a)) * 100.0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
