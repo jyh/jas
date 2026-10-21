@@ -1,7 +1,7 @@
 {
     "item":  "character.character_rotation",
     "surface":  "2379x1333",
-    "frame_hash":  "e0a91ec1604d0191b3bbe388e4771e31f47549a3c1897252b38a388628fbee76",
+    "frame_hash":  "af87045a01f42a5c88a452ab65601cfb6f24e6cab3b01ced5b7de67d2516b49b",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "78c0c8035c2dce37",
     "tab":  "[0,0]=on:\"text_basic.svg\"",
