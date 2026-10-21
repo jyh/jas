@@ -2035,6 +2035,42 @@ mod tests {
         assert_ne!(plain, paint("underline"), "an underline must change the frame");
     }
 
+    /// ⭐ A STACKED STYLE PAINTS (the 10-20 feel sitting, finding 10: every
+    /// repaint after superscript + underline read DOCUMENT INCOMPLETE). The
+    /// shift lays the text out, and what the line draw lacks now takes the
+    /// shared plan, so the frame paints, and the underline changes it.
+    #[test]
+    fn a_superscript_underlined_text_paints_and_differs_from_superscript_alone() {
+        let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+        let paint = |decoration: &str| {
+            let mut doc = crate::geometry::svg::svg_to_document(&svg);
+            fn style(e: &mut Element, decoration: &str) {
+                match e {
+                    Element::Text(t) => {
+                        t.baseline_shift = "super".into();
+                        t.text_decoration = decoration.into();
+                        t.fill = Some(crate::geometry::element::Fill {
+                            color: crate::geometry::element::Color::rgb(1.0, 0.0, 0.0), opacity: 1.0,
+                        });
+                    }
+                    Element::Layer(l) => for c in l.children.iter_mut() { style(std::rc::Rc::make_mut(c), decoration) },
+                    _ => {}
+                }
+            }
+            for l in doc.layers.iter_mut() { style(l, decoration); }
+            let (dev, ctx) = warp();
+            let t = tex(&dev, false);
+            let surface: IDXGISurface = t.cast().expect("surface");
+            let rc = unsafe { jas_paint_document_for_test(surface.as_raw(), &doc, W as f32, H as f32) };
+            assert_eq!(rc, JAS_PAINT_OK, "superscript text must paint, not refuse ({decoration:?})");
+            read(&dev, &ctx, &t)
+        };
+        let blank = { let (dev, ctx) = warp(); let t = tex(&dev, false); read(&dev, &ctx, &t) };
+        let sup = paint("none");
+        assert_ne!(blank, sup, "control: the superscript text must reach the surface at all");
+        assert_ne!(sup, paint("underline"), "the underline must change the frame");
+    }
+
     /// An EMPTY document is complete, not incomplete. Nothing to draw is a
     /// legitimate state (a new file), and refusing it would make the app unable
     /// to open one.

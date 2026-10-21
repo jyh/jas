@@ -4372,3 +4372,51 @@ fn styled_texts_scale_is_one_frame_around_the_plan() {
     assert!(cmds[last_run..].iter().any(|c| matches!(c, Command::PopState)), "the frame closes after the last run");
     assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
 }
+
+/// ⭐ A STACKED STYLE TAKES THE PLAN (the 10-20 feel sitting, finding 10,
+/// measured on the box as 1,223 `DOCUMENT INCOMPLETE` repaints). A baseline
+/// shift, a case or a leading makes flat text `needs_layout`, and the per-line
+/// draw that lays it out carries no decoration, spacing or glyph rotation, so
+/// superscript + underline went to legacy and the Windows walk refused the
+/// WHOLE frame. What the line draw cannot carry now takes the shared plan,
+/// which draws all three; what it can carry keeps the line draw, so no frame
+/// at a single style moves. The measurer is the argument, because off
+/// Direct2D there is none and the router could not be driven here at all.
+#[test]
+fn a_flat_laid_out_text_with_what_the_line_draw_lacks_takes_the_plan() {
+    use super::{flat_layout_route, FlatLayoutRoute as R};
+    let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+    let doc = crate::geometry::svg::svg_to_document(&svg);
+    let base = match &doc.layers[0] {
+        Element::Layer(l) => match &*l.children[0] {
+            Element::Text(t) => t.clone(),
+            other => panic!("expected Text, got {other:?}"),
+        },
+        other => panic!("expected Layer, got {other:?}"),
+    };
+    let with = |f: &dyn Fn(&mut crate::geometry::element::TextElem)| { let mut t = base.clone(); f(&mut t); t };
+    let sup = with(&|t| t.baseline_shift = "super".into());
+    assert!(super::needs_layout(&sup) && sup.render_is_flat(), "the subject: flat text the shift lays out");
+    // What the line draw carries keeps it: superscript alone, all caps under a shift.
+    assert_eq!(flat_layout_route(&sup, true), R::Lines);
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "super".into(); t.text_transform = "uppercase".into(); }), true), R::Lines);
+    // What it lacks takes the plan: a decoration, a glyph rotation, tracking.
+    for (name, t) in [
+        ("super + underline", with(&|t| { t.baseline_shift = "super".into(); t.text_decoration = "underline".into(); })),
+        ("sub + line-through", with(&|t| { t.baseline_shift = "sub".into(); t.text_decoration = "line-through".into(); })),
+        ("shift + rotation", with(&|t| { t.baseline_shift = "4pt".into(); t.rotate = "30".into(); })),
+        ("caps + underline", with(&|t| { t.text_transform = "uppercase".into(); t.text_decoration = "underline".into(); })),
+        ("super + tracking", with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "0.1em".into(); })),
+    ] {
+        assert_eq!(flat_layout_route(&t, true), R::Runs, "{name}");
+        // And without a real measurer nothing lowers: the layout breaks by widths.
+        assert_eq!(flat_layout_route(&t, false), R::Legacy, "{name}, no measurer");
+    }
+    // What neither draws stays legacy: a shift that does not read.
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "high".into(); t.text_decoration = "underline".into(); }), true), R::Legacy);
+    // Nor tracking the plan cannot read (`runs_plan_excludes`), which the line
+    // draw lacks too.
+    let unread = with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "wide".into(); });
+    assert!(super::runs_plan_excludes(&unread), "the subject: the plan refuses it");
+    assert_eq!(flat_layout_route(&unread, true), R::Legacy);
+}
