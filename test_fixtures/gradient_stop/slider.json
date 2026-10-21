@@ -1,0 +1,1609 @@
+{
+  "_doc": [
+    "The Gradient slider's law (transcripts/GRADIENT.md, The slider law (precisely)).",
+    "Each vector names an op: add_stop(stops, location) and delete_stop(stops, index) and drag_stop(stops, index, location, dy) return {stops, index} (the selected stop afterwards); set_midpoint(stops, pair, value) and drag_midpoint(stops, pair, location) return {stops}. expected: null means refused, nothing written.",
+    "Every expected value was computed by hand from the spec text before the reference law existed; each _comment shows the arithmetic.",
+    "Stops use the YAML shape {color, opacity, location, midpoint_to_next}. Input stops mostly carry midpoint_to_next 40 so a reset to 50 is visible.",
+    "Read by workspace_interpreter/tests/test_gradient_slider.py (reference), jas_dioxus/src/cross_language_test.rs and JasSwift/Tests/Panels/GradientStopCorpusTests.swift."
+  ],
+  "vectors": [
+    {
+      "name": "add_between_at_half_midpoint",
+      "op": "add_stop",
+      "_comment": "t = 0.25, m = 0.5, so u = 0.25: red 255 -> 191.25 -> 191 (bf), blue 63.75 -> 64 (40), opacity 100 -> 0 at u 0.25 is 75. The left stop's next changed, so its midpoint resets (it was already 50).",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 50
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 0,
+          "location": 100,
+          "midpoint_to_next": 50
+        }
+      ],
+      "location": 25,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#bf0040",
+            "opacity": 75,
+            "location": 25,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 0,
+            "location": 100,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "add_honours_the_midpoint_below_it",
+      "op": "add_stop",
+      "_comment": "m = 0.25 and t = 0.1 < m, so u = 0.5 * 0.4 = 0.2: red 255 - 51 = 204 (cc), blue 51 (33). A law that ignores the midpoint gives u = 0.1 (#e6001a).",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 25
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 10,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#cc0033",
+            "opacity": 100,
+            "location": 10,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "add_honours_the_midpoint_above_it",
+      "op": "add_stop",
+      "_comment": "m = 0.25 and t = 0.25 = m, so u = 0.5 exactly: 127.5 rounds half UP to 128 (80) on both channels. A banker's rounding gives 128 too, so the next vector carries the half-up witness.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 25
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 25,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#800080",
+            "opacity": 100,
+            "location": 25,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "add_rounds_half_up",
+      "op": "add_stop",
+      "_comment": "m = 0.5, t = 0.5, u = 0.5: black 0 -> #050505 5 gives 2.5, which rounds half UP to 3. Round-half-even gives 2.",
+      "stops": [
+        {
+          "color": "#000000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 50
+        },
+        {
+          "color": "#050505",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 50
+        }
+      ],
+      "location": 50,
+      "expected": {
+        "stops": [
+          {
+            "color": "#000000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#030303",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#050505",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "add_before_the_first_stop_takes_its_value",
+      "op": "add_stop",
+      "_comment": "Below the first stop the gradient extends with the first stop's colour and opacity. No existing stop's next changed, so both keep midpoint 40.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 80,
+          "location": 20,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 80,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 5,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 80,
+            "location": 5,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#ff0000",
+            "opacity": 80,
+            "location": 20,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 80,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "add_after_the_last_stop_takes_its_value",
+      "op": "add_stop",
+      "_comment": "From the last stop on the gradient is the last stop's value. The old last stop now has a next stop, so its midpoint resets.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 80,
+          "location": 20,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 60,
+          "location": 80,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 95,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 80,
+            "location": 20,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 60,
+            "location": 80,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 60,
+            "location": 95,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 2
+      }
+    },
+    {
+      "name": "add_at_a_stops_location_goes_after_it",
+      "op": "add_stop",
+      "_comment": "The new stop goes after every stop at or below the location, so at green's own location it follows green and takes green's value (t = 0). Green's next changed.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 50,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 2
+      }
+    },
+    {
+      "name": "add_on_unsorted_stops_sorts_them",
+      "op": "add_stop",
+      "_comment": "A document can carry stops out of order. The add sorts first: blue@20 then red@80, t = 0.5, m = 0.4, u = 0.5 + 0.5 * (0.1 / 0.6) = 0.58333...: red 148.75 -> 149 (95), blue 106.25 -> 106 (6a). Both old stops' next changed.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 80,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 20,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 50,
+      "expected": {
+        "stops": [
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 20,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#95006a",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 80,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "add_refuses_past_100",
+      "op": "add_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": 101,
+      "expected": null
+    },
+    {
+      "name": "add_refuses_below_0",
+      "op": "add_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": -1,
+      "expected": null
+    },
+    {
+      "name": "add_refuses_a_string",
+      "op": "add_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": "50",
+      "expected": null
+    },
+    {
+      "name": "add_refuses_a_bool",
+      "op": "add_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "location": true,
+      "expected": null
+    },
+    {
+      "name": "delete_middle_resets_the_left_neighbour",
+      "op": "delete_stop",
+      "_comment": "Red's next was green and is now blue, so red's midpoint resets; the selection moves left to red.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "delete_first_selects_stop_0",
+      "op": "delete_stop",
+      "_comment": "No stop's next changed (green's next is still blue).",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "expected": {
+        "stops": [
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "delete_last_resets_the_new_last",
+      "op": "delete_stop",
+      "_comment": "Green stops having a next stop, which counts as its next changing.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 2,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "delete_does_not_sort",
+      "op": "delete_stop",
+      "_comment": "Deletion keeps stored order, as an opacity edit does.",
+      "stops": [
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 90,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 10,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 2,
+      "expected": {
+        "stops": [
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 90,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "delete_refuses_at_the_two_stop_floor",
+      "op": "delete_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "expected": null
+    },
+    {
+      "name": "delete_refuses_past_the_end",
+      "op": "delete_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 3,
+      "expected": null
+    },
+    {
+      "name": "delete_refuses_a_negative_index",
+      "op": "delete_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": -1,
+      "expected": null
+    },
+    {
+      "name": "drag_within_the_bar_moves",
+      "op": "drag_stop",
+      "_comment": "No crossing, so no midpoint changes.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 30,
+      "dy": 5,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 30,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_past_a_neighbour_resorts",
+      "op": "drag_stop",
+      "_comment": "Red crosses green: red and green change next stop, blue does not.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 0,
+      "location": 70,
+      "dy": 0,
+      "expected": {
+        "stops": [
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 70,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_clamps_at_100",
+      "op": "drag_stop",
+      "_comment": "130 clamps to 100, which ties blue; a tie does not cross.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 130,
+      "dy": 0,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_clamps_at_0",
+      "op": "drag_stop",
+      "_comment": "-20 clamps to 0, which ties red; a tie does not cross.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": -20,
+      "dy": 0,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_off_below_deletes",
+      "op": "drag_stop",
+      "_comment": "|dy| = 21 > 20 with three stops: the drag deletes, whatever the location.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 60,
+      "dy": 21,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "drag_off_above_deletes",
+      "op": "drag_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 60,
+      "dy": -25,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 50
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 0
+      }
+    },
+    {
+      "name": "drag_at_exactly_20_stays_on_the_bar",
+      "op": "drag_stop",
+      "_comment": "The threshold is strict: 20 is on the bar.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 60,
+      "dy": 20,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 60,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_off_at_the_floor_is_a_move",
+      "op": "drag_stop",
+      "_comment": "With two stops a delete is blocked, so the drag is an ordinary move.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 60,
+      "dy": 40,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 60,
+            "midpoint_to_next": 40
+          }
+        ],
+        "index": 1
+      }
+    },
+    {
+      "name": "drag_refuses_past_the_end",
+      "op": "drag_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 3,
+      "location": 50,
+      "dy": 0,
+      "expected": null
+    },
+    {
+      "name": "drag_refuses_a_string_location",
+      "op": "drag_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": "50",
+      "dy": 0,
+      "expected": null
+    },
+    {
+      "name": "drag_refuses_a_string_dy",
+      "op": "drag_stop",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "index": 1,
+      "location": 50,
+      "dy": "0",
+      "expected": null
+    },
+    {
+      "name": "set_midpoint_writes_one_pair",
+      "op": "set_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 1,
+      "value": 30,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 30
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "set_midpoint_clamps_at_100",
+      "op": "set_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "value": 109,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 100
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "set_midpoint_clamps_at_0",
+      "op": "set_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "value": -5,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 0
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "set_midpoint_refuses_the_last_stop",
+      "op": "set_midpoint",
+      "_comment": "The last stop has no next stop, so it names no pair.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 2,
+      "value": 30,
+      "expected": null
+    },
+    {
+      "name": "set_midpoint_refuses_a_negative_pair",
+      "op": "set_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": -1,
+      "value": 30,
+      "expected": null
+    },
+    {
+      "name": "set_midpoint_refuses_a_string",
+      "op": "set_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "value": "30",
+      "expected": null
+    },
+    {
+      "name": "drag_midpoint_maps_into_its_pair",
+      "op": "drag_midpoint",
+      "_comment": "(60 - 50) / (100 - 50) * 100 = 20.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 1,
+      "location": 60,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 20
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "drag_midpoint_inside_the_first_pair",
+      "op": "drag_midpoint",
+      "_comment": "(10 - 0) / 50 * 100 = 20.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "location": 10,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 20
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "drag_midpoint_clamps_outside_its_pair",
+      "op": "drag_midpoint",
+      "_comment": "80 is past green: 160 clamps to 100.",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "location": 80,
+      "expected": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "opacity": 100,
+            "location": 0,
+            "midpoint_to_next": 100
+          },
+          {
+            "color": "#00ff00",
+            "opacity": 100,
+            "location": 50,
+            "midpoint_to_next": 40
+          },
+          {
+            "color": "#0000ff",
+            "opacity": 100,
+            "location": 100,
+            "midpoint_to_next": 40
+          }
+        ]
+      }
+    },
+    {
+      "name": "drag_midpoint_refuses_a_zero_width_pair",
+      "op": "drag_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 0,
+      "location": 50,
+      "expected": null
+    },
+    {
+      "name": "drag_midpoint_refuses_the_last_stop",
+      "op": "drag_midpoint",
+      "stops": [
+        {
+          "color": "#ff0000",
+          "opacity": 100,
+          "location": 0,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#00ff00",
+          "opacity": 100,
+          "location": 50,
+          "midpoint_to_next": 40
+        },
+        {
+          "color": "#0000ff",
+          "opacity": 100,
+          "location": 100,
+          "midpoint_to_next": 40
+        }
+      ],
+      "pair": 2,
+      "location": 50,
+      "expected": null
+    }
+  ]
+}
