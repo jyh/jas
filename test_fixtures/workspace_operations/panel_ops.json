@@ -272,5 +272,24 @@
    }
   ],
   "expected_json": "panel_detach_group_viewport_floats.json"
+ },
+ {
+  "name": "clamp_floating_docks_in_a_viewport_smaller_than_the_margin",
+  "setup": "workspace_default.json",
+  "ops": [
+   {
+    "op": "detach_group",
+    "dock_id": 0,
+    "group_idx": 0,
+    "x": 100.0,
+    "y": 200.0
+   },
+   {
+    "op": "clamp_floating_docks",
+    "viewport_w": 30.0,
+    "viewport_h": 30.0
+   }
+  ],
+  "expected_json": "panel_clamp_floating_tiny.json"
  }
 ]

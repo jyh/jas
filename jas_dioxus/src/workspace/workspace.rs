@@ -1219,8 +1219,12 @@ impl WorkspaceLayout {
     pub fn clamp_floating_docks(&mut self, viewport_w: f64, viewport_h: f64) {
         for fd in &mut self.floating {
             let min_visible = 50.0;
-            fd.x = fd.x.clamp(-fd.dock.width + min_visible, viewport_w - min_visible);
-            fd.y = fd.y.clamp(0.0, viewport_h - min_visible);
+            // NOT `f64::clamp`, which PANICS when its bounds cross (any viewport
+            // under the margin; through the FFI, a panic across the boundary).
+            // Swift's twin's form and order: `max(lower, min(v, upper))`, so in
+            // a viewport too small the LOWER bound wins.
+            fd.x = fd.x.min(viewport_w - min_visible).max(-fd.dock.width + min_visible);
+            fd.y = fd.y.min(viewport_h - min_visible).max(0.0);
         }
         if let Some(ref mut pl) = self.pane_layout {
             pl.clamp_panes(viewport_w, viewport_h);

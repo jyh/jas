@@ -472,6 +472,57 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    /// <summary>An ANCHORED group's index from its `dock{i}` key, or null (a floating group's key).</summary>
+    private static int? DockGroupIndex(string key) =>
+        key.StartsWith("dock", StringComparison.Ordinal)
+        && int.TryParse(key.AsSpan(4), System.Globalization.NumberStyles.None,
+                        System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : null;
+
+    /// <summary>The press a tear-out drag started at, in canvas-cell coordinates, and the element that claimed it.</summary>
+    private Windows.Foundation.Point? _tearFrom;
+    private UIElement? _tearSource;
+    /// <summary>Where the tear-out was released, in canvas-cell coordinates; read by the op builder.</summary>
+    private double _tearX, _tearY;
+
+    /// <summary>
+    /// A drag out of an anchored group tears it out (FP-5), as the web's dock-tab
+    /// drop does: a tab detaches its panel (`detach_panel`), the strip's empty part
+    /// detaches the group (`detach_group`), at the release point over the canvas.
+    /// The handlers see handled events too, because a Button handles its own press.
+    /// No viewport is sent, so the engine never snaps: this shell draws one
+    /// anchored dock, and a dock snapped to another edge would have nowhere to draw.
+    /// </summary>
+    private void WireTearOut(UIElement source, string key, Func<string> op)
+    {
+        // A Button captures its own press, so a tab's release returns to it. The
+        // strip claims only a press on its OWN empty part (a tab's press bubbles
+        // to it too) and captures the pointer, so its release returns to it.
+        var isButton = source is Microsoft.UI.Xaml.Controls.Primitives.ButtonBase;
+        source.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, e) =>
+        {
+            if (!isButton && !ReferenceEquals(e.OriginalSource, source)) { return; }
+            _tearFrom = e.GetCurrentPoint(FloatLayer).Position;
+            _tearSource = source;
+            if (!isButton) { source.CapturePointer(e.Pointer); }
+        }), handledEventsToo: true);
+        source.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, e) =>
+        {
+            if (!ReferenceEquals(_tearSource, source) || _tearFrom is not { } from) { return; }
+            _tearFrom = null;
+            _tearSource = null;
+            if (!isButton) { source.ReleasePointerCapture(e.Pointer); }
+            var at = e.GetCurrentPoint(FloatLayer).Position;
+            if (!LayoutWire.TearsOut(at.X - from.X, at.Y - from.Y, at.X, at.Y, FloatLayer.ActualWidth, FloatLayer.ActualHeight)) { return; }
+            (_tearX, _tearY) = (at.X, at.Y);
+            Report(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"DOCK TEAR-OUT group={key} x={at.X} y={at.Y} via=hand"));
+            _canvas?.LayoutOp(new LayoutOpCmd { Op = op(), Group = key, Via = "hand" });
+        }), handledEventsToo: true);
+    }
+
+    /// <summary>How many floating docks the last placement drew, so an all-anchored dock stays quiet.</summary>
+    private int _floatDrawn;
+
     /// <summary>Put each floating frame at the engine's (x, y) and `z`, and say so in one row.</summary>
     private void PlaceFloating(IReadOnlyList<LayoutWire.Floated> floating, string via)
     {
@@ -484,6 +535,11 @@ public sealed partial class MainWindow : Window
             Microsoft.UI.Xaml.Controls.Canvas.SetZIndex(frame, f.Z);
             placed.Add(string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{f.DockId}@{f.X},{f.Y}z{f.Z}"));
         }
+        // Quiet while nothing floats and nothing just stopped floating (flask §510:
+        // `docks=0` rode every layout answer, which was noise).
+        var was = _floatDrawn;
+        _floatDrawn = floating.Count;
+        if (floating.Count == 0 && was == 0) { return; }
         Report($"FLOAT DOCK PLACED docks={floating.Count} groups={floating.Sum(f => f.Groups.Count)} "
              + $"at=[{string.Join(";", placed)}] via={via}");
     }
@@ -519,11 +575,21 @@ public sealed partial class MainWindow : Window
             void BuildGroup(string key, LayoutWire.Group g, Panel host)
             {
                 var ids = g.Panels.ToList();
-                var tabs = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(4, 4, 4, 0) };
+                // A transparent background makes the strip's empty part hittable, so a
+                // drag that starts there tears the whole group out (FP-5).
+                var tabs = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Margin = new Thickness(4, 4, 4, 0),
+                    Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                };
                 var tabList = new List<(string, Button)>();
+                var groupIdx = DockGroupIndex(key);
+                if (groupIdx is int gi) { WireTearOut(tabs, key, () => LayoutWire.DetachGroup(_dockId, gi, _tearX, _tearY)); }
                 foreach (var id in ids)
                 {
                     var panelId = id;
+                    var panelIdx = ids.IndexOf(id);
                     var tab = new Button
                     {
                         Content = labels.TryGetValue(id, out var l) ? l : id,
@@ -534,6 +600,7 @@ public sealed partial class MainWindow : Window
                         MinHeight = 0,
                     };
                     tab.Click += (_, _) => _canvas.OpenPane(key, panelId, PaneAvailW);
+                    if (groupIdx is int ti) { WireTearOut(tab, key, () => LayoutWire.DetachPanel(_dockId, ti, panelIdx, _tearX, _tearY)); }
                     tabs.Children.Add(tab);
                     tabList.Add((id, tab));
                 }
@@ -812,6 +879,26 @@ public sealed partial class MainWindow : Window
         _canvas.PanelMenuRead = OnPanelMenuRead;
         _canvas.DockChanged = OnDockChanged;
         _canvas.LayoutChanged = OnLayoutChanged;
+        // FP-6: a resized canvas cell keeps every floating dock reachable, by the
+        // engine's `clamp_floating_docks`; sent only while something floats.
+        FloatLayer.SizeChanged += (_, e) =>
+        {
+            if (_floatDrawn == 0) { return; }
+            // The window's own size law: a zero (a minimised window) is REFUSED,
+            // never clamped to, or every floating dock would jump to the corner.
+            var decision = SurfacePolicy.Decide((uint)e.NewSize.Width, (uint)e.NewSize.Height, hasSurface: true);
+            if (decision != Decision.Accept)
+            {
+                Report($"FLOAT DOCK CLAMP {decision} {(uint)e.NewSize.Width}x{(uint)e.NewSize.Height} -- docks stay where they are");
+                return;
+            }
+            _canvas.LayoutOp(new LayoutOpCmd
+            {
+                Op = LayoutWire.ClampFloatingDocks(e.NewSize.Width, e.NewSize.Height),
+                Group = "float",
+                Via = "resize",
+            });
+        };
         _canvas.DialogChanged = OnDialogChanged;
         _canvas.DocumentOpenChanged = OnDocumentOpenChanged;
         _canvas.SaveAllRequested = () => SaveDocument(forceAsk: false, thenClose: true);

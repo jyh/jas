@@ -835,8 +835,11 @@ impl PaneLayout {
     /// Ensure every pane has at least MIN_PANE_VISIBLE pixels within the viewport.
     pub fn clamp_panes(&mut self, viewport_w: f64, viewport_h: f64) {
         for p in &mut self.panes {
-            p.x = p.x.clamp(-p.width + MIN_PANE_VISIBLE, viewport_w - MIN_PANE_VISIBLE);
-            p.y = p.y.clamp(-p.height + MIN_PANE_VISIBLE, viewport_h - MIN_PANE_VISIBLE);
+            // NOT `f64::clamp`, which PANICS when its bounds cross (a viewport
+            // under the margin). Swift's twin's form and order:
+            // `min(max(v, lower), upper)`, so here the UPPER bound wins.
+            p.x = p.x.max(-p.width + MIN_PANE_VISIBLE).min(viewport_w - MIN_PANE_VISIBLE);
+            p.y = p.y.max(-p.height + MIN_PANE_VISIBLE).min(viewport_h - MIN_PANE_VISIBLE);
         }
     }
 
