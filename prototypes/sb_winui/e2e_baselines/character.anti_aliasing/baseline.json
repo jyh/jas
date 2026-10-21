@@ -1,7 +1,7 @@
 {
     "item":  "character.anti_aliasing",
     "surface":  "2379x1333",
-    "frame_hash":  "1dc90f86a167dffa10ba4641fbdc9d89a1b2606976ab56a7d7a24a127f4a53c6",
+    "frame_hash":  "aea43f4fac429e41d113fa9c3831e3dd9c1e78d385ef35009eefb5d27a60a2a1",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "507ba332511b82b1",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

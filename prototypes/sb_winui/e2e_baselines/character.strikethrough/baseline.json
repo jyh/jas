@@ -1,7 +1,7 @@
 {
     "item":  "character.strikethrough",
     "surface":  "2379x1333",
-    "frame_hash":  "fa127fc84ede1db1abc70bd2d1b49946588ffa3fbd7bb7d4d3f1d3b926f73f67",
+    "frame_hash":  "0d4e8b855d31fccf4feaf514610cf129762dbe31629863d9973cae3a62481d52",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "1f840c01affaded2",
     "tab":  "[0,0]=on:\"text_basic.svg\"",

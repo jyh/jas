@@ -1,7 +1,7 @@
 {
     "item":  "boolean.subtract_front",
     "surface":  "2379x1333",
-    "frame_hash":  "2460696abfd1b7782353fe1b6fec5152c51eb0c0f3555fc4888c68c1a9f20ac1",
+    "frame_hash":  "286234c38c8a9d02b5eca8936f751c2d6df7ef118e014f13be30e9cc2b809dbf",
     "plan_panel":  "boolean_panel_content",
     "plan_sha":  "214de6189eec9238",
     "tab":  "[0,0]=on:\"overlapping_rects.svg\"",

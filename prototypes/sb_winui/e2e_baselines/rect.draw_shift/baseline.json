@@ -1,7 +1,7 @@
 {
     "item":  "rect.draw_shift",
     "surface":  "2379x1333",
-    "frame_hash":  "f09618013e051f8d664bc4d908f846c2c7956145a71c1bdf85f2c666f5257a46",
+    "frame_hash":  "4876b07e21c6d391fb535d698d713849d89b58cbc8248f0503e031ee9780674d",
     "plan_panel":  "align_panel_content",
     "plan_sha":  "b7227f4d30f7b39b",
     "tab":  "[0,0]=on:\"circle_basic.svg\"",

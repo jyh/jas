@@ -1,7 +1,7 @@
 {
     "item":  "boolean.divide",
     "surface":  "2379x1333",
-    "frame_hash":  "5e7ff37924038dbe6532a8129e35ca59fa7a523d5cc07a3e080b72b43d745aab",
+    "frame_hash":  "4493428accf452a4987e448e75b8cbe292f3e8c7479e73f9150445bc2b872934",
     "plan_panel":  "boolean_panel_content",
     "plan_sha":  "64599e85f4250501",
     "tab":  "[0,0]=on:\"overlapping_rects.svg\"",

@@ -1,7 +1,7 @@
 {
     "item":  "character.leading",
     "surface":  "2379x1333",
-    "frame_hash":  "726519622567ea1012bb3c455850384f213236987a51d9c4fe0cbe88d7baca13",
+    "frame_hash":  "941dbac3bb03a636e5a0f180a8c6157ccb16591d6b96b002d41d808f5c023b55",
     "plan_panel":  "character_panel_content",
     "plan_sha":  "ecfa0b1961f55642",
     "tab":  "[0,0]=on:\"text_basic.svg\"",
