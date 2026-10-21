@@ -1345,3 +1345,51 @@ internal static class ActWire
         }
     }
 }
+
+/// <summary>
+/// The `gradient_slider`'s picture (gradient.yaml `grad_slider`), as the web
+/// draws it (`renderer.rs` `render_gradient_slider`): a bar previewing the
+/// stops, a circle per stop at its `location`, and a diamond per pair at its
+/// `midpoint_to_next`. DISPLAY ONLY, as in every port: the spec declares no
+/// event for it yet, so a shell that sent one would be refused `EmptyBehavior`.
+/// </summary>
+internal static class GradientSliderWire
+{
+    /// <summary>One stop: `#rrggbb`, opacity and location in 0..100, and the
+    /// midpoint to the next stop in 0..100 (50 when the stop names none).</summary>
+    internal readonly record struct Stop(string Color, double Opacity, double Location, double Midpoint);
+
+    /// <summary>`bind.stops` (the plan's JSON text) as stops, or null when it
+    /// is not an array of objects that each name a `color` and a `location`, or
+    /// when any percentage lies outside 0..100: refused, never clamped, as the
+    /// shell refuses every value it was not given (check_shell_interaction_path).</summary>
+    internal static IReadOnlyList<Stop>? Stops(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return null; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            var stops = new List<Stop>();
+            foreach (var s in doc.RootElement.EnumerateArray())
+            {
+                if (s.ValueKind != System.Text.Json.JsonValueKind.Object) { return null; }
+                if (!s.TryGetProperty("color", out var c) || c.ValueKind != System.Text.Json.JsonValueKind.String) { return null; }
+                if (!s.TryGetProperty("location", out var l) || !l.TryGetDouble(out var loc)) { return null; }
+                double Num(string key, double fallback) =>
+                    s.TryGetProperty(key, out var v) && v.TryGetDouble(out var d) ? d : fallback;
+                var (opacity, midpoint) = (Num("opacity", 100), Num("midpoint_to_next", 50));
+                if (new[] { loc, opacity, midpoint }.Any(p => p < 0 || p > 100)) { return null; }
+                stops.Add(new Stop(c.GetString()!, opacity, loc, midpoint));
+            }
+            return stops;
+        }
+        catch (System.Text.Json.JsonException) { return null; }
+    }
+
+    /// <summary>Where the diamond between `a` and the next stop `b` sits, in 0..100.</summary>
+    internal static double MidpointLocation(Stop a, Stop b) => a.Location + (b.Location - a.Location) * a.Midpoint / 100;
+
+    /// <summary>A bound index (`bind.selected_stop_index`, `…midpoint_index`): -1, none, unless an integer.</summary>
+    internal static int Index(string? shown) => int.TryParse(shown, out var i) ? i : -1;
+}

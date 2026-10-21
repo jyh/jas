@@ -10221,14 +10221,170 @@
           3,
           0
         ],
-        "type": "fill_stroke_widget",
-        "id": "grad_fill_stroke_widget",
-        "kind": "fill_stroke_widget",
+        "type": "container",
+        "id": "",
+        "kind": "container",
         "col": 3,
         "visible": true,
         "dyn_visible": false,
         "bind": [],
-        "style": []
+        "style": [
+          "height",
+          "min_height",
+          "width"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          0
+        ],
+        "type": "color_swatch",
+        "id": "grad_fill_swatch",
+        "kind": "color_swatch",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "color",
+          "z_index"
+        ],
+        "style": [
+          "position",
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          1
+        ],
+        "type": "color_swatch",
+        "id": "grad_stroke_swatch",
+        "kind": "color_swatch",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "color",
+          "z_index"
+        ],
+        "style": [
+          "position",
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          2
+        ],
+        "type": "icon_button",
+        "id": "grad_swap_btn",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "position",
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          3
+        ],
+        "type": "icon_button",
+        "id": "grad_reset_btn",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "position",
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          4
+        ],
+        "type": "container",
+        "id": "grad_mode_btns",
+        "kind": "container",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "gap",
+          "position"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          4,
+          0
+        ],
+        "type": "icon_button",
+        "id": "grad_solid_btn",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          4,
+          1
+        ],
+        "type": "icon_button",
+        "id": "grad_gradient_btn",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [
+          "disabled"
+        ],
+        "style": [
+          "size"
+        ]
+      },
+      {
+        "path": [
+          3,
+          0,
+          4,
+          2
+        ],
+        "type": "icon_button",
+        "id": "grad_none_btn",
+        "kind": "icon_button",
+        "col": 0,
+        "visible": true,
+        "dyn_visible": false,
+        "bind": [],
+        "style": [
+          "size"
+        ]
       },
       {
         "path": [
