@@ -2060,13 +2060,15 @@ fn the_router_no_longer_routes_live_to_legacy_and_text_still_is() {
     };
     underlined.text_decoration = "underline".into();
     // In a box, as this arm always was: since node 20 an underlined POINT text
-    // lowers where a real measurer exists, while decorated AREA text stays
-    // legacy on every lane.
+    // lowers where a real measurer exists, and since 2026-10-20 decorated AREA
+    // text does too (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)). The clause narrowed again; what still refuses is
+    // what the plan cannot read.
     (underlined.width, underlined.height) = (10.0, 12.0);
-    assert!(
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(
         element_needs_legacy(&Element::Text(underlined), caps),
-        "a REAL decoration is an extra primitive and stays legacy -- the clause \
-         narrowed, it did not vanish"
+        !has_real,
+        "decorated AREA text takes the plan where a real measurer exists"
     );
 
     let _ = flat;
@@ -2310,7 +2312,11 @@ fn flat_decoration_lowers_only_where_its_length_is_measured() {
     );
     area.fill = fill(Color::BLACK);
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area), "decorated AREA text stays legacy");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): area text is laid out, so its decoration takes
+    // the plan's decoration lines. Point text above is not laid out and keeps
+    // node 20's rules.
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "decorated AREA text takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 20: the lines, as `canvas/render.rs::draw_text_decorations` draws
@@ -2366,8 +2372,11 @@ fn unreadable_or_anchored_tracking_stays_legacy() {
     );
     area.letter_spacing = "0.1em".into();
     assert!(area.is_area_text(), "control: the fixture is area text");
-    assert!(crate::painter::element_render::text_needs_legacy(&area),
-            "tracked AREA text stays legacy: it wraps by widths the spacing changes");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)): the plan wraps by widths that carry the spacing
+    // (`text_runs::plan`, each character's width plus the spacing).
+    let has_real = crate::text_measure::try_make_measurer("normal normal Arial", 20.0).is_some();
+    assert_eq!(crate::painter::element_render::text_needs_legacy(&area), !has_real,
+               "tracked AREA text takes the plan where a real measurer exists");
     let mut kern_word = flat_text(20.0);
     kern_word.kerning = "auto".into();
     assert!(crate::painter::element_render::text_needs_legacy(&kern_word),
@@ -3797,26 +3806,29 @@ fn text_that_needs_layout_lowers_only_with_a_real_measurer() {
     assert_eq!(text_needs_legacy(&listed), !has_real, "a list marker lowers exactly where a real measurer exists");
     let mut rotated = indented.clone();
     rotated.rotate = "30".into();
-    assert!(text_needs_legacy(&rotated), "a laid-out rotation stays legacy");
-    // jas section 432: each feature the per-line draw does not carry REFUSES on
-    // laid-out text, never drops. Area text and an indented POINT text both,
-    // since only the area case was refused before node 25.
+    assert_eq!(text_needs_legacy(&rotated), !has_real, "a laid-out rotation takes the plan where a real measurer exists");
+    // jas section 432: each feature the per-line draw does not carry never
+    // drops. Until 2026-10-20 each REFUSED; since then (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)) each takes the
+    // plan, which carries them, and only what the plan cannot read refuses.
+    // Area text and an indented POINT text both.
     let indented_point = with_paragraph(flat_text(20.0), |w| w.jas_left_indent = Some(12.0));
     for (label, t) in [("area", area_text("Hello World", 120.0)), ("indented point", indented_point)] {
         type Set = fn(&mut crate::geometry::element::TextElem);
-        let cases: [(&str, Set); 6] = [
+        let plan_carries: [(&str, Set); 5] = [
             ("tracking", |t| t.letter_spacing = "0.1em".into()),
             ("kerning", |t| t.kerning = "20".into()),
             ("underline", |t| t.text_decoration = "underline".into()),
             ("line-through", |t| t.text_decoration = "line-through".into()),
             ("rotation", |t| t.rotate = "30".into()),
-            ("an unreadable baseline shift", |t| t.baseline_shift = "high".into()),
         ];
-        for (name, set) in cases {
+        for (name, set) in plan_carries {
             let mut x = t.clone();
             set(&mut x);
-            assert!(text_needs_legacy(&x), "laid-out {label} text with {name} stays legacy");
+            assert_eq!(text_needs_legacy(&x), !has_real, "laid-out {label} text with {name} takes the plan");
         }
+        let mut x = t.clone();
+        x.baseline_shift = "high".into();
+        assert!(text_needs_legacy(&x), "laid-out {label} text with an unreadable baseline shift stays legacy");
     }
 }
 
@@ -3971,7 +3983,8 @@ fn a_readable_baseline_shift_lowers_with_a_real_measurer() {
     let mut decorated = flat_text(20.0);
     decorated.baseline_shift = "super".into();
     decorated.text_decoration = "underline".into();
-    assert!(text_needs_legacy(&decorated), "a shifted decoration stays legacy (its line sits on the shifted baseline)");
+    // Since 2026-10-20 (the 10-20 sitting, finding 10: what the per-line draw lacks takes the shared plan (`flat_layout_route`)), whose decoration lines sit on the shifted baseline.
+    assert_eq!(text_needs_legacy(&decorated), !has_real, "a shifted decoration takes the plan where a real measurer exists");
 }
 
 /// ⭐ NODE 28 (flask section 441): list markers, legacy's Phase 6 pass
@@ -4388,4 +4401,52 @@ fn styled_texts_scale_is_one_frame_around_the_plan() {
     let last_run = cmds.iter().rposition(|c| matches!(c, Command::DrawTextRun { .. })).unwrap();
     assert!(cmds[last_run..].iter().any(|c| matches!(c, Command::PopState)), "the frame closes after the last run");
     assert_eq!(font_runs(e), plain, "the runs inside the frame are the unscaled runs");
+}
+
+/// ⭐ A STACKED STYLE TAKES THE PLAN (the 10-20 feel sitting, finding 10,
+/// measured on the box as 1,223 `DOCUMENT INCOMPLETE` repaints). A baseline
+/// shift, a case or a leading makes flat text `needs_layout`, and the per-line
+/// draw that lays it out carries no decoration, spacing or glyph rotation, so
+/// superscript + underline went to legacy and the Windows walk refused the
+/// WHOLE frame. What the line draw cannot carry now takes the shared plan,
+/// which draws all three; what it can carry keeps the line draw, so no frame
+/// at a single style moves. The measurer is the argument, because off
+/// Direct2D there is none and the router could not be driven here at all.
+#[test]
+fn a_flat_laid_out_text_with_what_the_line_draw_lacks_takes_the_plan() {
+    use super::{flat_layout_route, FlatLayoutRoute as R};
+    let svg = std::fs::read_to_string("../test_fixtures/svg/text_basic.svg").expect("fixture");
+    let doc = crate::geometry::svg::svg_to_document(&svg);
+    let base = match &doc.layers[0] {
+        Element::Layer(l) => match &*l.children[0] {
+            Element::Text(t) => t.clone(),
+            other => panic!("expected Text, got {other:?}"),
+        },
+        other => panic!("expected Layer, got {other:?}"),
+    };
+    let with = |f: &dyn Fn(&mut crate::geometry::element::TextElem)| { let mut t = base.clone(); f(&mut t); t };
+    let sup = with(&|t| t.baseline_shift = "super".into());
+    assert!(super::needs_layout(&sup) && sup.render_is_flat(), "the subject: flat text the shift lays out");
+    // What the line draw carries keeps it: superscript alone, all caps under a shift.
+    assert_eq!(flat_layout_route(&sup, true), R::Lines);
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "super".into(); t.text_transform = "uppercase".into(); }), true), R::Lines);
+    // What it lacks takes the plan: a decoration, a glyph rotation, tracking.
+    for (name, t) in [
+        ("super + underline", with(&|t| { t.baseline_shift = "super".into(); t.text_decoration = "underline".into(); })),
+        ("sub + line-through", with(&|t| { t.baseline_shift = "sub".into(); t.text_decoration = "line-through".into(); })),
+        ("shift + rotation", with(&|t| { t.baseline_shift = "4pt".into(); t.rotate = "30".into(); })),
+        ("caps + underline", with(&|t| { t.text_transform = "uppercase".into(); t.text_decoration = "underline".into(); })),
+        ("super + tracking", with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "0.1em".into(); })),
+    ] {
+        assert_eq!(flat_layout_route(&t, true), R::Runs, "{name}");
+        // And without a real measurer nothing lowers: the layout breaks by widths.
+        assert_eq!(flat_layout_route(&t, false), R::Legacy, "{name}, no measurer");
+    }
+    // What neither draws stays legacy: a shift that does not read.
+    assert_eq!(flat_layout_route(&with(&|t| { t.baseline_shift = "high".into(); t.text_decoration = "underline".into(); }), true), R::Legacy);
+    // Nor tracking the plan cannot read (`runs_plan_excludes`), which the line
+    // draw lacks too.
+    let unread = with(&|t| { t.baseline_shift = "super".into(); t.letter_spacing = "wide".into(); });
+    assert!(super::runs_plan_excludes(&unread), "the subject: the plan refuses it");
+    assert_eq!(flat_layout_route(&unread, true), R::Legacy);
 }
