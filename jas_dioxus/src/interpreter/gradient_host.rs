@@ -96,6 +96,15 @@ pub fn seed_gradient(solid: Option<Color>) -> Gradient {
 /// Write `g` onto the active attribute of every selected element. The solid
 /// `fill` / `stroke` is left alone: it is the demote target.
 pub fn apply_gradient_to_selection(model: &mut Model, fill_on_top: bool, g: Gradient) {
+    // A selection that already holds exactly `g` is left alone: an equal write
+    // would move the model's generation, and the engine door would report a
+    // document change that did not happen (flask §518). No undo step was ever
+    // at stake; the model's no-op rule drops an identical transaction.
+    if let SelectionGradient::Uniform(held) = selection_gradient(model.document(), fill_on_top) {
+        if held == g {
+            return;
+        }
+    }
     let boxed = Some(Box::new(g));
     if fill_on_top {
         Controller::set_selection_fill_gradient(model, boxed);
@@ -245,16 +254,13 @@ pub const STOPS_KEY: &str = "gradient_stops";
 /// The engine's whole-list write: the selection's gradient (the same base as
 /// [`apply_stop_edit`]) takes `stops`. `false`, and nothing written, when
 /// nothing is selected, `stops` does not parse, or it has fewer than two stops.
-/// Also `false` when the selection already holds exactly those stops (a plain
-/// click on a stop, or a two-stop drag off the bar that clamps onto itself):
-/// a write of equal stops would move the model's generation, and the door
-/// would report a document change that did not happen (flask §518).
+/// A list equal to the selection's own writes nothing
+/// ([`apply_gradient_to_selection`]).
 pub fn apply_stops(model: &mut Model, fill_on_top: bool, stops: &Value,
                    mixed_base: impl FnOnce() -> Gradient) -> bool {
     let Some(stops) = stops_from_json(stops).filter(|s| s.len() >= 2) else { return false };
     let mut g = match selection_gradient(model.document(), fill_on_top) {
         SelectionGradient::Empty => return false,
-        SelectionGradient::Uniform(g) if g.stops == stops => return false,
         SelectionGradient::Uniform(g) => g,
         SelectionGradient::Solid(c) => seed_gradient(c),
         SelectionGradient::Mixed => mixed_base(),
@@ -605,6 +611,28 @@ mod tests {
         let mut want = seed_gradient(Some(BLUE));
         want.gtype = GradientType::Radial;
         assert_eq!(fill_gradient(&m, 0), Some(want));
+    }
+
+    /// An edit that leaves the selection's gradient as it was writes nothing,
+    /// so the model's generation (what the engine door reports as
+    /// `doc_changed`) does not move: a render key set to its own value, a stop
+    /// combo set to its own value, and the slider's whole list (flask §518).
+    /// The control: a real change does move it.
+    #[test]
+    fn an_edit_that_changes_nothing_writes_nothing() {
+        let mut m = model_with(vec![rect(Some(BLUE))], &[0]);
+        let mut held = seed_gradient(Some(RED));
+        held.angle = 30.0;
+        apply_gradient_to_selection(&mut m, true, held.clone());
+        let g0 = m.generation();
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(30.0), || panic!("not mixed")));
+        assert_eq!(m.generation(), g0, "a render key set to its own value");
+        apply_stop_edit(&mut m, true, "opacity", &json!(100.0), 0, || panic!("not mixed")).unwrap();
+        assert_eq!(m.generation(), g0, "a stop combo set to its own value");
+        apply_stops(&mut m, true, &stops_to_json(&held.stops), || panic!("not mixed"));
+        assert_eq!(m.generation(), g0, "the slider's list unchanged");
+        assert!(apply_render_key(&mut m, true, "gradient_angle", &json!(45.0), || panic!("not mixed")));
+        assert_ne!(m.generation(), g0, "the control: a real change writes");
     }
 
     #[test]
