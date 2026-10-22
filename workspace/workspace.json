@@ -235,6 +235,31 @@
         }
       ]
     },
+    "nudge_selection": {
+      "description": "Move the selected objects by a small fixed step from the keyboard. The arrow keys bind it (workspace/shortcuts.yaml): an arrow moves the selection 1 pt in its direction and Shift with an arrow moves it 10 pt. Up is toward smaller y, because the document's y axis points down. The steps are the field's convention, a small step and a large step ten times it under Shift: Figma nudges by 1 and by 10 with Shift (help.figma.com, \"Before you start\", the nudge amount preference), and Inkscape by 2 px and ten times that with Shift (inkscape.org/doc/keys.html, Behavior > Steps).\nThe move is the same one a Selection-tool drag makes (doc.translate_selection, journaled as the op move_selection), so a nudge moves exactly what a drag of the same distance moves. Undo follows the drag too: consecutive nudges of the SAME selection coalesce into ONE undo step, as the frames of one drag do (the journal's drag coalescing, OP_LOG.md \u00a79), so pressing an arrow ten times and undoing once puts the selection back where the first press found it. Any other edit, or a different selection, between two nudges starts a new step.\nIt does nothing when nothing is selected, and that is not an edit: no undo step is recorded. An arrow pressed while the keyboard belongs to something else does not reach this action at all: a text field or a focused panel control keeps its own arrow keys, and so does a tool that is editing text (the Type tool moves its caret).\n",
+      "category": "edit",
+      "tier": 3,
+      "enabled_when": "active_document.has_selection",
+      "params": {
+        "dx": {
+          "type": "number"
+        },
+        "dy": {
+          "type": "number"
+        }
+      },
+      "effects": [
+        {
+          "doc.snapshot": {}
+        },
+        {
+          "doc.translate_selection": {
+            "dx": "param.dx",
+            "dy": "param.dy"
+          }
+        }
+      ]
+    },
     "group": {
       "description": "Wrap the selected objects in a new Group element. The selection changes to the new group, and the whole operation is a single undo step. Requires at least 2 selected objects.\nGROUPING ALWAYS FLATTENS. The selected objects do NOT have to share a parent: they may sit in different layers, in different groups, or at different nesting depths, and every one of them becomes a child of the new group regardless of where it came from. The command never refuses and never silently does nothing. This is forced by what a group IS \u2014 a group's children are its children, and there is no representation in which one group's children remain spread across two different parents \u2014 so relocating them is the only thing grouping can mean.\nWHERE THE NEW GROUP LANDS. It is placed in the FRONTMOST selected object's parent container, at the z-order position that object leaves behind once the other selected objects have been removed. Frontmost means last in paint order, the object drawn on top. Choosing the frontmost position minimises the visual change: the group renders roughly where its frontmost member already rendered, so the artwork does not jump forward or backward past unrelated content the way it would if the group were dropped into the active layer instead. Note that z-order is being used here to choose a PLACEMENT, which is inherently an ordering question; the new group is a freshly created container and never inherits any selected object's identity, name or id.\nWHAT THE OBJECTS KEEP. Moving into the group is a relocation, not a rebuild: each object keeps its own identity and every one of its properties \u2014 geometry, fill, stroke, opacity, blend mode, transform, name, lock and visibility. Their relative front-to-back order is preserved: they become children in document order, so the object that was behind stays behind inside the group.\nWHAT HAPPENS TO THE CONTAINERS THEY LEFT. A layer or group that gives up all of its children is KEPT, empty. It was not what the command spoke to, it is still the artist's container, and it carries a name, an id and its own properties that deleting it would destroy. An emptied layer keeps its place in the Layers panel; an emptied group keeps its place in the stacking order.\nSELECTING A CONTAINER AND SOMETHING INSIDE IT. If a selected group and one of its own descendants are both selected, the container carries its descendants and the descendant is not moved separately, so the object appears in the new group exactly once.\n",
       "category": "object",
@@ -9321,6 +9346,70 @@
     {
       "key": "Backspace",
       "action": "delete_selection"
+    },
+    {
+      "key": "ArrowLeft",
+      "action": "nudge_selection",
+      "params": {
+        "dx": -1,
+        "dy": 0
+      }
+    },
+    {
+      "key": "ArrowRight",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 1,
+        "dy": 0
+      }
+    },
+    {
+      "key": "ArrowUp",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 0,
+        "dy": -1
+      }
+    },
+    {
+      "key": "ArrowDown",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 0,
+        "dy": 1
+      }
+    },
+    {
+      "key": "Shift+ArrowLeft",
+      "action": "nudge_selection",
+      "params": {
+        "dx": -10,
+        "dy": 0
+      }
+    },
+    {
+      "key": "Shift+ArrowRight",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 10,
+        "dy": 0
+      }
+    },
+    {
+      "key": "Shift+ArrowUp",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 0,
+        "dy": -10
+      }
+    },
+    {
+      "key": "Shift+ArrowDown",
+      "action": "nudge_selection",
+      "params": {
+        "dx": 0,
+        "dy": 10
+      }
     },
     {
       "key": "Ctrl+G",

@@ -1,0 +1,101 @@
+[
+  {
+    "name": "nudge_right_moves_only_the_selected_rect",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ]
+    ],
+    "actions": [
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": 1,
+          "dy": 0
+        }
+      }
+    ],
+    "expected_json": "nudge_right_moves_only_the_selected_rect_expected.json"
+  },
+  {
+    "name": "nudge_down_large_moves_both_rects",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": 0,
+          "dy": 10
+        }
+      }
+    ],
+    "expected_json": "nudge_down_large_moves_both_rects_expected.json"
+  },
+  {
+    "name": "nudges_accumulate_on_both_axes",
+    "setup_svg": "two_rects.svg",
+    "selection": [
+      [
+        0,
+        1
+      ]
+    ],
+    "actions": [
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": -1,
+          "dy": 0
+        }
+      },
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": 0,
+          "dy": -10
+        }
+      },
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": -1,
+          "dy": 0
+        }
+      }
+    ],
+    "expected_json": "nudges_accumulate_on_both_axes_expected.json"
+  },
+  {
+    "name": "nudge_with_nothing_selected_changes_nothing",
+    "setup_svg": "two_rects.svg",
+    "actions": [
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": 1,
+          "dy": 0
+        }
+      },
+      {
+        "action": "nudge_selection",
+        "params": {
+          "dx": 0,
+          "dy": -10
+        }
+      }
+    ],
+    "expected_json": "nudge_with_nothing_selected_changes_nothing_expected.json"
+  }
+]

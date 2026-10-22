@@ -23,6 +23,16 @@ shortcuts:
   - { key: "Ctrl+A",       action: select_all }
   - { key: "Delete",       action: delete_selection }
   - { key: "Backspace",    action: delete_selection }
+  # Nudge: 1 pt per press, 10 pt with Shift (actions.yaml nudge_selection
+  # cites the field's convention). The document's y axis points down.
+  - { key: "ArrowLeft",        action: nudge_selection,  params: { dx: -1,  dy: 0 } }
+  - { key: "ArrowRight",       action: nudge_selection,  params: { dx: 1,   dy: 0 } }
+  - { key: "ArrowUp",          action: nudge_selection,  params: { dx: 0,   dy: -1 } }
+  - { key: "ArrowDown",        action: nudge_selection,  params: { dx: 0,   dy: 1 } }
+  - { key: "Shift+ArrowLeft",  action: nudge_selection,  params: { dx: -10, dy: 0 } }
+  - { key: "Shift+ArrowRight", action: nudge_selection,  params: { dx: 10,  dy: 0 } }
+  - { key: "Shift+ArrowUp",    action: nudge_selection,  params: { dx: 0,   dy: -10 } }
+  - { key: "Shift+ArrowDown",  action: nudge_selection,  params: { dx: 0,   dy: 10 } }
   # Object
   - { key: "Ctrl+G",       action: group }
   - { key: "Ctrl+Shift+G", action: ungroup }

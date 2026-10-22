@@ -90,6 +90,13 @@ fn focus_on_app_surface() -> bool {
     false
 }
 
+/// Do the arrow keys belong to the canvas? On the web, only while focus rests
+/// on the app's own surface ([`focus_on_app_surface`]): a focused panel
+/// control keeps its own arrows. A native build has no focused DOM control.
+fn arrows_reach_the_canvas() -> bool {
+    cfg!(not(target_arch = "wasm32")) || focus_on_app_surface()
+}
+
 /// Check if any specific element currently holds focus (i.e. not just
 /// the document body fallback). The app-wide Tab handler uses this to
 /// decide whether to call preventDefault — if a real element has
@@ -602,6 +609,42 @@ pub(crate) fn make_keydown_handler(
                 (act.borrow_mut())(Box::new(|st: &mut AppState| {
                     st.swap_fill_stroke();
                 }));
+            }
+            // --- Nudge (actions.yaml nudge_selection) ---
+            // An arrow, or Shift with one, takes the engine's key order
+            // (`route_key`): a tool editing text took it above; otherwise the
+            // shortcuts.yaml binding is `nudge_selection`, dispatched as the
+            // menu would. Only on the app's own surface: a focused panel
+            // control (the gradient slider, a button) keeps its arrows. With
+            // nothing selected the browser keeps its default too.
+            Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown
+                if !cmd && arrows_reach_the_canvas() =>
+            {
+                let name = match key {
+                    Key::ArrowLeft => "ArrowLeft",
+                    Key::ArrowRight => "ArrowRight",
+                    Key::ArrowUp => "ArrowUp",
+                    _ => "ArrowDown",
+                };
+                let km = crate::tools::tool::KeyMods {
+                    shift: mods.shift(), ctrl: false, alt: mods.alt(), meta: false,
+                };
+                let (route, selected) = {
+                    let st = app_for_keys.borrow();
+                    let tool = st.tab().and_then(|tab| tab.tools.get(&st.active_tool));
+                    let route = crate::workspace::resolve_key::route_key(name, km, |k| {
+                        tool.is_some_and(|t| t.captures_keyboard() || t.claims_key(k))
+                    });
+                    (route, st.tab().is_some_and(|tab| !tab.model.document().selection.is_empty()))
+                };
+                if let crate::workspace::resolve_key::KeyRoute::Action(cmd) = route
+                    && selected
+                {
+                    evt.prevent_default();
+                    (act.borrow_mut())(Box::new(move |st: &mut AppState| {
+                        crate::interpreter::renderer::dispatch_action(&cmd.action, &cmd.params, st);
+                    }));
+                }
             }
             Key::Delete | Key::Backspace => {
                 // A tool that CLAIMS the key (`claims_keys`: the Artboard

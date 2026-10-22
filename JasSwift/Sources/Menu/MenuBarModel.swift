@@ -165,7 +165,25 @@ public struct KeyChord: Equatable {
 /// carries none.
 public struct ResolvedCommand: Equatable {
     public let action: String
-    public let params: [String: String]
+    public let params: [String: ShortcutParam]
+}
+
+/// One shortcut param value: a string (`select_tool`'s `tool`) or a number (a
+/// nudge's `dx`/`dy`). The NUMBER keeps the bundle's own `NSNumber`, so the
+/// key corpus serializes `-1` as the Rust golden does, never `-1.0`.
+public enum ShortcutParam: Equatable {
+    case string(String)
+    case number(NSNumber)
+
+    public var string: String? { if case .string(let s) = self { return s } else { return nil } }
+    public var number: Double? { if case .number(let n) = self { return n.doubleValue } else { return nil } }
+    /// The value as JSON data (for the corpus serializer and an action's params).
+    public var json: Any {
+        switch self {
+        case .string(let s): return s
+        case .number(let n): return n
+        }
+    }
 }
 
 /// Canonicalize a key token: a single ASCII letter is uppercased; every other
@@ -229,10 +247,14 @@ public func resolveKeyIn(_ chord: KeyChord, shortcuts: [Any]) -> ResolvedCommand
               let parsed = parseShortcutChord(keyStr) else { continue }
         if parsed == chord {
             let action = (obj["action"] as? String) ?? ""
-            var params: [String: String] = [:]
+            var params: [String: ShortcutParam] = [:]
             if let p = obj["params"] as? [String: Any] {
                 for (k, v) in p {
-                    if let s = v as? String { params[k] = s }
+                    if let s = v as? String {
+                        params[k] = .string(s)
+                    } else if let n = v as? NSNumber {
+                        params[k] = .number(n)
+                    }
                 }
             }
             return ResolvedCommand(action: action, params: params)
@@ -288,6 +310,9 @@ public func parseShortcut(_ shortcut: String) -> ParsedShortcut? {
 public enum KeyRoute: Equatable {
     /// The action `delete_selection` (an unclaimed Delete or Backspace).
     case deleteSelection
+    /// A caret key no tool takes that `shortcuts.yaml` binds: this ACTION (the
+    /// arrows' `nudge_selection`).
+    case action(ResolvedCommand)
     /// The active tool's `onKeyEvent`, with this named key.
     case toolKey(String)
     case undo
@@ -311,6 +336,14 @@ public func routeKey(_ name: String, _ mods: KeyMods, toolTakes: (String) -> Boo
         return toolTakes(name) ? .toolKey(name) : .deleteSelection
     case "Escape", "Enter":
         return .toolKey(name)
+    // The caret keys: a tool editing text takes them (the Type tool moves its
+    // caret); otherwise a key shortcuts.yaml binds runs its action (an arrow,
+    // or Shift with one, is `nudge_selection`) and the rest are unhandled.
+    case "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab":
+        if toolTakes(name) { return .toolKey(name) }
+        let chord = KeyChord(key: name, ctrl: mods.ctrl, shift: mods.shift, alt: mods.alt, meta: false)
+        guard let cmd = resolveKeyChord(chord) else { return .unhandled }
+        return .action(cmd)
     default:
         break
     }
@@ -325,6 +358,6 @@ public func routeKey(_ name: String, _ mods: KeyMods, toolTakes: (String) -> Boo
         default: return .unhandled
         }
     }
-    guard cmd.action == "select_tool", let tool = cmd.params["tool"] else { return .unhandled }
+    guard cmd.action == "select_tool", let tool = cmd.params["tool"]?.string else { return .unhandled }
     return .selectTool(tool)
 }
