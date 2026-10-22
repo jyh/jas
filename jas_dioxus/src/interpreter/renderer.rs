@@ -6881,6 +6881,75 @@ fn render_gradient_tile(el: &serde_json::Value, ctx: &serde_json::Value, rctx: &
     }
 }
 
+/// The slider bar's centre line, in pixels from the widget's top: the bar
+/// is drawn at `top:14px; height:16px` (below). A pointer's `dy` is measured
+/// from it (GRADIENT.md: a stop released more than 20 px off the bar deletes).
+const SLIDER_BAR_CENTRE_PX: f64 = 22.0;
+
+/// A pointer at client `(x, y)` over a slider whose box is at client
+/// `(left, top)` and `width` wide, as the law's raw parameters: the location
+/// in percent along the bar (not clamped: the law clamps a drag, and refuses
+/// an add outside [0, 100]) and `dy` from the bar's centre line.
+fn slider_point(x: f64, y: f64, left: f64, top: f64, width: f64) -> (f64, f64) {
+    let location = if width > 0.0 { (x - left) / width * 100.0 } else { 0.0 };
+    (location, y - (top + SLIDER_BAR_CENTRE_PX))
+}
+
+/// A key on a focused slider, in GRADIENT.md's keyboard table's names; `None`
+/// for a key the table does not name.
+fn slider_key(key: &str) -> Option<&'static str> {
+    match key {
+        "ArrowLeft" => Some("Left"),
+        "ArrowRight" => Some("Right"),
+        "Home" => Some("Home"),
+        "End" => Some("End"),
+        "Delete" => Some("Delete"),
+        "Backspace" => Some("Backspace"),
+        _ => None,
+    }
+}
+
+/// Send one slider gesture to the app and redraw.
+fn slider_send(app: &AppHandle, revision: Signal<u64>, gesture: &'static str, params: serde_json::Value) {
+    let app = app.clone();
+    let mut revision = revision;
+    spawn(async move {
+        let _ = app.borrow_mut().gradient_slider_gesture(gesture, &params);
+        revision += 1;
+    });
+}
+
+/// The slider's box in client pixels: `(left, top, width)`.
+fn slider_box(dom_id: &str) -> (f64, f64, f64) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id(dom_id))
+            .map(|el| {
+                let r = el.get_bounding_client_rect();
+                (r.left(), r.top(), r.width())
+            })
+            .unwrap_or((0.0, 0.0, 0.0))
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = dom_id;
+        (0.0, 0.0, 0.0)
+    }
+}
+
+/// Capture the pointer on the slider, so a drag off the 44 px widget keeps
+/// reporting until its release.
+fn slider_capture(dom_id: &str, pointer_id: i32) {
+    #[cfg(target_arch = "wasm32")]
+    if let Some(el) = web_sys::window().and_then(|w| w.document()).and_then(|d| d.get_element_by_id(dom_id)) {
+        let _ = el.set_pointer_capture(pointer_id);
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = (dom_id, pointer_id);
+}
+
 /// gradient_slider — 1-D color-stops editor.
 ///
 /// Phase 0 scope: renders the bar + stop markers + midpoint markers with
@@ -6921,6 +6990,55 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
 
     let on_click = build_click_handler(el, ctx, rctx);
 
+    // The pointer and keys (WIDGET_EVENTS.md §The stops kind): each gesture
+    // goes to the app with its raw parameters, and the slider law applies it
+    // (`AppState::gradient_slider_gesture`). A drag reports against the
+    // widget's own box, and the pointer is captured at the press so a drag
+    // off the bar still reports.
+    let app = rctx.app.clone();
+    let revision = rctx.revision;
+    let held = |app: &AppHandle| app.borrow().gradient_panel.press.get("kind")
+        .and_then(|k| k.as_str()).map(str::to_string);
+    let (app_bar, dom_bar) = (app.clone(), id.clone());
+    let on_bar_down = move |evt: Event<PointerData>| {
+        let c = evt.data().client_coordinates();
+        let (left, top, width) = slider_box(&dom_bar);
+        let (location, _) = slider_point(c.x, c.y, left, top, width);
+        slider_send(&app_bar, revision, "add", serde_json::json!({"location": location}));
+    };
+    let (app_move, dom_move) = (app.clone(), id.clone());
+    let on_move = move |evt: Event<PointerData>| {
+        if !evt.data().held_buttons().contains(dioxus::html::input_data::MouseButton::Primary) {
+            return;
+        }
+        let c = evt.data().client_coordinates();
+        let (left, top, width) = slider_box(&dom_move);
+        let (location, dy) = slider_point(c.x, c.y, left, top, width);
+        match held(&app_move).as_deref() {
+            Some("stop") => slider_send(&app_move, revision, "drag", serde_json::json!({"location": location, "dy": dy})),
+            Some("midpoint") => slider_send(&app_move, revision, "drag_midpoint", serde_json::json!({"location": location})),
+            _ => {}
+        }
+    };
+    let (app_up, dom_up) = (app.clone(), id.clone());
+    let on_up = move |evt: Event<PointerData>| {
+        let c = evt.data().client_coordinates();
+        let (left, top, width) = slider_box(&dom_up);
+        let (location, dy) = slider_point(c.x, c.y, left, top, width);
+        match held(&app_up).as_deref() {
+            Some("stop") => slider_send(&app_up, revision, "release", serde_json::json!({"location": location, "dy": dy})),
+            Some("midpoint") => slider_send(&app_up, revision, "release_midpoint", serde_json::json!({"location": location})),
+            _ => {}
+        }
+    };
+    let app_key = app.clone();
+    let on_key = move |evt: Event<KeyboardData>| {
+        let Some(key) = slider_key(&evt.data().key().to_string()) else { return };
+        evt.prevent_default();
+        let shift = evt.data().modifiers().shift();
+        slider_send(&app_key, revision, "key", serde_json::json!({"key": key, "shift": shift}));
+    };
+
     let stops_bind = stops_expr.map(|s| s.to_string()).unwrap_or_default();
     let sel_stop_bind = sel_stop_expr.map(|s| s.to_string()).unwrap_or_default();
     let sel_mid_bind = sel_mid_expr.map(|s| s.to_string()).unwrap_or_default();
@@ -6934,11 +7052,17 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
         let pct = stops_arr[i].get("midpoint_to_next").and_then(|v| v.as_f64()).unwrap_or(50.0);
         let mid_loc = left + (right - left) * (pct / 100.0);
         let sel_class = if sel_mid == i as i64 { " jas-gradient-midpoint-selected" } else { "" };
+        let (app_m, dom_m) = (app.clone(), id.clone());
         midpoint_markers.push(rsx! {
             div {
                 class: "jas-gradient-midpoint{sel_class}",
                 "data-role": "midpoint",
                 "data-midpoint-index": "{i}",
+                onpointerdown: move |evt: Event<PointerData>| {
+                    evt.stop_propagation();
+                    slider_capture(&dom_m, evt.data().pointer_id());
+                    slider_send(&app_m, revision, "press_midpoint", serde_json::json!({"pair": i}));
+                },
                 style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab;",
             }
         });
@@ -6949,11 +7073,17 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
         let loc = s.get("location").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("#000000").to_string();
         let sel_class = if sel_stop == i as i64 { " jas-gradient-stop-selected" } else { "" };
+        let (app_s, dom_s) = (app.clone(), id.clone());
         stop_markers.push(rsx! {
             div {
                 class: "jas-gradient-stop{sel_class}",
                 "data-role": "stop",
                 "data-stop-index": "{i}",
+                onpointerdown: move |evt: Event<PointerData>| {
+                    evt.stop_propagation();
+                    slider_capture(&dom_s, evt.data().pointer_id());
+                    slider_send(&app_s, revision, "press", serde_json::json!({"index": i}));
+                },
                 style: "position:absolute;left:calc({loc}% - 7px);top:30px;width:14px;height:14px;border-radius:50%;background:{color};border:1.5px solid #333;box-sizing:border-box;cursor:grab;",
             }
         });
@@ -6970,9 +7100,13 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
             tabindex: "0",
             style: "position:relative;width:100%;height:44px;box-sizing:border-box;outline:none;",
             onclick: move |evt| { if let Some(ref h) = on_click { h.call(evt); } },
+            onpointermove: on_move,
+            onpointerup: on_up,
+            onkeydown: on_key,
             div {
                 class: "jas-gradient-slider-bar",
                 "data-role": "bar",
+                onpointerdown: on_bar_down,
                 style: "position:absolute;left:0;right:0;top:14px;height:16px;background:{bar_bg};border:1px solid var(--jas-border,#555);box-sizing:border-box;cursor:crosshair;",
             }
             {midpoint_markers.into_iter()}
@@ -12715,6 +12849,60 @@ mod tests {
         assert_eq!(g.stops.iter().map(|s| (s.location, s.opacity, s.midpoint_to_next)).collect::<Vec<_>>(),
                    vec![(0.0, 100.0, 50.0), (25.0, 75.0, 50.0), (100.0, 100.0, 40.0)]);
         assert_eq!(g.stops[1].color, Color::rgb(1.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn the_slider_pointer_reports_percent_along_the_box_and_dy_from_the_bar_centre() {
+        // A 200 px slider at client (100, 50): its bar's centre line is y = 72.
+        assert_eq!(slider_point(150.0, 72.0, 100.0, 50.0, 200.0), (25.0, 0.0));
+        assert_eq!(slider_point(100.0, 93.0, 100.0, 50.0, 200.0), (0.0, 21.0));
+        // Past either end the location is reported, not clamped (the law clamps).
+        assert_eq!(slider_point(340.0, 50.0, 100.0, 50.0, 200.0), (120.0, -22.0));
+        // An unmeasured box reports 0, never a division by zero.
+        assert_eq!(slider_point(5.0, 22.0, 0.0, 0.0, 0.0), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_slider_keys_are_the_tables_and_nothing_else() {
+        let named: Vec<_> = ["ArrowLeft", "ArrowRight", "Home", "End", "Delete", "Backspace"]
+            .iter().map(|k| slider_key(k)).collect();
+        assert_eq!(named, vec![Some("Left"), Some("Right"), Some("Home"), Some("End"),
+                               Some("Delete"), Some("Backspace")]);
+        assert_eq!(slider_key("ArrowUp"), None);
+        assert_eq!(slider_key("q"), None);
+    }
+
+    #[test]
+    fn a_web_slider_gesture_drags_the_panel_and_commits_the_document_once() {
+        // WIDGET_EVENTS.md §The stops kind, in the web app: the panel struct
+        // is the slider's store, a drag moves it and leaves the document, and
+        // the release applies it to the selection once.
+        use crate::geometry::element::{Color, Gradient, GradientStop};
+        use serde_json::json;
+        let stop = |c: Color, loc: f64| GradientStop { color: c, opacity: 100.0, location: loc, midpoint_to_next: 40.0 };
+        let mut st = AppState::new();
+        st.fill_on_top = true;
+        select_first_rect(&mut st, Some(Gradient {
+            stops: vec![stop(Color::BLACK, 0.0), stop(Color::WHITE, 100.0)],
+            ..Gradient::default()
+        }));
+        st.sync_gradient_panel_from_selection();
+        let doc = |st: &AppState| -> Vec<f64> {
+            st.tabs[st.active_tab].model.document().get_element(&vec![0usize, 0]).unwrap()
+                .fill_gradient().unwrap().stops.iter().map(|s| s.location).collect()
+        };
+        assert_eq!(st.gradient_slider_gesture("release", &json!({"location": 30, "dy": 0})), Err("NoPress"));
+        assert_eq!(st.gradient_slider_gesture("press", &json!({"index": 0})), Ok(true));
+        assert_eq!(st.gradient_slider_gesture("drag", &json!({"location": 30, "dy": 0})), Ok(true));
+        assert_eq!(st.gradient_panel.stops[0].location, 30.0);
+        assert_eq!(doc(&st), vec![0.0, 100.0], "a drag does not write the document");
+        assert_eq!(st.gradient_slider_gesture("release", &json!({"location": 35, "dy": 0})), Ok(true));
+        assert_eq!(doc(&st), vec![35.0, 100.0]);
+        assert!(st.gradient_panel.press.is_null(), "the release clears the snapshot");
+        // A key on the selected stop commits at once; an unknown key is inert.
+        assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "Right", "shift": true})), Ok(true));
+        assert_eq!(doc(&st), vec![45.0, 100.0]);
+        assert_eq!(st.gradient_slider_gesture("key", &json!({"key": "q"})), Ok(false));
     }
 
     #[test]

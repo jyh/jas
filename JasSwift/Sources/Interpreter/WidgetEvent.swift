@@ -789,10 +789,15 @@ extension WidgetEvent {
             guard let n = v as? NSNumber, !n.isBool else { return nil }
             return n.intValue
         }
+        // Through the bind write, so the app's panel-write host (which
+        // notifies the view) sees every write, as a commit's bind write does.
+        func put(_ key: String, _ value: Any) {
+            writeBind(("panel", key), value: value, store: store, panel: panel, host: host)
+        }
         func write(_ stops: [GradientStop], _ stop: Int, _ midpoint: Int) {
-            store.setPanel(pid, stopsKey, gradientStopsToJSON(stops))
-            store.setPanel(pid, stopKey, stop)
-            store.setPanel(pid, midKey, midpoint)
+            put(stopsKey, gradientStopsToJSON(stops))
+            put(stopKey, stop)
+            put(midKey, midpoint)
         }
         func finish(_ out: [GradientStop], _ stop: Int, _ midpoint: Int) -> Result {
             write(out, stop, midpoint)
@@ -808,8 +813,8 @@ extension WidgetEvent {
             let isStop = name == "press"
             let n = isStop ? stops.count : stops.count - 1
             guard let i = int(params[isStop ? "index" : "pair"]), i >= 0, i < n else { return refused }
-            store.setPanel(pid, pressKey, ["kind": isStop ? "stop" : "midpoint", "index": i,
-                                           "stops": gradientStopsToJSON(stops)] as [String: Any])
+            put(pressKey, ["kind": isStop ? "stop" : "midpoint", "index": i,
+                           "stops": gradientStopsToJSON(stops)] as [String: Any])
             write(stops, isStop ? i : -1, isStop ? -1 : i)
             return Result(outcome: "committed", bindWritten: true)
         case "drag", "release", "drag_midpoint", "release_midpoint":
@@ -832,7 +837,7 @@ extension WidgetEvent {
                 write(out, stop, midpoint)
                 return Result(outcome: "committed", value: gradientStopsToJSON(out), bindWritten: true)
             }
-            store.setPanel(pid, pressKey, NSNull())
+            put(pressKey, NSNull())
             return finish(out, stop, midpoint)
         case "add":
             guard let (out, at) = addStop(stops, location: params["location"]) else { return refused }

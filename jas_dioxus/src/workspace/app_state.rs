@@ -392,6 +392,9 @@ pub(crate) struct GradientPanelState {
     /// showing a seeded default — first edit promotes the attribute
     /// to a gradient.
     pub preview_state: bool,
+    /// The slider's press snapshot (WIDGET_EVENTS.md §The stops kind), or
+    /// null when no stop or midpoint is held.
+    pub press: serde_json::Value,
 }
 
 impl Default for GradientPanelState {
@@ -419,6 +422,7 @@ impl Default for GradientPanelState {
             active_library_id: "neutrals".into(),
             thumbnail_size: "large".into(),
             preview_state: false,
+            press: serde_json::Value::Null,
         }
     }
 }
@@ -1080,6 +1084,32 @@ impl AppState {
     /// gets applied. The Fill / Stroke values themselves are left
     /// alone — the gradient field overrides paint at render time, but
     /// `fill.color` / `stroke.color` remain as the demote-target colour.
+    /// One Gradient-slider gesture (WIDGET_EVENTS.md §The stops kind) over
+    /// the panel struct, which is the web's slider store: the step from
+    /// `gradient_host::stops_step` is written to the panel, and a finished
+    /// gesture is applied to the selection (one undo step). `Ok(false)` is the
+    /// contract's `inert`; `Err` is the refusal class.
+    pub(crate) fn gradient_slider_gesture(&mut self, gesture: &str, params: &serde_json::Value)
+                                          -> Result<bool, &'static str> {
+        use crate::interpreter::gradient_host::{stops_from_json, stops_step, stops_to_json};
+        let gp = &self.gradient_panel;
+        let Some(step) = stops_step(gesture, params, &stops_to_json(&gp.stops),
+                                    gp.selected_stop_index, gp.selected_midpoint_index, &gp.press)? else {
+            return Ok(false);
+        };
+        let gp = &mut self.gradient_panel;
+        gp.stops = stops_from_json(&step.stops).ok_or("LawRefused")?;
+        gp.selected_stop_index = step.stop;
+        gp.selected_midpoint_index = step.midpoint;
+        if let Some(snap) = step.snapshot {
+            gp.press = snap;
+        }
+        if step.commit {
+            self.apply_gradient_panel_to_selection();
+        }
+        Ok(true)
+    }
+
     pub(crate) fn apply_gradient_panel_to_selection(&mut self) {
         use crate::geometry::element::{
             Gradient, GradientType, GradientMethod, StrokeSubMode,

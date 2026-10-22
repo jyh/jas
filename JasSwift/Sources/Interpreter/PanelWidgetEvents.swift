@@ -50,6 +50,18 @@ struct PanelWidgetEvents {
         }
     }
 
+    /// One slider gesture on a stops widget (WIDGET_EVENTS.md §The stops
+    /// kind): `name` is the gesture and `params` its raw parameters.
+    @discardableResult
+    func gesture(_ widget: [String: Any], name: String, params: [String: Any]) -> WidgetEvent.Result {
+        run { host, panel, ws in
+            WidgetEvent.gesture(widget: widget, name: name, params: params, store: model.stateStore,
+                                panel: panel, actions: ws?.actions(), dialogs: ws?.dialogs(),
+                                platformEffects: alignPlatformEffects(model: model), model: model,
+                                host: host)
+        }
+    }
+
     /// Click a button or icon button (WIDGET_EVENTS.md, "Clicking a button").
     /// `modifiers` are the click's `shift`/`ctrl`/`meta`/`alt`.
     @discardableResult
