@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import JasLib
 
@@ -487,4 +488,18 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     #expect(gradientSliderPoint(CGPoint(x: 0, y: 43), width: 200) == (0, 21))
     #expect(gradientSliderPoint(CGPoint(x: 240, y: 0), width: 200) == (120, -22))
     #expect(gradientSliderPoint(CGPoint(x: 5, y: 22), width: 0) == (0, 0))
+}
+
+@Test func theSliderKeysAreTheKeyboardTablesNames() {
+    // Mirrors renderer.rs's `slider_key`: the arrows, Home and End, and both
+    // deletes (the Mac's delete key is Backspace, its forward delete is
+    // Delete); anything else names nothing, and the slider sends no gesture.
+    #expect(gradientSliderKey(.leftArrow) == "Left")
+    #expect(gradientSliderKey(.rightArrow) == "Right")
+    #expect(gradientSliderKey(.home) == "Home")
+    #expect(gradientSliderKey(.end) == "End")
+    #expect(gradientSliderKey(.delete) == "Backspace")
+    #expect(gradientSliderKey(.deleteForward) == "Delete")
+    #expect(gradientSliderKey(.upArrow) == nil)
+    #expect(gradientSliderKey(KeyEquivalent("q")) == nil)
 }
