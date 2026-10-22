@@ -780,6 +780,43 @@ static class Program
             + "|" + (GradientSliderWire.Stops("""[{"location":5}]""")?.Count.ToString() ?? "(null)"));
         Eq("gradient: the selected index reads -1 when absent or not a number", "0|-1|-1|2",
             $"{GradientSliderWire.Index("0")}|{GradientSliderWire.Index("-1")}|{GradientSliderWire.Index(null)}|{GradientSliderWire.Index("2")}");
+        // Node 3b (council 10-21 ⑤): the pointer's DIPs as the gesture's RAW
+        // parameters. The plan's slider is 24 DIP tall; at 200 wide the stop
+        // radius is 4.8, the diamond 6, the bar's top 7, its width 190.4 and its
+        // height 7.4, so its centre line is at 10.7. Expected values are from a
+        // Python mirror of LayoutOf/Point, rounded to 6 places for the print.
+        static string R6(double v) => Math.Round(v, 6).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var slider = GradientSliderWire.LayoutOf(200, 24);
+        Eq("gradient pointer: the layout at 200 x 24", "4.8|6|7|190.4|7.4",
+            slider is { } sl ? $"{R6(sl.R)}|{R6(sl.D)}|{R6(sl.BarTop)}|{R6(sl.BarW)}|{R6(sl.BarH)}" : "(null)");
+        string PointAt(double x, double y) =>
+            slider is { } sl2 && GradientSliderWire.Point(sl2, x, y) is var (loc, dy) ? $"{R6(loc)}|{R6(dy)}" : "(null)";
+        string RoundTrip(double loc) => slider is { } sl3 ? PointAt(GradientSliderWire.At(sl3, loc), 10.7) : "(null)";
+        Eq("gradient pointer: a stop drawn at 0, 30 and 100 reads back its location, on the centre line",
+            "0|0 30|0 100|0", $"{RoundTrip(0)} {RoundTrip(30)} {RoundTrip(100)}");
+        Eq("gradient pointer: the surface's top-left corner is past the bar's start and above it, NOT clamped",
+            "-2.521008|-10.7", PointAt(0, 0));
+        Eq("gradient pointer: past the bar's end and below it, NOT clamped", "102.521008|20", PointAt(200, 30.7));
+        Eq("gradient pointer: a rect with no room for a bar takes no gesture", "(null)|(null)",
+            (GradientSliderWire.LayoutOf(9.6, 24) is null ? "(null)" : "layout") + "|"
+            + (GradientSliderWire.LayoutOf(200, 2) is null ? "(null)" : "layout"));
+        var drag = Parse(PanelWire.GestureJson("grad_slider", "drag",
+            new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }, false, true, false, false, "[0,3]"));
+        Check("gradient gesture: value is an OBJECT of numbers, beside the widget, event, modifiers and path",
+            drag is not null
+            && Str(drag, "widget") == "grad_slider" && Str(drag, "event") == "drag" && Bool(drag, "shift") == true
+            && drag.RootElement.TryGetProperty("value", out var dv) && dv.ValueKind == System.Text.Json.JsonValueKind.Object
+            && dv.TryGetProperty("location", out var dl) && dl.ValueKind == System.Text.Json.JsonValueKind.Number && dl.GetDouble() == 30.5
+            && dv.TryGetProperty("dy", out var ddy) && ddy.GetDouble() == -2.0
+            && drag.RootElement.TryGetProperty("path", out var dp) && dp.GetArrayLength() == 2, Show(drag));
+        var pressStop = Parse(PanelWire.GestureJson("grad_slider", "press",
+            new Dictionary<string, object> { ["index"] = 1 }, false, false, false, false));
+        Check("gradient gesture: a press's index crosses as an INTEGER (the engine reads it with as_i64)",
+            pressStop is not null && pressStop.RootElement.TryGetProperty("value", out var pv)
+            && pv.TryGetProperty("index", out var pi) && pi.TryGetInt64(out var piv) && piv == 1
+            && pi.GetRawText() == "1", Show(pressStop));
+        Eq("gradient gesture: the row token is the compact object", "{\"location\":30.5,\"dy\":-2}",
+            PanelWire.GestureRowValue(new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }));
         // The shell's named keys, by the code `OnKeyDown` sends (`JasCore.Key*`).
         // Tab is 0x09, a CONTROL character, so the character fallback names it
         // nothing: before Tab was in this table it reached `ApplyKey` as

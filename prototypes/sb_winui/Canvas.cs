@@ -351,6 +351,14 @@ internal sealed class PanelClickCmd : Cmd
     internal string? Value;
 
     /// <summary>
+    /// A slider gesture's RAW parameters (`WIDGET_EVENTS.md` §The stops kind),
+    /// sent as an OBJECT `value` by <see cref="PanelWire.GestureJson"/>; null for
+    /// every other act. Set, it replaces <see cref="Value"/> on the wire and in
+    /// the row.
+    /// </summary>
+    internal Dictionary<string, object>? Gesture;
+
+    /// <summary>
     /// WHO clicked: `hand` for a person, `synth:&lt;step&gt;` for Q6's replay.
     /// It is on every row the click writes, so a row can never claim a
     /// provenance its caller did not give it.
@@ -5531,8 +5539,11 @@ internal sealed unsafe class Canvas : IDisposable
     /// parse.
     /// </summary>
     private static byte[] PanelEventJson(PanelClickCmd click) =>
-        PanelWire.EventJson(click.Widget, click.Event, click.Value,
-                            click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path);
+        click.Gesture is { } gesture
+            ? PanelWire.GestureJson(click.Widget, click.Event, gesture,
+                                    click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path)
+            : PanelWire.EventJson(click.Widget, click.Event, click.Value,
+                                  click.Alt, click.Shift, click.Ctrl, click.Meta, click.Path);
 
     /// <summary>
     /// The fields every click row opens with. `event=` and `value=` come AFTER
@@ -5541,6 +5552,10 @@ internal sealed unsafe class Canvas : IDisposable
     /// </summary>
     private static string ClickHead(PanelClickCmd click) =>
         $"panel={click.PanelId} widget={click.Widget} via={click.Via} "
-        + $"event={click.Event} value={PanelWire.RowValue(click.Value)}";
+        + $"event={click.Event} value={ClickValue(click)}";
+
+    /// <summary>The row's `value=`: a gesture's parameters, else the commit's text.</summary>
+    private static string ClickValue(PanelClickCmd click) =>
+        click.Gesture is { } g ? PanelWire.GestureRowValue(g) : PanelWire.RowValue(click.Value);
 
 }
