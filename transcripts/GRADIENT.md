@@ -240,6 +240,10 @@ radial gradients. (It is disabled when `type == freeform`.)
 - The currently-selected stop has an additional 2 px accent ring.
 - For each adjacent pair of stops: a small diamond marker rendered
   above the bar at the midpoint position.
+- A marker's press target may be larger than its drawing, sized for the
+  platform's pointer; the press still carries the pointer's own location.
+  The Windows shell's diamond target is the band above the bar, a slider
+  thumb wide (18 DIP), the nearer diamond taking a press where two overlap.
 
 ### Selection model
 
