@@ -466,8 +466,19 @@ pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, mid
             if i < 0 || i as usize >= n {
                 return Err("LawRefused");
             }
+            // The grab (WIDGET_EVENTS.md §The stops kind): how far the pointer
+            // lay from the pressed marker. A press with no number is refused,
+            // never read as a grab of 0.
+            let at = params.get("location").and_then(Value::as_f64).ok_or("LawRefused")?;
+            let s = &stops[i as usize];
+            let here = if is_stop {
+                s.location
+            } else {
+                let b = &stops[i as usize + 1];
+                s.location + (b.location - s.location) * s.midpoint_to_next / 100.0
+            };
             let snap = json!({"kind": if is_stop { "stop" } else { "midpoint" }, "index": i,
-                              "stops": current});
+                              "stops": current, "grab": at - here});
             let (st, mid) = if is_stop { (i, -1) } else { (-1, i) };
             Ok(step(&stops, st, mid, Some(snap), false))
         }
@@ -479,11 +490,16 @@ pub fn stops_step(gesture: &str, params: &Value, current: &Value, stop: i64, mid
             }
             let at = snapshot.get("index").and_then(Value::as_i64).ok_or("NoPress")?;
             let press = stops_from_json(&snapshot["stops"]).ok_or("NoPress")?;
+            // The pointer less the grab, so the marker moves by how far the
+            // pointer moved; a location that is not a number goes to the law as is.
+            let grab = snapshot.get("grab").and_then(Value::as_f64).unwrap_or(0.0);
+            let location = params.get("location").and_then(Value::as_f64)
+                .map_or_else(|| p("location"), |x| json!(x - grab));
             let (out, st, mid) = if is_stop {
-                let (out, sel) = drag_stop(&press, at, &p("location"), &p("dy")).ok_or("LawRefused")?;
+                let (out, sel) = drag_stop(&press, at, &location, &p("dy")).ok_or("LawRefused")?;
                 (out, sel as i64, -1)
             } else {
-                (drag_midpoint(&press, at, &p("location")).ok_or("LawRefused")?, -1, at)
+                (drag_midpoint(&press, at, &location).ok_or("LawRefused")?, -1, at)
             };
             let finished = gesture.starts_with("release");
             Ok(step(&out, st, mid, finished.then_some(Value::Null), finished))

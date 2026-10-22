@@ -125,15 +125,25 @@ refused `NotWritable`.
 
 | gesture | parameters | what it does |
 |---|---|---|
-| `press` | `index` | selects the stop (the midpoint becomes −1) and snapshots the stops into `panel.<stops key>__press` |
+| `press` | `index`, `location` | selects the stop (the midpoint becomes −1) and snapshots the stops and the grab into `panel.<stops key>__press` |
 | `drag` | `location`, `dy` | `drag_stop` over the SNAPSHOT; writes the stops and the selection |
 | `release` | `location`, `dy` | as `drag`, then clears the snapshot and runs the `commit` behaviors |
-| `press_midpoint` | `pair` | selects the midpoint (the stop becomes −1) and snapshots |
+| `press_midpoint` | `pair`, `location` | selects the midpoint (the stop becomes −1) and snapshots, with the grab |
 | `drag_midpoint` | `location` | `drag_midpoint` over the snapshot; writes the stops |
 | `release_midpoint` | `location` | as `drag_midpoint`, then clears the snapshot and runs the `commit` behaviors |
 | `add` | `location` | `add_stop` over the current stops; selects the new stop; runs the `commit` behaviors |
 | `key` | `key`, `shift` | GRADIENT.md's keyboard table over the current stops; runs the `commit` behaviors |
 
+- **A marker moves by how far the pointer moved, never to the pointer.** A
+  press carries the pointer's `location` too, and the snapshot keeps the
+  GRAB: that location less the pressed marker's (a stop's `location`; a
+  midpoint's absolute location, `a + (b − a) · midpoint_to_next / 100`). A
+  `drag` or `release` passes its `location` less the grab to the law. So a
+  click on a marker off its centre selects it and moves nothing, as
+  GRADIENT.md asks of a click on a stop, and a marker does not jump to the
+  pointer when a drag starts. A press with no numeric `location` is refused
+  `LawRefused`, never read as a grab of 0: a shell that forgot it would
+  otherwise move every marker it clicked.
 - **A drag is computed from the press, never from the last preview**, and it
   runs NO behavior. The behaviors (which write the document) run once per
   gesture, so a drag is one undo step. The slider redraws from the store

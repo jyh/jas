@@ -813,8 +813,14 @@ extension WidgetEvent {
             let isStop = name == "press"
             let n = isStop ? stops.count : stops.count - 1
             guard let i = int(params[isStop ? "index" : "pair"]), i >= 0, i < n else { return refused }
+            // The grab (WIDGET_EVENTS.md §The stops kind): how far the pointer
+            // lay from the pressed marker. A press with no number is refused,
+            // never read as a grab of 0.
+            guard let at = gestureNumber(params["location"]) else { return refused }
+            let here = isStop ? stops[i].location
+                : stops[i].location + (stops[i + 1].location - stops[i].location) * stops[i].midpointToNext / 100
             put(pressKey, ["kind": isStop ? "stop" : "midpoint", "index": i,
-                           "stops": gradientStopsToJSON(stops)] as [String: Any])
+                           "stops": gradientStopsToJSON(stops), "grab": at - here] as [String: Any])
             write(stops, isStop ? i : -1, isStop ? -1 : i)
             return Result(outcome: "committed", bindWritten: true)
         case "drag", "release", "drag_midpoint", "release_midpoint":
@@ -824,13 +830,17 @@ extension WidgetEvent {
                   let at = int(snap["index"]), let press = gradientStopsFromJSON(snap["stops"]) else {
                 return Result(outcome: "refused", reason: noPress)
             }
+            // The pointer less the grab, so the marker moves by how far the
+            // pointer moved; a location that is not a number goes to the law as is.
+            let grab = gestureNumber(snap["grab"]) ?? 0
+            let location: Any? = gestureNumber(params["location"]).map { $0 - grab } ?? params["location"]
             let out: [GradientStop], stop: Int, midpoint: Int
             if isStop {
-                guard let (o, sel) = dragStop(press, index: at, location: params["location"],
+                guard let (o, sel) = dragStop(press, index: at, location: location,
                                               dy: params["dy"]) else { return refused }
                 (out, stop, midpoint) = (o, sel, -1)
             } else {
-                guard let o = dragMidpoint(press, pair: at, location: params["location"]) else { return refused }
+                guard let o = dragMidpoint(press, pair: at, location: location) else { return refused }
                 (out, stop, midpoint) = (o, -1, at)
             }
             if name.hasPrefix("drag") {
@@ -877,4 +887,12 @@ extension WidgetEvent {
             return Result(outcome: "inert")
         }
     }
+}
+
+/// A gesture parameter as a number; nil for anything else, a JSON boolean
+/// included (`JSONSerialization` hands one over as an NSNumber, and so does
+/// a Swift `Bool`).
+private func gestureNumber(_ value: Any?) -> Double? {
+    guard let n = value as? NSNumber, !n.isBool else { return nil }
+    return n.doubleValue
 }

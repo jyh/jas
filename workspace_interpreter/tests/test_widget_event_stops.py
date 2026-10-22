@@ -65,14 +65,14 @@ class TestTable:
 class TestStopDrag:
     def test_press_selects_and_writes_nothing_else(self):
         st = store_with(midpoint=0)
-        r = go(st, "press", index=1)
+        r = go(st, "press", index=1, location=50)
         assert r.outcome == "committed" and r.behaviors_run == 0
         assert (panel(st, "selected_stop_index"), panel(st, "selected_midpoint_index")) == (1, -1)
         assert panel(st, "stops") == THREE and st.get("gradient_stops") is None
 
     def test_a_drag_writes_the_store_and_runs_no_behavior(self):
         st = store_with()
-        go(st, "press", index=1)
+        go(st, "press", index=1, location=50)
         r = go(st, "drag", location=30, dy=0)
         assert r.behaviors_run == 0 and st.get("gradient_stops") is None
         assert panel(st, "stops")[1]["location"] == 30
@@ -81,7 +81,7 @@ class TestStopDrag:
         # Across a neighbour (midpoints reset) and back: from the press the
         # midpoints return to 40; applied incrementally they would stay 50.
         st = store_with()
-        go(st, "press", index=0)
+        go(st, "press", index=0, location=0)
         go(st, "drag", location=70, dy=0)
         assert panel(st, "selected_stop_index") == 1
         go(st, "drag", location=10, dy=0)
@@ -90,7 +90,7 @@ class TestStopDrag:
 
     def test_off_the_bar_and_back_restores_the_stop(self):
         st = store_with()
-        go(st, "press", index=1)
+        go(st, "press", index=1, location=50)
         go(st, "drag", location=50, dy=40)
         assert len(panel(st, "stops")) == 2 and panel(st, "selected_stop_index") == 0
         go(st, "drag", location=55, dy=3)
@@ -98,7 +98,7 @@ class TestStopDrag:
 
     def test_release_commits_once_and_clears_the_snapshot(self):
         st = store_with()
-        go(st, "press", index=1)
+        go(st, "press", index=1, location=50)
         go(st, "drag", location=20, dy=0)
         r = go(st, "release", location=25, dy=0)
         want = [S(R, 0), S(G, 25), S(B, 100)]
@@ -114,26 +114,70 @@ class TestStopDrag:
 
     def test_a_press_on_a_midpoint_does_not_feed_a_stop_release(self):
         st = store_with()
-        go(st, "press_midpoint", pair=0)
+        go(st, "press_midpoint", pair=0, location=20)
         assert go(st, "release", location=25, dy=0).reason == we.NO_PRESS
 
 
 class TestMidpointDrag:
     def test_press_midpoint_selects_it_and_clears_the_stop(self):
         st = store_with(stop=2)
-        r = go(st, "press_midpoint", pair=1)
+        r = go(st, "press_midpoint", pair=1, location=70)
         assert r.outcome == "committed" and r.behaviors_run == 0
         assert (panel(st, "selected_stop_index"), panel(st, "selected_midpoint_index")) == (-1, 1)
 
     def test_drag_then_release_midpoint(self):
         st = store_with()
-        go(st, "press_midpoint", pair=1)
+        go(st, "press_midpoint", pair=1, location=70)
         go(st, "drag_midpoint", location=60)
         assert panel(st, "stops")[1]["midpoint_to_next"] == 20
         assert st.get("gradient_stops") is None
         r = go(st, "release_midpoint", location=75)
         assert r.behaviors_run == 1 and st.get("gradient_stops")[1]["midpoint_to_next"] == 50
         assert go(st, "drag_midpoint", location=60).reason == we.NO_PRESS
+
+
+class TestGrab:
+    """The press carries the pointer's location too, and a drag moves the
+    marker by how far the pointer moved, never to the pointer itself
+    (GRADIENT.md: a click on a stop marker selects that stop). The procedure
+    removes the grab offset; the law is unchanged."""
+
+    def test_a_click_off_a_stops_centre_moves_nothing(self):
+        st = store_with()
+        go(st, "press", index=1, location=51.5)
+        r = go(st, "release", location=51.5, dy=0)
+        assert r.outcome == "committed" and r.value == THREE
+        assert panel(st, "stops") == THREE
+
+    def test_a_drag_keeps_the_grab_offset(self):
+        st = store_with()
+        go(st, "press", index=1, location=52)
+        go(st, "drag", location=62, dy=0)
+        assert panel(st, "stops")[1]["location"] == 60
+        r = go(st, "release", location=72, dy=0)
+        assert r.value == [S(R, 0), S(G, 70), S(B, 100)]
+
+    def test_a_midpoint_drag_keeps_the_grab_offset(self):
+        # Pair 0 runs 0..50 with its midpoint at 40 %, so it is drawn at 20;
+        # pressed at 22 and dragged to 32, it lands at 30, which is 60 %.
+        st = store_with()
+        go(st, "press_midpoint", pair=0, location=22)
+        go(st, "drag_midpoint", location=32)
+        assert panel(st, "stops")[0]["midpoint_to_next"] == 60
+        go(st, "release_midpoint", location=32)
+        # Now drawn at 30: a click at 31 (one off its centre) moves nothing.
+        dragged = [S(R, 0, 60), S(G, 50), S(B, 100)]
+        go(st, "press_midpoint", pair=0, location=31)
+        r = go(st, "release_midpoint", location=31)
+        assert r.value == dragged, "a click on a midpoint off its centre moves nothing"
+
+    @pytest.mark.parametrize("bad", [{}, {"location": None}, {"location": True}, {"location": "50"}])
+    def test_a_press_without_a_numeric_location_is_refused(self, bad):
+        st = store_with(stop=2)
+        assert go(st, "press", index=1, **bad).reason == we.LAW_REFUSED
+        assert go(st, "press_midpoint", pair=0, **bad).reason == we.LAW_REFUSED
+        assert panel(st, "selected_stop_index") == 2
+        assert panel(st, "stops" + we.PRESS_SUFFIX) is None
 
 
 class TestAdd:
@@ -204,7 +248,7 @@ class TestKeys:
 class TestRefusals:
     def test_a_wrong_kind(self):
         st = store_with()
-        assert go(st, "press", widget={**WIDGET, "type": "slider"}, index=1).reason == we.WRONG_KIND
+        assert go(st, "press", widget={**WIDGET, "type": "slider"}, index=1, location=50).reason == we.WRONG_KIND
 
     def test_an_unknown_gesture(self):
         assert go(store_with(), "wiggle").reason == we.WRONG_EVENT
@@ -217,8 +261,8 @@ class TestRefusals:
 
     def test_a_bad_index_is_refused_by_the_law(self):
         st = store_with()
-        assert go(st, "press", index=7).reason == we.LAW_REFUSED
-        assert go(st, "press_midpoint", pair=2).reason == we.LAW_REFUSED
+        assert go(st, "press", index=7, location=0).reason == we.LAW_REFUSED
+        assert go(st, "press_midpoint", pair=2, location=0).reason == we.LAW_REFUSED
         assert panel(st, "selected_stop_index") == -1
 
     def test_a_widget_whose_stops_are_not_a_panel_field_is_refused(self):

@@ -7061,7 +7061,10 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 onpointerdown: move |evt: Event<PointerData>| {
                     evt.stop_propagation();
                     slider_capture(&dom_m, evt.data().pointer_id());
-                    slider_send(&app_m, revision, "press_midpoint", serde_json::json!({"pair": i}));
+                    let c = evt.data().client_coordinates();
+                    let (left, top, width) = slider_box(&dom_m);
+                    let (location, _) = slider_point(c.x, c.y, left, top, width);
+                    slider_send(&app_m, revision, "press_midpoint", serde_json::json!({"pair": i, "location": location}));
                 },
                 style: "position:absolute;left:calc({mid_loc}% - 5px);top:2px;width:10px;height:10px;transform:rotate(45deg);background:#888;border:1px solid #333;box-sizing:border-box;cursor:grab;",
             }
@@ -7082,7 +7085,10 @@ fn render_gradient_slider(el: &serde_json::Value, ctx: &serde_json::Value, rctx:
                 onpointerdown: move |evt: Event<PointerData>| {
                     evt.stop_propagation();
                     slider_capture(&dom_s, evt.data().pointer_id());
-                    slider_send(&app_s, revision, "press", serde_json::json!({"index": i}));
+                    let c = evt.data().client_coordinates();
+                    let (left, top, width) = slider_box(&dom_s);
+                    let (location, _) = slider_point(c.x, c.y, left, top, width);
+                    slider_send(&app_s, revision, "press", serde_json::json!({"index": i, "location": location}));
                 },
                 style: "position:absolute;left:calc({loc}% - 7px);top:30px;width:14px;height:14px;border-radius:50%;background:{color};border:1.5px solid #333;box-sizing:border-box;cursor:grab;",
             }
@@ -12892,7 +12898,7 @@ mod tests {
                 .fill_gradient().unwrap().stops.iter().map(|s| s.location).collect()
         };
         assert_eq!(st.gradient_slider_gesture("release", &json!({"location": 30, "dy": 0})), Err("NoPress"));
-        assert_eq!(st.gradient_slider_gesture("press", &json!({"index": 0})), Ok(true));
+        assert_eq!(st.gradient_slider_gesture("press", &json!({"index": 0, "location": 0})), Ok(true));
         assert_eq!(st.gradient_slider_gesture("drag", &json!({"location": 30, "dy": 0})), Ok(true));
         assert_eq!(st.gradient_panel.stops[0].location, 30.0);
         assert_eq!(doc(&st), vec![0.0, 100.0], "a drag does not write the document");

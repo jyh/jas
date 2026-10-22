@@ -7828,7 +7828,7 @@ mod tests {
         // The solid selection reads as the seed: two stops at 0 and 100.
         assert_eq!(scope_locations(e), vec![0.0, 100.0]);
         let before = doc_locations(e);
-        gesture(e, "press", r#"{"index":0}"#);
+        gesture(e, "press", r#"{"index":0,"location":0}"#);
         gesture(e, "drag", r#"{"location":30,"dy":0}"#);
         assert_eq!(scope_locations(e), vec![30.0, 100.0], "the preview stands over the document");
         assert_eq!(doc_locations(e), before, "a drag does not write the document");
@@ -7857,17 +7857,17 @@ mod tests {
         let doc_changed = |reply: &str| serde_json::from_str::<serde_json::Value>(reply)
             .ok().and_then(|v| v["doc_changed"].as_bool());
         // A real move first, so the selection holds a gradient (not the seed).
-        gesture(e, "press", r#"{"index":0}"#);
+        gesture(e, "press", r#"{"index":0,"location":0}"#);
         let (moved, _) = gesture(e, "release", r#"{"location":35,"dy":0}"#);
         assert_eq!(doc_changed(&moved), Some(true), "the control: a move changes the document");
         let generation = engine_of(e).model.borrow().generation();
         // A plain click on stop 0: press, then release where it already is.
-        gesture(e, "press", r#"{"index":0}"#);
+        gesture(e, "press", r#"{"index":0,"location":35}"#);
         let (click, _) = gesture(e, "release", r#"{"location":35,"dy":0}"#);
         assert_eq!(doc_changed(&click), Some(false), "a click on a stop: {click}");
         // Two stops, stop 1 dragged far below the bar: an ordinary move,
         // clamped to 100, where it already is.
-        gesture(e, "press", r#"{"index":1}"#);
+        gesture(e, "press", r#"{"index":1,"location":100}"#);
         let (off, _) = gesture(e, "release", r#"{"location":100.1,"dy":46.3}"#);
         assert_eq!(doc_changed(&off), Some(false), "a two-stop drag off the bar: {off}");
         assert_eq!(engine_of(e).model.borrow().generation(), generation, "no write moved the generation");

@@ -641,8 +641,12 @@ def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
             panel: dict | None, **run_kwargs) -> EventResult:
     """Apply one slider gesture to a STOPS widget.
 
-    ``press`` / ``press_midpoint`` select and snapshot the bound stops.
-    ``drag`` / ``drag_midpoint`` apply the law to the SNAPSHOT and write the
+    ``press`` / ``press_midpoint`` select and snapshot the bound stops, with
+    the GRAB: how far the pointer's ``location`` lay from the pressed marker.
+    ``drag`` / ``drag_midpoint`` apply the law to the SNAPSHOT at the
+    pointer's location less the grab, so a marker moves by how far the
+    pointer moved, never to the pointer (a click off its centre moves
+    nothing), and write the
     stops and selection, running no behavior. ``release`` /
     ``release_midpoint`` write the same way, clear the snapshot, and run the
     ``commit`` behaviors with ``event.value`` the new stops; so do ``add``
@@ -682,7 +686,15 @@ def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
         n = len(stops) if kind == "stop" else len(stops) - 1
         if isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < n:
             return refused
-        write(press_key, {"kind": kind, "index": i, "stops": stops})
+        at = params.get("location")
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            return refused
+        if kind == "stop":
+            here = stops[i]["location"]
+        else:
+            a, b = stops[i]["location"], stops[i + 1]["location"]
+            here = a + (b - a) * stops[i].get("midpoint_to_next", 50) / 100
+        write(press_key, {"kind": kind, "index": i, "stops": stops, "grab": at - here})
         if kind == "stop":
             select(i, -1)
         else:
@@ -694,16 +706,17 @@ def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
         snap = read(press_key)
         if not isinstance(snap, dict) or snap.get("kind") != kind:
             return EventResult("refused", reason=NO_PRESS)
+        at = params.get("location")
+        if isinstance(at, (int, float)) and not isinstance(at, bool):
+            at = at - snap.get("grab", 0)
         if kind == "stop":
-            got = law.drag_stop(snap["stops"], snap["index"], params.get("location"),
-                                params.get("dy"))
+            got = law.drag_stop(snap["stops"], snap["index"], at, params.get("dy"))
             if got is None:
                 return refused
             new_stops, sel = got
             sel_stop, sel_mid = sel, -1
         else:
-            new_stops = law.drag_midpoint(snap["stops"], snap["index"],
-                                          params.get("location"))
+            new_stops = law.drag_midpoint(snap["stops"], snap["index"], at)
             if new_stops is None:
                 return refused
             sel_stop, sel_mid = -1, snap["index"]
