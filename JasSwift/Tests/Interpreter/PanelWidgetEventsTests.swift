@@ -455,3 +455,36 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     #expect(r.outcome == "committed")
     #expect(model.document.getElement([0, 0]).blendMode == .screen)
 }
+
+// MARK: - Gradient slider: the stops kind through the app's route
+
+@Test func aSliderDragThroughTheAppRouteWritesTheDocumentOnceAtTheRelease() {
+    // WIDGET_EVENTS.md §The stops kind, over the app's host: the gesture's
+    // writes go through the panel-write host, and the release's `commit`
+    // behavior (gradient_stops) reaches the selection through the gradient
+    // platform effect. The render scope is re-taken before each gesture, as
+    // a re-render would.
+    let model = modelWithSelectedRect()
+    model.stateStore.set("fill_on_top", true)
+    let widget = shipped(gradient, "grad_slider")
+    let locations = { model.document.getElement([0, 0]).fillGradient?.stops.map(\.location) }
+    let before = locations()
+    let press = events(model, gradient).gesture(widget, name: "press", params: ["index": 0])
+    #expect(press.outcome == "committed")
+    _ = events(model, gradient).gesture(widget, name: "drag", params: ["location": 30, "dy": 0])
+    let shown = model.stateStore.getPanel(gradient, "stops") as? [[String: Any]]
+    #expect(number(shown?.first?["location"]) == 30)
+    #expect(locations() == before, "a drag does not write the document")
+    let release = events(model, gradient).gesture(widget, name: "release", params: ["location": 35, "dy": 0])
+    #expect(release.outcome == "committed" && release.behaviorsRun == 1)
+    #expect(locations()?.first == 35)
+    #expect(model.stateStore.getPanel(gradient, "stops__press") is NSNull)
+}
+
+@Test func theSliderPointIsPercentAlongTheBarAndDyFromItsCentre() {
+    // Mirrors renderer.rs's arm: the bar's centre line is y = 22.
+    #expect(gradientSliderPoint(CGPoint(x: 50, y: 22), width: 200) == (25, 0))
+    #expect(gradientSliderPoint(CGPoint(x: 0, y: 43), width: 200) == (0, 21))
+    #expect(gradientSliderPoint(CGPoint(x: 240, y: 0), width: 200) == (120, -22))
+    #expect(gradientSliderPoint(CGPoint(x: 5, y: 22), width: 0) == (0, 0))
+}

@@ -2225,9 +2225,12 @@ struct YamlElementView: View {
 
     /// gradient_slider — 1-D stops editor.
     ///
-    /// Phase 0 scope: visual tree + tap-to-select gestures on stop and
-    /// midpoint markers. Full drag state (drag, drag-off-bar delete) and
-    /// keyboard handling are deferred to Phase 5.
+    /// Its pointer reports slider gestures (WIDGET_EVENTS.md §The stops kind)
+    /// through ``PanelWidgetEvents/gesture(_:name:params:)``: a drag on a stop
+    /// or midpoint marker is press, drags, release, and a tap on the bar is
+    /// an add, each with the raw location and `dy` from
+    /// ``gradientSliderPoint(_:width:)``. Keys are NOT wired: `onKeyPress`
+    /// needs macOS 14 and this package targets 13.
     @ViewBuilder
     private func renderGradientSlider() -> some View {
         let bind = element["bind"] as? [String: Any]
@@ -2265,6 +2268,10 @@ struct YamlElementView: View {
                     .frame(width: geo.size.width, height: 16)
                     .border(SwiftUI.Color.gray, width: 1)
                     .offset(x: 0, y: 14)
+                    .onTapGesture(count: 1, coordinateSpace: .named(gradientSliderSpace)) { p in
+                        let (location, _) = gradientSliderPoint(p, width: geo.size.width)
+                        widgetEvents?.gesture(element, name: "add", params: ["location": location])
+                    }
                 } else {
                     Rectangle().fill(SwiftUI.Color.gray)
                         .frame(width: geo.size.width, height: 16)
@@ -2291,9 +2298,7 @@ struct YamlElementView: View {
                                 .rotationEffect(.degrees(45))
                                 .offset(x: x, y: 2)
                         )
-                        .onTapGesture {
-                            onWidgetAction?("gradient_slider_midpoint_click", ["midpoint_index": i])
-                        }
+                        .gesture(sliderDrag(index: i, midpoint: true, width: geo.size.width))
                 }
 
                 // Stop markers (circles, below bar)
@@ -2306,8 +2311,33 @@ struct YamlElementView: View {
                     )
                 }
             }
+            .coordinateSpace(name: gradientSliderSpace)
         }
         .frame(height: 44)
+    }
+
+    /// A marker's drag as slider gestures: its first change is the press (no
+    /// snapshot stands yet), later changes are drags, and its end the release.
+    private func sliderDrag(index: Int, midpoint: Bool, width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(gradientSliderSpace))
+            .onChanged { value in
+                let (location, dy) = gradientSliderPoint(value.location, width: width)
+                let held = model?.stateStore.getPanel(panelId ?? "", "stops__press")
+                if held == nil || held is NSNull {
+                    widgetEvents?.gesture(element, name: midpoint ? "press_midpoint" : "press",
+                                          params: midpoint ? ["pair": index] : ["index": index])
+                } else {
+                    widgetEvents?.gesture(element, name: midpoint ? "drag_midpoint" : "drag",
+                                          params: midpoint ? ["location": location]
+                                                           : ["location": location, "dy": dy])
+                }
+            }
+            .onEnded { value in
+                let (location, dy) = gradientSliderPoint(value.location, width: width)
+                widgetEvents?.gesture(element, name: midpoint ? "release_midpoint" : "release",
+                                      params: midpoint ? ["location": location]
+                                                       : ["location": location, "dy": dy])
+            }
     }
 
     @ViewBuilder
@@ -2331,12 +2361,10 @@ struct YamlElementView: View {
                 )
             )
             .offset(x: x, y: 30)
-            .onTapGesture(count: 2) {
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
                 onWidgetAction?("gradient_slider_stop_dblclick", ["stop_index": index])
-            }
-            .onTapGesture(count: 1) {
-                onWidgetAction?("gradient_slider_stop_click", ["stop_index": index])
-            }
+            })
+            .gesture(sliderDrag(index: index, midpoint: false, width: width))
     }
 
     // MARK: - Separator
@@ -5089,4 +5117,16 @@ struct IconSelectButton: View {
             .padding(.vertical, 4)
         }
     }
+}
+
+/// The gradient slider's coordinate space: the 44 pt widget, origin top-left.
+let gradientSliderSpace = "gradient_slider"
+
+/// A point in ``gradientSliderSpace`` as the slider law's raw parameters: the
+/// location in percent along the bar (not clamped: the law clamps a drag and
+/// refuses an add outside [0, 100]) and `dy` from the bar's centre line, which
+/// is drawn at y 14…30. Mirrors `renderer.rs` `slider_point`.
+func gradientSliderPoint(_ p: CGPoint, width: CGFloat) -> (Double, Double) {
+    let location = width > 0 ? Double(p.x / width) * 100 : 0
+    return (location, Double(p.y) - 22)
 }
