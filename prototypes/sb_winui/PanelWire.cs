@@ -110,6 +110,36 @@ internal static class PanelWire
     }
 
     /// <summary>
+    /// The event JSON for a gesture on a stops kind (`WIDGET_EVENTS.md` §The
+    /// stops kind): `value` is an OBJECT of the gesture's RAW parameters (an
+    /// `index`, a `pair`, a `location` in percent, a `dy` in DIPs), never a
+    /// string, because the engine reads them as numbers. Everything else is
+    /// <see cref="EventJson"/>'s envelope. The shell computes no step of the
+    /// slider law; the engine does.
+    /// </summary>
+    internal static byte[] GestureJson(string widget, string gesture, IReadOnlyDictionary<string, object> parameters,
+                                       bool alt, bool shift, bool ctrl, bool meta, string? path = null)
+    {
+        var ev = new Dictionary<string, object>
+        {
+            ["widget"] = widget,
+            ["event"] = gesture,
+            ["alt"] = alt,
+            ["shift"] = shift,
+            ["ctrl"] = ctrl,
+            ["meta"] = meta,
+            ["value"] = parameters,
+        };
+        if (PlanPath(path) is { } p) { ev["path"] = p; }
+        return System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(ev);
+    }
+
+    /// <summary>A gesture's parameters as one whitespace-free row token: the
+    /// compact JSON object, with a space escaped as <see cref="RowValue"/> does.</summary>
+    internal static string GestureRowValue(IReadOnlyDictionary<string, object> parameters) =>
+        System.Text.Json.JsonSerializer.Serialize(parameters).Replace(" ", "\\u0020");
+
+    /// <summary>
     /// §1.2: a dropdown entry's `items` from its raw JSON
     /// (`panel_plan.rs::items_of`). Null when the core sent `null` (no `items`
     /// list), when the key is absent, or when the bytes are not an array.
@@ -1542,8 +1572,10 @@ internal static class ActWire
 /// The `gradient_slider`'s picture (gradient.yaml `grad_slider`), as the web
 /// draws it (`renderer.rs` `render_gradient_slider`): a bar previewing the
 /// stops, a circle per stop at its `location`, and a diamond per pair at its
-/// `midpoint_to_next`. DISPLAY ONLY, as in every port: the spec declares no
-/// event for it yet, so a shell that sent one would be refused `EmptyBehavior`.
+/// `midpoint_to_next`. Its gestures (council 10-21 ⑤, node 3b) cross as raw
+/// parameters through <see cref="PanelWire.GestureJson"/>: this class turns a
+/// pointer's DIPs into a `location` and a `dy` (<see cref="Point"/>) and
+/// nothing more; the slider law is the engine's.
 /// </summary>
 internal static class GradientSliderWire
 {
@@ -1584,4 +1616,34 @@ internal static class GradientSliderWire
 
     /// <summary>A bound index (`bind.selected_stop_index`, `…midpoint_index`): -1, none, unless an integer.</summary>
     internal static int Index(string? shown) => int.TryParse(shown, out var i) ? i : -1;
+
+    /// <summary>
+    /// The slider's geometry in the plan's rect, in DIPs: a stop's radius `R`
+    /// (also the inset that keeps an end stop inside), a diamond's side `D`, and
+    /// the bar's top, width and height. Null when the rect is too small to hold
+    /// a bar, which then draws nothing and takes no gesture. The ONE layout the
+    /// drawing and the pointer share, so a press lands where its marker is drawn.
+    /// </summary>
+    internal readonly record struct Layout(double R, double D, double BarTop, double BarW, double BarH);
+
+    internal static Layout? LayoutOf(double w, double h)
+    {
+        var (r, d) = (h * 0.2, h * 0.25);
+        var barTop = d + 1;
+        var (barW, barH) = (w - 2 * r, h - barTop - 2 * r);
+        return barW <= 0 || barH <= 0 ? null : new Layout(r, d, barTop, barW, barH);
+    }
+
+    /// <summary>Where a `location` (0..100) is drawn along the bar, in DIPs from the surface's left.</summary>
+    internal static double At(Layout l, double location) => l.R + l.BarW * location / 100;
+
+    /// <summary>
+    /// A point on the surface (DIPs) as a gesture's raw parameters: its
+    /// `location` in percent along the bar (the inverse of <see cref="At"/>)
+    /// and `dy`, its distance from the bar's centre line. Neither is clamped: a
+    /// drag past an end or off the bar is the law's to read (`drag_stop`), and
+    /// the shell decides nothing about it.
+    /// </summary>
+    internal static (double Location, double Dy) Point(Layout l, double x, double y) =>
+        ((x - l.R) / l.BarW * 100, y - (l.BarTop + l.BarH / 2));
 }

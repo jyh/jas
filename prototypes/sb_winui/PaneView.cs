@@ -408,13 +408,12 @@ public sealed partial class MainWindow
                         break;
 
                     // The gradient slider (the 10-20 sitting, item 6: it was a
-                    // `[gradient_slider]` placeholder). DISPLAY ONLY, as in every
-                    // port: the spec declares no event for it, so it takes no
-                    // pointer. ApplyLeafValues draws it from `bind.stops`.
+                    // `[gradient_slider]` placeholder). ApplyLeafValues draws it
+                    // from `bind.stops`; its gestures (council 10-21 ⑤, node 3b)
+                    // are BuildGradientSlider's.
                     case "gradient_slider":
                         gradients++;
-                        el = new GradientSliderSurface { IsHitTestVisible = false };
-                        if (leaf.Literal("summary") is { Length: > 0 } gtip) { ToolTipService.SetToolTip(el, gtip); }
+                        el = BuildGradientSlider(leaf);
                         break;
 
                     // A `length_input` is this control too: the person types TEXT
@@ -838,6 +837,73 @@ public sealed partial class MainWindow
         }
 
         /// <summary>
+        /// The gradient slider (WIDGET_EVENTS.md §The stops kind). A press on a
+        /// stop's circle is `press {index}` and on a pair's diamond `press_midpoint
+        /// {pair}`, and the POINTER IS CAPTURED on the surface, since a drag off
+        /// the 24 DIP rect is how a stop is removed; each move is then `drag
+        /// {location, dy}` (or `drag_midpoint {location}`) and the lift `release`
+        /// (`release_midpoint`). A press on the bar itself is `add {location}`.
+        /// Each crosses as a `PanelClickCmd` with <see cref="PanelClickCmd.Gesture"/>
+        /// set, so it writes the panel-click row every pane act writes.
+        ///
+        /// ⛔ IT COMPUTES NO STEP OF THE LAW: the parameters are the pointer's DIPs
+        /// through <see cref="GradientSliderWire.Point"/>, and every stop it draws
+        /// is the plan's. Which marker was pressed is which shape took the press.
+        ///
+        /// ⚠️ NOT WIRED: keys (a `Canvas` takes no focus), and a capture LOST
+        /// without a lift (the window deactivated mid-drag) sends nothing: the
+        /// press snapshot stays in the engine's store until the next press
+        /// replaces it, as in the web port. A slider with no id is drawn only.
+        /// </summary>
+        private GradientSliderSurface BuildGradientSlider(PaneLeaf leaf)
+        {
+            var slider = new GradientSliderSurface { Widget = leaf.Id, PlanPath = leaf.Path };
+            if (leaf.Literal("summary") is { Length: > 0 } tip) { ToolTipService.SetToolTip(slider, tip); }
+            if (!PanelWire.Addressable(leaf.Id, leaf.Path))
+            {
+                slider.IsHitTestVisible = false;
+                return slider;
+            }
+            void Track(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e, bool lift)
+            {
+                if (slider.Held is not { } held || slider.Geometry is not { } g) { return; }
+                var at = e.GetCurrentPoint(slider).Position;
+                var (location, dy) = GradientSliderWire.Point(g, at.X, at.Y);
+                var stop = held == "stop";
+                var gesture = (stop, lift) switch
+                {
+                    (true, false) => "drag",
+                    (true, true) => "release",
+                    (false, false) => "drag_midpoint",
+                    (false, true) => "release_midpoint",
+                };
+                var p = new Dictionary<string, object> { ["location"] = location };
+                if (stop) { p["dy"] = dy; }
+                if (lift)
+                {
+                    slider.Held = null;
+                    slider.ReleasePointerCapture(e.Pointer);
+                }
+                e.Handled = true;
+                SendGesture(slider, gesture, p);
+            }
+            slider.PointerMoved += (_, e) => Track(e, false);
+            slider.PointerReleased += (_, e) => Track(e, true);
+            slider.PointerCaptureLost += (_, _) => slider.Held = null;
+            return slider;
+        }
+
+        /// <summary>A press on one of the slider's markers: select it, hold it, capture the pointer.</summary>
+        private void PressMarker(GradientSliderSurface slider, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e,
+                                 string held, string gesture, string key, int at)
+        {
+            e.Handled = true;
+            slider.Held = held;
+            slider.CapturePointer(e.Pointer);
+            SendGesture(slider, gesture, new Dictionary<string, object> { [key] = at });
+        }
+
+        /// <summary>
         /// The gradient slider's picture, the web's layout scaled into the plan's
         /// rect (`render_gradient_slider` draws it 44 px tall; the plan gives 24):
         /// a diamond per pair across the top, the bar previewing the stops, and
@@ -848,13 +914,13 @@ public sealed partial class MainWindow
         private void DrawGradientSlider(GradientSliderSurface slider, PaneLeaf leaf)
         {
             slider.Children.Clear();
-            double w = leaf.W, h = leaf.H;
-            var r = h * 0.2;                       // a stop's radius; the inset that keeps it in
-            var d = h * 0.25;                      // a diamond's side
-            var barTop = d + 1;
-            var (barW, barH) = (w - 2 * r, h - barTop - 2 * r);
-            if (barW <= 0 || barH <= 0) { return; }   // a rect too small to draw draws nothing
-            double At(double loc) => r + barW * loc / 100;
+            double h = leaf.H;
+            // A rect too small to hold a bar draws nothing and takes no gesture.
+            slider.Geometry = GradientSliderWire.LayoutOf(leaf.W, h);
+            if (slider.Geometry is not { } g) { return; }
+            var (r, d, barTop, barW, barH) = (g.R, g.D, g.BarTop, g.BarW, g.BarH);
+            double At(double loc) => GradientSliderWire.At(g, loc);
+            var live = slider.IsHitTestVisible;
             Microsoft.UI.Xaml.Media.SolidColorBrush Brush(string hex, double opacity) =>
                 PanelWire.SwatchColor(hex) is { } c
                     ? new(Microsoft.UI.ColorHelper.FromArgb((byte)Math.Round(255 * opacity / 100), c.R, c.G, c.B))
@@ -865,6 +931,15 @@ public sealed partial class MainWindow
             Microsoft.UI.Xaml.Controls.Canvas.SetTop(bar, barTop);
             slider.Children.Add(bar);
             if (stops is null || stops.Count < 2) { bar.Fill = _paneMutedBrush; return; }
+            if (live)
+            {
+                bar.PointerPressed += (_, e) =>
+                {
+                    e.Handled = true;
+                    var at = e.GetCurrentPoint(slider).Position;
+                    SendGesture(slider, "add", new Dictionary<string, object> { ["location"] = GradientSliderWire.Point(g, at.X, at.Y).Location });
+                };
+            }
             var preview = new Microsoft.UI.Xaml.Media.LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0.5),
@@ -893,6 +968,8 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(diamond, At(GradientSliderWire.MidpointLocation(stops[i], stops[i + 1])) - d / 2);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(diamond, 0);
                 slider.Children.Add(diamond);
+                var pair = i;
+                if (live) { diamond.PointerPressed += (_, e) => PressMarker(slider, e, "midpoint", "press_midpoint", "pair", pair); }
             }
             for (var i = 0; i < stops.Count; i++)
             {
@@ -906,6 +983,8 @@ public sealed partial class MainWindow
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(dot, At(stops[i].Location) - r);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(dot, h - 2 * r);
                 slider.Children.Add(dot);
+                var index = i;
+                if (live) { dot.PointerPressed += (_, e) => PressMarker(slider, e, "stop", "press", "index", index); }
             }
         }
 
@@ -1384,7 +1463,8 @@ public sealed partial class MainWindow
         /// control was built from. A press is `click` with no value; a commit is
         /// `commit` with the control's text (<see cref="PanelWire.EventJson"/>).
         /// </summary>
-        private void SendPane(string widget, string eventName, string? value, string? path = null)
+        private void SendPane(string widget, string eventName, string? value, string? path = null,
+                              Dictionary<string, object>? gesture = null)
         {
             var act = new PanelClickCmd
             {
@@ -1394,6 +1474,7 @@ public sealed partial class MainWindow
                 Via = "hand",
                 Event = eventName,
                 Value = value,
+                Gesture = gesture,
                 Alt = IsKeyDown(Windows.System.VirtualKey.Menu),
                 Shift = IsKeyDown(Windows.System.VirtualKey.Shift),
                 Ctrl = IsKeyDown(Windows.System.VirtualKey.Control),
@@ -1403,6 +1484,10 @@ public sealed partial class MainWindow
             if (_dialog) { _w._canvas.DialogEvent(act); }
             else { _w._canvas.PanelClick(act); }
         }
+
+        /// <summary>One slider gesture, sent as a pane act whose value is its raw parameters.</summary>
+        private void SendGesture(GradientSliderSurface slider, string gesture, Dictionary<string, object> parameters) =>
+            SendPane(slider.Widget, gesture, null, slider.PlanPath, parameters);
 
         // =======================================================================
         // W2b-2 — THE SELECTOR, AND THE CONTROLS A PERSON CAN CHANGE
@@ -2013,6 +2098,18 @@ internal sealed partial class ColorBarSurface : Grid
 /// </summary>
 internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls.Canvas
 {
+    /// <summary>The widget id and plan path its gestures are addressed to.</summary>
+    internal string Widget = "";
+    internal string? PlanPath;
+
+    /// <summary>The layout it was last drawn with; null when the rect holds no bar.</summary>
+    internal GradientSliderWire.Layout? Geometry;
+
+    /// <summary>`stop` or `midpoint` between a press and its lift, else null.
+    /// It lives on the surface, which a redraw keeps, never on a marker, which
+    /// every redraw replaces.</summary>
+    internal string? Held;
+
     protected override Microsoft.UI.Xaml.Automation.Peers.AutomationPeer OnCreateAutomationPeer() =>
         new Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer(this);
 }
