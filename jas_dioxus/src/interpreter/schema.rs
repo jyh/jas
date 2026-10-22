@@ -121,6 +121,8 @@ pub fn get_entry(key: &str) -> Option<SchemaEntry> {
         // The two stop combos' keys (gradient_host::STOP_KEYS).
         "gradient_stop_opacity" => Some(SchemaEntry::new(Number, false, true)),
         "gradient_stop_location" => Some(SchemaEntry::new(Number, false, true)),
+        // The slider's finished gesture: the whole stops list (gradient_host::STOPS_KEY).
+        "gradient_stops" => Some(SchemaEntry::new(List, false, true)),
         "fill_on_top" => Some(SchemaEntry::new(Bool, false, true)),
         "toolbar_visible" => Some(SchemaEntry::new(Bool, false, true)),
         "canvas_visible" => Some(SchemaEntry::new(Bool, false, true)),

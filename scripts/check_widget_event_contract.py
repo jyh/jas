@@ -91,7 +91,7 @@ from workspace_interpreter.expr_parser import (  # noqa: E402
 from workspace_interpreter.expr_parser import Path as ExprPath  # noqa: E402
 from workspace_interpreter.widget_event import (  # noqa: E402
     ALLOWED_EVENTS, BOOLEAN_KINDS, CHECK_KINDS, CLICK_EVENTS, CLICK_KINDS, EVENT_ROOTS,
-    INPUT_KINDS, ITEM_KINDS, OPTION_KINDS,
+    INPUT_KINDS, ITEM_KINDS, OPTION_KINDS, STOPS_KINDS,
 )
 
 # A `foreach` without `as:` names its item this (every renderer agrees).
@@ -495,11 +495,12 @@ def self_test() -> int:
     # day; 11 since `color_bar` became an input kind, fork B2,
     # 2026-10-13); the literal is here so a change to the kind set is a
     # deliberate edit, not a drift.
-    # 17 since `button` and `icon_button` (the click kinds) joined, 2026-10-15.
-    arm("the module table is every value, boolean, item, check, option and "
-        "click kind",
+    # 17 since `button` and `icon_button` (the click kinds) joined, 2026-10-15;
+    # 18 since `gradient_slider` (the stops kind) joined, 2026-10-21.
+    arm("the module table is every value, boolean, item, check, option, click "
+        "and stops kind",
         len(table) == len(INPUT_KINDS | BOOLEAN_KINDS | ITEM_KINDS | CHECK_KINDS
-                          | OPTION_KINDS | CLICK_KINDS) == 17)
+                          | OPTION_KINDS | CLICK_KINDS | STOPS_KINDS) == 18)
     # One widget per (kind, event), each with one expression: the counts this
     # fixture is BUILT to have.
     clean = [{"type": k, "id": f"{k}_{e}", "behavior": [

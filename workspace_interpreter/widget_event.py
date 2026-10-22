@@ -101,6 +101,14 @@ CLICK_KINDS = frozenset({"button", "icon_button"})
 # The modifier keys a click carries as `event.*`; an absent one reads false.
 CLICK_MODIFIERS = ("shift", "ctrl", "meta", "alt")
 
+# The STOPS kind (WIDGET_EVENTS.md §The stops kind): a gesture crosses as
+# raw parameters and the slider law (gradient_law) applies it. Its one
+# behavior event, ``commit``, is "a gesture finished".
+STOPS_KINDS = frozenset({"gradient_slider"})
+STOPS_EVENTS = ("commit",)
+STOPS_GESTURES = ("press", "drag", "release", "press_midpoint", "drag_midpoint",
+                  "release_midpoint", "add", "key")
+
 ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: COMMIT_EVENTS for kind in INPUT_KINDS},
     "text_input": COMMIT_EVENTS + TEXT_ENTRY_EVENTS,
@@ -109,6 +117,7 @@ ALLOWED_EVENTS: dict[str, tuple[str, ...]] = {
     **{kind: PRESS_EVENTS for kind in CHECK_KINDS},
     **{kind: CHOOSE_EVENTS for kind in OPTION_KINDS},
     **{kind: CLICK_EVENTS + POINTER_EVENTS for kind in CLICK_KINDS},
+    **{kind: STOPS_EVENTS for kind in STOPS_KINDS},
 }
 
 # The names a behavior's expressions can start from: the store's evaluation
@@ -127,6 +136,9 @@ MISSING_VALUE = "MissingValue"  # a commit carried no text at all
 DISABLED = "Disabled"           # bind.disabled is true
 WRONG_KIND = "WrongKind"        # commit on a non-input kind, press on a non-boolean
 WRONG_EVENT = "WrongEvent"      # an event the kind's procedure does not take
+NO_PRESS = "NoPress"            # a drag or release with no press snapshot
+LAW_REFUSED = "LawRefused"      # the slider law refused the gesture
+NOT_WRITABLE = "NotWritable"    # a stops widget whose binds are not panel fields
 
 
 @dataclass(frozen=True)
@@ -598,3 +610,140 @@ def pick(widget: dict, item_value, event: str, store: StateStore, *,
                          run_kwargs, scope={"item": item})
     return EventResult("committed" if ran else "inert", value=item_value,
                        behaviors_run=ran)
+
+
+# ── The stops kind (WIDGET_EVENTS.md §The stops kind) ─────────
+
+#: The suffix of the panel key a press snapshots into, beside the bound
+#: stops (``panel.stops`` -> ``panel.stops__press``).
+PRESS_SUFFIX = "__press"
+
+#: A key's nudge: (plain, with Shift); Home and End go to 0 and 100.
+NUDGE = {"Left": (-1, -10), "Right": (1, 10)}
+
+
+def _stops_targets(widget: dict) -> dict | None:
+    """The three binds a stops widget writes, each a ``panel.`` key, or
+    ``None`` when any is missing or not a panel field."""
+    bind = widget.get("bind")
+    if not isinstance(bind, dict):
+        return None
+    out = {}
+    for name in ("stops", "selected_stop_index", "selected_midpoint_index"):
+        t = writable_target(bind.get(name))
+        if t is None or t[0] != "panel":
+            return None
+        out[name] = t[1]
+    return out
+
+
+def gesture(widget: dict, name: str, params: dict, store: StateStore, *,
+            panel: dict | None, **run_kwargs) -> EventResult:
+    """Apply one slider gesture to a STOPS widget.
+
+    ``press`` / ``press_midpoint`` select and snapshot the bound stops.
+    ``drag`` / ``drag_midpoint`` apply the law to the SNAPSHOT and write the
+    stops and selection, running no behavior. ``release`` /
+    ``release_midpoint`` write the same way, clear the snapshot, and run the
+    ``commit`` behaviors with ``event.value`` the new stops; so do ``add``
+    and ``key``, over the current stops. A refusal writes nothing."""
+    from workspace_interpreter import gradient_law as law
+    if widget.get("type") not in STOPS_KINDS:
+        return EventResult("refused", reason=WRONG_KIND)
+    if name not in STOPS_GESTURES:
+        return EventResult("refused", reason=WRONG_EVENT)
+    if _is_disabled(widget, store):
+        return EventResult("refused", reason=DISABLED)
+    keys = _stops_targets(widget)
+    if keys is None:
+        return EventResult("refused", reason=NOT_WRITABLE)
+    panel_id = store.get_active_panel_id()
+    read = lambda k: store.get_panel(panel_id, k)
+    write = lambda k, v: _write_bind(("panel", k), v, store, panel)
+    press_key = keys["stops"] + PRESS_SUFFIX
+    stops = read(keys["stops"]) or []
+    refused = EventResult("refused", reason=LAW_REFUSED)
+
+    def select(stop: int, midpoint: int) -> None:
+        write(keys["selected_stop_index"], stop)
+        write(keys["selected_midpoint_index"], midpoint)
+
+    def finish(new_stops, stop: int, midpoint: int) -> EventResult:
+        write(keys["stops"], new_stops)
+        select(stop, midpoint)
+        ran = _run_behaviors(_declared(widget, STOPS_EVENTS), new_stops, store,
+                             run_kwargs)
+        return EventResult("committed", value=new_stops, bind_written=True,
+                           behaviors_run=ran)
+
+    if name in ("press", "press_midpoint"):
+        kind = "stop" if name == "press" else "midpoint"
+        i = params.get("index" if kind == "stop" else "pair")
+        n = len(stops) if kind == "stop" else len(stops) - 1
+        if isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < n:
+            return refused
+        write(press_key, {"kind": kind, "index": i, "stops": stops})
+        if kind == "stop":
+            select(i, -1)
+        else:
+            select(-1, i)
+        return EventResult("committed", bind_written=True)
+
+    if name in ("drag", "release", "drag_midpoint", "release_midpoint"):
+        kind = "stop" if name in ("drag", "release") else "midpoint"
+        snap = read(press_key)
+        if not isinstance(snap, dict) or snap.get("kind") != kind:
+            return EventResult("refused", reason=NO_PRESS)
+        if kind == "stop":
+            got = law.drag_stop(snap["stops"], snap["index"], params.get("location"),
+                                params.get("dy"))
+            if got is None:
+                return refused
+            new_stops, sel = got
+            sel_stop, sel_mid = sel, -1
+        else:
+            new_stops = law.drag_midpoint(snap["stops"], snap["index"],
+                                          params.get("location"))
+            if new_stops is None:
+                return refused
+            sel_stop, sel_mid = -1, snap["index"]
+        if name.startswith("drag"):
+            write(keys["stops"], new_stops)
+            select(sel_stop, sel_mid)
+            return EventResult("committed", value=new_stops, bind_written=True)
+        write(press_key, None)
+        return finish(new_stops, sel_stop, sel_mid)
+
+    if name == "add":
+        got = law.add_stop(stops, params.get("location"))
+        if got is None:
+            return refused
+        return finish(got[0], got[1], -1)
+
+    # key
+    key, shift = params.get("key"), bool(params.get("shift"))
+    stop, midpoint = read(keys["selected_stop_index"]), read(keys["selected_midpoint_index"])
+    if isinstance(stop, int) and 0 <= stop < len(stops):
+        if key in ("Delete", "Backspace"):
+            got = law.delete_stop(stops, stop)
+        elif key in NUDGE or key in ("Home", "End"):
+            here = stops[stop]["location"]
+            to = (here + NUDGE[key][shift] if key in NUDGE
+                  else 0 if key == "Home" else 100)
+            got = law.drag_stop(stops, stop, to, 0)
+        else:
+            return EventResult("inert")
+        if got is None:
+            return refused
+        return finish(got[0], got[1], -1)
+    if isinstance(midpoint, int) and 0 <= midpoint < len(stops) - 1:
+        if key in NUDGE or key in ("Home", "End"):
+            here = stops[midpoint]["midpoint_to_next"]
+            to = (here + NUDGE[key][shift] if key in NUDGE
+                  else 0 if key == "Home" else 100)
+            new_stops = law.set_midpoint(stops, midpoint, to)
+            if new_stops is None:
+                return refused
+            return finish(new_stops, -1, midpoint)
+        return EventResult("inert")
+    return EventResult("inert")

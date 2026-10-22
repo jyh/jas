@@ -735,3 +735,141 @@ private func jsonValueEqual(_ a: Any?, _ b: Any?) -> Bool {
     }
     return false
 }
+
+// MARK: - The stops kind (WIDGET_EVENTS.md §The stops kind)
+
+extension WidgetEvent {
+    /// The stops kind: a shell reports a slider gesture with its raw
+    /// parameters, and the slider law applies it. Its one behavior event,
+    /// `commit`, is "a gesture finished".
+    static let stopsKinds: Set<String> = ["gradient_slider"]
+    static let stopsEvents = ["commit"]
+    static let stopsGestures = ["press", "drag", "release", "press_midpoint", "drag_midpoint",
+                                "release_midpoint", "add", "key"]
+    static let noPress = "NoPress"
+    static let lawRefused = "LawRefused"
+    static let notWritable = "NotWritable"
+    /// The suffix of the panel key a press snapshots into (`panel.stops__press`).
+    static let pressSuffix = "__press"
+
+    /// Apply one slider gesture to a stops widget (the reference's
+    /// `widget_event.gesture`). A press snapshots the CURRENT stops (the
+    /// host scope's when the view supplies one, else the store's); a drag
+    /// applies the law to the snapshot and writes the stops and selection,
+    /// running no behavior; a release, an add and a key also run the `commit`
+    /// behaviors with `event.value` the new stops. A refusal writes nothing.
+    static func gesture(
+        widget: [String: Any], name: String, params: [String: Any], store: StateStore,
+        panel: [String: Any]?,
+        actions: [String: Any]? = nil, dialogs: [String: Any]? = nil,
+        platformEffects: [String: PlatformEffect] = [:], model: Model? = nil,
+        host: Host = Host()
+    ) -> Result {
+        guard let kind = widget["type"] as? String, stopsKinds.contains(kind) else {
+            return Result(outcome: "refused", reason: wrongKind)
+        }
+        guard stopsGestures.contains(name) else { return Result(outcome: "refused", reason: wrongEvent) }
+        if isDisabled(widget, store: store, host: host) {
+            return Result(outcome: "refused", reason: disabled)
+        }
+        let bind = widget["bind"] as? [String: Any] ?? [:]
+        func key(_ name: String) -> String? {
+            guard let t = writableTarget(bind[name] as? String), t.scope == "panel" else { return nil }
+            return t.key
+        }
+        guard let pid = store.getActivePanelId(), let stopsKey = key("stops"),
+              let stopKey = key("selected_stop_index"), let midKey = key("selected_midpoint_index") else {
+            return Result(outcome: "refused", reason: notWritable)
+        }
+        let pressKey = stopsKey + pressSuffix
+        let shown = (host.scope?["panel"] as? [String: Any]) ?? store.getPanelState(pid)
+        let refused = Result(outcome: "refused", reason: lawRefused)
+        guard let stops = gradientStopsFromJSON(shown[stopsKey]) else { return refused }
+        func int(_ v: Any?) -> Int? {
+            guard let n = v as? NSNumber, !n.isBool else { return nil }
+            return n.intValue
+        }
+        func write(_ stops: [GradientStop], _ stop: Int, _ midpoint: Int) {
+            store.setPanel(pid, stopsKey, gradientStopsToJSON(stops))
+            store.setPanel(pid, stopKey, stop)
+            store.setPanel(pid, midKey, midpoint)
+        }
+        func finish(_ out: [GradientStop], _ stop: Int, _ midpoint: Int) -> Result {
+            write(out, stop, midpoint)
+            let value = gradientStopsToJSON(out)
+            let ran = runBehaviors(declared(widget, events: stopsEvents), value: value,
+                                   store: store, actions: actions, dialogs: dialogs,
+                                   platformEffects: platformEffects, model: model, host: host)
+            return Result(outcome: "committed", value: value, bindWritten: true, behaviorsRun: ran)
+        }
+
+        switch name {
+        case "press", "press_midpoint":
+            let isStop = name == "press"
+            let n = isStop ? stops.count : stops.count - 1
+            guard let i = int(params[isStop ? "index" : "pair"]), i >= 0, i < n else { return refused }
+            store.setPanel(pid, pressKey, ["kind": isStop ? "stop" : "midpoint", "index": i,
+                                           "stops": gradientStopsToJSON(stops)] as [String: Any])
+            write(stops, isStop ? i : -1, isStop ? -1 : i)
+            return Result(outcome: "committed", bindWritten: true)
+        case "drag", "release", "drag_midpoint", "release_midpoint":
+            let isStop = name == "drag" || name == "release"
+            guard let snap = store.getPanel(pid, pressKey) as? [String: Any],
+                  snap["kind"] as? String == (isStop ? "stop" : "midpoint"),
+                  let at = int(snap["index"]), let press = gradientStopsFromJSON(snap["stops"]) else {
+                return Result(outcome: "refused", reason: noPress)
+            }
+            let out: [GradientStop], stop: Int, midpoint: Int
+            if isStop {
+                guard let (o, sel) = dragStop(press, index: at, location: params["location"],
+                                              dy: params["dy"]) else { return refused }
+                (out, stop, midpoint) = (o, sel, -1)
+            } else {
+                guard let o = dragMidpoint(press, pair: at, location: params["location"]) else { return refused }
+                (out, stop, midpoint) = (o, -1, at)
+            }
+            if name.hasPrefix("drag") {
+                write(out, stop, midpoint)
+                return Result(outcome: "committed", value: gradientStopsToJSON(out), bindWritten: true)
+            }
+            store.setPanel(pid, pressKey, NSNull())
+            return finish(out, stop, midpoint)
+        case "add":
+            guard let (out, at) = addStop(stops, location: params["location"]) else { return refused }
+            return finish(out, at, -1)
+        default:
+            // key: GRADIENT.md's keyboard table.
+            let k = params["key"] as? String ?? ""
+            let shift = (params["shift"] as? NSNumber)?.boolValue ?? false
+            func to(_ here: Double) -> Double? {
+                switch k {
+                case "Home": return 0
+                case "End": return 100
+                case "Left": return here - (shift ? 10 : 1)
+                case "Right": return here + (shift ? 10 : 1)
+                default: return nil
+                }
+            }
+            if let stop = int(shown[stopKey]) ?? int(store.getPanel(pid, stopKey)),
+               stop >= 0, stop < stops.count {
+                let got: ([GradientStop], Int)?
+                if k == "Delete" || k == "Backspace" {
+                    got = deleteStop(stops, index: stop)
+                } else if let v = to(stops[stop].location) {
+                    got = dragStop(stops, index: stop, location: v, dy: 0)
+                } else {
+                    return Result(outcome: "inert")
+                }
+                guard let (out, sel) = got else { return refused }
+                return finish(out, sel, -1)
+            }
+            if let mid = int(shown[midKey]) ?? int(store.getPanel(pid, midKey)),
+               mid >= 0, mid + 1 < stops.count {
+                guard let v = to(stops[mid].midpointToNext) else { return Result(outcome: "inert") }
+                guard let out = setMidpoint(stops, pair: mid, value: v) else { return refused }
+                return finish(out, -1, mid)
+            }
+            return Result(outcome: "inert")
+        }
+    }
+}

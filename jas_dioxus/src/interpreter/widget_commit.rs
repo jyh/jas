@@ -138,6 +138,14 @@ pub const CLICK_KINDS: [&str; 2] = ["button", "icon_button"];
 /// A click, then the two pointer events a click kind may also declare, which
 /// the contract names and does not define.
 pub const CLICK_EVENTS: [&str; 3] = ["click", "mouse_down", "mouse_up"];
+/// The stops kind (WIDGET_EVENTS.md §The stops kind): a shell reports a
+/// slider gesture with its raw parameters, and the slider law applies it.
+pub const STOPS_KINDS: [&str; 1] = ["gradient_slider"];
+/// The one behavior event a stops kind declares: "a gesture finished".
+pub const STOPS_EVENTS: [&str; 1] = ["commit"];
+/// The gestures a shell reports on a stops kind, as the reference names them.
+pub const STOPS_GESTURES: [&str; 8] = ["press", "drag", "release", "press_midpoint",
+    "drag_midpoint", "release_midpoint", "add", "key"];
 
 /// The events `kind` may declare, in the contract's order; empty for a kind
 /// outside the contract.
@@ -154,6 +162,8 @@ pub fn allowed_events(kind: &str) -> Vec<&'static str> {
         CHOOSE_EVENTS.to_vec()
     } else if CLICK_KINDS.contains(&kind) {
         CLICK_EVENTS.to_vec()
+    } else if STOPS_KINDS.contains(&kind) {
+        STOPS_EVENTS.to_vec()
     } else {
         vec![]
     }
@@ -427,7 +437,8 @@ mod tests {
             seen += 1;
         }
         assert_eq!(seen, INPUT_KINDS.len() + BOOLEAN_KINDS.len() + ITEM_KINDS.len()
-                   + CHECK_KINDS.len() + OPTION_KINDS.len() + CLICK_KINDS.len());
+                   + CHECK_KINDS.len() + OPTION_KINDS.len() + CLICK_KINDS.len()
+                   + STOPS_KINDS.len());
         // A kind outside the table has no events. `slider`, `color_bar`,
         // `radio_group` and `icon_button_group` were this control until each
         // joined (2026-10-13 forks A and B2; 2026-10-15 twice);

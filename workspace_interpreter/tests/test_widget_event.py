@@ -50,15 +50,16 @@ def _recorder(store, panel_id):
 
 
 class TestContractTable:
-    def test_the_seventeen_kinds_and_nothing_else(self):
+    def test_the_eighteen_kinds_and_nothing_else(self):
         families = [we.INPUT_KINDS, we.BOOLEAN_KINDS, we.ITEM_KINDS,
-                    we.CHECK_KINDS, we.OPTION_KINDS, we.CLICK_KINDS]
+                    we.CHECK_KINDS, we.OPTION_KINDS, we.CLICK_KINDS, we.STOPS_KINDS]
         assert set(we.ALLOWED_EVENTS) == set().union(*families)
         assert len(we.INPUT_KINDS) == 10 and len(we.BOOLEAN_KINDS) == 2
         assert we.ITEM_KINDS == {"dropdown"}
         assert we.CHECK_KINDS == {"radio"} and we.OPTION_KINDS == {"radio_group"}
         assert we.CLICK_KINDS == {"button", "icon_button"}
-        assert sum(len(f) for f in families) == len(set().union(*families)) == 17, \
+        assert we.STOPS_KINDS == {"gradient_slider"}
+        assert sum(len(f) for f in families) == len(set().union(*families)) == 18, \
             "the families are disjoint"
 
     def test_a_button_clicks_and_names_its_two_pointer_events(self):

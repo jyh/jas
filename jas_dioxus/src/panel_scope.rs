@@ -526,6 +526,18 @@ pub fn engine_scope_open(slice: &PanelState, store: &StateStore, model: &Model, 
             panel.extend(crate::interpreter::gradient_host::live_values(model.document(),
                                                                        slice.fill_on_top));
         }
+        // WIDGET_EVENTS.md §The stops kind: while the slider's press snapshot
+        // stands, its preview is the store's, so the store's stops and
+        // selection stand over the document's until the release commits.
+        let pressed = |k: &str| own.get(&format!("{k}{}", crate::panel_behavior::PRESS_SUFFIX))
+            .map_or(false, |v| !v.is_null());
+        if pressed("stops") {
+            for k in ["stops", "selected_stop_index", "selected_midpoint_index"] {
+                if let Some(v) = own.get(k) {
+                    panel.insert(k.into(), v.clone());
+                }
+            }
+        }
     }
     if let Some(doc) = scope["active_document"].as_object_mut() {
         // The web's whole `active_document` view first (`document_views`), so
