@@ -19,6 +19,14 @@
       { "name": "menu_select_all",     "chord": { "key": "A", "ctrl": true } },
       { "name": "key_delete",          "chord": { "key": "Delete" } },
       { "name": "key_backspace",       "chord": { "key": "Backspace" } },
+      { "name": "nudge_left",          "chord": { "key": "ArrowLeft" } },
+      { "name": "nudge_right",         "chord": { "key": "ArrowRight" } },
+      { "name": "nudge_up",            "chord": { "key": "ArrowUp" } },
+      { "name": "nudge_down",          "chord": { "key": "ArrowDown" } },
+      { "name": "nudge_left_large",    "chord": { "key": "ArrowLeft", "shift": true } },
+      { "name": "nudge_right_large",   "chord": { "key": "ArrowRight", "shift": true } },
+      { "name": "nudge_up_large",      "chord": { "key": "ArrowUp", "shift": true } },
+      { "name": "nudge_down_large",    "chord": { "key": "ArrowDown", "shift": true } },
       { "name": "menu_group",          "chord": { "key": "G", "ctrl": true } },
       { "name": "menu_ungroup",        "chord": { "key": "G", "ctrl": true, "shift": true } },
       { "name": "menu_lock",           "chord": { "key": "2", "ctrl": true } },
@@ -72,7 +80,9 @@
       { "name": "null_ctrl_shift_a_overspecified", "chord": { "key": "A", "ctrl": true, "shift": true } },
       { "name": "null_meta_n_wrong_modifier",      "chord": { "key": "N", "meta": true } },
       { "name": "null_alt_v_wrong_modifier",       "chord": { "key": "V", "alt": true } },
-      { "name": "null_unknown_f5",                 "chord": { "key": "F5" } }
+      { "name": "null_unknown_f5",                 "chord": { "key": "F5" } },
+      { "name": "null_alt_arrow_wrong_modifier",   "chord": { "key": "ArrowLeft", "alt": true } },
+      { "name": "null_ctrl_arrow_wrong_modifier",  "chord": { "key": "ArrowRight", "ctrl": true } }
     ]
   }
 ]

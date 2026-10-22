@@ -1525,6 +1525,27 @@ unsafe fn dispatch_key(e: *mut JasEngine, engine: &JasEngine, ws: &Workspace, na
             return unsafe { jas_dispatch_action(e, DELETE.as_ptr(), DELETE.len()) };
         }
     }
+    // A bound caret key no tool takes (an arrow, or Shift with one, is
+    // `nudge_selection`) runs its ACTION, as the menu would. With nothing
+    // selected it changes nothing, so the shell keeps its own default.
+    if mask & MOD_CMD == 0 {
+        let km = crate::tools::tool::KeyMods { shift: mask & MOD_SHIFT != 0, ctrl: false,
+                                               alt: mask & MOD_ALT != 0, meta: false };
+        let route = {
+            let slot = engine.tool_slot();
+            crate::workspace::resolve_key::route_key(name, km, |key| {
+                slot.as_ref().is_some_and(|(_, t)| t.captures_keyboard() || t.claims_key(key))
+            })
+        };
+        if let crate::workspace::resolve_key::KeyRoute::Action(cmd) = route {
+            if engine.with_document(|d| d.selection.is_empty()) {
+                set_panel_event_error(engine, "KeyUnhandled", name);
+                return JasBytes::empty();
+            }
+            let req = serde_json::json!({"action": cmd.action, "params": cmd.params}).to_string();
+            return unsafe { jas_dispatch_action(e, req.as_ptr(), req.len()) };
+        }
+    }
     let generation = engine.model.borrow().generation();
     let status = unsafe { crate::ffi_pointer::jas_key_event(e, code, mask) };
     let doc_changed = engine.model.borrow().generation() != generation;
@@ -4542,6 +4563,58 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
         assert_eq!(v["dialog"], "delete_orphan_confirm", "an orphaning key asks, in the reply: {reply} {err}");
         assert_eq!(doc_json(e), before, "and deletes nothing yet");
+        unsafe { jas_engine_free(e) };
+    }
+
+    /// THE ARROW KEYS NUDGE (the helm's ruling on flask STATUS § 522): an
+    /// arrow by the key door moves the selection 1 pt, 10 with Shift, through
+    /// `nudge_selection`. Consecutive nudges of one selection are ONE undo step,
+    /// as a drag's frames are; an edit between them starts a new one. With
+    /// nothing selected it changes nothing and stays `KeyUnhandled`, so the
+    /// shell keeps its default.
+    #[test]
+    fn an_arrow_key_nudges_the_selection_and_a_run_of_nudges_is_one_undo_step() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        let e = engine_on("rect_with_stroke.svg");
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, r#"{"key":"ArrowRight"}"#);
+        assert_eq!(reply, "", "nothing selected: nothing took it");
+        assert!(err.contains("KeyUnhandled"), "unhandled, so the shell's default: {err}");
+        assert_eq!(doc_json(e), before, "and nothing moved");
+
+        let _ = dispatch(e, r#"{"action":"select_all","params":{}}"#);
+        // The rect's own x/y: a nudge moves it, so they move by the step.
+        let place = || engine_of(e).with_document(|d| {
+            let es = d.selection.iter().next().expect("the rect");
+            match d.get_element(&es.path) {
+                Some(crate::geometry::element::Element::Rect(r)) => (r.x, r.y),
+                other => panic!("the fixture's one element is a rect: {other:?}"),
+            }
+        });
+        let (x0, y0) = place();
+        let before = doc_json(e);
+        let (reply, err) = dispatch(e, r#"{"key":"ArrowRight"}"#);
+        let v: serde_json::Value = serde_json::from_str(&reply).unwrap_or_else(|_| panic!("{reply} {err}"));
+        assert_eq!(v["doc_changed"], true, "the arrow moved it: {reply} {err}");
+        let (x1, y1) = place();
+        assert_eq!((x1 - x0, y1 - y0), (1.0, 0.0), "one point right");
+        let (_, err) = dispatch(e, r#"{"key":"ArrowUp","mods":{"shift":true}}"#);
+        let (x2, y2) = place();
+        assert_eq!((x2 - x1, y2 - y1), (0.0, -10.0), "Shift: ten points up ({err})");
+        undo(e);
+        assert_eq!(doc_json(e), before, "one undo takes back the whole run of nudges");
+        // An edit between two nudges ends the run: the second is its own step.
+        let (_, err) = dispatch(e, r#"{"key":"ArrowRight"}"#);
+        assert_eq!(err, "", "a nudge");
+        let after_first = doc_json(e);
+        let _ = dispatch(e, r#"{"action":"swap_fill_stroke","params":{}}"#);
+        let swapped = doc_json(e);
+        assert_ne!(swapped, after_first, "CONTROL: the swap edited the document");
+        let _ = dispatch(e, r#"{"key":"ArrowRight"}"#);
+        undo(e);
+        assert_eq!(doc_json(e), swapped, "undo takes back the nudge after the edit only");
+        let (reply, err) = dispatch(e, r#"{"key":"ArrowLeft","mods":{"alt":true}}"#);
+        assert!(reply.is_empty() && err.contains("KeyUnhandled"), "Alt+arrow binds nothing: {reply} {err}");
         unsafe { jas_engine_free(e) };
     }
 

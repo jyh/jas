@@ -1,0 +1,16 @@
+{
+  "item": "shortcut.nudge",
+  "spec": "workspace/shortcuts.yaml",
+  "setup_svg": "complex_document.svg",
+  "tool": "selection",
+  "app_state": {},
+  "steps": [
+    {"kind": "press", "x": 36, "y": 36},
+    {"kind": "move", "x": 72, "y": 60, "dragging": true},
+    {"kind": "release", "x": 72, "y": 60},
+    {"key": "ArrowRight"},
+    {"key": "ArrowDown", "shift": true},
+    {"read": "document"}
+  ],
+  "expected_json": "shortcut.nudge.expected.json"
+}

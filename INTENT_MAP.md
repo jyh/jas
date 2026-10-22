@@ -7,12 +7,12 @@
 ## Scope -- read this first
 
 **This map covers the ACTION seam (`dispatch_action`) ONLY**: the
-243 actions in the workspace bundle's `actions` map, plus the
+244 actions in the workspace bundle's `actions` map, plus the
 bundle's declared `native_intercepts`. It is the machine enumeration
 of which actions journal through `op_apply` (the enumeration
 OP_LOG.md's actions.yaml<->op_apply unification prose refers to).
 
-**46 `doc.*` effect verbs -- including every DRAWING verb**
+**45 `doc.*` effect verbs -- including every DRAWING verb**
 (`doc.add_element`, `doc.add_path_from_buffer`,
 `doc.add_path_from_anchor_buffer`, the blob-brush / paintbrush
 commit verbs, ...) -- **are reachable only from tool/panel/dialog
@@ -38,18 +38,18 @@ verb list is in `intent_map.json` under
 | class | actions |
 |---|---|
 | `doc-direct` | 3 |
-| `journaling` | 25 |
+| `journaling` | 26 |
 | `native-intercept` | 1 |
 | `preview` | 3 |
 | `tool-lifecycle` | 1 |
 | `ui-state` | 205 |
 | `view` | 6 |
-| **total** | **244** |
+| **total** | **245** |
 
-(The bundle's `actions` map has 243 entries; `native-intercept` entries
+(The bundle's `actions` map has 244 entries; `native-intercept` entries
 come additively from `native_intercepts`.)
 
-## Journaling actions (25)
+## Journaling actions (26)
 
 | action | doc.* verbs reached |
 |---|---|
@@ -72,6 +72,7 @@ come additively from `native_intercepts`.)
 | `new_artboard` | `doc.create_artboard` |
 | `new_group` | `doc.wrap_in_group` |
 | `new_layer` | `doc.create_layer`, `doc.insert_at` |
+| `nudge_selection` | `doc.snapshot`, `doc.translate_selection` |
 | `print_dialog_done` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `print_dialog_print` | `doc.set_advanced_field`, `doc.set_color_management_field`, `doc.set_graphics_field`, `doc.set_marks_and_bleed_field`, `doc.set_output_field`, `doc.set_output_ink_field`, `doc.set_print_preferences_field` |
 | `remove_brush_from_selection` | `doc.set_attr_on_selection`, `doc.snapshot` |
@@ -203,7 +204,7 @@ are as of authoring (2026-07-22, post `five-port-parity`).
 | `doc.set_output_field` | always | `set_output_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_output_ink_field` | always | `set_output_ink_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
 | `doc.set_print_preferences_field` | always | `set_print_preferences_field` | yes | renderer.rs:3326-3367; op_apply.rs:1775 (PRINT_CONFIG_VERBS) |
-| `doc.translate_selection` | always | `move_selection` | no (tool YAML only) | effects.rs:767-785; op_apply.rs:1394 |
+| `doc.translate_selection` | always | `move_selection` | yes | effects.rs:767-785; op_apply.rs:1394 |
 | `doc.unpack_group_at` | always | `unpack_group_at` | yes | renderer.rs:3576-3587; op_apply.rs:1632 |
 | `doc.wrap_in_group` | always | `wrap_in_group` | yes | renderer.rs:3642-3664; op_apply.rs:1601 |
 | `doc.wrap_in_layer` | always | `wrap_in_layer` | yes | renderer.rs:3599-3631; op_apply.rs:1615 |

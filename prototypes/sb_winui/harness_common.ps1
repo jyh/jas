@@ -3009,6 +3009,27 @@ function Compare-SbRenderedTree([string]$Plan, [string]$Uia) {
 }
 
 # ---------------------------------------------------------------------------
+# THE KEY TABLE (§333 node 6; the arrows for jas #627's nudge): a key step's
+# name -> { Vk; Extended }, or $null for a name with no virtual key. ONE table,
+# read by Read-SbInputScript (which refuses a $null name) and by send_hand.ps1
+# (which injects by it), so the reader never admits a key the injector cannot
+# send. Names are CASE-EXACT, as the key corpus writes them. The arrows are
+# EXTENDED keys: sent without KEYEVENTF_EXTENDEDKEY, Shift+arrow arrives as
+# the numeric keypad's arrow and the shift is released under it.
+# ---------------------------------------------------------------------------
+function Get-SbKeyVk([string]$Name) {
+    $named = @{
+        'Delete' = 0x2E; 'Backspace' = 0x08; 'Enter' = 0x0D; 'Escape' = 0x1B; 'Tab' = 0x09
+        'ArrowLeft' = 0x25; 'ArrowUp' = 0x26; 'ArrowRight' = 0x27; 'ArrowDown' = 0x28
+    }
+    foreach ($k in $named.Keys) {
+        if ($Name -ceq $k) { return [pscustomobject]@{ Vk = [byte]$named[$k]; Extended = $k.StartsWith('Arrow') } }
+    }
+    if ($Name -cmatch '^[A-Za-z0-9]$') { return [pscustomobject]@{ Vk = [byte][char]$Name.ToUpperInvariant(); Extended = $false } }
+    return $null
+}
+
+# ---------------------------------------------------------------------------
 # docs/TESTING.md section 6: an INPUT SCRIPT, mapped onto what send_hand.ps1
 # can deliver EXACTLY -- one press, k post-press moves at i/k of the
 # press->release line, one release -- or REFUSED BY NAME. A gesture this
@@ -3111,7 +3132,7 @@ function Read-SbInputScript([string]$Json) {
             if ($names -contains 'meta' -and $st.meta) {
                 return (& $no "step $i key $kn carries meta: level 1 refuses meta, and so does this driver")
             }
-            if ($kn -cnotmatch '^(Delete|Backspace|Enter|Escape|Tab|[A-Za-z0-9])$') {
+            if ($null -eq (Get-SbKeyVk $kn)) {
                 return (& $no "step $i key ${kn}: the key injector has no virtual key for it")
             }
             $chord = @(@('ctrl', 'shift', 'alt') | Where-Object { $names -contains $_ -and $st.$_ }) + @($kn)

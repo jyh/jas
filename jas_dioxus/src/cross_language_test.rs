@@ -2022,7 +2022,7 @@ pub(crate) mod tests {
     /// cannot replay yet is REFUSED by name, never skipped; and the script must
     /// end on `{"read": "document"}`, or it asserts nothing.
     const SCRIPT_FIXTURES: &[&str] = &["selection.drag.json", "rect.draw.json", "ellipse.draw.json", "line.draw.json", "polygon.draw.json",
-                                       "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json"];
+                                       "shortcut.delete.json", "shortcut.undo.json", "rounded_rect.draw.json", "star.draw.json", "pencil.draw.json", "rect.draw_shift.json", "partial_selection.marquee.json", "shortcut.redo.json", "ellipse.draw_shift.json", "selection.drag_alt.json", "magic_wand.click.json", "shortcut.nudge.json"];
 
     #[cfg(feature = "web")]
     fn script_as_gesture_case(script: &serde_json::Value) -> serde_json::Value {
@@ -3085,6 +3085,12 @@ pub(crate) mod tests {
         // All's group-expansion difference (SCOPE-effective-locked.md D2 / Q2)
         // is UNRULED and would red here for a reason that is not about lock.
         "lock_inheritance_actions.json",
+        // NUDGE (council 10-22 ledger, the helm's ruling on flask STATUS 522):
+        // the arrow keys move the selection 1 pt, or 10 pt with Shift, through
+        // the SAME doc.translate_selection a Selection-tool drag runs. The
+        // off-axis case is a nudge of the SECOND rect, so a mover that ignores
+        // the selection or swaps dx/dy reds; nothing selected changes nothing.
+        "nudge_actions.json",
     ];
 
     #[cfg(feature = "web")]

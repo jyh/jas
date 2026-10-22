@@ -3668,6 +3668,26 @@ class CanvasNSView: NSView {
         if let ctx = toolContext, activeTool.onKey(ctx, keyCode: event.keyCode) {
             return
         }
+        // Nudge (actions.yaml nudge_selection): an arrow, or Shift with one,
+        // takes the engine's key order (`routeKey`; a tool editing text took
+        // it above), and its shortcuts.yaml binding runs as the menu would.
+        // With nothing selected the key falls through.
+        if let model = controller?.model,
+           !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control) {
+            let key = canonicalKeyName(event)
+            if key.hasPrefix("Arrow") {
+                let mods = KeyMods(shift: event.modifierFlags.contains(.shift),
+                                   ctrl: false, alt: event.modifierFlags.contains(.option))
+                if case .action(let cmd) = routeKey(key, mods, toolTakes: { [activeTool] in
+                       activeTool.capturesKeyboard() || activeTool.claimsKey($0) }),
+                   !model.document.selection.isEmpty {
+                    LayersPanel.dispatchYamlAction(cmd.action, model: model,
+                                                   params: cmd.params.mapValues(\.json))
+                    needsDisplay = true
+                    return
+                }
+            }
+        }
         guard let chars = event.charactersIgnoringModifiers else {
             super.keyDown(with: event)
             return
@@ -3812,7 +3832,7 @@ class CanvasNSView: NSView {
                     )
                     if let resolved = resolveKeyChord(chord),
                        resolved.action == "select_tool",
-                       let toolStr = resolved.params["tool"],
+                       let toolStr = resolved.params["tool"]?.string,
                        let tool = toolFromYamlString(toolStr) {
                         // Drive tool selection through the shared store, the
                         // SAME path the tool-alternates flyout uses: write

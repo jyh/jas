@@ -134,6 +134,9 @@ pub fn resolve_key_in(chord: &KeyChord, shortcuts: &[Value]) -> Option<ResolvedC
 pub enum KeyRoute {
     /// The action `delete_selection` (an unclaimed Delete or Backspace).
     DeleteSelection,
+    /// A caret key no tool takes that `shortcuts.yaml` binds: this ACTION,
+    /// run by the engine's action route (the arrows' `nudge_selection`).
+    Action(ResolvedCommand),
     /// The active tool's `on_key_event`, with this named key.
     ToolKey(&'static str),
     /// The active tool's `on_key_event`, with this character: a tool that
@@ -168,7 +171,8 @@ pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
         _ => None,
     };
     // The caret keys: a tool editing text takes them (the Type tool moves its
-    // caret); nothing in shortcuts.yaml binds them, so otherwise unhandled.
+    // caret); otherwise a key shortcuts.yaml binds runs its action (an arrow,
+    // or Shift with one, is `nudge_selection`) and the rest are unhandled.
     let caret: Option<&'static str> = match name {
         "ArrowLeft" => Some("ArrowLeft"),
         "ArrowRight" => Some("ArrowRight"),
@@ -180,7 +184,14 @@ pub fn route_key(name: &str, mods: crate::tools::tool::KeyMods,
         _ => None,
     };
     if let Some(key) = caret {
-        return if tool_takes(key) { KeyRoute::ToolKey(key) } else { KeyRoute::Unhandled };
+        if tool_takes(key) {
+            return KeyRoute::ToolKey(key);
+        }
+        let chord = KeyChord::new(key, mods.ctrl, mods.shift, mods.alt, false);
+        return match resolve_key(&chord) {
+            Some(cmd) => KeyRoute::Action(cmd),
+            None => KeyRoute::Unhandled,
+        };
     }
     if let Some(key) = named {
         // flask STATUS § 277: an unclaimed Delete or Backspace is
@@ -255,15 +266,50 @@ mod route_key_tests {
     }
 
     /// The caret keys (the Type tool's named gaps, #596): a tool editing text
-    /// takes them; with none, nothing binds them (shortcuts.yaml has no arrow),
-    /// so they are UNHANDLED, never a bad key name.
+    /// takes them; with none, a key `shortcuts.yaml` binds runs its action (the
+    /// arrows nudge) and the rest are UNHANDLED, never a bad key name.
     #[test]
     fn caret_keys_go_to_a_tool_that_takes_them_and_are_unhandled_otherwise() {
         for k in ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "Tab"] {
             assert_eq!(route_key(k, m(false, false), takes), KeyRoute::ToolKey(k), "{k} to the tool");
+            assert_eq!(route_key(k, m(true, true), takes), KeyRoute::ToolKey(k), "{k}: modifiers too");
+        }
+        for k in ["Home", "End", "Tab"] {
             assert_eq!(route_key(k, m(false, false), free), KeyRoute::Unhandled, "{k} with no tool");
         }
         assert_eq!(route_key("F13", m(false, false), free), KeyRoute::BadKey, "CONTROL: still a bad name");
+    }
+
+    /// An arrow no tool takes is `nudge_selection` (shortcuts.yaml): 1 pt, 10
+    /// with Shift, and up is toward smaller y. Every (key, shift) pair resolves
+    /// to a DIFFERENT move, so a router that drops Shift or swaps an axis reds.
+    #[test]
+    fn an_unclaimed_arrow_nudges_one_point_or_ten_with_shift() {
+        let mut seen = Vec::new();
+        for (k, dx, dy) in [("ArrowLeft", -1, 0), ("ArrowRight", 1, 0), ("ArrowUp", 0, -1), ("ArrowDown", 0, 1)] {
+            for (shift, n) in [(false, 1), (true, 10)] {
+                let KeyRoute::Action(cmd) = route_key(k, m(false, shift), free) else {
+                    panic!("{k} shift={shift}: not an action");
+                };
+                assert_eq!(cmd.action, "nudge_selection", "{k} shift={shift}");
+                let got = (cmd.params["dx"].as_i64(), cmd.params["dy"].as_i64());
+                assert_eq!(got, (Some(dx * n), Some(dy * n)), "{k} shift={shift}");
+                seen.push(got);
+            }
+        }
+        seen.sort();
+        seen.dedup();
+        assert_eq!(seen.len(), 8, "eight distinct moves");
+    }
+
+    /// Only a bare or Shift arrow is bound: Ctrl and Alt name no binding, so
+    /// the shell keeps its own default for them.
+    #[test]
+    fn a_ctrl_or_alt_arrow_is_unhandled() {
+        let alt = KeyMods { shift: false, ctrl: false, alt: true, meta: false };
+        assert_eq!(route_key("ArrowLeft", alt, free), KeyRoute::Unhandled);
+        assert_eq!(route_key("ArrowRight", m(true, false), free), KeyRoute::Unhandled);
+        assert!(matches!(route_key("ArrowRight", m(false, false), free), KeyRoute::Action(_)), "CONTROL");
     }
 
     #[test]

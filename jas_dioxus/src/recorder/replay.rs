@@ -216,6 +216,21 @@ fn replay_key(model: &mut Model, tool: &mut crate::tools::yaml_tool::YamlTool, e
         // The level-1 runner holds no system clipboard, so a clipboard chord
         // changes nothing here. No script presses one yet.
         KeyRoute::Clipboard(_) => {}
+        // An arrow's `nudge_selection`: the action's two effects on this
+        // case's model (`doc.snapshot`, then `doc.translate_selection`'s op).
+        // Any other bound caret key is not mirrored here, and says so.
+        KeyRoute::Action(cmd) => {
+            assert_eq!(cmd.action, "nudge_selection",
+                       "key event {ev}: action {:?} is not mirrored at level 1", cmd.action);
+            let n = |k: &str| cmd.params.get(k).and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let (dx, dy) = (n("dx"), n("dy"));
+            if !model.document().selection.is_empty() && (dx != 0.0 || dy != 0.0) {
+                model.begin_txn();
+                let _ = crate::document::op_apply::op_apply(
+                    model, &serde_json::json!({"op": "move_selection", "dx": dx, "dy": dy}));
+                model.commit_txn();
+            }
+        }
         KeyRoute::Unhandled => {}
         KeyRoute::BadKey => panic!("key event {ev}: {name:?} is not a key the engine takes"),
     }

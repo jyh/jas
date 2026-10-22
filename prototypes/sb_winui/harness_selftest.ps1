@@ -2241,6 +2241,26 @@ Test-Case 'is: a key the injector has no virtual key for is refused by name' {
     $k = [ordered]@{ key = 'F13' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
 } 'REFUSED: step 3 key F13: the key injector has no virtual key for it'
+Test-Case 'is: an arrow key step (the nudge, jas #627) is accepted and carried with its modifier' {
+    $k1 = [ordered]@{ key = 'ArrowRight' }
+    $k2 = [ordered]@{ key = 'ArrowDown'; shift = $true }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k1, $k2, $sRead)))
+} 'selection.drag svg=complex_document.svg tool=selection at=(36,36) by=(36,24) k=1 read=document expected=selection.drag.expected.json keys=ArrowRight;shift+ArrowDown'
+Test-Case 'is: an arrow name is case-exact, as every other key name is' {
+    $k = [ordered]@{ key = 'arrowright' }
+    Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))
+} 'REFUSED: step 3 key arrowright: the key injector has no virtual key for it'
+# The ONE table the reader admits by and send_hand.ps1 injects by: a name the
+# reader admits must be a name the injector can send, so both read it here.
+Test-Case 'vk: the four arrows are VK_LEFT..VK_DOWN and EXTENDED (else Shift+arrow is the keypad)' {
+    (@('ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown') | ForEach-Object { $v = Get-SbKeyVk $_; '{0}=0x{1:X2}/{2}' -f $_, $v.Vk, $v.Extended }) -join ' '
+} 'ArrowLeft=0x25/True ArrowUp=0x26/True ArrowRight=0x27/True ArrowDown=0x28/True'
+Test-Case 'vk: the keys that were already sent keep their codes, not extended' {
+    (@('Delete', 'Backspace', 'Enter', 'Escape', 'Tab', 'z', '7') | ForEach-Object { $v = Get-SbKeyVk $_; '{0}=0x{1:X2}/{2}' -f $_, $v.Vk, $v.Extended }) -join ' '
+} 'Delete=0x2E/False Backspace=0x08/False Enter=0x0D/False Escape=0x1B/False Tab=0x09/False z=0x5A/False 7=0x37/False'
+Test-Case 'vk: a name with no virtual key answers null, never a guess' {
+    (@('F13', 'arrowright', 'Space', '') | ForEach-Object { if ($null -eq (Get-SbKeyVk $_)) { "$_=null" } else { "$_=MAPPED" } }) -join ' '
+} 'F13=null arrowright=null Space=null =null'
 Test-Case 'is: a key modifier that is not a boolean is refused' {
     $k = [ordered]@{ key = 'Z'; ctrl = 'yes' }
     Show-SbScript (Read-SbInputScript (New-SbScript @($sPress, $sMove, $sRelease, $k, $sRead)))

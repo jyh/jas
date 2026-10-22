@@ -395,6 +395,47 @@ actions:
     enabled_when: "active_document.has_selection"
     effects:
       - log: "delete_selection"
+  nudge_selection:
+    description: >
+      Move the selected objects by a small fixed step from the keyboard.
+      The arrow keys bind it (workspace/shortcuts.yaml): an arrow moves
+      the selection 1 pt in its direction and Shift with an arrow moves
+      it 10 pt. Up is toward smaller y, because the document's y axis
+      points down. The steps are the field's convention, a small step
+      and a large step ten times it under Shift: Figma nudges by 1 and
+      by 10 with Shift (help.figma.com, "Before you start", the nudge
+      amount preference), and Inkscape by 2 px and ten times that with
+      Shift (inkscape.org/doc/keys.html, Behavior > Steps).
+
+      The move is the same one a Selection-tool drag makes
+      (doc.translate_selection, journaled as the op move_selection), so
+      a nudge moves exactly what a drag of the same distance moves.
+      Undo follows the drag too: consecutive nudges of the SAME selection
+      coalesce into ONE undo step, as the frames of one drag do (the
+      journal's drag coalescing, OP_LOG.md §9), so pressing an arrow ten
+      times and undoing once puts the selection back where the first
+      press found it. Any other edit, or a different selection, between
+      two nudges starts a new step.
+
+      It does nothing when nothing is selected, and that is not an edit:
+      no undo step is recorded. An arrow pressed while the keyboard
+      belongs to something else does not reach this action at all: a
+      text field or a focused panel control keeps its own arrow keys,
+      and so does a tool that is editing text (the Type tool moves its
+      caret).
+    category: edit
+    tier: 3
+    enabled_when: "active_document.has_selection"
+    # No defaults: every binding in shortcuts.yaml supplies both, and the
+    # param-defaults census (ActionParamDefaultsTests) stays at three.
+    params:
+      dx: { type: number }
+      dy: { type: number }
+    effects:
+      - "doc.snapshot": {}
+      - "doc.translate_selection":
+          dx: "param.dx"
+          dy: "param.dy"
 
   # ── Object ────────────────────────────────────────────────
   group:

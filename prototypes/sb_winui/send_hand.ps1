@@ -216,6 +216,16 @@ public static class SbHand
         keybd_event(vk, 0, down ? 0u : KEYEVENTF_KEYUP, UIntPtr.Zero);
     }
 
+    public const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+
+    // An arrow is an EXTENDED key: without the flag, Shift+arrow is read as the
+    // numeric keypad's arrow and the shift is released under it.
+    public static void KeyEx(byte vk, bool down, bool extended)
+    {
+        uint flags = (down ? 0u : KEYEVENTF_KEYUP) | (extended ? KEYEVENTF_EXTENDEDKEY : 0u);
+        keybd_event(vk, 0, flags, UIntPtr.Zero);
+    }
+
     public const uint MOVE = 0x0001;
     public const uint LEFTDOWN = 0x0002;
     public const uint LEFTUP = 0x0004;
@@ -475,15 +485,12 @@ foreach ($chord in $chords) {
         switch ($_) { 'ctrl' { [byte]0x11 } 'shift' { [byte]0x10 } 'alt' { [byte]0x12 } default { throw "unknown modifier $_" } }
     })
     $name = $parts[$parts.Count - 1]
-    $vk = switch -CaseSensitive -Regex ($name) {
-        '^Delete$' { [byte]0x2E } '^Backspace$' { [byte]0x08 } '^Enter$' { [byte]0x0D }
-        '^Escape$' { [byte]0x1B } '^Tab$' { [byte]0x09 }
-        '^[A-Za-z0-9]$' { [byte][char]$name.ToUpperInvariant() }
-        default { throw "no virtual key for $name" }
-    }
+    # Get-SbKeyVk (harness_common.ps1) is the reader's table too.
+    $vk = Get-SbKeyVk $name
+    if ($null -eq $vk) { throw "no virtual key for $name" }
     Start-Sleep -Milliseconds $SettleMs
     foreach ($m in $mods) { [SbHand]::Key($m, $true); $keyEvents++ }
-    [SbHand]::Key($vk, $true); [SbHand]::Key($vk, $false); $keyEvents += 2
+    [SbHand]::KeyEx($vk.Vk, $true, $vk.Extended); [SbHand]::KeyEx($vk.Vk, $false, $vk.Extended); $keyEvents += 2
     [array]::Reverse($mods)
     foreach ($m in $mods) { [SbHand]::Key($m, $false); $keyEvents++ }
 }

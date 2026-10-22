@@ -450,6 +450,10 @@ pub(crate) unsafe fn jas_key_event(e: *mut JasEngine, code: u32, mods: u32) -> J
         // `ffi::dispatch_key` runs it through `jas_dispatch_action` before
         // calling here, so this arm is the not-reached answer.
         KeyRoute::Clipboard(_) => JasStatus::UnknownVerb,
+        // A bound caret key (an arrow's `nudge_selection`) is an ACTION:
+        // `ffi::dispatch_key` runs it through `jas_dispatch_action` before
+        // calling here, so this arm is the not-reached answer too.
+        KeyRoute::Action(_) => JasStatus::UnknownVerb,
         KeyRoute::Unhandled => JasStatus::UnknownVerb,
         KeyRoute::BadKey => JasStatus::BadParamType,
     }

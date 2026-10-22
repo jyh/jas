@@ -186,6 +186,7 @@
             "doc.set_print_preferences_field": {},
             "doc.shear.apply": {},
             "doc.snapshot": {},
+            "doc.translate_selection": {},
             "doc.unpack_group_at": {},
             "doc.wrap_in_group": {},
             "doc.wrap_in_layer": {},
