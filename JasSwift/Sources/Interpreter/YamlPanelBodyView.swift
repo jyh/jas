@@ -2229,8 +2229,9 @@ struct YamlElementView: View {
     /// through ``PanelWidgetEvents/gesture(_:name:params:)``: a drag on a stop
     /// or midpoint marker is press, drags, release, and a tap on the bar is
     /// an add, each with the raw location and `dy` from
-    /// ``gradientSliderPoint(_:width:)``. Keys are NOT wired: `onKeyPress`
-    /// needs macOS 14 and this package targets 13.
+    /// ``gradientSliderPoint(_:width:)``. A key on the focused slider is a
+    /// `key` gesture named by ``gradientSliderKey(_:)``, on macOS 14 and later
+    /// only (`onKeyPress`; this package targets 13, where keys do nothing).
     @ViewBuilder
     private func renderGradientSlider() -> some View {
         let bind = element["bind"] as? [String: Any]
@@ -2314,6 +2315,10 @@ struct YamlElementView: View {
             .coordinateSpace(name: gradientSliderSpace)
         }
         .frame(height: 44)
+        .focusable()
+        .modifier(GradientSliderKeys { key, shift in
+            widgetEvents?.gesture(element, name: "key", params: ["key": key, "shift": shift])
+        })
     }
 
     /// A marker's drag as slider gestures: its first change is the press (no
@@ -5133,4 +5138,37 @@ let gradientSliderSpace = "gradient_slider"
 func gradientSliderPoint(_ p: CGPoint, width: CGFloat) -> (Double, Double) {
     let location = width > 0 ? Double(p.x / width) * 100 : 0
     return (location, Double(p.y) - 22)
+}
+
+/// A key on the focused slider in GRADIENT.md's keyboard table's names; nil
+/// for a key the table does not name. Mirrors `renderer.rs` `slider_key`: the
+/// Mac's delete key is Backspace and its forward delete is Delete.
+func gradientSliderKey(_ key: KeyEquivalent) -> String? {
+    switch key {
+    case .leftArrow: return "Left"
+    case .rightArrow: return "Right"
+    case .home: return "Home"
+    case .end: return "End"
+    case .delete: return "Backspace"
+    case .deleteForward: return "Delete"
+    default: return nil
+    }
+}
+
+/// The slider's keys, where `onKeyPress` exists (macOS 14); on 13 the view is
+/// unchanged. A key the table names is sent and handled; any other passes on.
+struct GradientSliderKeys: ViewModifier {
+    let send: (String, Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14, *) {
+            content.onKeyPress { press in
+                guard let name = gradientSliderKey(press.key) else { return .ignored }
+                send(name, press.modifiers.contains(.shift))
+                return .handled
+            }
+        } else {
+            content
+        }
+    }
 }
