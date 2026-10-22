@@ -7841,6 +7841,39 @@ mod tests {
         unsafe { jas_engine_free(e) };
     }
 
+    /// flask §518: a release that leaves the stops as they were (a plain click
+    /// on a stop, or a two-stop drag off the bar, which clamps onto itself)
+    /// changes nothing, so its reply must not say `doc_changed`. It once did:
+    /// `apply_stops` wrote the selection's gradient whether or not it differed,
+    /// and the write moved the model's generation.
+    #[test]
+    fn a_release_that_moves_no_stop_changes_no_document() {
+        let _counters = crate::ffi_instr::test_lock::lock();
+        use crate::document::test_fixture::{model_with, rect};
+        use crate::interpreter::gradient_host::GRADIENT_PANEL;
+        let e = engine_with(model_with(vec![rect(0.0, 0.0, 10.0, 10.0)], &[0]));
+        let gesture = |e, g: &str, v: &str| behave(e, GRADIENT_PANEL,
+            &format!(r#"{{"widget":"grad_slider","event":"{g}","value":{v}}}"#));
+        let doc_changed = |reply: &str| serde_json::from_str::<serde_json::Value>(reply)
+            .ok().and_then(|v| v["doc_changed"].as_bool());
+        // A real move first, so the selection holds a gradient (not the seed).
+        gesture(e, "press", r#"{"index":0}"#);
+        let (moved, _) = gesture(e, "release", r#"{"location":35,"dy":0}"#);
+        assert_eq!(doc_changed(&moved), Some(true), "the control: a move changes the document");
+        let generation = engine_of(e).model.borrow().generation();
+        // A plain click on stop 0: press, then release where it already is.
+        gesture(e, "press", r#"{"index":0}"#);
+        let (click, _) = gesture(e, "release", r#"{"location":35,"dy":0}"#);
+        assert_eq!(doc_changed(&click), Some(false), "a click on a stop: {click}");
+        // Two stops, stop 1 dragged far below the bar: an ordinary move,
+        // clamped to 100, where it already is.
+        gesture(e, "press", r#"{"index":1}"#);
+        let (off, _) = gesture(e, "release", r#"{"location":100.1,"dy":46.3}"#);
+        assert_eq!(doc_changed(&off), Some(false), "a two-stop drag off the bar: {off}");
+        assert_eq!(engine_of(e).model.borrow().generation(), generation, "no write moved the generation");
+        unsafe { jas_engine_free(e) };
+    }
+
     #[test]
     fn widget_event_corpus_through_the_door() {
         // ⭐ ROW EK: the ONE crate-level counter lock. This test reaches an
