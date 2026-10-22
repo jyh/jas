@@ -74,7 +74,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 0
+            "index": 0,
+            "location": 0
           }
         },
         {
@@ -263,7 +264,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 1
+            "index": 1,
+            "location": 50
           }
         },
         {
@@ -446,7 +448,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 1
+            "index": 1,
+            "location": 50
           }
         },
         {
@@ -539,7 +542,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 1
+            "index": 1,
+            "location": 100
           }
         },
         {
@@ -645,7 +649,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 2
+            "index": 2,
+            "location": 100
           }
         },
         {
@@ -763,6 +768,7 @@
           },
           "gesture": "press_midpoint",
           "params": {
+            "location": 70,
             "pair": 1
           }
         },
@@ -1554,6 +1560,7 @@
           },
           "gesture": "press_midpoint",
           "params": {
+            "location": 20,
             "pair": 0
           }
         },
@@ -1670,7 +1677,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 2
+            "index": 2,
+            "location": 0
           }
         },
         {
@@ -1699,6 +1707,7 @@
           },
           "gesture": "press_midpoint",
           "params": {
+            "location": 0,
             "pair": 1
           }
         },
@@ -1827,7 +1836,8 @@
           },
           "gesture": "press",
           "params": {
-            "index": 1
+            "index": 1,
+            "location": 50
           }
         },
         {
@@ -1980,6 +1990,600 @@
           },
           "gesture": "wiggle",
           "params": {}
+        }
+      ]
+    },
+    {
+      "name": "a_click_off_a_stops_centre_moves_nothing",
+      "setup": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "committed",
+            "pressed": true,
+            "reason": null,
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press",
+          "params": {
+            "index": 1,
+            "location": 51.5
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 1,
+            "committed": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50.0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ],
+            "midpoint": -1,
+            "outcome": "committed",
+            "pressed": false,
+            "reason": null,
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "release",
+          "params": {
+            "dy": 0,
+            "location": 51.5
+          }
+        }
+      ]
+    },
+    {
+      "name": "a_drag_keeps_the_grab_offset",
+      "setup": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "committed",
+            "pressed": true,
+            "reason": null,
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press",
+          "params": {
+            "index": 1,
+            "location": 52
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "committed",
+            "pressed": true,
+            "reason": null,
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 60.0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "drag",
+          "params": {
+            "dy": 0,
+            "location": 62
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 1,
+            "committed": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 70.0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ],
+            "midpoint": -1,
+            "outcome": "committed",
+            "pressed": false,
+            "reason": null,
+            "stop": 1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 70.0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "release",
+          "params": {
+            "dy": 0,
+            "location": 72
+          }
+        }
+      ]
+    },
+    {
+      "name": "a_midpoint_drag_keeps_the_grab_offset",
+      "setup": {
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": 0,
+            "outcome": "committed",
+            "pressed": true,
+            "reason": null,
+            "stop": -1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press_midpoint",
+          "params": {
+            "location": 22,
+            "pair": 0
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": 0,
+            "outcome": "committed",
+            "pressed": true,
+            "reason": null,
+            "stop": -1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 60.0,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "drag_midpoint",
+          "params": {
+            "location": 32
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 1,
+            "committed": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 60.0,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ],
+            "midpoint": 0,
+            "outcome": "committed",
+            "pressed": false,
+            "reason": null,
+            "stop": -1,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 60.0,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "release_midpoint",
+          "params": {
+            "location": 32
+          }
+        }
+      ]
+    },
+    {
+      "name": "a_press_without_a_location_is_refused",
+      "setup": {
+        "stop": 2,
+        "stops": [
+          {
+            "color": "#ff0000",
+            "location": 0,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#00ff00",
+            "location": 50,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          },
+          {
+            "color": "#0000ff",
+            "location": 100,
+            "midpoint_to_next": 40,
+            "opacity": 100
+          }
+        ]
+      },
+      "steps": [
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "LawRefused",
+            "stop": 2,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press",
+          "params": {
+            "index": 1
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "LawRefused",
+            "stop": 2,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press_midpoint",
+          "params": {
+            "pair": 0
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "LawRefused",
+            "stop": 2,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "press",
+          "params": {
+            "index": 1,
+            "location": true
+          }
+        },
+        {
+          "expected": {
+            "behaviors_run": 0,
+            "committed": null,
+            "midpoint": -1,
+            "outcome": "refused",
+            "pressed": false,
+            "reason": "NoPress",
+            "stop": 2,
+            "stops": [
+              {
+                "color": "#ff0000",
+                "location": 0,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#00ff00",
+                "location": 50,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              },
+              {
+                "color": "#0000ff",
+                "location": 100,
+                "midpoint_to_next": 40,
+                "opacity": 100
+              }
+            ]
+          },
+          "gesture": "release",
+          "params": {
+            "dy": 0,
+            "location": 50
+          }
         }
       ]
     }

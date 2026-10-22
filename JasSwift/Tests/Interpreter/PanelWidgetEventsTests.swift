@@ -469,7 +469,7 @@ private func filterAfter(_ picks: [(String, Bool)], from initial: [String]) -> [
     let widget = shipped(gradient, "grad_slider")
     let locations = { model.document.getElement([0, 0]).fillGradient?.stops.map(\.location) }
     let before = locations()
-    let press = events(model, gradient).gesture(widget, name: "press", params: ["index": 0])
+    let press = events(model, gradient).gesture(widget, name: "press", params: ["index": 0, "location": 0])
     #expect(press.outcome == "committed")
     _ = events(model, gradient).gesture(widget, name: "drag", params: ["location": 30, "dy": 0])
     let shown = model.stateStore.getPanel(gradient, "stops") as? [[String: Any]]

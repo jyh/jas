@@ -2324,8 +2324,12 @@ struct YamlElementView: View {
                 let (location, dy) = gradientSliderPoint(value.location, width: width)
                 let held = model?.stateStore.getPanel(panelId ?? "", "stops__press")
                 if held == nil || held is NSNull {
+                    // The press carries where the pointer went down, so the
+                    // marker moves by how far it moved, never to it.
+                    let (start, _) = gradientSliderPoint(value.startLocation, width: width)
                     widgetEvents?.gesture(element, name: midpoint ? "press_midpoint" : "press",
-                                          params: midpoint ? ["pair": index] : ["index": index])
+                                          params: midpoint ? ["pair": index, "location": start]
+                                                           : ["index": index, "location": start])
                 } else {
                     widgetEvents?.gesture(element, name: midpoint ? "drag_midpoint" : "drag",
                                           params: midpoint ? ["location": location]

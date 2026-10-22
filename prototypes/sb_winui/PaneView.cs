@@ -839,7 +839,8 @@ public sealed partial class MainWindow
         /// <summary>
         /// The gradient slider (WIDGET_EVENTS.md §The stops kind). A press on a
         /// stop's circle is `press {index}` and on a pair's diamond `press_midpoint
-        /// {pair}`, and the POINTER IS CAPTURED on the surface, since a drag off
+        /// {pair}` (each with the pointer's `location`, for the grab), and the
+        /// POINTER IS CAPTURED on the surface, since a drag off
         /// the 24 DIP rect is how a stop is removed; each move is then `drag
         /// {location, dy}` (or `drag_midpoint {location}`) and the lift `release`
         /// (`release_midpoint`). A press on the bar itself is `add {location}`.
@@ -893,14 +894,25 @@ public sealed partial class MainWindow
             return slider;
         }
 
-        /// <summary>A press on one of the slider's markers: select it, hold it, capture the pointer.</summary>
+        /// <summary>
+        /// A press on one of the slider's markers: select it, hold it, capture
+        /// the pointer. It carries the pointer's `location` too, so the engine
+        /// moves the marker by how far the pointer moves, never to the pointer
+        /// (a click off its centre moves nothing; flask §519).
+        /// </summary>
         private void PressMarker(GradientSliderSurface slider, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e,
                                  string held, string gesture, string key, int at)
         {
+            if (slider.Geometry is not { } g) { return; }
             e.Handled = true;
             slider.Held = held;
             slider.CapturePointer(e.Pointer);
-            SendGesture(slider, gesture, new Dictionary<string, object> { [key] = at });
+            var down = e.GetCurrentPoint(slider).Position;
+            SendGesture(slider, gesture, new Dictionary<string, object>
+            {
+                [key] = at,
+                ["location"] = GradientSliderWire.Point(g, down.X, down.Y).Location,
+            });
         }
 
         /// <summary>
