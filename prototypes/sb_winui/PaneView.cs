@@ -851,7 +851,13 @@ public sealed partial class MainWindow
         /// through <see cref="GradientSliderWire.Point"/>, and every stop it draws
         /// is the plan's. Which marker was pressed is which shape took the press.
         ///
-        /// ⚠️ NOT WIRED: keys (a `Canvas` takes no focus), and a capture LOST
+        /// A key the table names (<see cref="GradientSliderWire.KeyName"/>) on the
+        /// focused slider is a `key` gesture, and is HANDLED, so the window's key
+        /// handler (`OnKeyDown`, which sends arrows and Delete to the engine)
+        /// never also sees it; any other key bubbles on. A press on a
+        /// marker or the bar focuses the slider.
+        ///
+        /// ⚠️ NOT WIRED: a capture LOST
         /// without a lift (the window deactivated mid-drag) sends nothing: the
         /// press snapshot stays in the engine's store until the next press
         /// replaces it, as in the web port. A slider with no id is drawn only.
@@ -891,6 +897,17 @@ public sealed partial class MainWindow
             slider.PointerMoved += (_, e) => Track(e, false);
             slider.PointerReleased += (_, e) => Track(e, true);
             slider.PointerCaptureLost += (_, _) => slider.Held = null;
+            slider.IsTabStop = true;
+            slider.KeyDown += (_, e) =>
+            {
+                if (GradientSliderWire.KeyName(e.Key.ToString()) is not { } key) { return; }
+                e.Handled = true;
+                SendGesture(slider, "key", new Dictionary<string, object>
+                {
+                    ["key"] = key,
+                    ["shift"] = IsKeyDown(Windows.System.VirtualKey.Shift),
+                });
+            };
             return slider;
         }
 
@@ -906,6 +923,7 @@ public sealed partial class MainWindow
             if (slider.Geometry is not { } g) { return; }
             e.Handled = true;
             slider.Held = held;
+            slider.Focus(FocusState.Pointer);
             slider.CapturePointer(e.Pointer);
             var down = e.GetCurrentPoint(slider).Position;
             SendGesture(slider, gesture, new Dictionary<string, object>
@@ -925,7 +943,7 @@ public sealed partial class MainWindow
         /// </summary>
         private void DrawGradientSlider(GradientSliderSurface slider, PaneLeaf leaf)
         {
-            slider.Children.Clear();
+            slider.Surface.Children.Clear();
             double h = leaf.H;
             // A rect too small to hold a bar draws nothing and takes no gesture.
             slider.Geometry = GradientSliderWire.LayoutOf(leaf.W, h);
@@ -941,13 +959,14 @@ public sealed partial class MainWindow
             var bar = new Microsoft.UI.Xaml.Shapes.Rectangle { Width = barW, Height = barH, Stroke = _paneMutedBrush, StrokeThickness = 1 };
             Microsoft.UI.Xaml.Controls.Canvas.SetLeft(bar, r);
             Microsoft.UI.Xaml.Controls.Canvas.SetTop(bar, barTop);
-            slider.Children.Add(bar);
+            slider.Surface.Children.Add(bar);
             if (stops is null || stops.Count < 2) { bar.Fill = _paneMutedBrush; return; }
             if (live)
             {
                 bar.PointerPressed += (_, e) =>
                 {
                     e.Handled = true;
+                    slider.Focus(FocusState.Pointer);
                     var at = e.GetCurrentPoint(slider).Position;
                     SendGesture(slider, "add", new Dictionary<string, object> { ["location"] = GradientSliderWire.Point(g, at.X, at.Y).Location });
                 };
@@ -979,7 +998,7 @@ public sealed partial class MainWindow
                 };
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(diamond, At(GradientSliderWire.MidpointLocation(stops[i], stops[i + 1])) - d / 2);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(diamond, 0);
-                slider.Children.Add(diamond);
+                slider.Surface.Children.Add(diamond);
                 var pair = i;
                 if (live) { diamond.PointerPressed += (_, e) => PressMarker(slider, e, "midpoint", "press_midpoint", "pair", pair); }
             }
@@ -994,7 +1013,7 @@ public sealed partial class MainWindow
                 };
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(dot, At(stops[i].Location) - r);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(dot, h - 2 * r);
-                slider.Children.Add(dot);
+                slider.Surface.Children.Add(dot);
                 var index = i;
                 if (live) { dot.PointerPressed += (_, e) => PressMarker(slider, e, "stop", "press", "index", index); }
             }
@@ -2104,12 +2123,21 @@ internal sealed partial class ColorBarSurface : Grid
 }
 
 /// <summary>
-/// The gradient slider's surface (<c>DrawGradientSlider</c>). A `Canvas` has no
-/// automation peer, so it is given the plain element peer, as
+/// The gradient slider's surface (<c>DrawGradientSlider</c>): a `UserControl`,
+/// so it can take focus and its keys (a `Canvas` is a panel and cannot), hosting
+/// the `Canvas` the picture is drawn in. It is given the plain element peer, as
 /// <see cref="ColorBarSurface"/> is, and `grad_slider` reaches the rendered tree.
 /// </summary>
-internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls.Canvas
+internal sealed partial class GradientSliderSurface : Microsoft.UI.Xaml.Controls.UserControl
 {
+    /// <summary>The canvas the picture is drawn in, at the surface's origin.</summary>
+    internal readonly Microsoft.UI.Xaml.Controls.Canvas Surface = new();
+
+    internal GradientSliderSurface()
+    {
+        Content = Surface;
+    }
+
     /// <summary>The widget id and plan path its gestures are addressed to.</summary>
     internal string Widget = "";
     internal string? PlanPath;

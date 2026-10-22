@@ -815,6 +815,14 @@ static class Program
             pressStop is not null && pressStop.RootElement.TryGetProperty("value", out var pv)
             && pv.TryGetProperty("index", out var pi) && pi.TryGetInt64(out var piv) && piv == 1
             && pi.GetRawText() == "1", Show(pressStop));
+        // The slider's keys (GRADIENT.md's keyboard table), by the VirtualKey's
+        // NAME, as the web's `slider_key` names them: the arrows, Home and End,
+        // and both deletes. Any other key names nothing and is left to the window.
+        Eq("gradient keys: the table's keys by name", "Left|Right|Home|End|Delete|Backspace",
+            string.Join("|", new[] { "Left", "Right", "Home", "End", "Delete", "Back" }
+                .Select(k => GradientSliderWire.KeyName(k) ?? "(null)")));
+        Eq("gradient keys: anything else names nothing", "(null)|(null)|(null)",
+            string.Join("|", new[] { "Up", "A", "" }.Select(k => GradientSliderWire.KeyName(k) ?? "(null)")));
         Eq("gradient gesture: the row token is the compact object", "{\"location\":30.5,\"dy\":-2}",
             PanelWire.GestureRowValue(new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }));
         // The shell's named keys, by the code `OnKeyDown` sends (`JasCore.Key*`).
