@@ -998,9 +998,27 @@ public sealed partial class MainWindow
                 };
                 Microsoft.UI.Xaml.Controls.Canvas.SetLeft(diamond, At(GradientSliderWire.MidpointLocation(stops[i], stops[i + 1])) - d / 2);
                 Microsoft.UI.Xaml.Controls.Canvas.SetTop(diamond, 0);
+                diamond.IsHitTestVisible = false;
                 slider.Surface.Children.Add(diamond);
-                var pair = i;
-                if (live) { diamond.PointerPressed += (_, e) => PressMarker(slider, e, "midpoint", "press_midpoint", "pair", pair); }
+            }
+            if (live)
+            {
+                // The diamonds' one target (desk AED): the band above the bar,
+                // each diamond a thumb wide, the nearer one on an overlap. A
+                // press that reaches no diamond is left unhandled.
+                var band = new Microsoft.UI.Xaml.Shapes.Rectangle
+                {
+                    Width = leaf.W, Height = barTop,
+                    Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.ColorHelper.FromArgb(0x00, 0x00, 0x00, 0x00)),
+                };
+                Microsoft.UI.Xaml.Controls.Canvas.SetLeft(band, 0);
+                Microsoft.UI.Xaml.Controls.Canvas.SetTop(band, 0);
+                slider.Surface.Children.Add(band);
+                band.PointerPressed += (_, e) =>
+                {
+                    var at = e.GetCurrentPoint(slider).Position;
+                    if (GradientSliderWire.MidpointAt(g, stops, at.X, at.Y) is { } pair) { PressMarker(slider, e, "midpoint", "press_midpoint", "pair", pair); }
+                };
             }
             for (var i = 0; i < stops.Count; i++)
             {

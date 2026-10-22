@@ -800,7 +800,26 @@ static class Program
         Eq("gradient pointer: a rect with no room for a bar takes no gesture", "(null)|(null)",
             (GradientSliderWire.LayoutOf(9.6, 24) is null ? "(null)" : "layout") + "|"
             + (GradientSliderWire.LayoutOf(200, 2) is null ? "(null)" : "layout"));
-        var drag = Parse(PanelWire.GestureJson("grad_slider", "drag",
+        // Desk AED (flask §520): the diamond is drawn 6 DIP and was its own hit
+        // area, so a press 3 DIP right of its centre on its middle row missed.
+        // The target is the band above the bar, MidpointTarget wide, centred on
+        // the diamond; the nearer diamond takes a press where two overlap. At
+        // 200 x 24 the band is y 0..7 and a [0 100] pair's diamond is at x 100.
+        var gStops = GradientSliderWire.Stops("""[{"color":"#000000","location":0},{"color":"#ffffff","location":100}]""")!;
+        string MidAt(IReadOnlyList<GradientSliderWire.Stop> st, double x, double y) =>
+            slider is { } sl4 ? GradientSliderWire.MidpointAt(sl4, st, x, y)?.ToString() ?? "(null)" : "(no layout)";
+        Eq("gradient target: §520's misses now hit (+3,+3 middle row; +2,+0 top row) and the centre still does",
+            "0|0|0", $"{MidAt(gStops, 103, 3)}|{MidAt(gStops, 102, 0)}|{MidAt(gStops, 100, 3)}");
+        Eq("gradient target: half the target either side, and no further", "0|0|(null)|(null)",
+            $"{MidAt(gStops, 100 - GradientSliderWire.MidpointTarget / 2, 3)}|{MidAt(gStops, 100 + GradientSliderWire.MidpointTarget / 2, 3)}"
+            + $"|{MidAt(gStops, 100 - GradientSliderWire.MidpointTarget / 2 - 0.5, 3)}|{MidAt(gStops, 100 + GradientSliderWire.MidpointTarget / 2 + 0.5, 3)}");
+        Eq("gradient target: the bar's top row is the bar's (add), never a diamond's", "(null)|(null)",
+            $"{MidAt(gStops, 100, 7)}|{MidAt(gStops, 100, 12)}");
+        // Stops 0, 5, 10: diamonds at x 9.56 and 19.08, 9.52 apart, so the targets overlap.
+        var close = GradientSliderWire.Stops("""[{"color":"#000000","location":0},{"color":"#808080","location":5},{"color":"#ffffff","location":10}]""")!;
+        Eq("gradient target: overlapping targets go to the NEARER diamond, both ways", "0|1|0|1",
+            $"{MidAt(close, 14, 3)}|{MidAt(close, 15, 3)}|{MidAt(close, 9.56, 3)}|{MidAt(close, 19.08, 3)}");
+        var drag =Parse(PanelWire.GestureJson("grad_slider", "drag",
             new Dictionary<string, object> { ["location"] = 30.5, ["dy"] = -2.0 }, false, true, false, false, "[0,3]"));
         Check("gradient gesture: value is an OBJECT of numbers, beside the widget, event, modifiers and path",
             drag is not null

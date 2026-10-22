@@ -1648,6 +1648,36 @@ internal static class GradientSliderWire
         ((x - l.R) / l.BarW * 100, y - (l.BarTop + l.BarH / 2));
 
     /// <summary>
+    /// A diamond's press target's width, in DIPs: a slider thumb's, not the
+    /// diamond's drawn 6 (desk AED, flask §520: a press 3 DIP right of a
+    /// diamond's centre missed it). 18 is taken as WinUI's horizontal slider
+    /// thumb width; that figure is not measured from this tree (flask reads it
+    /// on the box).
+    /// </summary>
+    internal const double MidpointTarget = 18;
+
+    /// <summary>
+    /// The pair whose diamond a press at (x, y) takes, or null. The target is
+    /// the band above the bar (y in 0..BarTop, so the bar's own rows stay the
+    /// bar's `add`), <see cref="MidpointTarget"/> wide and centred on the
+    /// diamond; where two targets overlap the nearer diamond takes it, the
+    /// lower pair on a tie. Only the shell's hit test: the press it starts
+    /// carries the pointer's own location, as a press on the drawn diamond did.
+    /// </summary>
+    internal static int? MidpointAt(Layout l, IReadOnlyList<Stop> stops, double x, double y)
+    {
+        if (y < 0 || y >= l.BarTop) { return null; }
+        int? best = null;
+        var bestDistance = MidpointTarget / 2;
+        for (var i = 0; i + 1 < stops.Count; i++)
+        {
+            var distance = Math.Abs(x - At(l, MidpointLocation(stops[i], stops[i + 1])));
+            if (distance < bestDistance || (best is null && distance == bestDistance)) { (best, bestDistance) = (i, distance); }
+        }
+        return best;
+    }
+
+    /// <summary>
     /// A key on the focused slider in GRADIENT.md's keyboard table's names, from
     /// the `VirtualKey`'s name (`Left`, `Back`, ...); null for a key the table
     /// does not name, which the slider leaves to the window. Mirrors the web's
